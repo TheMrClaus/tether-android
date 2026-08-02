@@ -90,7 +90,12 @@ fun TetherKey(
     val radiusPx = with(density) { t.radiusKey.toPx() }
     val travelPx = with(density) { travel.toPx() }
 
-    Box(
+    // Single Row carries BOTH the side slab and the face, so a caller's width
+    // modifier (e.g. fillMaxWidth on the drawer's New session key) sizes the
+    // face exactly — previously the side was drawn on an outer Box at the
+    // caller's width while the face wrapped its content, rendering a wide dark
+    // slab with a small face floating on it ("super wide" buttons).
+    Row(
         modifier = modifier
             .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
             .drawBehind {
@@ -102,46 +107,42 @@ fun TetherKey(
                     cornerRadius = CornerRadius(radiusPx, radiusPx),
                 )
             }
-            .padding(bottom = travel),
+            .padding(bottom = travel)
+            .offset(y = if (down) travel else 0.dp)
+            .background(if (down) facePressed else face, shape)
+            .border(1.dp, side, shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick,
+            )
+            .heightIn(min = minHeight)
+            .padding(horizontal = if (label != null) 14.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .offset(y = if (down) travel else 0.dp)
-                .background(if (down) facePressed else face, shape)
-                .border(1.dp, side, shape)
-                .clickable(
-                    interactionSource = interaction,
-                    indication = null,
-                    enabled = enabled,
-                    onClick = onClick,
-                )
-                .heightIn(min = minHeight)
-                .padding(horizontal = if (label != null) 14.dp else 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (showSlit && t.keySlit > 0.dp) {
-                Box(
-                    Modifier
-                        .size(width = t.keySlit, height = 10.dp)
-                        .alpha(0.55f)
-                        .background(inkColor, RoundedCornerShape(1.5.dp)),
-                )
-            }
-            if (icon != null) {
-                Icon(icon, contentDescription = contentDescription ?: label, tint = inkColor, modifier = Modifier.size(iconSize))
-            }
-            if (label != null) {
-                Text(
-                    text = label.uppercase(),
-                    color = inkColor,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.name,
-                    fontSize = fontSize,
-                    letterSpacing = t.keyTracking.em,
-                    maxLines = 1,
-                )
-            }
+        if (showSlit && t.keySlit > 0.dp) {
+            Box(
+                Modifier
+                    .size(width = t.keySlit, height = 10.dp)
+                    .alpha(0.55f)
+                    .background(inkColor, RoundedCornerShape(1.5.dp)),
+            )
+        }
+        if (icon != null) {
+            Icon(icon, contentDescription = contentDescription ?: label, tint = inkColor, modifier = Modifier.size(iconSize))
+        }
+        if (label != null) {
+            Text(
+                text = label.uppercase(),
+                color = inkColor,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.name,
+                fontSize = fontSize,
+                letterSpacing = t.keyTracking.em,
+                maxLines = 1,
+            )
         }
     }
 }
