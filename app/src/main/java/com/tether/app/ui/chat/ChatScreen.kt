@@ -199,10 +199,11 @@ fun ChatScreen(
             session = session,
             projection = projection,
             serverNow = { vm.serverNow(session?.id) },
-            onSend = { text -> session?.let { vm.sendOrQueue(it.id, text) } },
+            onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
             onInterrupt = { session?.let { vm.client.interrupt(it.id) } },
             onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
             onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
+            onAttachError = { message -> vm.reportLocalError(message) },
         )
     }
 }

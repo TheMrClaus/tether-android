@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.AgentEvent
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.PROTOCOL_VERSION
 import com.tether.app.protocol.ServerMessage
@@ -625,18 +626,18 @@ class RealTetherClient(
     // Durable send (§5.6)
     // ------------------------------------------------------------------
 
-    override fun send(sessionId: String, text: String) {
-        recordAndDrain(PendingInput.KIND_SEND, sessionId, text)
+    override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
+        recordAndDrain(PendingInput.KIND_SEND, sessionId, text, attachments.ifEmpty { null })
     }
 
     override fun queueAdd(sessionId: String, text: String) {
         recordAndDrain(PendingInput.KIND_QUEUE, sessionId, text)
     }
 
-    private fun recordAndDrain(kind: String, sessionId: String, text: String) {
+    private fun recordAndDrain(kind: String, sessionId: String, text: String, attachments: List<Attachment>? = null) {
         val key = UUID.randomUUID().toString()
         val evicted = synchronized(lock) {
-            val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock())
+            val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments)
             pendingStore = result.store
             result.evicted
         }
@@ -668,7 +669,7 @@ class RealTetherClient(
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
             frames = sendable.map { record ->
                 if (record.kind == PendingInput.KIND_SEND) {
-                    ClientMessage.Send(record.sessionId, record.text, record.key)
+                    ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments)
                 } else {
                     ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
                 }

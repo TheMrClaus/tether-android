@@ -226,6 +226,24 @@ class WireTest {
         assertEquals("send", send["type"]!!.jsonPrimitive.content)
         assertEquals("key-123", send["idempotencyKey"]!!.jsonPrimitive.content)
 
+        // v15 attachments: exact server-validated field names (protocol-validate.mjs
+        // validateAttachments), omitted entirely when there are none.
+        val withFile = ClientMessage.Send(
+            "s1",
+            "look at this",
+            "key-9",
+            listOf(Attachment(name = "shot.png", mediaType = "image/png", data = "aGVsbG8=")),
+        ).toJsonObject()
+        assertEquals(setOf("type", "sessionId", "text", "idempotencyKey", "attachments"), withFile.keys)
+        val att = withFile["attachments"]!!.jsonArray.single().jsonObject
+        assertEquals(setOf("name", "mediaType", "data"), att.keys)
+        assertEquals("shot.png", att["name"]!!.jsonPrimitive.content)
+        assertEquals("image/png", att["mediaType"]!!.jsonPrimitive.content)
+        assertEquals("aGVsbG8=", att["data"]!!.jsonPrimitive.content)
+        assertFalse(
+            ClientMessage.Send("s1", "t", "k", emptyList()).toJsonObject().containsKey("attachments")
+        )
+
         val attach = ClientMessage.Attach("s1", 42).toJsonObject()
         assertEquals(setOf("type", "sessionId", "afterSeq"), attach.keys)
         assertEquals(42L, attach["afterSeq"]!!.jsonPrimitive.content.toLong())

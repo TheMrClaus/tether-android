@@ -1,7 +1,12 @@
 package com.tether.app.ui.chat
 
+import android.provider.OpenableColumns
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +19,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
@@ -25,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,18 +41,22 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.CircleHelp
 import com.composables.icons.lucide.CircleStop
+import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Loader
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Paperclip
 import com.composables.icons.lucide.Send
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.X
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.QueuedMessage
 import com.tether.app.protocol.model.SessionProjection
@@ -61,31 +73,61 @@ import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.util.elapsedLabel
 import com.tether.app.ui.util.spinnerWordFor
 import com.tether.app.ui.util.tokenLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 
 /**
  * Composer (visual-spec §4): waiting banner -> TurnActivity -> queued messages ->
  * input row (attach key · input well · SEND, or QUEUE + INTERRUPT while busy).
  */
+/** Server caps (lib/protocol-validate.mjs LIMITS): 10 files, 9 MiB each, 18 MiB total. */
+private const val MAX_ATTACHMENTS = 10
+private const val MAX_ATTACHMENT_BYTES = 9L * 1024 * 1024
+private const val MAX_TOTAL_ATTACHMENT_BYTES = 18L * 1024 * 1024
+
+/** A file the operator picked, held in memory until the next idle send. */
+private data class PickedAttachment(val attachment: Attachment, val sizeBytes: Long)
+
 @Composable
 fun Composer(
     session: AgentSession?,
     projection: SessionProjection?,
     serverNow: () -> Long,
-    onSend: (String) -> Unit,
+    onSend: (String, List<Attachment>) -> Boolean,
     onInterrupt: () -> Unit,
     onQueueEdit: (queueId: String, text: String) -> Unit,
     onQueueRemove: (queueId: String) -> Unit,
     modifier: Modifier = Modifier,
+    onAttachError: (String) -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     var draft by remember(session?.id) { mutableStateOf("") }
+    var picked by remember(session?.id) { mutableStateOf(listOf<PickedAttachment>()) }
 
     val activeTurn = projection?.activeTurnId?.let { projection.turnsById[it] }
     val busy = activeTurn != null
     val hasApproval = activeTurn?.pendingApprovals?.isNotEmpty() == true
     val hasQuestion = activeTurn?.pendingQuestions?.isNotEmpty() == true
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            val (loaded, failures) = withContext(Dispatchers.IO) {
+                readAttachments(context, uris, picked.sumOf { it.sizeBytes })
+            }
+            if (loaded.isNotEmpty()) picked = (picked + loaded).take(MAX_ATTACHMENTS)
+            if (failures > 0) {
+                onAttachError(
+                    "$failures file${if (failures == 1) "" else "s"} skipped — unreadable or over the 9 MB per-file limit.",
+                )
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -136,16 +178,30 @@ fun Composer(
             )
         }
 
+        if (picked.isNotEmpty()) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                picked.forEach { item ->
+                    AttachmentChip(
+                        item = item,
+                        onRemove = { picked = picked - item },
+                    )
+                }
+            }
+        }
+
         Row(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TetherKey(
-                onClick = { /* attachments: v1 stub */ },
+                onClick = { picker.launch(arrayOf("*/*")) },
                 variant = KeyVariant.Secondary,
                 icon = Lucide.Paperclip,
                 iconSize = 18.dp,
-                enabled = false,
+                enabled = session != null && !busy,
                 contentDescription = "Attach",
             )
             com.tether.app.ui.components.TetherInputWell(
@@ -163,8 +219,9 @@ fun Composer(
                 TetherKey(
                     onClick = {
                         if (draft.isNotBlank()) {
-                            onSend(draft.trim())
-                            draft = ""
+                            // Queue path is text-only; attachments are only
+                            // attachable while idle, so none are pending here.
+                            if (onSend(draft.trim(), emptyList())) draft = ""
                         }
                     },
                     variant = KeyVariant.Primary,
@@ -186,21 +243,118 @@ fun Composer(
             } else {
                 TetherKey(
                     onClick = {
-                        if (draft.isNotBlank()) {
-                            onSend(draft.trim())
-                            draft = ""
+                        if (draft.isNotBlank() || picked.isNotEmpty()) {
+                            // Refused sends (§5.6 rollback) keep draft + chips.
+                            if (onSend(draft.trim(), picked.map { it.attachment })) {
+                                draft = ""
+                                picked = emptyList()
+                            }
                         }
                     },
                     variant = KeyVariant.Primary,
                     icon = Lucide.Send,
                     iconSize = 18.dp,
-                    enabled = session != null && draft.isNotBlank(),
+                    enabled = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                     showSlit = true,
                     contentDescription = "Send",
                 )
             }
         }
     }
+}
+
+/** One picked-but-unsent attachment: icon + name/size + remove (visual-spec §4 chips). */
+@Composable
+private fun AttachmentChip(item: PickedAttachment, onRemove: () -> Unit) {
+    val t = LocalTetherTokens.current
+    Row(
+        modifier = Modifier
+            .background(t.mineralDeep, RoundedCornerShape(TetherDimens.radiusMd))
+            .border(1.dp, t.lineStrong, RoundedCornerShape(TetherDimens.radiusMd))
+            .padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Lucide.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+        Text(
+            item.attachment.name,
+            color = t.ink,
+            fontFamily = Manrope,
+            fontWeight = TetherWeights.label,
+            fontSize = 11.8.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 140.dp),
+        )
+        Text(
+            humanSize(item.sizeBytes),
+            color = t.faint,
+            fontFamily = Manrope,
+            fontSize = 10.4.sp,
+        )
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Lucide.X, contentDescription = "Remove ${item.attachment.name}", tint = t.muted, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+private fun humanSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
+}
+
+/**
+ * Read picked URIs into base64 attachments (caller supplies the IO context).
+ * Skips — and counts — anything unreadable, over the per-file cap, or pushing
+ * the running total (seeded with the already-picked bytes) over the total cap.
+ */
+private fun readAttachments(
+    context: android.content.Context,
+    uris: List<android.net.Uri>,
+    alreadyPickedBytes: Long,
+): Pair<List<PickedAttachment>, Int> {
+    val loaded = ArrayList<PickedAttachment>()
+    var failures = 0
+    var total = alreadyPickedBytes
+    for (uri in uris) {
+        if (loaded.size >= MAX_ATTACHMENTS) { failures++; continue }
+        try {
+            var name: String? = null
+            var size = -1L
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }
+                        ?.let { name = cursor.getString(it) }
+                    cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 }
+                        ?.let { if (!cursor.isNull(it)) size = cursor.getLong(it) }
+                }
+            }
+            if (size > MAX_ATTACHMENT_BYTES || (size >= 0 && total + size > MAX_TOTAL_ATTACHMENT_BYTES)) {
+                failures++
+                continue
+            }
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty() || bytes.size.toLong() > MAX_ATTACHMENT_BYTES ||
+                total + bytes.size > MAX_TOTAL_ATTACHMENT_BYTES
+            ) {
+                failures++
+                continue
+            }
+            total += bytes.size
+            loaded += PickedAttachment(
+                attachment = Attachment(
+                    name = name?.substringAfterLast('/')?.ifBlank { null } ?: "file",
+                    mediaType = context.contentResolver.getType(uri) ?: "application/octet-stream",
+                    data = Base64.encodeToString(bytes, Base64.NO_WRAP),
+                ),
+                sizeBytes = bytes.size.toLong(),
+            )
+        } catch (_: Exception) {
+            failures++
+        }
+    }
+    return Pair(loaded, failures)
 }
 
 /** Queued message row: recessed well with a 2dp violet left edge. */

@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.SessionProjection
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -46,6 +47,7 @@ object PendingInput {
         sessionId: String,
         text: String,
         now: Long,
+        attachments: List<Attachment>? = null,
     ): AddResult {
         val record = PendingRecord(
             key = key,
@@ -55,6 +57,7 @@ object PendingInput {
             sentAt = 0,
             tries = 0,
             firstQueuedAt = now,
+            attachments = attachments,
         )
         val records = store.records + record
         val overflow = records.size - MAX_RECORDS
@@ -168,8 +171,16 @@ object PendingInput {
         return PendingStore(records)
     }
 
+    /**
+     * Records carrying attachments are OMITTED (mirrors lib/pending-input.mjs):
+     * base64 payloads stay in memory for the life of the process and are lost
+     * on restart rather than written to disk.
+     */
     fun toPersisted(store: PendingStore): String =
-        json.encodeToString(PersistedPendingStore.serializer(), PersistedPendingStore(1, store.records))
+        json.encodeToString(
+            PersistedPendingStore.serializer(),
+            PersistedPendingStore(1, store.records.filter { it.attachments == null }),
+        )
 
     /** Restored records come back not-in-flight so the first drain re-sends them. */
     fun fromPersisted(raw: String?): PendingStore {
@@ -203,6 +214,8 @@ data class PendingRecord(
     val sentAt: Long = 0,
     val tries: Int = 0,
     val firstQueuedAt: Long = 0,
+    /** In-memory only: never persisted (see PendingInput.toPersisted). */
+    val attachments: List<Attachment>? = null,
 )
 
 @Serializable

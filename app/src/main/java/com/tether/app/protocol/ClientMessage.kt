@@ -1,9 +1,11 @@
 package com.tether.app.protocol
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -77,13 +79,33 @@ sealed interface ClientMessage {
         }
     }
 
-    /** Attachments are deliberately unsupported in v1 Android (see §5.6 note). */
-    data class Send(val sessionId: String, val text: String, val idempotencyKey: String) : ClientMessage {
+    /**
+     * Attachments ride an idle send only (v15, server-side: they are never
+     * queued). [data] is base64 without a data: URI prefix. Null = no
+     * attachments; the field is then omitted from the frame entirely.
+     */
+    data class Send(
+        val sessionId: String,
+        val text: String,
+        val idempotencyKey: String,
+        val attachments: List<Attachment>? = null,
+    ) : ClientMessage {
         override fun toJsonObject() = buildJsonObject {
             put("type", "send")
             put("sessionId", sessionId)
             put("text", text)
             put("idempotencyKey", idempotencyKey)
+            if (!attachments.isNullOrEmpty()) {
+                putJsonArray("attachments") {
+                    for (att in attachments) {
+                        add(buildJsonObject {
+                            put("name", att.name)
+                            put("mediaType", att.mediaType)
+                            put("data", att.data)
+                        })
+                    }
+                }
+            }
         }
     }
 
@@ -207,3 +229,11 @@ sealed interface ClientMessage {
         }
     }
 }
+
+/**
+ * A file/image carried by [ClientMessage.Send] (v15): [data] is base64 bytes,
+ * no data: URI prefix. @Serializable only so PendingRecord can carry it; it is
+ * never persisted (attachment records are excluded from the durable store).
+ */
+@Serializable
+data class Attachment(val name: String, val mediaType: String, val data: String)

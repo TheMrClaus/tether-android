@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.reduce.fold
@@ -143,6 +144,29 @@ class PendingInputTest {
         // Corrupt payloads restore to empty.
         assertTrue(PendingInput.fromPersisted("{broken").records.isEmpty())
         assertTrue(PendingInput.fromPersisted(null).records.isEmpty())
+    }
+
+    @Test
+    fun attachmentRecordsStayInMemoryAndAreNeverPersisted() {
+        var store = storeWith(Triple("plain", "s1", 0))
+        store = PendingInput.addRecord(
+            store,
+            "with-file",
+            PendingInput.KIND_SEND,
+            "s1",
+            "see attached",
+            1_500,
+            listOf(Attachment("a.txt", "text/plain", "aGVsbG8=")),
+        ).store
+
+        // The record still drains with its payload...
+        val due = PendingInput.dueRecords(store)
+        assertEquals(listOf("plain", "with-file"), due.map { it.key })
+        assertEquals("aGVsbG8=", due.last().attachments?.single()?.data)
+
+        // ...but persistence omits it entirely (mirrors lib/pending-input.mjs).
+        val restored = PendingInput.fromPersisted(PendingInput.toPersisted(store))
+        assertEquals(listOf("plain"), restored.records.map { it.key })
     }
 
     @Test

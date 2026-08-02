@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
@@ -69,8 +70,12 @@ interface TetherClient {
 
     fun attach(sessionId: String)
 
-    /** Durable send with a client-minted idempotencyKey (at-most-once, see specs/protocol-spec.md §5.6). */
-    fun send(sessionId: String, text: String)
+    /**
+     * Durable send with a client-minted idempotencyKey (at-most-once, see
+     * specs/protocol-spec.md §5.6). Attachments (v15) ride an idle send only
+     * and are held in memory, never persisted to disk.
+     */
+    fun send(sessionId: String, text: String, attachments: List<Attachment> = emptyList())
 
     fun queueAdd(sessionId: String, text: String)
     fun queueEdit(sessionId: String, queueId: String, text: String)
