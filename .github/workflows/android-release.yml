@@ -1,0 +1,264 @@
+name: Android Release
+
+# Manual, mode-gated release — mirrors the TwoZero android-release flow
+# (dry_run → draft → publish), APK-only since Tether ships no Play artifact:
+#
+#   .apk — personal distribution; the published GitHub Release is what
+#          Obtainium (or a browser) points at.
+#
+#   dry_run  — build + generate notes, upload them as artifacts, no Release.
+#   draft    — build signed, create a DRAFT GitHub Release with the APK attached.
+#   publish  — build signed, publish the Release immediately.
+#
+# Signing (draft/publish) comes from repository secrets, decoded at runtime; it
+# never touches the repo. A dry_run needs no secrets and stays unsigned.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_mode:
+        description: "Preview (dry_run), save as draft, or publish immediately"
+        required: true
+        default: dry_run
+        type: choice
+        options:
+          - dry_run
+          - draft
+          - publish
+      version_name:
+        description: "versionName to stamp (e.g. 0.1.0). Blank keeps the committed value."
+        required: false
+        type: string
+      version_code:
+        description: "versionCode to stamp. Blank keeps the committed value."
+        required: false
+        type: string
+      release_tag:
+        description: "Release tag. Blank → v<versionName>."
+        required: false
+        type: string
+      release_title:
+        description: "Release title. Blank → Tether Android <versionName>."
+        required: false
+        type: string
+      extra_notes:
+        description: "Optional extra Markdown appended to the generated notes."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # JDK 17 to match the local toolchain (AGP 9.3 minimum is 17).
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version + tag
+        id: meta
+        env:
+          # Route dispatch inputs through env — never interpolate them into the
+          # shell body (avoids ${{ }} expansion into executable code).
+          IN_VERSION_NAME: ${{ inputs.version_name }}
+          IN_VERSION_CODE: ${{ inputs.version_code }}
+          IN_RELEASE_TAG: ${{ inputs.release_tag }}
+          IN_RELEASE_TITLE: ${{ inputs.release_title }}
+        run: |
+          set -euo pipefail
+          gradle_file="app/build.gradle.kts"
+          current_name=$(grep -oP 'versionName = "\K[^"]+' "$gradle_file")
+          current_code=$(grep -oP 'versionCode = \K[0-9]+' "$gradle_file")
+
+          # Strip CR/LF so a multi-line input can't inject extra $GITHUB_OUTPUT keys.
+          strip_nl() { printf '%s' "$1" | tr -d '\r\n'; }
+
+          version_name=$(strip_nl "$IN_VERSION_NAME")
+          version_code=$(strip_nl "$IN_VERSION_CODE")
+          [ -n "$version_name" ] || version_name="$current_name"
+          [ -n "$version_code" ] || version_code="$current_code"
+
+          # Stamp the (uncommitted) build files so the APK carries this version.
+          sed -i "s/versionName = \"$current_name\"/versionName = \"$version_name\"/" "$gradle_file"
+          sed -i "s/versionCode = $current_code/versionCode = $version_code/" "$gradle_file"
+
+          tag=$(strip_nl "$IN_RELEASE_TAG")
+          [ -n "$tag" ] || tag="v$version_name"
+          title=$(strip_nl "$IN_RELEASE_TITLE")
+          [ -n "$title" ] || title="Tether Android $version_name"
+
+          {
+            echo "version_name=$version_name"
+            echo "version_code=$version_code"
+            echo "tag=$tag"
+            echo "title=$title"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $title ($version_name / code $version_code) → tag $tag"
+
+      - name: Generate release notes
+        id: notes
+        env:
+          META_TITLE: ${{ steps.meta.outputs.title }}
+          META_VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          META_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          META_TAG: ${{ steps.meta.outputs.tag }}
+          EXTRA_NOTES: ${{ inputs.extra_notes }}
+        run: |
+          set -euo pipefail
+          # Baseline = the previous v* tag reachable from HEAD, excluding the
+          # release's own tag. On a draft→publish rerun the draft's tag is already
+          # the newest one, so without this the range would be empty and overwrite
+          # the draft's notes with a blank changelog.
+          prev_tag=$(git tag --merged HEAD --list 'v*' --sort=-creatordate \
+            | grep -Fvx -- "$META_TAG" | head -n1 || true)
+          range=""
+          [ -n "$prev_tag" ] && range="$prev_tag..HEAD"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "## ${META_TITLE}"
+            echo
+            echo "_versionName ${META_VERSION_NAME} · versionCode ${META_VERSION_CODE}_"
+            echo
+            echo "### Changes"
+            git log $range --no-merges --pretty='- %s' | head -n 100 || true
+            if [ -n "$EXTRA_NOTES" ]; then
+              echo
+              echo "$EXTRA_NOTES"
+            fi
+          } > "$notes_file"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+          echo "----- notes -----"; cat "$notes_file"
+
+      - name: Bootstrap signing (draft / publish)
+        if: ${{ inputs.release_mode != 'dry_run' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TETHER_RELEASE_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.TETHER_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TETHER_RELEASE_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.TETHER_RELEASE_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$STORE_PASSWORD" ]; then
+            echo "Missing one or more required signing secrets (TETHER_RELEASE_*)." >&2
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/tether-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          # Exported for the next step; app/build.gradle.kts reads these env vars.
+          {
+            echo "TETHER_RELEASE_STORE_FILE=$keystore"
+            echo "TETHER_RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "TETHER_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "TETHER_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Assemble release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          if [ -z "$apk" ]; then echo "No release APK produced." >&2; exit 1; fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "Built $apk"
+
+      - name: Upload dry-run artifacts
+        if: ${{ inputs.release_mode == 'dry_run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tether-android-${{ steps.meta.outputs.version_name }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.notes.outputs.notes_file }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: ${{ inputs.release_mode != 'dry_run' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.meta.outputs.title }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Guard the tag: `gh release create --target` is IGNORED when the tag
+          # already exists on the remote, so a pre-existing tag at a different
+          # commit would tie the release to the wrong SHA (while the changelog
+          # baseline skips it). Local tags are present (fetch-depth: 0). Allow only
+          # an absent tag or one already peeling to TARGET_SHA. ^{commit}
+          # dereferences annotated tags to their commit.
+          if existing_tag_sha=$(git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" 2>/dev/null); then
+            if [ "$existing_tag_sha" != "$TARGET_SHA" ]; then
+              echo "Tag $RELEASE_TAG already exists at $existing_tag_sha, not $TARGET_SHA — refusing to release." >&2
+              exit 1
+            fi
+          fi
+
+          # publish → live release; draft → keep as draft.
+          if [ "$RELEASE_MODE" = "publish" ]; then draft_flag="--draft=false"; else draft_flag="--draft=true"; fi
+
+          if existing=$(gh release view "$RELEASE_TAG" --json isDraft,targetCommitish 2>/dev/null); then
+            # A prior `draft` run already created this tag's release — reuse it so
+            # `publish` doesn't fail on "release already exists". But only when it's
+            # still a DRAFT targeting THIS commit: never re-draft/overwrite a
+            # published release or one built from a different SHA.
+            is_draft=$(printf '%s' "$existing" | jq -r '.isDraft')
+            target=$(printf '%s' "$existing" | jq -r '.targetCommitish')
+            if [ "$is_draft" != "true" ]; then
+              echo "Release $RELEASE_TAG already exists and is published — refusing to modify it." >&2
+              exit 1
+            fi
+            if [ "$target" != "$TARGET_SHA" ]; then
+              echo "Existing draft $RELEASE_TAG targets '$target', not '$TARGET_SHA' — refusing to reuse." >&2
+              exit 1
+            fi
+            # Refresh metadata, (re)upload the APK, and only THEN publish.
+            #
+            # Publishing last is deliberate: "$draft_flag" is --draft=false in
+            # publish mode, so applying it here would make the release public
+            # BEFORE its asset exists — a failed upload would leave users (and
+            # Obtainium) looking at a published release with no APK. The guards
+            # above already proved this release is a draft, so omitting the flag
+            # from the metadata edit keeps it a draft either way.
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$NOTES_FILE"
+            gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber
+            if [ "$RELEASE_MODE" = "publish" ]; then
+              gh release edit "$RELEASE_TAG" --draft=false
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              "$APK_PATH" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --target "$TARGET_SHA" \
+              "$draft_flag"
+          fi

@@ -7,6 +7,12 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Release signing comes from the environment (CI decodes the keystore from a
+// repository secret — see .github/workflows/android-release.yml). When the
+// variables are absent (local builds, dry_run) the release build stays
+// unsigned; nothing key-related ever lives in the repo.
+val releaseStoreFile: String? = System.getenv("TETHER_RELEASE_STORE_FILE")
+
 android {
     namespace = "com.tether.app"
     compileSdk = 36
@@ -19,9 +25,23 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = System.getenv("TETHER_RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("TETHER_RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("TETHER_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseStoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
