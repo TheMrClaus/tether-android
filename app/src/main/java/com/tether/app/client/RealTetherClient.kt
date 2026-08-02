@@ -27,8 +27,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -39,9 +42,12 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
+/** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
+private const val CLOSE_DEVICE_REVOKED = 4001
+
 /**
- * Production [TetherClient]: OkHttp WebSocket + cookie auth + the attach /
- * reconnect / durable-send discipline of specs/protocol-spec.md §5.
+ * Production [TetherClient]: OkHttp WebSocket + cookie/device-token auth + the
+ * attach / reconnect / durable-send discipline of specs/protocol-spec.md §5.
  *
  * Construction (integrator):
  * ```
@@ -75,7 +81,11 @@ class RealTetherClient(
     private var reconnectJob: Job? = null
     private var sweeperJob: Job? = null
     private var baseUrlValue: HttpUrl? = null
-    private var cookieValue: String? = null
+
+    // The ONE credential in force. Cookie (password login) and device token
+    // (pairing) differ only in the header they add, so the connect loop below
+    // never branches on the auth mode.
+    private var credentialValue: Credential? = null
 
     @Volatile
     private var lastInboundAt = 0L
@@ -113,8 +123,8 @@ class RealTetherClient(
 
     init {
         scope.launch {
-            combine(settings.baseUrl, settings.cookie) { base, cookie ->
-                !base.isNullOrEmpty() && !cookie.isNullOrEmpty()
+            combine(settings.baseUrl, settings.credential) { base, credential ->
+                !base.isNullOrEmpty() && credential != null
             }.collect { configuredState.value = it }
         }
     }
@@ -129,16 +139,12 @@ class RealTetherClient(
 
         // 1. Cheapest pre-flight: /healthz carries protocolVersion unauthenticated.
         val health = try {
-            httpClient.newCall(Request.Builder().url(normalized.resolve("/healthz")!!).build()).execute()
+            probeHealth(normalized)
         } catch (e: IOException) {
             return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
         }
-        val serverVersion = health.use { response ->
-            if (!response.isSuccessful) return@withContext LoginResult.Unreachable("healthz returned HTTP ${response.code}")
-            parseJsonField(response, "protocolVersion")?.toIntOrNull()
-        }
-        if (serverVersion != null && serverVersion != PROTOCOL_VERSION) {
-            return@withContext LoginResult.VersionMismatch(serverVersion)
+        if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
+            return@withContext LoginResult.VersionMismatch(health.protocolVersion)
         }
 
         // 2. Password login (JSON form).
@@ -163,14 +169,7 @@ class RealTetherClient(
                     if (cookie.isNullOrEmpty()) {
                         return@withContext LoginResult.Unreachable("The server did not return a session cookie.")
                     }
-                    settings.setServer(normalized.toString().trimEnd('/'), cookie)
-                    synchronized(lock) {
-                        baseUrlValue = normalized
-                        cookieValue = cookie
-                        stopped = false
-                    }
-                    start()
-                    reconnectIfIdle()
+                    adoptCredential(normalized, Credential.Cookie(cookie))
                     return@withContext LoginResult.Success
                 }
                 401 -> return@withContext LoginResult.BadPassword(
@@ -184,6 +183,85 @@ class RealTetherClient(
         }
     }
 
+    override suspend fun pair(baseUrl: String, code: String, label: String): PairResult = withContext(Dispatchers.IO) {
+        val normalized = normalizeBaseUrl(baseUrl)
+            ?: return@withContext PairResult.Unreachable("That server URL is not valid.")
+        // Trim only. Case folding, separator stripping and U→V are the server's
+        // job (lib/device-tokens.mjs normalizePairingCode) — a second copy here
+        // could only drift out of agreement with it.
+        val typedCode = code.trim()
+        if (typedCode.isEmpty()) {
+            return@withContext PairResult.Rejected("Enter the pairing code shown in your browser.")
+        }
+
+        // 1. /healthz doubles as the capability probe: `pairing: true` is how a
+        //    native client learns this server can pair at all (it is deliberately
+        //    NOT part of PROTOCOL_VERSION).
+        val health = try {
+            probeHealth(normalized)
+        } catch (e: IOException) {
+            return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
+        }
+        if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
+            return@withContext PairResult.VersionMismatch(health.protocolVersion)
+        }
+        if (!health.pairing) {
+            return@withContext PairResult.NotSupported(
+                "This server does not support device pairing. Update the server, or connect with the password.",
+            )
+        }
+
+        // 2. Claim the code. This endpoint needs NO prior credential — the
+        //    short-lived single-use code IS the credential.
+        val body = buildJsonObject {
+            put("code", JsonPrimitive(typedCode))
+            put("label", JsonPrimitive(label))
+        }.toString()
+        val claimResponse = try {
+            httpClient.newCall(
+                Request.Builder()
+                    .url(normalized.resolve("/api/devices/claim")!!)
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build(),
+            ).execute()
+        } catch (e: IOException) {
+            return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
+        }
+        claimResponse.use { response ->
+            when (response.code) {
+                200 -> {
+                    val token = parseJsonField(response, "token")
+                    if (token.isNullOrEmpty()) {
+                        return@withContext PairResult.Unreachable("The server did not return a device token.")
+                    }
+                    adoptCredential(normalized, Credential.DeviceToken(token))
+                    return@withContext PairResult.Success
+                }
+                // One message for unknown / expired / already-claimed: the server
+                // deliberately does not distinguish them, so neither do we.
+                401 -> return@withContext PairResult.Rejected(
+                    parseJsonField(response, "error") ?: "That pairing code is not valid or has expired.",
+                )
+                429 -> return@withContext PairResult.RateLimited(
+                    parseJsonField(response, "error") ?: "Too many pairing attempts. Try again in a few minutes.",
+                )
+                else -> return@withContext PairResult.Unreachable("claim returned HTTP ${response.code}")
+            }
+        }
+    }
+
+    /** Persist a freshly-obtained credential and (re)start the connection loop. */
+    private suspend fun adoptCredential(base: HttpUrl, credential: Credential) {
+        settings.setServer(base.toString().trimEnd('/'), credential)
+        synchronized(lock) {
+            baseUrlValue = base
+            credentialValue = credential
+            stopped = false
+        }
+        start()
+        reconnectIfIdle()
+    }
+
     override fun start() {
         synchronized(lock) {
             stopped = false
@@ -193,17 +271,20 @@ class RealTetherClient(
         }
         scope.launch {
             val base = settings.baseUrl.first()
-            val cookie = settings.cookie.first()
+            // Whichever credential the install holds — a password cookie from a
+            // pre-pairing version still resolves here, so upgrading never logs
+            // an existing user out.
+            val credential = settings.credential.first()
             val persisted = settings.readPendingInput()
             synchronized(lock) {
                 if (base != null && baseUrlValue == null) baseUrlValue = base.toHttpUrlOrNull()
-                if (cookie != null && cookieValue == null) cookieValue = cookie
+                if (credential != null && credentialValue == null) credentialValue = credential
                 if (!pendingLoaded) {
                     pendingLoaded = true
                     if (pendingStore.records.isEmpty()) pendingStore = PendingInput.fromPersisted(persisted)
                 }
             }
-            if (baseUrlValue == null || cookieValue == null) {
+            if (baseUrlValue == null || credentialValue == null) {
                 connectionState.value = ConnectionState.AuthRequired
             } else {
                 connectNow()
@@ -223,12 +304,12 @@ class RealTetherClient(
             socketOpen = false
             connecting = false
             baseUrlValue = null
-            cookieValue = null
+            credentialValue = null
         }
         connectionState.value = ConnectionState.Disconnected
-        // stop() is logout: drop the persisted base URL + cookie so the UI's
+        // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
-        // successful login() resets `stopped` and restarts the loop.
+        // successful login()/pair() resets `stopped` and restarts the loop.
         scope.launch { settings.clear() }
     }
 
@@ -247,24 +328,24 @@ class RealTetherClient(
 
     private fun connectNow() {
         val base: HttpUrl
-        val cookie: String
+        val credential: Credential
         synchronized(lock) {
             if (stopped || connecting || socket != null) return
             val b = baseUrlValue
-            val c = cookieValue
+            val c = credentialValue
             if (b == null || c == null) {
                 connectionState.value = ConnectionState.AuthRequired
                 return
             }
             connecting = true
             base = b
-            cookie = c
+            credential = c
         }
         connectionState.value = ConnectionState.Connecting
         scope.launch(Dispatchers.IO) {
             // §5.3: check auth before each connect.
             val authenticated = try {
-                authProbe(base, cookie)
+                authProbe(base, credential)
             } catch (_: IOException) {
                 synchronized(lock) { connecting = false }
                 connectionState.value = ConnectionState.Disconnected
@@ -276,14 +357,14 @@ class RealTetherClient(
                 connectionState.value = ConnectionState.AuthRequired
                 return@launch
             }
-            openSocket(base, cookie)
+            openSocket(base, credential)
         }
     }
 
-    private fun authProbe(base: HttpUrl, cookie: String): Boolean {
+    private fun authProbe(base: HttpUrl, credential: Credential): Boolean {
         val request = Request.Builder()
             .url(base.resolve("/api/auth/session")!!)
-            .header("Cookie", "tether_session=$cookie")
+            .authorize(credential)
             .build()
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("auth probe returned HTTP ${response.code}")
@@ -291,7 +372,7 @@ class RealTetherClient(
         }
     }
 
-    private fun openSocket(base: HttpUrl, cookie: String) {
+    private fun openSocket(base: HttpUrl, credential: Credential) {
         // Origin's host(+port) MUST equal the Host header or the server
         // destroys the upgrade with a raw 401. OkHttp never sets it itself.
         val origin = buildString {
@@ -300,7 +381,7 @@ class RealTetherClient(
         }
         val request = Request.Builder()
             .url(base.resolve("/ws")!!)
-            .header("Cookie", "tether_session=$cookie")
+            .authorize(credential)
             .header("Origin", origin)
             .build()
         val listener = SocketListener()
@@ -354,14 +435,50 @@ class RealTetherClient(
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             webSocket.close(1000, null)
+            if (code == CLOSE_DEVICE_REVOKED) handleDeviceRevoked(webSocket)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (code == CLOSE_DEVICE_REVOKED) {
+                handleDeviceRevoked(webSocket)
+                return
+            }
             handleSocketGone(webSocket)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             handleSocketGone(webSocket)
+        }
+    }
+
+    /**
+     * Close code 4001 = the owner revoked this device from a browser. Terminal,
+     * NOT a transient drop: the stored token is dead, so reconnecting with it
+     * would only spin. Drop the credential and fall back to the login/pairing
+     * screen (the base URL survives — only the credential is gone).
+     */
+    private fun handleDeviceRevoked(webSocket: WebSocket?) {
+        synchronized(lock) {
+            // onClosing then onClosed both carry 4001; the first one through wins
+            // and clears `socket`, so the second is a no-op.
+            if (webSocket != null && socket !== webSocket) return
+            stopped = true
+            reconnectJob?.cancel()
+            reconnectJob = null
+            socket = null
+            socketOpen = false
+            connecting = false
+            credentialValue = null
+        }
+        connectionState.value = ConnectionState.AuthRequired
+        emitError("This device was unpaired from the server. Pair it again to reconnect.")
+        scope.launch {
+            try {
+                settings.clearCredential()
+            } catch (_: Exception) {
+                // Worst case the dead token survives a restart; start() then lands
+                // on AuthRequired at the first auth probe anyway.
+            }
         }
     }
 
@@ -696,11 +813,45 @@ class RealTetherClient(
         return withScheme.toHttpUrlOrNull()
     }
 
-    private fun parseJsonField(response: Response, field: String): String? = try {
-        val body = response.body.string()
-        val obj = com.tether.app.protocol.TetherJson.parseToJsonElement(body) as? JsonObject
-        obj?.get(field)?.jsonPrimitive?.content
+    /**
+     * Attach whatever credential is in force. This is the ONLY place the two auth
+     * modes differ, so nothing downstream has to know which one is in use.
+     */
+    private fun Request.Builder.authorize(credential: Credential?): Request.Builder = when (credential) {
+        is Credential.Cookie -> header("Cookie", "tether_session=${credential.value}")
+        is Credential.DeviceToken -> header("Authorization", "Bearer ${credential.value}")
+        null -> this
+    }
+
+    /** What /healthz tells an unauthenticated client: wire version + pairing capability. */
+    private class Health(val protocolVersion: Int?, val pairing: Boolean)
+
+    @Throws(IOException::class)
+    private fun probeHealth(base: HttpUrl): Health {
+        // /healthz is unauthenticated, but send the credential when one exists:
+        // a deployment that puts the probe behind its own gate still answers.
+        val credential = synchronized(lock) { credentialValue }
+        val request = Request.Builder()
+            .url(base.resolve("/healthz")!!)
+            .authorize(credential)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("healthz returned HTTP ${response.code}")
+            val obj = parseJsonObject(response)
+            return Health(
+                protocolVersion = obj?.get("protocolVersion")?.jsonPrimitive?.content?.toIntOrNull(),
+                // Absent flag = an older server, which cannot pair.
+                pairing = obj?.get("pairing")?.jsonPrimitive?.content == "true",
+            )
+        }
+    }
+
+    private fun parseJsonObject(response: Response): JsonObject? = try {
+        com.tether.app.protocol.TetherJson.parseToJsonElement(response.body.string()) as? JsonObject
     } catch (_: Exception) {
         null
     }
+
+    private fun parseJsonField(response: Response, field: String): String? =
+        parseJsonObject(response)?.get(field)?.jsonPrimitive?.content
 }

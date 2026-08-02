@@ -2,6 +2,7 @@ package com.tether.app.ui.fake
 
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.LoginResult
+import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ApprovalChoice
@@ -287,6 +288,22 @@ class FakeTetherClient : TetherClient {
                 _configured.value = true
                 _connection.value = ConnectionState.Connected
                 LoginResult.Success
+            }
+        }
+    }
+
+    override suspend fun pair(baseUrl: String, code: String, label: String): PairResult {
+        delay(400)
+        return when {
+            baseUrl.contains("unreachable") -> PairResult.Unreachable("Could not reach $baseUrl")
+            baseUrl.contains("old") -> PairResult.NotSupported("This server does not support device pairing.")
+            // Anything that is not a plausible 8-character code is "rejected" so
+            // the screen's error path can be demoed without a server.
+            code.trim().length != 8 -> PairResult.Rejected("That pairing code is not valid or has expired.")
+            else -> {
+                _configured.value = true
+                _connection.value = ConnectionState.Connected
+                PairResult.Success
             }
         }
     }

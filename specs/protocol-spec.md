@@ -6,11 +6,14 @@ Ground truth (code is authoritative):
 - `aidash/server.mjs` (auth + WS upgrade + dispatch)
 - `aidash/hooks/use-tether.ts` (reference client)
 - `aidash/lib/pending-input.mjs` (durable-send constants)
+- `aidash/lib/device-tokens.mjs` (pairing codes + device tokens)
 
 ## 1. AUTH
 
+Three credentials the server accepts, in the order `authenticate()` tries them: proxy SSO headers, the password cookie, a paired-device bearer token. The app implements two of them (cookie, device token) and treats them as ONE value — `Credential.Cookie` | `Credential.DeviceToken` in `SettingsStore.kt` — so every request path attaches whichever is in force instead of branching per auth mode.
+
 - Server: single Node HTTP server, default port 4173. `PROTOCOL_VERSION = 40`.
-- `GET /healthz` — unauthenticated: `{ ok, uptimeMs, sessions, outstandingBackground, protocolVersion }`. Cheapest pre-flight version check.
+- `GET /healthz` — unauthenticated: `{ ok, uptimeMs, sessions, outstandingBackground, protocolVersion, pairing }`. Cheapest pre-flight version check; `pairing: true` is a **capability flag, not part of PROTOCOL_VERSION** — absent means an older server that cannot pair.
 - `GET /api/auth/session` — always 200 `{ "authenticated": bool }`.
 
 ### POST /api/auth/login (password)
@@ -24,12 +27,27 @@ Failures: 401 `{"error":"That password is not correct."}`; 429 `{"error":"Too ma
 
 ### POST /api/auth/logout → 200 + cookie cleared.
 
+### 1.3 Device pairing (the SSO-proxy path)
+Behind a forward-auth proxy (Authelia) the browser password page is unreachable from the app, so the owner pairs the device instead: in a desktop browser (already through SSO) they click "Pair a device" and get an 8-character code, valid **5 minutes, single use**.
+
+- `POST /api/devices/claim` — JSON `{code, label}`. **The one endpoint that needs no prior credential** (the code IS the credential), and the one a self-hoster must exempt from SSO alongside `/ws`.
+  - 200 `{ok:true, token:"tthr_<43 chars base64url>", device:{id,label,createdAt,lastSeenAt}}`
+  - 401 `{error}` — unknown / expired / already-claimed, deliberately indistinguishable. Show the server's message verbatim; do not guess which case it was.
+  - 429 `{error}` — the claim endpoint has its own, tighter budget than password login (10 failures/IP + 60 global per 15 min; successes never consume it).
+- **Code normalisation is the SERVER's** (`normalizePairingCode`): it upper-cases, strips spaces/dots/hyphens/underscores and folds U→V over the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ`. The client trims whitespace and sends the rest verbatim — a second implementation could only drift out of agreement. (Upper-casing the field as the user types is presentation, not normalisation.)
+- The token is a **long-lived bearer credential**: `Authorization: Bearer tthr_…` on every subsequent HTTP request AND on the WS upgrade. Store it like the cookie (app-private; encrypted storage is the deferred hardening).
+- Device management (`GET /api/devices`, `POST /api/devices/pair`, `DELETE /api/devices/<id>`) requires a browser-grade credential and answers **403** to a device token: a paired phone can neither mint another token nor revoke a sibling. The app never calls these.
+- Feature-detect with `/healthz` `pairing: true` before offering the flow; a server without it must fall back to the password login.
+
+### 1.4 Revocation → WS close 4001 (TERMINAL)
+Revoking a device closes its live sockets with **code 4001, reason "device revoked"**. The token is checked only at upgrade, so this is the only signal an already-connected client gets. Treat it as terminal, NOT a transient drop: clear the stored credential, stop the reconnect loop, and return to the login/pairing screen. Reconnecting with a revoked token can only spin. (Client: `RealTetherClient.handleDeviceRevoked`; keeps the base URL, drops the credential.)
+
 ### Authelia proxy alternative
 Request (HTTP or WS upgrade) is authenticated if `AIDASH_PROXY_TOKEN` is configured server-side and headers `X-Tether-Proxy-Token: <token>` AND `Remote-User: <non-empty>` are both present. OR the cookie path. Support both: cookie is primary; allow optional proxy-token config.
 
 ### WS upgrade requirements (CRITICAL)
 - URL: `wss://<host>/ws` (or ws:// on http). No subprotocol. No query params.
-- Send `Cookie: tether_session=<value>` (or proxy header pair) on the upgrade.
+- Send `Cookie: tether_session=<value>` OR `Authorization: Bearer tthr_…` (or the proxy header pair) on the upgrade — exactly the credential the HTTP probes use.
 - **MUST send an `Origin` header whose URL host (host+port) exactly equals the `Host` header being sent** — e.g. connecting to `wss://tether.example.com/ws` → `Origin: https://tether.example.com`. OkHttp does NOT set Origin automatically. Omitting it → raw `HTTP/1.1 401 Unauthorized` + socket destroyed (indistinguishable from bad cookie).
 - Keepalive: server sends WS protocol-level PING every 30s and terminates clients that miss a PONG — OkHttp answers PONGs automatically. No application-level ping JSON.
 - Text frames only, one JSON object per frame. Inbound (client→server) frame cap 32 MiB.
@@ -123,7 +141,7 @@ on event(sessionId, ev):
 Clear resyncPending when that session's snapshot arrives.
 
 ### 5.3 Reconnect
-Fixed **1800 ms** delay after close (no backoff/jitter in the reference client). Immediate reconnect on network-available and on app foreground (onResume) when socket not OPEN/CONNECTING. `stopped=true` (permanent) on protocol mismatch or teardown. Before each connect, check `GET /api/auth/session`; on unauthenticated → re-login (or surface login).
+Fixed **1800 ms** delay after close (no backoff/jitter in the reference client). Immediate reconnect on network-available and on app foreground (onResume) when socket not OPEN/CONNECTING. `stopped=true` (permanent) on protocol mismatch, on close code **4001** (device revoked, §1.4), or teardown. Before each connect, check `GET /api/auth/session` **with the credential in force**; on unauthenticated → re-login/re-pair (or surface login).
 
 ### 5.4 On open
 Do NOT drain pending sends. Reset in-flight records to unsent. Wait for `ready`.
@@ -142,4 +160,4 @@ Do NOT drain pending sends. Reset in-flight records to unsent. Wait for `ready`.
 - Attachments are not persisted; if an attachment send can't reach the wire immediately, roll back and tell the user, keeping the draft.
 
 ## 6. RECOMMENDED CLIENT FLOW
-1. /healthz → protocolVersion check. 2. Login → cookie (EncryptedSharedPreferences). 3. wss://<host>/ws with Cookie + Origin matching Host. 4. Expect ready; validate version. 5. attach sessions of interest; maintain cursors/state/resyncPending maps per §5.2. 6. Port the reducer (see reducer-spec.md). 7. Durable-send store per §5.6. 8. Fixed 1800 ms reconnect + network/foreground triggers. 9. Rely on WS PING/PONG; add the 8 s half-open force-close. 10. error frames = uncorrelated toasts. 11. Never use device clock for elapsed times — use event ts / run.startedAt.
+1. /healthz → protocolVersion check (+ `pairing` capability). 2. Obtain a credential: password login → cookie, or pairing-code claim → `tthr_` bearer token (§1.3); persist one, not both. 3. wss://<host>/ws with that credential + Origin matching Host. 4. Expect ready; validate version. 5. attach sessions of interest; maintain cursors/state/resyncPending maps per §5.2. 6. Port the reducer (see reducer-spec.md). 7. Durable-send store per §5.6. 8. Fixed 1800 ms reconnect + network/foreground triggers. 9. Rely on WS PING/PONG; add the 8 s half-open force-close. 10. error frames = uncorrelated toasts. 11. Never use device clock for elapsed times — use event ts / run.startedAt.

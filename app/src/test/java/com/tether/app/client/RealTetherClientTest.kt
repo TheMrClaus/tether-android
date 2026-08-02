@@ -45,11 +45,21 @@ class RealTetherClientTest {
         override fun onMessage(webSocket: WebSocket, text: String) {
             serverReceived.put(text)
         }
+
+        // Complete the closing handshake. Without this the peer's close frame is
+        // never answered, the connection lingers, and MockWebServer.shutdown()
+        // gives up on its queue after 5 s with "Gave up waiting for queue to
+        // shut down" — a teardown failure that looks like a test failure.
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            webSocket.close(1000, null)
+        }
     }
 
     @After
     fun tearDown() {
         if (::client.isInitialized) client.stop()
+        // Drop any still-open server side before shutdown, for the same reason.
+        while (true) (serverSockets.poll() ?: break).cancel()
         scope.cancel()
         server.shutdown()
     }
@@ -280,6 +290,148 @@ class RealTetherClientTest {
         // Unreachable server.
         val unreachable = runBlocking { client.login("http://127.0.0.1:1", "pw") }
         assertTrue(unreachable is LoginResult.Unreachable)
+    }
+
+    // ------------------------------------------------------------------
+    // Device pairing (specs/protocol-spec.md §1.3)
+    // ------------------------------------------------------------------
+
+    private val deviceToken = "tthr_" + "a".repeat(43)
+
+    /** healthz (pairing:true) -> claim -> auth probe -> ws upgrade. */
+    private fun enqueuePairHandshake() {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"ok":true,"protocolVersion":40,"pairing":true}"""),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody(
+                    """{"ok":true,"token":"$deviceToken",
+                       "device":{"id":"d1","label":"Pixel 9","createdAt":1,"lastSeenAt":1}}""",
+                ),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        server.enqueue(MockResponse().withWebSocketUpgrade(wsListener))
+    }
+
+    @Test
+    fun pairStoresTheTokenAndSendsItAsBearerOnEveryHop() {
+        enqueuePairHandshake()
+        server.start()
+
+        val settings = InMemorySettings()
+        client = RealTetherClient(settings = settings, httpClient = OkHttpClient(), scope = scope)
+
+        // Deliberately messy input: the client must trim and NOTHING else — the
+        // server owns pairing-code normalisation.
+        val result = runBlocking { client.pair(server.url("/").toString(), "  abcd-efgh  ", "Pixel 9") }
+        assertEquals(PairResult.Success, result)
+        await(client.configured) { it }
+
+        assertNotNull("client never reached the ws upgrade", serverSockets.poll(10, TimeUnit.SECONDS))
+
+        // 1. healthz — no credential exists yet.
+        val health = server.takeRequest()
+        assertEquals("/healthz", health.path)
+        assertEquals(null, health.getHeader("Authorization"))
+
+        // 2. claim — unauthenticated by design, code passed through verbatim.
+        val claim = server.takeRequest()
+        assertEquals("/api/devices/claim", claim.path)
+        assertEquals("POST", claim.method)
+        assertEquals(null, claim.getHeader("Authorization"))
+        val claimBody = TetherJson.parseToJsonElement(claim.body.readUtf8()) as JsonObject
+        assertEquals("abcd-efgh", claimBody["code"]!!.jsonPrimitive.content)
+        assertEquals("Pixel 9", claimBody["label"]!!.jsonPrimitive.content)
+
+        // 3. auth probe — bearer, and no cookie masquerading alongside it.
+        val probe = server.takeRequest()
+        assertEquals("/api/auth/session", probe.path)
+        assertEquals("Bearer $deviceToken", probe.getHeader("Authorization"))
+        assertEquals(null, probe.getHeader("Cookie"))
+
+        // 4. ws upgrade — same bearer, plus the Origin the server insists on.
+        val upgrade = server.takeRequest()
+        assertEquals("/ws", upgrade.path)
+        assertEquals("Bearer $deviceToken", upgrade.getHeader("Authorization"))
+        assertEquals(null, upgrade.getHeader("Cookie"))
+        assertEquals("http://${upgrade.getHeader("Host")}", upgrade.getHeader("Origin"))
+
+        // The token is persisted; the cookie slot stays empty.
+        assertEquals(deviceToken, runBlocking { settings.deviceToken.first() })
+        assertEquals(null, runBlocking { settings.cookie.first() })
+        assertEquals(
+            Credential.DeviceToken(deviceToken),
+            runBlocking { settings.credential.first() },
+        )
+    }
+
+    @Test
+    fun pairFailuresMapToResultsAndStoreNothing() {
+        // Rejected code (unknown / expired / already claimed all look like this).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":40,"pairing":true}"""))
+        server.enqueue(
+            MockResponse().setResponseCode(401)
+                .setBody("""{"error":"That pairing code is not valid or has expired."}"""),
+        )
+        // Rate limited.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":40,"pairing":true}"""))
+        server.enqueue(
+            MockResponse().setResponseCode(429)
+                .setBody("""{"error":"Too many pairing attempts. Try again in a few minutes."}"""),
+        )
+        // A server without the pairing capability: never even attempts a claim.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":40}"""))
+        // Protocol mismatch short-circuits ahead of pairing entirely.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":39,"pairing":true}"""))
+        server.start()
+
+        val settings = InMemorySettings()
+        client = RealTetherClient(settings = settings, httpClient = OkHttpClient(), scope = scope)
+        val base = server.url("/").toString()
+
+        val rejected = runBlocking { client.pair(base, "AAAAAAAA", "Pixel 9") }
+        assertTrue(rejected is PairResult.Rejected)
+        assertEquals(
+            "That pairing code is not valid or has expired.",
+            (rejected as PairResult.Rejected).message,
+        )
+
+        assertTrue(runBlocking { client.pair(base, "AAAAAAAA", "Pixel 9") } is PairResult.RateLimited)
+        assertTrue(runBlocking { client.pair(base, "AAAAAAAA", "Pixel 9") } is PairResult.NotSupported)
+        assertEquals(PairResult.VersionMismatch(39), runBlocking { client.pair(base, "AAAAAAAA", "Pixel 9") })
+
+        // Nothing was persisted and the client never went looking for a socket.
+        assertEquals(null, runBlocking { settings.deviceToken.first() })
+        assertEquals(false, client.configured.value)
+        assertEquals(6, server.requestCount)
+    }
+
+    @Test
+    fun deviceRevokedCloseClearsTheTokenAndDoesNotReconnect() {
+        enqueuePairHandshake()
+        server.start()
+
+        val settings = InMemorySettings()
+        client = RealTetherClient(settings = settings, httpClient = OkHttpClient(), scope = scope)
+        assertEquals(PairResult.Success, runBlocking { client.pair(server.url("/").toString(), "ABCDEFGH", "Pixel 9") })
+
+        val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
+        serverSocket.send("""{"type":"ready","protocolVersion":40,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        await(client.connection) { it == ConnectionState.Connected }
+        repeat(4) { server.takeRequest() } // healthz, claim, auth probe, upgrade
+
+        // Revocation: the server closes the live socket with 4001.
+        serverSocket.close(4001, "device revoked")
+
+        await(client.connection) { it == ConnectionState.AuthRequired }
+        await(client.configured) { !it }
+        assertEquals(null, runBlocking { settings.deviceToken.first() })
+        assertEquals(null, runBlocking { settings.credential.first() })
+        // Terminal, not a transient drop: no auth probe, no second upgrade — the
+        // reconnect delay is 1800 ms, so 3 s of silence proves the loop stopped.
+        assertEquals(null, server.takeRequest(3, TimeUnit.SECONDS))
     }
 }
 

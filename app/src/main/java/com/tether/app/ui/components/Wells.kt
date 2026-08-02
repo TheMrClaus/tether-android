@@ -28,7 +28,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -53,6 +55,10 @@ fun TetherInputWell(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     maxLines: Int = if (singleLine) 1 else 6,
+    // visual-spec §5: Manrope is the UI face; JetBrains Mono is for code-like
+    // values (paths, tool output, a typed pairing code).
+    fontFamily: FontFamily = Manrope,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
 ) {
     val t = LocalTetherTokens.current
     val interaction = remember { MutableInteractionSource() }
@@ -100,9 +106,10 @@ fun TetherInputWell(
             enabled = enabled,
             textStyle = TextStyle(
                 color = t.ink,
-                fontFamily = Manrope,
+                fontFamily = fontFamily,
                 fontWeight = TetherWeights.body,
                 fontSize = 16.sp,
+                letterSpacing = letterSpacing,
             ),
             cursorBrush = SolidColor(t.violet),
             singleLine = singleLine,
@@ -117,9 +124,10 @@ fun TetherInputWell(
                         Text(
                             text = placeholder,
                             color = t.faint,
-                            fontFamily = Manrope,
+                            fontFamily = fontFamily,
                             fontWeight = TetherWeights.body,
                             fontSize = 16.sp,
+                            letterSpacing = letterSpacing,
                             maxLines = 2,
                         )
                     }

@@ -45,7 +45,20 @@ interface TetherClient {
      */
     suspend fun login(baseUrl: String, password: String): LoginResult
 
-    /** True once a server URL + cookie are persisted (skip the setup screen). */
+    /**
+     * The SSO-friendly alternative to [login]: exchange the 8-character pairing
+     * code the owner minted in a desktop browser ("Pair a device") for a
+     * long-lived device bearer token, persist it, then start the connection loop.
+     *
+     * [code] is passed to the server with nothing but whitespace trimming — the
+     * server owns pairing-code normalisation (case, spaces, hyphens, dots,
+     * underscores, U→V), and a second implementation here could only disagree
+     * with it. [label] names the device in the browser's device list (e.g. the
+     * handset model); the server normalises and caps it.
+     */
+    suspend fun pair(baseUrl: String, code: String, label: String): PairResult
+
+    /** True once a server URL + a credential are persisted (skip the setup screen). */
     val configured: StateFlow<Boolean>
 
     /** Open (or re-open) the connection loop. Idempotent. */
@@ -107,4 +120,21 @@ sealed interface LoginResult {
     data class RateLimited(val message: String) : LoginResult
     data class VersionMismatch(val requiredVersion: Int) : LoginResult
     data class Unreachable(val message: String) : LoginResult
+}
+
+/** Outcome of [TetherClient.pair]. Sibling of [LoginResult]; see specs/protocol-spec.md §1.3. */
+sealed interface PairResult {
+    data object Success : PairResult
+
+    /** 401: unknown, expired or already-claimed code — the server does not say which. */
+    data class Rejected(val message: String) : PairResult
+
+    /** 429: the claim endpoint's own (tighter than login) rate limit. */
+    data class RateLimited(val message: String) : PairResult
+
+    /** /healthz did not report `pairing: true` — this server predates device pairing. */
+    data class NotSupported(val message: String) : PairResult
+
+    data class VersionMismatch(val requiredVersion: Int) : PairResult
+    data class Unreachable(val message: String) : PairResult
 }
