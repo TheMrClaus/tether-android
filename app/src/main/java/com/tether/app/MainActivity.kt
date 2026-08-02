@@ -3,51 +3,22 @@ package com.tether.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import com.tether.app.ui.theme.TetherTheme
+import androidx.activity.enableEdgeToEdge
+import com.tether.app.ui.ClientLocator
+import com.tether.app.ui.UiRoot
 
+/**
+ * Single-activity shell. The TetherClient is obtained through ClientLocator —
+ * the integrator sets ClientLocator.factory to RealTetherClient before this
+ * activity first resolves it (Application.onCreate is the natural spot).
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val client = ClientLocator.obtain(applicationContext)
         setContent {
-            TetherTheme {
-                PlaceholderScreen()
-            }
+            UiRoot(client = client)
         }
-    }
-}
-
-@Composable
-fun PlaceholderScreen() {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "Tether",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-        }
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-private fun PlaceholderScreenPreview() {
-    TetherTheme {
-        PlaceholderScreen()
     }
 }
