@@ -5,7 +5,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.tether.app.client.ConnectionState
 import com.tether.app.client.TetherClient
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,14 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
 
     private val _selectedSessionId = MutableStateFlow<String?>(null)
     val selectedSessionId: StateFlow<String?> = _selectedSessionId.asStateFlow()
+
+    /**
+     * Operator-chosen project folder (the folder picker's result). Null means
+     * the server's default folder (ready.workspaceRoot). New sessions inherit
+     * it as their cwd; selecting it re-runs history discovery for that subtree.
+     */
+    private val _currentWorkspace = MutableStateFlow<String?>(null)
+    val currentWorkspace: StateFlow<String?> = _currentWorkspace.asStateFlow()
 
     /** Errors seen this connection, newest last (topbar badge + log dialog). */
     val errorLog = mutableStateListOf<String>()
@@ -95,16 +105,45 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
         client.attach(id)
     }
 
-    fun createSession(provider: String) {
-        knownIdsBeforeCreate = client.sessions.value.map { it.id }.toSet()
-        client.createSession(provider)
+    /** Choose the project folder new sessions run in (folder picker). */
+    fun selectWorkspace(cwd: String) {
+        _currentWorkspace.value = cwd
+        client.discover(cwd)
     }
 
-    /** Busy turns queue; idle sessions send. */
-    fun sendOrQueue(sessionId: String, text: String) {
+    fun createSession(provider: String) {
+        knownIdsBeforeCreate = client.sessions.value.map { it.id }.toSet()
+        client.createSession(provider, cwd = _currentWorkspace.value)
+    }
+
+    /**
+     * Busy turns queue; idle sessions send. Attachments ride the idle send
+     * only (the server never queues them) — the composer disables attaching
+     * while a turn is busy, so a non-empty list here always means idle.
+     *
+     * Returns false when the message was refused (attachments while
+     * disconnected — §5.6: roll back and tell the user, draft kept by the
+     * caller) so the composer can keep the draft instead of clearing it.
+     */
+    fun sendOrQueue(sessionId: String, text: String, attachments: List<Attachment> = emptyList()): Boolean {
         val projection = client.projections.value[sessionId]
-        if (projection?.activeTurnId != null) client.queueAdd(sessionId, text)
-        else client.send(sessionId, text)
+        if (projection?.activeTurnId != null) {
+            client.queueAdd(sessionId, text)
+            return true
+        }
+        if (attachments.isNotEmpty() && client.connection.value != ConnectionState.Connected) {
+            reportLocalError("Not connected — the message and its attachments were not sent.")
+            return false
+        }
+        client.send(sessionId, text, attachments)
+        return true
+    }
+
+    /** Client-side failure that never hit the server (e.g. unreadable attachment). */
+    fun reportLocalError(message: String) {
+        errorLog.add(message)
+        if (errorLog.size > 50) errorLog.removeAt(0)
+        _activeToast.value = message
     }
 
     fun dismissToast() {

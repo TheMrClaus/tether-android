@@ -4,9 +4,12 @@ import com.tether.app.client.ConnectionState
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
+import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ApprovalChoice
 import com.tether.app.protocol.model.ApprovalRequestMetadata
+import com.tether.app.protocol.model.AttachmentMeta
+import com.tether.app.protocol.model.DirectoryEntry
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.PendingApproval
@@ -67,7 +70,8 @@ class FakeTetherClient : TetherClient {
     )
 
     override val histories: StateFlow<List<HistorySession>> = MutableStateFlow(emptyList())
-    override val directories: StateFlow<DirectoryListing?> = MutableStateFlow(null)
+    private val _directories = MutableStateFlow<DirectoryListing?>(null)
+    override val directories: StateFlow<DirectoryListing?> = _directories.asStateFlow()
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 8)
     override val errors: SharedFlow<String> = _errors.asSharedFlow()
@@ -318,10 +322,15 @@ class FakeTetherClient : TetherClient {
 
     override fun attach(sessionId: String) { /* projections are pre-seeded */ }
 
-    override fun send(sessionId: String, text: String) {
+    override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
         val turnId = "t-${System.currentTimeMillis()}"
         val startTs = System.currentTimeMillis()
-        val userBlock = TurnBlock(blockId = "$turnId-u", kind = Vocab.BLOCK_USER_MESSAGE, text = text)
+        val userBlock = TurnBlock(
+            blockId = "$turnId-u",
+            kind = Vocab.BLOCK_USER_MESSAGE,
+            text = text,
+            attachments = attachments.map { AttachmentMeta(it.name, it.mediaType) }.ifEmpty { null },
+        )
         val agentBlock = TurnBlock(blockId = "$turnId-a", kind = Vocab.BLOCK_MESSAGE, done = false, text = "")
         updateProjection(sessionId) { p ->
             p.copy(
@@ -489,7 +498,15 @@ class FakeTetherClient : TetherClient {
 
     override fun resumeHistory(historyId: String, cwd: String) {}
     override fun discover(cwd: String) {}
-    override fun browse(cwd: String?) {}
+    override fun browse(cwd: String?) {
+        // Scripted listing so the folder picker works in previews/demos.
+        val current = cwd ?: "/home/operator/git"
+        _directories.value = DirectoryListing(
+            current = current,
+            parent = current.substringBeforeLast('/', "").ifEmpty { null }?.takeIf { current != "/" },
+            entries = listOf("aidash", "tether-android", "dotfiles").map { DirectoryEntry(it, "$current/$it") },
+        )
+    }
     override fun setMode(sessionId: String, permissionMode: String) {}
 
     override fun pin(sessionId: String, pinned: Boolean) {

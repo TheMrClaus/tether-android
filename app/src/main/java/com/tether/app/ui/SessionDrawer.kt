@@ -39,7 +39,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Folder
 import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
@@ -81,13 +84,20 @@ fun SessionDrawer(
     val t = LocalTetherTokens.current
     val scope = rememberCoroutineScope()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
+    val currentWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
+    val directories by vm.client.directories.collectAsStateWithLifecycle()
     val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = false)
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
     val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.System)
 
     var providerPicker by remember { mutableStateOf(false) }
+    var folderPicker by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("") }
+
+    // The folder the workspace row names: the picker's choice, else the
+    // server's default folder.
+    val effectiveWorkspace = currentWorkspace ?: workspaceRoot
 
     // Relative times tick once a minute while the drawer is open.
     var now by remember { mutableLongStateOf(vm.serverNow(null)) }
@@ -143,11 +153,15 @@ fun SessionDrawer(
                 fontSize = 13.1.sp,
             )
 
-            // Workspace row (static v1: shows the server's default folder).
+            // Workspace row: opens the folder picker (browse + select).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = TetherDimens.touchTargetDp)
+                    .clickable {
+                        folderPicker = true
+                        vm.client.browse(effectiveWorkspace)
+                    }
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -163,7 +177,7 @@ fun SessionDrawer(
                         letterSpacing = 0.08.em,
                     )
                     Text(
-                        workspaceRoot?.let(::projectName) ?: "—",
+                        effectiveWorkspace?.let(::projectName) ?: "—",
                         color = t.ink,
                         fontFamily = Manrope,
                         fontWeight = TetherWeights.label,
@@ -295,6 +309,74 @@ fun SessionDrawer(
         }
     }
 
+    if (folderPicker) {
+        val listing = directories
+        val pickerCurrent = listing?.current ?: effectiveWorkspace
+        TetherDialog(onDismiss = { folderPicker = false }, title = "Choose a folder") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Lucide.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+                Text(
+                    pickerCurrent ?: "—",
+                    color = t.muted,
+                    fontFamily = JetBrainsMono,
+                    fontSize = 11.2.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            listing?.parent?.let { parent ->
+                FolderRow(
+                    icon = { Icon(Lucide.ArrowLeft, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
+                    name = "Parent folder",
+                    detail = "Go up one level",
+                    onClick = { vm.client.browse(parent) },
+                )
+            }
+            listing?.entries?.forEach { entry ->
+                FolderRow(
+                    icon = { Icon(Lucide.Folder, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
+                    name = entry.name,
+                    detail = entry.path,
+                    onClick = { vm.client.browse(entry.path) },
+                )
+            }
+            if (listing != null && listing.entries.isEmpty() && listing.parent == null) {
+                Text(
+                    "No folders are available here.",
+                    color = t.muted,
+                    fontFamily = Manrope,
+                    fontWeight = TetherWeights.body,
+                    fontSize = 12.8.sp,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TetherKey(
+                    onClick = { folderPicker = false },
+                    variant = KeyVariant.Secondary,
+                    label = "Cancel",
+                )
+                TetherKey(
+                    onClick = {
+                        pickerCurrent?.let(vm::selectWorkspace)
+                        folderPicker = false
+                    },
+                    variant = KeyVariant.Primary,
+                    label = "Use this folder",
+                    icon = Lucide.Check,
+                    iconSize = 15.dp,
+                )
+            }
+        }
+    }
+
     if (settingsOpen) {
         TetherDialog(onDismiss = { settingsOpen = false }, title = "Settings") {
             Text(
@@ -363,6 +445,47 @@ fun SessionDrawer(
                     letterSpacing = 0.06.em,
                 )
             }
+        }
+    }
+}
+
+/** One tappable row in the folder picker: icon + name over truncated path. */
+@Composable
+private fun FolderRow(
+    icon: @Composable () -> Unit,
+    name: String,
+    detail: String,
+    onClick: () -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .heightIn(min = TetherDimens.touchTargetDp)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        icon()
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                color = t.ink,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.name,
+                fontSize = 13.1.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                detail,
+                color = t.faint,
+                fontFamily = JetBrainsMono,
+                fontSize = 10.4.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
