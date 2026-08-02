@@ -21,6 +21,7 @@ class UiPrefs(context: Context) {
         val theme = stringPreferencesKey("theme_choice")
         val showThinking = booleanPreferencesKey("show_thinking")
         val showEnded = booleanPreferencesKey("show_ended_sessions")
+        val pinnedProjects = stringPreferencesKey("pinned_projects")
     }
 
     val themeChoice: Flow<ThemeChoice> = store.data.map { ThemeChoice.fromId(it[Keys.theme]) }
@@ -39,5 +40,18 @@ class UiPrefs(context: Context) {
 
     suspend fun setShowEnded(value: Boolean) {
         store.edit { it[Keys.showEnded] = value }
+    }
+
+    /**
+     * Starred project folders, in pin order (index caps + switch shortcuts key
+     * off position, so order matters — newline-joined since paths can't
+     * contain newlines and DataStore string sets are unordered).
+     */
+    val pinnedProjects: Flow<List<String>> = store.data.map {
+        it[Keys.pinnedProjects]?.split('\n')?.filter(String::isNotBlank) ?: emptyList()
+    }
+
+    suspend fun setPinnedProjects(projects: List<String>) {
+        store.edit { it[Keys.pinnedProjects] = projects.joinToString("\n") }
     }
 }

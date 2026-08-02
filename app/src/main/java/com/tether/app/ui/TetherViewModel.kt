@@ -105,9 +105,15 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
         client.attach(id)
     }
 
-    /** Choose the project folder new sessions run in (folder picker). */
+    /**
+     * Choose the project folder new sessions run in (folder picker / pinned
+     * project). The session list filters to it, so the open chat is dropped —
+     * the same setActiveId(null) the web client applies on a project switch.
+     */
     fun selectWorkspace(cwd: String) {
+        if (cwd == _currentWorkspace.value) return
         _currentWorkspace.value = cwd
+        _selectedSessionId.value = null
         client.discover(cwd)
     }
 

@@ -47,6 +47,7 @@ import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Star
 import com.composables.icons.lucide.X
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.components.KeyVariant
@@ -63,6 +64,7 @@ import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.util.compactPath
 import com.tether.app.ui.util.projectName
 import com.tether.app.ui.util.providerGlyph
 import com.tether.app.ui.util.relativeTime
@@ -89,6 +91,7 @@ fun SessionDrawer(
     val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = false)
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
     val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.System)
+    val pinnedProjects by prefs.pinnedProjects.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var providerPicker by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
@@ -98,6 +101,16 @@ fun SessionDrawer(
     // The folder the workspace row names: the picker's choice, else the
     // server's default folder.
     val effectiveWorkspace = currentWorkspace ?: workspaceRoot
+    val currentPinned = effectiveWorkspace != null && pinnedProjects.contains(effectiveWorkspace)
+
+    // Live activity per project (exact cwd, like the web client) so a pinned
+    // project can flag "needs you" without switching to it.
+    val projectActivity: Map<String, Pair<Int, Int>> = sessions
+        .filter { it.status != "exited" }
+        .groupBy { it.cwd }
+        .mapValues { (_, list) ->
+            list.count { it.status == "waiting" } to list.count { it.status == "active" }
+        }
 
     // Relative times tick once a minute while the drawer is open.
     var now by remember { mutableLongStateOf(vm.serverNow(null)) }
@@ -108,7 +121,11 @@ fun SessionDrawer(
         }
     }
 
+    // Sessions belong to the picked project folder (exact cwd match, like the
+    // web client's visibleSessions) — this is what makes the list follow the
+    // folder you pick. Until the server reports a folder, show everything.
     val visibleSessions = sessions
+        .filter { effectiveWorkspace == null || it.cwd == effectiveWorkspace }
         .filter { showEnded || it.status != "exited" }
         .filter {
             filter.isBlank() ||
@@ -153,40 +170,153 @@ fun SessionDrawer(
                 fontSize = 13.1.sp,
             )
 
-            // Workspace row: opens the folder picker (browse + select).
+            // Workspace switch row: folder picker + pin star (visual-spec §3).
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = TetherDimens.touchTargetDp)
-                    .clickable {
-                        folderPicker = true
-                        vm.client.browse(effectiveWorkspace)
-                    }
-                    .padding(horizontal = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Lucide.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
-                Column(Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TetherDimens.touchTargetDp)
+                        .clickable {
+                            folderPicker = true
+                            vm.client.browse(effectiveWorkspace)
+                        }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Lucide.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "WORKSPACE",
+                            color = t.faint,
+                            fontFamily = Manrope,
+                            fontWeight = TetherWeights.strong,
+                            fontSize = 9.3.sp,
+                            letterSpacing = 0.08.em,
+                        )
+                        Text(
+                            effectiveWorkspace?.let(::projectName) ?: "—",
+                            color = t.ink,
+                            fontFamily = Manrope,
+                            fontWeight = TetherWeights.label,
+                            fontSize = 12.2.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(Lucide.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
+                }
+                // Pin star: pinned → violet wash bg + violet star (spec §3).
+                val starShape = RoundedCornerShape(TetherDimens.radiusSm)
+                Box(
+                    modifier = Modifier
+                        .size(TetherDimens.touchTargetDp)
+                        .background(if (currentPinned) t.violetWash else t.keyFace, starShape)
+                        .border(1.dp, if (currentPinned) t.violetStrong else t.line, starShape)
+                        .clickable(enabled = effectiveWorkspace != null) {
+                            val cwd = effectiveWorkspace ?: return@clickable
+                            scope.launch {
+                                prefs.setPinnedProjects(
+                                    if (currentPinned) pinnedProjects - cwd else pinnedProjects + cwd,
+                                )
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Lucide.Star,
+                        contentDescription = if (currentPinned) "Unpin this project" else "Pin this project to the drawer",
+                        tint = if (currentPinned) t.violet else t.faint,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
+            // Pinned projects (visual-spec §3): index cap, name, path, activity
+            // dot, unpin X. Tapping switches the workspace; the drawer stays open.
+            if (pinnedProjects.isNotEmpty()) {
+                Column {
                     Text(
-                        "WORKSPACE",
+                        "PROJECTS",
                         color = t.faint,
                         fontFamily = Manrope,
                         fontWeight = TetherWeights.strong,
-                        fontSize = 9.3.sp,
+                        fontSize = 10.7.sp,
                         letterSpacing = 0.08.em,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
                     )
-                    Text(
-                        effectiveWorkspace?.let(::projectName) ?: "—",
-                        color = t.ink,
-                        fontFamily = Manrope,
-                        fontWeight = TetherWeights.label,
-                        fontSize = 12.2.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    pinnedProjects.forEachIndexed { index, project ->
+                        val activity = projectActivity[project]
+                        val isCurrent = project == effectiveWorkspace
+                        val rowShape = RoundedCornerShape(TetherDimens.radiusSm)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .background(if (isCurrent) t.violetWash else Color.Transparent, rowShape)
+                                .border(1.dp, if (isCurrent) t.violetStrong else Color.Transparent, rowShape)
+                                .clickable { vm.selectWorkspace(project) }
+                                .padding(start = 8.dp, end = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (index < 9) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .background(t.keyFace, RoundedCornerShape(4.dp))
+                                        .border(1.dp, t.line, RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "${index + 1}",
+                                        color = t.faint,
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 9.3.sp,
+                                    )
+                                }
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    projectName(project),
+                                    color = if (isCurrent) t.white else t.ink,
+                                    fontFamily = Manrope,
+                                    fontWeight = TetherWeights.name,
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    compactPath(project, workspaceRoot),
+                                    color = t.faint,
+                                    fontFamily = JetBrainsMono,
+                                    fontSize = 9.9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            when {
+                                activity != null && activity.first > 0 -> WaitingPingDot(color = t.violet)
+                                activity != null && activity.second > 0 -> StatusDot(color = t.running)
+                            }
+                            IconButton(
+                                onClick = { scope.launch { prefs.setPinnedProjects(pinnedProjects - project) } },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Lucide.X,
+                                    contentDescription = "Unpin ${projectName(project)}",
+                                    tint = t.faint,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                    }
                 }
-                Icon(Lucide.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
             }
 
             // SESSIONS header + count + show-ended toggle.
@@ -238,6 +368,18 @@ fun SessionDrawer(
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            if (visibleSessions.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        if (sessions.isEmpty()) "No sessions yet." else "No sessions in this project.",
+                        color = t.faint,
+                        fontFamily = Manrope,
+                        fontWeight = TetherWeights.body,
+                        fontSize = 12.5.sp,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
             items(visibleSessions, key = { it.id }) { session ->
                 SessionRow(
                     session = session,

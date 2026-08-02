@@ -60,7 +60,9 @@ class FakeTetherClient : TetherClient {
     private val _configured = MutableStateFlow(true)
     override val configured: StateFlow<Boolean> = _configured.asStateFlow()
 
-    override val workspaceRoot: StateFlow<String?> = MutableStateFlow("/home/operator/git")
+    // One seed session lives exactly here, so the drawer's workspace filter
+    // shows it while hiding the subproject seeds (mirrors real usage).
+    override val workspaceRoot: StateFlow<String?> = MutableStateFlow("/home/operator/git/aidash")
 
     override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(
         listOf(
