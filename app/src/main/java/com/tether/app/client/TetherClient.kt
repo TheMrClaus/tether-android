@@ -38,6 +38,16 @@ interface TetherClient {
     /** Uncorrelated server error frames + client-side failures — show as toasts. */
     val errors: SharedFlow<String>
 
+    /**
+     * Validate + persist server config from the first-launch screen:
+     * probes /healthz (protocol version), performs the password login, stores
+     * the base URL and session cookie, then starts the connection loop.
+     */
+    suspend fun login(baseUrl: String, password: String): LoginResult
+
+    /** True once a server URL + cookie are persisted (skip the setup screen). */
+    val configured: StateFlow<Boolean>
+
     /** Open (or re-open) the connection loop. Idempotent. */
     fun start()
 
@@ -89,4 +99,12 @@ sealed interface ConnectionState {
 
     /** Server speaks a different PROTOCOL_VERSION; reconnect is disabled. */
     data class VersionMismatch(val requiredVersion: Int) : ConnectionState
+}
+
+sealed interface LoginResult {
+    data object Success : LoginResult
+    data class BadPassword(val message: String) : LoginResult
+    data class RateLimited(val message: String) : LoginResult
+    data class VersionMismatch(val requiredVersion: Int) : LoginResult
+    data class Unreachable(val message: String) : LoginResult
 }
