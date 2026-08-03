@@ -142,6 +142,18 @@ data class TetherTokens(
     val questionBg: Color,
     val questionInk: Color,
     val dropOverlay: Color,
+    // Depth / bevels (visual-spec §1 "Light/shade" + "Shadows"; ports of
+    // globals.css --lit-* / --press-shade / --wear-* / --shadow-key).
+    val litStrong: Color,
+    val litSoft: Color,
+    val litFaint: Color,
+    val pressShade: Color,
+    val wearHi: Color,
+    val wearLo: Color,
+    /** Soft drop-shadow elevation for a resting key (the "0 3px 6px -2px"
+     *  component of --shadow-key; the hard "0 2px 0 key-side" side-wall is
+     *  drawn by TetherKey itself). */
+    val shadowElevation: Dp,
 ) {
     private fun tint(alpha: Float): Color =
         tintRgb.copy(alpha = (alpha * tintBoost).coerceAtMost(1f))
@@ -219,6 +231,13 @@ val MachineTokens = TetherTokens(
     questionBg = Color(0xFF111A24),
     questionInk = Color(0xFF8FB4DD),
     dropOverlay = Color(0xDB1C1A33),
+    litStrong = Color(0x17FFFFFF),
+    litSoft = Color(0x0DFFFFFF),
+    litFaint = Color(0x08FFFFFF),
+    pressShade = Color(0x80000000),
+    wearHi = Color(0x0DFFFFFF),
+    wearLo = Color(0x29000000),
+    shadowElevation = 3.dp,
 )
 
 val TactileTokens = TetherTokens(
@@ -287,6 +306,13 @@ val TactileTokens = TetherTokens(
     questionBg = Color(0xFFE4E9F1),
     questionInk = Color(0xFF44608E),
     dropOverlay = Color(0xD9E5E3F3),
+    litStrong = Color(0xE6FFFFFF),
+    litSoft = Color(0x73FFFFFF),
+    litFaint = Color(0x48FFFFFF),
+    pressShade = Color(0x3D2D302A),
+    wearHi = Color(0x3DFFFFFF),
+    wearLo = Color(0x21000000),
+    shadowElevation = 5.dp,
 )
 
 val PrecisionTokens = TetherTokens(
@@ -355,6 +381,13 @@ val PrecisionTokens = TetherTokens(
     questionBg = Color(0xFFE7EDF4),
     questionInk = Color(0xFF3D5C85),
     dropOverlay = Color(0xDBE7E4F8),
+    litStrong = Color(0xF2FFFFFF),
+    litSoft = Color(0x8CFFFFFF),
+    litFaint = Color(0x4DFFFFFF),
+    pressShade = Color(0x3D1B2428),
+    wearHi = Color(0x66FFFFFF),
+    wearLo = Color(0x0D1B2428),
+    shadowElevation = 4.dp,
 )
 
 val NightTokens = TetherTokens(
@@ -423,6 +456,13 @@ val NightTokens = TetherTokens(
     questionBg = Color(0xFF151A22),
     questionInk = Color(0xFF9DB2D1),
     dropOverlay = Color(0xDB1F1C33),
+    litStrong = Color(0x1CFFFFFF),
+    litSoft = Color(0x0FFFFFFF),
+    litFaint = Color(0x09FFFFFF),
+    pressShade = Color(0x80000000),
+    wearHi = Color(0x12FFFFFF),
+    wearLo = Color(0x33000000),
+    shadowElevation = 5.dp,
 )
 
 fun tokensFor(family: TetherThemeFamily): TetherTokens = when (family) {
