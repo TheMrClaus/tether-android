@@ -193,11 +193,15 @@ private fun ComposerIdlePreview() {
                 provider = "claude",
                 cwd = "/home/operator/git/aidash",
             ),
+            controls = null,
             serverNow = { previewNow },
             onSend = { _, _ -> true },
             onInterrupt = {},
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
+            onSetMode = {},
+            onSetModel = { _ -> true },
+            onRequestControls = {},
         )
     }
 }
@@ -226,11 +230,15 @@ private fun ComposerBusyPreview() {
                 activeTurnId = "t1",
                 queuedMessages = listOf(QueuedMessage("q1", "Also update the changelog.")),
             ),
+            controls = null,
             serverNow = { previewNow },
             onSend = { _, _ -> true },
             onInterrupt = {},
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
+            onSetMode = {},
+            onSetModel = { _ -> true },
+            onRequestControls = {},
         )
     }
 }

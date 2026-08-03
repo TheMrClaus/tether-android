@@ -433,6 +433,55 @@ class RealTetherClientTest {
         // reconnect delay is 1800 ms, so 3 s of silence proves the loop stopped.
         assertEquals(null, server.takeRequest(3, TimeUnit.SECONDS))
     }
+
+    @Test
+    fun sessionControlsReplyIsRoutedAndCommandsSend() {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"ok":true,"protocolVersion":40}"""),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .addHeader("Set-Cookie", "tether_session=c4; Path=/")
+                .setBody("""{"ok":true}"""),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        server.enqueue(MockResponse().withWebSocketUpgrade(wsListener))
+        server.start()
+
+        client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope)
+        assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
+        val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
+        serverSocket.send("""{"type":"ready","protocolVersion":40,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        await(client.connection) { it == ConnectionState.Connected }
+
+        // The request frame is exactly what protocol-validate expects.
+        client.requestSessionControls("s1")
+        val request = nextFrame()
+        assertEquals("session-controls", request["type"]!!.jsonPrimitive.content)
+        assertEquals("s1", request["sessionId"]!!.jsonPrimitive.content)
+
+        // The reply lands in the per-session flow (it is NOT dropped).
+        serverSocket.send(
+            """
+            {"type":"session-controls","sessionId":"s1",
+             "models":[{"value":"default","displayName":"Default","current":true,"resolvedModel":"claude-opus-4-8"},
+                       {"value":"claude-opus-4-8","displayName":"Opus 4.1"}],
+             "commands":[{"name":"model","description":"Switch the model for this session","supported":true}],
+             "model":"claude-opus-4-8"}
+            """.trimIndent(),
+        )
+        val controls = await(client.sessionControls) { it.containsKey("s1") }.getValue("s1")
+        assertEquals(2, controls.models.size)
+        assertEquals("claude-opus-4-8", controls.models[0].resolvedModel)
+        assertEquals("claude-opus-4-8", controls.model)
+
+        // set-model sends the verbatim id ("" / "default" = reset, server's mapping).
+        client.setModel("s1", "claude-opus-4-8")
+        val setModel = nextFrame()
+        assertEquals("set-model", setModel["type"]!!.jsonPrimitive.content)
+        assertEquals("claude-opus-4-8", setModel["model"]!!.jsonPrimitive.content)
+    }
 }
 
 private fun CoroutineScope.launchCollect(

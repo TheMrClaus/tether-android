@@ -126,3 +126,13 @@ fun spinnerWordFor(turnId: String?, runIndex: Int?): String {
     val index = ((seed + run.toLong() * 47L) % SPINNER_WORDS.size).toInt()
     return SPINNER_WORDS[index]
 }
+
+/** aidash telemetry-readings.estimatedUSD(value, "compact"): "$1.23" / "$0.0045". */
+fun estimatedUsd(value: Double?): String {
+    if (value == null || !value.isFinite()) return "—"
+    val digits = if (kotlin.math.abs(value) >= 0.01) 2 else 4
+    val format = java.text.NumberFormat.getCurrencyInstance(java.util.Locale.US)
+    format.minimumFractionDigits = digits
+    format.maximumFractionDigits = digits
+    return format.format(value)
+}

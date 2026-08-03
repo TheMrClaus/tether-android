@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
@@ -35,6 +36,9 @@ interface TetherClient {
 
     /** Latest directory listing reply (folder picker). */
     val directories: StateFlow<DirectoryListing?>
+
+    /** Latest session-controls reply per session (models + slash commands for the composer). */
+    val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>>
 
     /** Uncorrelated server error frames + client-side failures — show as toasts. */
     val errors: SharedFlow<String>
@@ -98,6 +102,15 @@ interface TetherClient {
     fun browse(cwd: String? = null)
 
     fun setMode(sessionId: String, permissionMode: String)
+
+    /**
+     * Claude only: switch the session's model ("" or "default" resets to the CLI default).
+     * Returns false when the frame could not be sent — callers must not confirm then.
+     */
+    fun setModel(sessionId: String, model: String): Boolean
+
+    /** Ask for the session's available models + slash-command list. Cheap + idempotent. */
+    fun requestSessionControls(sessionId: String)
     fun pin(sessionId: String, pinned: Boolean)
     fun rename(sessionId: String, name: String)
     fun archive(sessionId: String)

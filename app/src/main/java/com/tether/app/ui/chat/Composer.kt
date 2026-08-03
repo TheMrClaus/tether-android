@@ -57,11 +57,18 @@ import com.composables.icons.lucide.Send
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.X
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.ServerMessage
+import com.tether.app.protocol.SessionCommandOption
+import com.tether.app.protocol.SessionModelOption
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.QueuedMessage
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.reduce.activeModel
+import com.tether.app.protocol.reduce.composerCommandList
+import com.tether.app.protocol.reduce.pickerModels
+import com.tether.app.protocol.reduce.resolveModelArg
 import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
@@ -95,11 +102,15 @@ private data class PickedAttachment(val attachment: Attachment, val sizeBytes: L
 fun Composer(
     session: AgentSession?,
     projection: SessionProjection?,
+    controls: ServerMessage.SessionControls?,
     serverNow: () -> Long,
     onSend: (String, List<Attachment>) -> Boolean,
     onInterrupt: () -> Unit,
     onQueueEdit: (queueId: String, text: String) -> Unit,
     onQueueRemove: (queueId: String) -> Unit,
+    onSetMode: (String) -> Unit,
+    onSetModel: (String) -> Boolean,
+    onRequestControls: () -> Unit,
     modifier: Modifier = Modifier,
     onAttachError: (String) -> Unit = {},
 ) {
@@ -112,9 +123,146 @@ fun Composer(
     val hasApproval = activeTurn?.pendingApprovals?.isNotEmpty() == true
     val hasQuestion = activeTurn?.pendingQuestions?.isNotEmpty() == true
 
+    val claude = session?.provider == "claude"
+    var showModelPicker by remember(session?.id) { mutableStateOf(false) }
+    var menuDismissed by remember(session?.id) { mutableStateOf(false) }
+    var notice by remember(session?.id) { mutableStateOf<String?>(null) }
+    var noticeSeq by remember(session?.id) { mutableStateOf(0) }
+
+    // The web flash(): 6 s auto-dismiss; every flash re-times itself, even an
+    // identical message (the counter makes it a fresh effect key).
+    LaunchedEffect(notice, noticeSeq) {
+        if (notice != null) {
+            delay(6_000)
+            notice = null
+        }
+    }
+    fun flash(message: String) {
+        noticeSeq += 1
+        notice = message
+    }
+
+    val models = controls?.models ?: emptyList()
+    val picker = remember(models, session?.model) { pickerModels(models, session?.model) }
+    val active = remember(models, picker, session?.model) { activeModel(models, picker, session?.model) }
+    val modelLabel = active?.displayName ?: (session?.model ?: "Default")
+    val commands = remember(projection?.cliInventory, controls) {
+        composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList())
+    }
+
+    // The command-name fragment being typed ("/mod" -> "mod"), or null when the
+    // draft isn't a bare slash command — drives whether the menu shows.
+    val slashQuery = if (claude && draft.startsWith("/") && !draft.drop(1).contains(" ")) draft.drop(1) else null
+    val menuMatches = remember(slashQuery, commands) {
+        if (slashQuery == null) {
+            emptyList()
+        } else {
+            val q = slashQuery.lowercase()
+            commands.filter { command ->
+                command.name.lowercase().startsWith(q) ||
+                    command.aliases.orEmpty().any { it.lowercase().startsWith(q) }
+            }
+        }
+    }
+    val menuOpen = slashQuery != null && !menuDismissed && menuMatches.isNotEmpty() && !busy
+
+    fun openModelPicker() {
+        if (!claude) return
+        onRequestControls() // refresh to the live list if the session has since warmed
+        showModelPicker = true
+        menuDismissed = true
+    }
+
+    fun chooseModel(model: SessionModelOption) {
+        if (onSetModel(model.value)) {
+            val isDefaultChoice = model.value.isEmpty() || model.value == "default"
+            flash(if (isDefaultChoice) "Model reset to the CLI default." else "Model set to ${model.displayName}.")
+            showModelPicker = false
+            if (draft.startsWith("/model")) draft = ""
+        }
+    }
+
+    // Native commands (currently /model) run in-app; everything else is flagged
+    // terminal-only rather than sent as prompt text (the /model-as-text bug).
+    fun runSlashCommand(raw: String) {
+        val body = raw.drop(1)
+        val name = body.split(Regex("\\s+")).first()
+        val arg = body.removePrefix(name).trim()
+        val info = commands.find { it.name == name || it.aliases.orEmpty().contains(name) }
+
+        if (name == "model" || info?.name == "model") {
+            if (arg.isEmpty()) {
+                openModelPicker()
+                draft = ""
+                return
+            }
+            val match = resolveModelArg(arg, models)
+            if (match != null) {
+                chooseModel(match)
+                return
+            }
+            flash("No model matches “$arg”. Choose one from the list.")
+            openModelPicker()
+            draft = ""
+            return
+        }
+        if (info != null && !info.supported) {
+            flash("/${info.name} isn’t available in Tether yet — run it from a terminal (claude --resume …).")
+            draft = ""
+            return
+        }
+        flash("Unknown command “/$name”. Type “/” to see what’s available.")
+    }
+
+    fun acceptCommand(command: SessionCommandOption) {
+        menuDismissed = true
+        if (command.name == "model" || command.aliases.orEmpty().contains("model")) {
+            openModelPicker()
+            draft = ""
+            return
+        }
+        if (!command.supported) {
+            flash("/${command.name} isn’t available in Tether yet — run it from a terminal.")
+            draft = ""
+            return
+        }
+        draft = "/${command.name} "
+    }
+
+    /** Slash commands are in-app control requests: never queued, no attachments. */
+    fun trySlashCommand(text: String, hasAttachments: Boolean): Boolean {
+        if (!claude || !text.startsWith("/") || hasAttachments) return false
+        runSlashCommand(text)
+        return true
+    }
+
+    fun submit() {
+        val text = draft.trim()
+        val hasAttachments = picked.isNotEmpty()
+        if (text.isEmpty() && !hasAttachments) return
+        if (trySlashCommand(text, hasAttachments)) return
+        if (busy && hasAttachments) {
+            // Attachments only ride an idle send — ask the operator to wait
+            // rather than silently dropping the files (web submit()).
+            flash("Wait for the current turn to finish before sending attachments.")
+            return
+        }
+        if (busy) {
+            // Queue path is text-only; attachments are only attachable while
+            // idle, so none are pending here.
+            if (text.isNotEmpty() && onSend(text, emptyList())) draft = ""
+        } else {
+            // Refused sends (§5.6 rollback) keep draft + chips.
+            if (onSend(text, picked.map { it.attachment })) {
+                draft = ""
+                picked = emptyList()
+            }
+        }
+    }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
             val (loaded, failures) = withContext(Dispatchers.IO) {
@@ -170,6 +318,27 @@ fun Composer(
             TurnActivity(projection = projection, session = session, serverNow = serverNow)
         }
 
+        if (claude) {
+            ChatModeRow(
+                permissionMode = session.permissionMode,
+                modelLabel = modelLabel,
+                onSetMode = onSetMode,
+                onModelClick = { openModelPicker() },
+            )
+        }
+        notice?.let { ComposerNotice(it) }
+        if (menuOpen) {
+            SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
+        }
+        if (showModelPicker) {
+            ModelPickerPanel(
+                pickerModels = picker,
+                sessionModel = session?.model,
+                onChoose = { chooseModel(it) },
+                onClose = { showModelPicker = false },
+            )
+        }
+
         projection?.queuedMessages?.forEach { queued ->
             QueuedRow(
                 queued = queued,
@@ -197,7 +366,7 @@ fun Composer(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TetherKey(
-                onClick = { picker.launch(arrayOf("*/*")) },
+                onClick = { attachmentPicker.launch(arrayOf("*/*")) },
                 variant = KeyVariant.Secondary,
                 icon = Lucide.Paperclip,
                 iconSize = 18.dp,
@@ -206,7 +375,12 @@ fun Composer(
             )
             com.tether.app.ui.components.TetherInputWell(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = {
+                    draft = it
+                    // Re-arm the slash menu after an Escape/dismiss once the
+                    // operator keeps editing a slash (web onDraftChange).
+                    if (menuDismissed) menuDismissed = false
+                },
                 modifier = Modifier.weight(1f),
                 placeholder = if (busy) {
                     "The agent is working — your message will be queued and sent after this turn…"
@@ -217,13 +391,7 @@ fun Composer(
             )
             if (busy) {
                 TetherKey(
-                    onClick = {
-                        if (draft.isNotBlank()) {
-                            // Queue path is text-only; attachments are only
-                            // attachable while idle, so none are pending here.
-                            if (onSend(draft.trim(), emptyList())) draft = ""
-                        }
-                    },
+                    onClick = { submit() },
                     variant = KeyVariant.Primary,
                     label = "Queue",
                     icon = Lucide.Send,
@@ -242,15 +410,7 @@ fun Composer(
                 )
             } else {
                 TetherKey(
-                    onClick = {
-                        if (draft.isNotBlank() || picked.isNotEmpty()) {
-                            // Refused sends (§5.6 rollback) keep draft + chips.
-                            if (onSend(draft.trim(), picked.map { it.attachment })) {
-                                draft = ""
-                                picked = emptyList()
-                            }
-                        }
-                    },
+                    onClick = { submit() },
                     variant = KeyVariant.Primary,
                     icon = Lucide.Send,
                     iconSize = 18.dp,

@@ -81,8 +81,8 @@ internal fun toolInputSummary(name: String?, input: JsonElement?): String? {
     return compact.take(200).ifBlank { null }
 }
 
-/** Best-effort text extraction from a tool output payload; truncated ~600 chars. */
-internal fun toolOutputText(output: JsonElement?): String? {
+/** Best-effort text extraction from a tool output payload; truncated to [maxChars]. */
+internal fun toolOutputText(output: JsonElement?, maxChars: Int = 600): String? {
     val text = when (output) {
         null -> return null
         is JsonPrimitive -> output.content
@@ -100,7 +100,7 @@ internal fun toolOutputText(output: JsonElement?): String? {
     }
     val trimmed = text.trim()
     if (trimmed.isEmpty()) return null
-    return if (trimmed.length > 600) trimmed.take(600) + "…" else trimmed
+    return if (trimmed.length > maxChars) trimmed.take(maxChars) + "…" else trimmed
 }
 
 internal data class DiffModel(val filePath: String, val tag: String, val deleted: List<String>, val added: List<String>)
