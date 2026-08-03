@@ -115,11 +115,24 @@ fun ConversationTimeline(
 
     fun fireHaptic() {
         val v = vibrator ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+        if (!v.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // PRIMITIVE_THUD is the heaviest primitive (deep impact); scale 1.0 = max.
+            if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_THUD)) {
+                v.vibrate(
+                    VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1.0f)
+                        .compose()
+                )
+            } else {
+                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 45, 25, 45), -1))
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // No composition API on Q; use the strongest predefined effect.
+            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
         } else {
             @Suppress("DEPRECATION")
-            v.vibrate(20L)
+            v.vibrate(longArrayOf(0, 45, 25, 45), -1)
         }
     }
 
@@ -139,6 +152,7 @@ fun ConversationTimeline(
     var scrubIndex by remember { mutableIntStateOf(-1) }
     var scrubSlot by remember { mutableIntStateOf(DEFAULT_ANCHOR_SLOT) }
     var scrubbing by remember { mutableStateOf(false) }
+    var pointerY by remember { mutableStateOf(0f) }
 
     fun updateScrubIndex(index: Int) {
         if (index < 0 || index >= storyPoints.size) return
@@ -156,6 +170,7 @@ fun ConversationTimeline(
         scrubIndex = -1
         scrubSlot = DEFAULT_ANCHOR_SLOT
         lastHapticIndex.value = -1
+        pointerY = 0f
         if (jump && idx >= 0) scrollToStoryPoint(idx)
     }
 
@@ -240,6 +255,7 @@ fun ConversationTimeline(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         down.consume()
                         val downY = down.position.y
+                        pointerY = downY
                         val slot = slotFromY(downY)
                         if (slot < 0) return@awaitEachGesture
                         val startIndex = visibleIndices.getOrNull(slot) ?: return@awaitEachGesture
@@ -255,6 +271,7 @@ fun ConversationTimeline(
                                 else if (lastSeenIndex in 0 until storyPoints.size) scrollToStoryPoint(lastSeenIndex)
                                 break
                             }
+                            pointerY = change.position.y
                             val dy = downY - change.position.y
                             if (!isDragging && abs(dy) > touchSlop) {
                                 isDragging = true
@@ -263,7 +280,11 @@ fun ConversationTimeline(
                                 change.consume()
                                 scrubbing = true
                                 scrubSlot = slot
-                                val span = max(140f, railHeightPx * 0.72f)
+                                // Compact span: a short thumb sweep covers the whole
+                                // history. 200px ≈ a comfortable arc; scaled up only
+                                // when there are very few points so each step stays
+                                // reachable.
+                                val span = max(200f, railHeightPx * 0.45f)
                                 // Right-edge rail: drag up browses older prompts.
                                 val sign = -1f
                                 val delta = sign * dy
@@ -325,7 +346,7 @@ fun ConversationTimeline(
                 }
             }
 
-            // Snippet bubble (during scrub only)
+            // Snippet bubble (during scrub only) — follows the thumb, not the slot.
             if (inspecting && focusIndex >= 0) {
                 val point = storyPoints[focusIndex]
                 var bubbleHeight by remember { mutableStateOf(0) }
@@ -334,6 +355,14 @@ fun ConversationTimeline(
                     targetValue = 1f,
                     animationSpec = if (reducedMotion) snap() else tween(130),
                     label = "bubble-in",
+                )
+
+                // Smooth the bubble Y so it glides with the thumb instead of snapping.
+                val bubbleTargetY = if (scrubbing) pointerY else focusedY
+                val animatedBubbleY by animateFloatAsState(
+                    targetValue = bubbleTargetY,
+                    animationSpec = if (reducedMotion) snap() else tween(80),
+                    label = "bubble-y",
                 )
 
                 Column(
@@ -345,7 +374,7 @@ fun ConversationTimeline(
                             val w = with(density) { 240.dp.toPx() }
                             val gap = with(density) { 4.dp.toPx() }
                             val x = -(w + gap).roundToInt()
-                            val yRaw = (focusedY - bubbleHeight / 2f)
+                            val yRaw = (animatedBubbleY - bubbleHeight / 2f)
                             val maxY = (railHeightPx - bubbleHeight).roundToInt()
                             val y = yRaw.roundToInt().coerceIn(0, if (maxY > 0) maxY else 0)
                             IntOffset(x, y)
