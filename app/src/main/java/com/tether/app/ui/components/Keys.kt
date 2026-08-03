@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -51,6 +52,9 @@ import com.tether.app.ui.theme.TetherWeights
  * [pressShade], and shrinks the contact shadow. Hover deepens the fill only.
  * Disabled keys lose elevation and contrast. The most-used keys (primary
  * CTAs and the sidebar's New session) carry a subtle radial wear polish.
+ *
+ * A strong mechanical haptic (THUD on press, QUICK_FALL on release) fires on
+ * every enabled click, so the key feels like a physical button.
  */
 
 enum class KeyVariant { Primary, Secondary, Brick, Utility }
@@ -74,9 +78,16 @@ fun TetherKey(
     contentDescription: String? = null,
 ) {
     val t = LocalTetherTokens.current
+    val haptics = rememberKeyHaptics()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val hovered by interaction.collectIsHoveredAsState()
+
+    // Fire a sharp mechanical haptic on press-down (not on release — the
+    // travel animation + THUD together sell the physical-button feel).
+    LaunchedEffect(pressed) {
+        if (pressed && enabled) haptics.press()
+    }
 
     val face: Color
     val faceHover: Color
