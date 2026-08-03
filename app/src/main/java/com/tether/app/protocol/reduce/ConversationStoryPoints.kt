@@ -31,8 +31,8 @@ data class StoryPoint(
     val ts: Long?,
 )
 
-private const val PROMPT_MAX = 220
-private const val REPLY_MAX = 260
+private const val PROMPT_MAX = 270
+private const val REPLY_MAX = 320
 
 private fun truncate(text: String, max: Int): String {
     val clean = text.trim().replace(Regex("\\s+"), " ")
