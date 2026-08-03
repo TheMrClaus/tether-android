@@ -199,6 +199,28 @@ sealed interface ClientMessage {
         }
     }
 
+    /**
+     * Claude only: switch the session's model ("" or "default" clears to the
+     * CLI default). No direct reply: the ack is the `session` broadcast
+     * carrying session.model, and the frame is silently dropped for
+     * non-claude sessions — never wait on feedback for them.
+     */
+    data class SetModel(val sessionId: String, val model: String) : ClientMessage {
+        override fun toJsonObject() = buildJsonObject {
+            put("type", "set-model")
+            put("sessionId", sessionId)
+            put("model", model)
+        }
+    }
+
+    /** Ask for the session's available models + slash-command list (reply: session-controls). */
+    data class SessionControlsRequest(val sessionId: String) : ClientMessage {
+        override fun toJsonObject() = buildJsonObject {
+            put("type", "session-controls")
+            put("sessionId", sessionId)
+        }
+    }
+
     data class Pin(val sessionId: String, val pinned: Boolean) : ClientMessage {
         override fun toJsonObject() = buildJsonObject {
             put("type", "pin")

@@ -274,6 +274,27 @@ class WireTest {
         assertEquals(setOf("type", "sessionId", "name"), ClientMessage.Rename("s1", "New").toJsonObject().keys)
         assertEquals(setOf("type", "sessionId"), ClientMessage.Archive("s1").toJsonObject().keys)
         assertEquals(setOf("type", "sessionId"), ClientMessage.Kill("s1").toJsonObject().keys)
+
+        assertEquals(
+            setOf("type", "sessionId", "model"),
+            ClientMessage.SetModel("s1", "claude-opus-4-8").toJsonObject().keys,
+        )
+        assertEquals(
+            "set-model",
+            ClientMessage.SetModel("s1", "claude-opus-4-8").toJsonObject()["type"]!!.jsonPrimitive.content,
+        )
+        // The clear-to-default path is load-bearing: `model` must be present
+        // even when empty (omitting it would silently keep the current model).
+        val cleared = ClientMessage.SetModel("s1", "").toJsonObject()
+        assertEquals("", cleared["model"]!!.jsonPrimitive.content)
+        assertEquals(
+            setOf("type", "sessionId"),
+            ClientMessage.SessionControlsRequest("s1").toJsonObject().keys,
+        )
+        assertEquals(
+            "session-controls",
+            ClientMessage.SessionControlsRequest("s1").toJsonObject()["type"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test

@@ -52,6 +52,9 @@ import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.reduce.RUN_RUNNING
+import com.tether.app.protocol.reduce.collectSubagentRuns
+import com.tether.app.protocol.reduce.subagentRosterSummary
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.SpinnerRing
@@ -148,10 +151,31 @@ fun ChatScreen(
 ) {
     val t = LocalTetherTokens.current
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
+    val controlsMap by vm.client.sessionControls.collectAsStateWithLifecycle()
+
+    val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
+    val runs = remember(projection) { collectSubagentRuns(projection) }
+    // Resolve by lookup, never by trusting the stored id: a run that vanished
+    // from a re-snapshot degrades to the Session tab on its own.
+    val activeRun = session?.let { selectedRunIds[it.id] }?.let { id -> runs.firstOrNull { it.runId == id } }
+
+    LaunchedEffect(session?.id, session?.provider) {
+        val s = session
+        if (s != null && s.provider == "claude") vm.client.requestSessionControls(s.id)
+    }
 
     Column(modifier.background(t.mineralDeep)) {
         if (session != null) {
             WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot)
+        }
+
+        if (session != null && runs.isNotEmpty()) {
+            SubagentTabs(
+                runs = runs,
+                activeRunId = activeRun?.runId,
+                onSelect = { runId -> vm.selectRun(session.id, runId) },
+            )
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -185,11 +209,31 @@ fun ChatScreen(
                     hint = "The agent runs on your server and streams every step back here.",
                 )
 
+                activeRun != null -> RunTab(
+                    vm = vm,
+                    sessionId = session.id,
+                    projection = projection,
+                    run = activeRun,
+                    showThinking = showThinking,
+                )
+
                 else -> Transcript(
                     vm = vm,
                     sessionId = session.id,
                     projection = projection,
                     showThinking = showThinking,
+                    roster = if (runs.isNotEmpty()) {
+                        {
+                            SubagentRoster(
+                                runs = runs,
+                                summary = subagentRosterSummary(runs),
+                                activeRunId = null,
+                                onSelect = { runId -> vm.selectRun(session.id, runId) },
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -198,11 +242,15 @@ fun ChatScreen(
         Composer(
             session = session,
             projection = projection,
+            controls = session?.let { controlsMap[it.id] },
             serverNow = { vm.serverNow(session?.id) },
             onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
             onInterrupt = { session?.let { vm.client.interrupt(it.id) } },
             onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
             onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
+            onSetMode = { mode -> session?.let { vm.client.setMode(it.id, mode) } },
+            onSetModel = { model -> session?.let { vm.client.setModel(it.id, model) } ?: false },
+            onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
             onAttachError = { message -> vm.reportLocalError(message) },
         )
     }
@@ -214,6 +262,7 @@ private fun Transcript(
     sessionId: String,
     projection: SessionProjection,
     showThinking: Boolean,
+    roster: (@Composable () -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
     val items = remember(projection, showThinking) { buildChatItems(projection, showThinking) }
@@ -249,6 +298,9 @@ private fun Transcript(
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (roster != null) {
+                item(key = "subagent-roster") { roster() }
+            }
             items.forEach { item ->
                 item(key = item.key) {
                     when (item) {
@@ -308,6 +360,71 @@ private fun Transcript(
                     fontFamily = Manrope,
                     fontWeight = TetherWeights.label,
                     fontSize = 12.5.sp,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A sub-agent run tab: the run panel replaces the transcript, but the active
+ * turn's pending approval/question cards render below it on every tab — a
+ * card the turn is stalled on must never be hidden behind a tab.
+ */
+@Composable
+private fun RunTab(
+    vm: TetherViewModel,
+    sessionId: String,
+    projection: SessionProjection,
+    run: com.tether.app.protocol.reduce.SubagentRun,
+    showThinking: Boolean,
+) {
+    val listState = rememberLazyListState()
+    val activeTurn = projection.activeTurnId?.let { projection.turnsById[it] }
+    val pending = activeTurn?.pendingApprovals?.values?.toList().orEmpty()
+    val pendingQ = activeTurn?.pendingQuestions?.values?.toList().orEmpty()
+
+    // Web parity: a running run follows the newest activity as its thread
+    // grows (steps stream in, pending cards arrive); a finished run parks at
+    // the top. Re-key on the growing content so the effect re-fires, and read
+    // the current last index inside the effect so it tracks new items.
+    LaunchedEffect(run.runId, run.steps, pending.size, pendingQ.size, run.status) {
+        val lastIndex = pending.size + pendingQ.size // panel is item 0; cards follow
+        if (run.status == RUN_RUNNING) {
+            listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
+        } else {
+            listState.scrollToItem(0)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = 12.dp, end = 12.dp, top = 12.dp, bottom = 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "run-panel") {
+            SubagentRunPanel(run = run, showThinking = showThinking)
+        }
+        pending.forEach { approval ->
+            item(key = "approval/${approval.requestId}") {
+                ApprovalCard(
+                    approval = approval,
+                    onChoice = { choiceId, decision ->
+                        vm.client.approval(sessionId, approval.requestId, choiceId, decision)
+                    },
+                )
+            }
+        }
+        pendingQ.forEach { question ->
+            item(key = "question/${question.requestId}") {
+                QuestionCard(
+                    question = question,
+                    onSubmit = { answers, response ->
+                        vm.client.answerQuestion(sessionId, question.requestId, answers, response)
+                    },
                 )
             }
         }

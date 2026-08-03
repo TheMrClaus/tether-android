@@ -106,6 +106,7 @@ class RealTetherClient(
     private val projectionsState = MutableStateFlow<Map<String, SessionProjection>>(emptyMap())
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
+    private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
     private val errorsFlow = MutableSharedFlow<String>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -119,6 +120,7 @@ class RealTetherClient(
     override val projections: StateFlow<Map<String, SessionProjection>> = projectionsState
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
+    override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
     override val errors: SharedFlow<String> = errorsFlow
     override val configured: StateFlow<Boolean> = configuredState
 
@@ -522,8 +524,9 @@ class RealTetherClient(
                     emitError(message.error ?: "The interrupt request could not be delivered.")
                 }
             is ServerMessage.ErrorFrame -> emitError(message.message)
-            is ServerMessage.SearchResults, is ServerMessage.SessionControls,
-            is ServerMessage.Log, is ServerMessage.Unknown,
+            is ServerMessage.SessionControls ->
+                sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
+            is ServerMessage.SearchResults, is ServerMessage.Log, is ServerMessage.Unknown,
             -> Unit
         }
     }
@@ -776,6 +779,13 @@ class RealTetherClient(
 
     override fun setMode(sessionId: String, permissionMode: String) {
         sendFrame(ClientMessage.SetMode(sessionId, permissionMode))
+    }
+
+    override fun setModel(sessionId: String, model: String): Boolean =
+        sendFrame(ClientMessage.SetModel(sessionId, model))
+
+    override fun requestSessionControls(sessionId: String) {
+        sendFrame(ClientMessage.SessionControlsRequest(sessionId))
     }
 
     override fun pin(sessionId: String, pinned: Boolean) {

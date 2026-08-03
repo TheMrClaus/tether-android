@@ -5,6 +5,9 @@ import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.ServerMessage
+import com.tether.app.protocol.SessionCommandOption
+import com.tether.app.protocol.SessionModelOption
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ApprovalChoice
 import com.tether.app.protocol.model.ApprovalRequestMetadata
@@ -74,6 +77,25 @@ class FakeTetherClient : TetherClient {
     override val histories: StateFlow<List<HistorySession>> = MutableStateFlow(emptyList())
     private val _directories = MutableStateFlow<DirectoryListing?>(null)
     override val directories: StateFlow<DirectoryListing?> = _directories.asStateFlow()
+
+    // The seed lets previews show a working picker for `s-active`.
+    override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = MutableStateFlow(
+        mapOf(
+            "s-active" to ServerMessage.SessionControls(
+                sessionId = "s-active",
+                models = listOf(
+                    SessionModelOption(value = "default", displayName = "Default", current = true, resolvedModel = "claude-opus"),
+                    SessionModelOption(value = "claude-opus", displayName = "Opus", description = "Most capable"),
+                    SessionModelOption(value = "claude-sonnet", displayName = "Sonnet", description = "Balanced"),
+                ),
+                commands = listOf(
+                    SessionCommandOption(name = "model", description = "Switch the model for this session", argumentHint = "[model]", supported = true),
+                    SessionCommandOption(name = "compact", description = "Compact the conversation", supported = false),
+                ),
+                model = "claude-opus",
+            ),
+        ),
+    )
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 8)
     override val errors: SharedFlow<String> = _errors.asSharedFlow()
@@ -510,6 +532,9 @@ class FakeTetherClient : TetherClient {
         )
     }
     override fun setMode(sessionId: String, permissionMode: String) {}
+
+    override fun setModel(sessionId: String, model: String): Boolean = true
+    override fun requestSessionControls(sessionId: String) {}
 
     override fun pin(sessionId: String, pinned: Boolean) {
         _sessions.update { list -> list.map { if (it.id == sessionId) it.copy(pinned = pinned) else it } }

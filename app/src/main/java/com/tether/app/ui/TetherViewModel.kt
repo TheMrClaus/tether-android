@@ -31,6 +31,20 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
     private val _currentWorkspace = MutableStateFlow<String?>(null)
     val currentWorkspace: StateFlow<String?> = _currentWorkspace.asStateFlow()
 
+    /**
+     * The selected sub-agent run tab per session (null/absent = the whole
+     * session transcript). Owned here — like the web's dashboard — NOT in the
+     * composable, so it survives recomposition; consumers resolve the id by
+     * lookup against the current runs list, so a vanished run degrades to the
+     * Session tab by itself (no reset effect).
+     */
+    private val _selectedRunIdBySession = MutableStateFlow<Map<String, String?>>(emptyMap())
+    val selectedRunIdBySession: StateFlow<Map<String, String?>> = _selectedRunIdBySession.asStateFlow()
+
+    fun selectRun(sessionId: String, runId: String?) {
+        _selectedRunIdBySession.value = _selectedRunIdBySession.value + (sessionId to runId)
+    }
+
     /** Errors seen this connection, newest last (topbar badge + log dialog). */
     val errorLog = mutableStateListOf<String>()
 
@@ -90,6 +104,15 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
         val selected = _selectedSessionId.value
         if (selected != null && list.none { it.id == selected }) {
             _selectedSessionId.value = null
+        }
+
+        // Drop run-tab selections for sessions that no longer exist (archive /
+        // workspace switch) — stale entries are inert (consumers resolve by
+        // lookup) but this keeps the map from growing unbounded over time.
+        val liveIds = list.mapTo(HashSet()) { it.id }
+        val runSelections = _selectedRunIdBySession.value
+        if (runSelections.isNotEmpty() && runSelections.any { it.key !in liveIds }) {
+            _selectedRunIdBySession.value = runSelections.filterKeys { it in liveIds }
         }
     }
 
