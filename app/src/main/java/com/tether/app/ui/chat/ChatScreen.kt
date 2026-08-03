@@ -534,9 +534,14 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 )
             }
             if (session.status != "exited") {
-                IconButton(onClick = { confirmEnd = true }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                    Icon(Lucide.CircleStop, contentDescription = "End session", tint = t.brick, modifier = Modifier.size(16.dp))
-                }
+                TetherKey(
+                    onClick = { confirmEnd = true },
+                    variant = KeyVariant.Brick,
+                    icon = Lucide.CircleStop,
+                    iconSize = 16.dp,
+                    contentDescription = "End session",
+                    wear = false,
+                )
             }
         }
         Row(
