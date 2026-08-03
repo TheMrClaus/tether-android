@@ -578,8 +578,11 @@ private fun WorkspaceSwitcher(
 
 /** Pin-project star key (.pin-project): 44dp square raised key cap — keyFace
  *  bg + keySide border + lit top bevel + contact shadow (the full
- *  --shadow-key treatment, same vocabulary as .button-secondary). Pinned →
- *  violet-wash bg + violet star fill (.pin-project.is-pinned). */
+ *  --shadow-key treatment, same vocabulary as .button-secondary). The pinned
+ *  state is carried by a small indicator dash BELOW the star (grey when
+ *  unpinned, violet when pinned) — an on/off light, not a recoloured cap. The
+ *  cap itself stays neutral in both states, matching the web's
+ *  `.pin-project` resting face. */
 @Composable
 private fun PinProjectKey(
     pinned: Boolean,
@@ -597,13 +600,14 @@ private fun PinProjectKey(
     val radiusPx = with(density) { TetherDimens.radiusSm.toPx() }
     val travelPx = with(density) { t.pressTravel.toPx() }
 
+    // The cap is always neutral — pinned state no longer recolours it.
     val face = when {
-        !enabled -> if (pinned) t.violetWash else t.keyFace
-        down -> if (pinned) t.violetWash else t.keyFaceDeep
-        hovered && !pinned -> t.keyFaceHover
-        else -> if (pinned) t.violetWash else t.keyFace
+        !enabled -> t.keyFace
+        down -> t.keyFaceDeep
+        hovered -> t.keyFaceHover
+        else -> t.keyFace
     }
-    val side = if (pinned) t.violetStrong else t.keySide
+    val side = t.keySide
 
     Box(
         modifier = modifier
@@ -637,13 +641,8 @@ private fun PinProjectKey(
             .offset(y = if (down) t.pressTravel else 0.dp)
             .background(face, shape)
             .drawBehind {
-                // Lit top bevel on a resting UNPINNED key (--edge-highlight).
-                // The web's .pin-project.is-pinned keeps the bevel in CSS, but
-                // the violet-wash bg absorbs it (white-at-9% is invisible on a
-                // violet wash), so effectively it's gone — skip it when pinned
-                // to match the web's effective look. Feathered as a 2dp
-                // gradient so it reads as a soft inset, not a crisp line.
-                if (enabled && !down && !pinned) {
+                // Lit top bevel, feathered (web --edge-highlight inset shadow).
+                if (enabled && !down) {
                     drawRoundRect(
                         brush = Brush.verticalGradient(
                             colors = listOf(t.litStrong, Color.Transparent),
@@ -658,12 +657,26 @@ private fun PinProjectKey(
             .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            Lucide.Star,
-            contentDescription = if (pinned) "Unpin this project" else "Pin this project to the drawer",
-            tint = if (pinned) t.violet else t.faint,
-            modifier = Modifier.size(16.dp),
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Lucide.Star,
+                contentDescription = if (pinned) "Unpin this project" else "Pin this project to the drawer",
+                tint = t.faint,
+                modifier = Modifier.size(16.dp),
+            )
+            // On/off indicator dash: grey when unpinned, violet when pinned.
+            // A 12dp × 2dp bar sitting just below the star — reads as a small
+            // status light, not a recoloured key face.
+            Box(
+                Modifier
+                    .padding(top = 2.dp)
+                    .size(width = 12.dp, height = 2.dp)
+                    .background(if (pinned) t.violet else t.line, RoundedCornerShape(1.dp)),
+            )
+        }
     }
 }
 
