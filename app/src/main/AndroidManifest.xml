@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- API 33+: runtime permission for posting notifications. Requested from
+         the settings sheet the first time the user enables notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".TetherApp"
@@ -21,6 +24,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- FCM message receiver. exported=false: only the FCM system service
+             (same APK signature) may start it. The service posts the shared
+             push payload (approval / question / turn_end) as a system
+             notification on the channel selected by data.kind. -->
+        <service
+            android:name=".push.TetherFcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
