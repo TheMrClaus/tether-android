@@ -1,5 +1,7 @@
 package com.tether.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +48,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,6 +66,8 @@ import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Star
 import com.composables.icons.lucide.X
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.push.PushScope
+import com.tether.app.push.TetherFcmService
 import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.StatusDot
@@ -437,6 +442,18 @@ fun SessionDrawer(
     }
 
     if (settingsOpen) {
+        val pushEnabled by prefs.pushEnabled.collectAsStateWithLifecycle(initialValue = true)
+        val pushScope by prefs.pushScope.collectAsStateWithLifecycle(initialValue = PushScope.All)
+        val pushPermissionAsked by prefs.pushPermissionAsked.collectAsStateWithLifecycle(initialValue = false)
+        val context = LocalContext.current
+        val permissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            scope.launch {
+                if (!granted) prefs.setPushEnabled(false)
+                prefs.setPushPermissionAsked(true)
+            }
+        }
         TetherDialog(onDismiss = { settingsOpen = false }, title = "Settings") {
             Text(
                 "THEME",
@@ -528,6 +545,118 @@ fun SessionDrawer(
                     letterSpacing = 0.06.em,
                 )
             }
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "NOTIFICATIONS",
+                color = t.faint,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.strong,
+                fontSize = 10.7.sp,
+                letterSpacing = 0.08.em,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+            // Master toggle. On first enable, request POST_NOTIFICATIONS; if
+            // denied the toggle reverts and the status line explains why.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (!pushEnabled) {
+                            val sdk = android.os.Build.VERSION.SDK_INT
+                            if (sdk >= 33 && !pushPermissionAsked) {
+                                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                scope.launch { prefs.setPushEnabled(true) }
+                            }
+                        } else {
+                            scope.launch { prefs.setPushEnabled(false) }
+                        }
+                    }
+                    .heightIn(min = TetherDimens.touchTargetDp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Notifications",
+                    color = t.ink,
+                    fontFamily = Manrope,
+                    fontWeight = TetherWeights.name,
+                    fontSize = 13.1.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (pushEnabled) "ON" else "OFF",
+                    color = if (pushEnabled) t.violet else t.faint,
+                    fontFamily = Manrope,
+                    fontWeight = TetherWeights.strong,
+                    fontSize = 10.7.sp,
+                    letterSpacing = 0.06.em,
+                )
+            }
+            // Scope selector — disabled while the master toggle is off.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                PushScope.entries.forEach { choice ->
+                    val chosen = choice == pushScope
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (chosen) t.violetWash else t.keyFace,
+                                RoundedCornerShape(TetherDimens.radiusSm),
+                            )
+                            .border(
+                                1.dp,
+                                if (chosen) t.violetStrong else t.keySide,
+                                RoundedCornerShape(TetherDimens.radiusSm),
+                            )
+                            .clickable(enabled = pushEnabled) {
+                                scope.launch { prefs.setPushScope(choice) }
+                            }
+                            .heightIn(min = TetherDimens.touchTargetDp)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            when (choice) {
+                                PushScope.All -> "All sessions"
+                                PushScope.Attached -> "Sessions opened on this phone"
+                                PushScope.Pinned -> "Pinned sessions"
+                            },
+                            color = if (chosen) t.white else t.ink,
+                            fontFamily = Manrope,
+                            fontWeight = TetherWeights.name,
+                            fontSize = 13.1.sp,
+                            modifier = Modifier.weight(1f).graphicsLayer { alpha = if (pushEnabled) 1f else 0.5f },
+                        )
+                        if (chosen) StatusDot(t.violet, size = 6.4.dp)
+                    }
+                }
+            }
+            // Status line. The runtime permission state is read here so the
+            // line tracks a denial even after the sheet is reopened.
+            val notificationManager = remember(context) {
+                context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            }
+            val permissionGranted = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else true
+            val statusLine = when {
+                !pushEnabled -> "Off"
+                !permissionGranted && android.os.Build.VERSION.SDK_INT >= 33 -> "Permission required."
+                !notificationManager.areNotificationsEnabled() -> "Notifications disabled in system settings."
+                else -> "Notifications on"
+            }
+            Text(
+                statusLine,
+                color = t.faint,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.body,
+                fontSize = 11.2.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }

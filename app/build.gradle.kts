@@ -21,8 +21,8 @@ android {
         applicationId = "com.tether.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.5.0.1"
+        versionCode = 15
+        versionName = "0.5.1"
     }
 
     signingConfigs {
@@ -59,6 +59,14 @@ android {
             jvmTarget.set(JvmTarget.JVM_17)
         }
     }
+
+    testOptions {
+        // Robolectric needs the merged manifest/resources/assets on the
+        // classpath for the test variant.
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -74,6 +82,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
 
@@ -83,7 +92,18 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
 
+    // Firebase Cloud Messaging. The BOM aligns versions; only the messaging
+    // artifact is used. No google-services Gradle plugin is applied — Firebase
+    // is initialised programmatically in TetherApp.onCreate from env-supplied
+    // FirebaseOptions (see PushController), so no google-services.json is ever
+    // checked in. When the env vars are absent, Firebase stays uninitialised
+    // and the push subsystem reports "not configured" at runtime.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
