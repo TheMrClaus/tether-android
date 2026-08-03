@@ -53,8 +53,9 @@ import com.tether.app.ui.theme.TetherWeights
  * Disabled keys lose elevation and contrast. The most-used keys (primary
  * CTAs and the sidebar's New session) carry a subtle radial wear polish.
  *
- * A strong mechanical haptic (THUD on press, QUICK_FALL on release) fires on
- * every enabled click, so the key feels like a physical button.
+ * A strong mechanical haptic (QUICK_RISE on press, THUD on release, both at
+ * maximum scale) fires on every enabled click, so the key feels like a
+ * physical button.
  */
 
 enum class KeyVariant { Primary, Secondary, Brick, Utility }
@@ -83,10 +84,11 @@ fun TetherKey(
     val pressed by interaction.collectIsPressedAsState()
     val hovered by interaction.collectIsHoveredAsState()
 
-    // Fire a sharp mechanical haptic on press-down (not on release — the
-    // travel animation + THUD together sell the physical-button feel).
+    // QUICK_RISE on press-down sells the button biting back; the THUD on
+    // release completes the mechanical feel — both at maximum scale.
     LaunchedEffect(pressed) {
         if (pressed && enabled) haptics.press()
+        else if (!pressed && enabled) haptics.release()
     }
 
     val face: Color

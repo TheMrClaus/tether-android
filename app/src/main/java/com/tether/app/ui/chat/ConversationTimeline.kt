@@ -118,22 +118,22 @@ fun ConversationTimeline(
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // PRIMITIVE_THUD is the heaviest primitive (deep impact); scale 1.0 = max.
-            if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_THUD)) {
+            // PRIMITIVE_TICK is the light, crisp step primitive — the right
+            // feel for crossing into each dot while scrubbing.
+            if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
                 v.vibrate(
                     VibrationEffect.startComposition()
-                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1.0f)
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f)
                         .compose()
                 )
             } else {
-                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 45, 25, 45), -1))
+                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 15, 20), -1))
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // No composition API on Q; use the strongest predefined effect.
-            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
         } else {
             @Suppress("DEPRECATION")
-            v.vibrate(longArrayOf(0, 45, 25, 45), -1)
+            v.vibrate(longArrayOf(0, 20, 15, 20), -1)
         }
     }
 
@@ -370,8 +370,8 @@ fun ConversationTimeline(
 
                 Column(
                     Modifier
-                        .align(Alignment.CenterEnd)
-                        .widthIn(min = 200.dp, max = 320.dp)
+                        .align(Alignment.TopEnd)
+                        .widthIn(min = 200.dp, max = 360.dp)
                         .alpha(bubbleAlpha)
                         .onSizeChanged {
                             bubbleHeight = it.height
@@ -380,6 +380,11 @@ fun ConversationTimeline(
                         .offset {
                             val gapPx = with(density) { 4.dp.toPx() }
                             val x = (-(bubbleWidthPx + gapPx)).roundToInt()
+                            // Align the bubble's vertical center to the thumb
+                            // (or the focused dot when not scrubbing). TopEnd
+                            // alignment means this y is measured from the top
+                            // of the rail, so the clamp keeps the bubble fully
+                            // on-screen even when the thumb is near the bottom.
                             val yRaw = (animatedBubbleY - bubbleHeight / 2f)
                             val maxY = (railHeightPx - bubbleHeight).roundToInt()
                             val y = yRaw.roundToInt().coerceIn(0, if (maxY > 0) maxY else 0)
