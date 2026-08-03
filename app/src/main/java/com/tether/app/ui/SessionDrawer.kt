@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -636,12 +637,19 @@ private fun PinProjectKey(
             .offset(y = if (down) t.pressTravel else 0.dp)
             .background(face, shape)
             .drawBehind {
-                // Lit top bevel on a resting key (--edge-highlight).
-                if (enabled && !down) {
+                // Lit top bevel on a resting UNPINNED key (--edge-highlight).
+                // The web's .pin-project.is-pinned keeps the bevel in CSS, but
+                // the violet-wash bg absorbs it (white-at-9% is invisible on a
+                // violet wash), so effectively it's gone — skip it when pinned
+                // to match the web's effective look. Feathered as a 2dp
+                // gradient so it reads as a soft inset, not a crisp line.
+                if (enabled && !down && !pinned) {
                     drawRoundRect(
-                        color = t.litStrong,
-                        topLeft = Offset(0f, 0f),
-                        size = Size(size.width, 1.dp.toPx()),
+                        brush = Brush.verticalGradient(
+                            colors = listOf(t.litStrong, Color.Transparent),
+                            startY = 0f,
+                            endY = 2.dp.toPx(),
+                        ),
                         cornerRadius = CornerRadius(radiusPx, radiusPx),
                     )
                 }
