@@ -54,6 +54,7 @@ import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
 import com.tether.app.protocol.reduce.RUN_RUNNING
 import com.tether.app.protocol.reduce.collectSubagentRuns
+import com.tether.app.protocol.reduce.storyPointsFromSession
 import com.tether.app.protocol.reduce.subagentRosterSummary
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.components.KeyVariant
@@ -270,6 +271,33 @@ private fun Transcript(
     val density = LocalDensity.current
     val stickPx = with(density) { 80.dp.toPx() }
 
+    // Story points: the conversation timeline rail indexes operator prompts.
+    val storyPoints = remember(projection) { storyPointsFromSession(projection) }
+    val storyPointIndex = remember(storyPoints) {
+        storyPoints.withIndex().associate { (i, sp) -> "${sp.turnId}:${sp.blockId}" to i }
+    }
+    // Map story-point index → LazyColumn item index (where the user block renders).
+    val storyPointToLazyIndex = remember(items, storyPointIndex) {
+        val m = HashMap<Int, Int>()
+        items.forEachIndexed { lazyIndex, item ->
+            if (item is ChatItem.Block && item.block.kind == Vocab.BLOCK_USER_MESSAGE) {
+                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[sp] = lazyIndex }
+            }
+        }
+        m
+    }
+    // Map LazyColumn item key → story-point index (for active-dot tracking).
+    val itemKeyToSpIndex = remember(storyPointIndex) {
+        val m = HashMap<Any, Int>()
+        items.forEachIndexed { _, item ->
+            if (item is ChatItem.Block && item.block.kind == Vocab.BLOCK_USER_MESSAGE) {
+                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[item.key] = sp }
+            }
+        }
+        m
+    }
+    val hasTimeline = storyPoints.isNotEmpty()
+
     val atBottom by remember {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -294,7 +322,10 @@ private fun Transcript(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 12.dp, end = 12.dp, top = 12.dp, bottom = 16.dp,
+                start = 12.dp,
+                end = if (hasTimeline) 66.dp else 12.dp,
+                top = 12.dp,
+                bottom = 16.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -330,6 +361,17 @@ private fun Transcript(
                     }
                 }
             }
+        }
+
+        // Conversation timeline rail (right edge).
+        if (hasTimeline) {
+            ConversationTimeline(
+                storyPoints = storyPoints,
+                listState = listState,
+                storyPointToLazyIndex = storyPointToLazyIndex,
+                itemKeyToSpIndex = itemKeyToSpIndex,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
         }
 
         if (!atBottom) {
