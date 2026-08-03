@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -346,10 +347,13 @@ fun ConversationTimeline(
                 }
             }
 
-            // Snippet bubble (during scrub only) — follows the thumb, not the slot.
+            // Snippet bubble (during scrub only) — hugs the rail, follows the thumb.
+            // Width adapts to the available space left of the rail, capped so ~6 words
+            // of the prompt fit. maxLines raised so longer prompts are readable.
             if (inspecting && focusIndex >= 0) {
                 val point = storyPoints[focusIndex]
                 var bubbleHeight by remember { mutableStateOf(0) }
+                var bubbleWidthPx by remember { mutableStateOf(0f) }
 
                 val bubbleAlpha by animateFloatAsState(
                     targetValue = 1f,
@@ -357,7 +361,6 @@ fun ConversationTimeline(
                     label = "bubble-in",
                 )
 
-                // Smooth the bubble Y so it glides with the thumb instead of snapping.
                 val bubbleTargetY = if (scrubbing) pointerY else focusedY
                 val animatedBubbleY by animateFloatAsState(
                     targetValue = bubbleTargetY,
@@ -367,13 +370,16 @@ fun ConversationTimeline(
 
                 Column(
                     Modifier
-                        .width(240.dp)
+                        .align(Alignment.CenterEnd)
+                        .widthIn(min = 200.dp, max = 320.dp)
                         .alpha(bubbleAlpha)
-                        .onSizeChanged { bubbleHeight = it.height }
+                        .onSizeChanged {
+                            bubbleHeight = it.height
+                            bubbleWidthPx = it.width.toFloat()
+                        }
                         .offset {
-                            val w = with(density) { 240.dp.toPx() }
-                            val gap = with(density) { 4.dp.toPx() }
-                            val x = -(w + gap).roundToInt()
+                            val gapPx = with(density) { 4.dp.toPx() }
+                            val x = (-(bubbleWidthPx + gapPx)).roundToInt()
                             val yRaw = (animatedBubbleY - bubbleHeight / 2f)
                             val maxY = (railHeightPx - bubbleHeight).roundToInt()
                             val y = yRaw.roundToInt().coerceIn(0, if (maxY > 0) maxY else 0)
@@ -387,29 +393,29 @@ fun ConversationTimeline(
                             ambientColor = t.contact.copy(alpha = 0.4f),
                             spotColor = t.contact.copy(alpha = 0.3f),
                         )
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
                     Text(
                         point.prompt.ifEmpty { "Attachment sent" },
                         color = t.white,
                         fontFamily = Manrope,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.5.sp,
-                        lineHeight = 17.5.sp,
-                        maxLines = 2,
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Box(Modifier.height(1.dp).fillMaxWidth().background(t.line.copy(alpha = 0.6f)))
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         point.reply.ifEmpty { "Agent reply pending\u2026" },
                         color = t.muted,
                         fontFamily = Manrope,
                         fontWeight = FontWeight.Normal,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        maxLines = 2,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
