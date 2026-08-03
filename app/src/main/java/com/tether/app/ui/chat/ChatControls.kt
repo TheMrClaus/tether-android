@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -200,11 +201,15 @@ private fun RaisedPill(
             )
             .background(face, shape)
             .drawBehind {
-                // Lit top bevel (--edge-highlight "inset 0 1px 0 lit-strong").
+                // Lit top bevel — feathered like the web's
+                // --edge-highlight "inset 0 1px 0 lit-strong" (a hard 1dp
+                // strip would read as a crisp line; a 2dp gradient fades it).
                 drawRoundRect(
-                    color = t.litStrong,
-                    topLeft = Offset(0f, 0f),
-                    size = Size(size.width, 1.dp.toPx()),
+                    brush = Brush.verticalGradient(
+                        colors = listOf(t.litStrong, Color.Transparent),
+                        startY = 0f,
+                        endY = 2.dp.toPx(),
+                    ),
                     cornerRadius = CornerRadius(radiusPx, radiusPx),
                 )
             }

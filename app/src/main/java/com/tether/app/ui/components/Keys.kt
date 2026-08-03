@@ -166,21 +166,29 @@ fun TetherKey(
             .offset(y = if (down) travel else 0.dp)
             .background(faceColor, shape)
             .drawBehind {
-                // Lit bevel on a resting key: a faint top + left light strip
-                // (--edge-highlight / --bevel-raised). Press swaps it for a
-                // recessed [pressShade] along the top edge (--bevel-pressed).
+                // Lit bevel on a resting key: the web's --edge-highlight is an
+                // INSET box-shadow ("inset 0 1px 0 lit-strong"), which feathers
+                // naturally. A 1dp solid strip reads as a crisp line, so we
+                // approximate the inset with a short vertical gradient that
+                // fades from litStrong to transparent over ~2dp — the same
+                // feather CSS gets for free. Press swaps it for a recessed
+                // [pressShade] along the top edge (--bevel-pressed).
                 val cornerRadius = CornerRadius(radiusPx, radiusPx)
                 if (resting) {
                     drawRoundRect(
-                        color = t.litStrong,
-                        topLeft = Offset(0f, 0f),
-                        size = Size(size.width, 1.dp.toPx()),
+                        brush = Brush.verticalGradient(
+                            colors = listOf(t.litStrong, Color.Transparent),
+                            startY = 0f,
+                            endY = 2.dp.toPx(),
+                        ),
                         cornerRadius = cornerRadius,
                     )
                     drawRoundRect(
-                        color = t.litSoft,
-                        topLeft = Offset(0f, 0f),
-                        size = Size(1.dp.toPx(), size.height),
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(t.litSoft, Color.Transparent),
+                            startX = 0f,
+                            endX = 2.dp.toPx(),
+                        ),
                         cornerRadius = cornerRadius,
                     )
                 } else if (down) {
