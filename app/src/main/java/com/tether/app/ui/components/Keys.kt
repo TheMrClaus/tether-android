@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,10 +22,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,8 +44,13 @@ import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 
 /**
- * The molded "key" control (visual-spec §4 composer + §2.3): a raised face over a
- * solid side, 1px border, press = travel down onto the side, uppercase legend.
+ * The molded "key" control (visual-spec §4 composer + §2.3 + globals.css
+ * ":root .button-*" material layer): a raised face over a solid side-wall,
+ * lit top-left bevel, soft drop contact shadow, uppercase legend. Pressing
+ * travels the face down onto the side, swaps the lit bevel for a recessed
+ * [pressShade], and shrinks the contact shadow. Hover deepens the fill only.
+ * Disabled keys lose elevation and contrast. The most-used keys (primary
+ * CTAs and the sidebar's New session) carry a subtle radial wear polish.
  */
 
 enum class KeyVariant { Primary, Secondary, Brick, Utility }
@@ -57,60 +66,148 @@ fun TetherKey(
     fontSize: TextUnit = 13.sp,
     enabled: Boolean = true,
     showSlit: Boolean = false,
+    /** Subtle contact-polish wear on the face — primary CTAs and the New
+     *  session key in the sidebar (visual-spec §2.3 "Wear / contact polish
+     *  goes ONLY on genuinely frequent controls"). */
+    wear: Boolean = variant == KeyVariant.Primary,
     minHeight: Dp = TetherDimens.touchTargetDp,
     contentDescription: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
 
     val face: Color
+    val faceHover: Color
     val facePressed: Color
     val side: Color
     val inkColor: Color
     when (variant) {
         KeyVariant.Primary -> {
-            face = t.accent; facePressed = t.accentDeep; side = t.accentSide; inkColor = t.accentInk
+            face = t.accent; faceHover = t.accentHover; facePressed = t.accentDeep
+            side = t.accentSide; inkColor = t.accentInk
         }
         KeyVariant.Secondary -> {
-            face = t.keyFace; facePressed = t.keyFaceDeep; side = t.keySide; inkColor = t.ink
+            face = t.keyFace; faceHover = t.keyFaceHover; facePressed = t.keyFaceDeep
+            side = t.keySide; inkColor = t.ink
         }
         KeyVariant.Brick -> {
-            face = t.brick; facePressed = t.brickDeep; side = t.brickSide; inkColor = t.accentInk
+            face = t.brick; faceHover = t.brickDeep; facePressed = t.brickDeep
+            side = t.brickSide; inkColor = t.accentInk
         }
         KeyVariant.Utility -> {
-            face = t.charcoal; facePressed = t.charcoal; side = t.charcoalSide; inkColor = t.utilityInk
+            face = t.charcoal; faceHover = t.charcoal; facePressed = t.charcoal
+            side = t.charcoalSide; inkColor = t.utilityInk
         }
     }
 
     val travel = t.pressTravel
     val shape = RoundedCornerShape(t.radiusKey)
     val down = pressed && enabled
+    // Disabled keys lose elevation: no travel, no contact shadow, no bevel.
+    val resting = enabled && !down
     val density = LocalDensity.current
     val radiusPx = with(density) { t.radiusKey.toPx() }
     val travelPx = with(density) { travel.toPx() }
+    val elevationPx = with(density) { t.shadowElevation.toPx() }
 
-    // Single Row carries BOTH the side slab and the face, so a caller's width
-    // modifier (e.g. fillMaxWidth on the drawer's New session key) sizes the
-    // face exactly — previously the side was drawn on an outer Box at the
-    // caller's width while the face wrapped its content, rendering a wide dark
-    // slab with a small face floating on it ("super wide" buttons).
+    // Face fill: hover deepens the fill, press sinks to the deep face.
+    val faceColor = when {
+        !enabled -> face
+        down -> facePressed
+        hovered -> faceHover
+        else -> face
+    }
+
+    // The contact shadow under a resting key (the soft "0 3px 6px -2px"
+    // component of --shadow-key). Compose's Modifier.shadow draws a single
+    // Gaussian with the key's own shape, which is exactly this. We offset
+    // it down by ~half the side-wall so the shadow sits under the side slab.
+    val shadowModifier = if (resting) {
+        Modifier.shadow(
+            elevation = t.shadowElevation,
+            shape = shape,
+            clip = false,
+            ambientColor = t.contact.copy(alpha = 0.45f),
+            spotColor = t.contact.copy(alpha = 0.55f),
+        )
+    } else if (down) {
+        // Pressed: shrink to the --shadow-key-pressed "0 1px 2px" residual.
+        Modifier.shadow(
+            elevation = 1.dp,
+            shape = shape,
+            clip = false,
+            ambientColor = t.contact.copy(alpha = 0.4f),
+            spotColor = t.contact.copy(alpha = 0.45f),
+        )
+    } else {
+        Modifier
+    }
+
     Row(
         modifier = modifier
             .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
+            .then(shadowModifier)
             .drawBehind {
-                // The static side the face travels onto (shadow-key "0 Npx 0 key-side").
+                // The hard side-wall the face travels onto (--shadow-key's
+                // "0 2px 0 key-side" component). Drawn as a solid slab offset
+                // down by the press travel; the face sits on top of it.
+                if (enabled) {
+                    drawRoundRect(
+                        color = side,
+                        topLeft = Offset(0f, travelPx),
+                        size = Size(size.width, size.height - travelPx),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx),
+                    )
+                }
+            }
+            .padding(bottom = if (enabled) travel else 0.dp)
+            .offset(y = if (down) travel else 0.dp)
+            .background(faceColor, shape)
+            .drawBehind {
+                // Lit bevel on a resting key: a faint top + left light strip
+                // (--edge-highlight / --bevel-raised). Press swaps it for a
+                // recessed [pressShade] along the top edge (--bevel-pressed).
+                val cornerRadius = CornerRadius(radiusPx, radiusPx)
+                if (resting) {
+                    drawRoundRect(
+                        color = t.litStrong,
+                        topLeft = Offset(0f, 0f),
+                        size = Size(size.width, 1.dp.toPx()),
+                        cornerRadius = cornerRadius,
+                    )
+                    drawRoundRect(
+                        color = t.litSoft,
+                        topLeft = Offset(0f, 0f),
+                        size = Size(1.dp.toPx(), size.height),
+                        cornerRadius = cornerRadius,
+                    )
+                } else if (down) {
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(t.pressShade, Color.Transparent),
+                            startY = 0f,
+                            endY = 3.dp.toPx(),
+                        ),
+                        cornerRadius = cornerRadius,
+                    )
+                }
+            }
+            .then(if (wear && enabled) Modifier.drawBehind {
+                // Wear: a single soft radial polish, only on the most-used
+                // keys. Subtle material texture, never glossy.
                 drawRoundRect(
-                    color = side,
-                    topLeft = Offset(0f, travelPx),
-                    size = Size(size.width, size.height - travelPx),
+                    brush = Brush.radialGradient(
+                        colors = listOf(t.wearHi, Color.Transparent),
+                        center = Offset(size.width * 0.5f, size.height * 0.3f),
+                        radius = size.maxDimension * 0.7f,
+                    ),
                     cornerRadius = CornerRadius(radiusPx, radiusPx),
                 )
-            }
-            .padding(bottom = travel)
-            .offset(y = if (down) travel else 0.dp)
-            .background(if (down) facePressed else face, shape)
+            } else Modifier)
             .border(1.dp, side, shape)
+            .clip(shape)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
