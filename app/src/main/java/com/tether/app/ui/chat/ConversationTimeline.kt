@@ -371,7 +371,7 @@ fun ConversationTimeline(
                 Column(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .widthIn(min = 200.dp, max = 360.dp)
+                        .widthIn(min = 240.dp, max = 440.dp)
                         .alpha(bubbleAlpha)
                         .onSizeChanged {
                             bubbleHeight = it.height
