@@ -21,8 +21,8 @@ android {
         applicationId = "com.tether.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.4.4.1"
+        versionCode = 10
+        versionName = "0.4.4.2"
     }
 
     signingConfigs {
