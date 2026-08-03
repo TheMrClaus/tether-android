@@ -3,6 +3,9 @@ package com.tether.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -35,9 +39,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -567,8 +575,10 @@ private fun WorkspaceSwitcher(
     }
 }
 
-/** Pin-project star key (.pin-project): 44dp square, raised key cap; pinned
- *  → violet-wash bg + violet star fill. */
+/** Pin-project star key (.pin-project): 44dp square raised key cap — keyFace
+ *  bg + keySide border + lit top bevel + contact shadow (the full
+ *  --shadow-key treatment, same vocabulary as .button-secondary). Pinned →
+ *  violet-wash bg + violet star fill (.pin-project.is-pinned). */
 @Composable
 private fun PinProjectKey(
     pinned: Boolean,
@@ -578,12 +588,66 @@ private fun PinProjectKey(
 ) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(TetherDimens.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val down = pressed && enabled
+    val density = LocalDensity.current
+    val radiusPx = with(density) { TetherDimens.radiusSm.toPx() }
+    val travelPx = with(density) { t.pressTravel.toPx() }
+
+    val face = when {
+        !enabled -> if (pinned) t.violetWash else t.keyFace
+        down -> if (pinned) t.violetWash else t.keyFaceDeep
+        hovered && !pinned -> t.keyFaceHover
+        else -> if (pinned) t.violetWash else t.keyFace
+    }
+    val side = if (pinned) t.violetStrong else t.keySide
+
     Box(
         modifier = modifier
             .size(TetherDimens.touchTargetDp)
-            .background(if (pinned) t.violetWash else t.graphiteRaised, shape)
-            .border(1.dp, if (pinned) t.violetStrong else t.line, shape)
-            .clickable(enabled = enabled, onClick = onClick),
+            .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
+            .then(if (enabled && !down) Modifier.shadow(
+                elevation = t.shadowElevation,
+                shape = shape,
+                clip = false,
+                ambientColor = t.contact.copy(alpha = 0.45f),
+                spotColor = t.contact.copy(alpha = 0.55f),
+            ) else if (down) Modifier.shadow(
+                elevation = 1.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = t.contact.copy(alpha = 0.4f),
+                spotColor = t.contact.copy(alpha = 0.45f),
+            ) else Modifier)
+            .drawBehind {
+                // Hard side-wall the face travels onto.
+                if (enabled) {
+                    drawRoundRect(
+                        color = side,
+                        topLeft = Offset(0f, travelPx),
+                        size = Size(size.width, size.height - travelPx),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx),
+                    )
+                }
+            }
+            .padding(bottom = if (enabled) t.pressTravel else 0.dp)
+            .offset(y = if (down) t.pressTravel else 0.dp)
+            .background(face, shape)
+            .drawBehind {
+                // Lit top bevel on a resting key (--edge-highlight).
+                if (enabled && !down) {
+                    drawRoundRect(
+                        color = t.litStrong,
+                        topLeft = Offset(0f, 0f),
+                        size = Size(size.width, 1.dp.toPx()),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx),
+                    )
+                }
+            }
+            .border(1.dp, side, shape)
+            .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

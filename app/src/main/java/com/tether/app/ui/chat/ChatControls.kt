@@ -3,6 +3,9 @@ package com.tether.app.ui.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,8 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +31,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,6 +60,13 @@ import com.tether.app.ui.theme.TetherWeights
  * The composer mode row (visual-spec §4, Claude only): ShieldCheck + "Mode" +
  * the permission-mode pill (drop-up) + the model chip. Mirrors the web
  * chat-mode-row; the inline hint lives in the menu rows on the phone.
+ *
+ * The mode pill and model chip share the web's `.chat-mode-select` /
+ * `.chat-model-chip` raised-pill vocabulary (globals.css §4344 + §5198):
+ * graphite-raised face, 1px line border, lit top bevel (--edge-highlight),
+ * 999px pill radius. The mode pill's danger variant swaps border + text to
+ * amber/warning (.chat-mode-select.is-danger); the model chip hovers to
+ * violet (`.chat-model-chip:hover`).
  */
 @Composable
 fun ChatModeRow(
@@ -67,21 +87,19 @@ fun ChatModeRow(
         Icon(Lucide.ShieldCheck, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
         Text("Mode", color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 12.5.sp)
         Box {
-            Row(
-                Modifier
-                    .height(29.dp)
-                    .background(t.keyFace, RoundedCornerShape(999.dp))
-                    .border(1.dp, t.keySide, RoundedCornerShape(999.dp))
-                    .clickable { modeMenuOpen = true }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            RaisedPill(
+                onClick = { modeMenuOpen = true },
+                danger = current.danger,
+                modifier = Modifier.height(29.dp),
             ) {
                 Text(
                     current.label,
-                    color = if (current.danger) t.danger else t.ink,
+                    color = if (current.danger) t.warning else t.ink,
                     fontFamily = Manrope,
                     fontWeight = TetherWeights.label,
                     fontSize = 12.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             DropdownMenu(
@@ -125,28 +143,83 @@ fun ChatModeRow(
             }
         }
         Spacer(Modifier.weight(1f))
-        Row(
-            Modifier
-                .height(29.dp)
-                .background(t.keyFace, RoundedCornerShape(999.dp))
-                .border(1.dp, t.keySide, RoundedCornerShape(999.dp))
-                .clickable(onClick = onModelClick)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(Lucide.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
-            Text(
-                modelLabel,
-                color = t.ink,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.label,
-                fontSize = 12.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Box {
+            val modelHover = remember { MutableInteractionSource() }
+            RaisedPill(
+                onClick = onModelClick,
+                interactionSource = modelHover,
+                modifier = Modifier.height(29.dp),
+            ) {
+                Icon(Lucide.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+                Text(
+                    modelLabel,
+                    color = t.ink,
+                    fontFamily = Manrope,
+                    fontWeight = TetherWeights.label,
+                    fontSize = 12.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
+}
+
+/**
+ * The shared raised-pill cap (web `.chat-mode-select` / `.chat-model-chip`):
+ * graphite-raised face, 1px line border, lit top bevel, 999px pill radius,
+ * soft contact shadow. Press travels 1dp; hover deepens the face. The [danger]
+ * variant swaps the border to amber + text to warning (mode pill only).
+ */
+@Composable
+private fun RaisedPill(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    content: @Composable RowScope.() -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val pressed by interactionSource.collectIsPressedAsState()
+    val shape = RoundedCornerShape(999.dp)
+    val face = if (hovered && !pressed) t.graphiteRaised.copy(alpha = 0.92f) else t.graphiteRaised
+    val borderColor = if (danger) t.amber else t.line
+    val density = LocalDensity.current
+    val radiusPx = with(density) { 999.dp.toPx() }
+    val down = pressed
+
+    Row(
+        modifier = modifier
+            .shadow(
+                elevation = if (!down) 2.dp else 1.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = t.contact.copy(alpha = 0.35f),
+                spotColor = t.contact.copy(alpha = 0.4f),
+            )
+            .background(face, shape)
+            .drawBehind {
+                // Lit top bevel (--edge-highlight "inset 0 1px 0 lit-strong").
+                drawRoundRect(
+                    color = t.litStrong,
+                    topLeft = Offset(0f, 0f),
+                    size = Size(size.width, 1.dp.toPx()),
+                    cornerRadius = CornerRadius(radiusPx, radiusPx),
+                )
+            }
+            .border(1.dp, borderColor, shape)
+            .offset(y = if (down) 1.dp else 0.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        content = content,
+    )
 }
 
 /**
