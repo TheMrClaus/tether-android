@@ -15,7 +15,8 @@ val releaseStoreFile: String? = System.getenv("TETHER_RELEASE_STORE_FILE")
 
 android {
     namespace = "com.tether.app"
-    compileSdk = 36
+    compileSdk = 37
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "com.tether.app"

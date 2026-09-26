@@ -15,6 +15,11 @@ fun interface FirebaseTokenProvider {
 
     /** Production binding: delegates to [FirebaseMessaging.getInstance().token]. */
     companion object Default : FirebaseTokenProvider {
+        // firebase-messaging 25.1.0 deprecated getToken/onNewToken in favour of
+        // FID-based register()/onRegistered(). Migrating changes the identifier
+        // the Tether server pushes to, so it is a server-coordinated change, not
+        // part of the dependency refresh; the token API still works.
+        @Suppress("DEPRECATION")
         override suspend fun token(): String? = try {
             // token() returns a Task<String>; await it off the IO dispatcher.
             // The 10s cap matches Play Services' own task timeout fallback.

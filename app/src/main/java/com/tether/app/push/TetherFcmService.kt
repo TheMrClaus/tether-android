@@ -85,6 +85,8 @@ class TetherFcmService : FirebaseMessagingService() {
         manager.notify(tag ?: DEFAULT_TAG, NOTIFICATION_ID, builder.build())
     }
 
+    // Deprecated in firebase-messaging 25.1.0 (see FirebaseTokenProvider.Default).
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onNewToken(token: String) {
         // Hand off to the controller, which re-syncs the registration with the
         // current prefs-derived scope + sets. The controller is wired from

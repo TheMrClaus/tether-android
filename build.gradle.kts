@@ -29,7 +29,8 @@ subprojects {
     }
     pluginManager.withPlugin("com.android.library") {
         extensions.configure<LibraryExtension> {
-            compileSdk = 36
+            compileSdk = 37
+            compileSdkMinor = 2
             defaultConfig { minSdk = 26 }
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
