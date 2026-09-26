@@ -31,7 +31,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # The action's default package list still includes the retired `tools` package, which makes
+      # sdkmanager exit 1 — ask for platform-tools only (AGP fetches the platform it needs).
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
 
