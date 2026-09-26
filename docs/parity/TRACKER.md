@@ -11,7 +11,7 @@
 | Program status | IN PROGRESS |
 | Current phase | Phase 0 — Bootstrap, baseline, parity matrix |
 | PARITY_BASE (tether SHA) | `7d65611` (PROTOCOL_VERSION 128) |
-| App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
+| App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
 | Last updated (UTC) | 2026-09-27 |
@@ -54,10 +54,10 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T0.3 | Modularize into D7 modules (move, keep tests green) | VERIFIED | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | VERIFIED | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
-| T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | IN-PROGRESS | executor-T0.6 @ 2026-09-26 22:17 | `bd show` | security-executor-T0.6 start (wt ~/git/tether-android-wt/T0.6b, branch parity/T0.6-sdk @1c37354): research done. Docs: developer.android.co… |
+| T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | VERIFIED | executor-T0.6 @ 2026-09-26 22:17 | `3541b4b`, `508198c` · `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | DONE | executor-S0.3 @ 2026-09-26 21:12 |  |  |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  | Reopened after VERIFY-FAIL (nondeterministic ambient frames). Executor fixing: classify ambient pushes out of scenario ordering; acceptance… |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
@@ -67,7 +67,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | TODO |  |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S0.3: ServerMessage 'approval' and 'approval_resolved' are declared in lib/protocol.ts but never sent by server.mjs at 7d65611 (approv… |
-| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.3 verify: after 76b0431 a narrower pre-existing window remains — an attach() from another thread that lands just BEFORE onReady's r… |
+| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.6 security review: reconnect loop has a fixed 1.8s delay (RealTetherClient.kt:384-385) — the new connection manager needs real back… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
@@ -180,9 +180,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 14 — Hardening & release 1.0.0
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T14.1 | Performance + Baseline Profiles | TODO |  |  |  |
+| T14.1 | Performance + Baseline Profiles | TODO |  |  | From v0.6.0: release build has isMinifyEnabled=false (since before the program) — ~31 MB dex. Since minSdk 34 AGP stores dex uncompressed, … |
 | T14.2 | Accessibility pass | TODO |  |  |  |
-| T14.3 | Security review | TODO |  |  |  |
+| T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
 | T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
 
@@ -229,6 +229,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Isolated test servers run in their own transient cgroup** via `systemd-run --user --scope` (ports 4290–4299, throwaway state dirs); the #155 guard is never modified or bypassed in code | Agents run inside `tether.service`'s cgroup, where `server.mjs` rightly refuses a second server; a scope is a separate cgroup (verified) | owner |
 | 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
+| 2026-09-27 | **Published v0.6.0** (code 16) from `34b1c9b` after CI + verifier + security review; same signing cert as 0.5.1 (upgrade-installs). APK is 33 MB because dex is stored uncompressed at minSdk ≥ 28 (AGP default, not a regression); R8 minification (off since before the program) → T14.1 | Owner asked for a morning APK; decided on owner's behalf | claude-main |
 | 2026-09-27 | Owner away overnight: agent works autonomously, decides on the owner's behalf (logged here), and publishes a new APK release when the SDK work lands | Owner message | owner |
 | 2026-09-27 | **targetSdk 37** with an `ACCESS_LOCAL_NETWORK` permission flow (Android 17 blocks LAN traffic otherwise); **minSdk 26 → 34 (Android 14)**; compileSdk 37 | Owner: "everything latest", Android 14 floor. targetSdk doesn't limit installs; minSdk does | owner |
 | 2026-09-27 | FCM `register()`/`onRegistered()` migration folded into **T12.1** (+ matching server PR); old API narrowly `@Suppress`ed until then | Owner answer | owner |
