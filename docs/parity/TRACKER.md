@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 23:10 |
+| Last updated (UTC) | 2026-09-27 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,12 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** ⏸ **Waiting on the owner.** VERIFIED: T0.1, T0.3, T0.4, T0.5, S0.1, S0.2, S0.5.
-Every remaining Phase 0 task is blocked on an owner decision — **T0.2** (KVM group for the emulator)
-and **S0.3** (isolated test server vs. the production cgroup guard), which also gates **S0.4**
-(web reference screenshots) and **S0.6** (the tether PR). Phase 1+ is gated on Phase 0 in the store.
-When unblocked: S0.3 run → S0.4 → S0.6 (merge `android-parity/S0.{2,3,4,5}` into
-`android-parity/S0`, keep the anchored `/parity-corpus/` ignore, PR) and T0.2 (boot AVDs, install APK).
+**Next action:** Owner answered the question card (2026-09-27, see Decision log). IN FLIGHT:
+**S0.3** live capture inside `systemd-run --user --scope` (executor); **T0.6** dependency refresh to
+latest stable (executor, worktree `~/git/tether-android-wt/T0.6`); release-workflow fix — `dry_run`
+run 36275738887 on branch `parity/T14.5-release-setup`. Next: S0.4 (reuses S0.3's harness) → S0.6 PR.
+T0.2 **deferred** (owner: skip emulators for now).
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -51,13 +50,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by (agent @ UTC) | Evidence | Notes |
 |---|---|---|---|---|---|
 | T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
-| T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
+| T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED (deferred) | claude-main @ 2026-09-26 21:05 |  | OWNER DECISION 2026-09-27: skip emulators for now. T0.2 deferred (emulator + AVDs stay installed). Behavior checks use JVM/Robolectric unti… |
 | T0.3 | Modularize into D7 modules (move, keep tests green) | VERIFIED | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | VERIFIED | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
+| T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | IN-PROGRESS | executor-T0.6 @ 2026-09-26 22:17 |  |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | BLOCKED | executor-S0.3 @ 2026-09-26 21:12 |  | done: fdecbe9 on android-parity/S0.3 (script + tests/capture-wire-corpus.test.mjs 5 pass/2 skip + .gitignore parity-corpus/ .next-parity/; … |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  | OWNER DECISION 2026-09-27: agents may run isolated fake-engine servers in their own transient cgroup via 'systemd-run --user --scope' (port… |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
@@ -216,8 +216,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 
 | Since (UTC) | Task | Blocker | Needed from | Status |
 |---|---|---|---|---|
-| 2026-09-26 21:55 | S0.3 (→ S0.4, and every DoD "isolated fake-engine server" run) | An isolated server can't boot from an agent session: agents run inside `tether.service`'s cgroup, and `server.mjs`'s `findLiveUnitMainPeer()` guard (issue #155 — a second in-cgroup server once process-group-killed prod) refuses to start. Escaping via `systemd-run --user --scope` would bypass that production-safety guard. Capture script + tests are committed (`fdecbe9`, never run live). | owner: either OK agents running isolated servers in their own transient scope (`systemd-run --user --scope …`, separate port/state dir), or run `TETHER_CAPTURE_WIRE_E2E=1 node --test tests/capture-wire-corpus.test.mjs` in `~/git/tether-wt/android-parity-S0.3` from a shell outside `tether.service` | OPEN |
-| 2026-09-26 21:10 | T0.2 | Emulator can't boot: user `operator` is not in group `kvm` (`/dev/kvm` root:kvm 0660) → no hardware acceleration | owner: `sudo usermod -aG kvm operator` + re-login (or OK the agent to run it) | OPEN |
+| 2026-09-26 21:55 | S0.3 (→ S0.4, and every DoD "isolated fake-engine server" run) | An isolated server can't boot from an agent session: agents run inside `tether.service`'s cgroup, and `server.mjs`'s `findLiveUnitMainPeer()` guard (issue #155 — a second in-cgroup server once process-group-killed prod) refuses to start. Escaping via `systemd-run --user --scope` would bypass that production-safety guard. Capture script + tests are committed (`fdecbe9`, never run live). | owner: either OK agents running isolated servers in their own transient scope (`systemd-run --user --scope …`, separate port/state dir), or run the capture from a shell outside `tether.service` | RESOLVED 2026-09-27: owner OK'd `systemd-run --user --scope` |
+| 2026-09-26 21:10 | T0.2 | Emulator can't boot: user `operator` is not in group `kvm` (`/dev/kvm` root:kvm 0660) → no hardware acceleration | owner: `sudo usermod -aG kvm operator` + re-login (or OK the agent to run it) | RESOLVED 2026-09-27: owner chose *skip emulators for now* → T0.2 deferred |
 
 ## Decision log
 
@@ -225,6 +225,11 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 |---|---|---|---|
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
+| 2026-09-27 | **Emulators skipped for now**: T0.2 deferred (SDK emulator + both AVDs stay installed); behavior checks run on JVM/Robolectric; Phase 0 closes without T0.2 | Owner answer (question card) | owner |
+| 2026-09-27 | **Isolated test servers run in their own transient cgroup** via `systemd-run --user --scope` (ports 4290–4299, throwaway state dirs); the #155 guard is never modified or bypassed in code | Agents run inside `tether.service`'s cgroup, where `server.mjs` rightly refuses a second server; a scope is a separate cgroup (verified) | owner |
+| 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
+| 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
+| 2026-09-27 | New task **T0.6**: update every toolchain/plugin/library/CI action to its latest stable, incl. compileSdk/targetSdk | Owner request: "update everything in that app to the very latest" | owner |
 | 2026-09-26 | Themes are **3 families × light/dark/system = 6 skins** (tactile/night, precision/machine, studio/studio-dark), not "four themes"; PLAN constraint 2, D9, D12, §5.3, §5.4, T3.1 edited | Web moved to a family×mode model (`hooks/use-preferences.ts`) incl. the Studio family (`app/studio.css`) | claude-main (T0.5) |
 | 2026-09-26 | T0.5 settled: browser pane **in scope on phone**; `/setup` wizard **yes** (lowest P10 priority); notification quick actions **out of parity scope** → `T12.3` deferred owner opt-in; away digest in scope (T5.4); login = instrument + studio + retro | Web behavior at `7d65611`; PLAN defaults | claude-main (T0.5) |
 | 2026-09-26 | Full matrix lives in `MATRIX.md`/`matrix.json` (generated) + one bead per row under epic `MATRIX`, rows parked `deferred`; TRACKER keeps only the summary | 291 rows don't fit a hand-kept table; bd v1.3.0 leaked `open`+blocks rows into `bd ready` | claude-main (T0.5) |
