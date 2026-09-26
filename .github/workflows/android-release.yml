@@ -72,7 +72,11 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
+        # The action's default package list includes the retired `tools` package, which makes
+        # sdkmanager exit 1 — ask for platform-tools only (AGP fetches the platform it needs).
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
