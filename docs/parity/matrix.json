@@ -1532,7 +1532,7 @@
    "kind": "event",
    "artifact": "cli_inventory_reset",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T7.3"
   },
   {
@@ -1693,14 +1693,14 @@
    "kind": "event",
    "artifact": "approval_resolved",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.3"
   },
   {
    "kind": "event",
    "artifact": "approval_expired",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.3"
   },
   {
@@ -1714,14 +1714,14 @@
    "kind": "event",
    "artifact": "question_resolved",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.3"
   },
   {
    "kind": "event",
    "artifact": "question_cancelled",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.3"
   },
   {
@@ -1959,14 +1959,14 @@
    "kind": "event",
    "artifact": "warning",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.6"
   },
   {
    "kind": "event",
    "artifact": "unknown_event",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.6"
   },
   {
@@ -1994,14 +1994,14 @@
    "kind": "event",
    "artifact": "background_interrupted",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.6"
   },
   {
    "kind": "event",
    "artifact": "background_abandoned",
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
-   "android": "MISSING",
+   "android": "PARTIAL",
    "task": "T6.6"
   },
   {

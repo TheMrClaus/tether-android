@@ -51,14 +51,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
-| T0.3 | Modularize into D7 modules (move, keep tests green) | TODO |  |  |  |
+| T0.3 | Modularize into D7 modules (move, keep tests green) | IN-PROGRESS | executor-T0.3 @ 2026-09-26 21:22 |  |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | TODO |  |  |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | DONE | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | IN-PROGRESS | executor-S0.2 @ 2026-09-26 21:12 |  | done: surveyed reducer (engines/events.mjs reduce/initialSessionState), AgentEvent union, fixtures, helper modules / half: none / files: no… |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  |  |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | BLOCKED | executor-S0.3 @ 2026-09-26 21:12 |  | done: fdecbe9 on android-parity/S0.3 (script + tests/capture-wire-corpus.test.mjs 5 pass/2 skip + .gitignore parity-corpus/ .next-parity/; … |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
-| S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | DONE | executor-S0.5 @ 2026-09-26 21:12 |  |  |
+| S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  |  |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
@@ -206,8 +206,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | hook/helper | 21 | 8 | 13 | 0 | 0 |
 | client-msg | 67 | 47 | 20 | 0 | 0 |
 | server-msg | 41 | 28 | 13 | 0 | 0 |
-| event | 74 | 30 | 44 | 0 | 0 |
-| **total** | **291** | 173 | 113 | 0 | 5 |
+| event | 74 | 21 | 53 | 0 | 0 |
+| **total** | **291** | 164 | 122 | 0 | 5 |
 
 ---
 
@@ -215,6 +215,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 
 | Since (UTC) | Task | Blocker | Needed from | Status |
 |---|---|---|---|---|
+| 2026-09-26 21:55 | S0.3 (→ S0.4, and every DoD "isolated fake-engine server" run) | An isolated server can't boot from an agent session: agents run inside `tether.service`'s cgroup, and `server.mjs`'s `findLiveUnitMainPeer()` guard (issue #155 — a second in-cgroup server once process-group-killed prod) refuses to start. Escaping via `systemd-run --user --scope` would bypass that production-safety guard. Capture script + tests are committed (`fdecbe9`, never run live). | owner: either OK agents running isolated servers in their own transient scope (`systemd-run --user --scope …`, separate port/state dir), or run `TETHER_CAPTURE_WIRE_E2E=1 node --test tests/capture-wire-corpus.test.mjs` in `~/git/tether-wt/android-parity-S0.3` from a shell outside `tether.service` | OPEN |
 | 2026-09-26 21:10 | T0.2 | Emulator can't boot: user `operator` is not in group `kvm` (`/dev/kvm` root:kvm 0660) → no hardware acceleration | owner: `sudo usermod -aG kvm operator` + re-login (or OK the agent to run it) | OPEN |
 
 ## Decision log

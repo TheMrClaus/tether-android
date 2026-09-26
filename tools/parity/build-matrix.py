@@ -248,11 +248,19 @@ def extract_unions(protocol_ts: str):
 def android_known():
     p = ROOT / "app/src/main/java/com/tether/app/protocol"
     client = set(re.findall(r'put\("type", "([^"]+)"\)', (p / "ClientMessage.kt").read_text()))
-    server = set(re.findall(r'^\s*"([a-z_-]+)" -> ', (p / "ServerMessage.kt").read_text(), re.M))
+    server = when_labels((p / "ServerMessage.kt").read_text())
     events = set()
     for f in (p / "reduce").glob("*.kt"):
-        events |= set(re.findall(r'^\s*"([a-z_]+)" -> ', f.read_text(), re.M))
+        events |= when_labels(f.read_text())
     return client, server, events
+
+
+def when_labels(src):
+    """String labels of Kotlin `when` branches, incl. multi-label `"a", "b" ->` and a trailing `->`."""
+    out = set()
+    for m in re.finditer(r'^\s*((?:"[a-z_-]+"\s*,\s*)*"[a-z_-]+")\s*->', src, re.M):
+        out |= set(re.findall(r'"([a-z_-]+)"', m.group(1)))
+    return out
 
 
 def main():

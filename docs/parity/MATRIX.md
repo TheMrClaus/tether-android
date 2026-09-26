@@ -16,7 +16,7 @@
 | hook/helper | 21 | 8 | 13 | 0 | 0 |
 | client-msg | 67 | 47 | 20 | 0 | 0 |
 | server-msg | 41 | 28 | 13 | 0 | 0 |
-| event | 74 | 30 | 44 | 0 | 0 |
+| event | 74 | 21 | 53 | 0 | 0 |
 | **total** | **291** | | | | |
 
 ## component
@@ -271,7 +271,7 @@
 | Web artifact | Behavior (1 line) | Android status | Task |
 |---|---|---|---|
 | `native_session_id` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T7.3 |
-| `cli_inventory_reset` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T7.3 |
+| `cli_inventory_reset` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T7.3 |
 | `cli_commands_changed` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T7.3 |
 | `turn_started` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.1 |
 | `user_message_accepted` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.1 |
@@ -294,11 +294,11 @@
 | `tool_output_delta` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.2 |
 | `tool_end` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.2 |
 | `approval_request` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
-| `approval_resolved` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.3 |
-| `approval_expired` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.3 |
+| `approval_resolved` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
+| `approval_expired` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
 | `question_request` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
-| `question_resolved` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.3 |
-| `question_cancelled` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.3 |
+| `question_resolved` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
+| `question_cancelled` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
 | `question_answered` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.3 |
 | `permission_denied` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.3 |
 | `cancel_requested` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.7 |
@@ -332,13 +332,13 @@
 | `task_progress` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.4 |
 | `task_completed` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.4 |
 | `background_tasks_changed` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.4 |
-| `warning` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.6 |
-| `unknown_event` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.6 |
+| `warning` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.6 |
+| `unknown_event` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.6 |
 | `subagent_message` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.4 |
 | `error` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.7 |
 | `turn_end` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.1 |
-| `background_interrupted` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.6 |
-| `background_abandoned` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.6 |
+| `background_interrupted` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.6 |
+| `background_abandoned` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.6 |
 | `external_advancement` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T6.6 |
 | `turn_interrupted` | AgentEvent: reducer fold (T2.1) + surface | MISSING | T6.6 |
 | `queued_message_added` | AgentEvent: reducer fold (T2.1) + surface | PARTIAL | T7.1 |
