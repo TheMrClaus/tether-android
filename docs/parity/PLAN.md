@@ -23,8 +23,10 @@ background catch-up) so the app behaves *better* than a browser tab on a phone.
    Flutter, no "web wrapper" of any kind. Every screen is Jetpack Compose. (Opening an
    *external* URL — e.g. a worktree service preview — in a Chrome Custom Tab is allowed,
    because that is Android's native "open link" behavior, not our UI.)
-2. **Same look.** The four web themes (`machine` default dark, `night`, `precision`,
-   `tactile`, plus "system"), the same tokens, typography (Manrope + JetBrains Mono),
+2. **Same look.** The web's theme system — **3 families × light/dark/system → 6 skins**
+   (`tactile`/`night`, `precision`/`machine`, `studio`/`studio-dark`; see
+   `hooks/use-preferences.ts`; Studio also restyles the material layer via `app/studio.css`) —
+   *(T0.5 correction: this line originally said "four themes")*, the same tokens, typography (Manrope + JetBrains Mono),
    the "Quiet Instrument" rules (`DESIGN.md`, `PRODUCT.md` in the tether repo): violet only
    for focus/selected/waiting, no gradients/glass, status never by color alone, 44dp targets.
 3. **Same behavior.** Same event folding (the `engines/events.mjs` reducer semantics), same
@@ -141,10 +143,10 @@ background catch-up) so the app behaves *better* than a browser tab on a phone.
 | D6 | Parity reference | **`PARITY_BASE = 7d65611` (tether, v128).** Parity is measured against this SHA; later tether changes go through the Catch-up Loop (§9). | You can't hit a moving target; freeze it, then roll forward in batches. |
 | D7 | Architecture | Single activity, unidirectional data flow (ViewModel → immutable UiState via StateFlow), coroutines. Gradle modules: `:app`, `:core:protocol`, `:core:reducer`, `:core:net`, `:core:data` (Room + DataStore), `:core:designsystem`, `:feature:*` (shell, sidebar, chat, composer, newsession, inspector, settings, files, usage, search, scheduled, auth). DI: keep the existing manual `ClientLocator` unless it becomes a pain (then Hilt, as a logged decision). | Modules let parallel agents work without merge fights and keep the core pure/testable. |
 | D8 | Local storage | **Room** for the journal mirror/snapshots/outbox (sync, Phase 13), **DataStore** for prefs, **Android Keystore-backed encryption** for credentials (cookie, `tthr_` device token). | Sync needs an indexed store; credentials need hardware-backed protection. |
-| D9 | Design tokens | **Generated, not hand-copied:** a tether script exports the CSS custom properties for all four themes from `app/globals.css` to JSON → a Gradle task / checked-in generator writes `Tokens.kt`. A CI check fails on drift. | 88 versions of drift happened by hand-copying. |
+| D9 | Design tokens | **Generated, not hand-copied:** a tether script exports the CSS custom properties for all 6 skins from `app/globals.css` + `app/studio.css` to JSON → a Gradle task / checked-in generator writes `Tokens.kt`. A CI check fails on drift. | 88 versions of drift happened by hand-copying. |
 | D10 | Layout classes | **Phone = web mobile layout** (the web below its mobile breakpoint). **Tablet/foldable/landscape ≥ expanded width = web desktop layout** (sidebar + chat + inspector, resizable). Use `WindowSizeClass`. | Same app on every Android form factor. |
 | D11 | Markdown & code | Native Kotlin markdown (e.g. `org.jetbrains:markdown` or commonmark-java + GFM tables/strikethrough/task lists) rendered to Compose; syntax highlighting via a Kotlin highlighter. Match `components/markdown.tsx` feature by feature. | No WebView for markdown. |
-| D12 | Login surface | Implement the **login variant(s) the web serves by default** (check `app/login/page.tsx` + `components/login/*`); pairing code + password + (later) passkeys via Credential Manager. | Parity with what the owner actually sees. |
+| D12 | Login surface | Implement the **login variant(s) the web serves by default** (check `app/login/page.tsx` + `components/login/*`); pairing code + password + (later) passkeys via Credential Manager. *T0.5: the web picks `InstrumentLogin` for the tactile/precision families, `StudioLogin` for Studio, `RetroLogin` as an opt-in — all three are in T1.4.* | Parity with what the owner actually sees. |
 | D13 | Distribution | Keep APK via GitHub Releases (+ Obtainium). Add an in-app "update available" check against the GitHub Releases API (ties into D5). | Existing pipeline; D5 banner needs a way to update. |
 
 ---
@@ -202,7 +204,7 @@ mapping, the status vocabulary, CAS guards and the worktree/sync rules are in
 
 - `./gradlew assembleDebug lint testDebugUnitTest` green (and the relevant `:module:test`).
 - New logic has unit tests; reducer/protocol changes pass the conformance corpora (§5).
-- UI tasks: a **screenshot test** (Roborazzi, JVM) per visual state in all four themes at
+- UI tasks: a **screenshot test** (Roborazzi, JVM) per visual state in all 6 skins at
   phone size (and expanded size if the surface differs), **plus a side-by-side comparison**
   against the web reference screenshot of the same seeded state (§6.2) saved under
   `docs/parity/screens/<surface>/` and linked in Evidence. Differences must be explained
@@ -256,7 +258,7 @@ mapping, the status vocabulary, CAS guards and the worktree/sync rules are in
   subagent runs, timeline, notices, rate limit, model fallback, wrap-up, handoff/read-only,
   worktree services, scheduled actions, usage, settings tabs, file browser…).
 - Script `scripts/parity-screens.mjs` (Playwright, already a tether dev dependency):
-  screenshots each scenario × theme at **Pixel-class viewport 412×915 @DPR 2.625** and at
+  screenshots each scenario × skin (all 6) at **Pixel-class viewport 412×915 @DPR 2.625** and at
   **tablet 1280×800**, into `parity-corpus/screens/web/<scenario>/<theme>-<size>.png`.
 - Android side: Roborazzi screenshots of the same scenario rendered from the same
   captured wire frames (fed through the fake client), into `docs/parity/screens/`. A small
@@ -267,8 +269,10 @@ mapping, the status vocabulary, CAS guards and the worktree/sync rules are in
 
 - Script `scripts/export-design-tokens.mjs` in tether: parse `app/globals.css`
   `:root,[data-theme]` (≈line 55) and each theme block (`machine` ≈119, `precision` ≈237,
-  `tactile` ≈352, `night` ≈468 — and the later "MATERIAL LAYER" overrides) → resolved
-  `design-tokens.json`. Android generator → `core/designsystem/.../GeneratedTokens.kt`.
+  `tactile` ≈352, `night` ≈468 — and the later "MATERIAL LAYER" overrides) **plus
+  `app/studio.css` (`studio`, `studio-dark`)** → resolved `design-tokens.json` (6 skins).
+  Note: `machine` is written as `:root, [data-theme="machine"]`, so its values are the base
+  every other skin overrides. Android generator → `core/designsystem/.../GeneratedTokens.kt`.
   CI check: regenerate + `git diff --exit-code`.
 
 ---
@@ -363,8 +367,9 @@ Phases 3–12 can partially overlap once Phases 0–2 are VERIFIED.
   (`tether.preferences.v1` → DataStore, same keys/semantics).
 
 ### Phase 3 — Design system
-- **T3.1** Generated tokens (D9) for all four themes + system; theme switcher; status/nav
-  bar colors (`--graphite` per theme, as the PWA manifest fix did).
+- **T3.1** Generated tokens (D9) for all 6 skins; family × mode switcher (+ follow system);
+  status/nav bar colors (`--graphite` per skin, as the PWA manifest fix did; `color-scheme`
+  per skin drives light/dark bar icons). Studio's material-layer restyle lands in T3.3.
 - **T3.2** Typography: Manrope + JetBrains Mono variable fonts (already in `res/font`),
   exact weights/tracking/uppercase micro-labels.
 - **T3.3** Primitives matching the web's material layer: keys (face/side/press-travel/slit),
@@ -393,7 +398,8 @@ Phases 3–12 can partially overlap once Phases 0–2 are VERIFIED.
   seen/unread (`mark-seen`, v63), running/waiting indicators (icon + text).
 - **T5.2** History/resume picker (`discover`/`histories`/`resume`).
 - **T5.3** Global search (`global-search`, v71) and in-session search (`search`).
-- **T5.4** Away digests if the web shows them.
+- **T5.4** Away digests — **confirmed on the web in T0.5** ("changed while away" digest in
+  `session-sidebar.tsx`, `lastSeen` fold) → in scope.
 
 ### Phase 6 — Chat view (largest phase; split further in T0.5 if needed)
 - **T6.1** Turn/block rendering: user/agent bubbles, streaming text, thinking blocks,
@@ -433,7 +439,8 @@ Phases 3–12 can partially overlap once Phases 0–2 are VERIFIED.
 - **T8.4** `github-work-dialog` (`/api/github/*` issues/PRs/connection device-login).
 - **T8.5** `metadata-draft-panel`, handoff brief + claim (v101–106).
 - **T8.6** `browser-pane` (`/ws-browser`) rendered natively (image/frame stream + input),
-  if the web exposes it on mobile; otherwise tablet layout only — decide in T0.5.
+  **Decided in T0.5: in scope on phone** — the web shows it as a full-screen sheet on phones
+  (`dashboard.tsx` #162), so the app does too (frames as images, never a WebView).
 
 ### Phase 9 — Inspector, usage, scheduled actions
 - **T9.1** `inspector` (all sections), `telemetry-*`.
@@ -452,8 +459,9 @@ Phases 3–12 can partially overlap once Phases 0–2 are VERIFIED.
   "fix" that).
 - **T10.5** Passkeys via Credential Manager (needs **S10.1**: server serves
   `/.well-known/assetlinks.json` for the app's signing cert; PR).
-- **T10.6** `/setup` first-run wizard parity (if the owner wants it on phone — decide in
-  T0.5; default: yes, read-mostly).
+- **T10.6** `/setup` first-run wizard parity. **Decided in T0.5: keep the default (yes)** —
+  `/setup` is a separate unauthenticated setup-server mode (`lib/setup-server.mjs`); the app
+  detects a server in setup mode and runs the wizard natively. Lowest priority of Phase 10.
 
 ### Phase 11 — Files
 - **T11.1** `workspace-file-browser` on `/api/files/*`: list, view (text/code/images),
@@ -533,5 +541,6 @@ then:
 - Release signing + FCM secrets (already repo secrets; agents shouldn't need them for debug).
 - Merging/deploying tether PRs (S0.6, S1.1, S10.1, S13.1) — production restart via
   `npm run safe-restart` by the owner.
-- Decisions flagged "decide in T0.5" (browser-pane on phone, setup wizard on phone,
-  notification quick actions).
+- ~~Decisions flagged "decide in T0.5"~~ — settled in T0.5 (browser pane: yes on phone; setup
+  wizard: yes; notification quick actions: **not in parity scope**, parked as owner opt-in
+  bead `T12.3` (`deferred`) — the owner turns it on or it stays off).

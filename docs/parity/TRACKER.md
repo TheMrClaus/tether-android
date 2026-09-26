@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 21:15 |
+| Last updated (UTC) | 2026-09-26 21:40 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,9 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** T0.1 + S0.1 are DONE, awaiting a verifier (S0.2 is gated on S0.1 `verified`).
-Next up: **T0.5** (Parity Matrix) and **T0.3** (modularize). T0.2 is **BLOCKED on the owner**
-(KVM group — see Blockers). Always start with `bd ready`.
+**Next action:** VERIFIED: T0.1, S0.1. DONE (awaiting verifier): T0.5 (matrix), S0.5 (tokens).
+IN-PROGRESS by executors in their own tether worktrees: **S0.2** (reducer/helper corpus),
+**S0.3** (wire corpus). Next for the main session: **T0.3** (modularize), then T0.4 (CI), S0.4
+(screens), S0.6 (merge S0.x → `android-parity/S0`, PR). T0.2 **BLOCKED on owner** (KVM).
+Dispatch from `bd ready` (the matrix rows are parked `deferred` and never show there).
 
 **In-flight state:** none uncommitted. Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -47,16 +49,16 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 0 — Bootstrap, baseline, parity matrix
 | ID | Task | Status | Claimed by (agent @ UTC) | Evidence | Notes |
 |---|---|---|---|---|---|
-| T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | DONE | claude-main @ 2026-09-26 20:59 | `63eca63` · `bd show` |  |
+| T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
 | T0.3 | Modularize into D7 modules (move, keep tests green) | TODO |  |  |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | TODO |  |  |  |
-| T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | TODO |  |  |  |
-| S0.1 | tether branch `android-parity/S0` | DONE | claude-main @ 2026-09-26 21:05 | `bd show` |  |
-| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | TODO |  |  |  |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | TODO |  |  |  |
+| T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | DONE | claude-main @ 2026-09-26 21:09 | `bd show` |  |
+| S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
+| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | IN-PROGRESS | executor-S0.2 @ 2026-09-26 21:12 |  | done: surveyed reducer (engines/events.mjs reduce/initialSessionState), AgentEvent union, fixtures, helper modules / half: none / files: no… |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  |  |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
-| S0.5 | `scripts/export-design-tokens.mjs` (4 themes → JSON) | TODO |  |  |  |
+| S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | DONE | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  |  |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
@@ -79,7 +81,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 3 — Design system
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T3.1 | Generated tokens, 4 themes + system, system bars | TODO |  |  |  |
+| T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | TODO |  |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | TODO |  |  |  |
 | T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | TODO |  |  |  |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
@@ -160,6 +162,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T12.1 | FCM refresh, channels, deep link, Android 13+ permission | TODO |  |  |  |
 | T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
+| T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
 ### Phase 13 — Proper sync
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -184,26 +187,27 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 
 ---
 
-## Parity Matrix (filled by T0.5 — the definition of "done")
+## Parity Matrix (built by T0.5 — the definition of "done")
 
-Seed rows below; T0.5 replaces/extends them with one row per web component, page, HTTP
-route, ClientMessage, ServerMessage and AgentEvent type at PARITY_BASE.
+**Full matrix: [`MATRIX.md`](./MATRIX.md)** (one row per web component, page, HTTP route, hook/pure
+helper, ClientMessage, ServerMessage and AgentEvent at tether `7d65611`, v128),
+data in [`matrix.json`](./matrix.json), generated by `tools/parity/build-matrix.py`. Every row is also a
+bead (`bd list -l matrix --all`), parked as `deferred` with a `task:<id>` label; when its task is done
+the maker moves the task's rows to `done`, and a different actor promotes them to `verified`.
+"Are we done" = every non-dropped matrix bead `verified`.
 
-| Web artifact | Behavior (1 line) | Android status | Task |
-|---|---|---|---|
-| `components/dashboard.tsx` | Shell, layout switching | PARTIAL (MainShell) | T4.1/T4.2 |
-| `components/session-sidebar.tsx` | Session list | PARTIAL (SessionDrawer, v40) | T5.1 |
-| `components/chat-view.tsx` | Transcript | PARTIAL (ChatScreen, v40) | T6.* |
-| `components/draft-composer.tsx` | Composer | PARTIAL (Composer, v40) | T7.1 |
-| `components/conversation-timeline.tsx` | Timeline rail | PARTIAL | T6.5 |
-| `components/subagent-runs.tsx` | Subagent runs | PARTIAL | T6.4 |
-| `components/inspector.tsx` | Inspector | MISSING | T9.1 |
-| `components/settings-dialog.tsx` | Settings | MISSING | T10.1 |
-| `components/workspace-file-browser.tsx` | File browser | MISSING | T11.1 |
-| `components/scheduled-actions-view.tsx` | Scheduled actions | MISSING | T9.3 |
-| `components/usage-dashboard.tsx` | Usage | MISSING | T9.2 |
-| `components/global-search.tsx` | Global search | MISSING | T5.3 |
-| … (T0.5 completes) | | | |
+Android status at T0.5 (app 0.5.1 / protocol 40):
+
+| Kind | Rows | MISSING | PARTIAL | DONE | N/A |
+|---|---|---|---|---|---|
+| component | 57 | 41 | 14 | 0 | 2 |
+| page | 6 | 2 | 3 | 0 | 1 |
+| route | 25 | 17 | 6 | 0 | 2 |
+| hook/helper | 21 | 8 | 13 | 0 | 0 |
+| client-msg | 67 | 47 | 20 | 0 | 0 |
+| server-msg | 41 | 28 | 13 | 0 | 0 |
+| event | 74 | 30 | 44 | 0 | 0 |
+| **total** | **291** | 173 | 113 | 0 | 5 |
 
 ---
 
@@ -219,6 +223,10 @@ route, ClientMessage, ServerMessage and AgentEvent type at PARITY_BASE.
 |---|---|---|---|
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
+| 2026-09-26 | Themes are **3 families × light/dark/system = 6 skins** (tactile/night, precision/machine, studio/studio-dark), not "four themes"; PLAN constraint 2, D9, D12, §5.3, §5.4, T3.1 edited | Web moved to a family×mode model (`hooks/use-preferences.ts`) incl. the Studio family (`app/studio.css`) | claude-main (T0.5) |
+| 2026-09-26 | T0.5 settled: browser pane **in scope on phone**; `/setup` wizard **yes** (lowest P10 priority); notification quick actions **out of parity scope** → `T12.3` deferred owner opt-in; away digest in scope (T5.4); login = instrument + studio + retro | Web behavior at `7d65611`; PLAN defaults | claude-main (T0.5) |
+| 2026-09-26 | Full matrix lives in `MATRIX.md`/`matrix.json` (generated) + one bead per row under epic `MATRIX`, rows parked `deferred`; TRACKER keeps only the summary | 291 rows don't fit a hand-kept table; bd v1.3.0 leaked `open`+blocks rows into `bd ready` | claude-main (T0.5) |
+| 2026-09-26 | Generated corpora (`parity-corpus/`) are **gitignored in tether** and vendored into the Android repo; the tether PR carries only the scripts + tests | Keeps the tether PR reviewable; Android pins the corpus by manifest SHA | claude-main |
 | 2026-09-26 | T0.1 baseline keeps Android timeline story-point limits 270/320 (owner bump in 0.5.0.1) and fixes the stale test; the web's 220/260 is flagged on T6.5 | T0.1 is "build as-is"; parity decisions belong to the surface task | claude-main |
 
 ## Session log (append-only)
@@ -227,3 +235,4 @@ route, ClientMessage, ServerMessage and AgentEvent type at PARITY_BASE.
 |---|---|---|---|---|
 | 2026-09-26 | planning session / Opus 5.5 | — | Wrote PLAN.md + TRACKER.md (uncommitted in `~/git/tether-android/docs/parity/`) | T0.1 |
 | 2026-09-26 21:15 | claude-main / Opus 5.5 | T0.1, S0.1, T0.2 | T0.1 DONE (`63eca63`, gate green 131 tests); S0.1 DONE (worktree branch); T0.2 BLOCKED (KVM) | verifier for T0.1/S0.1; T0.5, T0.3 |
+| 2026-09-26 21:40 | claude-main / Opus 5.5 (+ executor-S0.5, verifier) | T0.1, S0.1, T0.5, S0.5, S0.2, S0.3 | T0.1+S0.1 VERIFIED (verifier caught AIDASH_ env names → fixed `fed0ab1`); T0.5 DONE (291-row matrix, 6-skin correction); S0.5 DONE (`356b456`); S0.2/S0.3 running | T0.3; verify T0.5/S0.5 |

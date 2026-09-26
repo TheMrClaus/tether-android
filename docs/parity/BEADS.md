@@ -37,7 +37,7 @@ moves). Re-run it if you ever need to reconcile the file back into the store.
 | 7. Decisions | `bd comment` on the affected task; material changes also edit `PLAN.md` + the TRACKER Decision log |
 | 8. Status vocabulary | `open`(TODO) · `in_progress` · `blocked` · `review` · `done` · `verified` · `dropped` · `deferred` (owner-gated) — configured in this store, categories make `done/verified/dropped/deferred` leave `bd ready` |
 | 9. Branching | unchanged — Android `parity/<task>-<slug>` → `main`; tether `android-parity/<task>` → PR. beads never touches git branches. |
-| 10. Parity matrix | rows are beads too: `bd create "…" --parent P0 -l matrix` once T0.5 builds it, so "are we done" is `bd list -l matrix --json` |
+| 10. Parity matrix | built by T0.5: `python3 tools/parity/build-matrix.py --beads > m.jsonl && bd import -i m.jsonl` (deterministic IDs `M.<kind>.<slug>`, upsert-safe). Rows are children of epic `MATRIX` (not `P0`, so Phase 0 can close), carry `task:<id>` + a blocks-edge to it, and are **parked as `deferred`** — acceptance rows, not work items, so `bd ready` stays the work frontier. When task X is done: `bd list -l task:X -l matrix` → maker sets each to `done` with evidence → a different actor sets `verified`. "Are we done" = `bd list -l matrix --all --json`. *(A plain `open` + blocks-edge did not keep the rows out of `bd ready` reliably on v1.3.0 — 240/287 leaked — hence `deferred`.)* |
 
 **Concurrency is safe by construction.** `bd update --if-assignee X` / `--if-status X` are
 compare-and-swap guards: a lost race writes nothing and exits **13** (treat exactly like the
@@ -54,6 +54,10 @@ copies of the truth.
 
 - **beads ≠ git.** `bd dolt push` publishes `refs/dolt/data` (issue history) to `origin`; it does
   not touch `main` and creates no git commit. Do it at the same points §3 says to push the tracker.
+- **Close-guard quirk (v1.3.0):** `-s done` refuses while a blocker is `verified` (the guard only
+  honours `closed`, although `verified` is a done-category status). When *every* blocker is
+  `verified`, use `-s done --force` and say so in the evidence note. Never `--force` past a blocker
+  that is not verified.
 - **Never** `bd import` another machine's whole store, and never hand-edit `.beads/`.
 - `bd` is installed at `~/bin/bd`, **pinned v1.3.0**. The store carries a Dolt schema version with a
   forward-skew guard: **all writers upgrade together** or older binaries refuse the store. Do not

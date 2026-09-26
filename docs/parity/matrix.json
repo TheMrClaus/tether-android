@@ -1,0 +1,2043 @@
+{
+ "parityBase": "7d65611",
+ "protocolVersion": 128,
+ "rows": [
+  {
+   "kind": "component",
+   "artifact": "components/attach-sheet.tsx",
+   "behavior": "Attachment picker sheet (camera/photos/files/paste)",
+   "android": "MISSING",
+   "task": "T7.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/browser-pane.tsx",
+   "behavior": "In-console browser pane: frames as images over /ws-browser; full-screen sheet on phones",
+   "android": "MISSING",
+   "task": "T8.6"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/chat-tool-render.tsx",
+   "behavior": "Tool call cards: per-tool rendering, output, diffs",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/chat-view.tsx",
+   "behavior": "Transcript: turns, blocks, streaming, cards, notices, paging",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/claude-reset-grant-dialog.tsx",
+   "behavior": "Claude reset-grant claim dialog (v126)",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/codex-controls.tsx",
+   "behavior": "Codex session controls (sandbox/approval presets, actions)",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/codex-reset-credit-dialog.tsx",
+   "behavior": "Codex reset-credit consume dialog",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/codex-rich-renderers.tsx",
+   "behavior": "Codex-specific rich tool renderers",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/context-gauge.tsx",
+   "behavior": "Context-window usage gauge",
+   "android": "MISSING",
+   "task": "T4.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/conversation-timeline.tsx",
+   "behavior": "Timeline rail with story points + scrub",
+   "android": "PARTIAL",
+   "task": "T6.5"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/dashboard.tsx",
+   "behavior": "App shell: layout switching phone/desktop, panels, dialogs, browser pane host",
+   "android": "PARTIAL",
+   "task": "T4.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/deepseek-peak.tsx",
+   "behavior": "DeepSeek peak-hours indicator",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/draft-composer.tsx",
+   "behavior": "Composer: multiline, send/queue, drafts, attachments, controls row",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/expandable-block.tsx",
+   "behavior": "Collapsible block primitive for long output",
+   "android": "MISSING",
+   "task": "T3.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/folder-picker-dialog.tsx",
+   "behavior": "Folder picker (browse, create folder)",
+   "android": "PARTIAL",
+   "task": "T8.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/git-changes-card.tsx",
+   "behavior": "Git changes card with per-file diffs",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/github-work-dialog.tsx",
+   "behavior": "GitHub issues/PRs picker + device login",
+   "android": "MISSING",
+   "task": "T8.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/global-search.tsx",
+   "behavior": "Global search across sessions (v71)",
+   "android": "MISSING",
+   "task": "T5.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/inspector.tsx",
+   "behavior": "Session details column/sheet: telemetry, context, git, services, MCP",
+   "android": "MISSING",
+   "task": "T9.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/landing/demo-console.tsx",
+   "behavior": "Landing-page demo console — not part of the console",
+   "android": "N/A",
+   "task": "—"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/landing/landing-page.tsx",
+   "behavior": "Public marketing landing (/web) — not part of the console",
+   "android": "N/A",
+   "task": "—"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/log-dialog.tsx",
+   "behavior": "Server log dialog (log messages)",
+   "android": "MISSING",
+   "task": "T4.5"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/login/instrument-login.tsx",
+   "behavior": "Default sign-in (instrument families): password + pairing + passkey",
+   "android": "PARTIAL",
+   "task": "T1.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/login/retro-login.tsx",
+   "behavior": "Retro sign-in (per-browser opt-in variant)",
+   "android": "MISSING",
+   "task": "T1.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/login/studio-login.tsx",
+   "behavior": "Sign-in for the Studio family",
+   "android": "MISSING",
+   "task": "T1.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/markdown.tsx",
+   "behavior": "Markdown renderer (GFM, code, copy)",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/mcp-health-card.tsx",
+   "behavior": "MCP server health card",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/metadata-draft-panel.tsx",
+   "behavior": "AI-drafted title/metadata panel",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/model-browser.tsx",
+   "behavior": "Model browser popover with catalog, search, passthrough",
+   "android": "PARTIAL",
+   "task": "T7.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/nodes-settings.tsx",
+   "behavior": "Multi-host node registry settings",
+   "android": "MISSING",
+   "task": "T10.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/notice-dismiss-button.tsx",
+   "behavior": "Dismiss control for dismissable notices (v119)",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/opencode-rich-renderers.tsx",
+   "behavior": "OpenCode-specific rich tool renderers",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/opencode-serve-controls.tsx",
+   "behavior": "OpenCode serve controls",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/paired-devices.tsx",
+   "behavior": "Paired devices list/pair/revoke",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/panel-resize-handle.tsx",
+   "behavior": "Drag handles for sidebar/inspector widths, persisted",
+   "android": "MISSING",
+   "task": "T4.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/provider-logo.tsx",
+   "behavior": "Provider logos",
+   "android": "MISSING",
+   "task": "T3.5"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/repository-panel.tsx",
+   "behavior": "Repository panel: branch, changes, change request",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/scheduled-actions-view.tsx",
+   "behavior": "Scheduled actions list/create/control (v87)",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/session-dial.tsx",
+   "behavior": "Session dial control (quick session state + actions)",
+   "android": "MISSING",
+   "task": "T4.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/session-settings-sheet.tsx",
+   "behavior": "Per-session settings sheet",
+   "android": "MISSING",
+   "task": "T10.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/session-sidebar.tsx",
+   "behavior": "Session list: workspaces, pins, order, unread, away digest, actions",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/session-statusline.tsx",
+   "behavior": "Statusline under composer: model, effort, tokens, cost, wrap-up badge",
+   "android": "MISSING",
+   "task": "T4.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/settings-dialog.tsx",
+   "behavior": "Settings: all tabs (appearance, providers, ACP, advanced, server, accounts)",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/sign-in-security.tsx",
+   "behavior": "Sign-in & security: passkeys, sessions",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/studio-welcome.tsx",
+   "behavior": "Empty-state / new session welcome with catalog",
+   "android": "MISSING",
+   "task": "T8.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/subagent-runs.tsx",
+   "behavior": "Subagent run tabs/cards with nested transcript",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/telemetry-readings.tsx",
+   "behavior": "Token/cost/elapsed readings formatting and layout",
+   "android": "PARTIAL",
+   "task": "T4.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/telemetry-sheet.tsx",
+   "behavior": "Mobile bottom sheet with telemetry readings",
+   "android": "MISSING",
+   "task": "T4.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/tether-select.tsx",
+   "behavior": "Custom select primitive",
+   "android": "MISSING",
+   "task": "T3.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/todo-bar.tsx",
+   "behavior": "Todo/plan progress bar above composer",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/topbar.tsx",
+   "behavior": "Top bar: brand, session title, connection state, menu entry points",
+   "android": "PARTIAL",
+   "task": "T4.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/turn-activity.tsx",
+   "behavior": "Live turn activity line (spinner words, elapsed)",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/usage-accounts-dialog.tsx",
+   "behavior": "Usage accounts dialog / account identity",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/usage-dashboard.tsx",
+   "behavior": "Usage dashboard (/usage)",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/workspace-file-browser.tsx",
+   "behavior": "Workspace file browser over /api/files",
+   "android": "MISSING",
+   "task": "T11.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/workspace-header.tsx",
+   "behavior": "Workspace header above the chat (cwd, branch, worktree, actions)",
+   "android": "MISSING",
+   "task": "T4.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/worktree-services-card.tsx",
+   "behavior": "Worktree services (ports, open in browser)",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "page",
+   "artifact": "/",
+   "behavior": "Dashboard (console)",
+   "android": "PARTIAL",
+   "task": "T4.1"
+  },
+  {
+   "kind": "page",
+   "artifact": "/login",
+   "behavior": "Sign-in; variant by theme family (instrument/studio) or retro opt-in",
+   "android": "PARTIAL",
+   "task": "T1.4"
+  },
+  {
+   "kind": "page",
+   "artifact": "/setup",
+   "behavior": "First-run wizard (separate setup-server mode, unauthenticated)",
+   "android": "MISSING",
+   "task": "T10.6"
+  },
+  {
+   "kind": "page",
+   "artifact": "/usage",
+   "behavior": "Usage page",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "page",
+   "artifact": "/web",
+   "behavior": "Marketing landing page — not the console",
+   "android": "N/A",
+   "task": "—"
+  },
+  {
+   "kind": "page",
+   "artifact": "app/layout.tsx boot script",
+   "behavior": "Pre-paint theme resolution family×mode→skin (6 skins)",
+   "android": "PARTIAL",
+   "task": "T3.1"
+  },
+  {
+   "kind": "route",
+   "artifact": "/healthz",
+   "behavior": "Health + protocol version probe",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/ws",
+   "behavior": "Main WebSocket (Origin must match Host)",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/ws-browser",
+   "behavior": "Browser-pane frame/input stream",
+   "android": "MISSING",
+   "task": "T8.6"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/login",
+   "behavior": "Password login → cookie",
+   "android": "PARTIAL",
+   "task": "T1.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/logout",
+   "behavior": "Logout",
+   "android": "MISSING",
+   "task": "T1.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/session",
+   "behavior": "Who am I / session probe",
+   "android": "PARTIAL",
+   "task": "T1.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/sessions",
+   "behavior": "List/revoke sign-in sessions",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/passkey/login/*",
+   "behavior": "Passkey login options/verify",
+   "android": "MISSING",
+   "task": "T10.5"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/auth/passkeys (+/policy, /register/*)",
+   "behavior": "Passkey management",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/devices (list/delete)",
+   "behavior": "Paired device list/revoke (403 for device tokens by design)",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/devices/claim",
+   "behavior": "Claim pairing code → device bearer token",
+   "android": "PARTIAL",
+   "task": "T1.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/devices/pair, /api/devices/pairings",
+   "behavior": "Create/list pairing codes",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/push/fcm-config, /api/push/fcm-register",
+   "behavior": "FCM relay config + token registration",
+   "android": "PARTIAL",
+   "task": "T12.1"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/push/config, /api/push/subscriptions",
+   "behavior": "Web Push (VAPID) — browser only; native uses FCM",
+   "android": "N/A",
+   "task": "T12.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/stats",
+   "behavior": "Server stats",
+   "android": "MISSING",
+   "task": "T9.1"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/usage, /api/usage/accounts",
+   "behavior": "Usage + account identity",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/usage/claude-reset-grants/claim",
+   "behavior": "Claim Claude reset grant (v126)",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/codex/reset-credits/consume",
+   "behavior": "Consume Codex reset credit",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/claude-accounts (+/sync, /sync/run)",
+   "behavior": "Claude accounts + sync",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/files/* (list, mkdir, touch, rename, move, copy, upload, GET/HEAD/DELETE)",
+   "behavior": "Workspace file ops",
+   "android": "MISSING",
+   "task": "T11.1"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/github/* (issues, pull-requests, connection/*)",
+   "behavior": "GitHub work + device login",
+   "android": "MISSING",
+   "task": "T8.4"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/worktree/open",
+   "behavior": "Open a worktree service URL (Custom Tab on Android)",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/tool-media/",
+   "behavior": "Tool media blobs (v94)",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/setup/*",
+   "behavior": "First-run wizard API (setup-server mode)",
+   "android": "MISSING",
+   "task": "T10.6"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/control/v1",
+   "behavior": "Control API — machine-facing plane, not for the app",
+   "android": "N/A",
+   "task": "—"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-tether.ts",
+   "behavior": "Reference client: connect, seq dedupe, cursor, reconnect, visibility",
+   "android": "PARTIAL",
+   "task": "T2.3"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-preferences.ts",
+   "behavior": "Preferences (tether.preferences.v1), theme family×mode, panel widths",
+   "android": "PARTIAL",
+   "task": "T2.3"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-draft-composer.ts",
+   "behavior": "Per-session drafts (tether:draft:*)",
+   "android": "MISSING",
+   "task": "T7.1"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-keyboard-inset.ts",
+   "behavior": "Soft-keyboard inset handling",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-menu-placement.ts",
+   "behavior": "Popover placement",
+   "android": "MISSING",
+   "task": "T3.3"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-paired-devices.ts",
+   "behavior": "Paired devices data",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-push-notifications.ts",
+   "behavior": "Web push subscription (browser) — native equivalent is FCM",
+   "android": "PARTIAL",
+   "task": "T12.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-sign-in-security.ts",
+   "behavior": "Passkeys/sessions data",
+   "android": "MISSING",
+   "task": "T10.4"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "hooks/use-browser.ts",
+   "behavior": "Browser pane client",
+   "android": "MISSING",
+   "task": "T8.6"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/format.ts",
+   "behavior": "Formatters (tokens, cost, durations, paths)",
+   "android": "PARTIAL",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/model-picker.mjs (+model-id, model-browser-view)",
+   "behavior": "Model catalog/labels, looksLikeModelId, /model passthrough",
+   "android": "PARTIAL",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/pending-input.mjs",
+   "behavior": "Pending-input queue semantics + limits",
+   "android": "PARTIAL",
+   "task": "T1.3"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/conversation-story-points.ts",
+   "behavior": "Timeline story points (web limits 220/260)",
+   "android": "PARTIAL",
+   "task": "T6.5"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/sidebar-order.mjs, sidebar-workspaces.mjs, session-order.mjs, session-seen.mjs",
+   "behavior": "Sidebar grouping/order/seen fold",
+   "android": "PARTIAL",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/panel-widths.mjs",
+   "behavior": "Panel width parse/clamp",
+   "android": "MISSING",
+   "task": "T4.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/elapsed.mjs, message-time.mjs, spinner-words.mjs",
+   "behavior": "Elapsed/time/spinner-word helpers",
+   "android": "PARTIAL",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/mode-cycle.mjs, codex-mode-presets.mjs, draft-preferences.mjs",
+   "behavior": "Mode cycling, presets, applied defaults",
+   "android": "PARTIAL",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/interrupt-notice.mjs, history-origin.mjs, pending-workspace.mjs",
+   "behavior": "Interrupt notice copy, history origin, pending workspace",
+   "android": "MISSING",
+   "task": "T2.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/claude-reset-grants-view.mjs, deepseek-peak.mjs",
+   "behavior": "Usage view helpers",
+   "android": "MISSING",
+   "task": "T9.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/attachment-draft.ts, draft-form.ts",
+   "behavior": "Attachment/draft form model",
+   "android": "PARTIAL",
+   "task": "T7.4"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "app/globals.css + app/studio.css tokens",
+   "behavior": "6 skin token maps + material layer",
+   "android": "PARTIAL",
+   "task": "T3.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "hello",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "node-add",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "node-remove",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "node-probe",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "ping",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T1.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "create",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T8.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "resume",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "worktree-inspect",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "worktree-scripts",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "worktree-script",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "worktree-logs",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "worktree-diff",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "git-diff-file",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "change-request",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "discover",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "mark-seen",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-session-order",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "search",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T5.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "global-search",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T5.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "browse",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T8.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "create-folder",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "attach",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "fetch-turns",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "pin",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "rename",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "archive",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "kill",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "send",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T1.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "run-command",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "background-command",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "stop-command",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "queue-add",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "queue-edit",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "queue-remove",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "interrupt",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "dismiss-notice",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "rate-limit-resume",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "scheduled-actions",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "schedule-create",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "schedule-update",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "schedule-control",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "approval",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T6.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "question",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T6.3"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-mode",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-model",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-reasoning-effort",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-fast-mode",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-auto-continue-on-limit",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "session-controls",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "codex-controls",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "codex-control-action",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "opencode-controls",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "opencode-control-action",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "advanced-settings",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-advanced-settings",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "server-settings",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-server-settings",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "detect-engines",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "acp-agents",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "providers",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-acp-agents",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "set-providers",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "providers-snapshot",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "refresh-providers",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "metadata-draft-request",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "handoff-brief",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "handoff",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "ready",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "pong",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T1.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "log",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T4.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "version_mismatch",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "nodes",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T1.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "node-result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T10.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "created",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T8.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "session",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T5.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "histories",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T5.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "session-order",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T5.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "scheduled-actions",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T9.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "seen",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T5.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "search-results",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T5.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "global-search-results",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T5.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "directories",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T8.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "event",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T2.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "snapshot",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T1.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "turns-detail",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T6.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "approval",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "approval_resolved",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "interrupt_result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "session-controls",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T7.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "codex-controls",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "codex-control-result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "opencode-controls",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "opencode-control-result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "advanced-settings",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "server-settings",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "acp-agents",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "providers",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "providers-snapshot",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "metadata-draft-result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "metadata-draft-error",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "worktree-source",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "worktree-scripts",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "worktree-logs",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "worktree-diff",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "git-diff-file",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T6.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "change-request",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "handoff-brief",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "MISSING",
+   "task": "T8.5"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "error",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "event",
+   "artifact": "native_session_id",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "cli_inventory_reset",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "cli_commands_changed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "turn_started",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "user_message_accepted",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "command_output_started",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "command_output_delta",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "command_output_completed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T7.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "background_command_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "background_command_output",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "spawned_run_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "spawned_run_output",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "spawned_run_media",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "message_started",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "message_delta",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "message_completed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "thinking_delta",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "thinking_completed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "thinking_stop",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "tool_start",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "tool_progress",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "tool_output_delta",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "tool_end",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "approval_request",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "approval_resolved",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "approval_expired",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "question_request",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "question_resolved",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "question_cancelled",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "question_answered",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "permission_denied",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "cancel_requested",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "event",
+   "artifact": "cancelled",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "event",
+   "artifact": "process_exit",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "event",
+   "artifact": "usage",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T4.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "token_progress",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T4.3"
+  },
+  {
+   "kind": "event",
+   "artifact": "turn_activity",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "api_retry",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "rate_limit",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "fast_mode",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T7.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "limit_hit",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "rate_limit_resume_scheduled",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "rate_limit_resume_dismissed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "rate_limit_resume_fired",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "plan_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "todo_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "todo_item_created",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "todo_item_id_assigned",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "todo_item_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "diff_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "model_rerouted",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "model_fallback",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "review_started",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "review_completed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.2"
+  },
+  {
+   "kind": "event",
+   "artifact": "mcp_health_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "context_compacted",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "provider_notice",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "notice_dismissed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "task_started",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "task_progress",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "task_completed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "background_tasks_changed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "warning",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "unknown_event",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "subagent_message",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.4"
+  },
+  {
+   "kind": "event",
+   "artifact": "error",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.7"
+  },
+  {
+   "kind": "event",
+   "artifact": "turn_end",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "background_interrupted",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "background_abandoned",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "external_advancement",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "turn_interrupted",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "MISSING",
+   "task": "T6.6"
+  },
+  {
+   "kind": "event",
+   "artifact": "queued_message_added",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "queued_message_updated",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  },
+  {
+   "kind": "event",
+   "artifact": "queued_message_removed",
+   "behavior": "AgentEvent: reducer fold (T2.1) + surface",
+   "android": "PARTIAL",
+   "task": "T7.1"
+  }
+ ]
+}
