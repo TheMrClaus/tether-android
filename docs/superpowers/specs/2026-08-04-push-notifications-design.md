@@ -64,8 +64,8 @@ driven by the same event observer; the dispatch step fans out to both.
 - **`tether/lib/fcm-push.mjs`** (new, ~140 lines, mirrors
   `push-notifications.mjs`):
   - `createFcmSender({ env, implementation })` — reads
-    `AIDASH_FCM_PROJECT_ID`, `AIDASH_FCM_CLIENT_EMAIL`,
-    `AIDASH_FCM_PRIVATE_KEY` (the private key may be a path to a PEM file or
+    `TETHER_FCM_PROJECT_ID`, `TETHER_FCM_CLIENT_EMAIL`,
+    `TETHER_FCM_PRIVATE_KEY` (the private key may be a path to a PEM file or
     the raw PEM; both forms are accepted). Mints a service-account JWT
     (RS256, 1 h TTL, cached with refresh). Sends via
     `POST https://fcm.googleapis.com/v1/projects/{projectId}/messages:send`
@@ -136,9 +136,9 @@ driven by the same event observer; the dispatch step fans out to both.
 
 - **Env contract**: three new vars, added to the repo's existing
   `.env.example`/README pattern:
-  - `AIDASH_FCM_PROJECT_ID`
-  - `AIDASH_FCM_CLIENT_EMAIL`
-  - `AIDASH_FCM_PRIVATE_KEY` (path to PEM, or the raw PEM with literal `\n`)
+  - `TETHER_FCM_PROJECT_ID`
+  - `TETHER_FCM_CLIENT_EMAIL`
+  - `TETHER_FCM_PRIVATE_KEY` (path to PEM, or the raw PEM with literal `\n`)
 
   When absent, `fcmSender.configured === false`; `/api/push/fcm-config`
   reports it; the app's settings row shows "Server push not configured".

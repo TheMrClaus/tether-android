@@ -48,7 +48,7 @@ Behind a forward-auth proxy (Authelia) the browser password page is unreachable 
 Revoking a device closes its live sockets with **code 4001, reason "device revoked"**. The token is checked only at upgrade, so this is the only signal an already-connected client gets. Treat it as terminal, NOT a transient drop: clear the stored credential, stop the reconnect loop, and return to the login/pairing screen. Reconnecting with a revoked token can only spin. (Client: `RealTetherClient.handleDeviceRevoked`; keeps the base URL, drops the credential.)
 
 ### Authelia proxy alternative
-Request (HTTP or WS upgrade) is authenticated if `AIDASH_PROXY_TOKEN` is configured server-side and headers `X-Tether-Proxy-Token: <token>` AND `Remote-User: <non-empty>` are both present. OR the cookie path. Support both: cookie is primary; allow optional proxy-token config.
+Request (HTTP or WS upgrade) is authenticated if `TETHER_PROXY_TOKEN` is configured server-side and headers `X-Tether-Proxy-Token: <token>` AND `Remote-User: <non-empty>` are both present. OR the cookie path. Support both: cookie is primary; allow optional proxy-token config.
 
 ### WS upgrade requirements (CRITICAL)
 - URL: `wss://<host>/ws` (or ws:// on http). No subprotocol. No query params.
