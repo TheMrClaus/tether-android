@@ -8,11 +8,18 @@
          minSdk 34). Requested from the settings sheet the first time the user
          enables notifications. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 17 (API 37) runtime permission, NEARBY_DEVICES group. With
+         targetSdk 37 the OS blocks traffic to the local network without it, and
+         Tether servers are often self-hosted on the LAN. Requested (with an
+         in-app explanation first) only when the configured server is local, and
+         only on API 37+. Below 37 INTERNET implies local access and the
+         declaration is inert. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <application
         android:name=".TetherApp"
         android:label="@string/app_name"
-        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Tether"
         android:supportsRtl="true">
 

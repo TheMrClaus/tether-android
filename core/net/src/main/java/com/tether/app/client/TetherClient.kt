@@ -130,6 +130,15 @@ sealed interface ConnectionState {
 
     /** Server speaks a different PROTOCOL_VERSION; reconnect is disabled. */
     data class VersionMismatch(val requiredVersion: Int) : ConnectionState
+
+    /**
+     * The server is on the local network and the OS blocks that traffic until the
+     * user grants local-network access (Android 17+, see [LocalNetworkAccess]).
+     * No automatic reconnect is scheduled, because every retry would fail the same
+     * way. [TetherClient.reconnectIfIdle] (after the grant, on resume, on network
+     * change) re-evaluates.
+     */
+    data object LocalNetworkBlocked : ConnectionState
 }
 
 sealed interface LoginResult {
@@ -138,6 +147,9 @@ sealed interface LoginResult {
     data class RateLimited(val message: String) : LoginResult
     data class VersionMismatch(val requiredVersion: Int) : LoginResult
     data class Unreachable(val message: String) : LoginResult
+
+    /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
+    data object LocalNetworkBlocked : LoginResult
 }
 
 /** Outcome of [TetherClient.pair]. Sibling of [LoginResult]; see specs/protocol-spec.md §1.3. */
@@ -155,4 +167,7 @@ sealed interface PairResult {
 
     data class VersionMismatch(val requiredVersion: Int) : PairResult
     data class Unreachable(val message: String) : PairResult
+
+    /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
+    data object LocalNetworkBlocked : PairResult
 }

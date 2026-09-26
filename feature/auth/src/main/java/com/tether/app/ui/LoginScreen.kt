@@ -68,6 +68,14 @@ private const val CODE_FIELD_MAX = 12
 fun LoginScreen(
     client: TetherClient,
     versionMismatch: ConnectionState.VersionMismatch? = null,
+    /**
+     * Android 17: the server is on the local network and access is not granted.
+     * The host (UiRoot) runs the permission flow and calls [retry] once access is
+     * granted. The screen itself only reports the block.
+     */
+    onLocalNetworkBlocked: (retry: () -> Unit) -> Unit = {},
+    /** The latest attempt was not blocked, so any earlier local-network prompt is stale. */
+    onLocalNetworkClear: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val scope = rememberCoroutineScope()
@@ -98,8 +106,10 @@ fun LoginScreen(
         busy = true
         error = null
         scope.launch {
+            var blocked = false
             error = when (mode) {
                 AuthMode.Password -> when (val result = client.login(url, password)) {
+                    is LoginResult.LocalNetworkBlocked -> { blocked = true; null }
                     is LoginResult.Success -> null
                     is LoginResult.BadPassword -> result.message.ifBlank { "That password was not accepted." }
                     is LoginResult.RateLimited -> result.message.ifBlank { "Too many attempts — wait a moment and try again." }
@@ -107,6 +117,7 @@ fun LoginScreen(
                     is LoginResult.VersionMismatch -> versionCopy(result.requiredVersion)
                 }
                 AuthMode.Pairing -> when (val result = client.pair(url, code, deviceLabel)) {
+                    is PairResult.LocalNetworkBlocked -> { blocked = true; null }
                     is PairResult.Success -> null
                     is PairResult.Rejected -> result.message.ifBlank { "That pairing code is not valid or has expired." }
                     is PairResult.RateLimited -> result.message.ifBlank { "Too many pairing attempts — wait a few minutes." }
@@ -116,6 +127,10 @@ fun LoginScreen(
                 }
             }
             busy = false
+            // Blocked: the host shows the explanation / persistent notice and
+            // retries this same connect once access is granted. Never a silent
+            // failure, and never an automatic retry while access is denied.
+            if (blocked) onLocalNetworkBlocked { connect() } else onLocalNetworkClear()
         }
     }
 

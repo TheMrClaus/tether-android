@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces android:usesCleartextTraffic="true", which Android plans to
+     deprecate (Android 17 behavior changes, all apps). This preserves today's
+     policy EXACTLY and neither tightens nor loosens it:
+     - cleartext (http://) permitted for every host, because users point the app
+       at self-hosted servers, often plain HTTP on the LAN;
+     - trust anchors are the system CAs only, which is already the default for
+       targetSdk >= 24, stated here so the file is self-describing.
+     Narrowing cleartext (per-domain, or LAN-only) is a policy decision tracked
+     for T14.3. Change it there, not here. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

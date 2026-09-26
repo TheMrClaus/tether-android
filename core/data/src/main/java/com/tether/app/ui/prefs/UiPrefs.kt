@@ -25,6 +25,7 @@ class UiPrefs(context: Context) {
         val pushEnabled = booleanPreferencesKey("push_enabled")
         val pushScope = stringPreferencesKey("push_scope")
         val pushPermissionAsked = booleanPreferencesKey("push_permission_asked")
+        val localNetworkPermissionAsked = booleanPreferencesKey("local_network_permission_asked")
         // Newline-joined sets, matching pinnedProjects' pattern: paths/ids
         // can't contain newlines, and DataStore string sets are unordered.
         val pushAttachedSessions = stringPreferencesKey("push_attached_sessions")
@@ -85,6 +86,18 @@ class UiPrefs(context: Context) {
 
     suspend fun setPushPermissionAsked(value: Boolean) {
         store.edit { it[Keys.pushPermissionAsked] = value }
+    }
+
+    /**
+     * "Have we ever shown the system ACCESS_LOCAL_NETWORK dialog?" (Android 17+).
+     * Tells "never asked" apart from "denied, don't ask again": both report
+     * shouldShowRequestPermissionRationale == false, but only the second one needs
+     * the app-settings deep link.
+     */
+    val localNetworkPermissionAsked: Flow<Boolean> = store.data.map { it[Keys.localNetworkPermissionAsked] ?: false }
+
+    suspend fun setLocalNetworkPermissionAsked(value: Boolean) {
+        store.edit { it[Keys.localNetworkPermissionAsked] = value }
     }
 
     /** Session ids the device has attached to (drives the `attached` scope). */

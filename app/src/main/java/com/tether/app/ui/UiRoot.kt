@@ -5,7 +5,14 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,6 +28,11 @@ import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
 import com.tether.app.push.PushScope
 import com.tether.app.push.TetherFcmService
+import com.tether.app.ui.localnet.LocalNetworkExplainDialog
+import com.tether.app.ui.localnet.LocalNetworkNotice
+import com.tether.app.ui.localnet.LocalNetworkPhase
+import com.tether.app.ui.localnet.LocalNetworkSource
+import com.tether.app.ui.localnet.rememberLocalNetworkPrompt
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
@@ -66,6 +78,18 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
         if (configured) client.start()
     }
 
+    // Android 17 local-network permission. The client reports LocalNetworkBlocked
+    // only for a server on the local network, so remote servers never get here.
+    // The retry is reconnectIfIdle(), which re-evaluates the grant.
+    val localNetwork = rememberLocalNetworkPrompt(prefs)
+    LaunchedEffect(connection) {
+        if (connection is ConnectionState.LocalNetworkBlocked) {
+            localNetwork.onBlocked(LocalNetworkSource.Connection) { client.reconnectIfIdle() }
+        } else {
+            localNetwork.clear(LocalNetworkSource.Connection)
+        }
+    }
+
     // Lifecycle: reconnect promptly when the app returns to the foreground.
     LifecycleResumeEffect(client) {
         client.reconnectIfIdle()
@@ -95,18 +119,43 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
 
     TetherTheme(choice = themeChoice) {
         val tokens = LocalTetherTokens.current
-        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(tokens.mineral)) {
-            val needsSetup = !configured ||
-                connection is ConnectionState.AuthRequired ||
-                connection is ConnectionState.VersionMismatch
-            if (needsSetup) {
-                LoginScreen(
-                    client = client,
-                    versionMismatch = connection as? ConnectionState.VersionMismatch,
+        val phase = localNetwork.model.phase
+        Column(Modifier.fillMaxSize().background(tokens.mineral)) {
+            // Persistent denied state, above whichever screen is showing.
+            if (phase is LocalNetworkPhase.Denied) {
+                LocalNetworkNotice(
+                    canRequest = phase.canRequest,
+                    onAllow = localNetwork::onAllow,
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                 )
-            } else {
-                MainShell(vm = vm, prefs = prefs)
             }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    // The notice already cleared the status bar.
+                    .then(if (phase is LocalNetworkPhase.Denied) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
+            ) {
+                val needsSetup = !configured ||
+                    connection is ConnectionState.AuthRequired ||
+                    connection is ConnectionState.VersionMismatch
+                if (needsSetup) {
+                    LoginScreen(
+                        client = client,
+                        versionMismatch = connection as? ConnectionState.VersionMismatch,
+                        onLocalNetworkBlocked = { retry -> localNetwork.onBlocked(LocalNetworkSource.Login, retry) },
+                        onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
+                    )
+                } else {
+                    MainShell(vm = vm, prefs = prefs)
+                }
+            }
+        }
+        if (phase == LocalNetworkPhase.Explaining) {
+            LocalNetworkExplainDialog(
+                onContinue = localNetwork::onExplainContinue,
+                onNotNow = localNetwork::onExplainDismissed,
+            )
         }
     }
 }

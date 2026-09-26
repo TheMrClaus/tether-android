@@ -3,6 +3,7 @@ package com.tether.app
 import android.app.Application
 import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.RealTetherClient
+import com.tether.app.net.AndroidLocalNetworkAccess
 import com.tether.app.push.PushController
 import com.tether.app.push.TetherFcmService
 import com.tether.app.ui.ClientLocator
@@ -30,6 +31,8 @@ class TetherApp : Application() {
                 settings = settings,
                 httpClient = httpClient,
                 scope = appScope,
+                // Android 17+: tells the client when the OS blocks a LAN server.
+                localNetworkAccess = AndroidLocalNetworkAccess(context),
             )
         }
 

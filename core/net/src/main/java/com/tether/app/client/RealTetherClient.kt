@@ -62,6 +62,12 @@ private const val CLOSE_DEVICE_REVOKED = 4001
  * ```
  * Wire [reconnectIfIdle] to ConnectivityManager.NetworkCallback.onAvailable and
  * to Activity/Process lifecycle onResume. Call [stop] only on logout.
+ *
+ * [localNetworkAccess] reports the Android 17 local-network block. When it
+ * applies to the server, login/pair/connect report LocalNetworkBlocked instead of
+ * touching the network. A local host is known from the URL before any traffic;
+ * a name that turns out to resolve to a LAN address is known after a transport
+ * failure. The UI then asks for the permission.
  */
 class RealTetherClient(
     private val settings: SettingsStore,
@@ -70,6 +76,7 @@ class RealTetherClient(
     private val clock: () -> Long = System::currentTimeMillis,
     private val reconnectDelayMs: Long = 1_800,
     private val sweepIntervalMs: Long = 2_000,
+    private val localNetworkAccess: LocalNetworkAccess = LocalNetworkAccess.Unrestricted,
 ) : TetherClient {
 
     private val lock = Any()
@@ -139,11 +146,13 @@ class RealTetherClient(
     override suspend fun login(baseUrl: String, password: String): LoginResult = withContext(Dispatchers.IO) {
         val normalized = normalizeBaseUrl(baseUrl)
             ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
+        if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
 
         // 1. Cheapest pre-flight: /healthz carries protocolVersion unauthenticated.
         val health = try {
             probeHealth(normalized)
         } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
             return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
         }
         if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
@@ -160,6 +169,7 @@ class RealTetherClient(
                     .build(),
             ).execute()
         } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
             return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
         }
         loginResponse.use { response ->
@@ -189,6 +199,7 @@ class RealTetherClient(
     override suspend fun pair(baseUrl: String, code: String, label: String): PairResult = withContext(Dispatchers.IO) {
         val normalized = normalizeBaseUrl(baseUrl)
             ?: return@withContext PairResult.Unreachable("That server URL is not valid.")
+        if (blockedBeforeConnect(normalized)) return@withContext PairResult.LocalNetworkBlocked
         // Trim only. Case folding, separator stripping and U→V are the server's
         // job (lib/device-tokens.mjs normalizePairingCode) — a second copy here
         // could only drift out of agreement with it.
@@ -203,6 +214,7 @@ class RealTetherClient(
         val health = try {
             probeHealth(normalized)
         } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext PairResult.LocalNetworkBlocked
             return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
         }
         if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
@@ -228,6 +240,7 @@ class RealTetherClient(
                     .build(),
             ).execute()
         } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext PairResult.LocalNetworkBlocked
             return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
         }
         claimResponse.use { response ->
@@ -344,13 +357,30 @@ class RealTetherClient(
             base = b
             credential = c
         }
+        if (blockedBeforeConnect(base)) {
+            // Check before any local-network access (the documented pattern).
+            // No reconnect is scheduled, because it could only fail the same way.
+            // reconnectIfIdle() re-evaluates once access is granted.
+            synchronized(lock) { connecting = false }
+            connectionState.value = ConnectionState.LocalNetworkBlocked
+            return
+        }
         connectionState.value = ConnectionState.Connecting
         scope.launch(Dispatchers.IO) {
             // §5.3: check auth before each connect.
             val authenticated = try {
                 authProbe(base, credential)
-            } catch (_: IOException) {
-                synchronized(lock) { connecting = false }
+            } catch (e: IOException) {
+                val blocked = blockedAfterFailure(base, e)
+                val halted = synchronized(lock) {
+                    connecting = false
+                    stopped
+                }
+                if (blocked && !halted) {
+                    // Same as above: no reconnect loop against a blocked network.
+                    connectionState.value = ConnectionState.LocalNetworkBlocked
+                    return@launch
+                }
                 connectionState.value = ConnectionState.Disconnected
                 scheduleReconnect()
                 return@launch
@@ -821,6 +851,27 @@ class RealTetherClient(
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
+
+    /** The URL alone shows the server is local and the OS would block it: don't touch the network. */
+    private fun blockedBeforeConnect(base: HttpUrl): Boolean =
+        localNetworkAccess.isRestricted() && LocalNetworkHosts.isLocalHost(base.host)
+
+    /**
+     * A connect attempt failed at the transport level. Was it the local-network
+     * block? Covers names that resolve to a LAN address (split-horizon DNS), which
+     * [blockedBeforeConnect] cannot see. Resolves only when access is restricted
+     * and the failure is a transport one, so it adds nothing to the normal path.
+     * Must run off the main thread (every caller is on Dispatchers.IO).
+     */
+    private fun blockedAfterFailure(base: HttpUrl, error: IOException): Boolean {
+        if (!localNetworkAccess.isRestricted() || !LocalNetworkDenial.isTransportFailure(error)) return false
+        val targetIsLocal = LocalNetworkHosts.isLocalHost(base.host) || try {
+            httpClient.dns.lookup(base.host).any { LocalNetworkHosts.isLocalAddress(it.address) }
+        } catch (_: IOException) {
+            false
+        }
+        return LocalNetworkDenial.isBlockedByPermission(restricted = true, targetIsLocal = targetIsLocal, error = error)
+    }
 
     private fun normalizeBaseUrl(raw: String): HttpUrl? {
         val trimmed = raw.trim().trimEnd('/')
