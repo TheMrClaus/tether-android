@@ -1,7 +1,6 @@
 package com.tether.app.ui.chat
 
 import android.content.Context
-import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -77,12 +76,7 @@ private fun clamp(v: Float, min: Float, max: Float): Float = max(min, min(max, v
 private fun clamp(v: Int, min: Int, max: Int): Int = max(min, min(max, v))
 
 private fun getVibrator(context: Context): Vibrator? =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-    } else {
-        @Suppress("DEPRECATION")
-        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-    }
+    (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
 
 /**
  * Compact conversation index rail — Kotlin/Compose port of aidash's
@@ -117,23 +111,16 @@ fun ConversationTimeline(
     fun fireHaptic() {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // PRIMITIVE_TICK is the light, crisp step primitive — the right
-            // feel for crossing into each dot while scrubbing.
-            if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
-                v.vibrate(
-                    VibrationEffect.startComposition()
-                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f)
-                        .compose()
-                )
-            } else {
-                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 15, 20), -1))
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+        // PRIMITIVE_TICK is the light, crisp step primitive — the right
+        // feel for crossing into each dot while scrubbing.
+        if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
+            v.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f)
+                    .compose()
+            )
         } else {
-            @Suppress("DEPRECATION")
-            v.vibrate(longArrayOf(0, 20, 15, 20), -1)
+            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 15, 20), -1))
         }
     }
 

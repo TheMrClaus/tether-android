@@ -4,8 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- API 33+: runtime permission for posting notifications. Requested from
-         the settings sheet the first time the user enables notifications. -->
+    <!-- Runtime permission for posting notifications (every supported API level,
+         minSdk 34). Requested from the settings sheet the first time the user
+         enables notifications. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application

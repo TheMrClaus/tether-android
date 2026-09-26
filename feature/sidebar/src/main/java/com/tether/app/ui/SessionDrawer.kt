@@ -562,8 +562,7 @@ fun SessionDrawer(
                     .fillMaxWidth()
                     .clickable {
                         if (!pushEnabled) {
-                            val sdk = android.os.Build.VERSION.SDK_INT
-                            if (sdk >= 33 && !pushPermissionAsked) {
+                            if (!pushPermissionAsked) {
                                 permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                             } else {
                                 scope.launch { prefs.setPushEnabled(true) }
@@ -636,15 +635,13 @@ fun SessionDrawer(
             val notificationManager = remember(context) {
                 context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             }
-            val permissionGranted = if (android.os.Build.VERSION.SDK_INT >= 33) {
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.POST_NOTIFICATIONS,
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            } else true
+            val permissionGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
             val statusLine = when {
                 !pushEnabled -> "Off"
-                !permissionGranted && android.os.Build.VERSION.SDK_INT >= 33 -> "Permission required."
+                !permissionGranted -> "Permission required."
                 !notificationManager.areNotificationsEnabled() -> "Notifications disabled in system settings."
                 else -> "Notifications on"
             }
