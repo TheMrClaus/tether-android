@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 21:40 |
+| Last updated (UTC) | 2026-09-26 22:00 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,11 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED: T0.1, S0.1. DONE (awaiting verifier): T0.5 (matrix), S0.5 (tokens).
-IN-PROGRESS by executors in their own tether worktrees: **S0.2** (reducer/helper corpus),
-**S0.3** (wire corpus). Next for the main session: **T0.3** (modularize), then T0.4 (CI), S0.4
-(screens), S0.6 (merge S0.x → `android-parity/S0`, PR). T0.2 **BLOCKED on owner** (KVM).
-Dispatch from `bd ready` (the matrix rows are parked `deferred` and never show there).
+**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5. IN-PROGRESS (executors, own worktrees):
+**T0.3** (modularize, `~/git/tether-android-wt/T0.3`) and **S0.2** (reducer/helper corpus). Then the
+main session: merge T0.3 → verify → **T0.4** (CI). **BLOCKED on owner:** T0.2 (KVM) and S0.3 (→ S0.4)
+(isolated server can't boot inside `tether.service`'s cgroup) — see Blockers. Phase 1+ is gated on
+all of Phase 0 in the store, so once T0.3/T0.4/S0.2 land, the program waits on those two decisions.
+Dispatch from `bd ready` (matrix rows are parked `deferred`).
 
 **In-flight state:** none uncommitted. Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -53,7 +54,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
 | T0.3 | Modularize into D7 modules (move, keep tests green) | IN-PROGRESS | executor-T0.3 @ 2026-09-26 21:22 |  |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | TODO |  |  |  |
-| T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | DONE | claude-main @ 2026-09-26 21:09 | `bd show` |  |
+| T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | IN-PROGRESS | executor-S0.2 @ 2026-09-26 21:12 |  | done: surveyed reducer (engines/events.mjs reduce/initialSessionState), AgentEvent union, fixtures, helper modules / half: none / files: no… |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | BLOCKED | executor-S0.3 @ 2026-09-26 21:12 |  | done: fdecbe9 on android-parity/S0.3 (script + tests/capture-wire-corpus.test.mjs 5 pass/2 skip + .gitignore parity-corpus/ .next-parity/; … |
