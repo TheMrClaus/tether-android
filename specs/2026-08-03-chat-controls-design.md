@@ -1,5 +1,10 @@
 # Design: chat controls parity — mode/model selectors, slash menu, sub-agent tabs, IME fix
 
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
 Date: 2026-08-03
 Status: approved direction (user: "I want it exactly like the web version"), pending implementation plan
 
@@ -13,10 +18,10 @@ the web behaves today, plus fix the IME layout bug. Four work items:
 3. **Sub-agent tabs**: tab strip + transcript roster + per-run panel (full port).
 4. **Keyboard gap fix**: composer must sit tight above the IME.
 
-Ground truth (read in this order): `aidash/components/chat-view.tsx`,
-`aidash/components/subagent-runs.tsx`, `aidash/components/subagent-run-model.mjs`,
-`aidash/lib/protocol.ts` (`PERMISSION_MODE_OPTIONS`, `ModelOption`, `SlashCommandInfo`),
-`aidash/lib/model-id.mjs`, and this repo's `specs/visual-spec.md` (§4 "Mode row"
+Ground truth (read in this order): `tether/components/chat-view.tsx`,
+`tether/components/subagent-runs.tsx`, `tether/components/subagent-run-model.mjs`,
+`tether/lib/protocol.ts` (`PERMISSION_MODE_OPTIONS`, `ModelOption`, `SlashCommandInfo`),
+`tether/lib/model-id.mjs`, and this repo's `specs/visual-spec.md` (§4 "Mode row"
 is currently marked "May defer to v1.5" — this design implements it).
 
 Non-goal: any server or wire change. Everything below is client-side; the
@@ -206,7 +211,7 @@ tight above the keyboard. No layout code changes.
   title fallback chain; status mapping; runId shape; `steps`; usage
   null-not-0; apportioned cost (match by `model` then `canonicalModel`, share
   clamp, null cases); roster summary incl. `partial`; entries thinking filter.
-- `ModelIdTest` (new): the cases from `aidash/tests/model-id.test.mjs`.
+- `ModelIdTest` (new): the cases from `tether/tests/model-id.test.mjs`.
 - `SessionControlsModelTest` (new): default-row synthesis + labeling,
   current-marking, `composerCommandList` merge/allow-set/sort/guaranteed-model,
   `resolveModelArg` precedence.

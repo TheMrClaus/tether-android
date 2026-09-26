@@ -131,15 +131,17 @@ class ConversationStoryPointsTest {
 
     @Test
     fun longPromptIsTruncatedWithEllipsis() {
-        val longPrompt = "a".repeat(300)
-        val longReply = "b".repeat(300)
+        // Limits are 270/320 since 0.5.0.1 (wider scrub bubble). The web
+        // (lib/conversation-story-points.ts) uses 220/260 \u2014 divergence tracked in T6.5.
+        val longPrompt = "a".repeat(400)
+        val longReply = "b".repeat(400)
         val projection = projectionOf(
             turnOf("t1", listOf(userBlock("u1", longPrompt), messageBlock("a1", longReply)))
         )
         val points = storyPointsFromSession(projection)
-        assertEquals(220, points[0].prompt.length)
+        assertEquals(270, points[0].prompt.length)
         assertTrue(points[0].prompt.endsWith("\u2026"))
-        assertEquals(260, points[0].reply.length)
+        assertEquals(320, points[0].reply.length)
         assertTrue(points[0].reply.endsWith("\u2026"))
     }
 

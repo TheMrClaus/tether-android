@@ -4,6 +4,7 @@ import com.tether.app.protocol.TetherJson
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -487,4 +488,5 @@ class RealTetherClientTest {
 private fun CoroutineScope.launchCollect(
     client: RealTetherClient,
     onError: (String) -> Unit,
-) = launch { client.errors.collect { onError(it) } }
+) = // UNDISPATCHED: subscribe before returning, or a frame sent right after can be missed (no replay).
+    launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { onError(it) } }

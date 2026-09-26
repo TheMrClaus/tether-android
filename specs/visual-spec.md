@@ -1,6 +1,11 @@
 # Tether Mobile UI — Compose Port Spec (pixel-faithful)
 
-Ground truth: `aidash/app/globals.css` (tokens + component rules; the "MATERIAL LAYER" from ~line 4897 OVERRIDES base rules), `DESIGN.md`, `PRODUCT.md`, `components/{dashboard,chat-view,session-sidebar,topbar,workspace-header,turn-activity,markdown,chat-tool-render}.tsx`, `lib/format.ts`.
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
+Ground truth: `tether/app/globals.css` (tokens + component rules; the "MATERIAL LAYER" from ~line 4897 OVERRIDES base rules), `DESIGN.md`, `PRODUCT.md`, `components/{dashboard,chat-view,session-sidebar,topbar,workspace-header,turn-activity,markdown,chat-tool-render}.tsx`, `lib/format.ts`.
 Root font 16px; rem values below are ×16.
 
 ## 1. THEMES

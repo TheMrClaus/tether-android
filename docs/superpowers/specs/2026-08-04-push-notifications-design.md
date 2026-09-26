@@ -1,8 +1,13 @@
 # Push notifications — FCM relay
 
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
 **Date:** 2026-08-04
 **Status:** Approved (brainstorming complete, awaiting implementation plan)
-**Scope:** `tether-android` (app) + `aidash` (server, sibling repo at `../aidash`)
+**Scope:** `tether-android` (app) + `tether` (server, sibling repo at `../tether`)
 
 ## Goal
 
@@ -24,9 +29,9 @@ Push; add an FCM dispatch path alongside it.
 
 ## Context
 
-The server already has a Web Push subsystem (`aidash/lib/push-notifications.mjs`,
-`aidash/server.mjs` lines 79-88, 671-680, 2161-2196; `aidash/public/sw.js`;
-`aidash/hooks/use-push-notifications.ts`). It fires on three event types via
+The server already has a Web Push subsystem (`tether/lib/push-notifications.mjs`,
+`tether/server.mjs` lines 79-88, 671-680, 2161-2196; `tether/public/sw.js`;
+`tether/hooks/use-push-notifications.ts`). It fires on three event types via
 `createPushEventObserver`:
 
 - `approval_request` — `"Tether needs you" / "A <provider> session is waiting for approval."`
@@ -51,12 +56,12 @@ registration row.
 Two new subsystems, one on each side of the wire, sharing the existing
 trigger logic and payload shape.
 
-### Server (`aidash/`)
+### Server (`tether/`)
 
 A new FCM sender runs **alongside** the existing Web Push sender. Both are
 driven by the same event observer; the dispatch step fans out to both.
 
-- **`aidash/lib/fcm-push.mjs`** (new, ~140 lines, mirrors
+- **`tether/lib/fcm-push.mjs`** (new, ~140 lines, mirrors
   `push-notifications.mjs`):
   - `createFcmSender({ env, implementation })` — reads
     `AIDASH_FCM_PROJECT_ID`, `AIDASH_FCM_CLIENT_EMAIL`,
@@ -81,7 +86,7 @@ driven by the same event observer; the dispatch step fans out to both.
     defensive, bounded sizes, never log secrets. Match the style of
     `normalizePushSubscription`.
 
-- **`aidash/lib/push-notifications.mjs`** (refactor, not rewrite):
+- **`tether/lib/push-notifications.mjs`** (refactor, not rewrite):
   - `createPushEventObserver` takes both a `webPushDispatcher` and an
     `fcmDispatcher`. The `payload` construction (current lines 307-348) is
     unchanged; only the final dispatch fans out to both. The dispatcher
@@ -91,7 +96,7 @@ driven by the same event observer; the dispatch step fans out to both.
   - `pushTag`, `providerLabel`, `hasPending` stay in `push-notifications.mjs`
     and are reused by `fcm-push.mjs` (export them, no behavior change).
 
-- **`aidash/server.mjs`** wiring:
+- **`tether/server.mjs`** wiring:
   - Construct `fcmRegistrationStore` and `fcmSender` next to the existing
     `pushSubscriptionStore`/`webPushAdapter` (around lines 79-88).
   - Build an `FcmDispatcher` (new class in `fcm-push.mjs`) and pass it to
@@ -286,7 +291,7 @@ driven by the same event observer; the dispatch step fans out to both.
 
 ## Testing
 
-- **`aidash/tests/fcm-push.test.mjs`** — unit tests for:
+- **`tether/tests/fcm-push.test.mjs`** — unit tests for:
   - `FcmRegistrationStore`: upsert (create + update), `setSessions`,
     `remove`, rotation replaces-in-place, validation rejects bad
     tokens/scope/ids, `MAX_REGISTRATIONS` cap.
@@ -295,10 +300,10 @@ driven by the same event observer; the dispatch step fans out to both.
   - `FcmDispatcher.notify`: scope filtering matrix —
     `all→notify`, `attached∈→notify`, `attached∉→skip`, `pinned∈→notify`,
     `pinned∉→skip`, FCM 404/410 → prune.
-- **`aidash/tests/fcm-endpoints.test.mjs`** — HTTP tests: auth required
+- **`tether/tests/fcm-endpoints.test.mjs`** — HTTP tests: auth required
   (401), 503 when unconfigured, 400 on invalid body, 201 on create, 200 on
   update, PATCH partial update, 404 PATCH on missing row, 200 DELETE.
-  Pattern matches `aidash/tests/push-endpoints.test.mjs`.
+  Pattern matches `tether/tests/push-endpoints.test.mjs`.
 - **App** — `PushRegistrar` is tested via a `FakePushRegistrar` seam (the
   existing `FakeTetherClient` pattern in `ui/fake/`); tests cover scope
   serialization, attached-set changes, unregister on logout.

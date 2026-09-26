@@ -1,5 +1,10 @@
 # Chat Controls Parity Implementation Plan
 
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring the Android app to chat-controls parity with the mobile web app — permission-mode selector, model selector with slash-command autocomplete, sub-agent tabs — and fix the IME gap bug.
@@ -53,7 +58,7 @@ keyboard with no gap; the transcript resizes above it. (Not automatable here.)
 - Test: `app/src/test/java/com/tether/app/protocol/reduce/ModelIdTest.kt`
 - Create: `app/src/main/java/com/tether/app/protocol/reduce/ModelId.kt`
 
-- [ ] **Step 1: Write the failing test** (cases transcribed from `aidash/tests/model-id.test.mjs`)
+- [ ] **Step 1: Write the failing test** (cases transcribed from `tether/tests/model-id.test.mjs`)
 
 ```kotlin
 package com.tether.app.protocol.reduce
@@ -113,7 +118,7 @@ Expected: FAIL — `e: unresolved reference: modelsDiverge`
 package com.tether.app.protocol.reduce
 
 /**
- * Port of aidash/lib/model-id.mjs — did the model that actually served the
+ * Port of tether/lib/model-id.mjs — did the model that actually served the
  * last turn demonstrably differ from the operator-selected one?
  *
  * The two sides come from different vocabularies, so equality is judged on a
@@ -149,7 +154,7 @@ Expected: `BUILD SUCCESSFUL`
 - Create: `app/src/main/java/com/tether/app/protocol/reduce/SubagentRunModel.kt`
 - Modify: `app/src/main/java/com/tether/app/ui/util/Format.kt` (append one function)
 
-This is a line-faithful port of `aidash/components/subagent-run-model.mjs`.
+This is a line-faithful port of `tether/components/subagent-run-model.mjs`.
 Key invariants: a run's identity is `"$turnId::$blockId"`; `totalTokens` and
 `estimatedCostUSD` are **null, never 0, when unmeasured** (resumed sessions
 replay no child records — 0 would assert "cost nothing"); the apportioned cost
@@ -392,7 +397,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Pure render model for the sub-agent run tabs — Kotlin port of
- * aidash/components/subagent-run-model.mjs. A sub-agent run is an Agent/Task
+ * tether/components/subagent-run-model.mjs. A sub-agent run is an Agent/Task
  * tool block carrying a folded `subagent` thread. DERIVED from the existing
  * SessionProjection: no protocol change, no reducer change.
  *
@@ -568,7 +573,7 @@ fun subagentRosterSummary(runs: List<SubagentRun>): SubagentRosterSummary {
 Append at the end of `app/src/main/java/com/tether/app/ui/util/Format.kt`:
 
 ```kotlin
-/** aidash telemetry-readings.estimatedUSD(value, "compact"): "$1.23" / "$0.0045". */
+/** tether telemetry-readings.estimatedUSD(value, "compact"): "$1.23" / "$0.0045". */
 fun estimatedUsd(value: Double?): String {
     if (value == null || !value.isFinite()) return "—"
     val digits = if (kotlin.math.abs(value) >= 0.01) 2 else 4
@@ -600,7 +605,7 @@ Expected: `BUILD SUCCESSFUL`
 - Create: `app/src/main/java/com/tether/app/protocol/reduce/SessionControlsModel.kt`
 
 Ports of `pickerModels` / `activeModel` / `composerCommandList` /
-`resolveModelArg` from `aidash/components/chat-view.tsx` (lines 69–105,
+`resolveModelArg` from `tether/components/chat-view.tsx` (lines 69–105,
 932–971, 1093–1102). Reuses the existing wire types `SessionModelOption` and
 `SessionCommandOption` (they are field-identical to the web's `ModelOption` /
 `SlashCommandInfo`).
@@ -759,7 +764,7 @@ import com.tether.app.protocol.SessionModelOption
 import com.tether.app.protocol.model.CliCommand
 
 /**
- * Ports of the composer-controls derivations in aidash/components/chat-view.tsx
+ * Ports of the composer-controls derivations in tether/components/chat-view.tsx
  * (pickerModels / activeModel / composerCommandList / resolveModelArg). Pure:
  * no I/O, no Compose. The wire types SessionModelOption / SessionCommandOption
  * are field-identical to the web's ModelOption / SlashCommandInfo.
@@ -1151,7 +1156,7 @@ class PermissionModesTest {
     fun valuesMatchTheServerAllowSetExactly() {
         // The wire is strict (protocol-validate.mjs + engines/claude.mjs allow-set);
         // a typo here is a silently rejected frame. Keep in sync with
-        // PERMISSION_MODE_OPTIONS in aidash/lib/protocol.ts.
+        // PERMISSION_MODE_OPTIONS in tether/lib/protocol.ts.
         assertEquals(
             listOf("default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"),
             PERMISSION_MODE_OPTIONS.map { it.value },
@@ -1185,7 +1190,7 @@ package com.tether.app.ui.chat
 
 /**
  * UI-facing metadata for the permission-mode selector. Hand-synced with
- * PERMISSION_MODE_OPTIONS in aidash/lib/protocol.ts — `default` (Manual) is
+ * PERMISSION_MODE_OPTIONS in tether/lib/protocol.ts — `default` (Manual) is
  * the safe default: every gated tool prompts via the approval chips.
  */
 data class PermissionModeOption(
@@ -2716,7 +2721,7 @@ Expected: `BUILD SUCCESSFUL` for both
   launcher tool block in `FakeTetherClient.activeProjection()` is named
   `Agent` or `Task` so previews show the tab strip — rename it if not.
 - **Hand-sync discipline**: `PermissionModes.kt` carries the hand-synced copy
-  of `aidash/lib/protocol.ts` `PERMISSION_MODE_OPTIONS`; the canary is
+  of `tether/lib/protocol.ts` `PERMISSION_MODE_OPTIONS`; the canary is
   `PermissionModesTest`. If the web table changes, update both.
 - **No commits** — the repo owner commits explicitly (see the git policy note
   at the top).

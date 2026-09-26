@@ -1,12 +1,17 @@
 # Tether Wire Protocol & Auth — Kotlin Client Spec
 
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
 Ground truth (code is authoritative):
-- `aidash/lib/protocol.ts` (types, PROTOCOL_VERSION)
-- `aidash/lib/protocol-validate.mjs` (what the server ACCEPTS)
-- `aidash/server.mjs` (auth + WS upgrade + dispatch)
-- `aidash/hooks/use-tether.ts` (reference client)
-- `aidash/lib/pending-input.mjs` (durable-send constants)
-- `aidash/lib/device-tokens.mjs` (pairing codes + device tokens)
+- `tether/lib/protocol.ts` (types, PROTOCOL_VERSION)
+- `tether/lib/protocol-validate.mjs` (what the server ACCEPTS)
+- `tether/server.mjs` (auth + WS upgrade + dispatch)
+- `tether/hooks/use-tether.ts` (reference client)
+- `tether/lib/pending-input.mjs` (durable-send constants)
+- `tether/lib/device-tokens.mjs` (pairing codes + device tokens)
 
 ## 1. AUTH
 

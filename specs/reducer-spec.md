@@ -1,10 +1,15 @@
 # Tether AgentEvent Vocabulary + Pure Reducer — Kotlin Port Spec
 
+> **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
+> (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
+> lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)
+> supersedes this until the spec is refreshed. Trust the corpora (`parity-corpus/`) over this file.
+
 Ground truth (read these when in doubt — the code is authoritative):
-- `aidash/engines/events.mjs` — the pure reducer (lines 1–1618; 1620+ are provider adapters, NOT needed on Android — the server sends normalized events)
-- `aidash/lib/protocol.ts` — TS types
-- `aidash/tests/events.test.mjs` — golden behavioural tests
-- `aidash/hooks/use-tether.ts` — the browser consumer
+- `tether/engines/events.mjs` — the pure reducer (lines 1–1618; 1620+ are provider adapters, NOT needed on Android — the server sends normalized events)
+- `tether/lib/protocol.ts` — TS types
+- `tether/tests/events.test.mjs` — golden behavioural tests
+- `tether/hooks/use-tether.ts` — the browser consumer
 
 Design invariants to carry into Kotlin:
 1. The reducer is **pure**: no I/O, no clocks, no RNG, no argument mutation. Every clock reading comes from `event.ts` (journal-stamped).
