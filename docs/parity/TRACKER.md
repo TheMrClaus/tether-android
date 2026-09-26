@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 22:40 |
+| Last updated (UTC) | 2026-09-26 23:00 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,10 +24,10 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5, S0.2. DONE, verifier running: **T0.3** (`cbd6042`,
-9 modules). IN-PROGRESS: **T0.4** CI — branch `parity/T0.4-ci`, first GitHub run 36273502390; merge
-to main when green. Then remaining Phase 0 = S0.4 + S0.6 (+ S0.3, T0.2) — **BLOCKED on owner**
-(see Blockers). Phase 1+ is gated on all of Phase 0 in the store.
+**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5, S0.2. DONE, verifier running: **T0.3**
+(`cbd6042` + race fix `76b0431`) and **T0.4** (CI green on branch + main). After that, every
+remaining Phase 0 task (T0.2, S0.3, S0.4, S0.6) is **BLOCKED on the owner** (see Blockers), and
+Phase 1+ is gated on Phase 0 in the store — the program waits for those two decisions.
 
 **In-flight state:** none uncommitted. Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -50,8 +50,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
-| T0.3 | Modularize into D7 modules (move, keep tests green) | DONE | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042` · `bd show` |  |
-| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | IN-PROGRESS | claude-main @ 2026-09-26 21:35 |  | done: .github/workflows/ci.yml on branch parity/T0.4-ci (pushed, sha ebb7054); jobs: assembleDebug lint testDebugUnitTest :core:protocol:te… |
+| T0.3 | Modularize into D7 modules (move, keep tests green) | DONE | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
+| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | DONE | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
@@ -182,7 +182,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.2 | Accessibility pass | TODO |  |  |  |
 | T14.3 | Security review | TODO |  |  |  |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
-| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  |  |  |
+| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  |  | From T0.4: android-release.yml uses android-actions/setup-android@v3 with default packages, which include the retired 'tools' package -> sd… |
 
 ---
 
@@ -236,3 +236,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 | planning session / Opus 5.5 | — | Wrote PLAN.md + TRACKER.md (uncommitted in `~/git/tether-android/docs/parity/`) | T0.1 |
 | 2026-09-26 21:15 | claude-main / Opus 5.5 | T0.1, S0.1, T0.2 | T0.1 DONE (`63eca63`, gate green 131 tests); S0.1 DONE (worktree branch); T0.2 BLOCKED (KVM) | verifier for T0.1/S0.1; T0.5, T0.3 |
 | 2026-09-26 21:40 | claude-main / Opus 5.5 (+ executor-S0.5, verifier) | T0.1, S0.1, T0.5, S0.5, S0.2, S0.3 | T0.1+S0.1 VERIFIED (verifier caught AIDASH_ env names → fixed `fed0ab1`); T0.5 DONE (291-row matrix, 6-skin correction); S0.5 DONE (`356b456`); S0.2/S0.3 running | T0.3; verify T0.5/S0.5 |
+| 2026-09-26 23:00 | claude-main / Opus 5.5 (+ executors S0.2, S0.3, T0.3; verifier) | S0.2, S0.3, T0.3, T0.4 | S0.2 VERIFIED (`157b87d`); S0.3 BLOCKED (cgroup guard; script `fdecbe9` untested live); T0.3 DONE (`cbd6042`) — verifier found a real duplicate-attach race, fixed `76b0431` + deterministic regression test; T0.4 DONE (CI green); T0.5 re-verified after a matrix regex fix | owner decisions: KVM, isolated-server scope |
