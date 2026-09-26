@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 22:00 |
+| Last updated (UTC) | 2026-09-26 22:40 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,12 +24,10 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5. DONE, verifier running: **S0.2** (`157b87d`).
-IN-PROGRESS (executor, own worktree): **T0.3** (modularize, `~/git/tether-android-wt/T0.3`). Then the
-main session: merge T0.3 → verify → **T0.4** (CI). **BLOCKED on owner:** T0.2 (KVM) and S0.3 (→ S0.4)
-(isolated server can't boot inside `tether.service`'s cgroup) — see Blockers. Phase 1+ is gated on
-all of Phase 0 in the store, so once T0.3/T0.4/S0.2 land, the program waits on those two decisions.
-Dispatch from `bd ready` (matrix rows are parked `deferred`).
+**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5, S0.2. DONE, verifier running: **T0.3** (`cbd6042`,
+9 modules). IN-PROGRESS: **T0.4** CI — branch `parity/T0.4-ci`, first GitHub run 36273502390; merge
+to main when green. Then remaining Phase 0 = S0.4 + S0.6 (+ S0.3, T0.2) — **BLOCKED on owner**
+(see Blockers). Phase 1+ is gated on all of Phase 0 in the store.
 
 **In-flight state:** none uncommitted. Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -52,11 +50,11 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
-| T0.3 | Modularize into D7 modules (move, keep tests green) | IN-PROGRESS | executor-T0.3 @ 2026-09-26 21:22 |  |  |
-| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | TODO |  |  |  |
+| T0.3 | Modularize into D7 modules (move, keep tests green) | DONE | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042` · `bd show` |  |
+| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | IN-PROGRESS | claude-main @ 2026-09-26 21:35 |  | done: .github/workflows/ci.yml on branch parity/T0.4-ci (pushed, sha ebb7054); jobs: assembleDebug lint testDebugUnitTest :core:protocol:te… |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
-| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | DONE | executor-S0.2 @ 2026-09-26 21:12 |  |  |
+| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | BLOCKED | executor-S0.3 @ 2026-09-26 21:12 |  | done: fdecbe9 on android-parity/S0.3 (script + tests/capture-wire-corpus.test.mjs 5 pass/2 skip + .gitignore parity-corpus/ .next-parity/; … |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
@@ -75,7 +73,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | TODO |  |  |  |
+| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | TODO |  |  | From S0.2 verify: corpus-manifest tetherSha records the GENERATING commit (157b87d = scripts-only diff atop PARITY_BASE 7d65611). When vend… |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
 
