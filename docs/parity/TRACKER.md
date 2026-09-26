@@ -24,11 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** Owner answered the question card (2026-09-27, see Decision log). IN FLIGHT:
-**S0.3** live capture inside `systemd-run --user --scope` (executor); **T0.6** dependency refresh to
-latest stable (executor, worktree `~/git/tether-android-wt/T0.6`); release-workflow fix — `dry_run`
-run 36275738887 on branch `parity/T14.5-release-setup`. Next: S0.4 (reuses S0.3's harness) → S0.6 PR.
-T0.2 **deferred** (owner: skip emulators for now).
+**Next action:** Owner is away until morning and asked for: finish → commit → push `main` → **publish a
+new APK release** (plan: 0.6.0 / code 16 via `android-release.yml` `publish`). IN FLIGHT: T0.6 second
+half (targetSdk 37 + local-network permission + minSdk 34; security-executor, worktree
+`~/git/tether-android-wt/T0.6b`); S0.3 DONE → verifier; S0.4 web screenshots (executor, scoped server).
+After the release: S0.6 (merge S0.x → `android-parity/S0`, PR) then close Phase 0 and start Phase 1.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -54,11 +54,11 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T0.3 | Modularize into D7 modules (move, keep tests green) | VERIFIED | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | VERIFIED | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
-| T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | IN-PROGRESS | executor-T0.6 @ 2026-09-26 22:17 |  |  |
+| T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | IN-PROGRESS | executor-T0.6 @ 2026-09-26 22:17 | `bd show` | security-executor-T0.6 start (wt ~/git/tether-android-wt/T0.6b, branch parity/T0.6-sdk @1c37354): research done. Docs: developer.android.co… |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  | OWNER DECISION 2026-09-27: agents may run isolated fake-engine servers in their own transient cgroup via 'systemd-run --user --scope' (port… |
-| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | DONE | executor-S0.3 @ 2026-09-26 21:12 |  |  |
+| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
 
@@ -66,7 +66,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | TODO |  |  |  |
-| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  |  |
+| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S0.3: ServerMessage 'approval' and 'approval_resolved' are declared in lib/protocol.ts but never sent by server.mjs at 7d65611 (approv… |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.3 verify: after 76b0431 a narrower pre-existing window remains — an attach() from another thread that lands just BEFORE onReady's r… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
@@ -161,7 +161,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | TODO |  |  |  |
+| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | TODO |  |  | OWNER DECISION 2026-09-27: migrate FCM from deprecated getToken()/onNewToken() to register()/onRegistered() here (different identifier -> m… |
 | T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
 | T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
@@ -184,7 +184,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.2 | Accessibility pass | TODO |  |  |  |
 | T14.3 | Security review | TODO |  |  |  |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
-| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  |  | From T0.4: android-release.yml uses android-actions/setup-android@v3 with default packages, which include the retired 'tools' package -> sd… |
+| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
 
 ---
 
@@ -229,6 +229,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Isolated test servers run in their own transient cgroup** via `systemd-run --user --scope` (ports 4290–4299, throwaway state dirs); the #155 guard is never modified or bypassed in code | Agents run inside `tether.service`'s cgroup, where `server.mjs` rightly refuses a second server; a scope is a separate cgroup (verified) | owner |
 | 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
+| 2026-09-27 | Owner away overnight: agent works autonomously, decides on the owner's behalf (logged here), and publishes a new APK release when the SDK work lands | Owner message | owner |
 | 2026-09-27 | **targetSdk 37** with an `ACCESS_LOCAL_NETWORK` permission flow (Android 17 blocks LAN traffic otherwise); **minSdk 26 → 34 (Android 14)**; compileSdk 37 | Owner: "everything latest", Android 14 floor. targetSdk doesn't limit installs; minSdk does | owner |
 | 2026-09-27 | FCM `register()`/`onRegistered()` migration folded into **T12.1** (+ matching server PR); old API narrowly `@Suppress`ed until then | Owner answer | owner |
 | 2026-09-27 | New task **T0.6**: update every toolchain/plugin/library/CI action to its latest stable, incl. compileSdk/targetSdk | Owner request: "update everything in that app to the very latest" | owner |
