@@ -14,7 +14,7 @@
 | App version on `main` | 0.5.1 (code 15), speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |
-| Last updated (UTC) | 2026-09-26 23:00 |
+| Last updated (UTC) | 2026-09-26 23:10 |
 | Last agent | claude-main (Opus 5.5, Tether session) |
 
 > **Machine layer:** the live state of this program is the repo's **beads store** (`.beads/`,
@@ -24,12 +24,14 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5, S0.2. DONE, verifier running: **T0.3**
-(`cbd6042` + race fix `76b0431`) and **T0.4** (CI green on branch + main). After that, every
-remaining Phase 0 task (T0.2, S0.3, S0.4, S0.6) is **BLOCKED on the owner** (see Blockers), and
-Phase 1+ is gated on Phase 0 in the store — the program waits for those two decisions.
+**Next action:** ⏸ **Waiting on the owner.** VERIFIED: T0.1, T0.3, T0.4, T0.5, S0.1, S0.2, S0.5.
+Every remaining Phase 0 task is blocked on an owner decision — **T0.2** (KVM group for the emulator)
+and **S0.3** (isolated test server vs. the production cgroup guard), which also gates **S0.4**
+(web reference screenshots) and **S0.6** (the tether PR). Phase 1+ is gated on Phase 0 in the store.
+When unblocked: S0.3 run → S0.4 → S0.6 (merge `android-parity/S0.{2,3,4,5}` into
+`android-parity/S0`, keep the anchored `/parity-corpus/` ignore, PR) and T0.2 (boot AVDs, install APK).
 
-**In-flight state:** none uncommitted. Tether S* work happens in the worktree
+**In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
 `~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
 with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
@@ -50,8 +52,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T0.1 | Build `main` as-is; record breakage; mark `specs/*.md` as v40-historical, `aidash`→`tether` | VERIFIED | claude-main @ 2026-09-26 20:59 | `63eca63`, `fed0ab1` · `bd show` |  |
 | T0.2 | Toolchain: emulator pkg + system image, AVDs `tether-parity` + `tether-tablet`, 0.5.1 installs | BLOCKED | claude-main @ 2026-09-26 21:05 |  | BLOCKED: emulator refuses to boot — 'x86_64 emulation requires hardware acceleration; user doesn't have permissions to use KVM' (/dev/kvm i… |
-| T0.3 | Modularize into D7 modules (move, keep tests green) | DONE | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
-| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | DONE | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
+| T0.3 | Modularize into D7 modules (move, keep tests green) | VERIFIED | executor-T0.3 @ 2026-09-26 21:22 | `cbd6042`, `76b0431` · `bd show` |  |
+| T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | VERIFIED | claude-main @ 2026-09-26 21:35 | `1865da1` · `bd show` |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
@@ -65,7 +67,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | TODO |  |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  |  |
-| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  |  |
+| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.3 verify: after 76b0431 a narrower pre-existing window remains — an attach() from another thread that lands just BEFORE onReady's r… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
