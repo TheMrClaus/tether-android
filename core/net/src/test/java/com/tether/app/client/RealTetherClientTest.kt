@@ -187,6 +187,44 @@ class RealTetherClientTest {
     }
 
     @Test
+    fun attachRightAfterConnectedIsSentExactlyOnce() {
+        // Regression (T0.3 verify): onReady() published Connected before it snapshotted the
+        // re-attach set, so an attach() issued the instant Connected was observed went out
+        // twice. An Unconfined collector runs INSIDE onReady() at the moment Connected is
+        // published, which makes the old race deterministic.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":40}"""))
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .addHeader("Set-Cookie", "tether_session=c3; Path=/")
+                .setBody("""{"ok":true}"""),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        server.enqueue(MockResponse().withWebSocketUpgrade(wsListener))
+        server.start()
+
+        client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope)
+        val eager = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            eager.launch {
+                client.connection.first { it == ConnectionState.Connected }
+                client.attach("s1")
+            }
+            assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
+            val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
+            serverSocket.send("""{"type":"ready","protocolVersion":40,"sessions":[],"providers":[],"workspaceRoot":null}""")
+            await(client.connection) { it == ConnectionState.Connected }
+
+            val attach = nextFrame()
+            assertEquals("attach", attach["type"]!!.jsonPrimitive.content)
+            assertEquals("s1", attach["sessionId"]!!.jsonPrimitive.content)
+            val extra = serverReceived.poll(1, TimeUnit.SECONDS)
+            assertTrue("attach sent twice: $extra", extra == null)
+        } finally {
+            eager.cancel()
+        }
+    }
+
+    @Test
     fun gapTriggersExactlyOneReAttachAndSnapshotHeals() {
         server.enqueue(
             MockResponse().setResponseCode(200)

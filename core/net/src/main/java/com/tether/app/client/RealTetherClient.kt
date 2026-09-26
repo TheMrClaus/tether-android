@@ -539,7 +539,6 @@ class RealTetherClient(
         sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
         providersState.value = message.providers
         workspaceRootState.value = message.workspaceRoot
-        connectionState.value = ConnectionState.Connected
         // §5.5: re-attach every subscribed session and every session that has
         // pending outbound input, from its last good cursor.
         val toAttach: List<Pair<String, Long?>>
@@ -550,6 +549,12 @@ class RealTetherClient(
             pendingStore.records.mapTo(ids) { it.sessionId }
             toAttach = ids.map { it to tracker.cursorFor(it) }
         }
+        // Publish Connected only AFTER the re-attach set is fixed: a caller that
+        // observes Connected and then attach()es must not also be swept into the
+        // set above, or the session is attached twice (two snapshots; a gap
+        // re-attach can then be mistaken for the duplicate). Surfaced by T0.3's
+        // parallel module test runs.
+        connectionState.value = ConnectionState.Connected
         for ((sessionId, afterSeq) in toAttach) {
             sendFrame(ClientMessage.Attach(sessionId, afterSeq))
         }
