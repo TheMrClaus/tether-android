@@ -22,3 +22,15 @@ dependencyResolutionManagement {
 
 rootProject.name = "Tether"
 include(":app")
+
+// PLAN D7 modules. Package names stay `com.tether.app.*` everywhere; each
+// Android module has its own `namespace` (and therefore its own R class).
+include(":core:protocol")
+include(":core:reducer")
+include(":core:net")
+include(":core:data")
+include(":core:designsystem")
+include(":feature:auth")
+include(":feature:chat")
+include(":feature:sidebar")
+include(":feature:shell")

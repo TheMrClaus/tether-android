@@ -70,6 +70,16 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:protocol"))
+    implementation(project(":core:net"))
+    implementation(project(":core:data"))
+    implementation(project(":core:designsystem"))
+    implementation(project(":feature:auth"))
+    implementation(project(":feature:shell"))
+    // Previews.kt renders sidebar and chat components side by side.
+    implementation(project(":feature:chat"))
+    implementation(project(":feature:sidebar"))
+
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
 
