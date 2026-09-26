@@ -24,8 +24,8 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5. IN-PROGRESS (executors, own worktrees):
-**T0.3** (modularize, `~/git/tether-android-wt/T0.3`) and **S0.2** (reducer/helper corpus). Then the
+**Next action:** VERIFIED: T0.1, S0.1, T0.5, S0.5. DONE, verifier running: **S0.2** (`157b87d`).
+IN-PROGRESS (executor, own worktree): **T0.3** (modularize, `~/git/tether-android-wt/T0.3`). Then the
 main session: merge T0.3 → verify → **T0.4** (CI). **BLOCKED on owner:** T0.2 (KVM) and S0.3 (→ S0.4)
 (isolated server can't boot inside `tether.service`'s cgroup) — see Blockers. Phase 1+ is gated on
 all of Phase 0 in the store, so once T0.3/T0.4/S0.2 land, the program waits on those two decisions.
@@ -56,11 +56,11 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T0.4 | CI workflow: build + lint + unit + Roborazzi + conformance | TODO |  |  |  |
 | T0.5 | Build the full Parity Matrix (below) at PARITY_BASE; add missing T-tasks; settle "decide in T0.5" items | VERIFIED | claude-main @ 2026-09-26 21:09 | `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
-| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | IN-PROGRESS | executor-S0.2 @ 2026-09-26 21:12 |  | done: surveyed reducer (engines/events.mjs reduce/initialSessionState), AgentEvent union, fixtures, helper modules / half: none / files: no… |
+| S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | DONE | executor-S0.2 @ 2026-09-26 21:12 |  |  |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | BLOCKED | executor-S0.3 @ 2026-09-26 21:12 |  | done: fdecbe9 on android-parity/S0.3 (script + tests/capture-wire-corpus.test.mjs 5 pass/2 skip + .gitignore parity-corpus/ .next-parity/; … |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | TODO |  |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
-| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  |  |
+| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -76,7 +76,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | TODO |  |  |  |
-| T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  |  |
+| T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
 
 ### Phase 3 — Design system
