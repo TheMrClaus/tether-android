@@ -11,6 +11,8 @@ dependencies {
     api(project(":core:protocol"))
 
     testImplementation(libs.junit)
+    // T2.2: ICU collation for the localeCompare-dependent helpers (tests only; see JsCollator).
+    testImplementation(libs.icu4j)
 }
 
 // T2.1 conformance harness: the vendored parity corpus and the reference events.mjs

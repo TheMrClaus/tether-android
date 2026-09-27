@@ -1,5 +1,6 @@
 package com.tether.app.protocol.helpers
 
+import com.tether.app.protocol.fold.isNullish
 import com.tether.app.protocol.fold.jsToString
 import com.tether.app.protocol.fold.strictEquals
 import com.tether.app.protocol.tree.JsBool
@@ -55,7 +56,10 @@ object CodexModePresets {
 
     // lib/codex-mode-presets.mjs:80 — the picker value for a stored triple; "default" for anything else.
     fun codexModeForSession(session: JsValue?): String {
-        if (session !is JsObj) throw JsError("TypeError", "Cannot destructure '${jsToString(session)}' as it is ${jsToString(session)}.")
+        if (isNullish(session)) {
+            val shown = if (session == null) "undefined" else "object null"
+            throw JsError("TypeError", "Cannot destructure property 'sandboxPolicy' of '$shown' as it is ${jsToString(session)}.")
+        }
         val normalizedPolicy: JsValue = if (session["approvalPolicy"].isStr("never")) JsStr("never") else JsNull
         val normalizedReviewer = JsStr(if (session["approvalsReviewer"].isStr("auto_review")) "auto_review" else "user")
         for ((value, preset) in CODEX_MODE_PRESETS) {

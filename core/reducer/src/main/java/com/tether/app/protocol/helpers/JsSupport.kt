@@ -11,8 +11,6 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.text.Collator
-import java.util.Locale
 import kotlin.math.floor
 
 // T2.2: JavaScript semantics the pure-helper ports lean on, on top of fold/Js.kt (truthy, jsTrim,
@@ -95,15 +93,24 @@ fun jsParseInt10(input: String): Double {
 fun isIntegral(d: Double): Boolean = d.isFinite() && floor(d) == d
 
 /**
- * `a.localeCompare(b)` with the default (root/English) collation. ICU's root order and the JDK's
- * English RuleBasedCollator agree on the ASCII labels and keys the helpers compare (case and
- * accents are tie-breakers after the base letter, punctuation sorts before digits and letters).
+ * `a.localeCompare(b)` — the default ICU collator (`new Intl.Collator()`: the host locale, usage
+ * "sort", sensitivity "variant" = tertiary strength, punctuation and spaces NOT ignored, no numeric
+ * collation, caseFirst off). Collation is injected so this module stays pure JVM: Android passes an
+ * `android.icu.text.Collator` (feature/chat IcuJsCollator), JVM tests ICU4J. The JDK's
+ * java.text.Collator is NOT a substitute — it ignores '-' and ' ', so "GPT-5" and "GPT5" tie.
  */
-fun jsLocaleCompare(a: String, b: String): Int = COLLATOR.compare(a, b).coerceIn(-1, 1)
+fun interface JsCollator {
+    /** Negative, zero or positive, like `a.localeCompare(b)`. */
+    fun compare(a: String, b: String): Int
+}
 
-private val COLLATOR: Collator = Collator.getInstance(Locale.ENGLISH).apply {
-    strength = Collator.TERTIARY
-    decomposition = Collator.CANONICAL_DECOMPOSITION
+/**
+ * A destructured / defaulted options parameter (`{ a, b } = {}`): `undefined` takes the default,
+ * but JS `null` throws the TypeError the web would.
+ */
+fun requireNotJsNull(value: JsValue?, firstProperty: String): JsValue? {
+    if (value === JsNull) throw JsError("TypeError", "Cannot destructure property '$firstProperty' of 'object null' as it is null.")
+    return value
 }
 
 /** The JS `===` of two values when one side is a known string. */

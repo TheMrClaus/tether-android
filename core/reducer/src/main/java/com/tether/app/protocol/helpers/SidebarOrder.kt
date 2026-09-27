@@ -35,14 +35,15 @@ object SidebarOrder {
 
     // lib/sidebar-order.mjs:32 — newest first; ties by updatedAt desc, then key (localeCompare).
     // The web sorts IN PLACE and returns the same array; the sorted copy is returned here.
-    fun sortSidebarEntries(entries: JsArr, mode: JsValue?): JsArr {
+    // [collator] is `localeCompare` (see [JsCollator]).
+    fun sortSidebarEntries(entries: JsArr, mode: JsValue?, collator: JsCollator): JsArr {
         val key = { entry: JsValue -> jsToNumber(if (mode.isStr("last-active")) lastActiveAt(entry) else entry["createdAt"]) }
         return JsArr.of(
             entries.sortedWith { left, right ->
                 sortSign(
                     orNumber(key(right) - key(left)) {
                         orNumber(jsToNumber(right["updatedAt"]) - jsToNumber(left["updatedAt"])) {
-                            jsLocaleCompare((left["key"] as JsStr).value, (right["key"] as JsStr).value).toDouble()
+                            collator.compare((left["key"] as JsStr).value, (right["key"] as JsStr).value).toDouble()
                         }
                     },
                 )

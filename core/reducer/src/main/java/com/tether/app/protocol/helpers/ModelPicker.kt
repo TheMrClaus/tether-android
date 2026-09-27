@@ -470,6 +470,7 @@ object ModelPicker {
 
     // lib/model-picker.mjs:709 — the Inspector's `{ label, lastServed, note }` (issue #179).
     fun modelReading(options: JsValue? = null): JsObj {
+        if (options === JsNull) throw JsError("TypeError", "Cannot read properties of null (reading 'configured')")
         val configured = options["configured"] ?: JsNull
         val served = options["served"] ?: JsNull
         val fallback = options["fallback"] ?: JsNull

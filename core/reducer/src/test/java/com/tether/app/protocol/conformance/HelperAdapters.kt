@@ -44,7 +44,7 @@ import java.util.Locale
  * T2.2: the call adapters — how each recorded `fn(...args)` maps onto its Kotlin port. The corpus
  * environment is TZ=UTC (helpers that read the host zone get [UTC]); `nowMs` pins Date.now.
  * Results come back as Kotlin values and are encoded by [CanonicalJson.encodeTagged]; a JS
- * `undefined` result is returned as [Undefined].
+ * `undefined` result is returned as [Undefined]. `localeCompare` is ICU en-US ([IcuTestCollator]).
  */
 object HelperAdapters {
 
@@ -217,9 +217,9 @@ object HelperAdapters {
         reg("model-browser-view", "buildSyntheticDefaultRow") { ModelBrowserView.buildSyntheticDefaultRow(it.v(0)) }
         reg("model-browser-view", "getProviderModelRows") { ModelBrowserView.getProviderModelRows(it.v(0)) }
         reg("model-browser-view", "getAllProviderModelRows") { ModelBrowserView.getAllProviderModelRows(it.v(0)) }
-        reg("model-browser-view", "filterAndRankModelRows") { ModelBrowserView.filterAndRankModelRows(it.v(0), it.v(1)) }
+        reg("model-browser-view", "filterAndRankModelRows") { ModelBrowserView.filterAndRankModelRows(it.v(0), it.v(1), IcuTestCollator.EN_US) }
         reg("model-browser-view", "buildProviderQualifiedDescription") { undef(ModelBrowserView.buildProviderQualifiedDescription(it.v(0))) }
-        reg("model-browser-view", "resolveModelBrowserAllView") { ModelBrowserView.resolveModelBrowserAllView(it.v(0), it.v(1)) }
+        reg("model-browser-view", "resolveModelBrowserAllView") { ModelBrowserView.resolveModelBrowserAllView(it.v(0), it.v(1), IcuTestCollator.EN_US) }
         reg("model-browser-view", "resolveInitialModelBrowserView") { ModelBrowserView.resolveInitialModelBrowserView(it.v(0), it.v(1)) }
         reg("model-browser-view", "resolveSelectedModelLabel") { undef(ModelBrowserView.resolveSelectedModelLabel(it.v(0), it.v(1), it.v(2))) }
 
@@ -286,7 +286,7 @@ object HelperAdapters {
 
         // lib/sidebar-order.mjs
         reg("sidebar-order", "applySidebarOrder") { SidebarOrder.applySidebarOrder(it.arr(0), it.v(1)) }
-        reg("sidebar-order", "sortSidebarEntries") { SidebarOrder.sortSidebarEntries(it.arr(0), it.v(1)) }
+        reg("sidebar-order", "sortSidebarEntries") { SidebarOrder.sortSidebarEntries(it.arr(0), it.v(1), IcuTestCollator.EN_US) }
         reg("sidebar-order", "moveSidebarEntry") { SidebarOrder.moveSidebarEntry(it.arr(0), it.v(1), it.v(2)) }
 
         // lib/sidebar-workspaces.mjs

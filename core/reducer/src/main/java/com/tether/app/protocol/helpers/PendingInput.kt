@@ -190,6 +190,7 @@ object PendingInput {
 
     // lib/pending-input.mjs:400 — one session's records as the composer's `sending` / `waiting` rows.
     fun describePending(store: JsValue?, options: JsValue? = null): JsArr {
+        requireNotJsNull(options, "sessionId")
         val sessionId = options["sessionId"]
         val now = jsToNumber(options["now"])
         val socketOpen = truthy(options["socketOpen"])

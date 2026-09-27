@@ -63,6 +63,7 @@ object PendingWorkspace {
     // lib/pending-workspace.mjs:124 — `{ cwd, requestId, phase: "opening" | "stalled" }`, or null.
     fun describeIntent(intent: JsValue?, options: JsValue? = null): JsObj? {
         if (!truthy(intent)) return null
+        requireNotJsNull(options, "now")
         val now = jsToNumber(options["now"])
         val socketOpen = truthy(options["socketOpen"])
         val lastServerFrameAt = options["lastServerFrameAt"]?.let { jsToNumber(it) } ?: 0.0

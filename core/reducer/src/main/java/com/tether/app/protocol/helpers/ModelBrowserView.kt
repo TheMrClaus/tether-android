@@ -81,15 +81,15 @@ object ModelBrowserView {
         return null
     }
 
-    // lib/model-browser-view.mjs:84 — ranked matches; ties break by label (localeCompare).
-    fun filterAndRankModelRows(rows: JsValue?, normalizedQuery: JsValue?): JsArr {
+    // lib/model-browser-view.mjs:84 — ranked matches; ties break by label ([collator] = localeCompare).
+    fun filterAndRankModelRows(rows: JsValue?, normalizedQuery: JsValue?, collator: JsCollator): JsArr {
         val list = rows.arrOrEmpty()
         if (!truthy(normalizedQuery)) return list
         val q = jsToString(normalizedQuery)
         val scored = list.mapNotNull { row -> scoreModelRow(row, q)?.let { row to it } }
         return JsArr.of(
             scored.sortedWith { a, b ->
-                if (a.second != b.second) a.second - b.second else jsLocaleCompare(jsToString(a.first["modelLabel"]), jsToString(b.first["modelLabel"]))
+                if (a.second != b.second) a.second - b.second else collator.compare(jsToString(a.first["modelLabel"]), jsToString(b.first["modelLabel"]))
             }.map { it.first },
         )
     }
@@ -99,9 +99,9 @@ object ModelBrowserView {
         if (truthy(row["description"])) JsStr("${jsToString(row["providerLabel"])} · ${jsToString(row["description"])}") else row["providerLabel"]
 
     // lib/model-browser-view.mjs:105
-    fun resolveModelBrowserAllView(entries: JsValue?, normalizedQuery: JsValue?): JsObj {
+    fun resolveModelBrowserAllView(entries: JsValue?, normalizedQuery: JsValue?, collator: JsCollator): JsObj {
         if (!truthy(normalizedQuery)) return JsObj.of("kind" to JsStr("browse"))
-        val rows = filterAndRankModelRows(getAllProviderModelRows(entries), normalizedQuery)
+        val rows = filterAndRankModelRows(getAllProviderModelRows(entries), normalizedQuery, collator)
         if (rows.isEmpty()) return JsObj.of("kind" to JsStr("noSearchMatches"))
         return JsObj.of("kind" to JsStr("searchResults"), "rows" to rows)
     }

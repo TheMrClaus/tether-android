@@ -31,6 +31,7 @@ object SpawnMarker {
 
     // lib/spawn-marker.mjs:47 — `formatSpawnMarker({ parentSessionId, spawnKey = null } = {})`; throws on a bad id.
     fun formatSpawnMarker(options: JsValue? = null): String {
+        requireNotJsNull(options, "parentSessionId")
         val parentSessionId = options["parentSessionId"]
         val spawnKey = options["spawnKey"] ?: JsNull
         if (!isValidMarkerId(parentSessionId)) throw JsError("Error", "formatSpawnMarker: invalid parentSessionId")

@@ -120,7 +120,7 @@ object Format {
     val UTC: ZoneId = ZoneOffset.UTC
 
     // CLDR "en" short compact decimal: K (10^3), M (10^6), B (10^9), T (10^12); nothing larger, so
-    // 10^15 prints as "1000T". The value is scaled on its DECIMAL digits (as ICU does), rounded
+    // 10^15 prints as "1000T" and 10^16 as "10,000T" (min2 grouping). The value is scaled on its DECIMAL digits (as ICU does), rounded
     // half-expand to one fraction digit, and re-bucketed when rounding carries it to 1000 of a unit.
     private val SUFFIXES = listOf("", "K", "M", "B", "T")
 
@@ -132,7 +132,12 @@ object Format {
             unit += 1
             rounded = decimal.movePointLeft(3 * unit).setScale(1, RoundingMode.HALF_UP)
         }
-        val digits = rounded.stripTrailingZeros().let { if (it.scale() < 0) it.setScale(0) else it }.toPlainString()
+        val plain = rounded.stripTrailingZeros().let { if (it.scale() < 0) it.setScale(0) else it }.toPlainString()
+        // Compact notation groups with ICU's "min2" strategy: a separator only once the integer part
+        // has 5+ digits, so "1000T" but "10,000T" (only the T range can get there).
+        val integer = plain.substringBefore('.')
+        val grouped = if (integer.length >= 5) integer.reversed().chunked(3).joinToString(",").reversed() else integer
+        val digits = grouped + plain.substring(integer.length)
         // ECMA-402 signDisplay "auto": a sign for every negative number, negative zero included.
         val sign = if (value < 0 || (value == 0.0 && 1 / value < 0)) "-" else ""
         return sign + digits + SUFFIXES[unit]

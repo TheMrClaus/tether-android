@@ -2,6 +2,7 @@ package com.tether.app.protocol.helpers
 
 import com.tether.app.protocol.fold.jsToString
 import com.tether.app.protocol.fold.numberToString
+import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -51,7 +52,11 @@ object PanelWidths {
     }
 
     /** Env `{ rootFontSize?, viewportWidth? }`; a missing or non-positive reading takes the default. */
-    private fun positive(env: JsValue?, key: String): Double? = (env[key] as? JsNum)?.value?.takeIf { it > 0 }
+    private fun positive(env: JsValue?, key: String): Double? {
+        // `env = {}` only covers undefined; `null.rootFontSize` throws on the web.
+        if (env === JsNull) throw JsError("TypeError", "Cannot read properties of null (reading '$key')")
+        return (env[key] as? JsNum)?.value?.takeIf { it > 0 }
+    }
 
     // lib/panel-widths.mjs:81
     fun panelWidthBounds(kind: JsValue?, env: JsValue? = null): JsObj {
