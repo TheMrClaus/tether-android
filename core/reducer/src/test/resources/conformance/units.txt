@@ -65,21 +65,23 @@ case native-session-id-with-initial       A  ready
 case cancel-interrupted                   A  pending
 
 # ---- B: interaction and notices ----
+# The 4 B cases still pending fold unit A's tool_start/tool_end/user_message_accepted (their
+# first red path is turnsById.*.blocks); B's own arms go green on them once A lands.
 case approval-choices-metadata            B  pending
 case approval-legacy-decision-and-expiry  B  ready
 case question-flow                        B  pending
 case permission-denials                   B  pending
 case queued-messages                      B  pending
-case turn-interrupted-cap                 B  pending
-case dismissed-notices-cap                B  pending
-case session-notices-and-dismiss          B  pending
-case provider-notices-and-dismiss         B  pending
-case external-advancement                 B  pending
+case turn-interrupted-cap                 B  ready
+case dismissed-notices-cap                B  ready
+case session-notices-and-dismiss          B  ready
+case provider-notices-and-dismiss         B  ready
+case external-advancement                 B  ready
 case rate-limit-grace                     B  ready
-case rate-limit-resume-flow               B  pending
+case rate-limit-resume-flow               B  ready
 case rate-limit-resume-guards             B  ready
-case limit-hit-resume-now                 B  pending
-case fast-mode                            B  pending
+case limit-hit-resume-now                 B  ready
+case fast-mode                            B  ready
 
 # ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
 case cli-inventory                        C  pending

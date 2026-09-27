@@ -4,7 +4,9 @@ import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
+import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
+import com.tether.app.protocol.tree.arr
 import com.tether.app.protocol.tree.js
 import com.tether.app.protocol.tree.num
 import com.tether.app.protocol.tree.obj
@@ -14,17 +16,207 @@ import com.tether.app.protocol.tree.str
 // 2517-2563; permission_denied 2072-2111 with 1278-1346; queued messages 2863-2900; rate
 // limit, fast mode and resume 1665-1763 with 1184-1255.
 //
-// H1 seeded the cases its acceptance cases (run-bookkeeping, api-retry) drive —
-// approval_request (+ its 635-728 normalizers), approval_resolved/expired, question_request,
-// question_resolved/cancelled, rate_limit (+ clearRateLimitGrace, eventTs,
-// offerRateLimitResume) — ported in full. Every other label falls to `else` until unit B.
+// H1 seeded approval_request (+ its 635-728 normalizers), approval_resolved/expired,
+// question_request, question_resolved/cancelled and rate_limit (+ clearRateLimitGrace, eventTs,
+// offerRateLimitResume); unit B ported the rest.
 internal fun foldInteraction(state: JsObj, event: JsObj, type: String): JsObj = when (type) {
     "rate_limit" -> foldRateLimit(state, event)
+    "fast_mode" -> foldFastMode(state, event)
+    "limit_hit" -> foldLimitHit(state, event)
+    "rate_limit_resume_scheduled" -> foldResumeScheduled(state, event)
+    "rate_limit_resume_dismissed" -> foldResumeDismissed(state, event)
+    "rate_limit_resume_fired" -> foldResumeFired(state, event)
+    "permission_denied" -> foldPermissionDenied(state, event)
     "approval_request" -> foldApprovalRequest(state, event)
     "question_request" -> foldQuestionRequest(state, event)
     "question_resolved", "question_cancelled" -> foldQuestionClosed(state, event)
+    "question_answered" -> foldQuestionAnswered(state, event)
     "approval_resolved", "approval_expired" -> foldApprovalClosed(state, event)
-    else -> state // not yet ported (unit B)
+    "queued_message_added" -> foldQueuedAdded(state, event)
+    "queued_message_updated" -> foldQueuedUpdated(state, event)
+    "queued_message_removed" -> foldQueuedRemoved(state, event)
+    else -> state
+}
+
+// events.mjs:1696
+private fun foldFastMode(state: JsObj, event: JsObj): JsObj {
+    val disabledReason = event["disabledReason"].orJsNull()
+    if (strictEquals(state["fastModeState"], event["state"]) &&
+        strictEquals(state["fastModeDisabledReason"], disabledReason)
+    ) {
+        return state
+    }
+    return state.with("fastModeState" to event["state"], "fastModeDisabledReason" to disabledReason)
+}
+
+// events.mjs:1707
+private fun foldLimitHit(state: JsObj, event: JsObj): JsObj {
+    val offered = offerRateLimitResume(
+        state,
+        resetsAt = event["resetAt"],
+        limitType = event["limitType"],
+        stampedNow = eventTs(event),
+    ) ?: return state
+    return state.put("rateLimitResume", offered)
+}
+
+// events.mjs:1730
+private fun foldResumeScheduled(state: JsObj, event: JsObj): JsObj {
+    val current = state["rateLimitResume"]
+    if (!truthy(current) || current !is JsObj) return state
+    val resumeAt = event["resumeAt"]
+    if (!strictEquals(current["resetsAt"], event["resetsAt"]) ||
+        current["status"].str != "awaiting_choice" ||
+        !isFiniteNumber(resumeAt) ||
+        // `event.resetsAt + DELAY`: resetsAt is a number here (it === current.resetsAt).
+        resumeAt.num != (event["resetsAt"].num ?: Double.NaN) + Limits.RATE_LIMIT_RESUME_DELAY_MS
+    ) {
+        return state
+    }
+    return state.put(
+        "rateLimitResume",
+        JsObj.of(
+            "status" to js("scheduled"),
+            "resetsAt" to event["resetsAt"],
+            "resumeAt" to resumeAt,
+            "limitType" to (if (truthy(current["limitType"])) current["limitType"] else null),
+        ),
+    )
+}
+
+// events.mjs:1747
+private fun foldResumeDismissed(state: JsObj, event: JsObj): JsObj {
+    val current = state["rateLimitResume"]
+    if (!truthy(current) || current !is JsObj) return state
+    if (!strictEquals(current["resetsAt"], event["resetsAt"]) || current["status"].str == "fired") return state
+    return state.put("rateLimitResume", current.put("status", js("dismissed")))
+}
+
+// events.mjs:1753
+private fun foldResumeFired(state: JsObj, event: JsObj): JsObj {
+    val current = state["rateLimitResume"]
+    if (!truthy(current) || current !is JsObj) return state
+    val status = current["status"].str
+    if (!strictEquals(current["resetsAt"], event["resetsAt"]) || (status != "scheduled" && status != "awaiting_choice")) {
+        return state
+    }
+    return state.put("rateLimitResume", current.put("status", js("fired")))
+}
+
+// events.mjs:1278
+private fun samePermissionDenial(a: JsObj, b: JsObj): Boolean =
+    strictEquals(a["toolId"], b["toolId"]) &&
+        strictEquals(a["name"], b["name"]) &&
+        strictEquals(a["reason"], b["reason"]) &&
+        strictEquals(a["reasonCode"].orJsNull(), b["reasonCode"].orJsNull()) &&
+        strictEquals(a["error"].orJsNull(), b["error"].orJsNull()) &&
+        truthy(a["subagent"]) == truthy(b["subagent"])
+
+// events.mjs:1290
+private fun upsertPermissionDenial(denials: JsArr, denial: JsObj): JsArr {
+    val index = denials.indexOfFirst { strictEquals(it.obj?.get("toolId"), denial["toolId"]) }
+    if (index == -1) return denials.add(denial)
+    val existing = denials[index].obj!!
+    var enriched = existing.with(
+        "name" to jsOr(denial["name"], existing["name"]),
+        "reason" to (if (strictEquals(existing["reason"], JsStr("unknown"))) denial["reason"] else existing["reason"]),
+    )
+    if (truthy(existing["reasonCode"]) || truthy(denial["reasonCode"])) {
+        enriched = enriched.put("reasonCode", coalesce(existing["reasonCode"], denial["reasonCode"]))
+    }
+    if (truthy(existing["error"]) || truthy(denial["error"])) {
+        enriched = enriched.put("error", coalesce(existing["error"], denial["error"]))
+    }
+    if (truthy(existing["subagent"]) || truthy(denial["subagent"])) enriched = enriched.put("subagent", JsBool.TRUE)
+    if (samePermissionDenial(existing, enriched)) return denials
+    return denials.set(index, enriched)
+}
+
+// events.mjs:1320
+private fun permissionDenialReasonCode(value: JsValue?): String? {
+    val s = value.str ?: return null
+    return if (Limits.PERMISSION_DENIAL_REASON_CODE.matches(s)) s else null
+}
+
+// events.mjs:2072
+private fun foldPermissionDenied(state: JsObj, event: JsObj): JsObj {
+    val reasonCode = permissionDenialReasonCode(event["reasonCode"])
+    val error = boundedDisplayText(event["error"], Limits.PROVIDER_PROJECTION_LIMITS.proseChars)
+    val reason = event["reason"].str
+    val denial = JsObj.of(
+        "toolId" to event["toolId"],
+        "name" to event["name"],
+        "reason" to js(if (reason != null && reason in Limits.PERMISSION_DENIAL_REASON_VALUES) reason else "unknown"),
+        "reasonCode" to jsOrUndefined(reasonCode?.takeIf { it.isNotEmpty() }),
+        "error" to jsOrUndefined(error?.takeIf { it.isNotEmpty() }),
+        "subagent" to (if (event["subagent"] === JsBool.TRUE) JsBool.TRUE else null),
+    )
+    val turnId = event["turnId"]
+    if (isNullish(turnId) || !state["turnsById"].obj!!.has(jsToString(turnId))) {
+        val current = state["unattributedPermissionDenials"].arr!!
+        val permissionDenials = upsertPermissionDenial(current, denial)
+        if (permissionDenials === current) return state
+        return state.put("unattributedPermissionDenials", permissionDenials)
+    }
+    return updateTurnById(state, turnId) { turn ->
+        val current = turn["permissionDenials"].arr!!
+        val permissionDenials = upsertPermissionDenial(current, denial)
+        if (permissionDenials === current) turn else turn.put("permissionDenials", permissionDenials)
+    }
+}
+
+// events.mjs:2540
+private fun foldQuestionAnswered(state: JsObj, event: JsObj): JsObj {
+    if (!isOpenCurrentTurn(state, event["turnId"])) return state
+    val items = event["items"] as? JsArr ?: JsArr.EMPTY
+    return updateTurn(state) { turn ->
+        val existing = turn["answeredQuestions"] as? JsArr ?: JsArr.EMPTY
+        if (existing.any { strictEquals(it.obj?.get("requestId"), event["requestId"]) }) {
+            turn
+        } else {
+            val answered = JsObj.of(
+                "requestId" to event["requestId"],
+                "toolId" to event["toolId"],
+                "items" to items,
+                "response" to (if (truthy(event["response"])) event["response"] else null),
+            )
+            turn.put("answeredQuestions", existing.add(answered))
+        }
+    }
+}
+
+private fun hasQueueId(state: JsObj, queueId: JsValue?): Boolean =
+    state["queuedMessages"].arr!!.any { strictEquals(it.obj?.get("queueId"), queueId) }
+
+// events.mjs:2863
+private fun foldQueuedAdded(state: JsObj, event: JsObj): JsObj {
+    if (hasQueueId(state, event["queueId"])) return state
+    val message = JsObj.of(
+        "queueId" to event["queueId"],
+        "text" to event["text"],
+        "flushMode" to (if (truthy(event["flushMode"])) event["flushMode"] else null),
+    )
+    return state.put("queuedMessages", state["queuedMessages"].arr!!.add(message))
+}
+
+// events.mjs:2878
+private fun foldQueuedUpdated(state: JsObj, event: JsObj): JsObj {
+    if (!hasQueueId(state, event["queueId"])) return state
+    var queued = state["queuedMessages"].arr!!
+    for (i in queued.indices) {
+        val m = queued[i]
+        if (strictEquals(m.obj?.get("queueId"), event["queueId"])) queued = queued.set(i, m.obj!!.put("text", event["text"]))
+    }
+    return state.put("queuedMessages", queued)
+}
+
+// events.mjs:2888
+private fun foldQueuedRemoved(state: JsObj, event: JsObj): JsObj {
+    if (!hasQueueId(state, event["queueId"])) return state
+    return state.put(
+        "queuedMessages",
+        state["queuedMessages"].arr!!.filterKeep { !strictEquals(it.obj?.get("queueId"), event["queueId"]) },
+    )
 }
 
 // events.mjs:1665
