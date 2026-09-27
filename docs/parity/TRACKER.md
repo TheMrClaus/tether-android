@@ -24,11 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4 (auth + Keystore creds, `c855d02`), T2.1, T2.1D, T2.2,
-T3.1. Owner action pending: merge + deploy **tether#197** (S1.1, v129) — `main` speaks 129, so **no
-release until it's deployed**; next release notes must mention that pre-T1.4 backups may hold the old
-plaintext credential file. IN FLIGHT (own worktrees): **T1.3** durable send; **T2.3** prefs + drafts;
-**T3.2** typography; **S0.4** sidebar-order determinism fix. Next: T1.5 (after T1.3), S0.6 PR, T3.3–T3.5.
+**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4, T2.1, T2.1D, T2.2, T3.1, T3.2 (`823d7d8`). Owner action
+pending: merge + deploy **tether#197** (S1.1, v129) — `main` speaks 129, so **no release until it's
+deployed**; next release notes must mention pre-T1.4 backups may hold the old plaintext credential file.
+IN FLIGHT: **T1.3** durable send (DONE → verifier); **T2.3** prefs + drafts (DONE → verifier); **T3.3**
+primitives + Roborazzi infra; **T3.5** icons/provider logos/app icon; **S0.4** sidebar-order fix.
+Next: merge T1.3/T2.3 → T1.5 nodes → S0.6 PR; T3.4 gallery after T3.3; then Phase 4 shell.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -68,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
-| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
+| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
@@ -78,16 +79,16 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 02:17 |  |  |
-| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
+| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
 
 ### Phase 3 — Design system
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
-| T3.2 | Typography (Manrope, JetBrains Mono) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | TODO |  |  | From T3.1: draw generated shadow lists (bevels/wells/bezel/keys incl. inset layers); use per-skin radii (TetherDimens.radius* only holds ba… |
+| T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | From T3.2: TetherWeights.body is 500 but web body is 400 -> migrate screens to TetherTypography roles; tablet (>=48rem) type sizes not mode… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
-| T3.5 | Icons, provider logos, adaptive app icon | TODO |  |  |  |
+| T3.5 | Icons, provider logos, adaptive app icon | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  |  |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -120,7 +121,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T7.1 | Draft composer, persisted drafts, queue UI | TODO |  |  |  |
+| T7.1 | Draft composer, persisted drafts, queue UI | TODO |  |  | From T1.3: pending-status rows via helpers.PendingInput.describePending(PendingStore.tree); no failed-send list/retract yet (abandoned reco… |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | TODO |  |  |  |
 | T7.3 | Slash commands, run/background command, mentions | TODO |  |  |  |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
@@ -172,7 +173,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | TODO |  |  |  |
 | T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  |  |
 | T13.2 | Offline mode + stale indicators | TODO |  |  |  |
-| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  |  |
+| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | From T1.3: PendingInput facade has no mention parameter; a queue item removed on another device can still be resent (web has the same gap);… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | TODO |  |  |  |
 | T13.4 | FCM hint → WorkManager catch-up | TODO |  |  |  |
 | T13.5 | Cache policy, eviction, migrations | TODO |  |  |  |
@@ -182,7 +183,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T14.1 | Performance + Baseline Profiles | TODO |  |  | DECISION: FoldAdapterStressTest p99<2ms bar is now OPT-IN (-Pparity.perfAssert=true) — wall-clock assertions flake under load in the defaul… |
-| T14.2 | Accessibility pass | TODO |  |  |  |
+| T14.2 | Accessibility pass | TODO |  |  | From T3.2: CSS text-transform:uppercase keeps the ORIGINAL words as the accessible name; native uppercase labels must set contentDescriptio… |
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
 | T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
