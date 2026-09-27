@@ -16,9 +16,15 @@ fun interface FirebaseTokenProvider {
     /** Production binding: delegates to [FirebaseMessaging.getInstance().token]. */
     companion object Default : FirebaseTokenProvider {
         // firebase-messaging 25.1.0 deprecated getToken/onNewToken in favour of
-        // FID-based register()/onRegistered(). Migrating changes the identifier
-        // the Tether server pushes to, so it is a server-coordinated change, not
-        // part of the dependency refresh; the token API still works.
+        // register()/onRegistered(). T12.1 checked 25.1.3 (BOM 34.19.0):
+        // register() returns Task<Void> and hands the identifier only to
+        // FirebaseMessagingService.onRegistered(String). It needs the manifest
+        // meta-data firebase_messaging_installation_id_enabled=true, and that
+        // same flag makes getToken() fail. On Play services 26.12 or newer, the
+        // identifier is the Firebase Installation ID, not an FCM registration
+        // token; older Play services fall back to a legacy token. The server
+        // sends to `message.token`, so the switch waits on a server S-task. The
+        // token API still works until then.
         @Suppress("DEPRECATION")
         override suspend fun token(): String? = try {
             // token() returns a Task<String>; await it off the IO dispatcher.
