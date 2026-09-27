@@ -385,7 +385,7 @@ private fun LabeledRow(label: String, labelWidth: Int, content: @Composable (Mod
 }
 
 @Composable
-private fun MonoText(text: String, color: Color, fontSize: TextUnit = 12.sp, modifier: Modifier = Modifier) {
+private fun MonoText(text: String, color: Color, modifier: Modifier = Modifier, fontSize: TextUnit = 12.sp) {
     Text(text = text, color = color, fontFamily = JetBrainsMono, fontSize = fontSize, modifier = modifier)
 }
 
@@ -445,12 +445,12 @@ private fun InstrumentLogin(ui: LoginUi) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MonoText("tether › sign-in", t.faint, 11.sp)
+                MonoText("tether › sign-in", t.faint, fontSize = 11.sp)
                 Spacer(Modifier.weight(1f))
                 // Status is the label AND the dot, never colour alone.
                 StatusDot(color = statusColor)
                 Spacer(Modifier.width(6.dp))
-                MonoText(statusLabel, t.muted, 11.sp)
+                MonoText(statusLabel, t.muted, fontSize = 11.sp)
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             Column(
@@ -471,10 +471,10 @@ private fun InstrumentLogin(ui: LoginUi) {
                         val key = line.substringBefore(" · ")
                         val value = line.substringAfter(" · ", "")
                         Row {
-                            MonoText(key, t.faint, 11.5.sp)
+                            MonoText(key, t.faint, fontSize = 11.5.sp)
                             if (value.isNotEmpty()) {
-                                MonoText(" · ", t.faint, 11.5.sp)
-                                MonoText(value, t.ink, 11.5.sp)
+                                MonoText(" · ", t.faint, fontSize = 11.5.sp)
+                                MonoText(value, t.ink, fontSize = 11.5.sp)
                             }
                         }
                     }
@@ -514,7 +514,7 @@ private fun InstrumentLogin(ui: LoginUi) {
                                 )
                             }
                         }
-                        MonoText(PAIRING_HELP, t.muted, 11.5.sp)
+                        MonoText(PAIRING_HELP, t.muted, fontSize = 11.5.sp)
                     }
                 }
 
@@ -590,7 +590,7 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false) {
                 fontWeight = TetherWeights.body,
                 fontSize = 14.sp,
             )
-            MonoText("Your agents · Your workspace · Anywhere", t.faint, 11.sp)
+            MonoText("Your agents · Your workspace · Anywhere", t.faint, fontSize = 11.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Lucide.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
@@ -678,7 +678,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Lucide.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
             Text("Your private workspace", color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
-            if (ui.hostname.isNotEmpty()) MonoText(ui.hostname, t.faint, 11.5.sp)
+            if (ui.hostname.isNotEmpty()) MonoText(ui.hostname, t.faint, fontSize = 11.5.sp)
         }
         Spacer(Modifier.height(8.dp))
         Text("One private console. Every agent.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
@@ -725,7 +725,7 @@ private fun RetroLogin(ui: LoginUi, studio: Boolean) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         bootLines.forEachIndexed { index, line ->
-            MonoText(line, if (index == 0) t.white else t.ink, if (index == 0) 15.sp else 12.5.sp)
+            MonoText(line, if (index == 0) t.white else t.ink, fontSize = if (index == 0) 15.sp else 12.5.sp)
         }
         Spacer(Modifier.height(10.dp))
         LabeledRow("server:", 88) { ServerUrlField(ui, it, JetBrainsMono) }
@@ -741,8 +741,8 @@ private fun RetroLogin(ui: LoginUi, studio: Boolean) {
             }
             AuthMode.Pairing -> LabeledRow("code:", 88) { mod -> RetroPromptWithEnter(mod, ui) { CodeField(ui, it) } }
         }
-        MonoText(hint, t.faint, 11.5.sp)
-        feedback?.let { (text, color) -> MonoText(text, color, 12.5.sp, Modifier.politeLiveRegion()) }
+        MonoText(hint, t.faint, fontSize = 11.5.sp)
+        feedback?.let { (text, color) -> MonoText(text, color, Modifier.politeLiveRegion(), fontSize = 12.5.sp) }
     }
 }
 

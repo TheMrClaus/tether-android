@@ -24,4 +24,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.lucide.icons)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
 }
