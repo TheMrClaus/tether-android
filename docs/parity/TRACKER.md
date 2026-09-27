@@ -24,12 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4, T2.1, T2.1D, T2.2, T3.1, T3.2 (`823d7d8`). Owner action
+**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4, T2.1, T2.1D, T2.2, T2.3 (`30340e2`), T3.1, T3.2. Owner action
 pending: merge + deploy **tether#197** (S1.1, v129) — `main` speaks 129, so **no release until it's
 deployed**; next release notes must mention pre-T1.4 backups may hold the old plaintext credential file.
-IN FLIGHT: **T1.3** durable send (DONE → verifier); **T2.3** prefs + drafts (DONE → verifier); **T3.3**
-primitives + Roborazzi infra; **T3.5** icons/provider logos/app icon; **S0.4** sidebar-order fix.
-Next: merge T1.3/T2.3 → T1.5 nodes → S0.6 PR; T3.4 gallery after T3.3; then Phase 4 shell.
+IN FLIGHT (≤4 agents): **T1.3** durable send (refuted on an atomicity test gap → fixing, plus the
+reconnect-handshake test flake in `reconnectAfterDrop`); **S0.4** sidebar-order determinism; **T3.3**
+primitives + Roborazzi; **T3.5** icons. Next: T1.5 (after T1.3), S0.6 PR, T3.4 gallery, Phase 4 shell.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -69,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
-| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
+| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  | VERIFY-FAIL (test gap): persisted-write atomicity untested (half-then-full write and empty-then-real write both green). Invariant confirmed… |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
@@ -79,14 +79,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 02:17 |  |  |
-| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
+| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 
 ### Phase 3 — Design system
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | From T3.2: TetherWeights.body is 500 but web body is 400 -> migrate screens to TetherTypography roles; tablet (>=48rem) type sizes not mode… |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | executor-T3.3 resumed in ~/git/tether-android-wt/T3.3 (branch parity/T3.3-primitives @823d7d8). Plan: Roborazzi 1.75.0 (latest on Maven Cen… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | Executor died at session limit before any change (worktree clean at 823d7d8). Deferred to reduce concurrent agents; restart after T3.3. |
 
