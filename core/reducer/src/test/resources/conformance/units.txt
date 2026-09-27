@@ -1,0 +1,123 @@
+# T2.1 conformance units — which unit owns each reducer corpus case and each events.mjs line.
+# Source: docs/parity/T2.1_PLAN.md §2 + Revisions 1–3. Reference: parity-corpus/reference/events.mjs
+# (sha256 6478d19c…, tether 157b87d, protocolVersion 128).
+#
+# Formats (checked by ConformanceUnitsTest):
+#   case  <corpus case name>  <unit>  <ready|pending>
+#   range <unit>  <from>-<to>          events.mjs lines 215–1607, each covered by exactly one unit
+# Units: H1 (core), A (turn/content), B (interaction/notices), C (session lists/background),
+# I (integration). ReducerConformanceTest ENFORCES `ready` cases and reports `pending` ones as
+# expected-red; a unit flips its cases to `ready` when they go green.
+# H1 seeded (fully ported) the A/B event cases its own two cases need — see FoldTurn.kt and
+# FoldInteraction.kt headers — which already turns five A/B cases green; they are `ready` so
+# the gate protects them (message-aborted-literal, warnings-and-unknown-events,
+# approval-legacy-decision-and-expiry, rate-limit-grace, rate-limit-resume-guards).
+#
+# Revision 5 finding (H1, 2026-09-27): the only JSON.stringify in events.mjs 215–2900 is
+# coerceTaskResultText (887–908), reached solely through taskAssignmentId (863), whose callers
+# are the Claude adapter (3983, 4181) — NOT reduceEvent. The corpus's todo_item_id_assigned
+# events already carry the resolved `taskId` (todo-incremental-tasks steps 4–6), so the fold
+# never stringifies and the corpus's sorted-key storage cannot conflict with insertion order.
+# Nothing to file against S0.2. The JS-order stringify still exists (Js.kt jsonStringify).
+# The fold's runtime Number::toString need is template-literal keys (dismiss keys with a numeric
+# `seq`, events.mjs 225/2844; model_fallback noticeId 1912), served by the same Ryu port.
+
+# ---- events.mjs line ownership (215–1607) ----
+range H1 215-491
+range A  492-510
+range H1 511-561
+range C  562-586
+range H1 587-634
+range B  635-729
+range C  730-761
+range H1 762-764
+range C  765-1058
+range B  1059-1063
+range C  1064-1183
+range B  1184-1255
+range H1 1256-1277
+range B  1278-1346
+range H1 1347-1369
+range A  1370-1436
+range H1 1437-1537
+range C  1538-1607
+
+# ---- H1: core ----
+case run-bookkeeping                      H1 ready
+case api-retry                            H1 ready
+
+# ---- A: turn and content stream (cancel-interrupted: A owns, runs after B) ----
+case message-turn-basic                   A  pending
+case blocks-without-started               A  pending
+case thinking-stream-and-replay           A  pending
+case tool-lifecycle-progress              A  pending
+case claude-final-report-order-untouched  A  pending
+case codex-final-report-last              A  pending
+case subagent-message                     A  pending
+case turn-guards-duplicates-and-reopen    A  pending
+case usage-token-progress-turn-activity   A  pending
+case message-aborted-literal              A  ready
+case user-message-engine-text-equal       A  pending
+case errors-and-account-auth              A  pending
+case warnings-and-unknown-events          A  ready
+case code-point-bounds                    A  pending
+case native-session-id-with-initial       A  pending
+case cancel-interrupted                   A  pending
+
+# ---- B: interaction and notices ----
+case approval-choices-metadata            B  pending
+case approval-legacy-decision-and-expiry  B  ready
+case question-flow                        B  pending
+case permission-denials                   B  pending
+case queued-messages                      B  pending
+case turn-interrupted-cap                 B  pending
+case dismissed-notices-cap                B  pending
+case session-notices-and-dismiss          B  pending
+case provider-notices-and-dismiss         B  pending
+case external-advancement                 B  pending
+case rate-limit-grace                     B  ready
+case rate-limit-resume-flow               B  pending
+case rate-limit-resume-guards             B  ready
+case limit-hit-resume-now                 B  pending
+case fast-mode                            B  pending
+
+# ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
+case cli-inventory                        C  pending
+case cli-inventory-limits                 C  pending
+case mcp-health                           C  pending
+case mcp-health-cap                       C  pending
+case todo-incremental-tasks               C  pending
+case todo-limits                          C  pending
+case todo-write                           C  pending
+case model-fallback                       C  pending
+case background-command-lifecycle         C  pending
+case background-commands-cap              C  pending
+case background-task-lifecycle            C  pending
+case background-tasks-cap                 C  pending
+case spawned-run-keys-cap                 C  pending
+case spawned-run-lifecycle                C  pending
+case spawned-runs-cap                     C  pending
+case continuation-command-run-output      C  pending
+case diff-chars-cap                       C  pending
+case plan-diff-reroute-review-compaction  C  pending
+
+# ---- I: integration (Revision 1: the 16 fixture cases + 3 named) ----
+case fixture-acp-session-updates          I  pending
+case fixture-claude-cli-inventory         I  pending
+case fixture-claude-forwarded-subagent    I  pending
+case fixture-claude-init-capabilities-retry I pending
+case fixture-claude-model-fallback        I  pending
+case fixture-claude-multi-model-usage     I  pending
+case fixture-claude-permission-denials    I  pending
+case fixture-claude-task-telemetry        I  pending
+case fixture-claude-todo-write            I  pending
+case fixture-claude-tool-lifecycle        I  pending
+case fixture-claude-tool-turn             I  pending
+case fixture-claude-wrap-up               I  pending
+case fixture-codex-app-server-engine      I  pending
+case fixture-codex-app-server-rich        I  pending
+case fixture-codex-rollout                I  pending
+case fixture-codex-turn                   I  pending
+case provider-projection-limits           I  pending
+case codex-app-server-representative      I  pending
+case opencode-provider-session            I  pending

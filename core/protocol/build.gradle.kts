@@ -8,6 +8,8 @@ plugins {
 
 dependencies {
     api(libs.kotlinx.serialization.json)
+    // T2.1: the persistent JsValue tree (tree/JsValue.kt) the v128 fold operates on.
+    api(libs.kotlinx.collections.immutable)
 
     testImplementation(libs.junit)
 }
