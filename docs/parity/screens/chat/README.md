@@ -28,3 +28,18 @@ snapshot's "Load 3 earlier turns" key, `.load-earlier-button`). 1.3× font-scale
 table re-flows as CSS auto layout does: cells wrap only when the max-content width does not fit.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.
+
+## Markdown port: deliberate JVM-vs-JS rules
+
+`feature/chat/.../MarkdownParser.kt` ports `components/markdown.tsx` regex for regex. Two rules
+keep it faithful where the JVM differs from JS:
+
+- **Case-insensitive matching is ASCII-only.** JS `/i` without the `u` flag folds only `A`-`Z`.
+  Kotlin `RegexOption.IGNORE_CASE` and `ignoreCase = true` fold Unicode too (`ſ` U+017F == `s`,
+  `ı` U+0131 / `İ` U+0130 == `i`), which would let `httpſ://x` or `maılto:x` past the link
+  allowlist and into a Custom Tab intent. Never use either for a ported web regex. The allowlist
+  uses `startsWithAsciiIgnoreCase` instead.
+- **Two web infinite loops are not reproduced.** A line that passes the heading-start check but
+  fails the full heading regex hangs the web parser: `"# x\r"` (a lone CR) and `"## title\u2028"`
+  (U+2028 LINE SEPARATOR). JS `.` cannot cross either terminator and `split("\n")` leaves both
+  inside the line. The port consumes such a line as a one-line paragraph. Both cases are tested.

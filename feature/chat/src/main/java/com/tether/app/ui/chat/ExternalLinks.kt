@@ -35,7 +35,8 @@ object CustomTabLinkOpener : LinkOpener {
     fun intentFor(href: String, toolbarColor: Color): Intent? {
         if (!isSafeHref(href)) return null // markdown.tsx SAFE_HREF: never javascript:/data:/intent:
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(href))
-        if (!href.startsWith("mailto:", ignoreCase = true)) {
+        // ASCII-only fold like the allowlist (JVM ignoreCase would fold Unicode, e.g. `ı` == `i`).
+        if (!href.startsWithAsciiIgnoreCase("mailto:")) {
             intent.putExtras(Bundle().apply { putBinder(EXTRA_SESSION, null) })
             intent.putExtra(EXTRA_TOOLBAR_COLOR, toolbarColor.toArgb())
         }

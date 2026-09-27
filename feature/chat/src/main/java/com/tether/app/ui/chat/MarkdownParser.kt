@@ -22,7 +22,13 @@ import com.tether.app.protocol.helpers.JS_WS
  * JS regex semantics are kept where Java's differ: `\s` is the JS whitespace class ([JS_WS]),
  * `.` excludes only the line terminators LF, CR, U+2028 and U+2029, and `$` (no `m` flag) is
  * end-of-input (`\z`), never
- * "before a final line terminator".
+ * "before a final line terminator". Case-insensitivity: JS `/i` without `u` folds ASCII only, so
+ * never use Kotlin `RegexOption.IGNORE_CASE` (JVM: Unicode folding, `ſ` == `s`) or
+ * `ignoreCase = true` for a ported web regex — see [startsWithAsciiIgnoreCase].
+ *
+ * Web infinite loops the port does not reproduce (see the guard in [parseMarkdown]): a line that
+ * passes the heading-START check but fails the full heading regex, because JS `.` cannot cross a
+ * lone line terminator inside the line — `"# x\r"` (CR) and `"## title\u2028"` (LINE SEPARATOR).
  *
  * The parse is pure (no Compose): [MdBlock] / [MdInline] are the React nodes the web builds.
  */
@@ -34,7 +40,7 @@ sealed interface MdInline {
     /** `<code className="md-code">` — content literal. */
     data class Code(val text: String) : MdInline
 
-    /** `<a href target=_blank>` — [href] passed [SAFE_HREF]. */
+    /** `<a href target=_blank>` — [href] passed [isSafeHref]. */
     data class Link(val href: String, val children: List<MdInline>) : MdInline
 
     /** A link whose href failed the allowlist: `<span>` of its label, no link. */
@@ -87,8 +93,17 @@ sealed interface MdBlock {
     data object Rule : MdBlock
 }
 
-/** markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i`. */
-private val SAFE_HREF = Regex("^(https?://|mailto:)", RegexOption.IGNORE_CASE)
+/**
+ * markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i`, as literal lowercase prefixes compared
+ * by [startsWithAsciiIgnoreCase].
+ *
+ * NOT a Kotlin `Regex(…, IGNORE_CASE)`: on the JVM that flag also sets UNICODE_CASE, so `ſ`
+ * (U+017F) matches `s` and `ı` / `İ` (U+0131 / U+0130) match `i` — `httpſ://x` and `maılto:x`
+ * would pass the allowlist and become intents. JS `/i` without the `u` flag folds ASCII only.
+ * Nor a `java.util.regex.Pattern` with CASE_INSENSITIVE alone: on-device regex is ICU-backed, not
+ * the JVM engine the unit tests run, so the fold is written out by hand where both agree.
+ */
+private val SAFE_HREF_PREFIXES = listOf("http://", "https://", "mailto:")
 
 /** JS `.` (no `s` flag): anything but the four line terminators. */
 private const val JS_DOT = "[^\\n\\r\\u2028\\u2029]"
@@ -120,8 +135,22 @@ const val INLINE_SCAN_LIMIT: Int = 20_000
 /** markdown.tsx:204 — at most this many inline tokens per scan. */
 private const val INLINE_GUARD: Int = 5000
 
-/** Is [href] an allowed link target (`http://`, `https://`, `mailto:`, any case)? */
-fun isSafeHref(href: String): Boolean = SAFE_HREF.containsMatchIn(href)
+/** Is [href] an allowed link target (`http://`, `https://`, `mailto:`, any ASCII case)? */
+fun isSafeHref(href: String): Boolean = SAFE_HREF_PREFIXES.any { href.startsWithAsciiIgnoreCase(it) }
+
+/**
+ * JS `/^prefix/i` (no `u` flag): only `A`-`Z` fold to `a`-`z`; every other char must equal the
+ * [lowercasePrefix] char exactly. Never `startsWith(…, ignoreCase = true)` — that folds Unicode.
+ */
+internal fun String.startsWithAsciiIgnoreCase(lowercasePrefix: String): Boolean {
+    if (length < lowercasePrefix.length) return false
+    for (n in lowercasePrefix.indices) {
+        val c = this[n]
+        val folded = if (c in 'A'..'Z') c + ('a' - 'A') else c
+        if (folded != lowercasePrefix[n]) return false
+    }
+    return true
+}
 
 private class InlineMatch(val index: Int, val length: Int, val node: MdInline)
 
@@ -294,8 +323,9 @@ fun parseMarkdown(text: String): List<MdBlock> {
         ) {
             para.add(lines[i++])
         }
-        // Divergence guard (documented): a line like "# x\r" (a lone CR, which JS `.` cannot
-        // cross) fails the full heading regex but passes the heading-start check, so the web's
+        // Divergence guard (documented): a line like "# x\r" or "## title\u2028" (a lone CR or
+        // U+2028, which JS `.` cannot cross; `split("\n")` leaves it inside the line) fails the
+        // full heading regex but passes the heading-start check, so the web's
         // loop pushes an empty paragraph without advancing and never terminates. Here the line is
         // consumed as a one-line paragraph instead.
         if (para.isEmpty()) para.add(lines[i++])

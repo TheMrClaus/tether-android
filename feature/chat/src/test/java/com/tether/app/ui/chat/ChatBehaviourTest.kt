@@ -129,6 +129,19 @@ class ChatBehaviourTest {
     }
 
     @Test
+    fun unicodeCaseVariantsOfAllowedSchemesNeverBecomeIntents() {
+        val black = androidx.compose.ui.graphics.Color.Black
+        // JS `/i` (no `u` flag) rejects these; JVM IGNORE_CASE would fold them to https / mailto.
+        for (href in listOf("http\u017F://example.com", "HTTP\u017F://example.com", "ma\u0131lto:a@b.test", "MA\u0130LTO:a@b.test")) {
+            assertNull(href, CustomTabLinkOpener.intentFor(href, black))
+        }
+        val upper = CustomTabLinkOpener.intentFor("HTTPS://example.com", black)!!
+        assertTrue("ASCII-uppercase https still opens a tab", upper.hasExtra(CustomTabLinkOpener.EXTRA_SESSION))
+        val upperMail = CustomTabLinkOpener.intentFor("MAILTO:ops@example.test", black)!!
+        assertFalse("ASCII-uppercase mailto still goes to the mail app", upperMail.hasExtra(CustomTabLinkOpener.EXTRA_SESSION))
+    }
+
+    @Test
     fun scrollingToTheTopOfABoundedSnapshotAsksForTheTrimmedTurns() {
         val calls = mutableListOf<Pair<Int, Int>>()
         val listState = LazyListState()

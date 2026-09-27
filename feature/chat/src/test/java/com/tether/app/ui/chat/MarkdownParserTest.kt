@@ -211,6 +211,13 @@ class MarkdownParserTest {
         assertEquals(listOf(p(t("# x\r"))), parseMarkdown("# x\r"))
     }
 
+    @Test(timeout = 5_000) fun aLineSeparatorAfterAHeadingDoesNotHang() {
+        // Same class as "# x\r": U+2028 is a JS line terminator `.` cannot cross, and
+        // `split("\n")` keeps it in the line — the web would loop forever on "## title\u2028".
+        assertEquals(listOf(p(t("## title\u2028"))), parseMarkdown("## title\u2028"))
+        assertEquals(listOf(p(t("## title\u2028")), p(t("after"))), parseMarkdown("## title\u2028\n\nafter"))
+    }
+
     // ── Inline (150-213) ─────────────────────────────────────────────────────────────────────
 
     @Test fun boldItalicCodeAndLinks() {
@@ -249,6 +256,25 @@ class MarkdownParserTest {
         assertEquals(listOf(Span(t("rel"))), parseInline("[rel](/docs)"))
         assertEquals(listOf(Link("MAILTO:a@b.test", t("m"))), parseInline("[m](MAILTO:a@b.test)"))
         assertEquals(listOf(Link("HTTP://X.TEST", t("u"))), parseInline("[u](HTTP://X.TEST)"))
+    }
+
+    @Test fun theSchemeAllowlistFoldsAsciiCaseOnly() {
+        // JS `/i` without `u` folds A-Z only; the JVM's IGNORE_CASE would also fold these.
+        val unicodeVariants = listOf(
+            "http\u017F://example.com", // LATIN SMALL LETTER LONG S -> "https"
+            "HTTP\u017F://example.com",
+            "ma\u0131lto:a@b.test", // LATIN SMALL LETTER DOTLESS I -> "mailto"
+            "MA\u0130LTO:a@b.test", // LATIN CAPITAL LETTER I WITH DOT ABOVE -> "mailto"
+            "\u212Attp://example.com", // KELVIN SIGN (folds to k, never in a scheme)
+        )
+        for (href in unicodeVariants) {
+            assertFalse(href, isSafeHref(href))
+            assertEquals(href, listOf(Span(t("x"))), parseInline("[x]($href)"))
+        }
+        for (href in listOf("HTTPS://example.com", "hTtP://example.com", "Mailto:a@b.test")) {
+            assertTrue(href, isSafeHref(href))
+            assertEquals(href, listOf(Link(href, t("x"))), parseInline("[x]($href)"))
+        }
     }
 
     @Test fun aLinkUrlCannotContainWhitespaceOrAClosingParen() {
