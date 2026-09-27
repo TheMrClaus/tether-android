@@ -56,16 +56,23 @@ data class Session(val baseUrl: String?, val credential: Credential?)
  * (scheme and host lower-cased, IDN in punycode, the default port written out,
  * any path, query or trailing slash ignored, `_` allowed in the host). So
  * `https://Host:443/` and `https://host` are one origin; `https://host:8443`,
- * `http://host` and `https://other` are three others. Null for anything that is
- * not an http(s) URL.
+ * `http://host` and `https://other` are three others. An IPv6 literal keeps its
+ * brackets (`http://[fd00::5]:3000`), so an origin is itself a URL and parses
+ * back to itself. Null for anything that is not an http(s) URL.
  *
- * It is the identity everything bound to one server is keyed by: the sealed
- * credential's AAD and the durable-send slots ([SettingsStore.readPendingInput]).
+ * It is the identity the durable-send slots ([SettingsStore.readPendingInput])
+ * and the client's per-server state are keyed by. The sealed credential's AAD
+ * uses [DataStoreSettings.originOf], the same identity in its original spelling
+ * (IPv6 without brackets), which must not change: existing sealed credentials
+ * are bound to it.
  */
 fun serverOrigin(baseUrl: String?): String? {
     val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }?.toHttpUrlOrNull() ?: return null
-    return "${url.scheme}://${url.host}:${url.port}"
+    return "${url.scheme}://${bracketedHost(url.host)}:${url.port}"
 }
+
+/** OkHttp's `host` has no brackets; a URL (or an origin) needs them around an IPv6 literal. */
+fun bracketedHost(host: String): String = if (':' in host) "[$host]" else host
 
 /**
  * The durable-send slots in the settings file, one per server origin, and the
@@ -626,7 +633,12 @@ class DataStoreSettings(
          * — the identity a credential is bound to. Null for anything that is not
          * an http(s) URL.
          */
-        fun originOf(baseUrl: String?): String? = serverOrigin(baseUrl)
+        fun originOf(baseUrl: String?): String? {
+            // Deliberately NOT serverOrigin(): this exact spelling (an IPv6 host
+            // without brackets) is what existing credentials are sealed under.
+            val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }?.toHttpUrlOrNull() ?: return null
+            return "${url.scheme}://${url.host}:${url.port}"
+        }
 
         /**
          * Build the file-backed store. Production:

@@ -93,10 +93,11 @@ class DurableSendTest {
         h.close()
     }
 
-    private fun disk(): DiskSettings {
+    private fun disk(ipv6: Boolean = false): DiskSettings {
         if (!::settings.isInitialized) {
-            h.server.start()
-            val url = h.server.url("/").toString().trimEnd('/')
+            if (ipv6) h.server.start(java.net.InetAddress.getByName("::1"), 0) else h.server.start()
+            // An IPv6 literal URL, as a user types it (url() would use a host name).
+            val url = if (ipv6) "http://[::1]:${h.server.port}" else h.server.url("/").toString().trimEnd('/')
             settings = DiskSettings(InMemorySettings(url, initialCookie = "cookie"), url)
         }
         return settings
@@ -204,6 +205,35 @@ class DurableSendTest {
         // The live ack clears it for good — on disk too.
         ws2.send(turnStartedEvent("s1", "t1", 2, sent))
         persistedMatches { it.records.isEmpty() }
+    }
+
+    /**
+     * ta-s8q round 2: a server on an IPv6 literal (`http://[::1]:port`). Its
+     * origin keeps the brackets, so its slot is written and read back; a
+     * turn survives process death exactly as on any other server. The WS
+     * upgrade's Origin header keeps them too (the server parses it as a URL).
+     */
+    @Test
+    fun anIpv6ServerKeepsDurableSendAcrossProcessDeath() {
+        disk(ipv6 = true)
+        val (first, ws) = firstProcess()
+        first.send("s1", "sent to an IPv6 server")
+        val sent = key(h.expectFrame("send"))
+        persistedMatches { s -> s.records.any { it.key == sent && it.tries == 1 } }
+        assertEquals("http://[::1]:${h.server.port}", settings.home)
+        kill(first, ws)
+
+        val second = process()
+        val ws2 = startConnected(second)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertEquals(listOf(sent), h.framesUntilBarrier().map { key(it) })
+
+        val upgrades = generateSequence { h.server.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            .filter { it.path == "/ws" }.toList()
+        assertTrue(upgrades.isNotEmpty())
+        upgrades.forEach { assertEquals("http://[::1]:${h.server.port}", it.getHeader("Origin")) }
     }
 
     @Test

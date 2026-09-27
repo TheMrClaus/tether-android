@@ -1239,9 +1239,10 @@ class RealTetherClient(
 
     private fun openSocket(base: HttpUrl, credential: Credential, generation: Long) {
         // Origin's host(+port) MUST equal the Host header or the server
-        // destroys the upgrade with a raw 401. OkHttp never sets it itself.
+        // destroys the upgrade with a raw 401. OkHttp never sets it itself. An
+        // IPv6 literal keeps its brackets: the server parses this as a URL.
         val origin = buildString {
-            append(base.scheme).append("://").append(base.host)
+            append(base.scheme).append("://").append(bracketedHost(base.host))
             if (base.port != HttpUrl.defaultPort(base.scheme)) append(':').append(base.port)
         }
         val request = Request.Builder()

@@ -716,6 +716,39 @@ class DataStoreSettingsTest {
     }
 
     @Test
+    fun anIpv6OriginKeepsItsBracketsAndTheCredentialBindingKeepsItsSpelling() {
+        assertEquals("http://[fd00::5]:3000", serverOrigin("http://[FD00::5]:3000/"))
+        assertEquals("http://[::1]:80", serverOrigin("http://[::1]"))
+        assertEquals("pending_input|http://[fd00::5]:3000", PendingSlots.keyFor("http://[fd00::5]:3000"))
+        // The credential AAD is unchanged: credentials sealed by earlier builds still open.
+        assertEquals("http://fd00::5:3000", DataStoreSettings.originOf("http://[fd00::5]:3000"))
+    }
+
+    @Test
+    fun anIpv6ServerSignsInMigratesAndKeepsItsSlot() = runBlocking {
+        writeLegacyPending("http://[fd00::5]:3000", payloadA)
+        val first = open()
+        // setServer migrates the 0.6.0 slot in its URL edit: it must not throw here.
+        first.store.setServer("http://[fd00::5]:3000", Credential.Cookie(cookie))
+        assertEquals(payloadA, first.store.readPendingInput(ORIGIN_V6))
+        first.store.writePendingInput(ORIGIN_V6, payloadB)
+        first.close()
+        val second = open()
+        assertEquals(Credential.Cookie(cookie), second.store.credential.first())
+        assertEquals(payloadB, second.store.readPendingInput(ORIGIN_V6))
+        second.close()
+    }
+
+    @Test
+    fun theInMemoryStoreHandlesAnIpv6ServerTheSameWay() = runBlocking {
+        val store = InMemorySettings(initialBaseUrl = "http://[fd00::5]:3000", initialLegacyPendingInput = payloadA)
+        store.setServer("http://[fd00::5]:3000", Credential.Cookie(cookie))
+        assertEquals(payloadA, store.readPendingInput(ORIGIN_V6))
+        store.writePendingInput(ORIGIN_V6, payloadB)
+        assertEquals(payloadB, store.readPendingInput(ORIGIN_V6))
+    }
+
+    @Test
     fun aSlotIsOnlyEverNamedByACanonicalOrigin() {
         for (bad in listOf("https://Host", "https://host", "https://host:443/", "host", "")) {
             assertTrue(bad, runCatching { PendingSlots.keyFor(bad) }.isFailure)
@@ -812,5 +845,6 @@ class DataStoreSettingsTest {
         const val ORIGIN_A = "https://a.example:443"
         const val ORIGIN_B = "https://b.example:443"
         const val LEGACY_ORIGIN = "https://tether.example.com:443"
+        const val ORIGIN_V6 = "http://[fd00::5]:3000"
     }
 }
