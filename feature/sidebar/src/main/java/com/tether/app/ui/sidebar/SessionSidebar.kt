@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -188,14 +189,17 @@ private fun SidebarContent(
     val dragPreview = drag?.takeIf { it.engaged }?.let { DragPreview(it.key, it.order) }
     val view = SidebarViewModel.view(state, visibleCounts, dragPreview)
 
-    val dragController = remember(state, view) {
+    val latestState by rememberUpdatedState(state)
+    val latestView by rememberUpdatedState(view)
+    val latestCommit by rememberUpdatedState(actions.onReorderSessions)
+    val dragController = remember {
         DragController(
-            state = state,
-            view = view,
+            stateOf = { latestState },
+            viewOf = { latestView },
             getDrag = { drag },
             setDrag = { drag = it },
             rowBounds = rowBounds,
-            onCommit = actions.onReorderSessions,
+            onCommit = { latestCommit },
         )
     }
 

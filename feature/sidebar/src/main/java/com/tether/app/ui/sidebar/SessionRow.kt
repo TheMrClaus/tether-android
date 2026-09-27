@@ -97,18 +97,18 @@ data class DragSession(
  * committed once, on release, as the block's full explicit order.
  */
 class DragController internal constructor(
-    private val state: SidebarState,
-    private val view: SidebarView,
+    private val stateOf: () -> SidebarState,
+    private val viewOf: () -> SidebarView,
     private val getDrag: () -> DragSession?,
     private val setDrag: (DragSession?) -> Unit,
     private val rowBounds: Map<String, Rect>,
-    private val onCommit: (String, List<String>) -> Unit,
+    private val onCommit: () -> (String, List<String>) -> Unit,
 ) {
     internal var listBounds: Rect = Rect.Zero
 
     fun begin(entry: SidebarEntry) {
         val workspace = entry.workspace ?: return
-        val order = SidebarViewModel.dragBaseOrder(state, workspace, view.delegateChildKeys)
+        val order = SidebarViewModel.dragBaseOrder(stateOf(), workspace, viewOf().delegateChildKeys)
         setDrag(DragSession(entry.key, workspace, order, order))
     }
 
@@ -142,20 +142,20 @@ class DragController internal constructor(
     /** session-sidebar.tsx:684-696. */
     fun finish() {
         val drag = getDrag() ?: return
-        if (drag.engaged && drag.order != drag.initialOrder) onCommit(drag.workspace, drag.order)
+        if (drag.engaged && drag.order != drag.initialOrder) onCommit()(drag.workspace, drag.order)
         setDrag(null)
     }
 
     /** TalkBack's "Move up" / "Move down" on the handle: the same full-order commit, one step. */
     fun moveByOne(entry: SidebarEntry, delta: Int): Boolean {
         val workspace = entry.workspace ?: return false
-        val order = SidebarViewModel.dragBaseOrder(state, workspace, view.delegateChildKeys)
+        val order = SidebarViewModel.dragBaseOrder(stateOf(), workspace, viewOf().delegateChildKeys)
         val from = order.indexOf(entry.key)
         val to = from + delta
         if (from < 0 || to !in order.indices) return false
         val next = SidebarViewModel.move(order, entry.key, order[to])
         if (next == order) return false
-        onCommit(workspace, next)
+        onCommit()(workspace, next)
         return true
     }
 }
@@ -327,6 +327,7 @@ internal fun SessionRow(
                     .width(if (studio) 2.4f.rem else 2.5f.rem)
                     .heightIn(min = 2.75f.rem)
                     .onGloballyPositioned { handleCoords = it }
+                    .testTag(SidebarTags.handle(entry.key))
                     .semantics {
                         contentDescription = if (dragEnabled) "Hold and drag to move $name" else "Clear filters to reorder $name"
                         if (dragEnabled) {
