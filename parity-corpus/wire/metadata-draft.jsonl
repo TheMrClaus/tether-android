@@ -1,0 +1,4 @@
+{"dir":"c2s","frame":{"type":"metadata-draft-request","requestId":"draft-1","draftKind":"commitMessage","sessionId":"sess-0001"}}
+{"dir":"s2c","frame":{"type":"metadata-draft-result","requestId":"draft-1","result":{"ok":false,"error":"no staged changes"}}}
+{"dir":"c2s","frame":{"type":"metadata-draft-request","requestId":"draft-2","draftKind":"pullRequest","sessionId":"no-such-session"}}
+{"dir":"s2c","frame":{"type":"metadata-draft-error","requestId":"draft-2","error":"unknown session"}}

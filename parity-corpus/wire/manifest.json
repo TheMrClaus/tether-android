@@ -1,0 +1,605 @@
+{
+  "tetherSha": "44a4656f92460e86c0e0cbe72e718e64325b3924",
+  "protocolVersion": 128,
+  "frameWrapper": "{ dir: \"s2c\" | \"c2s\", sock?: string, frame } — one per line, arrival order; `sock` names a secondary socket (absent = the primary one)",
+  "boots": [
+    {
+      "label": "rich",
+      "fakeEngineScript": [
+        {
+          "initNativeSessionId": "fake-native-rich",
+          "cliVersion": "2.1.999"
+        },
+        {
+          "apiRetry": {
+            "attempt": 1,
+            "maxRetries": 3,
+            "delayMs": 10,
+            "errorStatus": 529,
+            "error": "overloaded"
+          }
+        },
+        {
+          "mcpHealth": {
+            "name": "parity-mcp",
+            "status": "ready"
+          }
+        },
+        {
+          "think": {
+            "tokens": [
+              120,
+              480
+            ]
+          }
+        },
+        {
+          "message": "Looking at the repository."
+        },
+        {
+          "plan": {
+            "steps": [
+              {
+                "step": "Read the README",
+                "status": "completed"
+              },
+              {
+                "step": "Write the file",
+                "status": "in_progress"
+              },
+              {
+                "step": "Verify",
+                "status": "pending"
+              }
+            ]
+          }
+        },
+        {
+          "tool": {
+            "name": "Read",
+            "input": {
+              "file_path": "README.md"
+            },
+            "output": "base\n"
+          }
+        },
+        {
+          "openTool": {
+            "name": "Bash",
+            "input": {
+              "command": "ls"
+            },
+            "toolId": "parity-open-tool"
+          }
+        },
+        {
+          "closeTool": {
+            "toolId": "parity-open-tool",
+            "output": "README.md\n"
+          }
+        },
+        {
+          "subagent": {
+            "name": "Agent",
+            "input": {
+              "description": "Survey",
+              "prompt": "List the files"
+            },
+            "items": [
+              {
+                "kind": "thinking",
+                "key": "sub-1",
+                "text": "Listing."
+              },
+              [
+                {
+                  "kind": "tool",
+                  "key": "sub-2",
+                  "name": "Glob",
+                  "input": {
+                    "pattern": "*"
+                  }
+                },
+                {
+                  "kind": "tool_result",
+                  "key": "sub-2",
+                  "output": "README.md",
+                  "isError": false
+                }
+              ],
+              {
+                "kind": "message",
+                "key": "sub-3",
+                "text": "One file."
+              }
+            ],
+            "output": "One file."
+          }
+        },
+        {
+          "warning": "Parity warning: this is a scripted notice."
+        },
+        {
+          "approval": {
+            "name": "Write",
+            "input": {
+              "file_path": "parity.txt",
+              "content": "hello\n"
+            },
+            "output": "Wrote parity.txt"
+          }
+        },
+        {
+          "message": "Done."
+        }
+      ],
+      "scenarios": [
+        "handshake",
+        "version-mismatch",
+        "nodes",
+        "directories",
+        "session-lifecycle",
+        "turn-approve",
+        "turn-interrupt",
+        "queue",
+        "snapshots",
+        "notices",
+        "session-controls",
+        "provider-controls",
+        "settings",
+        "discovery",
+        "resume",
+        "scheduled-actions",
+        "metadata-draft",
+        "handoff",
+        "worktree",
+        "errors"
+      ]
+    },
+    {
+      "label": "echo",
+      "fakeEngineScript": "(unset: the fake engine echoes the user's text)",
+      "scenarios": [
+        "handshake-echo",
+        "bounded-snapshot",
+        "commands",
+        "delegate-mention"
+      ]
+    },
+    {
+      "label": "crash",
+      "fakeEngineScript": [
+        {
+          "initNativeSessionId": "fake-native-crash"
+        },
+        {
+          "message": "About to fail."
+        },
+        {
+          "crash": true
+        }
+      ],
+      "scenarios": [
+        "handshake-crash",
+        "turn-crash"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "handshake",
+      "file": "handshake.jsonl",
+      "frames": 7
+    },
+    {
+      "name": "version-mismatch",
+      "file": "version-mismatch.jsonl",
+      "frames": 3
+    },
+    {
+      "name": "nodes",
+      "file": "nodes.jsonl",
+      "frames": 8
+    },
+    {
+      "name": "directories",
+      "file": "directories.jsonl",
+      "frames": 10
+    },
+    {
+      "name": "session-lifecycle",
+      "file": "session-lifecycle.jsonl",
+      "frames": 8
+    },
+    {
+      "name": "turn-approve",
+      "file": "turn-approve.jsonl",
+      "frames": 34
+    },
+    {
+      "name": "turn-interrupt",
+      "file": "turn-interrupt.jsonl",
+      "frames": 35
+    },
+    {
+      "name": "queue",
+      "file": "queue.jsonl",
+      "frames": 79
+    },
+    {
+      "name": "snapshots",
+      "file": "snapshots.jsonl",
+      "frames": 10
+    },
+    {
+      "name": "notices",
+      "file": "notices.jsonl",
+      "frames": 7
+    },
+    {
+      "name": "session-controls",
+      "file": "session-controls.jsonl",
+      "frames": 14
+    },
+    {
+      "name": "provider-controls",
+      "file": "provider-controls.jsonl",
+      "frames": 14
+    },
+    {
+      "name": "settings",
+      "file": "settings.jsonl",
+      "frames": 19
+    },
+    {
+      "name": "discovery",
+      "file": "discovery.jsonl",
+      "frames": 15
+    },
+    {
+      "name": "resume",
+      "file": "resume.jsonl",
+      "frames": 2
+    },
+    {
+      "name": "scheduled-actions",
+      "file": "scheduled-actions.jsonl",
+      "frames": 10
+    },
+    {
+      "name": "metadata-draft",
+      "file": "metadata-draft.jsonl",
+      "frames": 4
+    },
+    {
+      "name": "handoff",
+      "file": "handoff.jsonl",
+      "frames": 41
+    },
+    {
+      "name": "worktree",
+      "file": "worktree.jsonl",
+      "frames": 22
+    },
+    {
+      "name": "errors",
+      "file": "errors.jsonl",
+      "frames": 8
+    },
+    {
+      "name": "handshake-echo",
+      "file": "handshake-echo.jsonl",
+      "frames": 3
+    },
+    {
+      "name": "bounded-snapshot",
+      "file": "bounded-snapshot.jsonl",
+      "frames": 18
+    },
+    {
+      "name": "commands",
+      "file": "commands.jsonl",
+      "frames": 41
+    },
+    {
+      "name": "delegate-mention",
+      "file": "delegate-mention.jsonl",
+      "frames": 10
+    },
+    {
+      "name": "handshake-crash",
+      "file": "handshake-crash.jsonl",
+      "frames": 3
+    },
+    {
+      "name": "turn-crash",
+      "file": "turn-crash.jsonl",
+      "frames": 14
+    }
+  ],
+  "ambient": {
+    "file": "ambient.jsonl",
+    "frames": 158,
+    "rule": "Ambient server frames never enter a scenario file. `log` records are kept here as a set (one single-record log frame per distinct record, boot then seq order, `boot` names the server), followed by each session's last real `session` row of its boot, taken after the metrics sweep converged. Session rows in scenario files have `metrics` removed (the sweep merges it at timing-dependent moments); these final rows are the SessionMetrics samples. Unsolicited providers-snapshot / providers / scheduled-actions pushes and session rows that only refresh `metrics` or repeat the last row are dropped; each of those types is still recorded as a direct reply in a scenario."
+  },
+  "serverTypesSeen": [
+    "ready",
+    "pong",
+    "log",
+    "version_mismatch",
+    "nodes",
+    "node-result",
+    "created",
+    "session",
+    "histories",
+    "session-order",
+    "scheduled-actions",
+    "seen",
+    "search-results",
+    "global-search-results",
+    "directories",
+    "event",
+    "snapshot",
+    "turns-detail",
+    "interrupt_result",
+    "session-controls",
+    "codex-controls",
+    "codex-control-result",
+    "opencode-controls",
+    "opencode-control-result",
+    "advanced-settings",
+    "server-settings",
+    "providers",
+    "providers-snapshot",
+    "metadata-draft-result",
+    "metadata-draft-error",
+    "worktree-source",
+    "worktree-scripts",
+    "worktree-logs",
+    "worktree-diff",
+    "git-diff-file",
+    "change-request",
+    "handoff-brief",
+    "error"
+  ],
+  "serverTypesMissing": [
+    {
+      "type": "approval",
+      "reason": "declared in ServerMessage but never emitted by server.mjs at this sha: approval prompts reach clients only as `event` frames carrying AgentEvent `approval_request` (captured in turn-approve/turn-interrupt/queue/handoff)"
+    },
+    {
+      "type": "approval_resolved",
+      "reason": "declared in ServerMessage but never emitted by server.mjs at this sha: resolutions reach clients only as `event` frames carrying AgentEvent `approval_resolved` (captured in turn-approve)"
+    },
+    {
+      "type": "acp-agents",
+      "reason": "retired in Phase 4 — server.mjs no longer handles the `acp-agents` request (ACP agents are `extends: \"acp\"` provider profiles); the request is answered with `error`"
+    }
+  ],
+  "unknownServerTypes": [],
+  "clientTypesValidated": [
+    "hello",
+    "node-add",
+    "node-remove",
+    "node-probe",
+    "ping",
+    "create",
+    "resume",
+    "worktree-inspect",
+    "worktree-scripts",
+    "worktree-script",
+    "worktree-logs",
+    "worktree-diff",
+    "git-diff-file",
+    "change-request",
+    "discover",
+    "mark-seen",
+    "set-session-order",
+    "search",
+    "global-search",
+    "browse",
+    "create-folder",
+    "attach",
+    "fetch-turns",
+    "pin",
+    "rename",
+    "archive",
+    "kill",
+    "send",
+    "run-command",
+    "background-command",
+    "stop-command",
+    "queue-add",
+    "queue-edit",
+    "queue-remove",
+    "interrupt",
+    "dismiss-notice",
+    "rate-limit-resume",
+    "scheduled-actions",
+    "schedule-create",
+    "schedule-update",
+    "schedule-control",
+    "approval",
+    "question",
+    "set-mode",
+    "set-model",
+    "set-reasoning-effort",
+    "set-fast-mode",
+    "set-auto-continue-on-limit",
+    "session-controls",
+    "codex-controls",
+    "codex-control-action",
+    "opencode-controls",
+    "opencode-control-action",
+    "advanced-settings",
+    "set-advanced-settings",
+    "server-settings",
+    "set-server-settings",
+    "detect-engines",
+    "acp-agents",
+    "providers",
+    "set-acp-agents",
+    "set-providers",
+    "providers-snapshot",
+    "refresh-providers",
+    "metadata-draft-request",
+    "handoff-brief",
+    "handoff"
+  ],
+  "clientTypesSent": [
+    "hello",
+    "node-add",
+    "node-remove",
+    "node-probe",
+    "ping",
+    "create",
+    "resume",
+    "worktree-inspect",
+    "worktree-scripts",
+    "worktree-script",
+    "worktree-logs",
+    "worktree-diff",
+    "git-diff-file",
+    "change-request",
+    "discover",
+    "mark-seen",
+    "set-session-order",
+    "search",
+    "global-search",
+    "browse",
+    "create-folder",
+    "attach",
+    "fetch-turns",
+    "pin",
+    "rename",
+    "archive",
+    "kill",
+    "send",
+    "run-command",
+    "background-command",
+    "stop-command",
+    "queue-add",
+    "queue-edit",
+    "queue-remove",
+    "interrupt",
+    "dismiss-notice",
+    "rate-limit-resume",
+    "scheduled-actions",
+    "schedule-create",
+    "schedule-update",
+    "schedule-control",
+    "approval",
+    "question",
+    "set-mode",
+    "set-model",
+    "set-reasoning-effort",
+    "set-fast-mode",
+    "set-auto-continue-on-limit",
+    "session-controls",
+    "codex-controls",
+    "codex-control-action",
+    "opencode-controls",
+    "opencode-control-action",
+    "advanced-settings",
+    "set-advanced-settings",
+    "server-settings",
+    "set-server-settings",
+    "detect-engines",
+    "acp-agents",
+    "providers",
+    "set-providers",
+    "providers-snapshot",
+    "refresh-providers",
+    "metadata-draft-request",
+    "handoff-brief",
+    "handoff"
+  ],
+  "eventTypesSeen": [
+    "native_session_id",
+    "turn_started",
+    "user_message_accepted",
+    "command_output_started",
+    "command_output_delta",
+    "command_output_completed",
+    "background_command_updated",
+    "message_started",
+    "message_delta",
+    "message_completed",
+    "tool_start",
+    "tool_end",
+    "approval_request",
+    "approval_resolved",
+    "cancel_requested",
+    "cancelled",
+    "usage",
+    "token_progress",
+    "api_retry",
+    "plan_updated",
+    "mcp_health_updated",
+    "notice_dismissed",
+    "warning",
+    "subagent_message",
+    "turn_end",
+    "turn_interrupted",
+    "queued_message_added",
+    "queued_message_updated",
+    "queued_message_removed"
+  ],
+  "eventTypesMissing": [
+    "cli_inventory_reset",
+    "cli_commands_changed",
+    "background_command_output",
+    "spawned_run_updated",
+    "spawned_run_output",
+    "spawned_run_media",
+    "thinking_delta",
+    "thinking_completed",
+    "thinking_stop",
+    "tool_progress",
+    "tool_output_delta",
+    "approval_expired",
+    "question_request",
+    "question_resolved",
+    "question_cancelled",
+    "question_answered",
+    "permission_denied",
+    "process_exit",
+    "turn_activity",
+    "rate_limit",
+    "fast_mode",
+    "limit_hit",
+    "rate_limit_resume_scheduled",
+    "rate_limit_resume_dismissed",
+    "rate_limit_resume_fired",
+    "todo_updated",
+    "todo_item_created",
+    "todo_item_id_assigned",
+    "todo_item_updated",
+    "diff_updated",
+    "model_rerouted",
+    "model_fallback",
+    "review_started",
+    "review_completed",
+    "context_compacted",
+    "provider_notice",
+    "task_started",
+    "task_progress",
+    "task_completed",
+    "background_tasks_changed",
+    "unknown_event",
+    "error",
+    "background_interrupted",
+    "background_abandoned",
+    "external_advancement"
+  ],
+  "failures": [],
+  "scrub": [
+    "Temp roots are replaced by name inside every string: <STATE_DIR>, <WORKSPACE_ROOT>, <WORKTREE_ROOT>, <HOME> (the throwaway HOME); the tether checkout becomes <TETHER_REPO> and the operator's real home <OPERATOR_HOME>; any other os.tmpdir() path becomes <TMP>; a temp dir's basename inside text becomes tether-parity-<kind>-XXXXXX.",
+    "The server's loopback origin 127.0.0.1:<port> becomes 127.0.0.1:<PORT>; a numeric field named `port` inside a worktree service keeps its type but is set to 0.",
+    "Epoch-millisecond numbers (1.5e12..2.5e12) become 1767225600000 and epoch-second numbers under a key ending in At/at/Time become 1767225600 (types are preserved); ISO-8601 timestamps inside strings become 2026-01-01T00:00:00.000Z.",
+    "Duration-like numbers (keys ending in Ms / ms / Seconds, or named elapsed/duration/latency/uptime/pid) become 0; a parenthesized duration inside text, e.g. `(16 ms)`, becomes `(0 ms)`.",
+    "Server-minted ids are replaced by stable ordinals in first-seen order, everywhere they occur (including inside larger strings): UUIDs -> 00000000-0000-4000-8000-<12-digit ordinal>; Tether session ids -> sess-<n>; schedule ids -> sched-<n>; other minted base64url ids under an `id`/`…Id` key (history ids, …) -> id-<n>; 40-hex git shas -> <sha-n>; worktree project hashes -> <project-hash-n>.",
+    "Ordering: scenario frames are in arrival order except that, between two client frames, server frames are grouped per socket (primary first) and session rows are coalesced to the last row per session, placed after that socket's other frames. Ambient frames (log records, unsolicited catalog/registry pushes, metrics-only or repeated session rows) are split out — see manifest.ambient and canonicalOrder. Every client frame is sent only after 150 ms of wire silence, and each scenario ends after a full 2.5 s metrics-sweep period.",
+    "Not scrubbed: host-dependent values (CLI detection/versions in server-settings `detected`/`discovered`) — stable across re-runs on one host, but they differ between hosts."
+  ]
+}

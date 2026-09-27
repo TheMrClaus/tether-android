@@ -1,0 +1,10 @@
+{"dir":"c2s","frame":{"type":"browse"}}
+{"dir":"s2c","frame":{"type":"directories","listing":{"current":"<WORKSPACE_ROOT>","parent":"/tmp","entries":[{"name":"remote.git","path":"<WORKSPACE_ROOT>/remote.git"},{"name":"repo","path":"<WORKSPACE_ROOT>/repo"}]}}}
+{"dir":"c2s","frame":{"type":"browse","cwd":"<WORKSPACE_ROOT>","requestId":"browse-1"}}
+{"dir":"s2c","frame":{"type":"directories","listing":{"current":"<WORKSPACE_ROOT>","parent":"/tmp","entries":[{"name":"remote.git","path":"<WORKSPACE_ROOT>/remote.git"},{"name":"repo","path":"<WORKSPACE_ROOT>/repo"}]},"requestId":"browse-1"}}
+{"dir":"c2s","frame":{"type":"create-folder","cwd":"<WORKSPACE_ROOT>","name":"parity-folder"}}
+{"dir":"s2c","frame":{"type":"directories","listing":{"current":"<WORKSPACE_ROOT>","parent":"/tmp","entries":[{"name":"parity-folder","path":"<WORKSPACE_ROOT>/parity-folder"},{"name":"remote.git","path":"<WORKSPACE_ROOT>/remote.git"},{"name":"repo","path":"<WORKSPACE_ROOT>/repo"}]}}}
+{"dir":"c2s","frame":{"type":"worktree-inspect","cwd":"<WORKSPACE_ROOT>","requestId":"inspect-plain"}}
+{"dir":"s2c","frame":{"type":"worktree-source","info":{"cwd":"<WORKSPACE_ROOT>","isRepo":false,"repoRoot":null,"remote":null,"remotes":[],"currentBranch":"","defaultBaseRef":"","branches":[],"configPresent":false,"configWarnings":[],"hasSetup":false,"hasTeardown":false,"declaredScripts":[]},"requestId":"inspect-plain"}}
+{"dir":"c2s","frame":{"type":"worktree-inspect","cwd":"<WORKSPACE_ROOT>/repo","requestId":"inspect-repo"}}
+{"dir":"s2c","frame":{"type":"worktree-source","info":{"cwd":"<WORKSPACE_ROOT>/repo","isRepo":true,"repoRoot":"<WORKSPACE_ROOT>/repo","remote":"origin","remotes":["origin"],"currentBranch":"main","defaultBaseRef":"origin/main","branches":["main","origin","origin/main"],"configPresent":true,"configWarnings":[],"hasSetup":true,"hasTeardown":false,"declaredScripts":[{"name":"check","type":"script","port":null}]},"requestId":"inspect-repo"}}

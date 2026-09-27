@@ -1,0 +1,69 @@
+{"type":"hello","frame":{"type":"hello","protocolVersion":128},"verdict":{"ok":true}}
+{"type":"node-add","frame":{"type":"node-add","credential":"parity-credential-bundle","label":"Peer","baseUrl":"https://peer.example.test","requestId":"node-add-1"},"verdict":{"ok":true}}
+{"type":"node-remove","frame":{"type":"node-remove","nodeId":"node-0001","requestId":"node-remove-1"},"verdict":{"ok":true}}
+{"type":"node-probe","frame":{"type":"node-probe","nodeId":"node-0001","requestId":"node-probe-1"},"verdict":{"ok":true}}
+{"type":"ping","frame":{"type":"ping","nonce":"ping-1"},"verdict":{"ok":true}}
+{"type":"create","frame":{"type":"create","provider":"claude","cwd":"/workspace/project","name":"Parity session","permissionMode":"default","sandboxPolicy":"workspace-write","useWorktree":true,"worktree":{"mode":"branch-off","baseRef":"origin/main","branch":"parity/branch","slug":"parity-branch"},"model":"claude-opus-4-1","reasoningEffort":"high","requestId":"create-1"},"verdict":{"ok":true}}
+{"type":"resume","frame":{"type":"resume","historyId":"11111111-1111-4111-8111-111111111111","cwd":"/workspace/project"},"verdict":{"ok":true}}
+{"type":"worktree-inspect","frame":{"type":"worktree-inspect","cwd":"/workspace/project","requestId":"inspect-1"},"verdict":{"ok":true}}
+{"type":"worktree-scripts","frame":{"type":"worktree-scripts","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"worktree-script","frame":{"type":"worktree-script","sessionId":"session-0001","name":"web","action":"start"},"verdict":{"ok":true}}
+{"type":"worktree-logs","frame":{"type":"worktree-logs","sessionId":"session-0001","name":"web"},"verdict":{"ok":true}}
+{"type":"worktree-diff","frame":{"type":"worktree-diff","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"git-diff-file","frame":{"type":"git-diff-file","sessionId":"session-0001","path":"README.md"},"verdict":{"ok":true}}
+{"type":"change-request","frame":{"type":"change-request","sessionId":"session-0001","refresh":true},"verdict":{"ok":true}}
+{"type":"discover","frame":{"type":"discover","cwd":"/workspace/project","lastSeen":{"session-0001":1767225600000},"watch":["/workspace/project"],"requestId":"discover-1"},"verdict":{"ok":true}}
+{"type":"mark-seen","frame":{"type":"mark-seen","historyId":"session-0001","seenAt":1767225600000},"verdict":{"ok":true}}
+{"type":"set-session-order","frame":{"type":"set-session-order","cwd":"/workspace/project","order":["session-0001"]},"verdict":{"ok":true}}
+{"type":"search","frame":{"type":"search","cwd":"/workspace/project","query":"parity"},"verdict":{"ok":true}}
+{"type":"global-search","frame":{"type":"global-search","requestId":1,"query":"parity","providers":["claude","codex"],"since":0,"until":1767225600000,"cwd":"/workspace/project"},"verdict":{"ok":true}}
+{"type":"browse","frame":{"type":"browse","cwd":"/workspace/project","requestId":"browse-1"},"verdict":{"ok":true}}
+{"type":"create-folder","frame":{"type":"create-folder","cwd":"/workspace/project","name":"new-folder"},"verdict":{"ok":true}}
+{"type":"attach","frame":{"type":"attach","sessionId":"session-0001","afterSeq":0},"verdict":{"ok":true}}
+{"type":"fetch-turns","frame":{"type":"fetch-turns","sessionId":"session-0001","fromIndex":0,"toIndex":2},"verdict":{"ok":true}}
+{"type":"pin","frame":{"type":"pin","sessionId":"session-0001","pinned":true},"verdict":{"ok":true}}
+{"type":"rename","frame":{"type":"rename","sessionId":"session-0001","name":"Renamed"},"verdict":{"ok":true}}
+{"type":"archive","frame":{"type":"archive","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"kill","frame":{"type":"kill","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"send","frame":{"type":"send","sessionId":"session-0001","text":"hello","idempotencyKey":"send-1","attachments":[{"name":"note.txt","mediaType":"text/plain","data":"aGVsbG8="}],"mention":{"kind":"delegate","provider":"codex","model":"gpt-5","reasoningEffort":"high","mode":"review"}},"verdict":{"ok":true}}
+{"type":"run-command","frame":{"type":"run-command","sessionId":"session-0001","command":"echo hi","idempotencyKey":"cmd-1","background":true},"verdict":{"ok":true}}
+{"type":"background-command","frame":{"type":"background-command","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"stop-command","frame":{"type":"stop-command","sessionId":"session-0001","commandId":"command-0001"},"verdict":{"ok":true}}
+{"type":"queue-add","frame":{"type":"queue-add","sessionId":"session-0001","queueId":"queue-1","text":"next"},"verdict":{"ok":true}}
+{"type":"queue-edit","frame":{"type":"queue-edit","sessionId":"session-0001","queueId":"queue-1","text":"next, edited"},"verdict":{"ok":true}}
+{"type":"queue-remove","frame":{"type":"queue-remove","sessionId":"session-0001","queueId":"queue-1"},"verdict":{"ok":true}}
+{"type":"interrupt","frame":{"type":"interrupt","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"dismiss-notice","frame":{"type":"dismiss-notice","sessionId":"session-0001","dismissKey":"warning:turn-0001:0"},"verdict":{"ok":true}}
+{"type":"rate-limit-resume","frame":{"type":"rate-limit-resume","sessionId":"session-0001","resetsAt":1767225600000,"action":"schedule"},"verdict":{"ok":true}}
+{"type":"scheduled-actions","frame":{"type":"scheduled-actions"},"verdict":{"ok":true}}
+{"type":"schedule-create","frame":{"type":"schedule-create","schedule":{"name":"Nightly","prompt":"Run the checks","cwd":"/workspace/project","provider":"claude","profileId":null,"model":null,"reasoningEffort":null,"permissionMode":null,"sandboxPolicy":null,"useWorktree":false,"cron":"0 9 * * 1","timeZone":"UTC","maxRuns":null}},"verdict":{"ok":true}}
+{"type":"schedule-update","frame":{"type":"schedule-update","scheduleId":"schedule-0001","schedule":{"name":"Nightly","prompt":"Run the checks","cwd":"/workspace/project","provider":"codex","profileId":null,"model":"gpt-5","reasoningEffort":"high","permissionMode":"plan","sandboxPolicy":"read-only","useWorktree":true,"cron":"30 2 * * *","timeZone":"Europe/Rome","maxRuns":3}},"verdict":{"ok":true}}
+{"type":"schedule-control","frame":{"type":"schedule-control","scheduleId":"schedule-0001","action":"pause"},"verdict":{"ok":true}}
+{"type":"approval","variant":"choiceId","frame":{"type":"approval","sessionId":"session-0001","requestId":"request-0001","choiceId":"accept","grantedPermissions":{"fileSystem":{"read":["/tmp"],"write":[]},"network":{"enabled":false}}},"verdict":{"ok":true}}
+{"type":"approval","variant":"decision","frame":{"type":"approval","sessionId":"session-0001","requestId":"request-0001","decision":"allow"},"verdict":{"ok":true}}
+{"type":"question","variant":"keyed","frame":{"type":"question","sessionId":"session-0001","requestId":"request-0002","answers":{"answers":{"Which one?":"Beta"},"response":"Beta, please"}},"verdict":{"ok":true}}
+{"type":"question","variant":"positional","frame":{"type":"question","sessionId":"session-0001","requestId":"request-0002","answers":{"answers":[["Beta"]]}},"verdict":{"ok":true}}
+{"type":"set-mode","frame":{"type":"set-mode","sessionId":"session-0001","permissionMode":"plan"},"verdict":{"ok":true}}
+{"type":"set-model","frame":{"type":"set-model","sessionId":"session-0001","model":"claude-opus-4-1"},"verdict":{"ok":true}}
+{"type":"set-reasoning-effort","frame":{"type":"set-reasoning-effort","sessionId":"session-0001","reasoningEffort":"high"},"verdict":{"ok":true}}
+{"type":"set-fast-mode","frame":{"type":"set-fast-mode","sessionId":"session-0001","enabled":true},"verdict":{"ok":true}}
+{"type":"set-auto-continue-on-limit","frame":{"type":"set-auto-continue-on-limit","sessionId":"session-0001","enabled":true},"verdict":{"ok":true}}
+{"type":"session-controls","frame":{"type":"session-controls","sessionId":"session-0001","warm":true},"verdict":{"ok":true}}
+{"type":"codex-controls","frame":{"type":"codex-controls","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"codex-control-action","frame":{"type":"codex-control-action","sessionId":"session-0001","action":{"type":"set-model-selection","modelId":"gpt-5","reasoningEffortId":"high","revision":"rev-1","operatorAction":true,"operatorActionId":"op-1"}},"verdict":{"ok":true}}
+{"type":"opencode-controls","frame":{"type":"opencode-controls","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"opencode-control-action","frame":{"type":"opencode-control-action","sessionId":"session-0001","action":{"type":"set-mode","mode":"build","revision":"rev-1","operatorAction":true,"operatorActionId":"op-1"}},"verdict":{"ok":true}}
+{"type":"advanced-settings","frame":{"type":"advanced-settings"},"verdict":{"ok":true}}
+{"type":"set-advanced-settings","frame":{"type":"set-advanced-settings","claudeCliVersion":null},"verdict":{"ok":true}}
+{"type":"server-settings","frame":{"type":"server-settings"},"verdict":{"ok":true}}
+{"type":"set-server-settings","frame":{"type":"set-server-settings","settings":{"pinnedWorkspaces":["/workspace/project"]}},"verdict":{"ok":true}}
+{"type":"detect-engines","frame":{"type":"detect-engines"},"verdict":{"ok":true}}
+{"type":"acp-agents","frame":{"type":"acp-agents"},"verdict":{"ok":true}}
+{"type":"providers","frame":{"type":"providers"},"verdict":{"ok":true}}
+{"type":"set-acp-agents","frame":{"type":"set-acp-agents","agents":[{"id":"gemini","label":"Gemini CLI","command":"gemini","args":["--experimental-acp"],"homeDir":"/var/lib/tether/gemini-home","enabled":true}]},"verdict":{"ok":true}}
+{"type":"set-providers","frame":{"type":"set-providers","profiles":[{"id":"work-claude","label":"Work Claude","extends":"claude","enabled":true,"homeDir":"/var/lib/tether/work-claude"}]},"verdict":{"ok":true}}
+{"type":"providers-snapshot","frame":{"type":"providers-snapshot"},"verdict":{"ok":true}}
+{"type":"refresh-providers","frame":{"type":"refresh-providers","providers":["claude"]},"verdict":{"ok":true}}
+{"type":"metadata-draft-request","frame":{"type":"metadata-draft-request","requestId":"draft-1","draftKind":"commitMessage","sessionId":"session-0001"},"verdict":{"ok":true}}
+{"type":"handoff-brief","frame":{"type":"handoff-brief","sourceId":"session-0001","targetId":"session-0002","budgetChars":4000,"requestId":"brief-1"},"verdict":{"ok":true}}
+{"type":"handoff","frame":{"type":"handoff","sourceId":"session-0001","targetId":"session-0002","engineText":"Continue from the brief.","requestId":"handoff-1"},"verdict":{"ok":true}}

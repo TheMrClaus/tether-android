@@ -1,0 +1,8 @@
+{"dir":"c2s","frame":{"type":"node-add","credential":"not-a-credential-bundle","label":"Peer","requestId":"node-add-1"}}
+{"dir":"s2c","frame":{"type":"node-result","ok":false,"message":"That credential could not be read. Re-copy it from the peer.","requestId":"node-add-1"}}
+{"dir":"c2s","frame":{"type":"node-probe","nodeId":"parity-node","requestId":"node-probe-1"}}
+{"dir":"s2c","frame":{"type":"nodes","nodes":[]}}
+{"dir":"s2c","frame":{"type":"node-result","ok":false,"nodeId":"parity-node","message":"No such node.","requestId":"node-probe-1"}}
+{"dir":"c2s","frame":{"type":"node-remove","nodeId":"parity-node","requestId":"node-remove-1"}}
+{"dir":"s2c","frame":{"type":"nodes","nodes":[]}}
+{"dir":"s2c","frame":{"type":"node-result","ok":false,"nodeId":"parity-node","message":"No such node.","requestId":"node-remove-1"}}
