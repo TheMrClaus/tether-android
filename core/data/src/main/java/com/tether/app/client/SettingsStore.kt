@@ -587,7 +587,12 @@ class DataStoreSettings(
         if (pendingMigrated) return
         mutex.withLock {
             if (pendingMigrated) return
-            withContext(ioDispatcher) { dataStore.edit { migrateLegacyPending(it) } }
+            withContext(ioDispatcher) {
+                // Nothing to attribute (every install but a 0.6.0 upgrade): no edit at all.
+                if (dataStore.data.first().contains(stringPreferencesKey(PendingSlots.LEGACY_KEY))) {
+                    dataStore.edit { migrateLegacyPending(it) }
+                }
+            }
             pendingMigrated = true
         }
     }
