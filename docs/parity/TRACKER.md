@@ -237,6 +237,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 
 | Date | Decision | Reason | By |
 |---|---|---|---|
+| 2026-09-28 | Owner asleep overnight: the coordinator works autonomously, decides on the owner's behalf (logged here), merges verified work, and delivers a morning report plus a live-deployment test list. Production deploys, releases and history rewrites stay owner calls | Owner message | owner |
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
 | 2026-09-27 | **Emulators skipped for now**: T0.2 deferred (SDK emulator + both AVDs stay installed); behavior checks run on JVM/Robolectric; Phase 0 closes without T0.2 | Owner answer (question card) | owner |
