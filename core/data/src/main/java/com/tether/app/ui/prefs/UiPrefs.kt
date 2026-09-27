@@ -83,7 +83,7 @@ class UiPrefs(context: Context) {
         store.edit { it[Keys.pushEnabled] = value }
     }
 
-    /** Per-device scope. Default [ThemeChoice.System]-independent: All events. */
+    /** Per-device push scope (independent of the theme). Default: All events. */
     val pushScope: Flow<com.tether.app.push.PushScope> = store.data.map {
         com.tether.app.push.PushScope.fromWire(it[Keys.pushScope]) ?: com.tether.app.push.PushScope.All
     }
