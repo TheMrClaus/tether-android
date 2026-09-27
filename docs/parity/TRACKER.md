@@ -77,6 +77,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | TODO |  |  | From S0.2 verify: corpus-manifest tetherSha records the GENERATING commit (157b87d = scripts-only diff atop PARITY_BASE 7d65611). When vend… |
+| T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
 
