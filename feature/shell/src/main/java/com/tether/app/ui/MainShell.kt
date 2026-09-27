@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,8 @@ import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.log.LogDialog
+import com.tether.app.ui.log.LogDialogState
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.shell.EmptyStage
 import com.tether.app.ui.shell.PhoneShell
@@ -59,6 +62,7 @@ import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
@@ -104,7 +108,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
 
-    var showErrorLog by remember { mutableStateOf(false) }
+    var showLog by remember { mutableStateOf(false) }
+    // The web's <dialog> stays mounted, so its filters and last stats survive a close and reopen.
+    val logState = remember { LogDialogState() }
+    val eventLog by vm.client.eventLog.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val refreshStats: () -> Unit = { scope.launch { logState.onStats(vm.client.fetchStats()) } }
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
@@ -132,9 +141,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenFiles = null,
                 onOpenUsage = null,
                 onOpenUsageAnalytics = null,
+                // dashboard.tsx:199 openLog: acknowledge the warnings, open, fetch fresh stats.
                 onOpenLog = {
                     vm.openLog()
-                    showErrorLog = true
+                    showLog = true
+                    refreshStats()
                 },
                 onLogout = { showLogoutConfirm = true },
             )
@@ -243,8 +254,14 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
 
-    if (showErrorLog) {
-        TetherDialog(onDismiss = { showErrorLog = false }, title = "Health & Event Log") {}
+    if (showLog) {
+        LogDialog(
+            entries = eventLog.entries,
+            sessions = sessions,
+            state = logState,
+            onRefresh = refreshStats,
+            onDismiss = { showLog = false },
+        )
     }
 
     if (showLogoutConfirm) {
