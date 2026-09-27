@@ -720,7 +720,8 @@ class RealTetherClient(
      */
     private fun detachSocketLocked(): WebSocket? {
         val ws = socket
-        if (ws != null && !socketOpen) connecting = false
+        // An upgrade still in flight (bound or not yet) ends the connect attempt.
+        if (!socketOpen && (ws != null || socketListener != null)) connecting = false
         socketListener?.retired = true
         socketListener = null
         socket = null
@@ -891,17 +892,29 @@ class RealTetherClient(
             .authorize(credential)
             .header("Origin", origin)
             .build()
+        // The listener is registered BEFORE the upgrade starts: OkHttp may call
+        // onOpen / onMessage / onFailure on its own thread before newWebSocket()
+        // even returns, and a callback from the current listener must bind its
+        // socket rather than be dropped as a stranger's (a lost onOpen left the
+        // client stuck in Connecting with an open socket).
         val listener = SocketListener()
-        // No redirects on the credential-bearing upgrade either (see authHttp).
-        val ws = authHttp.newWebSocket(request, listener)
-        listener.expected = ws
-        val cancel = synchronized(lock) {
+        synchronized(lock) {
             if (haltedLocked() || socket != null) {
                 connecting = false
+                return
+            }
+            socketListener = listener
+        }
+        // No redirects on the credential-bearing upgrade either (see authHttp).
+        val ws = authHttp.newWebSocket(request, listener)
+        val cancel = synchronized(lock) {
+            if (listener.retired) {
+                true
+            } else if (haltedLocked()) {
+                detachSocketLocked()
                 true
             } else {
-                socket = ws
-                socketListener = listener
+                listener.bindLocked(ws)
                 false
             }
         }
@@ -952,17 +965,24 @@ class RealTetherClient(
     }
 
     private inner class SocketListener : WebSocketListener() {
-        @Volatile
-        var expected: WebSocket? = null
-
         /** Set (under lock) once the client let go of this socket. */
         var retired = false
 
+        /**
+         * The current listener's socket becomes [socket] at its FIRST sign of life,
+         * whichever comes first: a callback or newWebSocket() returning. True when
+         * [webSocket] is the client's current socket. Caller holds [lock].
+         */
+        fun bindLocked(webSocket: WebSocket): Boolean {
+            if (retired) return false
+            if (this === socketListener && socket == null) socket = webSocket
+            return socket === webSocket
+        }
+
         override fun onOpen(webSocket: WebSocket, response: Response) {
             val reject = synchronized(lock) {
-                if (webSocket !== socket && webSocket !== expected) return
-                if (retired || haltedLocked() || (socket != null && socket !== webSocket)) {
-                    if (!retired && socket == null) connecting = false
+                if (retired || haltedLocked() || !bindLocked(webSocket)) {
+                    if (!retired && this === socketListener) connecting = false
                     retired = true
                     return@synchronized true
                 }
@@ -988,18 +1008,20 @@ class RealTetherClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            if (webSocket !== socket) return
+            if (!synchronized(lock) { bindLocked(webSocket) }) return
             // Stamped before parsing: even an undecodable frame proves traffic.
             lastInboundAt = clock()
             handleFrame(webSocket, ServerMessage.parse(text))
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            synchronized(lock) { bindLocked(webSocket) }
             webSocket.close(1000, null)
             if (code == CLOSE_DEVICE_REVOKED || code == CLOSE_SESSION_REVOKED) handleRevokedClose(webSocket, code)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            synchronized(lock) { bindLocked(webSocket) }
             if (code == CLOSE_DEVICE_REVOKED || code == CLOSE_SESSION_REVOKED) {
                 handleRevokedClose(webSocket, code)
                 return
@@ -1008,6 +1030,7 @@ class RealTetherClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            synchronized(lock) { bindLocked(webSocket) }
             handleSocketGone(webSocket)
         }
     }
