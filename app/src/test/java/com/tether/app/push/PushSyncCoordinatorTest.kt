@@ -46,13 +46,17 @@ class PushSyncCoordinatorTest {
         }
     }
 
+    private val serverA = PushServerIdentity("https://a.tether.invalid/", Credential.DeviceToken("fake-device-token-a"))
+    private val serverB = PushServerIdentity("https://b.tether.invalid/", Credential.DeviceToken("fake-device-token-b"))
+
     private fun request(
         enabled: Boolean = true,
         scope: PushScope = PushScope.Attached,
         attached: Set<String> = setOf("s1"),
         pinned: Set<String> = emptySet(),
         syncHints: Boolean = true,
-    ) = PushSyncRequest(enabled, scope, attached, pinned, syncHints)
+        server: PushServerIdentity? = serverA,
+    ) = PushSyncRequest(enabled, scope, attached, pinned, syncHints, server)
 
     @Test
     fun firstRequestPostsTheWholeRowIncludingTheOptIn() = runBlocking {
@@ -163,15 +167,61 @@ class PushSyncCoordinatorTest {
 
     @Test
     fun logoutUnregistersAndTheNextSignInPostsAgain() = runBlocking {
+        // The identity sequence production emits: signed in, logout (the hook,
+        // then the credential flow goes null), signed in again.
         val registrar = RecordingRegistrar()
         val coordinator = PushSyncCoordinator(registrar)
         coordinator.onRequest(request())
-        coordinator.onLoggedOut("https://tether.invalid/", Credential.DeviceToken("fake-device-token-not-a-credential"))
+        coordinator.onLoggedOut("https://a.tether.invalid/", Credential.DeviceToken("fake-device-token-a"))
+        coordinator.onRequest(request(server = null))
         coordinator.onRequest(request())
         assertEquals(
             listOf("POST attached [s1] [] syncHints=true", "DELETE logout", "POST attached [s1] [] syncHints=true"),
             registrar.calls,
         )
+    }
+
+    @Test
+    fun withoutAPairedDeviceNothingIsCalled() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar)
+        coordinator.onRequest(request(server = null))
+        coordinator.onRequest(request(server = null, attached = setOf("s2")))
+        coordinator.onTokenRotated()
+        coordinator.onRequest(request(server = null, enabled = false))
+        assertEquals(emptyList<String>(), registrar.calls)
+    }
+
+    @Test
+    fun aSignInWithUnchangedPrefsPostsOnce() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar)
+        coordinator.onRequest(request(server = null))
+        coordinator.onRequest(request(server = serverA))
+        coordinator.onRequest(request(server = serverA))
+        assertEquals(listOf("POST attached [s1] [] syncHints=true"), registrar.calls)
+    }
+
+    @Test
+    fun aServerSwitchPostsTheWholeRowToTheNewServer() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar)
+        coordinator.onRequest(request(server = serverA))
+        coordinator.onRequest(request(server = null))
+        coordinator.onRequest(request(server = serverB))
+        assertEquals(
+            listOf("POST attached [s1] [] syncHints=true", "POST attached [s1] [] syncHints=true"),
+            registrar.calls,
+        )
+    }
+
+    @Test
+    fun aDisableRightAfterASwitchDeletesNothingOnTheNewServer() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar)
+        coordinator.onRequest(request(server = serverA))
+        coordinator.onRequest(request(server = serverB, enabled = false))
+        assertEquals(listOf("POST attached [s1] [] syncHints=true"), registrar.calls)
     }
 
     @Test

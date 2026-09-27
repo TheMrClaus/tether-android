@@ -44,7 +44,7 @@ import okhttp3.OkHttpClient
 class PushController(
     private val app: Application,
     private val settings: SettingsStore,
-    private val prefs: UiPrefs,
+    private val prefs: PushPrefs,
     private val httpClient: OkHttpClient,
     private val scope: CoroutineScope,
     private val firebaseConfig: FirebaseConfig = FirebaseConfig.FromEnv,
@@ -71,28 +71,35 @@ class PushController(
             },
         )
 
-        // Observe prefs: pushEnabled + pushScope + sets + the sync-hint opt-in,
-        // and route to sync / update / unregister.
-        combine(
+        startSync()
+    }
+
+    /**
+     * The registration trigger path. It observes the prefs, the sync-hint
+     * opt-in, and the server identity (base URL + paired-device credential), and
+     * hands every distinct snapshot to the [PushSyncCoordinator]. Because the
+     * identity is part of the snapshot, a fresh sign-in or pairing, or a switch
+     * to another server, registers at once. Before round 2 only a pref change or
+     * a token rotation did. Split from [start] so tests drive the real path
+     * without the process lifecycle.
+     */
+    internal fun startSync() {
+        val prefsRequest = combine(
             prefs.pushEnabled,
             prefs.pushScope,
             prefs.attachedSessions,
             prefs.pinnedSessions,
             syncHints.optedIn(),
         ) { enabled, scopeChoice, attached, pinned, hints ->
-            PushSyncRequest(enabled, scopeChoice, attached.toSet(), pinned.toSet(), hints)
+            PushSyncRequest(enabled, scopeChoice, attached.toSet(), pinned.toSet(), hints, server = null)
         }
+        val server = combine(settings.baseUrl, settings.credential) { baseUrl, credential ->
+            PushServerIdentity.of(baseUrl, credential)
+        }
+        combine(prefsRequest, server) { request, identity -> request.copy(server = identity) }
             .distinctUntilChanged()
             .onEach { coordinator.onRequest(it) }
             .launchIn(scope)
-
-        // Logout: unregister. The settings.credential flow flips to null when
-        // RealTetherClient.stop() clears it; that is the signal.
-        scope.launch {
-            settings.credential.collect { credential ->
-                if (credential == null) coordinator.onCredentialCleared()
-            }
-        }
     }
 
     /**
@@ -127,7 +134,7 @@ class PushController(
             httpClient: OkHttpClient,
             scope: CoroutineScope,
         ): PushController {
-            val controller = PushController(app, settings, prefs, httpClient, scope)
+            val controller = PushController(app, settings, PushPrefs.fromUiPrefs(prefs), httpClient, scope)
             controller.start()
             instance = controller
             return controller
@@ -146,14 +153,32 @@ class PushController(
     }
 }
 
-/** One snapshot of everything the server's push row holds for this device. */
+/**
+ * One snapshot of everything the server's push row holds for this device, plus
+ * which server and credential it belongs to. [server] is null while there is no
+ * paired-device credential: nothing can be registered then.
+ */
 internal data class PushSyncRequest(
     val enabled: Boolean,
     val scope: PushScope,
     val attached: Set<String>,
     val pinned: Set<String>,
     val syncHints: Boolean,
+    val server: PushServerIdentity?,
 )
+
+/**
+ * The server a registration belongs to. A change here (sign-in, re-pair, server
+ * switch) forces a full POST. [Credential.toString] is masked, so this never
+ * prints the token.
+ */
+internal data class PushServerIdentity(val baseUrl: String, val credential: Credential.DeviceToken) {
+    companion object {
+        /** Only a paired device has an FCM row (fcm-register needs a device principal). */
+        fun of(baseUrl: String?, credential: Credential?): PushServerIdentity? =
+            if (baseUrl != null && credential is Credential.DeviceToken) PushServerIdentity(baseUrl, credential) else null
+    }
+}
 
 /**
  * Keeps the server's push row in step with the prefs. Every entry point runs
@@ -167,11 +192,14 @@ internal data class PushSyncRequest(
  *   server-side) falls back to the full POST.
  * - A rotation re-applies the latest request, so the new token is sent at once.
  *   If the prefs have not emitted yet, the first emission does the full sync.
+ * - A new server identity (sign-in, re-pair, server switch) is a full POST too.
+ *   No identity (signed out, cookie login) calls nothing.
  */
 internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
     private val mutex = Mutex()
     private var latest: PushSyncRequest? = null
     private var lastSyncKey: String? = null
+    private var syncedServer: PushServerIdentity? = null
     private var needsFullSync = true
 
     suspend fun onRequest(request: PushSyncRequest) = mutex.withLock {
@@ -184,18 +212,29 @@ internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
         latest?.let { reconcile(it) }
     }
 
-    suspend fun onCredentialCleared() = mutex.withLock {
-        registrar.unregister()
-        needsFullSync = true
-    }
-
     suspend fun onLoggedOut(baseUrl: String, credential: Credential) = mutex.withLock {
         registrar.unregister(baseUrl, credential)
         lastSyncKey = null
+        syncedServer = null
         needsFullSync = true
     }
 
     private suspend fun reconcile(request: PushSyncRequest) {
+        if (request.server == null) {
+            // Signed out, or a cookie login: no row can exist for this device. The
+            // logout hook ([onLoggedOut]) already DELETEd with the old credential.
+            lastSyncKey = null
+            syncedServer = null
+            needsFullSync = true
+            return
+        }
+        // A new sign-in, re-pair or server switch: the current server has no row
+        // for this token yet, so POST the whole row. Nothing synced so far belongs
+        // to this server, so a disable right after a switch DELETEs nothing here.
+        if (request.server != syncedServer) {
+            needsFullSync = true
+            lastSyncKey = null
+        }
         if (!request.enabled) {
             // Disabled: unregister on the server (best-effort); a re-enable then
             // re-runs the full sync path.
@@ -220,6 +259,7 @@ internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
         }
         if (result is PushRegistrarResult.Success || result is PushRegistrarResult.ServerUnconfigured) {
             lastSyncKey = key
+            syncedServer = request.server
             needsFullSync = false
         }
     }
