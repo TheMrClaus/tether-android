@@ -631,14 +631,13 @@ class RealTetherClient(
      * newer binding loads its own). Checks the unattributed 0.6.0 slot once.
      */
     private suspend fun bindPendingToCurrentServer() {
-        val (origin, checkUnattributed) = synchronized(lock) {
-            val target = currentOriginLocked() ?: return
-            if (pendingLoaded || pendingOrigin != target) return
+        val (target, checkUnattributed) = synchronized(lock) {
             val check = !unattributedChecked
             unattributedChecked = true
-            target to check
+            val current = currentOriginLocked()
+            (if (current == null || pendingLoaded || pendingOrigin != current) null else current) to check
         }
-        val raw = readQuietly { settings.readPendingInput(origin) }
+        // Checked once per process, with or without a server configured.
         if (checkUnattributed) {
             val count = PendingInput.fromPersisted(readQuietly { settings.readUnattributedPendingInput() }).records.size
             if (count > 0) {
@@ -649,6 +648,8 @@ class RealTetherClient(
                 )
             }
         }
+        val origin = target ?: return
+        val raw = readQuietly { settings.readPendingInput(origin) }
         val loaded = synchronized(lock) {
             if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return@synchronized false
             restorePendingLocked(raw, setAside.remove(origin))
