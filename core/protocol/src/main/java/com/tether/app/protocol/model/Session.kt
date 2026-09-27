@@ -28,6 +28,13 @@ data class AgentSession(
     val model: String? = null,
     val sandboxPolicy: String? = null,
     val lastTurnOutcome: String? = null,
+    // T5.1: the sidebar fields (lib/protocol.ts AgentSession). v70 `lastMessageAt` keys the
+    // "last-active" sort; `nameIsCustom` keeps an operator rename over the discovered title;
+    // v101 `parentSessionId` groups delegate children, `handedOffTo` badges a handed-off source.
+    val lastMessageAt: Long? = null,
+    val nameIsCustom: Boolean = false,
+    val parentSessionId: String? = null,
+    val handedOffTo: String? = null,
 )
 
 @Serializable
@@ -99,6 +106,20 @@ data class HistorySession(
     val cwd: String,
     val updatedAt: Long,
     val digest: HistoryDigest? = null,
+    // T5.1: the sidebar fields (lib/protocol.ts HistorySession). v68 `lastSeenAt` is the
+    // server's authoritative seen stamp; v122 `origin` / `spawnedBy` drive the agent-CLI lens.
+    val createdAt: Long? = null,
+    val lastSeenAt: Long? = null,
+    val origin: String? = null,
+    val spawnedBy: HistorySpawnLink? = null,
+)
+
+/** v122 HistorySession.spawnedBy (lib/protocol.ts HistorySpawnLink). */
+@Serializable
+data class HistorySpawnLink(
+    val tetherSessionId: String,
+    val spawnKey: String? = null,
+    val completion: String? = null,
 )
 
 @Serializable

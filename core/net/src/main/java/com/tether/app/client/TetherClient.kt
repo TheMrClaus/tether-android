@@ -267,9 +267,54 @@ interface TetherClient {
 
     /** GET /api/stats, the dialog's operational snapshot (fetched on every open and on Refresh). */
     suspend fun fetchStats(): StatsResult = StatsResult.Failed(STATS_FALLBACK_ERROR)
+
+    // ------------------------------------------------------------------
+    // T5.1 sidebar sync: v93 watched workspaces, v63 seen, v67 order, v128 pinned workspaces.
+    // Defaults keep other implementations (test doubles) compiling; RealTetherClient and the
+    // debug FakeTetherClient implement them.
+    // ------------------------------------------------------------------
+
+    /** Discovered conversations per workspace root, replaced per `histories` frame (use-tether.ts historiesByCwd). */
+    val historiesByCwd: StateFlow<Map<String, List<HistorySession>>> get() = NO_HISTORIES_BY_CWD
+
+    /** v67: the server's explicit per-workspace row order (`session-order`), keyed by cwd. */
+    val sessionOrders: StateFlow<Map<String, List<String>>> get() = NO_SESSION_ORDERS
+
+    /** v63: the newest `seen` broadcast per historyId (another device saw the conversation). */
+    val remoteSeen: StateFlow<Map<String, Long>> get() = NO_REMOTE_SEEN
+
+    /** v50: the last `server-settings` frame (null until one arrives on this server). */
+    val serverSettings: StateFlow<ServerMessage.ServerSettings?> get() = NO_SERVER_SETTINGS
+
+    /**
+     * v93 `discover {cwd, lastSeen, watch}`: [watch] is the COMPLETE set of sidebar workspaces
+     * (it replaces the server's per-socket subscription); [lastSeen] merges into the server's
+     * global seen store. Returns false when the frame could not be sent.
+     */
+    fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean = false
+
+    /** v63 `mark-seen`. Fire-and-forget, like the web (a lost one self-heals on the next discover). */
+    fun markSeen(historyId: String, seenAt: Long): Boolean = false
+
+    /**
+     * v67 `set-session-order` (empty [order] resets to recency). Applied to [sessionOrders]
+     * optimistically when the frame was sent (use-tether.ts setSessionOrder); returns whether it was.
+     */
+    fun setSessionOrder(cwd: String, order: List<String>): Boolean = false
+
+    /** v50 `server-settings` request. */
+    fun requestServerSettings(): Boolean = false
+
+    /** v128 `set-server-settings {pinnedWorkspaces}`: the owner-level kept sidebar workspaces. */
+    fun setPinnedWorkspaces(pinned: List<String>): Boolean = false
 }
 
 private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
+private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = MutableStateFlow(emptyMap())
+private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableStateFlow(emptyMap())
+private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
+private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
+
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 

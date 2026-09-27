@@ -573,7 +573,8 @@ class FakeTetherClient : TetherClient {
     override fun kill(sessionId: String) {
         val ts = System.currentTimeMillis()
         _sessions.update { list ->
-            list.map { if (it.id == sessionId) it.copy(status = "exited", endedAt = ts, updatedAt = ts) else it }
+            // The server archives a killed session (the sidebar's "Archived" group, T5.1).
+            list.map { if (it.id == sessionId) it.copy(status = "exited", endedAt = ts, updatedAt = ts, runtimeArchived = true) else it }
         }
         updateProjection(sessionId) { it.copy(status = Vocab.SESSION_EXITED, activeTurnId = null) }
     }
@@ -585,6 +586,19 @@ class FakeTetherClient : TetherClient {
 
     /** The fake never sends a bounded snapshot, so there is nothing to fetch. */
     override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {}
+
+    // T5.1 sidebar sync: an in-memory order store (the server's canonical echo is immediate);
+    // no server settings, so the sidebar keeps this device's pinned workspaces.
+    private val _sessionOrders = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    override val sessionOrders: StateFlow<Map<String, List<String>>> = _sessionOrders.asStateFlow()
+    override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean = true
+    override fun markSeen(historyId: String, seenAt: Long): Boolean = true
+    override fun setSessionOrder(cwd: String, order: List<String>): Boolean {
+        _sessionOrders.update { it + (cwd to order) }
+        return true
+    }
+    override fun requestServerSettings(): Boolean = true
+    override fun setPinnedWorkspaces(pinned: List<String>): Boolean = true
 
     private companion object {
         val TREE_JSON = Json {

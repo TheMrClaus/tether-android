@@ -323,6 +323,13 @@ class RealTetherClient(
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = trimmedBeforeState
 
+    // T5.1 sidebar sync (SidebarSync.kt).
+    private val sidebarSync = SidebarSync()
+    override val historiesByCwd: StateFlow<Map<String, List<HistorySession>>> = sidebarSync.historiesByCwd
+    override val sessionOrders: StateFlow<Map<String, List<String>>> = sidebarSync.sessionOrders
+    override val remoteSeen: StateFlow<Map<String, Long>> = sidebarSync.remoteSeen
+    override val serverSettings: StateFlow<ServerMessage.ServerSettings?> = sidebarSync.serverSettings
+
     init {
         scope.launch {
             combine(settings.baseUrl, settings.credential) { base, credential ->
@@ -622,6 +629,7 @@ class RealTetherClient(
         directoriesState.value = null
         sessionControlsState.value = emptyMap()
         trimmedBeforeState.value = emptyMap()
+        sidebarSync.clear()
     }
 
     /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
@@ -1605,7 +1613,13 @@ class RealTetherClient(
                 }
                 ifCurrent(webSocket) { upsertSessionLocked(message.session) }
             }
-            is ServerMessage.Histories -> ifCurrent(webSocket) { historiesState.value = message.sessions }
+            is ServerMessage.Histories -> ifCurrent(webSocket) {
+                historiesState.value = message.sessions
+                sidebarSync.onFrame(message)
+            }
+            // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt).
+            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings ->
+                ifCurrent(webSocket) { sidebarSync.onFrame(message) }
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
             is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
             is ServerMessage.Event -> onEvent(webSocket, message)
@@ -2187,6 +2201,19 @@ class RealTetherClient(
     override fun kill(sessionId: String) {
         sendFrame(ClientMessage.Kill(sessionId))
     }
+
+    // T5.1 sidebar sync (SidebarSync.kt): the exact frames, sent on the current handshaken socket.
+    override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean =
+        sendFrame(SidebarSync.discover(cwd, lastSeen, watch))
+
+    override fun markSeen(historyId: String, seenAt: Long): Boolean = sendFrame(SidebarSync.markSeen(historyId, seenAt))
+
+    override fun setSessionOrder(cwd: String, order: List<String>): Boolean =
+        sendFrame(SidebarSync.setSessionOrder(cwd, order)).also { sent -> if (sent) sidebarSync.applyLocalOrder(cwd, order) }
+
+    override fun requestServerSettings(): Boolean = sendFrame(ClientMessage.ServerSettingsRequest)
+
+    override fun setPinnedWorkspaces(pinned: List<String>): Boolean = sendFrame(SidebarSync.setPinnedWorkspaces(pinned))
 
     // ------------------------------------------------------------------
     // v109 node registry
