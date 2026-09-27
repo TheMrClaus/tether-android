@@ -66,7 +66,8 @@ class ManualScheduler : Scheduler {
 /** Backoff delays with this base never collide with the ping (8 s) or grace (60 s) timers. */
 fun testBackoff() = Backoff(baseMs = 1_100, capMs = 30_000, random = { 0.0 })
 
-fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.BACKGROUND_GRACE_MS
+fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.BACKGROUND_GRACE_MS &&
+    ms != NodeRegistryRules.REQUEST_TIMEOUT_MS
 
 const val HEALTH_129 = """{"ok":true,"protocolVersion":129,"nativeProtocolFloor":129}"""
 
@@ -127,9 +128,15 @@ class ConnectionHarness {
         server.enqueue(MockResponse().setResponseCode(code).setBody("{}"))
     }
 
-    fun newClient(backoff: Backoff = testBackoff(), configured: Boolean = true): RealTetherClient {
+    fun newClient(
+        backoff: Backoff = testBackoff(),
+        configured: Boolean = true,
+        deviceToken: String? = null,
+    ): RealTetherClient {
         server.start()
-        settings = if (configured) {
+        settings = if (deviceToken != null) {
+            InMemorySettings(initialBaseUrl = server.url("/").toString().trimEnd('/'), initialDeviceToken = deviceToken)
+        } else if (configured) {
             InMemorySettings(initialBaseUrl = server.url("/").toString().trimEnd('/'), initialCookie = "cookie")
         } else {
             InMemorySettings()

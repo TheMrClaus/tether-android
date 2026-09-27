@@ -1669,6 +1669,9 @@ class RealTetherClient(
         message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.Answered(result)) }
     }
 
+    /** Test seam: node requests still waiting for an answer (must return to 0: nothing leaks). */
+    internal fun pendingNodeRequestCount(): Int = synchronized(lock) { nodeRequests.size }
+
     /** An unknown / already-settled requestId is ignored. */
     private fun completeNodeRequest(requestId: String, outcome: NodeRequestOutcome) {
         val waiter = synchronized(lock) { nodeRequests.remove(requestId) } ?: return
