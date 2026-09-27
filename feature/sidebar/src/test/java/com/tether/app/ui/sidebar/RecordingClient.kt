@@ -1,0 +1,112 @@
+package com.tether.app.ui.sidebar
+
+import com.tether.app.client.ConnectionState
+import com.tether.app.client.LoginResult
+import com.tether.app.client.PairResult
+import com.tether.app.client.TetherClient
+import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.ServerMessage
+import com.tether.app.protocol.TetherJson
+import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.model.DirectoryListing
+import com.tether.app.protocol.model.HistorySession
+import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.model.SessionProjection
+import com.tether.app.protocol.tree.JsObj
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+
+/**
+ * A [TetherClient] that records every frame the sidebar makes it send, as the wire JSON the real
+ * client would put on the socket (the ClientMessage encodings SidebarSyncTest pins to the corpus).
+ */
+class RecordingClient(
+    sessions: List<AgentSession> = emptyList(),
+    connected: Boolean = true,
+) : TetherClient {
+    val frames = mutableListOf<JsonObject>()
+    fun types(): List<String> = frames.map { (it["type"] as JsonPrimitive).content }
+    private fun record(message: ClientMessage) {
+        frames += TetherJson.parseToJsonElement(message.encode()) as JsonObject
+    }
+
+    override val connection = MutableStateFlow<ConnectionState>(if (connected) ConnectionState.Connected else ConnectionState.Disconnected)
+    override val sessions = MutableStateFlow(sessions)
+    override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(emptyList())
+    override val workspaceRoot = MutableStateFlow<String?>(SidebarFixtures.ROOT)
+    override val projections: StateFlow<Map<String, SessionProjection>> = MutableStateFlow(emptyMap())
+    override val projectionTrees: StateFlow<Map<String, JsObj>> = MutableStateFlow(emptyMap())
+    override val histories: StateFlow<List<HistorySession>> = MutableStateFlow(emptyList())
+    override val directories: StateFlow<DirectoryListing?> = MutableStateFlow(null)
+    override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = MutableStateFlow(emptyMap())
+    override val errors: SharedFlow<String> = MutableSharedFlow()
+    override val configured: StateFlow<Boolean> = MutableStateFlow(true)
+    override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
+
+    override val historiesByCwd = MutableStateFlow<Map<String, List<HistorySession>>>(emptyMap())
+    override val sessionOrders = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    override val remoteSeen = MutableStateFlow<Map<String, Long>>(emptyMap())
+    override val serverSettings = MutableStateFlow<ServerMessage.ServerSettings?>(null)
+
+    override suspend fun login(baseUrl: String, password: String, username: String): LoginResult = error("unused")
+    override suspend fun pair(baseUrl: String, code: String, label: String): PairResult = error("unused")
+    override fun start() = Unit
+    override fun stop() = Unit
+    override fun attach(sessionId: String) = record(ClientMessage.Attach(sessionId, null))
+    override fun send(sessionId: String, text: String, attachments: List<Attachment>) = Unit
+    override fun queueAdd(sessionId: String, text: String) = Unit
+    override fun queueEdit(sessionId: String, queueId: String, text: String) = Unit
+    override fun queueRemove(sessionId: String, queueId: String) = Unit
+    override fun interrupt(sessionId: String) = Unit
+    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) = Unit
+    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) = Unit
+    override fun createSession(provider: String, cwd: String?, name: String?) = record(ClientMessage.Create(provider = provider, cwd = cwd, name = name))
+    override fun resumeHistory(historyId: String, cwd: String) = record(ClientMessage.Resume(historyId, cwd))
+    override fun discover(cwd: String) = record(ClientMessage.Discover(cwd))
+    override fun browse(cwd: String?) = record(ClientMessage.Browse(cwd))
+    override fun setMode(sessionId: String, permissionMode: String) = Unit
+    override fun setModel(sessionId: String, model: String): Boolean = true
+    override fun requestSessionControls(sessionId: String) = Unit
+    override fun pin(sessionId: String, pinned: Boolean) = record(ClientMessage.Pin(sessionId, pinned))
+    override fun rename(sessionId: String, name: String) = record(ClientMessage.Rename(sessionId, name))
+    override fun archive(sessionId: String) = record(ClientMessage.Archive(sessionId))
+    override fun kill(sessionId: String) = record(ClientMessage.Kill(sessionId))
+    override fun reconnectIfIdle() = Unit
+    override fun setAppForeground(foreground: Boolean) = Unit
+    override fun retryConnection() = Unit
+
+    override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean {
+        record(ClientMessage.Discover(cwd, lastSeen = lastSeen, watch = watch))
+        return true
+    }
+
+    override fun markSeen(historyId: String, seenAt: Long): Boolean {
+        record(ClientMessage.MarkSeen(historyId, seenAt))
+        return true
+    }
+
+    override fun setSessionOrder(cwd: String, order: List<String>): Boolean {
+        record(ClientMessage.SetSessionOrder(cwd, order))
+        sessionOrders.value = sessionOrders.value + (cwd to order)
+        return true
+    }
+
+    override fun requestServerSettings(): Boolean {
+        record(ClientMessage.ServerSettingsRequest)
+        return true
+    }
+
+    override fun setPinnedWorkspaces(pinned: List<String>): Boolean {
+        record(ClientMessage.SetServerSettings(buildJsonObject { put("pinnedWorkspaces", JsonArray(pinned.map(::JsonPrimitive))) }))
+        return true
+    }
+}
+
+fun frame(json: String): JsonObject = TetherJson.parseToJsonElement(json) as JsonObject
