@@ -74,7 +74,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | DONE | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
+| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
@@ -230,6 +230,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Isolated test servers run in their own transient cgroup** via `systemd-run --user --scope` (ports 4290–4299, throwaway state dirs); the #155 guard is never modified or bypassed in code | Agents run inside `tether.service`'s cgroup, where `server.mjs` rightly refuses a second server; a scope is a separate cgroup (verified) | owner |
 | 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
+| 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
+| 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
 | 2026-09-27 | **Gate exception:** S1.1 (server native compat window) starts before Phase 0 closes | It needs no Phase-0 artifact; only S0.3-verify/S0.4/S0.6 remain in P0 | claude-main (owner delegation) |
 | 2026-09-27 | **Published v0.6.0** (code 16) from `34b1c9b` after CI + verifier + security review; same signing cert as 0.5.1 (upgrade-installs). APK is 33 MB because dex is stored uncompressed at minSdk ≥ 28 (AGP default, not a regression); R8 minification (off since before the program) → T14.1 | Owner asked for a morning APK; decided on owner's behalf | claude-main |
 | 2026-09-27 | Owner away overnight: agent works autonomously, decides on the owner's behalf (logged here), and publishes a new APK release when the SDK work lands | Owner message | owner |
