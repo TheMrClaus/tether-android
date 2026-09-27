@@ -12,7 +12,9 @@
     <string name="push_channel_rate_limit_description">A session hit a rate limit and asks whether to resume when it resets.</string>
     <string name="push_channel_general_name">Other session alerts</string>
     <string name="push_channel_general_description">Alerts shown while Tether is closed, and any other session alert.</string>
-    <!-- Lock-screen stand-in for approval and question notifications (VISIBILITY_PRIVATE). -->
+    <!-- Lock-screen stand-in for approval and question notifications the app posts
+         itself (foreground or data-only). Notifications FCM shows in the background
+         take their visibility from the server payload instead. -->
     <string name="push_public_title">Tether needs you</string>
     <string name="push_public_text">A session is waiting for you.</string>
 </resources>

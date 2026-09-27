@@ -24,6 +24,14 @@ import com.tether.app.R
  * - Lock screen: VISIBILITY_PRIVATE, set explicitly. Approval and question
  *   notifications carry a generic public version ("Tether needs you"), so a
  *   locked screen shows that something waits, and not which provider or what.
+ *
+ * Scope: all of this applies only to notifications **this app posts**, which is
+ * in the foreground or for a data-only message. While the app is in the
+ * background, FCM shows the server's `notification` message itself, and this
+ * code never runs. There, visibility comes from the server payload's
+ * `android.notification.visibility`. The server does not send it today, so
+ * Android's default (private, no public version) applies. A public version
+ * cannot be set through FCM at all.
  */
 object PushNotifier {
     const val FALLBACK_TAG = "tether-push"

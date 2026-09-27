@@ -13,9 +13,11 @@ import com.google.firebase.messaging.RemoteMessage
  *   The kinds are approval, question, turn_end and resume_choice, and the copy
  *   is generic. `url` is always the id-free `/` (the FCM privacy floor: Google
  *   can read the payload, so it never names a session). While the app is in the
- *   background, FCM shows these itself, on the manifest's default channel, and
- *   this method is not called. In the foreground it is called, and the app posts
- *   on the per-kind channel ([PushNotifier]).
+ *   background, FCM shows these itself, on the manifest's default channel and
+ *   with the payload's visibility (none today, so Android's private default),
+ *   and this method is not called. In the foreground it is called, and the app
+ *   posts on the per-kind channel, with its own lock-screen rules
+ *   ([PushNotifier]).
  * - **Sync hint** (v130, S13.1): data-only `{kind:"sync", v:"1"}`, sent only to
  *   devices that opted in with `syncHints`. It carries no content and never
  *   posts a notification. T13.4 turns it into the background catch-up; until
