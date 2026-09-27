@@ -15,6 +15,9 @@
        already lives in no_backup/.) Firebase Installations' file is named
        after the app id, which comes from the server at runtime, so it has no
        fixed path to exclude here.
+     - shared_prefs/tether_push_firebase.xml binds the accepted Firebase project
+       to the server origin it came from (T12.1). It is excluded with the token,
+       so a restored install never inherits a push identity.
      Keep this in sync with backup_rules.xml (android:fullBackupContent). -->
 <data-extraction-rules>
     <cloud-backup>
@@ -22,11 +25,13 @@
         <exclude domain="file" path="tether_settings.preferences_pb" />
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
+        <exclude domain="sharedpref" path="tether_push_firebase.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="credentials" />
         <exclude domain="file" path="tether_settings.preferences_pb" />
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
+        <exclude domain="sharedpref" path="tether_push_firebase.xml" />
     </device-transfer>
 </data-extraction-rules>
