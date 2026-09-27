@@ -53,9 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.Lucide
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
@@ -138,7 +136,7 @@ fun TetherSelectTrigger(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.clearAndSetSemantics { },
         )
-        Icon(Lucide.ChevronDown, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
+        Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
     }
 }
 
@@ -254,7 +252,7 @@ private fun SelectOptionRow(option: TetherSelectOption, selected: Boolean, last:
                     )
                 }
             }
-            if (selected) Icon(Lucide.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+            if (selected) Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
         }
         if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
     }

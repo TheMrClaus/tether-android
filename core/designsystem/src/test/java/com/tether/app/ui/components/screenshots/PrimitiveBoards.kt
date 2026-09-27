@@ -15,16 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.composables.icons.lucide.ArrowDown
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.FileText
-import com.composables.icons.lucide.Image
-import com.composables.icons.lucide.Loader
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Paperclip
-import com.composables.icons.lucide.Send
-import com.composables.icons.lucide.Settings
 import com.tether.app.ui.components.KeyShape
 import com.tether.app.ui.components.KeySize
 import com.tether.app.ui.components.KeyVariant
@@ -53,6 +43,7 @@ import com.tether.app.ui.components.TetherWell
 import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.components.statusColor
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 
@@ -82,7 +73,7 @@ val TabletBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
 fun KeysBoard() {
     for (variant in KeyVariant.entries) {
         StateRow("${variant.name.lowercase()}: rest · pressed · focus · disabled") {
-            val icon = if (variant == KeyVariant.Quiet) Lucide.Settings else null
+            val icon = if (variant == KeyVariant.Quiet) TetherIcons.Settings else null
             val label = if (variant == KeyVariant.Quiet) null else when (variant) {
                 KeyVariant.Primary -> "Send"
                 KeyVariant.Brick -> "Stop"
@@ -97,14 +88,14 @@ fun KeysBoard() {
     }
     StateRow("latched · small · slit · circle cap · authored legend") {
         TetherKey(onClick = {}, label = "Filter", selected = true)
-        TetherKey(onClick = {}, variant = KeyVariant.Quiet, icon = Lucide.Paperclip, selected = true, contentDescription = "Attach")
+        TetherKey(onClick = {}, variant = KeyVariant.Quiet, icon = TetherIcons.Paperclip, selected = true, contentDescription = "Attach")
         TetherKey(onClick = {}, label = "Yes", size = KeySize.Small, minHeight = 32.dp)
         TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Approve", showSlit = true)
     }
     StateRow("") {
         TetherKey(onClick = {}, variant = KeyVariant.Brick, label = "Deny", showSlit = true)
-        TetherKey(onClick = {}, variant = KeyVariant.Utility, icon = Lucide.ArrowDown, shape = KeyShape.Circle, contentDescription = "Jump")
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, icon = Lucide.Send, contentDescription = "Send")
+        TetherKey(onClick = {}, variant = KeyVariant.Utility, icon = TetherIcons.ArrowDown, shape = KeyShape.Circle, contentDescription = "Jump")
+        TetherKey(onClick = {}, variant = KeyVariant.Primary, icon = TetherIcons.Send, contentDescription = "Send")
         TetherKey(onClick = {}, label = "use main.kt", fixedVerb = false)
     }
 }
@@ -163,12 +154,12 @@ fun StatusPillsBoard() {
 fun ChipsBoard() {
     StateRow("rest · open · focus") {
         TetherChip("Draft", {})
-        TetherChip("Opus 4.1", {}, active = true, trailingIcon = Lucide.ChevronDown)
+        TetherChip("Opus 4.1", {}, active = true, trailingIcon = TetherIcons.ChevronDown)
         TetherChip("Focus", {}, interactionSource = heldInteraction(focused = true))
     }
     StateRow("leading glyph · disabled") {
         val t = LocalTetherTokens.current
-        TetherChip("notes.md", {}, leading = { androidx.compose.material3.Icon(Lucide.FileText, null, tint = t.muted, modifier = Modifier.size(12.dp)) })
+        TetherChip("notes.md", {}, leading = { androidx.compose.material3.Icon(TetherIcons.FileText, null, tint = t.muted, modifier = Modifier.size(12.dp)) })
         TetherChip("Off", {}, enabled = false)
     }
 }
@@ -221,9 +212,9 @@ fun SheetBoard() {
     val t = LocalTetherTokens.current
     Box(Modifier.fillMaxWidth().height(360.dp).background(dialogScrim(t)), contentAlignment = Alignment.BottomCenter) {
         TetherSheetSurface(title = "Attach", onClose = {}) {
-            TetherSheetRow("Photo library", {}, icon = Lucide.Image)
-            TetherSheetRow("File", {}, icon = Lucide.FileText, interactionSource = heldInteraction(pressed = true))
-            TetherSheetRow("Paste from clipboard", {}, icon = Lucide.Paperclip, interactionSource = heldInteraction(focused = true))
+            TetherSheetRow("Photo library", {}, icon = TetherIcons.Image)
+            TetherSheetRow("File", {}, icon = TetherIcons.FileText, interactionSource = heldInteraction(pressed = true))
+            TetherSheetRow("Paste from clipboard", {}, icon = TetherIcons.Paperclip, interactionSource = heldInteraction(focused = true))
         }
     }
 }
@@ -258,7 +249,7 @@ fun IndicatorsBoard() {
     StateRow("spinner ring · loader · dot · waiting ping") {
         SpinnerRing(statusColor(StatusTone.Active))
         SpinnerRing(t.muted, size = 16.dp, stroke = 2.dp)
-        SpinningIcon(Lucide.Loader, tint = t.muted, size = 16.dp)
+        SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 16.dp)
         StatusDot(t.faint)
         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { WaitingPingDot(t.violet) }
     }
@@ -282,6 +273,6 @@ fun RockerBoard() {
 fun DialogFooterKeysBoard() {
     StateRow("settings footer: secondary · primary with glyph") {
         TetherKey(onClick = {}, label = "Cancel")
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = Lucide.Check, iconSize = 16.dp)
+        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = TetherIcons.Check, iconSize = 16.dp)
     }
 }

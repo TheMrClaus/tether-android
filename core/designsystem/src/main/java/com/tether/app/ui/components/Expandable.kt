@@ -54,8 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.ChevronDown
-import com.composables.icons.lucide.Lucide
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -301,7 +300,7 @@ private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Lucide.ChevronDown, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp).graphicsLayer { rotationZ = rotation })
+        Icon(TetherIcons.ChevronDown, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp).graphicsLayer { rotationZ = rotation })
         Text(
             label,
             color = ink,

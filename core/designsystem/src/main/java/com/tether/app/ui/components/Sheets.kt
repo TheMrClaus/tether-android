@@ -46,8 +46,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.X
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -118,7 +117,7 @@ fun TetherSheetSurface(
                     modifier = Modifier.weight(1f).semantics { heading() },
                 )
                 if (onClose != null) {
-                    TetherKey(onClick = onClose, variant = KeyVariant.Quiet, icon = Lucide.X, iconSize = 16.dp, contentDescription = "Close")
+                    TetherKey(onClick = onClose, variant = KeyVariant.Quiet, icon = TetherIcons.X, iconSize = 16.dp, contentDescription = "Close")
                 }
             }
             PerfDivider()

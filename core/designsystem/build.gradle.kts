@@ -91,8 +91,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.core)
-    // Lucide glyphs the primitives draw (select chevron/check, expand chevron, sheet close).
-    implementation(libs.lucide.icons)
 
     designTokenGenerator(project(":tools:design-tokens"))
 
