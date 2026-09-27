@@ -81,9 +81,8 @@ case limit-hit-resume-now                 B  ready
 case fast-mode                            B  ready
 
 # ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
-# Still pending on other units' arms (C's own folds proven green with them stubbed in):
+# Still pending on another unit's arm (C's folds proven green with it swapped in):
 #   cli-inventory, cli-inventory-limits -> unit I: swap FoldTurn.kt stand-ins projectedCliInventory/sameProjectedCliInventory for C's internal normalizeProjectedCliInventory/sameCliInventory (proven green)
-#   model-fallback, code-point-bounds -> B notice_dismissed; plan-diff-reroute-review-compaction -> B context_compacted
 case cli-inventory                        C  pending
 case cli-inventory-limits                 C  pending
 case mcp-health                           C  ready
@@ -91,7 +90,7 @@ case mcp-health-cap                       C  ready
 case todo-incremental-tasks               C  ready
 case todo-limits                          C  ready
 case todo-write                           C  ready
-case model-fallback                       C  pending
+case model-fallback                       C  ready
 case background-command-lifecycle         C  ready
 case background-commands-cap              C  ready
 case background-task-lifecycle            C  ready
@@ -101,9 +100,9 @@ case spawned-run-lifecycle                C  ready
 case spawned-runs-cap                     C  ready
 case continuation-command-run-output      C  ready
 case diff-chars-cap                       C  ready
-case plan-diff-reroute-review-compaction  C  pending
+case plan-diff-reroute-review-compaction  C  ready
 # code-point-bounds: reassigned A -> C (2026-09-27, coordinator) — only C labels + B notice_dismissed.
-case code-point-bounds                    C  pending
+case code-point-bounds                    C  ready
 
 # ---- I: integration (Revision 1: the 16 fixture cases + 3 named) ----
 case fixture-acp-session-updates          I  pending
