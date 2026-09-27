@@ -47,21 +47,21 @@ case run-bookkeeping                      H1 ready
 case api-retry                            H1 ready
 
 # ---- A: turn and content stream (cancel-interrupted: A owns, runs after B) ----
-case message-turn-basic                   A  pending
-case blocks-without-started               A  pending
-case thinking-stream-and-replay           A  pending
-case tool-lifecycle-progress              A  pending
-case claude-final-report-order-untouched  A  pending
-case codex-final-report-last              A  pending
-case subagent-message                     A  pending
-case turn-guards-duplicates-and-reopen    A  pending
-case usage-token-progress-turn-activity   A  pending
+case message-turn-basic                   A  ready
+case blocks-without-started               A  ready
+case thinking-stream-and-replay           A  ready
+case tool-lifecycle-progress              A  ready
+case claude-final-report-order-untouched  A  ready
+case codex-final-report-last              A  ready
+case subagent-message                     A  ready
+case turn-guards-duplicates-and-reopen    A  ready
+case usage-token-progress-turn-activity   A  ready
 case message-aborted-literal              A  ready
-case user-message-engine-text-equal       A  pending
-case errors-and-account-auth              A  pending
+case user-message-engine-text-equal       A  ready
+case errors-and-account-auth              A  ready
 case warnings-and-unknown-events          A  ready
 case code-point-bounds                    A  pending
-case native-session-id-with-initial       A  pending
+case native-session-id-with-initial       A  ready
 case cancel-interrupted                   A  pending
 
 # ---- B: interaction and notices ----
