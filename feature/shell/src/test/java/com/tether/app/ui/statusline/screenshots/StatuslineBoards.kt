@@ -141,6 +141,10 @@ fun ColumnScope.GaugeBoard() {
         ContextGauge(m(45.0), pressed = false, onClick = {}, interactionSource = heldPress(), env = BoardEnv)
         ContextGauge(m(45.0), pressed = true, onClick = {}, env = BoardEnv)
     }
+    StateRow("no reading (the web scenarios' seed) · rest · open") {
+        ContextGauge(null, pressed = false, onClick = {}, env = BoardEnv)
+        ContextGauge(null, pressed = true, onClick = {}, env = BoardEnv)
+    }
     StateRow("labelled (≥48rem) · rest · open") {
         ContextGauge(m(45.0), showLabel = true, pressed = false, onClick = {}, env = BoardEnv)
         ContextGauge(m(45.0), showLabel = true, pressed = true, onClick = {}, env = BoardEnv)
