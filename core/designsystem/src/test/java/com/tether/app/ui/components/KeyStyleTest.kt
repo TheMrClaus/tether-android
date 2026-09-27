@@ -1,197 +1,228 @@
 package com.tether.app.ui.components
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.TetherSkin
+import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.tokensFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The key cascade: globals.css material layer, Studio's flat overrides, and who wins where. */
+/**
+ * The key cascade pinned as a TABLE: web class set × skin family × state → the computed values,
+ * each row transcribed by hand from the CSS at PARITY_BASE (g = app/globals.css, s = app/studio.css,
+ * the winning rule cited per row). Every row is checked in every skin of its family. The shadow
+ * lists here are an independent transcription of the CSS, not the production building blocks.
+ */
 class KeyStyleTest {
-    private val instrument = TetherSkin.entries.filter { it.family != ThemeFamily.Studio }
-    private val studio = TetherSkin.entries.filter { it.family == ThemeFamily.Studio }
+    private enum class Fam { Instrument, Studio }
 
-    @Test fun instrumentSecondaryRestIsMoldedFaceOverSideWall() {
-        for (skin in instrument) {
-            val t = tokensFor(skin)
-            val look = resolveKey(t, KeyVariant.Secondary, KeyState.Rest)
-            assertEquals(skin.id, t.keyFace, look.face)
-            assertEquals(skin.id, t.keySide, look.border)
-            assertEquals(skin.id, t.radiusKey, look.radius)
-            assertEquals(skin.id, 2 + t.css.shadowKey.size, look.shadows.size)
-            assertTrue(skin.id, look.shadows.take(2).all { it.inset })
-            assertEquals(skin.id, 0.dp, look.travel)
-        }
+    private class Row(
+        val source: String,
+        val classes: Set<KeyClass>,
+        val fam: Fam,
+        val state: KeyState,
+        val face: (TetherTokens) -> Color,
+        val border: (TetherTokens) -> Color,
+        val ink: (TetherTokens) -> Color,
+        val shadows: (TetherTokens) -> List<CssShadow>,
+        val travel: (TetherTokens) -> Dp = { 0.dp },
+        val radius: (TetherTokens) -> Dp,
+        val alpha: Float = 1f,
+        val slit: Boolean = false,
+        val slitAlpha: Float = 0.55f,
+        val wear: KeyWear = KeyWear.None,
+    )
+
+    // ── Transcribed shadow lists ──
+    private fun c(t: TetherTokens, a: Float) = t.contact.copy(alpha = a)
+    private fun inset(y: Dp, color: Color, x: Dp = 0.dp, blur: Dp = 0.dp, spread: Dp = 0.dp) = CssShadow(true, x, y, blur, spread, color)
+    private fun drop(y: Dp, color: Color, blur: Dp = 0.dp, spread: Dp = 0.dp) = CssShadow(false, 0.dp, y, blur, spread, color)
+
+    /** g8592: inset 0 1px 0 lit-strong, inset 1px 0 0 lit-soft, var(--shadow-key). */
+    private val neutral = { t: TetherTokens -> listOf(inset(1.dp, t.litStrong), inset(0.dp, t.litSoft, x = 1.dp)) + t.css.shadowKey }
+
+    /** g8686: var(--bevel-pressed), var(--shadow-key-pressed). */
+    private val neutralPressed = { t: TetherTokens -> t.css.bevelPressed + t.css.shadowKeyPressed }
+
+    /** g8634: lit-faint ×2, inset -1px -1px contact/.1, 0 3px accent-side, 0 5px 7px -2px contact/.32. */
+    private val primary = { t: TetherTokens ->
+        listOf(
+            inset(1.dp, t.litFaint), inset(0.dp, t.litFaint, x = 1.dp), inset((-1).dp, c(t, 0.1f), x = (-1).dp),
+            drop(3.dp, t.accentSide), drop(5.dp, c(t, 0.32f), blur = 7.dp, spread = (-2).dp),
+        )
     }
 
-    @Test fun smallKeysUseTheCompactDropScale() {
-        val t = tokensFor(TetherSkin.Tactile)
-        val look = resolveKey(t, KeyVariant.Secondary, KeyState.Rest, size = KeySize.Small)
-        assertEquals(t.css.shadowKeySm, look.shadows.drop(2))
+    /** g8711: inset 0 2px 3px press-shade, inset 0 -1px 0 lit-faint, 0 1px 0 accent-side, 0 1px 2px contact/.24. */
+    private val primaryPressed = { t: TetherTokens ->
+        listOf(inset(2.dp, t.pressShade, blur = 3.dp), inset((-1).dp, t.litFaint), drop(1.dp, t.accentSide), drop(1.dp, c(t, 0.24f), blur = 2.dp))
     }
 
-    @Test fun pressedKeysTravelThePressDepthAndDarken() {
-        for (skin in TetherSkin.entries) {
-            val t = tokensFor(skin)
-            val secondary = resolveKey(t, KeyVariant.Secondary, KeyState.Pressed)
-            assertEquals(skin.id, t.pressTravel, secondary.travel)
-            assertEquals(skin.id, t.keyFaceDeep, secondary.face)
-            assertEquals(skin.id, t.css.bevelPressed + t.css.shadowKeyPressed, secondary.shadows)
-        }
-        assertEquals(0.dp, tokensFor(TetherSkin.Studio).pressTravel)
+    /** g8656: inset 0 1px 0 lit-faint, inset -1px -1px 0 contact/.1, 0 2px 0 brick-side, 0 4px 6px -2px contact/.3. */
+    private val brick = { t: TetherTokens ->
+        listOf(inset(1.dp, t.litFaint), inset((-1).dp, c(t, 0.1f), x = (-1).dp), drop(2.dp, t.brickSide), drop(4.dp, c(t, 0.3f), blur = 6.dp, spread = (-2).dp))
     }
 
-    @Test fun studioFlattensRestingKeys() {
-        for (skin in studio) {
-            val t = tokensFor(skin)
-            val secondary = resolveKey(t, KeyVariant.Secondary, KeyState.Rest)
-            assertEquals(skin.id, t.graphite, secondary.face)
-            assertEquals(skin.id, emptyList<Any>(), secondary.shadows)
-            assertEquals(skin.id, StudioKeyRadius, secondary.radius)
-            val primary = resolveKey(t, KeyVariant.Primary, KeyState.Rest)
-            assertEquals(skin.id, t.accent, primary.face)
-            assertEquals(skin.id, Color.Transparent, primary.border)
-            assertTrue(skin.id, primary.shadows.isEmpty())
-        }
-    }
+    /** g8719: inset 0 2px 3px press-shade, 0 1px 0 brick-side, 0 1px 2px contact/.24. */
+    private val brickPressed = { t: TetherTokens -> listOf(inset(2.dp, t.pressShade, blur = 3.dp), drop(1.dp, t.brickSide), drop(1.dp, c(t, 0.24f), blur = 2.dp)) }
 
-    @Test fun globalsPressedPrimaryOutranksStudiosFlatRule() {
-        for (skin in studio) {
-            val t = tokensFor(skin)
-            val look = resolveKey(t, KeyVariant.Primary, KeyState.Pressed)
-            assertEquals(skin.id, t.accentDeep, look.face)
-            assertEquals(skin.id, 4, look.shadows.size)
-        }
-    }
+    /** g8757: 0 1px 0 key-side. */
+    private val flat = { t: TetherTokens -> listOf(drop(1.dp, t.keySide)) }
+    private val jump = { t: TetherTokens -> listOf(inset(1.dp, t.litSoft), drop(2.dp, t.charcoalSide)) + t.css.shadowFloating }
+    private val none = { _: TetherTokens -> emptyList<CssShadow>() }
+    private val clear = { _: TetherTokens -> Color.Transparent }
+    private val studioRadius = { _: TetherTokens -> 10.dp }
+    private val keyRadius = { t: TetherTokens -> t.radiusKey }
+    private val travel = { t: TetherTokens -> t.pressTravel }
 
-    @Test fun brickRolesShareOneGlobalsLookOutsideStudio() {
-        for (skin in instrument) {
-            val t = tokensFor(skin)
-            val looks = listOf(KeyVariant.Deny, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession)
-                .map { resolveKey(t, it, KeyState.Rest) }
-            assertTrue(skin.id, looks.all { it == looks.first() })
-            assertEquals(t.brick, looks.first().face)
-            assertEquals(t.brickSide, looks.first().border)
-            assertEquals(4, looks.first().shadows.size)
-            val pressed = resolveKey(t, KeyVariant.Interrupt, KeyState.Pressed)
-            assertEquals(t.brickDeep, pressed.face)
-            assertEquals(t.pressTravel, pressed.travel)
-        }
-    }
+    private val I = Fam.Instrument
+    private val S = Fam.Studio
+    private val R = KeyState.Rest
+    private val P = KeyState.Pressed
+    private val D = KeyState.Disabled
 
-    @Test fun studioDenyAndDangerAreFlatInEveryState() {
-        for (skin in studio) {
-            val t = tokensFor(skin)
-            for (role in listOf(KeyVariant.Deny, KeyVariant.Danger)) {
-                val rest = resolveKey(t, role, KeyState.Rest)
-                assertTrue("${skin.id} $role", rest.shadows.isEmpty())
-                assertEquals("${skin.id} $role", Color.Transparent, rest.border)
-                assertEquals("${skin.id} $role", t.brick, rest.face)
-                val pressed = resolveKey(t, role, KeyState.Pressed)
-                assertTrue("${skin.id} $role", pressed.shadows.isEmpty())
-                assertEquals("${skin.id} $role", t.brickDeep, pressed.face)
-                assertEquals("${skin.id} $role", 0.dp, pressed.travel)
+    private val table: List<Row> = listOf(
+        // ── {button-primary} ──
+        Row("g8634 + g8675 + g9228 + g8787", KeyClasses.ButtonPrimary, I, R, { it.accent }, { it.accentSide }, { it.accentInk }, primary, radius = keyRadius, slit = true, wear = KeyWear.Primary),
+        Row("g8711 (0,4,0)", KeyClasses.ButtonPrimary, I, P, { it.accentDeep }, { it.accentSide }, { it.accentInk }, primaryPressed, travel, keyRadius, slit = true, wear = KeyWear.Primary),
+        Row("g8757 + g641 + g9250", KeyClasses.ButtonPrimary, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.48f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Primary),
+        Row("s260 + s265 + s271 (tie, studio later)", KeyClasses.ButtonPrimary, S, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8711 (0,4,0) beats s260; s265 border stays", KeyClasses.ButtonPrimary, S, P, { it.accentDeep }, clear, { it.accentInk }, primaryPressed, travel, studioRadius),
+        Row("g8757 (0,3,0) beats s265 (0,2,0)", KeyClasses.ButtonPrimary, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.48f, slitAlpha = 0.25f),
+
+        // ── {button-secondary} ──
+        Row("g8592 + g8676", KeyClasses.ButtonSecondary, I, R, { it.keyFace }, { it.keySide }, { it.ink }, neutral, radius = keyRadius),
+        Row("g8686 (0,4,0)", KeyClasses.ButtonSecondary, I, P, { it.keyFaceDeep }, { it.keySide }, { it.ink }, neutralPressed, travel, keyRadius),
+        Row("g8758", KeyClasses.ButtonSecondary, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.48f),
+        Row("s261 + s277", KeyClasses.ButtonSecondary, S, R, { it.graphite }, { it.lineStrong }, { it.ink }, none, radius = studioRadius),
+        Row("g8686 (0,4,0); s277 border stays", KeyClasses.ButtonSecondary, S, P, { it.keyFaceDeep }, { it.lineStrong }, { it.ink }, neutralPressed, travel, studioRadius),
+        Row("g8758 (0,3,0)", KeyClasses.ButtonSecondary, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.48f),
+
+        // ── {button-primary, button-danger} ──
+        Row("g8658 (0,3,0) + g9228 + g8787", KeyClasses.ButtonDanger, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true, wear = KeyWear.Primary),
+        Row("g8721 (0,5,0)", KeyClasses.ButtonDanger, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true, wear = KeyWear.Primary),
+        Row("g8757 (0,3,0) ties g8658, later", KeyClasses.ButtonDanger, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.48f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Primary),
+        Row("g8658 (0,3,0) face beats s265; s492 flat", KeyClasses.ButtonDanger, S, R, { it.brick }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("s493 (0,5,0) ties g8721, later; face from g8721", KeyClasses.ButtonDanger, S, P, { it.brickDeep }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8757 then s492 (0,3,0, later)", KeyClasses.ButtonDanger, S, D, { it.keyFace }, clear, { it.muted }, none, radius = studioRadius, alpha = 0.48f, slitAlpha = 0.25f),
+
+        // ── {button-secondary, chat-approval-deny} ──
+        Row("g8657 (0,3,0) beats g8592", KeyClasses.ApprovalDeny, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius),
+        Row("g8720 (0,5,0)", KeyClasses.ApprovalDeny, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius),
+        Row("g8758 (0,3,0) ties g8657, later: a flat grey secondary", KeyClasses.ApprovalDeny, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.48f),
+        Row("g8657 + s261 radius + s489 flat", KeyClasses.ApprovalDeny, S, R, { it.brick }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("s491 (0,5,0) ties g8720, later", KeyClasses.ApprovalDeny, S, P, { it.brickDeep }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8758 then s489 (0,3,0, later)", KeyClasses.ApprovalDeny, S, D, { it.keyFace }, clear, { it.muted }, none, radius = studioRadius, alpha = 0.48f),
+
+        // ── {chat-send} ──
+        Row("g8635 + g8677 + g9229 + g8786", KeyClasses.ChatSend, I, R, { it.accent }, { it.accentSide }, { it.accentInk }, primary, radius = keyRadius, slit = true, wear = KeyWear.Send),
+        Row("g8712 (0,4,0)", KeyClasses.ChatSend, I, P, { it.accentDeep }, { it.accentSide }, { it.accentInk }, primaryPressed, travel, keyRadius, slit = true, wear = KeyWear.Send),
+        Row("g8759 + g7127 opacity 0.5 + g9251", KeyClasses.ChatSend, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Send),
+        Row("s262 + s266 + s275", KeyClasses.ChatSend, S, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8712 (0,4,0)", KeyClasses.ChatSend, S, P, { it.accentDeep }, clear, { it.accentInk }, primaryPressed, travel, studioRadius),
+        Row("g8759 + g7127", KeyClasses.ChatSend, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.5f, slitAlpha = 0.25f),
+
+        // ── {chat-send, chat-interrupt} ──
+        Row("g8656 ties g8635, later + g9231 + g8786", KeyClasses.ChatInterrupt, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true, wear = KeyWear.Send),
+        Row("g8719 ties g8712, later", KeyClasses.ChatInterrupt, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true, wear = KeyWear.Send),
+        Row("g8760 + g7127 + g9253", KeyClasses.ChatInterrupt, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Send),
+        Row("s266 (.chat-send accent) ties g8656, later: BLUE", KeyClasses.ChatInterrupt, S, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8719 (0,4,0) ties g8712, later; s266 border stays", KeyClasses.ChatInterrupt, S, P, { it.brickDeep }, clear, { it.accentInk }, brickPressed, travel, studioRadius),
+        Row("g8760 (0,3,0)", KeyClasses.ChatInterrupt, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.5f, slitAlpha = 0.25f),
+
+        // ── {end-session} (no Studio rule: studio.css 355-365 excludes it, issue #177) ──
+        Row("g8659 + g8680 + g9232", KeyClasses.EndSession, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true),
+        Row("g8722", KeyClasses.EndSession, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true),
+        Row("not in g8757's list: g641 only", KeyClasses.EndSession, I, D, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, alpha = 0.48f, slit = true),
+        Row("g8659", KeyClasses.EndSession, S, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true),
+        Row("g8722", KeyClasses.EndSession, S, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true),
+
+        // ── {new-session-button} ──
+        Row("g8593 + g8679 + g8788", KeyClasses.NewSession, I, R, { it.keyFace }, { it.keySide }, { it.ink }, neutral, radius = keyRadius, wear = KeyWear.NewSession),
+        Row("g8687 (0,3,0)", KeyClasses.NewSession, I, P, { it.keyFaceDeep }, { it.keySide }, { it.ink }, neutralPressed, travel, keyRadius, wear = KeyWear.NewSession),
+        Row("s264 + s267 + s273 + s303 #365cde", KeyClasses.NewSession, S, R, { Color(0xFF365CDE) }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("g8687 (0,3,0) beats s303 (0,2,0)", KeyClasses.NewSession, S, P, { it.keyFaceDeep }, clear, { it.accentInk }, neutralPressed, travel, studioRadius),
+
+        // ── {chat-attach-btn} (in .chat-composer-toolbar) ──
+        Row("g8597 + g7136 radius-md", KeyClasses.Attach, I, R, { it.keyFace }, { it.keySide }, { it.ink }, neutral, radius = { it.radiusMd }),
+        Row("g8691 (0,3,0)", KeyClasses.Attach, I, P, { it.keyFaceDeep }, { it.keySide }, { it.ink }, neutralPressed, travel, { it.radiusMd }),
+        Row("s389 (0,3,0)", KeyClasses.Attach, S, R, { it.graphiteRaised }, clear, { it.ink }, none, radius = { 9.6.dp }),
+        Row("s389 ties g8691, later; travel from g8691", KeyClasses.Attach, S, P, { it.graphiteRaised }, clear, { it.ink }, none, travel, { 9.6.dp }),
+
+        // ── {chat-jump} ──
+        Row("g8734 + g4774 radius 50%", KeyClasses.ChatJump, I, R, { it.charcoal }, { it.charcoalSide }, { it.utilityInk }, jump, radius = { KeyRadiusCircle }),
+        Row("g8734 + g641", KeyClasses.ChatJump, S, D, { it.charcoal }, { it.charcoalSide }, { it.utilityInk }, jump, radius = { KeyRadiusCircle }, alpha = 0.48f),
+
+        // ── {icon-button} ──
+        Row("g755", KeyClasses.IconButton, I, R, clear, clear, { it.muted }, none, radius = { it.radiusSm }),
+        Row("g8983 (0,3,0)", KeyClasses.IconButton, S, P, { it.keyFaceDeep }, clear, { it.muted }, neutralPressed, travel, { it.radiusSm }),
+    )
+
+    @Test fun cascadeTable() {
+        var checked = 0
+        for (row in table) {
+            val skins = TetherSkin.entries.filter { (it.family == ThemeFamily.Studio) == (row.fam == Fam.Studio) }
+            for (skin in skins) {
+                val t = tokensFor(skin)
+                val look = resolveKey(t, row.classes, row.state)
+                val at = "${row.classes.joinToString(" ") { it.css }} ${skin.id} ${row.state} [${row.source}]"
+                assertEquals("$at face", row.face(t), look.face)
+                assertEquals("$at border", row.border(t), look.border)
+                assertEquals("$at ink", row.ink(t), look.ink)
+                assertEquals("$at shadows", row.shadows(t), look.shadows)
+                assertEquals("$at travel", row.travel(t), look.travel)
+                assertEquals("$at radius", row.radius(t), look.radius)
+                assertEquals("$at alpha", row.alpha, look.alpha)
+                assertEquals("$at slit", row.slit, look.slit)
+                assertEquals("$at slitAlpha", row.slitAlpha, look.slitAlpha)
+                assertEquals("$at wear", row.wear, look.wear)
+                checked++
             }
-            // Danger is a .button-primary: 0.625rem; deny keeps the skin's key radius.
-            assertEquals(StudioKeyRadius, resolveKey(t, KeyVariant.Danger, KeyState.Rest).radius)
-            assertEquals(t.radiusKey, resolveKey(t, KeyVariant.Deny, KeyState.Rest).radius)
+        }
+        assertTrue("rows × skins checked: $checked", checked >= 150)
+    }
+
+    @Test fun everyAppClassSetHasRestAndPressedRowsInBothFamilies() {
+        val sets = listOf(
+            KeyClasses.ButtonPrimary, KeyClasses.ButtonSecondary, KeyClasses.ButtonDanger, KeyClasses.ApprovalDeny,
+            KeyClasses.ChatSend, KeyClasses.ChatInterrupt, KeyClasses.EndSession, KeyClasses.NewSession, KeyClasses.Attach,
+        )
+        for (set in sets) for (fam in Fam.entries) for (state in listOf(R, P)) {
+            assertTrue("$set $fam $state", table.any { it.classes == set && it.fam == fam && it.state == state })
         }
     }
 
-    @Test fun studioInterruptKeepsItsBorderAndTheGlobalsPress() {
-        for (skin in studio) {
-            val t = tokensFor(skin)
-            val rest = resolveKey(t, KeyVariant.Interrupt, KeyState.Rest)
-            assertEquals(skin.id, t.brickSide, rest.border)
-            assertTrue(skin.id, rest.shadows.isEmpty())
-            assertEquals(skin.id, StudioKeyRadius, rest.radius)
-            val pressed = resolveKey(t, KeyVariant.Interrupt, KeyState.Pressed)
-            assertEquals(skin.id, t.brickDeep, pressed.face)
-            assertEquals(skin.id, 3, pressed.shadows.size)
-            assertTrue(skin.id, pressed.shadows.first().inset)
-        }
-    }
-
-    @Test fun studioEndSessionStaysRaised() {
-        for (skin in studio) {
-            val t = tokensFor(skin)
-            val rest = resolveKey(t, KeyVariant.EndSession, KeyState.Rest)
-            assertEquals(skin.id, t.brickSide, rest.border)
-            assertEquals(skin.id, 4, rest.shadows.size)
-            assertEquals(skin.id, hardShadow(2.dp, t.brickSide), rest.shadows[2])
-            assertEquals(skin.id, 3, resolveKey(t, KeyVariant.EndSession, KeyState.Pressed).shadows.size)
-        }
-    }
-
-    @Test fun disabledBrickRoles() {
-        for (skin in TetherSkin.entries) {
-            val t = tokensFor(skin)
-            // Deny and end-session are outside the flat-disabled rule: their own look, faded.
-            for (role in listOf(KeyVariant.Deny, KeyVariant.EndSession)) {
-                val look = resolveKey(t, role, KeyState.Disabled)
-                assertEquals("${skin.id} $role", t.brick, look.face)
-                assertEquals("${skin.id} $role", DisabledOpacity, look.alpha)
-            }
-            val interrupt = resolveKey(t, KeyVariant.Interrupt, KeyState.Disabled)
-            assertEquals(skin.id, listOf(hardShadow(1.dp, t.keySide)), interrupt.shadows)
-            val danger = resolveKey(t, KeyVariant.Danger, KeyState.Disabled)
-            assertEquals(skin.id, t.keyFace, danger.face)
-            assertEquals(skin.id, t.muted, danger.ink)
-            if (skin.family == ThemeFamily.Studio) {
-                // Studio's flat danger rule ties the disabled rule and comes later.
-                assertTrue(skin.id, danger.shadows.isEmpty())
-                assertEquals(skin.id, Color.Transparent, danger.border)
-            } else {
-                assertEquals(skin.id, listOf(hardShadow(1.dp, t.keySide)), danger.shadows)
-            }
-        }
-    }
-
-    @Test fun slitRoles() {
-        assertEquals(setOf(KeyVariant.Primary, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession), SlitKeys)
-    }
-
-    @Test fun disabledKeysSitFlatAtTheDisabledOpacityInEverySkin() {
-        for (skin in TetherSkin.entries) {
-            val t = tokensFor(skin)
-            for (variant in listOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Interrupt)) {
-                val look = resolveKey(t, variant, KeyState.Disabled)
-                assertEquals("${skin.id} $variant", DisabledOpacity, look.alpha)
-                assertEquals("${skin.id} $variant", t.keyFace, look.face)
-                assertEquals("${skin.id} $variant", t.muted, look.ink)
-                assertEquals("${skin.id} $variant", listOf(hardShadow(1.dp, t.keySide)), look.shadows)
-                assertEquals("${skin.id} $variant", 0.25f, look.slitAlpha)
-            }
-            // The charcoal utility cap and quiet icon keys keep their own look, only faded.
-            val utility = resolveKey(t, KeyVariant.Utility, KeyState.Disabled)
-            assertEquals(t.charcoal, utility.face)
-            assertEquals(DisabledOpacity, utility.alpha)
-            assertEquals(DisabledOpacity, resolveKey(t, KeyVariant.Quiet, KeyState.Disabled).alpha)
-        }
+    @Test fun cascadeOrderIsSpecificityThenFileThenLine() {
+        val t = tokensFor(TetherSkin.Studio)
+        val rules = matchingKeyRules(t, KeyClasses.ChatInterrupt, KeyState.Rest)
+        // g8656 `:root .chat-interrupt` and s266 `:root:where() .chat-send` tie at (0,2,0); studio is later.
+        val brick = rules.indexOfFirst { it.file == CssFile.Globals && it.line == 8656 }
+        val accent = rules.indexOfFirst { it.file == CssFile.Studio && it.line == 266 }
+        assertTrue(brick in 0 until accent)
+        val sorted = rules.sortedWith(compareBy({ it.specificity }, { it.file.ordinal }, { it.line }))
+        assertEquals(sorted, rules)
     }
 
     @Test fun latchedKeysCarryTheVioletSelectedTone() {
         for (skin in TetherSkin.entries) {
             val t = tokensFor(skin)
-            val look = resolveKey(t, KeyVariant.Secondary, KeyState.Rest, selected = true)
+            val look = resolveKey(t, KeyClasses.ButtonSecondary, KeyState.Rest, selected = true)
             assertEquals(t.violetWash, look.face)
             assertEquals(t.violet, look.ink)
             assertTrue(look.shadows.any { it.inset && it.spread == 1.dp && it.color == t.violetStrong })
-            // Pressing a latched key shows the press, not the latch.
-            assertEquals(t.keyFaceDeep, resolveKey(t, KeyVariant.Secondary, KeyState.Pressed, selected = true).face)
+            // Pressing a latched key shows the press (0,4,0) over the latch (0,3,0).
+            assertEquals(t.keyFaceDeep, resolveKey(t, KeyClasses.ButtonSecondary, KeyState.Pressed, selected = true).face)
         }
     }
 
-    @Test fun quietKeysAreBareAtRestOnTheSmallRadius() {
-        val t = tokensFor(TetherSkin.Machine)
-        val look = resolveKey(t, KeyVariant.Quiet, KeyState.Rest)
-        assertEquals(Color.Transparent, look.face)
-        assertTrue(look.shadows.isEmpty())
-        assertEquals(t.radiusSm, look.radius)
-        assertEquals(t.muted, look.ink)
+    @Test fun smallKeysUseTheCompactDropScale() {
+        val t = tokensFor(TetherSkin.Tactile)
+        val look = resolveKey(t, KeyClasses.ButtonSecondary, KeyState.Rest, size = KeySize.Small)
+        assertEquals(t.css.shadowKeySm, look.shadows.drop(2))
     }
 
     @Test fun oklabMixMatchesCssColorMix() {

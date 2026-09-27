@@ -15,9 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.tether.app.ui.components.KeyShape
+import com.tether.app.ui.components.KeyClass
+import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.KeyWear
 import com.tether.app.ui.components.KeySize
-import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.SelectTriggerStyle
 import com.tether.app.ui.components.SpinnerRing
@@ -49,7 +50,8 @@ import com.tether.app.ui.theme.LocalTetherTypography
 
 /** Every primitive's state board, by golden folder name. */
 val PrimitiveBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
-    "keys" to { KeysBoard() },
+    "keys" to { KeysBoard(part = 1) },
+    "keys-more" to { KeysBoard(part = 2) },
     "wells" to { WellsBoard() },
     "seams" to { SeamsBoard() },
     "status-pills" to { StatusPillsBoard() },
@@ -79,38 +81,47 @@ val FontScaleBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
 )
 
 @Composable
-fun KeysBoard() {
-    for (variant in KeyVariant.entries) {
-        StateRow("${variant.name.lowercase()}: rest · pressed · focus · disabled", wrap = true) {
-            val icon = if (variant == KeyVariant.Quiet) TetherIcons.Settings else null
-            val label = if (variant == KeyVariant.Quiet) null else when (variant) {
-                KeyVariant.Primary -> "Send"
-                KeyVariant.Deny -> "Deny"
-                KeyVariant.Danger -> "Delete"
-                KeyVariant.Interrupt -> "Stop"
-                KeyVariant.EndSession -> "End"
-                KeyVariant.Utility -> "Jump"
-                else -> "Retry"
-            }
-            TetherKey(onClick = {}, variant = variant, label = label, icon = icon, contentDescription = "k")
-            TetherKey(onClick = {}, variant = variant, label = label, icon = icon, contentDescription = "k", interactionSource = heldInteraction(pressed = true))
-            TetherKey(onClick = {}, variant = variant, label = label, icon = icon, contentDescription = "k", interactionSource = heldInteraction(focused = true))
-            TetherKey(onClick = {}, variant = variant, label = label, icon = icon, contentDescription = "k", enabled = false)
+fun KeysBoard(part: Int? = null) {
+    // A phone-height window holds about ten rows, so the phone goldens split the board in two.
+    val sets = when (part) {
+        1 -> KeyBoardSets.take(6)
+        2 -> KeyBoardSets.drop(6)
+        else -> KeyBoardSets
+    }
+    for ((markup, classes, label) in sets) {
+        StateRow("$markup: rest · pressed · focus · disabled", wrap = true) {
+            val icon = if (label == null) TetherIcons.Settings else null
+            TetherKey(onClick = {}, classes = classes, label = label, icon = icon, contentDescription = "k")
+            TetherKey(onClick = {}, classes = classes, label = label, icon = icon, contentDescription = "k", interactionSource = heldInteraction(pressed = true))
+            TetherKey(onClick = {}, classes = classes, label = label, icon = icon, contentDescription = "k", interactionSource = heldInteraction(focused = true))
+            TetherKey(onClick = {}, classes = classes, label = label, icon = icon, contentDescription = "k", enabled = false)
         }
     }
-    StateRow("latched · small · slit · circle cap · authored legend", wrap = true) {
+    if (part == 1) return
+    StateRow("latched · small · circle cap · icon send · authored legend", wrap = true) {
         TetherKey(onClick = {}, label = "Filter", selected = true)
-        TetherKey(onClick = {}, variant = KeyVariant.Quiet, icon = TetherIcons.Paperclip, selected = true, contentDescription = "Attach")
+        TetherKey(onClick = {}, classes = KeyClasses.IconButton, icon = TetherIcons.Paperclip, selected = true, contentDescription = "Attach")
         TetherKey(onClick = {}, label = "Yes", size = KeySize.Small, minHeight = 32.dp)
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Approve", showSlit = true)
-    }
-    StateRow("", wrap = true) {
-        TetherKey(onClick = {}, variant = KeyVariant.Interrupt, label = "Stop", showSlit = true)
-        TetherKey(onClick = {}, variant = KeyVariant.Utility, icon = TetherIcons.ArrowDown, shape = KeyShape.Circle, contentDescription = "Jump")
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, icon = TetherIcons.Send, contentDescription = "Send")
+        TetherKey(onClick = {}, classes = KeyClasses.ChatJump, icon = TetherIcons.ArrowDown, contentDescription = "Jump")
+        TetherKey(onClick = {}, classes = KeyClasses.ChatSend, icon = TetherIcons.Send, contentDescription = "Send", wearPattern = KeyWear.SendCompact)
         TetherKey(onClick = {}, label = "use main.kt", fixedVerb = false)
     }
 }
+
+/** Every class set the app renders (web markup → legend; null = an icon control). */
+val KeyBoardSets: List<Triple<String, Set<KeyClass>, String?>> = listOf(
+    Triple("button-primary", KeyClasses.ButtonPrimary, "Approve"),
+    Triple("button-secondary", KeyClasses.ButtonSecondary, "Retry"),
+    Triple("button-primary button-danger", KeyClasses.ButtonDanger, "Delete"),
+    Triple("button-secondary chat-approval-deny", KeyClasses.ApprovalDeny, "Deny"),
+    Triple("chat-send", KeyClasses.ChatSend, "Send"),
+    Triple("chat-send chat-interrupt", KeyClasses.ChatInterrupt, "Stop"),
+    Triple("end-session", KeyClasses.EndSession, "End"),
+    Triple("new-session-button", KeyClasses.NewSession, "New session"),
+    Triple("chat-attach-btn", KeyClasses.Attach, "Attach"),
+    Triple("chat-jump", KeyClasses.ChatJump, "Jump"),
+    Triple("icon-button", KeyClasses.IconButton, null),
+)
 
 @Composable
 fun WellsBoard() {
@@ -211,7 +222,7 @@ fun DialogBoard() {
             title = "End session",
             footer = {
                 TetherKey(onClick = {}, label = "Cancel")
-                TetherKey(onClick = {}, variant = KeyVariant.Danger, label = "End session", showSlit = true)
+                TetherKey(onClick = {}, classes = KeyClasses.ButtonDanger, label = "End session")
             },
         ) {
             TetherDialogText("The agent stops and the transcript is kept. You can resume from history.")
@@ -285,6 +296,6 @@ fun RockerBoard() {
 fun DialogFooterKeysBoard() {
     StateRow("settings footer: secondary · primary with glyph") {
         TetherKey(onClick = {}, label = "Cancel")
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = TetherIcons.Check, iconSize = 17.dp, showSlit = true)
+        TetherKey(onClick = {}, classes = KeyClasses.ButtonPrimary, label = "Save settings", icon = TetherIcons.Check, iconSize = 17.dp)
     }
 }

@@ -62,7 +62,7 @@ import com.tether.app.protocol.reduce.activeModel
 import com.tether.app.protocol.reduce.composerCommandList
 import com.tether.app.protocol.reduce.pickerModels
 import com.tether.app.protocol.reduce.resolveModelArg
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherKey
@@ -376,7 +376,7 @@ fun Composer(
         ) {
             TetherKey(
                 onClick = { attachmentPicker.launch(arrayOf("*/*")) },
-                variant = KeyVariant.Secondary,
+                classes = KeyClasses.Attach,
                 icon = TetherIcons.Paperclip,
                 iconSize = 18.dp,
                 enabled = session != null && !busy,
@@ -401,18 +401,17 @@ fun Composer(
             if (busy) {
                 TetherKey(
                     onClick = { submit() },
-                    variant = KeyVariant.Primary,
+                    classes = KeyClasses.ChatSend,
                     label = "Queue",
                     icon = TetherIcons.Send,
                     iconSize = 18.dp,
                     fontSize = 12.sp,
                     enabled = draft.isNotBlank(),
-                    showSlit = true,
                     contentDescription = "Queue",
                 )
                 TetherKey(
                     onClick = onInterrupt,
-                    variant = KeyVariant.Interrupt,
+                    classes = KeyClasses.ChatInterrupt,
                     icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     contentDescription = "Interrupt",
@@ -420,11 +419,10 @@ fun Composer(
             } else {
                 TetherKey(
                     onClick = { submit() },
-                    variant = KeyVariant.Primary,
+                    classes = KeyClasses.ChatSend,
                     icon = TetherIcons.Send,
                     iconSize = 18.dp,
                     enabled = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
-                    showSlit = true,
                     contentDescription = "Send",
                 )
             }

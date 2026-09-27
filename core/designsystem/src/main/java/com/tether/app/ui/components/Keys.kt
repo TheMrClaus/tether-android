@@ -81,24 +81,24 @@ private val SlitInset: Dp = 5.12.dp
 fun TetherKey(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    variant: KeyVariant = KeyVariant.Secondary,
+    /** The web class set this key mirrors (e.g. [KeyClasses.ChatInterrupt]); see [resolveKey]. */
+    classes: Set<KeyClass> = KeyClasses.ButtonSecondary,
     label: String? = null,
     icon: ImageVector? = null,
     iconSize: Dp = 15.dp,
     /** Unspecified: the skin's key-legend role (0.8rem instrument, 0.8125rem Studio). */
     fontSize: TextUnit = TextUnit.Unspecified,
     enabled: Boolean = true,
-    /** The machined families' execution slit (primary/destructive actuating keys only). */
-    showSlit: Boolean = false,
-    /** Contact-polish wear — only on genuinely frequent controls (globals.css 8771-8781). */
-    wear: Boolean = variant == KeyVariant.Primary,
+    /** Contact-polish wear; which composition (if any) comes from the class set (globals.css 8771-8857). */
+    wear: Boolean = true,
     minHeight: Dp = TetherDimens.touchTargetDp,
     contentDescription: String? = null,
     selected: Boolean = false,
     size: KeySize = KeySize.Regular,
-    shape: KeyShape = KeyShape.Rounded,
-    /** Which wear composition [wear] paints (Send / primary CTA / New session). */
-    wearPattern: KeyWear = if (variant == KeyVariant.Primary) KeyWear.Primary else KeyWear.NewSession,
+    /** Null: the class set's radius (a round cap for `chat-jump`). */
+    shape: KeyShape? = null,
+    /** Overrides the class set's wear composition (e.g. [KeyWear.SendCompact] for the phone's icon-only Send). */
+    wearPattern: KeyWear? = null,
     fixedVerb: Boolean = true,
     interactionSource: MutableInteractionSource? = null,
 ) {
@@ -123,8 +123,10 @@ fun TetherKey(
         down -> KeyState.Pressed
         else -> KeyState.Rest
     }
-    val look = resolveKey(t, variant, state, selected = selected, size = size)
-    val keyShape: Shape = if (shape == KeyShape.Circle) CircleShape else RoundedCornerShape(look.radius)
+    val look = resolveKey(t, classes, state, selected = selected, size = size)
+    val round = shape == KeyShape.Circle || (shape == null && look.radius == KeyRadiusCircle)
+    val keyShape: Shape = if (round) CircleShape else RoundedCornerShape(if (look.radius == KeyRadiusCircle) 0.dp else look.radius)
+    val wearShown = if (look.wear == KeyWear.None) KeyWear.None else wearPattern ?: look.wear
 
     // CSS: `transition: background var(--duration-fast), transform 90ms var(--ease-out)`; the
     // global prefers-reduced-motion rule collapses every transition to a state jump.
@@ -140,7 +142,7 @@ fun TetherKey(
     val textStyle = (if (fixedVerb) baseStyle else baseStyle.copy(letterSpacing = 0.sp))
         .let { if (fontSize != TextUnit.Unspecified) it.copy(fontSize = fontSize) else it }
     val shown = label?.let { if (fixedVerb) legend.format(it) else it }
-    val slit = showSlit && t.keySlit > 0.dp && variant in SlitKeys
+    val slit = look.slit && t.keySlit > 0.dp
     val iconOnly = label == null
 
     Row(
@@ -169,9 +171,9 @@ fun TetherKey(
             .drawWithContent {
                 drawContent()
                 // ::before / ::after are positioned, so they paint over the legend.
-                if (wear && enabled && wearPattern != KeyWear.None) {
+                if (wear && wearShown != KeyWear.None) {
                     val path = Path().apply { addOutline(keyShape.createOutline(this@drawWithContent.size, layoutDirection, this@drawWithContent)) }
-                    clipPath(path) { drawKeyWear(t, wearPattern) }
+                    clipPath(path) { drawKeyWear(t, wearShown) }
                 }
                 if (slit) {
                     val h = this.size.height * 0.42f

@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.tether.app.protocol.model.PendingApproval
 import com.tether.app.protocol.model.PendingQuestion
 import com.tether.app.protocol.model.PermissionDenialProjection
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
@@ -128,7 +128,7 @@ fun ApprovalCard(
                             onChoice(choice.choiceId, null)
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        variant = if (grants) KeyVariant.Primary else KeyVariant.Secondary,
+                        classes = if (grants) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
                         label = choice.label,
                         icon = if (grants) TetherIcons.Check else TetherIcons.Ban,
                         enabled = !submitted,
@@ -142,7 +142,7 @@ fun ApprovalCard(
                             onChoice(null, "allow")
                         },
                         modifier = Modifier.weight(1f),
-                        variant = KeyVariant.Primary,
+                        classes = KeyClasses.ButtonPrimary,
                         label = "Approve",
                         icon = TetherIcons.Check,
                         enabled = !submitted,
@@ -153,7 +153,7 @@ fun ApprovalCard(
                             onChoice(null, "deny")
                         },
                         modifier = Modifier.weight(1f),
-                        variant = KeyVariant.Deny,
+                        classes = KeyClasses.ApprovalDeny,
                         label = "Deny",
                         icon = TetherIcons.Ban,
                         enabled = !submitted,
@@ -321,7 +321,7 @@ fun QuestionCard(
                 onSubmit(answers, freeText)
             },
             modifier = Modifier.fillMaxWidth(),
-            variant = KeyVariant.Primary,
+            classes = KeyClasses.ButtonPrimary,
             label = if (submitted) "Answer sent" else "Submit answer",
             icon = TetherIcons.Check,
             enabled = allAnswered && !submitted,

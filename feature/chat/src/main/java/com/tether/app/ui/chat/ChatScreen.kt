@@ -51,7 +51,7 @@ import com.tether.app.protocol.reduce.collectSubagentRuns
 import com.tether.app.protocol.reduce.storyPointsFromSession
 import com.tether.app.protocol.reduce.subagentRosterSummary
 import com.tether.app.ui.TetherViewModel
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherStatusPill
@@ -182,7 +182,7 @@ fun ChatScreen(
                     title = "No session selected",
                     hint = "Open the menu to pick or create a session.",
                 ) {
-                    TetherKey(onClick = onOpenDrawer, variant = KeyVariant.Secondary, label = "Sessions")
+                    TetherKey(onClick = onOpenDrawer, classes = KeyClasses.ButtonSecondary, label = "Sessions")
                 }
 
                 projection == null -> Column(
@@ -562,7 +562,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             if (session.status != "exited") {
                 TetherKey(
                     onClick = { confirmEnd = true },
-                    variant = KeyVariant.EndSession,
+                    classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
                     contentDescription = "End session",
@@ -654,13 +654,13 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 modifier = Modifier.padding(bottom = 12.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(onClick = { confirmEnd = false }, variant = KeyVariant.Secondary, label = "Cancel")
+                TetherKey(onClick = { confirmEnd = false }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
                 TetherKey(
                     onClick = {
                         confirmEnd = false
                         vm.client.kill(session.id)
                     },
-                    variant = KeyVariant.Danger,
+                    classes = KeyClasses.ButtonDanger,
                     label = "End session",
                     icon = TetherIcons.CircleStop,
                 )

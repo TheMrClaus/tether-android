@@ -114,7 +114,7 @@ fun TetherSheetSurface(
                     modifier = Modifier.weight(1f).semantics { heading() },
                 )
                 if (onClose != null) {
-                    TetherKey(onClick = onClose, variant = KeyVariant.Quiet, icon = TetherIcons.X, iconSize = 16.dp, contentDescription = "Close")
+                    TetherKey(onClick = onClose, classes = KeyClasses.IconButton, icon = TetherIcons.X, iconSize = 16.dp, contentDescription = "Close")
                 }
             }
             PerfDivider()

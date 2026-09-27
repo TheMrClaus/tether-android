@@ -37,7 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.WifiOff
 import com.tether.app.net.AndroidLocalNetworkAccess
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.prefs.UiPrefs
@@ -174,13 +174,13 @@ fun LocalNetworkExplainDialog(onContinue: () -> Unit, onNotNow: () -> Unit) {
             TetherKey(
                 onClick = onNotNow,
                 modifier = Modifier.weight(1f),
-                variant = KeyVariant.Secondary,
+                classes = KeyClasses.ButtonSecondary,
                 label = LocalNetworkCopy.NOT_NOW,
             )
             TetherKey(
                 onClick = onContinue,
                 modifier = Modifier.weight(1f),
-                variant = KeyVariant.Primary,
+                classes = KeyClasses.ButtonPrimary,
                 label = LocalNetworkCopy.CONTINUE,
             )
         }
@@ -230,7 +230,7 @@ fun LocalNetworkNotice(canRequest: Boolean, onAllow: () -> Unit, modifier: Modif
             // TetherKey's contentDescription only labels an icon. The legend here
             // is text, so the full TalkBack label goes on the key's own node.
             modifier = Modifier.semantics { contentDescription = actionLabel },
-            variant = KeyVariant.Primary,
+            classes = KeyClasses.ButtonPrimary,
             label = if (canRequest) LocalNetworkCopy.ALLOW else LocalNetworkCopy.OPEN_SETTINGS,
             minHeight = TetherDimens.touchTargetDp,
         )

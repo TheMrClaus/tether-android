@@ -44,7 +44,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.ui.chat.ChatScreen
 import com.tether.app.ui.components.BrandMark
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.Wordmark
@@ -175,7 +175,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TetherKey(
                     onClick = { showLogoutConfirm = false },
-                    variant = KeyVariant.Secondary,
+                    classes = KeyClasses.ButtonSecondary,
                     label = "Cancel",
                 )
                 TetherKey(
@@ -183,7 +183,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         showLogoutConfirm = false
                         vm.logout()
                     },
-                    variant = KeyVariant.Danger,
+                    classes = KeyClasses.ButtonDanger,
                     label = "Sign out",
                     icon = TetherIcons.LogOut,
                 )

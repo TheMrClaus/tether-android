@@ -57,7 +57,7 @@ import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
 import com.tether.app.client.TetherClient
 import com.tether.app.ui.components.BrandMark
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
@@ -351,7 +351,7 @@ private fun ModeSwitch(ui: LoginUi, passwordLabel: String, pairingLabel: String)
             modifier = Modifier.weight(1f).semantics {
                 contentDescription = if (ui.mode == AuthMode.Password) "$passwordLabel, selected" else passwordLabel
             },
-            variant = if (ui.mode == AuthMode.Password) KeyVariant.Primary else KeyVariant.Secondary,
+            classes = if (ui.mode == AuthMode.Password) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
             label = passwordLabel,
             enabled = !ui.busy,
         )
@@ -360,7 +360,7 @@ private fun ModeSwitch(ui: LoginUi, passwordLabel: String, pairingLabel: String)
             modifier = Modifier.weight(1f).semantics {
                 contentDescription = if (ui.mode == AuthMode.Pairing) "$pairingLabel, selected" else pairingLabel
             },
-            variant = if (ui.mode == AuthMode.Pairing) KeyVariant.Primary else KeyVariant.Secondary,
+            classes = if (ui.mode == AuthMode.Pairing) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
             label = pairingLabel,
             enabled = !ui.busy,
         )
@@ -490,7 +490,7 @@ private fun InstrumentLogin(ui: LoginUi) {
                                 TetherKey(
                                     onClick = ui.onSubmit,
                                     modifier = Modifier.semantics { contentDescription = "Unlock Tether" },
-                                    variant = KeyVariant.Primary,
+                                    classes = KeyClasses.ButtonPrimary,
                                     icon = TetherIcons.ArrowRight,
                                     enabled = !ui.busy,
                                 )
@@ -506,7 +506,7 @@ private fun InstrumentLogin(ui: LoginUi) {
                                 TetherKey(
                                     onClick = ui.onSubmit,
                                     modifier = Modifier.semantics { contentDescription = "Pair device" },
-                                    variant = KeyVariant.Primary,
+                                    classes = KeyClasses.ButtonPrimary,
                                     icon = TetherIcons.ArrowRight,
                                     enabled = !ui.busy,
                                 )
@@ -634,11 +634,10 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                 TetherKey(
                     onClick = ui.onSubmit,
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Unlock Tether" },
-                    variant = KeyVariant.Primary,
+                    classes = KeyClasses.ButtonPrimary,
                     label = if (ui.phase == LoginPhase.Verifying) "Opening workspace…" else "Open workspace",
                     icon = TetherIcons.ArrowRight,
                     enabled = !ui.busy,
-                    showSlit = true,
                 )
             } else {
                 Text(
@@ -655,11 +654,10 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                 TetherKey(
                     onClick = ui.onSubmit,
                     modifier = Modifier.fillMaxWidth(),
-                    variant = KeyVariant.Primary,
+                    classes = KeyClasses.ButtonPrimary,
                     label = if (ui.phase == LoginPhase.Verifying) "Pairing…" else "Pair this device",
                     icon = TetherIcons.ArrowRight,
                     enabled = !ui.busy,
-                    showSlit = true,
                 )
             }
         }
@@ -751,7 +749,7 @@ private fun RetroPromptWithEnter(modifier: Modifier, ui: LoginUi, field: @Compos
         TetherKey(
             onClick = ui.onSubmit,
             modifier = Modifier.semantics { contentDescription = "Send" },
-            variant = KeyVariant.Secondary,
+            classes = KeyClasses.ButtonSecondary,
             label = "⏎",
             enabled = !ui.busy,
         )
@@ -763,7 +761,7 @@ private fun RetroMenuItem(label: String, selected: Boolean, enabled: Boolean, on
     TetherKey(
         onClick = onClick,
         modifier = Modifier.semantics { contentDescription = if (selected) "$label, selected" else label },
-        variant = if (selected) KeyVariant.Primary else KeyVariant.Utility,
+        classes = if (selected) KeyClasses.ButtonPrimary else KeyClasses.ChatJump,
         label = if (selected) "› $label" else label,
         enabled = enabled,
     )

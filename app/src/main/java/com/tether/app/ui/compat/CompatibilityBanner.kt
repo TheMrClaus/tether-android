@@ -38,7 +38,7 @@ import com.tether.app.BuildConfig
 import com.tether.app.client.IncompatibleReason
 import com.tether.app.client.Incompatibility
 import com.tether.app.client.ReleaseCheck
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -149,7 +149,7 @@ private fun BannerRow(
             // TetherKey's contentDescription only labels an icon; the full
             // TalkBack label goes on the key's own node.
             modifier = Modifier.semantics { contentDescription = actionA11y },
-            variant = KeyVariant.Primary,
+            classes = KeyClasses.ButtonPrimary,
             label = actionLabel,
             minHeight = TetherDimens.touchTargetDp,
         )

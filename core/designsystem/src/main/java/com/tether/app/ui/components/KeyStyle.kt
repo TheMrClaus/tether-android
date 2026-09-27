@@ -11,48 +11,71 @@ import kotlin.math.cbrt
 import kotlin.math.pow
 
 /**
- * The key system of the web's material layer, resolved per skin the way the CSS cascade resolves
- * it. Sources: globals.css "MATERIAL LAYER" (key system 8589-8769, icon controls 8970-8989,
- * latched filter keys 11048-11056) and, for the Studio family, studio.css 260-278 + 489-497,
- * which flatten the material. Where a globals rule out-ranks Studio's `:root:where()` rules
- * (`:active:not(:disabled)` and `:disabled`, specificity (0,4,0)/(0,3,0) vs Studio's (0,2,0)),
- * the globals rule wins in Studio too, exactly as in the browser.
+ * The key system of the web's material layer, resolved the way the browser resolves it.
+ *
+ * A web key is a `<button>` carrying SEVERAL classes (`button-secondary chat-approval-deny`,
+ * `chat-send chat-interrupt`, `button-primary button-danger`…), and every rule that matches ANY
+ * of its classes takes part. So a key here is its web CLASS SET ([KeyClass]); [resolveKey] runs a
+ * small cascade over [KeyRules] — the rules of globals.css and studio.css that paint keys — with
+ * the browser's precedence: matching rules sorted by specificity, then source order, studio.css
+ * loading after globals.css; later declarations win.
+ *
+ * Modelled states: rest, pressed (`:active:not(:disabled)`), disabled (`:disabled`). Keyboard
+ * focus is a separate colour-free ring ([focusRing]). `:hover` is not a state of a touch key and
+ * is not modelled.
  */
-enum class KeyVariant {
-    /** `.button-primary` / `.chat-send`: the accent key (sage / mineral / cobalt). */
-    Primary,
+enum class KeyClass(val css: String) {
+    ButtonPrimary("button-primary"),
+    ButtonSecondary("button-secondary"),
+    ButtonDanger("button-danger"),
 
-    /** `.button-secondary` and the neutral key group (quick keys, attach, question options). */
-    Secondary,
+    /** Only ever rendered inside `.chat-approval-actions`; its rules include that ancestor. */
+    ChatApprovalDeny("chat-approval-deny"),
+    ChatSend("chat-send"),
+    ChatInterrupt("chat-interrupt"),
+    EndSession("end-session"),
+    NewSessionButton("new-session-button"),
 
-    /**
-     * The destructive (brick) keys share one globals look (globals.css 8663-8726) but are four
-     * roles, because Studio treats them differently:
-     *
-     * - [Deny] `.chat-approval-deny` — Studio flattens it in every state (studio.css 489-497).
-     * - [Danger] `.button-primary.button-danger` (confirm dialogs) — flattened likewise; being a
-     *   `.button-primary` it also takes the disabled rule and the slit.
-     * - [Interrupt] `.chat-interrupt` — Studio's key rule (studio.css:263) drops its shadow but
-     *   keeps the 1px `--brick-side` border; the globals pressed rule still wins when pressed.
-     * - [EndSession] `.end-session` — excluded from Studio's flat header (studio.css 355-365,
-     *   issue #177): the full raised brick key in every skin.
-     */
-    Deny,
+    /** The composer's paperclip, inside `.chat-composer-toolbar` (Studio restyles it there). */
+    ChatAttachBtn("chat-attach-btn"),
+    ChatJump("chat-jump"),
+    IconButton("icon-button"),
+}
 
-    /** `.button-primary.button-danger`: see [Deny]. */
-    Danger,
+/** The class sets the app renders, named after the web markup they mirror. */
+object KeyClasses {
+    /** `<button className="button-primary">` (Approve, Save settings, Use this folder…). */
+    val ButtonPrimary: Set<KeyClass> = setOf(KeyClass.ButtonPrimary)
 
-    /** `.chat-interrupt`: see [Deny]. */
-    Interrupt,
+    /** `<button className="button-secondary">` (Cancel, provider choices…). */
+    val ButtonSecondary: Set<KeyClass> = setOf(KeyClass.ButtonSecondary)
 
-    /** `.end-session`: see [Deny]. */
-    EndSession,
+    /** Confirm dialogs' destructive action: `button-primary button-danger`. */
+    val ButtonDanger: Set<KeyClass> = setOf(KeyClass.ButtonPrimary, KeyClass.ButtonDanger)
 
-    /** `.chat-jump`: the charcoal utility cap that floats over the transcript. */
-    Utility,
+    /** The explicit approval Deny: `button-secondary chat-approval-deny` (chat-view.tsx:1316). */
+    val ApprovalDeny: Set<KeyClass> = setOf(KeyClass.ButtonSecondary, KeyClass.ChatApprovalDeny)
 
-    /** `.icon-button`: quiet at rest, molded only while pressed. */
-    Quiet,
+    /** Composer Send / Queue: `chat-send` (chat-view.tsx:4470, 4502). */
+    val ChatSend: Set<KeyClass> = setOf(KeyClass.ChatSend)
+
+    /** Composer Interrupt: `chat-send chat-interrupt` (chat-view.tsx:4474). */
+    val ChatInterrupt: Set<KeyClass> = setOf(KeyClass.ChatSend, KeyClass.ChatInterrupt)
+
+    /** The session header's destructive key: `end-session`. */
+    val EndSession: Set<KeyClass> = setOf(KeyClass.EndSession)
+
+    /** The sidebar's New session key: `new-session-button`. */
+    val NewSession: Set<KeyClass> = setOf(KeyClass.NewSessionButton)
+
+    /** The composer paperclip: `chat-attach-btn`. */
+    val Attach: Set<KeyClass> = setOf(KeyClass.ChatAttachBtn)
+
+    /** Jump-to-latest: `chat-jump`. */
+    val ChatJump: Set<KeyClass> = setOf(KeyClass.ChatJump)
+
+    /** Icon controls: `icon-button`. */
+    val IconButton: Set<KeyClass> = setOf(KeyClass.IconButton)
 }
 
 /** Which drop-shadow scale a neutral key uses: `--shadow-key` or the compact `--shadow-key-sm`. */
@@ -60,6 +83,9 @@ enum class KeySize { Regular, Small }
 
 /** Interaction state that changes the key's material (focus is a separate, colour-free ring). */
 enum class KeyState { Rest, Pressed, Disabled }
+
+/** A radius meaning `border-radius: 50%` (the round `.chat-jump` cap). */
+val KeyRadiusCircle: Dp = Dp.Infinity
 
 @Immutable
 data class KeyLook(
@@ -70,200 +96,301 @@ data class KeyLook(
     val shadows: List<CssShadow>,
     /** translateY while pressed (`--press-travel`; 0 in Studio). */
     val travel: Dp,
+    /** [KeyRadiusCircle] for a round cap. */
     val radius: Dp,
-    /** `button:disabled { opacity: 0.48 }` (globals.css 641-647). */
+    /** `button:disabled { opacity: 0.48 }` (`.chat-send:disabled` 0.5). */
     val alpha: Float,
-    /** Execution-slit opacity (0.55 at rest, 0.25 disabled; globals.css 9245/9253). */
+    /** Whether the execution slit `::before` is displayed (its width is `--key-slit`). */
+    val slit: Boolean,
+    /** Execution-slit opacity (0.55; 0.25 on a disabled key). */
     val slitAlpha: Float,
+    /** Which `::after` wear composition paints (Studio hides it). */
+    val wear: KeyWear,
 )
-
-/** Studio's labelled keys: `border-radius: 0.625rem` (studio.css:264, a literal, not a token). */
-val StudioKeyRadius: Dp = 10.dp
 
 /** `button:disabled` opacity (globals.css:647). */
 const val DisabledOpacity: Float = 0.48f
 
+/** Studio's labelled keys: `border-radius: 0.625rem` (studio.css 260-264, a literal, not a token). */
+val StudioKeyRadius: Dp = 10.dp
+
+/** Where a rule was written; studio.css loads after globals.css. */
+enum class CssFile { Globals, Studio }
+
+/** What a key rule's selector requires beyond its classes. */
+enum class KeyPseudo { None, Active, Disabled, On }
+
+/** The mutable computed style a rule's declarations write into. */
+class KeyComputed(
+    var face: Color = Color.Transparent,
+    var border: Color = Color.Transparent,
+    var ink: Color = Color.Unspecified,
+    var shadows: List<CssShadow> = emptyList(),
+    var travel: Dp = 0.dp,
+    var radius: Dp = 0.dp,
+    var alpha: Float = 1f,
+    var slit: Boolean = false,
+    var slitAlpha: Float = 0.55f,
+    var wear: KeyWear = KeyWear.None,
+)
+
+/** The context a declaration reads: the skin's tokens and the key's size variant. */
+class KeyContext(val t: TetherTokens, val size: KeySize)
+
+/**
+ * One CSS rule (or one selector of a selector list, since each carries its own specificity).
+ * [classes] must all be on the key; [specificity] is (a, b, c) packed as `a*10000 + b*100 + c`.
+ */
+class KeyRule(
+    val file: CssFile,
+    val line: Int,
+    val classes: Set<KeyClass>,
+    val specificity: Int,
+    val pseudo: KeyPseudo = KeyPseudo.None,
+    val studioOnly: Boolean = false,
+    val declare: KeyComputed.(KeyContext) -> Unit,
+) {
+    val selector: String
+        get() = (if (studioOnly) ":root:where(studio) " else ":root ") + classes.joinToString("") { ".${it.css}" } +
+            when (pseudo) {
+                KeyPseudo.None -> ""
+                KeyPseudo.Active -> ":active:not(:disabled)"
+                KeyPseudo.Disabled -> ":disabled"
+                KeyPseudo.On -> ".is-on"
+            }
+}
+
+private fun spec(b: Int, c: Int = 0): Int = b * 100 + c
+
+private fun ctxContact(t: TetherTokens, a: Float) = t.contact.copy(alpha = a)
+
+// Shared declaration blocks (each cites its source).
+private val neutralRest: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8592-8606
+    border = c.t.keySide
+    face = c.t.keyFace
+    shadows = listOf(hardShadow(1.dp, c.t.litStrong, inset = true), hardShadow(0.dp, c.t.litSoft, x = 1.dp, inset = true)) +
+        (if (c.size == KeySize.Small) c.t.css.shadowKeySm else c.t.css.shadowKey)
+    ink = c.t.ink
+}
+private val neutralActive: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8683-8696
+    travel = c.t.pressTravel
+    face = c.t.keyFaceDeep
+    shadows = c.t.css.bevelPressed + c.t.css.shadowKeyPressed
+}
+private val primaryRest: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8634-8641
+    border = c.t.accentSide
+    face = c.t.accent
+    ink = c.t.accentInk
+    shadows = listOf(
+        hardShadow(1.dp, c.t.litFaint, inset = true),
+        hardShadow(0.dp, c.t.litFaint, x = 1.dp, inset = true),
+        hardShadow((-1).dp, ctxContact(c.t, 0.1f), x = (-1).dp, inset = true),
+        hardShadow(3.dp, c.t.accentSide),
+        softShadow(5.dp, 7.dp, ctxContact(c.t, 0.32f), spread = (-2).dp),
+    )
+}
+private val primaryActive: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8711-8717
+    travel = c.t.pressTravel
+    face = c.t.accentDeep
+    shadows = listOf(
+        softShadow(2.dp, 3.dp, c.t.pressShade, inset = true),
+        hardShadow((-1).dp, c.t.litFaint, inset = true),
+        hardShadow(1.dp, c.t.accentSide),
+        softShadow(1.dp, 2.dp, ctxContact(c.t, 0.24f)),
+    )
+}
+private val brickRest: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8656-8664
+    border = c.t.brickSide
+    face = c.t.brick
+    ink = c.t.accentInk
+    shadows = listOf(
+        hardShadow(1.dp, c.t.litFaint, inset = true),
+        hardShadow((-1).dp, ctxContact(c.t, 0.1f), x = (-1).dp, inset = true),
+        hardShadow(2.dp, c.t.brickSide),
+        softShadow(4.dp, 6.dp, ctxContact(c.t, 0.3f), spread = (-2).dp),
+    )
+}
+private val brickActive: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8719-8726
+    travel = c.t.pressTravel
+    face = c.t.brickDeep
+    shadows = listOf(
+        softShadow(2.dp, 3.dp, c.t.pressShade, inset = true),
+        hardShadow(1.dp, c.t.brickSide),
+        softShadow(1.dp, 2.dp, ctxContact(c.t, 0.24f)),
+    )
+}
+private val flatDisabled: KeyComputed.(KeyContext) -> Unit = { c ->
+    // globals.css 8757-8769
+    travel = 0.dp
+    border = c.t.lineStrong
+    face = c.t.keyFace
+    ink = c.t.muted
+    shadows = listOf(hardShadow(1.dp, c.t.keySide))
+}
+private val studioFlatKey: KeyComputed.(KeyContext) -> Unit = {
+    // studio.css 260-264 (radius, box-shadow: none; the legend styling is the skin's key role)
+    radius = StudioKeyRadius
+    shadows = emptyList()
+}
+private val studioAccentKey: KeyComputed.(KeyContext) -> Unit = { c ->
+    // studio.css:265-267
+    face = c.t.accent
+    ink = c.t.accentInk
+    border = Color.Transparent
+}
+private val studioFlatDestructive: KeyComputed.(KeyContext) -> Unit = {
+    // studio.css 489-497
+    border = Color.Transparent
+    shadows = emptyList()
+    travel = 0.dp
+}
+
+private fun g(line: Int, classes: Set<KeyClass>, specificity: Int, pseudo: KeyPseudo = KeyPseudo.None, declare: KeyComputed.(KeyContext) -> Unit) =
+    KeyRule(CssFile.Globals, line, classes, specificity, pseudo, studioOnly = false, declare = declare)
+
+private fun s(line: Int, classes: Set<KeyClass>, specificity: Int, pseudo: KeyPseudo = KeyPseudo.None, declare: KeyComputed.(KeyContext) -> Unit) =
+    KeyRule(CssFile.Studio, line, classes, specificity, pseudo, studioOnly = true, declare = declare)
+
+private val Primary = setOf(KeyClass.ButtonPrimary)
+private val Secondary = setOf(KeyClass.ButtonSecondary)
+private val Danger = setOf(KeyClass.ButtonPrimary, KeyClass.ButtonDanger)
+private val Deny = setOf(KeyClass.ChatApprovalDeny)
+private val Send = setOf(KeyClass.ChatSend)
+private val Interrupt = setOf(KeyClass.ChatInterrupt)
+private val End = setOf(KeyClass.EndSession)
+private val NewSession = setOf(KeyClass.NewSessionButton)
+private val Attach = setOf(KeyClass.ChatAttachBtn)
+private val Jump = setOf(KeyClass.ChatJump)
+private val Icon = setOf(KeyClass.IconButton)
+
+/**
+ * Every rule that paints a key, one entry per selector (web source at PARITY_BASE 7d65611).
+ * Specificity: `:root` and each class/pseudo-class count b; `:where()` counts nothing; an element
+ * or pseudo-element counts c. `.chat-approval-actions` (the deny's ancestor) is counted in.
+ */
+val KeyRules: List<KeyRule> = listOf(
+    // ── globals.css base rules (specificity (0,1,0) unless noted) ──
+    g(641, emptySet(), spec(1, 1), KeyPseudo.Disabled) { alpha = DisabledOpacity }, // button:disabled
+    g(755, Icon, spec(1)) { border = Color.Transparent; radius = it.t.radiusSm; face = Color.Transparent; ink = it.t.muted }, // colour inherits; hosts set --muted
+    g(892, NewSession, spec(1)) { border = it.t.lineStrong; radius = it.t.radiusSm; face = it.t.graphiteRaised; shadows = it.t.css.edgeHighlight + it.t.css.shadowRaised; ink = it.t.white },
+    g(1930, End, spec(1)) { border = Color.Transparent; radius = it.t.radiusSm; face = Color.Transparent; ink = it.t.muted },
+    g(2297, Primary, spec(1)) { radius = it.t.radiusSm },
+    g(2298, Secondary, spec(1)) { radius = it.t.radiusSm },
+    g(2312, Primary, spec(1)) { border = Color.Transparent; face = it.t.violetStrong; shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowRaised; ink = it.t.white },
+    g(2323, Secondary, spec(1)) { border = it.t.lineStrong; face = Color.Transparent; ink = it.t.ink },
+    g(4774, Jump, spec(1)) { border = it.t.lineStrong; radius = KeyRadiusCircle; face = it.t.graphiteRaised; ink = it.t.ink; shadows = it.t.css.shadowFloating },
+    g(7107, Send, spec(1)) { border = it.t.violetStrong; radius = it.t.radiusMd; face = it.t.violetDeep; ink = it.t.white; shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowRaised },
+    g(7127, Send, spec(2), KeyPseudo.Disabled) { alpha = 0.5f },
+    g(7128, Interrupt, spec(1)) { border = it.t.dangerEdge; face = it.t.dangerWash },
+    g(7136, Attach, spec(1)) { border = it.t.line; radius = it.t.radiusMd; face = it.t.mineralDeep; ink = it.t.muted },
+
+    // ── globals.css material layer (":root" rules) ──
+    g(8592, Secondary, spec(2), declare = neutralRest),
+    g(8593, NewSession, spec(2), declare = neutralRest),
+    g(8597, Attach, spec(2), declare = neutralRest),
+    g(8634, Primary, spec(2), declare = primaryRest),
+    g(8635, Send, spec(2), declare = primaryRest),
+    g(8656, Interrupt, spec(2), declare = brickRest),
+    g(8657, Deny, spec(3), declare = brickRest),
+    g(8658, Danger, spec(3), declare = brickRest),
+    g(8659, End, spec(2), declare = brickRest),
+    g(8675, Primary, spec(2)) { radius = it.t.radiusKey },
+    g(8676, Secondary, spec(2)) { radius = it.t.radiusKey },
+    g(8677, Send, spec(2)) { radius = it.t.radiusKey },
+    g(8678, Interrupt, spec(2)) { radius = it.t.radiusKey },
+    g(8679, NewSession, spec(2)) { radius = it.t.radiusKey },
+    g(8680, End, spec(2)) { radius = it.t.radiusKey },
+    g(8686, Secondary, spec(4), KeyPseudo.Active, neutralActive),
+    g(8687, NewSession, spec(3), KeyPseudo.Active, neutralActive),
+    g(8691, Attach, spec(3), KeyPseudo.Active, neutralActive),
+    g(8711, Primary, spec(4), KeyPseudo.Active, primaryActive),
+    g(8712, Send, spec(4), KeyPseudo.Active, primaryActive),
+    g(8719, Interrupt, spec(4), KeyPseudo.Active, brickActive),
+    g(8720, Deny, spec(5), KeyPseudo.Active, brickActive),
+    g(8721, Danger, spec(5), KeyPseudo.Active, brickActive),
+    g(8722, End, spec(4), KeyPseudo.Active, brickActive),
+    g(8734, Jump, spec(2)) { border = it.t.charcoalSide; face = it.t.charcoal; ink = it.t.utilityInk; shadows = listOf(hardShadow(1.dp, it.t.litSoft, inset = true), hardShadow(2.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
+    g(8749, Jump, spec(3), KeyPseudo.Active) { travel = it.t.pressTravel; face = oklabMix(it.t.charcoal, it.t.contact, 0.9f); shadows = listOf(softShadow(2.dp, 3.dp, it.t.pressShade, inset = true), hardShadow(1.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
+    g(8757, Primary, spec(3), KeyPseudo.Disabled, flatDisabled),
+    g(8758, Secondary, spec(3), KeyPseudo.Disabled, flatDisabled),
+    g(8759, Send, spec(3), KeyPseudo.Disabled, flatDisabled),
+    g(8760, Interrupt, spec(3), KeyPseudo.Disabled, flatDisabled),
+    // Wear ::after (globals.css 8786-8857): Send / Primary / New session compositions.
+    g(8786, Send, spec(2, 1)) { wear = KeyWear.Send },
+    g(8787, Primary, spec(2, 1)) { wear = KeyWear.Primary },
+    g(8788, NewSession, spec(2, 1)) { wear = KeyWear.NewSession },
+    g(8983, Icon, spec(3), KeyPseudo.Active, neutralActive), // icon controls (8983-8989)
+    // Execution slit ::before (globals.css 9220-9253).
+    g(9228, Primary, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
+    g(9229, Send, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
+    g(9231, Interrupt, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
+    g(9232, End, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
+    g(9250, Primary, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
+    g(9251, Send, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
+    g(9253, Interrupt, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
+    // Latched (.is-on) keys: raised, the violet selected tone (globals.css 11048-11056).
+    g(11049, emptySet(), spec(3), KeyPseudo.On) {
+        face = it.t.violetWash
+        ink = it.t.violet
+        shadows = listOf(
+            hardShadow(1.dp, it.t.litStrong, inset = true),
+            CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = it.t.violetStrong),
+        ) + it.t.css.shadowKeySm
+    },
+
+    // ── studio.css (loads after globals.css; `:root:where(...)` = (0,1,0) + classes) ──
+    s(260, Primary, spec(2), declare = studioFlatKey),
+    s(261, Secondary, spec(2), declare = studioFlatKey),
+    s(262, Send, spec(2), declare = studioFlatKey),
+    s(263, Interrupt, spec(2), declare = studioFlatKey),
+    s(264, NewSession, spec(2), declare = studioFlatKey),
+    s(265, Primary, spec(2), declare = studioAccentKey),
+    s(266, Send, spec(2), declare = studioAccentKey),
+    s(267, NewSession, spec(2), declare = studioAccentKey),
+    s(277, Secondary, spec(2)) { border = it.t.lineStrong; face = it.t.graphite; ink = it.t.ink },
+    s(271, Primary, spec(2, 1)) { slit = false; wear = KeyWear.None },
+    s(273, NewSession, spec(2, 1)) { slit = false; wear = KeyWear.None },
+    s(275, Send, spec(2, 1)) { slit = false; wear = KeyWear.None },
+    s(303, NewSession, spec(2)) { face = Color(0xFF365CDE) },
+    s(389, Attach, spec(3)) { border = Color.Transparent; radius = 9.6.dp; face = it.t.graphiteRaised; shadows = emptyList() }, // .chat-composer-toolbar .chat-attach-btn
+    s(489, Deny, spec(3), declare = studioFlatDestructive),
+    s(491, Deny, spec(5), KeyPseudo.Active, studioFlatDestructive),
+    s(492, Danger, spec(3), declare = studioFlatDestructive),
+    s(493, Danger, spec(5), KeyPseudo.Active, studioFlatDestructive),
+)
+
+/** The rules that apply to [classes] in [state] for this skin, in cascade (application) order. */
+fun matchingKeyRules(t: TetherTokens, classes: Set<KeyClass>, state: KeyState, selected: Boolean = false): List<KeyRule> {
+    val studio = t.skin.family == ThemeFamily.Studio
+    return KeyRules.filter { r ->
+        (!r.studioOnly || studio) && classes.containsAll(r.classes) && when (r.pseudo) {
+            KeyPseudo.None -> true
+            KeyPseudo.Active -> state == KeyState.Pressed
+            KeyPseudo.Disabled -> state == KeyState.Disabled
+            KeyPseudo.On -> selected
+        }
+    }.sortedWith(compareBy<KeyRule>({ it.specificity }, { it.file.ordinal }, { it.line }))
+}
+
+/** Resolves a key's look: the cascade over [KeyRules] for its class set, skin and state. */
 fun resolveKey(
     t: TetherTokens,
-    variant: KeyVariant,
+    classes: Set<KeyClass>,
     state: KeyState,
     selected: Boolean = false,
     size: KeySize = KeySize.Regular,
 ): KeyLook {
-    val studio = t.skin.family == ThemeFamily.Studio
-    val css = t.css
-    val contact = { a: Float -> t.contact.copy(alpha = a) }
-    val bevel = listOf(hardShadow(1.dp, t.litStrong, inset = true), hardShadow(0.dp, t.litSoft, x = 1.dp, inset = true))
-    val keyDrop = if (size == KeySize.Small) css.shadowKeySm else css.shadowKey
-    val radius = when {
-        variant == KeyVariant.Quiet -> t.radiusSm
-        // studio.css:263 rounds only its labelled key group (button-primary/secondary, send, interrupt).
-        studio && variant in StudioRoundedKeys -> StudioKeyRadius
-        else -> t.radiusKey
-    }
-
-    if (state == KeyState.Disabled && variant == KeyVariant.Danger && studio) {
-        // The disabled rule (0,3,0) ties with Studio's flat danger rule, which comes later: the
-        // disabled face/legend, Studio's transparent border and no shadow.
-        return KeyLook(t.keyFace, Color.Transparent, t.muted, emptyList(), 0.dp, radius, DisabledOpacity, 0.25f)
-    }
-    if (state == KeyState.Disabled && variant in FlatWhenDisabled) {
-        // globals.css 8757-8769: flat on the panel, muted legend (wins in Studio: (0,3,0)).
-        return KeyLook(
-            face = t.keyFace,
-            border = t.lineStrong,
-            ink = t.muted,
-            shadows = listOf(hardShadow(1.dp, t.keySide)),
-            travel = 0.dp,
-            radius = radius,
-            alpha = DisabledOpacity,
-            slitAlpha = 0.25f,
-        )
-    }
-    val pressed = state == KeyState.Pressed
-    val disabledAlpha = if (state == KeyState.Disabled) DisabledOpacity else 1f
-    val travel = if (pressed) t.pressTravel else 0.dp
-
-    return when (variant) {
-        KeyVariant.Secondary -> when {
-            pressed -> KeyLook(
-                face = t.keyFaceDeep,
-                border = if (studio) t.lineStrong else t.keySide,
-                ink = t.ink,
-                shadows = css.bevelPressed + css.shadowKeyPressed,
-                travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-            selected -> latched(t, radius)
-            studio -> KeyLook(t.graphite, t.lineStrong, t.ink, emptyList(), 0.dp, radius, 1f, 0.55f)
-            else -> KeyLook(t.keyFace, t.keySide, t.ink, bevel + keyDrop, 0.dp, radius, 1f, 0.55f)
-        }
-
-        KeyVariant.Primary -> when {
-            // globals.css 8711-8717 ((0,4,0): also wins over Studio's flat rule).
-            pressed -> KeyLook(
-                face = t.accentDeep,
-                border = if (studio) Color.Transparent else t.accentSide,
-                ink = t.accentInk,
-                shadows = listOf(
-                    softShadow(2.dp, 3.dp, t.pressShade, inset = true),
-                    hardShadow((-1).dp, t.litFaint, inset = true),
-                    hardShadow(1.dp, t.accentSide),
-                    softShadow(1.dp, 2.dp, contact(0.24f)),
-                ),
-                travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-            studio -> KeyLook(t.accent, Color.Transparent, t.accentInk, emptyList(), 0.dp, radius, 1f, 0.55f)
-            else -> KeyLook(
-                face = t.accent,
-                border = t.accentSide,
-                ink = t.accentInk,
-                shadows = listOf(
-                    hardShadow(1.dp, t.litFaint, inset = true),
-                    hardShadow(0.dp, t.litFaint, x = 1.dp, inset = true),
-                    hardShadow((-1).dp, contact(0.1f), x = (-1).dp, inset = true),
-                    hardShadow(3.dp, t.accentSide),
-                    softShadow(5.dp, 7.dp, contact(0.32f), spread = (-2).dp),
-                ),
-                travel = 0.dp, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-        }
-
-        KeyVariant.Deny, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession ->
-            brickKey(t, variant, pressed, travel, radius, disabledAlpha)
-
-        // globals.css 8734-8753 (no Studio override: Studio's tokens flatten the lit edge).
-        KeyVariant.Utility -> if (pressed) {
-            KeyLook(
-                face = oklabMix(t.charcoal, t.contact, 0.9f),
-                border = t.charcoalSide,
-                ink = t.utilityInk,
-                shadows = listOf(softShadow(2.dp, 3.dp, t.pressShade, inset = true), hardShadow(1.dp, t.charcoalSide)) + css.shadowFloating,
-                travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-        } else {
-            KeyLook(
-                face = t.charcoal,
-                border = t.charcoalSide,
-                ink = t.utilityInk,
-                shadows = listOf(hardShadow(1.dp, t.litSoft, inset = true), hardShadow(2.dp, t.charcoalSide)) + css.shadowFloating,
-                travel = 0.dp, radius = radius, alpha = disabledAlpha, slitAlpha = 0.55f,
-            )
-        }
-
-        // globals.css 755-768 + 8981-8989; latched filter keys 11048-11056.
-        KeyVariant.Quiet -> when {
-            pressed -> KeyLook(t.keyFaceDeep, Color.Transparent, t.white, css.bevelPressed + css.shadowKeyPressed, travel, radius, 1f, 0.55f)
-            selected -> latched(t, radius).copy(border = Color.Transparent)
-            else -> KeyLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, radius, disabledAlpha, 0.55f)
-        }
-    }
+    val c = KeyComputed(ink = t.ink)
+    val ctx = KeyContext(t, size)
+    for (rule in matchingKeyRules(t, classes, state, selected)) rule.declare(c, ctx)
+    return KeyLook(c.face, c.border, c.ink, c.shadows, c.travel, c.radius, c.alpha, c.slit, c.slitAlpha, c.wear)
 }
-
-/** The keys studio.css:263 re-rounds to 0.625rem. */
-private val StudioRoundedKeys = setOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Danger, KeyVariant.Interrupt)
-
-/** The keys globals.css 8757-8769 lays flat when disabled (deny and end-session only fade). */
-private val FlatWhenDisabled = setOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Danger, KeyVariant.Interrupt)
-
-/** The keys that carry the machined execution slit (globals.css 9220-9247; Studio hides it). */
-val SlitKeys: Set<KeyVariant> = setOf(KeyVariant.Primary, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession)
-
-/** The four brick roles: one globals look, three Studio treatments (see [KeyVariant.Deny]). */
-private fun brickKey(t: TetherTokens, variant: KeyVariant, pressed: Boolean, travel: Dp, radius: Dp, alpha: Float): KeyLook {
-    val studio = t.skin.family == ThemeFamily.Studio
-    val contact = { a: Float -> t.contact.copy(alpha = a) }
-    val flatInStudio = studio && (variant == KeyVariant.Deny || variant == KeyVariant.Danger)
-    val face = if (pressed) t.brickDeep else t.brick
-    return when {
-        // studio.css 489-497 (its :active selector ties the globals one and comes later).
-        flatInStudio -> KeyLook(face, Color.Transparent, t.accentInk, emptyList(), 0.dp, radius, alpha, 0.55f)
-        // globals.css 8719-8726, (0,4,0): wins over Studio's interrupt rule too.
-        pressed -> KeyLook(
-            face = face,
-            border = t.brickSide,
-            ink = t.accentInk,
-            shadows = listOf(
-                softShadow(2.dp, 3.dp, t.pressShade, inset = true),
-                hardShadow(1.dp, t.brickSide),
-                softShadow(1.dp, 2.dp, contact(0.24f)),
-            ),
-            travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-        )
-        // studio.css:263: `box-shadow: none`, the globals border stays.
-        studio && variant == KeyVariant.Interrupt -> KeyLook(face, t.brickSide, t.accentInk, emptyList(), 0.dp, radius, alpha, 0.55f)
-        // globals.css 8663-8672 (and Studio's end-session, excluded from the flat rail).
-        else -> KeyLook(
-            face = face,
-            border = t.brickSide,
-            ink = t.accentInk,
-            shadows = listOf(
-                hardShadow(1.dp, t.litFaint, inset = true),
-                hardShadow((-1).dp, contact(0.1f), x = (-1).dp, inset = true),
-                hardShadow(2.dp, t.brickSide),
-                softShadow(4.dp, 6.dp, contact(0.3f), spread = (-2).dp),
-            ),
-            travel = 0.dp, radius = radius, alpha = alpha, slitAlpha = 0.55f,
-        )
-    }
-}
-
-/**
- * A latched (selected) key: it "sits raised and carries the selected tone" — violet wash, a 1px
- * violet-strong inset ring, violet legend (globals.css 11048-11056). Violet here marks SELECTED.
- */
-private fun latched(t: TetherTokens, radius: Dp): KeyLook = KeyLook(
-    face = t.violetWash,
-    border = Color.Transparent,
-    ink = t.violet,
-    shadows = listOf(
-        hardShadow(1.dp, t.litStrong, inset = true),
-        CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = t.violetStrong),
-    ) + t.css.shadowKeySm,
-    travel = 0.dp,
-    radius = radius,
-    alpha = 1f,
-    slitAlpha = 0.55f,
-)
 
 /**
  * CSS `color-mix(in oklab, a p, b)` for opaque colours (the chat-jump press face). Exact: sRGB →

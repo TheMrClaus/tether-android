@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.push.PushScope
-import com.tether.app.ui.components.KeyVariant
+import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherDialog
@@ -178,7 +178,7 @@ fun SessionDrawer(
             TetherKey(
                 onClick = { providerPicker = true },
                 modifier = Modifier.fillMaxWidth(),
-                variant = KeyVariant.Secondary,
+                classes = KeyClasses.NewSession,
                 label = "New session",
                 icon = TetherIcons.Plus,
                 iconSize = 17.dp,
@@ -416,7 +416,7 @@ fun SessionDrawer(
             ) {
                 TetherKey(
                     onClick = { folderPicker = false },
-                    variant = KeyVariant.Secondary,
+                    classes = KeyClasses.ButtonSecondary,
                     label = "Cancel",
                     wear = false,
                 )
@@ -425,7 +425,7 @@ fun SessionDrawer(
                         pickerCurrent?.let(vm::selectWorkspace)
                         folderPicker = false
                     },
-                    variant = KeyVariant.Primary,
+                    classes = KeyClasses.ButtonPrimary,
                     label = "Use this folder",
                     icon = TetherIcons.Check,
                     iconSize = 15.dp,
