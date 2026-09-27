@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Base64
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,16 @@ sealed interface Credential {
     }
 }
 
+/** A consistent (server, credential) pair; see [SettingsStore.session]. */
+data class Session(val baseUrl: String?, val credential: Credential?)
+
+/** Cookie wins over a device token (the narrower, older grant); empty = absent. */
+fun credentialInForce(cookie: String?, deviceToken: String?): Credential? = when {
+    !cookie.isNullOrEmpty() -> Credential.Cookie(cookie)
+    !deviceToken.isNullOrEmpty() -> Credential.DeviceToken(deviceToken)
+    else -> null
+}
+
 /**
  * Persisted client configuration. The DataStore implementation keeps the server
  * URL and pending input in `tether_settings.preferences_pb` and the credentials
@@ -70,13 +81,15 @@ interface SettingsStore {
      * preferring it can never silently escalate to the device token).
      */
     val credential: Flow<Credential?>
-        get() = combine(cookie, deviceToken) { cookieValue, tokenValue ->
-            when {
-                !cookieValue.isNullOrEmpty() -> Credential.Cookie(cookieValue)
-                !tokenValue.isNullOrEmpty() -> Credential.DeviceToken(tokenValue)
-                else -> null
-            }
-        }
+        get() = combine(cookie, deviceToken, ::credentialInForce)
+
+    /**
+     * The server URL and the credential in force, read as ONE consistent pair.
+     * Every path that SENDS a credential uses this: reading [baseUrl] and
+     * [credential] separately can straddle a server switch and pair URL A with
+     * credential B.
+     */
+    suspend fun session(): Session
 
     /** Persist the server and the credential that authenticates against it. */
     suspend fun setServer(baseUrl: String, credential: Credential)
@@ -149,12 +162,12 @@ class DataStoreSettings(
     private val sealedDeviceTokenKey = stringPreferencesKey(SLOT_DEVICE_TOKEN)
 
     /**
-     * [AAD_FORMAT_ORIGIN] once every blob in the file is origin-bound. Absent =
-     * blobs from an early T1.4 build (slot-only AAD) may exist: they are opened
-     * with the old AAD ONCE and re-sealed with the origin. With the marker set the
-     * old AAD is never tried again.
+     * Consecutive launches whose credential read hit a [CipherFailure.Suspect]
+     * error. At [SUSPECT_ROTATE_AFTER] the key is rotated (destroyed, blobs
+     * dropped), so a key that is broken for good stops forcing a sign-in on every
+     * launch. Reset by any successful open or seal.
      */
-    private val aadFormatKey = intPreferencesKey("aad_format")
+    private val suspectFailuresKey = intPreferencesKey("credential_key_suspect_failures")
 
     private data class Credentials(val cookie: String?, val deviceToken: String?) {
         override fun toString(): String = "Credentials(cookie=${if (cookie == null) "null" else "***"}, " +
@@ -168,8 +181,8 @@ class DataStoreSettings(
         }
         /** Undecryptable for good: delete it. */
         data object Dead : Slot
-        /** Keystore not usable right now: leave the blob, retry later. */
-        data object Unavailable : Slot
+        /** Keystore not usable right now: leave the blob, retry later. [suspect] counts toward rotation. */
+        data class Unavailable(val suspect: Boolean) : Slot
     }
 
     private val mutex = Mutex()
@@ -180,6 +193,28 @@ class DataStoreSettings(
     // A transient Keystore failure left a blob unopened: the next read retries.
     @Volatile
     private var retryPending = false
+
+    // This process already counted its suspect failure (count once per launch).
+    private var suspectCounted = false
+
+    private var lastSealFailure: CipherFailure? = null
+
+    /**
+     * Count this launch's suspect failure (at most once); at the threshold,
+     * destroy the key and reset the counter. True = the key was just rotated.
+     * Caller holds [mutex].
+     */
+    private suspend fun noteSuspectFailureLocked(): Boolean {
+        if (suspectCounted) return false
+        suspectCounted = true
+        val n = (dataStore.data.first()[suspectFailuresKey] ?: 0) + 1
+        val rotate = n >= SUSPECT_ROTATE_AFTER
+        if (rotate) cipher.destroyKey()
+        runCatching {
+            dataStore.edit { if (rotate) it.remove(suspectFailuresKey) else it[suspectFailuresKey] = n }
+        }
+        return rotate
+    }
 
     override val baseUrl: Flow<String?> = dataStore.data.map { it[baseUrlKey] }
 
@@ -218,9 +253,18 @@ class DataStoreSettings(
         }
 
         val origin = originOf(prefs[baseUrlKey])
-        val allowSlotOnlyAad = sealed[aadFormatKey] != AAD_FORMAT_ORIGIN
-        var cookieSlot = openSlot(sealed[sealedCookieKey], SLOT_COOKIE, origin, allowSlotOnlyAad)
-        var tokenSlot = openSlot(sealed[sealedDeviceTokenKey], SLOT_DEVICE_TOKEN, origin, allowSlotOnlyAad)
+        var cookieSlot = openSlot(sealed[sealedCookieKey], SLOT_COOKIE, origin)
+        var tokenSlot = openSlot(sealed[sealedDeviceTokenKey], SLOT_DEVICE_TOKEN, origin)
+
+        // Rotation of a key that keeps failing for no stated reason, counted once
+        // per launch and persisted across launches.
+        val suspect = listOf(cookieSlot, tokenSlot).any { it is Slot.Unavailable && it.suspect }
+        if (suspect && noteSuspectFailureLocked()) {
+            // Rotated: everything sealed under the old key is dead.
+            if (cookieSlot is Slot.Unavailable) cookieSlot = Slot.Dead
+            if (tokenSlot is Slot.Unavailable) tokenSlot = Slot.Dead
+        }
+        val resetCounter = listOf(cookieSlot, tokenSlot).any { it is Slot.Opened } && (prefs[suspectFailuresKey] ?: 0) > 0
 
         // Pre-T1.4 plaintext: written in ONE edit together with its base URL, so
         // it belongs to [origin]. A sealed or temporarily unreadable value wins
@@ -237,22 +281,23 @@ class DataStoreSettings(
         val cookieWrite = rewriteFor(cookieSlot, SLOT_COOKIE, origin)
         val tokenWrite = rewriteFor(tokenSlot, SLOT_DEVICE_TOKEN, origin)
         val unavailable = cookieSlot is Slot.Unavailable || tokenSlot is Slot.Unavailable
-        val markOriginFormat = !unavailable || !allowSlotOnlyAad
-        if (cookieWrite != null || tokenWrite != null || (markOriginFormat && sealed[aadFormatKey] != AAD_FORMAT_ORIGIN)) {
+        if (cookieWrite != null || tokenWrite != null) {
             runCatching {
                 credentialStore.edit { p ->
                     cookieWrite?.let { w -> if (w.isEmpty()) p.remove(sealedCookieKey) else p[sealedCookieKey] = w }
                     tokenWrite?.let { w -> if (w.isEmpty()) p.remove(sealedDeviceTokenKey) else p[sealedDeviceTokenKey] = w }
-                    if (markOriginFormat) p[aadFormatKey] = AAD_FORMAT_ORIGIN
                 }
             }
         }
         // Only after the sealed copy is on disk: delete the plaintext.
-        if (legacy) {
+        if (legacy || resetCounter) {
             runCatching {
                 dataStore.edit {
-                    it.remove(legacyCookieKey)
-                    it.remove(legacyDeviceTokenKey)
+                    if (legacy) {
+                        it.remove(legacyCookieKey)
+                        it.remove(legacyDeviceTokenKey)
+                    }
+                    if (resetCounter) it.remove(suspectFailuresKey)
                 }
             }
         }
@@ -265,12 +310,12 @@ class DataStoreSettings(
 
     /** null = leave the slot as it is; "" = delete it; otherwise the new sealed value. */
     private fun rewriteFor(slot: Slot, name: String, origin: String?): String? = when (slot) {
-        Slot.Empty, Slot.Unavailable -> null
+        Slot.Empty, is Slot.Unavailable -> null
         Slot.Dead -> ""
         is Slot.Opened -> if (!slot.reseal) null else origin?.let { sealSlot(slot.value, name, it) } ?: ""
     }
 
-    private fun openSlot(encoded: String?, slot: String, origin: String?, allowSlotOnlyAad: Boolean): Slot {
+    private fun openSlot(encoded: String?, slot: String, origin: String?): Slot {
         if (encoded.isNullOrEmpty()) return Slot.Empty
         // A credential with no (parsable) server cannot be bound to one: dead.
         if (origin == null) return Slot.Dead
@@ -279,26 +324,25 @@ class DataStoreSettings(
         } catch (_: IllegalArgumentException) {
             return Slot.Dead // not Base64: corrupt
         }
-        val first = tryOpen(blob, aadFor(slot, origin))
-        if (first !is Slot.Dead || !allowSlotOnlyAad) return first.asFresh()
-        // One-time migration of a slot-only-AAD blob (early T1.4 builds).
-        val legacy = tryOpen(blob, legacyAadFor(slot))
-        return if (legacy is Slot.Opened) legacy.copy(reseal = true) else legacy
+        // Only the origin-bound AAD. A blob sealed under any other AAD (another
+        // origin, or the slot-only AAD of unreleased early T1.4 builds) does not
+        // open and is deleted: re-sealing it for "whatever URL is on disk" would
+        // accept exactly the torn URL-B-plus-credential-A state.
+        return tryOpen(blob, aadFor(slot, origin))
     }
-
-    private fun Slot.asFresh(): Slot = if (this is Slot.Opened) copy(reseal = false) else this
 
     private fun tryOpen(blob: ByteArray, aad: ByteArray): Slot = try {
         String(cipher.open(blob, aad), Charsets.UTF_8).takeIf { it.isNotEmpty() }
             ?.let { Slot.Opened(it, reseal = false) } ?: Slot.Dead
     } catch (e: CredentialCipherException) {
-        when {
-            e.transient -> Slot.Unavailable
-            e.keyUnusable -> {
+        when (e.failure) {
+            CipherFailure.Transient -> Slot.Unavailable(suspect = false)
+            CipherFailure.Suspect -> Slot.Unavailable(suspect = true)
+            CipherFailure.KeyDead -> {
                 cipher.destroyKey()
                 Slot.Dead
             }
-            else -> Slot.Dead
+            CipherFailure.BadBlob -> Slot.Dead
         }
     }
 
@@ -309,6 +353,7 @@ class DataStoreSettings(
             try {
                 return Base64.getEncoder().encodeToString(cipher.seal(plaintext, aadFor(slot, origin)))
             } catch (e: CredentialCipherException) {
+                lastSealFailure = e.failure
                 // One retry under a fresh key when the old one is dead; a transient
                 // error never destroys the key.
                 if (!e.keyUnusable || attempt == 1) return null
@@ -319,8 +364,6 @@ class DataStoreSettings(
     }
 
     private fun aadFor(slot: String, origin: String): ByteArray = "$AAD_PREFIX$slot|$origin".toByteArray(Charsets.UTF_8)
-
-    private fun legacyAadFor(slot: String): ByteArray = "$LEGACY_AAD_PREFIX$slot".toByteArray(Charsets.UTF_8)
 
     private suspend fun removeSealedSlots() {
         credentialStore.edit {
@@ -356,15 +399,28 @@ class DataStoreSettings(
                     is Credential.DeviceToken -> Credentials(null, credential.value)
                 }
                 val origin = originOf(baseUrl)
-                val cookieBlob = origin?.let { o -> next.cookie?.let { sealSlot(it, SLOT_COOKIE, o) } }
-                val tokenBlob = origin?.let { o -> next.deviceToken?.let { sealSlot(it, SLOT_DEVICE_TOKEN, o) } }
+                fun sealNext(): Pair<String?, String?> = Pair(
+                    origin?.let { o -> next.cookie?.let { sealSlot(it, SLOT_COOKIE, o) } },
+                    origin?.let { o -> next.deviceToken?.let { sealSlot(it, SLOT_DEVICE_TOKEN, o) } },
+                )
+                lastSealFailure = null
+                var (cookieBlob, tokenBlob) = sealNext()
+                val sealed = cookieBlob != null || tokenBlob != null
+                // A key that works resets the rotation counter; one that fails for
+                // no stated reason counts (once per launch) and may be rotated,
+                // after which the seal is retried under the fresh key.
+                if (!sealed && lastSealFailure == CipherFailure.Suspect && noteSuspectFailureLocked()) {
+                    val retried = sealNext()
+                    cookieBlob = retried.first
+                    tokenBlob = retried.second
+                }
                 credentials.value = next
                 if (cookieBlob != null || tokenBlob != null) {
                     credentialStore.edit { p ->
                         cookieBlob?.let { p[sealedCookieKey] = it }
                         tokenBlob?.let { p[sealedDeviceTokenKey] = it }
-                        p[aadFormatKey] = AAD_FORMAT_ORIGIN
                     }
+                    runCatching { dataStore.edit { it.remove(suspectFailuresKey) } }
                 }
             }
         }
@@ -402,6 +458,18 @@ class DataStoreSettings(
         }
     }
 
+    /**
+     * URL and credential from ONE snapshot, under the same lock every writer
+     * holds — a server switch can never be observed half-way (URL A with
+     * credential B). Use this, not [baseUrl] + [credential], before sending a
+     * credential anywhere.
+     */
+    override suspend fun session(): Session = mutex.withLock {
+        if (credentials.value == null || retryPending) loadLocked()
+        val c = credentials.value ?: Credentials(null, null)
+        Session(dataStore.data.first()[baseUrlKey], credentialInForce(c.cookie, c.deviceToken))
+    }
+
     override suspend fun readPendingInput(): String? = dataStore.data.first()[pendingKey]
 
     override suspend fun writePendingInput(raw: String) {
@@ -418,31 +486,19 @@ class DataStoreSettings(
         const val SLOT_COOKIE = "session_cookie"
         const val SLOT_DEVICE_TOKEN = "device_token"
         private const val AAD_PREFIX = "tether.credential.v2|"
-        private const val LEGACY_AAD_PREFIX = "tether.credential.v1|"
-        private const val AAD_FORMAT_ORIGIN = 2
+
+        /** Launches in a row with an unexplained key failure before the key is rotated. */
+        const val SUSPECT_ROTATE_AFTER = 3
 
         /**
-         * `scheme://host:port`, lower-cased, default port made explicit — the
-         * identity a credential is bound to. Null for anything that is not an
-         * http(s) URL with a host.
+         * `scheme://host:port` as OkHttp canonicalises it (lower-case host, IDN
+         * in punycode, default port explicit, `_` allowed — `my_nas.lan` works)
+         * — the identity a credential is bound to. Null for anything that is not
+         * an http(s) URL.
          */
         fun originOf(baseUrl: String?): String? {
-            if (baseUrl.isNullOrBlank()) return null
-            val uri = try {
-                java.net.URI(baseUrl.trim())
-            } catch (_: java.net.URISyntaxException) {
-                return null
-            }
-            val scheme = uri.scheme?.lowercase() ?: return null
-            val host = uri.host?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
-            val port = when {
-                uri.port != -1 -> uri.port
-                scheme == "https" -> 443
-                scheme == "http" -> 80
-                else -> return null
-            }
-            if (scheme != "http" && scheme != "https") return null
-            return "$scheme://$host:$port"
+            val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }?.toHttpUrlOrNull() ?: return null
+            return "${url.scheme}://${url.host}:${url.port}"
         }
 
         /**
@@ -475,34 +531,44 @@ class InMemorySettings(
     private val deviceTokenState = MutableStateFlow(initialDeviceToken)
     private var pending: String? = null
 
+    // Every write and [session] take this, so a (URL, credential) pair is never torn.
+    private val lock = Any()
+
     override val baseUrl: Flow<String?> = baseUrlState
     override val cookie: Flow<String?> = cookieState
     override val deviceToken: Flow<String?> = deviceTokenState
 
+    override suspend fun session(): Session = synchronized(lock) {
+        Session(baseUrlState.value, credentialInForce(cookieState.value, deviceTokenState.value))
+    }
+
     override suspend fun setServer(baseUrl: String, credential: Credential) {
-        baseUrlState.value = baseUrl
-        when (credential) {
-            is Credential.Cookie -> {
-                cookieState.value = credential.value
-                deviceTokenState.value = null
-            }
-            is Credential.DeviceToken -> {
-                deviceTokenState.value = credential.value
-                cookieState.value = null
+        synchronized(lock) {
+            // Same order as DataStoreSettings: the old credential goes before the URL moves.
+            cookieState.value = null
+            deviceTokenState.value = null
+            baseUrlState.value = baseUrl
+            when (credential) {
+                is Credential.Cookie -> cookieState.value = credential.value
+                is Credential.DeviceToken -> deviceTokenState.value = credential.value
             }
         }
     }
 
     override suspend fun clearCredential() {
-        cookieState.value = null
-        deviceTokenState.value = null
+        synchronized(lock) {
+            cookieState.value = null
+            deviceTokenState.value = null
+        }
     }
 
     override suspend fun clear() {
-        baseUrlState.value = null
-        cookieState.value = null
-        deviceTokenState.value = null
-        pending = null
+        synchronized(lock) {
+            baseUrlState.value = null
+            cookieState.value = null
+            deviceTokenState.value = null
+            pending = null
+        }
     }
 
     override suspend fun readPendingInput(): String? = pending

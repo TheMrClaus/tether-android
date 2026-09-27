@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -336,8 +337,10 @@ class DataStoreSettingsTest {
     }
 
     @Test
-    fun slotOnlyAadBlobsMigrateOnceToOriginBound() = runBlocking {
-        // An early-T1.4 blob: AAD = slot only, no format marker.
+    fun slotOnlyAadBlobsAreDeadNotUpgraded() = runBlocking {
+        // An unreleased early-T1.4 blob (AAD = slot only). Re-sealing it for the
+        // URL on disk would accept the torn URL-B + credential-A state, so it is
+        // deleted and reads as logged out.
         val cipher = AesGcmCredentialCipher(keys)
         val v1 = java.util.Base64.getEncoder().encodeToString(
             cipher.seal(token.toByteArray(), "tether.credential.v1|device_token".toByteArray()),
@@ -346,21 +349,135 @@ class DataStoreSettingsTest {
         raw(credentialsFile) { ds -> ds.edit { it[stringPreferencesKey("device_token")] = v1 } }
 
         val first = open()
-        assertEquals(Credential.DeviceToken(token), first.store.credential.first())
+        assertNull(first.store.credential.first())
         first.close()
-        val migrated = raw(credentialsFile) { it.data.first() }
-        assertEquals(2, migrated[androidx.datastore.preferences.core.intPreferencesKey("aad_format")])
-        val resealed = java.util.Base64.getDecoder().decode(migrated[stringPreferencesKey("device_token")]!!)
-        assertEquals(
-            token,
-            String(cipher.open(resealed, "tether.credential.v2|device_token|https://a.example:443".toByteArray())),
-        )
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+        assertEquals(0, keys.destroyed) // a bad blob is not a bad key
+    }
 
-        // Once migrated, a slot-only blob is never accepted again (fail closed).
-        raw(credentialsFile) { ds -> ds.edit { it[stringPreferencesKey("device_token")] = v1 } }
+    @Test
+    fun hostsWithUnderscoresKeepTheirCredential() = runBlocking {
+        val first = open()
+        first.store.setServer("http://my_nas.lan:4173", Credential.Cookie(cookie))
+        first.close()
+        val second = open()
+        assertEquals(Credential.Cookie(cookie), second.store.credential.first())
+        second.close()
+    }
+
+    // ------------------------------------------------------------------
+    // One atomic (URL, credential) read
+    // ------------------------------------------------------------------
+
+    /** Suspends the next write until [release] — a server switch frozen half-way. */
+    private class GatedDataStore(private val inner: DataStore<Preferences>) : DataStore<Preferences> {
+        @Volatile var armed = false
+        val reached = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        override val data = inner.data
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            if (armed) {
+                armed = false
+                reached.complete(Unit)
+                release.await()
+            }
+            return inner.updateData(transform)
+        }
+    }
+
+    @Test
+    fun sessionNeverObservesAServerSwitchHalfWay() = kotlinx.coroutines.test.runTest {
+        val job = Job()
+        val scope = CoroutineScope(Dispatchers.IO + job)
+        credentialsFile.parentFile!!.mkdirs()
+        val gated = GatedDataStore(PreferenceDataStoreFactory.create(scope = scope) { settingsFile })
+        val creds = PreferenceDataStoreFactory.create(scope = scope) { credentialsFile }
+        val dispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler)
+        val store = DataStoreSettings(gated, creds, AesGcmCredentialCipher(keys), ioDispatcher = dispatcher)
+        store.setServer(serverA, Credential.Cookie(cookie))
+        assertEquals(Session(serverA, Credential.Cookie(cookie)), store.session())
+
+        gated.armed = true // freeze the switch at "move the URL"
+        val switching = async(dispatcher) { store.setServer(serverB, Credential.DeviceToken(token)) }
+        gated.reached.await()
+        val reader = async(dispatcher) { store.session() }
+        testScheduler.runCurrent()
+        // The reader cannot see the frozen, half-switched state: it waits.
+        assertFalse(reader.isCompleted)
+        gated.release.complete(Unit)
+        switching.await()
+        assertEquals(Session(serverB, Credential.DeviceToken(token)), reader.await())
+        job.cancelAndJoin()
+    }
+
+    // ------------------------------------------------------------------
+    // Unexplained key failures rotate after N launches
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aKeyThatKeepsFailingForNoReasonIsRotatedAfterThreeLaunches() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        first.close()
+        keys.failure = java.security.InvalidKeyException("keystore says no, every time")
+        repeat(DataStoreSettings.SUSPECT_ROTATE_AFTER - 1) {
+            val launch = open()
+            assertNull(launch.store.credential.first())
+            launch.close()
+            assertEquals(0, keys.destroyed) // not yet: could still be transient
+            assertNotNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+        }
+        val last = open()
+        assertNull(last.store.credential.first())
+        last.close()
+        assertEquals(1, keys.destroyed)
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+        assertNull(raw(settingsFile) { it.data.first() }[androidx.datastore.preferences.core.intPreferencesKey("credential_key_suspect_failures")])
+        // The fresh key works again.
+        keys.failure = null
+        val again = open()
+        again.store.setServer(serverA, Credential.Cookie(cookie))
+        again.close()
+        val check = open()
+        assertEquals(Credential.Cookie(cookie), check.store.credential.first())
+        check.close()
+    }
+
+    @Test
+    fun oneSuccessfulReadResetsTheSuspectCount() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        first.close()
+        repeat(2) {
+            keys.failure = java.security.InvalidKeyException("flaky")
+            val bad = open()
+            assertNull(bad.store.credential.first())
+            bad.close()
+            keys.failure = null
+            val good = open()
+            assertEquals(Credential.DeviceToken(token), good.store.credential.first())
+            good.close()
+        }
+        assertEquals(0, keys.destroyed) // never three in a row
+        assertNull(raw(settingsFile) { it.data.first() }[androidx.datastore.preferences.core.intPreferencesKey("credential_key_suspect_failures")])
+    }
+
+    @Test
+    fun anUnrecoverableKeyCausedByATransientKeystoreErrorIsNotDestroyed() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        keys.failure = java.security.UnrecoverableKeyException("wrapped").apply {
+            initCause(java.security.KeyStoreException("system busy"))
+        }
         val second = open()
         assertNull(second.store.credential.first())
         second.close()
+        assertEquals(0, keys.destroyed)
+        keys.failure = null
+        val third = open()
+        assertEquals(Credential.Cookie(cookie), third.store.credential.first())
+        third.close()
     }
 
     @Test
@@ -488,6 +605,7 @@ class DataStoreSettingsTest {
         assertEquals("https://a.example:443", DataStoreSettings.originOf("https://A.Example/"))
         assertEquals("http://10.0.2.2:4290", DataStoreSettings.originOf("http://10.0.2.2:4290"))
         assertEquals("http://h:80", DataStoreSettings.originOf("http://h"))
+        assertEquals("http://my_nas.lan:4173", DataStoreSettings.originOf("http://my_nas.lan:4173"))
         assertNull(DataStoreSettings.originOf("ftp://h"))
         assertNull(DataStoreSettings.originOf("not a url"))
         assertNull(DataStoreSettings.originOf(null))

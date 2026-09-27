@@ -10,6 +10,9 @@ android {
 dependencies {
     api(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+    // HttpUrl only: the credential store binds a credential to the server origin
+    // exactly as the network layer canonicalises it.
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

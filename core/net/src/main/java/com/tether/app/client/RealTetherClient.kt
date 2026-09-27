@@ -405,15 +405,21 @@ class RealTetherClient(
             }
         }
         scope.launch {
-            val base = settings.baseUrl.first()
-            // Whichever credential the install holds — a password cookie from a
-            // pre-pairing version still resolves here, so upgrading never logs
-            // an existing user out.
-            val credential = settings.credential.first()
+            // ONE snapshot of (URL, credential): two separate reads could straddle
+            // a server switch and pair URL A with credential B. Whichever
+            // credential the install holds — a password cookie from a pre-pairing
+            // version still resolves here, so upgrading never logs anyone out.
+            val session = settings.session()
             val persisted = settings.readPendingInput()
             synchronized(lock) {
-                if (base != null && baseUrlValue == null) baseUrlValue = base.toHttpUrlOrNull()
-                if (credential != null && credentialValue == null) credentialValue = credential
+                val base = session.baseUrl?.toHttpUrlOrNull()
+                if (credentialValue == null && session.credential != null && base != null) {
+                    // Adopted as a pair, never the credential under another URL.
+                    baseUrlValue = base
+                    credentialValue = session.credential
+                } else if (baseUrlValue == null && base != null) {
+                    baseUrlValue = base
+                }
                 settingsLoaded = true
                 if (!pendingLoaded) {
                     pendingLoaded = true

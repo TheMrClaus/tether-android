@@ -2,9 +2,7 @@ package com.tether.app.client
 
 import java.security.UnrecoverableKeyException
 import javax.crypto.AEADBadTagException
-import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
-import javax.crypto.IllegalBlockSizeException
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
@@ -29,21 +27,40 @@ interface CredentialCipher {
 }
 
 /**
- * Three kinds of failure, which the store treats differently:
- * - [keyUnusable]: the key is missing, permanently invalidated
- *   (KeyPermanentlyInvalidatedException) or unrecoverable. Every blob sealed
- *   under it is dead; the store destroys the key and deletes the blobs.
- * - [transient]: the Keystore could not be used right now (KeyStoreException,
- *   ProviderException, a daemon hiccup). The key and the blob are LEFT alone and
- *   the credential reads as "unavailable this time"; the next use retries.
- * - neither: this blob is bad (corrupt, truncated, wrong slot/origin) and is deleted.
+ * How a cipher operation failed; the store treats each differently.
  * The message never contains credential material.
  */
+enum class CipherFailure {
+    /** This blob is bad (corrupt, truncated, wrong slot/origin — a GCM tag mismatch): delete it. */
+    BadBlob,
+
+    /** The key is missing or permanently invalidated: destroy it, every blob under it is dead. */
+    KeyDead,
+
+    /**
+     * The Keystore said "not right now" (a KeyStoreException in the cause chain
+     * that is, or may be, transient): keep the key and the blob, read as logged
+     * out this time, retry on the next use. Does not count toward rotation.
+     */
+    Transient,
+
+    /**
+     * Unexplained (e.g. a bare IllegalBlockSizeException / InvalidKeyException,
+     * which is how Android Keystore surfaces most provider failures): treated as
+     * transient, but the store counts consecutive launches that hit it and rotates
+     * the key after [DataStoreSettings.SUSPECT_ROTATE_AFTER], so a key that is
+     * broken for good does not force a sign-in on every launch forever.
+     */
+    Suspect,
+}
+
 class CredentialCipherException(
     message: String,
-    val keyUnusable: Boolean = false,
-    val transient: Boolean = false,
-) : Exception(message)
+    val failure: CipherFailure = CipherFailure.BadBlob,
+) : Exception(message) {
+    val keyUnusable: Boolean get() = failure == CipherFailure.KeyDead
+    val transient: Boolean get() = failure == CipherFailure.Transient || failure == CipherFailure.Suspect
+}
 
 /** Where the AES key lives. The production source is the Android Keystore. */
 interface CredentialKeySource {
@@ -76,13 +93,13 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
             cipher.init(Cipher.ENCRYPT_MODE, keys.getOrCreateKey())
             cipher.updateAAD(aad)
             val iv = cipher.iv
-            if (iv == null || iv.size != IV_BYTES) throw CredentialCipherException("unexpected IV length", transient = true)
+            if (iv == null || iv.size != IV_BYTES) throw CredentialCipherException("unexpected IV length", CipherFailure.Suspect)
             val sealed = cipher.doFinal(plaintext)
             return byteArrayOf(VERSION) + iv + sealed
         } catch (e: CredentialCipherException) {
             throw e
         } catch (e: Exception) {
-            throw classify("seal", e)
+            throw classifyCipherFailure("seal", e)
         }
     }
 
@@ -92,15 +109,15 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
         val key = try {
             keys.existingKey()
         } catch (e: Exception) {
-            throw classify("key fetch", e)
-        } ?: throw CredentialCipherException("no key", keyUnusable = true)
+            throw classifyCipherFailure("key fetch", e)
+        } ?: throw CredentialCipherException("no key", CipherFailure.KeyDead)
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BYTES * 8, blob, 1, IV_BYTES))
             cipher.updateAAD(aad)
             return cipher.doFinal(blob, 1 + IV_BYTES, blob.size - 1 - IV_BYTES)
         } catch (e: Exception) {
-            throw classify("open", e)
+            throw classifyCipherFailure("open", e)
         }
     }
 
@@ -112,34 +129,58 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
         }
     }
 
-    /**
-     * Only a permanently invalidated or unrecoverable key is "unusable" (and gets
-     * destroyed). A bad tag / bad padding is this blob's fault. Everything else —
-     * KeyStoreException, ProviderException, a generic InvalidKeyException from a
-     * Keystore hiccup — is transient: destroying the key for it would sign the
-     * user out over a momentary error.
-     */
-    private fun classify(what: String, e: Exception): CredentialCipherException {
-        val name = e.javaClass.simpleName
-        return when {
-            isPermanentKeyFailure(e) -> CredentialCipherException("$what: key unusable ($name)", keyUnusable = true)
-            e is AEADBadTagException || e is BadPaddingException || e is IllegalBlockSizeException ->
-                CredentialCipherException("$what: blob rejected ($name)")
-            else -> CredentialCipherException("$what: keystore unavailable ($name)", transient = true)
-        }
-    }
-
-    private fun isPermanentKeyFailure(e: Throwable): Boolean =
-        e is UnrecoverableKeyException ||
-            // android.security.keystore.KeyPermanentlyInvalidatedException (matched by
-            // name: it is an Android class, and this file is JVM-tested).
-            generateSequence<Class<*>>(e.javaClass) { it.superclass }.any { it.name == KEY_PERMANENTLY_INVALIDATED }
-
     companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val VERSION: Byte = 1
         const val IV_BYTES = 12
         const val TAG_BYTES = 16
-        private const val KEY_PERMANENTLY_INVALIDATED = "android.security.keystore.KeyPermanentlyInvalidatedException"
     }
+}
+
+private const val KEY_PERMANENTLY_INVALIDATED = "android.security.keystore.KeyPermanentlyInvalidatedException"
+
+/**
+ * Classify a Keystore / JCE failure. Android Keystore maps most provider
+ * failures in doFinal to IllegalBlockSizeException and wraps the real cause, so
+ * the cause chain decides:
+ * 1. KeyPermanentlyInvalidatedException anywhere → [CipherFailure.KeyDead].
+ * 2. A KeyStoreException anywhere (java.security's, or android.security's on
+ *    API 33+) → [CipherFailure.Transient] — unless it reports
+ *    `isTransientFailure() == false`, which makes it [CipherFailure.Suspect].
+ *    This includes an UnrecoverableKeyException CAUSED by such an error.
+ * 3. A bare UnrecoverableKeyException → [CipherFailure.KeyDead].
+ * 4. AEADBadTagException (the GCM tag did not verify) → [CipherFailure.BadBlob]:
+ *    the only proof that the blob, not the Keystore, is wrong.
+ * 5. Anything else → [CipherFailure.Suspect].
+ */
+internal fun classifyCipherFailure(what: String, e: Throwable): CredentialCipherException {
+    val name = e.javaClass.simpleName
+    val chain = generateSequence(e) { it.cause.takeIf { c -> c !== it } }.take(16).toList()
+    fun hierarchyNamed(t: Throwable, fqcn: String) =
+        generateSequence<Class<*>>(t.javaClass) { it.superclass }.any { it.name == fqcn }
+    val failure = when {
+        chain.any { hierarchyNamed(it, KEY_PERMANENTLY_INVALIDATED) } -> CipherFailure.KeyDead
+        chain.any { isKeyStoreException(it) } -> {
+            val reportsPermanent = chain.filter { isKeyStoreException(it) }.any { transientFlag(it) == false }
+            if (reportsPermanent) CipherFailure.Suspect else CipherFailure.Transient
+        }
+        chain.any { it is UnrecoverableKeyException } -> CipherFailure.KeyDead
+        chain.any { it is AEADBadTagException } -> CipherFailure.BadBlob
+        else -> CipherFailure.Suspect
+    }
+    return CredentialCipherException("$what failed ($name): $failure", failure)
+}
+
+/** java.security.KeyStoreException, android.security.KeyStoreException (API 33+), or a lookalike. */
+private fun isKeyStoreException(t: Throwable): Boolean =
+    t is java.security.KeyStoreException ||
+        generateSequence<Class<*>>(t.javaClass) { it.superclass }.any { it.simpleName == "KeyStoreException" }
+
+/** `isTransientFailure()` when the exception has it (android.security.KeyStoreException, API 33+); else null. */
+private fun transientFlag(t: Throwable): Boolean? = try {
+    t.javaClass.getMethod("isTransientFailure").invoke(t) as? Boolean
+} catch (_: ReflectiveOperationException) {
+    null
+} catch (_: RuntimeException) {
+    null
 }

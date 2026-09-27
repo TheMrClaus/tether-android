@@ -5,7 +5,6 @@ import com.tether.app.client.SettingsStore
 import com.tether.app.protocol.TetherJson
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -79,8 +78,10 @@ open class PushRegistrar(
      */
     suspend fun sync(scope: PushScope, attached: Set<String>, pinned: Set<String>): PushRegistrarResult =
         withContext(Dispatchers.IO) {
-            val base = baseUrl() ?: return@withContext PushRegistrarResult.Error("No server configured.")
-            val credential = settings.credential.first() ?: return@withContext PushRegistrarResult.Error("Not signed in.")
+            // One consistent (URL, credential) snapshot: never URL A + token B.
+            val session = settings.session()
+            val base = session.baseUrl?.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Error("No server configured.")
+            val credential = session.credential ?: return@withContext PushRegistrarResult.Error("Not signed in.")
             // A cookie (password) login has no deviceId; FCM registration is a
             // per-device concept. Treat as unconfigured from the app's POV.
             if (credential !is Credential.DeviceToken) {
@@ -118,8 +119,10 @@ open class PushRegistrar(
      */
     suspend fun update(scope: PushScope, attached: Set<String>, pinned: Set<String>): PushRegistrarResult =
         withContext(Dispatchers.IO) {
-            val base = baseUrl() ?: return@withContext PushRegistrarResult.Error("No server configured.")
-            val credential = settings.credential.first() ?: return@withContext PushRegistrarResult.Error("Not signed in.")
+            // One consistent (URL, credential) snapshot: never URL A + token B.
+            val session = settings.session()
+            val base = session.baseUrl?.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Error("No server configured.")
+            val credential = session.credential ?: return@withContext PushRegistrarResult.Error("Not signed in.")
             if (credential !is Credential.DeviceToken) {
                 return@withContext PushRegistrarResult.Error("FCM registration requires a paired device.")
             }
@@ -145,8 +148,9 @@ open class PushRegistrar(
 
     /** DELETE the authed device's row. Called on disable. */
     suspend fun unregister(): PushRegistrarResult = withContext(Dispatchers.IO) {
-        val base = baseUrl() ?: return@withContext PushRegistrarResult.Success
-        val credential = settings.credential.first() ?: return@withContext PushRegistrarResult.Success
+        val session = settings.session()
+        val base = session.baseUrl?.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Success
+        val credential = session.credential ?: return@withContext PushRegistrarResult.Success
         if (credential !is Credential.DeviceToken) return@withContext PushRegistrarResult.Success
         unregisterWith(base, credential)
     }
@@ -179,8 +183,6 @@ open class PushRegistrar(
     }
 
     // ---- internals -------------------------------------------------------
-
-    private suspend fun baseUrl(): HttpUrl? = settings.baseUrl.first()?.toHttpUrlOrNull()
 
     private fun fetchConfig(base: HttpUrl, credential: Credential.DeviceToken): FcmConfig? {
         val request = Request.Builder()
