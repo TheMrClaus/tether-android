@@ -36,7 +36,12 @@ beads Dolt history flattened and re-pushed. Branches cut before the scrub are **
 - **T6.1** chat turns: **VERIFIED + MERGED** (`19abfbc`). The P1 link-allowlist bypass (JVM `IGNORE_CASE` folds
   Unicode, so `httpſ://` / `maılto:` linked) was fixed with ASCII-only folding; exhaustive U+0000-U+FFFF comparison against the
   web's JS regex is identical; transplanted onto `main`, gate 2101/0 failed/4 skipped.
-- **T4.5** log dialog: executor running in `tether-android-wt/T4.5` (branch `parity/T4.5-log-dialog`, cut from `f96c6ee`).
+- **T4.5** log dialog: **VERIFIED + MERGED** (`61f868a`). Two verify rounds: the unseen-warnings mark now belongs to a sign-in
+  generation on `EventLog` (a StateFlow-conflation race made the first reset unreliable). Rebased gate 2208/0 failed/4 skipped.
+- **T5.1** re-verify in flight after a wiring-test deadlock fix (`6458ffa`, `03db718`). **T11.1** file browser (security-executor)
+  and **ta-cdh** (load-sensitive `OriginKeyedPendingTest`) in flight.
+- Follow-ups filed tonight: ta-cdh, two design-system parity bugs (line-height:1 text, dialog top light line), error-toast
+  auto-dismiss vs the web's persistent toast.
 
 **Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2, verified) awaits
 merge; then the owner sets `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` in production,
@@ -108,7 +113,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
-| T4.5 | Log dialog | IN-PROGRESS | TheMrClaus @ 2026-09-27 21:58 |  | checkpoint 3: LogDialog + LogReadings in feature/shell/ui/log, MainShell wired (openLog acks badge + fetches stats). next: LogReadingsTest,… |
+| T4.5 | Log dialog | VERIFIED | TheMrClaus @ 2026-09-27 21:58 |  |  |
 
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -168,7 +173,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 11 — Files
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T11.1 | Workspace file browser (all /api/files ops) | TODO |  |  |  |
+| T11.1 | Workspace file browser (all /api/files ops) | DONE | TheMrClaus @ 2026-09-27 22:25 |  |  |
 | T11.2 | Android share target → session | TODO |  |  |  |
 
 ### Phase 12 — Notifications
