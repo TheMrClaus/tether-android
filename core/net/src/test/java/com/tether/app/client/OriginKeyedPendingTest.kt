@@ -527,7 +527,9 @@ class OriginKeyedPendingTest {
         process(settings)
         client.start()
         await(client.connection) { it == ConnectionState.AuthRequired }
-        awaitErrors { list -> list.any { it.contains("saved by an earlier version") && it.contains("will not be sent") } }
+        awaitErrors { list -> list.any { it.contains("saved by an earlier version") && it.contains("not sent") && it.contains("from 0.6.0") } }
+        // Told once, then deleted: it can never be sent anywhere.
+        awaitCondition("the unattributed slot is deleted") { runBlocking { settings.readUnattributedPendingInput() } == null }
 
         loginTo(b)
         val bws = b.nextSocket()
@@ -536,8 +538,7 @@ class OriginKeyedPendingTest {
         serverBarrier(bws)
         assertTrue(framesUntilBarrier(b).isEmpty())
         assertTrue(b.allFrames.none { it.contains("k-orphan") || it.contains("s-a") })
-        // Still kept, still unattributed.
-        assertEquals(listOf("k-orphan"), PendingInput.fromPersisted(runBlocking { settings.readUnattributedPendingInput() }).records.map { it.key })
+        assertEquals("told once", 1, errors.count { it.contains("saved by an earlier version") })
         assertTrue(PendingInput.fromPersisted(runBlocking { settings.readPendingInput(b.origin()) }).records.isEmpty())
     }
 
@@ -572,6 +573,33 @@ class OriginKeyedPendingTest {
         assertEquals("a second attempt ran in parallel", 1, b.probes.get())
         assertNull(client.signedOutReason.value)
         assertEquals(ConnectionState.Connected, client.connection.value)
+    }
+
+    @Test
+    fun aSlotOfAnotherServerWhoseRecordsAllExpiredIsPrunedWithANoticeAndALiveOneIsKept() {
+        fun slot(key: String, queuedAt: Long) = PendingInput.toPersistable(
+            PendingInput.addRecord(PendingInput.emptyStore(), key, PendingInput.KIND_SEND, "s-x", "old text $key", queuedAt).store,
+        )
+        val stale = "https://stale.example:443"
+        val live = "https://live.example:443"
+        disk = DiskSettings(InMemorySettings(a.url(), initialCookie = "parity-fake-cookie-a"), a.url())
+        disk.slots[stale] = slot("k-stale", now.get() - 10 * 60 * 1000L - 1)
+        disk.slots[live] = slot("k-live", now.get() - 60_000)
+        process(disk).start()
+        handshake(a, a.nextSocket())
+        awaitCondition("the expired slot is pruned") { !disk.slots.containsKey(stale) }
+        assertTrue("a slot with a deliverable record is kept", disk.slots.containsKey(live))
+        awaitErrors { list -> list.any { it.contains("for stale.example expired") && it.contains("old text k-stale") } }
+    }
+
+    @Test
+    fun theNoticeNamesTheSchemeWhenTheHostAloneWouldNameTheServerYouAreOn() {
+        // http -> https on one host: "kept for tether.example" would name B.
+        assertEquals("http://tether.example", displayHost("http://tether.example:80", versus = "https://tether.example:443"))
+        // Hosts that differ read fine without it.
+        assertEquals("a.example", displayHost("https://a.example:443", versus = "https://b.example:443"))
+        assertEquals("a.example:8443", displayHost("https://a.example:8443", versus = "https://a.example:443"))
+        assertEquals("[fd00::5]:3000", displayHost("http://[fd00::5]:3000"))
     }
 
     // ------------------------------------------------------------------

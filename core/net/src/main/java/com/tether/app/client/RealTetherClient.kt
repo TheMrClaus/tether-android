@@ -57,6 +57,20 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
+/**
+ * `host`, or `host:port` for a non-default port: what the user typed, minus
+ * the scheme; an IPv6 literal in brackets. When that reads the same as
+ * [versus] (the server now in force, e.g. after an http -> https switch on
+ * one host) the scheme is kept, so the notice never names the server the
+ * user is on as the one the records were kept for.
+ */
+internal fun displayHost(origin: String, versus: String? = null): String {
+    val url = origin.toHttpUrlOrNull() ?: return origin
+    val host = bracketedHost(url.host)
+    val short = if (url.port == HttpUrl.defaultPort(url.scheme)) host else "$host:${url.port}"
+    return if (versus != null && versus != origin && displayHost(versus) == short) "${url.scheme}://$short" else short
+}
+
 /** See RealTetherClient.raceHook (tests only). */
 internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked }
 
@@ -527,7 +541,7 @@ class RealTetherClient(
      * What an origin switch leaves to do outside the lock: persist [write] (the
      * set-aside store, into its own origin's slot) and tell the user.
      */
-    private class OriginSwitch(val write: SetAsideWrite?, val discarded: Int)
+    private class OriginSwitch(val write: SetAsideWrite?, val discarded: Int, val target: String)
 
     private class SetAsideWrite(
         val origin: String,
@@ -583,7 +597,7 @@ class RealTetherClient(
         pendingLoaded = false
         pendingOrigin = target
         clearServerStateLocked()
-        return OriginSwitch(write, discarded)
+        return OriginSwitch(write, discarded, target)
     }
 
     /** Everything that is per server and not the pending store. Caller holds [lock]. */
@@ -616,7 +630,7 @@ class RealTetherClient(
             if (count > 0) {
                 emitError(
                     "$count unsent message${if (count == 1) " was" else "s were"} not sent to this server. " +
-                        "${if (count == 1) "It was" else "They were"} kept for ${displayHost(write.origin)} " +
+                        "${if (count == 1) "It was" else "They were"} kept for ${displayHost(write.origin, versus = switch.target)} " +
                         "and will only go there if you sign in to it again.",
                 )
             }
@@ -629,11 +643,6 @@ class RealTetherClient(
         }
     }
 
-    /** `host`, or `host:port` for a non-default port: what the user typed, minus the scheme. */
-    private fun displayHost(origin: String): String {
-        val url = origin.toHttpUrlOrNull() ?: return origin
-        return if (url.port == HttpUrl.defaultPort(url.scheme)) url.host else "${url.host}:${url.port}"
-    }
 
     /**
      * Merge the persisted slot of the current origin into the pending store
@@ -650,17 +659,24 @@ class RealTetherClient(
             val current = currentOriginLocked()
             (if (current == null || pendingLoaded || pendingOrigin != current) null else current) to check
         }
-        // Checked once per process, with or without a server configured.
+        // Checked once per process, with or without a server configured: it can
+        // never be sent, so the user is told once (with the first text, to
+        // retype it) and it is deleted.
         if (checkUnattributed) {
-            val count = PendingInput.fromPersisted(readQuietly { settings.readUnattributedPendingInput() }).records.size
-            if (count > 0) {
-                emitError(
-                    "$count unsent message${if (count == 1) "" else "s"} saved by an earlier version could not be " +
-                        "matched to a server. ${if (count == 1) "It was" else "They were"} kept on this device and " +
-                        "will not be sent.",
-                )
+            val raw = readQuietly { settings.readUnattributedPendingInput() }
+            if (raw != null) {
+                val records = PendingInput.fromPersisted(raw).records
+                if (records.isNotEmpty()) emitError(unattributedMessage(records))
+                try {
+                    settings.removeUnattributedPendingInput()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Retried (and shown again) by the next process.
+                }
             }
         }
+        pruneExpiredSlots()
         val origin = target ?: return
         // A stop() whose disk wipe has not landed yet: what is there is dead.
         val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
@@ -672,6 +688,65 @@ class RealTetherClient(
         persistPending()
         attachPendingSessionsThenDrain()
     }
+
+    private fun unattributedMessage(records: List<PendingRecord>): String {
+        val first = records.first().text
+        val preview = if (first.length > 120) first.take(120) + "…" else first
+        val n = records.size
+        return "$n unsent message${if (n == 1) "" else "s"} saved by an earlier version could not be matched to a " +
+            "server and ${if (n == 1) "was" else "were"} not sent. The first was: \"$preview\""
+    }
+
+    /**
+     * Slots are never wiped by logout; this is what bounds them. A slot of any
+     * origin other than the bound one (and with no store set aside in this
+     * process) whose records have ALL expired by the T1.3 rules, or that holds
+     * none, is deleted, with the undelivered notice for what it held. Runs on
+     * every binding (start / sign-in), serialized with the pending writes.
+     */
+    private fun pruneExpiredSlots() {
+        scope.launch {
+            persistMutex.withLock {
+                val origins = try {
+                    settings.pendingInputOrigins()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    return@withLock
+                }
+                for (origin in origins) {
+                    if (synchronized(lock) { pruneSkippedLocked(origin) }) continue
+                    val expiry = PendingInput.expireRecords(
+                        PendingInput.fromPersisted(readQuietly { settings.readPendingInput(origin) }),
+                        clock(),
+                    )
+                    if (expiry.store.records.isNotEmpty()) continue
+                    if (synchronized(lock) { pruneSkippedLocked(origin) }) continue
+                    try {
+                        settings.removePendingInput(origin)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        continue
+                    }
+                    if (expiry.unsent.isNotEmpty()) {
+                        val n = expiry.unsent.size
+                        val first = expiry.unsent.first().text
+                        val preview = if (first.length > 120) first.take(120) + "…" else first
+                        emitError(
+                            "$n unsent message${if (n == 1) "" else "s"} for ${displayHost(origin)} expired before you " +
+                                "signed in there again and ${if (n == 1) "was" else "were"} dropped. " +
+                                "The first was: \"$preview\"",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** The bound origin, a store set aside in memory, or a wipe in progress: not pruned. Caller holds [lock]. */
+    private fun pruneSkippedLocked(origin: String): Boolean =
+        origin == pendingOrigin || origin in setAside || wipeLanded != pendingWipe
 
     /** An unreadable store is "nothing there", never a failed start or sign-in. */
     private suspend fun readQuietly(read: suspend () -> String?): String? = try {

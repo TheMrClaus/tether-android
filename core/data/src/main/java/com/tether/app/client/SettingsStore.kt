@@ -84,10 +84,15 @@ fun bracketedHost(host: String): String = if (':' in host) "[$host]" else host
  *   filled for the server configured at the time, so it belongs to the origin
  *   of the `base_url` stored next to it. It is moved there once, in the same
  *   atomic edit that reads that URL (and before any edit that moves the URL).
- *   With no parsable `base_url` it moves to [UNATTRIBUTED_KEY]: kept on the
- *   device, never loaded, never sent. If the target slot already exists (only
- *   possible after a downgrade and a second upgrade) the legacy value is left
- *   where it is, inert: never merged into a slot it may not belong to.
+ *   With no parsable `base_url` it moves to [UNATTRIBUTED_KEY]: never loaded,
+ *   never sent (the client shows one notice and deletes it). If the target
+ *   slot is already taken (only possible after a downgrade and a second
+ *   upgrade) it moves to [UNATTRIBUTED_KEY] too: never merged into a slot it
+ *   may not belong to. The legacy key is ALWAYS gone afterwards, so the
+ *   migration runs once and can never re-run later against a URL that has
+ *   moved on (which would hand server A's input to server B). If the
+ *   unattributed slot is taken as well (a second leftover nobody was told
+ *   about yet), the older leftover wins and this one is dropped.
  */
 object PendingSlots {
     const val LEGACY_KEY = "pending_input"
@@ -99,6 +104,10 @@ object PendingSlots {
         require(serverOrigin(origin) == origin) { "not a canonical server origin" }
         return ORIGIN_PREFIX + origin
     }
+
+    /** The origin a slot key belongs to, or null for any other key. */
+    fun originOfKey(name: String): String? =
+        name.takeIf { it.startsWith(ORIGIN_PREFIX) }?.removePrefix(ORIGIN_PREFIX)?.takeIf { serverOrigin(it) == it }
 
     /** Every durable-send key (for a full wipe). */
     fun isPendingKey(name: String): Boolean =
@@ -116,9 +125,9 @@ object PendingSlots {
         remove: (String) -> Unit,
     ) {
         val legacy = get(LEGACY_KEY) ?: return
-        val target = serverOrigin(baseUrl)?.let(::keyFor) ?: UNATTRIBUTED_KEY
-        if (get(target) != null) return
-        set(target, legacy)
+        val owner = serverOrigin(baseUrl)?.let(::keyFor)
+        val target = if (owner != null && get(owner) == null) owner else UNATTRIBUTED_KEY
+        if (get(target) == null) set(target, legacy)
         remove(LEGACY_KEY)
     }
 }
@@ -189,11 +198,21 @@ interface SettingsStore {
     /** Replaces [origin]'s whole payload atomically: a crash leaves the old one or the new one, never a mix. */
     suspend fun writePendingInput(origin: String, raw: String)
 
+    /** Every origin that has a durable-send slot (for pruning expired ones). */
+    suspend fun pendingInputOrigins(): Set<String>
+
+    /** Delete [origin]'s slot. */
+    suspend fun removePendingInput(origin: String)
+
     /**
      * A 0.6.0 payload that no server could be attributed to (no server was
-     * configured next to it): kept, never loaded into a live store, never sent.
+     * configured next to it, or its server's slot was taken): never loaded into
+     * a live store, never sent.
      */
     suspend fun readUnattributedPendingInput(): String?
+
+    /** Delete the unattributed payload (once the user has been told about it). */
+    suspend fun removeUnattributedPendingInput()
 }
 
 /**
@@ -583,6 +602,22 @@ class DataStoreSettings(
         return dataStore.data.first()[stringPreferencesKey(PendingSlots.UNATTRIBUTED_KEY)]
     }
 
+    override suspend fun removeUnattributedPendingInput() {
+        ensurePendingMigrated()
+        dataStore.edit { it.remove(stringPreferencesKey(PendingSlots.UNATTRIBUTED_KEY)) }
+    }
+
+    override suspend fun pendingInputOrigins(): Set<String> {
+        ensurePendingMigrated()
+        return dataStore.data.first().asMap().keys.mapNotNull { PendingSlots.originOfKey(it.name) }.toSet()
+    }
+
+    override suspend fun removePendingInput(origin: String) {
+        val key = stringPreferencesKey(PendingSlots.keyFor(origin))
+        ensurePendingMigrated()
+        dataStore.edit { it.remove(key) }
+    }
+
     /**
      * Attribute the 0.6.0 single slot once per process, in ONE edit that reads
      * the `base_url` stored next to it (see [PendingSlots]). Under [mutex], so
@@ -747,5 +782,25 @@ class InMemorySettings(
     override suspend fun readUnattributedPendingInput(): String? = synchronized(lock) {
         migrateLocked()
         pending[PendingSlots.UNATTRIBUTED_KEY]
+    }
+
+    override suspend fun removeUnattributedPendingInput() {
+        synchronized(lock) {
+            migrateLocked()
+            pending.remove(PendingSlots.UNATTRIBUTED_KEY)
+        }
+    }
+
+    override suspend fun pendingInputOrigins(): Set<String> = synchronized(lock) {
+        migrateLocked()
+        pending.keys.mapNotNull { PendingSlots.originOfKey(it) }.toSet()
+    }
+
+    override suspend fun removePendingInput(origin: String) {
+        val key = PendingSlots.keyFor(origin)
+        synchronized(lock) {
+            migrateLocked()
+            pending.remove(key)
+        }
     }
 }

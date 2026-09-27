@@ -65,6 +65,15 @@ class DiskSettings(private val inner: InMemorySettings, homeUrl: String) : Setti
         return slots[origin]
     }
 
+    override suspend fun pendingInputOrigins(): Set<String> = slots.keys.toSet()
+
+    override suspend fun removePendingInput(origin: String) {
+        PendingSlots.keyFor(origin)
+        if (tear) throw IOException("killed mid-write")
+        slots.remove(origin)
+        allWrites += origin to "<removed>"
+    }
+
     override suspend fun writePendingInput(origin: String, raw: String) {
         PendingSlots.keyFor(origin)
         beforeWrite?.invoke(origin)

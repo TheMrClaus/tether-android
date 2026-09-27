@@ -830,8 +830,44 @@ class DataStoreSettingsTest {
         }
         val store = open()
         assertEquals(payloadB, store.store.readPendingInput(ORIGIN_A))
+        // Never merged into A's slot: set aside as unattributed, and consumed.
+        assertEquals(payloadA, store.store.readUnattributedPendingInput())
         store.close()
-        assertEquals(payloadA, raw(settingsFile) { it.data.first() }[stringPreferencesKey(PendingSlots.LEGACY_KEY)])
+        assertNull(raw(settingsFile) { it.data.first() }[stringPreferencesKey(PendingSlots.LEGACY_KEY)])
+    }
+
+    @Test
+    fun theLegacySlotIsMigratedOnceAndNeverLaterHandedToTheNextServer() = runBlocking {
+        // A's slot is taken, so the 0.6.0 payload cannot go there...
+        raw(settingsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey("base_url")] = "https://a.example"
+                it[stringPreferencesKey(PendingSlots.keyFor(ORIGIN_A))] = payloadB
+                it[stringPreferencesKey(PendingSlots.LEGACY_KEY)] = payloadA
+            }
+        }
+        val store = open()
+        // ...and moving on to B and then C must never attribute it to B.
+        store.store.setServer("https://b.example", Credential.Cookie(cookie))
+        store.store.setServer("https://c.example", Credential.Cookie(cookie))
+        assertNull(store.store.readPendingInput(ORIGIN_B))
+        assertNull(store.store.readPendingInput("https://c.example:443"))
+        assertEquals(payloadA, store.store.readUnattributedPendingInput())
+        store.store.removeUnattributedPendingInput()
+        assertNull(store.store.readUnattributedPendingInput())
+        store.close()
+    }
+
+    @Test
+    fun slotOriginsAreListedAndRemovable() = runBlocking {
+        val store = open()
+        store.store.writePendingInput(ORIGIN_A, payloadA)
+        store.store.writePendingInput(ORIGIN_V6, payloadB)
+        assertEquals(setOf(ORIGIN_A, ORIGIN_V6), store.store.pendingInputOrigins())
+        store.store.removePendingInput(ORIGIN_A)
+        assertEquals(setOf(ORIGIN_V6), store.store.pendingInputOrigins())
+        assertNull(store.store.readPendingInput(ORIGIN_A))
+        store.close()
     }
 
     /** Sealing always fails (Keystore unavailable); opening never succeeds either. */
