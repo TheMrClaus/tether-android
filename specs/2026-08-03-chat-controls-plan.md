@@ -13,7 +13,7 @@
 
 **Tech Stack:** Kotlin, Jetpack Compose (Material3 `DropdownMenu`), kotlinx.serialization, JUnit4 + MockWebServer for tests.
 
-**Repo:** `/home/op/git/tether-android`. All paths below are relative to it. All commands run with `workdir=/home/op/git/tether-android`.
+**Repo:** `~/git/tether-android`. All paths below are relative to it. All commands run with `workdir=~/git/tether-android`.
 
 > **Git policy (repo owner's rule, overrides the skill template): do NOT run `git add`/`git commit` at any step.** The owner commits explicitly. Tasks end at "tests pass / build passes".
 
