@@ -438,7 +438,8 @@ internal fun SessionRow(
                     }
                     location?.let { Text(it, style = css(type.ui, if (studio) 0.64f else 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
-                SmallIcon(TetherIcons.ChevronRight, ink, if (phone) 16.dp else 12.dp)
+                // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
+                SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
             }
             // .session-item-end: two taps by design (no modal); 44dp on a phone (coarse pointer).
             if (endable) {

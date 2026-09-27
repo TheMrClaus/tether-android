@@ -18,6 +18,15 @@ from. Each primitive mirrors a web rule set in `~/git/tether` at `PARITY_BASE` (
 | Settings rocker | `Rocker.kt` | rocker switches |
 | Haptics moment map | `Haptics.kt` | the web's single `navigator.vibrate(7)` + native key moments |
 
+**Scoped tokens.** `TokenScope` + `ProvideTokenScope` (`theme/TokenScope.kt`, T5.1) mirror a CSS rule
+that redeclares custom properties for everything inside an element (studio.css `.session-sidebar`
+gives the Studio rail its own ink-blue palette). A scope is a `SkinTokens.copy(...)` of exactly the
+properties the rule sets. Derived properties keep their `:root` values, as in CSS, and everything
+reading `LocalTetherTokens` inside the scope (keys included) resolves against it. Surfaces the web
+renders outside the element (dialogs) are composed outside the scope. `TetherKey` also takes optional
+`contentArrangement` / `contentPadding` / `trailing` (New session's left-aligned legend and `N` cap).
+Their defaults leave every existing key unchanged.
+
 **Layout class.** `currentLayoutClass()` (PLAN D10): below WindowSizeClass "expanded" (840dp) is
 the web's mobile layout — the sheet docks, the expand toggle is 44dp / 0.74rem.
 

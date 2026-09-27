@@ -67,7 +67,8 @@ private const val CaptureAtMs = 600L
 
 fun ComposeContentTestRule.snapSidebar(shot: SidebarShot, skin: TetherSkin, name: String, size: String, layout: TetherLayoutClass) {
     mainClock.autoAdvance = false
-    setContent { SidebarUnderTest(skin, sidebarState(shot), layout, sidebarSeed(shot)) }
+    // The real host wires every callback; Collapse (desktop only) must be present to be drawn.
+    setContent { SidebarUnderTest(skin, sidebarState(shot), layout, sidebarSeed(shot), SidebarActions(onCollapse = {})) }
     mainClock.advanceTimeBy(CaptureAtMs)
     waitForIdle()
     // The screen capture includes the menus' popup windows.
