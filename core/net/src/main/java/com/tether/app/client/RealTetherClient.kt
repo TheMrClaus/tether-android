@@ -119,10 +119,16 @@ private const val REDIRECT_MESSAGE =
  * - a sign-in to the SAME origin (a re-login after expiry) changes nothing:
  *   the T1.3 guarantees hold exactly as for a reconnect;
  * - set-aside records do not expire while away. On return the T1.3 10-minute
- *   rule applies (the sweeper expires them with its notice), exactly as it
- *   does to a store restored after process death and as the web does to an
+ *   rule (and the retry cap) is applied the moment the store is restored,
+ *   BEFORE anything can drain: expired records are dropped with the sweeper's
+ *   "could not be delivered" notice and never transmitted. The same holds for
+ *   a store restored after process death, and it is what the web does to an
  *   origin whose page was closed: expiring them while signed in elsewhere
- *   would only move that notice out of the context it is about.
+ *   would only move that notice out of the context it is about;
+ * - slots are not wiped by logout (a re-login to the same origin delivers
+ *   them). A slot of another origin whose records have ALL passed that age
+ *   (or that holds none) is pruned when a store is bound (start / sign-in),
+ *   with the same notice for any records it held; nothing else prunes slots.
  *
  * Origin keying of the staged outbox (SYNC_DESIGN §5.3, T13.3) must follow the
  * same slots: the outbox key sits next to its origin's pending slot, in the
@@ -655,12 +661,11 @@ class RealTetherClient(
         val origin = target ?: return
         // A stop() whose disk wipe has not landed yet: what is there is dead.
         val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
-        val loaded = synchronized(lock) {
-            if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return@synchronized false
+        val expired = synchronized(lock) {
+            if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return
             restorePendingLocked(raw, setAside.remove(origin))
-            true
         }
-        if (!loaded) return
+        if (expired.isNotEmpty()) emitError(undeliveredMessage(expired))
         persistPending()
         attachPendingSessionsThenDrain()
     }
@@ -1817,9 +1822,12 @@ class RealTetherClient(
      * ([PendingInput.restoredFromPreviousProcess]). A store this process set
      * aside for the same origin ([overlay]) sits between the two: it is exact
      * (a record it holds with tries 0 was never transmitted), so it keeps its
-     * counts and attachments. Caller holds [lock]; [raw] is [pendingOrigin]'s slot.
+     * counts and attachments. The T1.3 expiry (age, retry cap) runs right here,
+     * in the same critical section, so nothing past it can drain first
+     * (sendableRecords itself has no age check). Caller holds [lock]; [raw] is
+     * [pendingOrigin]'s slot. Returns the expired records, for the notice.
      */
-    private fun restorePendingLocked(raw: String?, overlay: SetAsideStore?) {
+    private fun restorePendingLocked(raw: String?, overlay: SetAsideStore?): List<PendingRecord> {
         val persistedCleared = PendingInput.clearedFromPersisted(raw)
         val cleared = LinkedHashSet(persistedCleared)
         overlay?.let { cleared.addAll(it.cleared) }
@@ -1829,7 +1837,11 @@ class RealTetherClient(
         if (overlay != null) mine = PendingInput.mergeStores(mine, overlay.store, clearedKeys)
         val restored = PendingInput.restoredFromPreviousProcess(PendingInput.fromPersisted(raw), clock())
         pendingStore = PendingInput.mergeStores(mine, restored, clearedKeys)
+        val expiry = PendingInput.expireRecords(pendingStore, clock())
+        pendingStore = expiry.store
+        forgetLocked(expiry.unsent.map { it.key })
         pendingLoaded = true
+        return expiry.unsent
     }
 
     /** use-tether.ts:360 forget: tombstone removed keys, oldest falling off first. Caller holds [lock]. */

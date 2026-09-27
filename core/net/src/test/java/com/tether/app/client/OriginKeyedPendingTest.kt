@@ -366,6 +366,27 @@ class OriginKeyedPendingTest {
     }
 
     @Test
+    fun setAsideRecordsPastTheTenMinuteAgeAreDroppedOnReturnNeverSent() {
+        writeOnA()
+        loginTo(b)
+        handshake(b, b.nextSocket())
+        framesUntilBarrier(b)
+        now.addAndGet(10 * 60 * 1000L + 1)
+
+        a.down = false
+        loginTo(a)
+        // Expired at the restore itself, before any drain: the notice, and nothing on the wire.
+        awaitErrors { list -> list.any { it.startsWith("3 messages could not be delivered") } }
+        val aws = a.nextSocket()
+        handshake(a, aws)
+        aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        serverBarrier(aws)
+        assertTrue("an expired record went out", framesUntilBarrier(a).isEmpty())
+        val sent = a.allFrames.map { TetherJson.parseToJsonElement(it) as JsonObject }.filter { it.type() == "send" || it.type() == "queue-add" }
+        assertEquals("only the one send before the switch", 1, sent.size)
+    }
+
+    @Test
     fun theSetAsideRecordsSurviveProcessDeathInTheirOwnOriginsSlot() {
         val onA = writeOnA()
         loginTo(b)
