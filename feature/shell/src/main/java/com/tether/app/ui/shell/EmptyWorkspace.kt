@@ -127,8 +127,8 @@ fun EmptyWorkspace(
             color = t.muted,
             textAlign = TextAlign.Center,
             style = cssText(type.ui, 0.95f, 400, lineHeight = 1.65f).copy(lineBreak = LineBreak.Paragraph),
-            // `max-width: 38ch` (a "0" advance at 0.95rem ≈ 0.55em).
-            modifier = Modifier.widthIn(max = (38 * 0.95f * 16f * 0.55f).dp),
+            // `max-width: 38ch` (Manrope's "0" advances ≈ 0.62em); on a phone the well is narrower.
+            modifier = Modifier.widthIn(max = (38 * 0.95f * 16f * 0.62f).dp),
         )
         if (stage is EmptyStage.Welcome) {
             Spacer(Modifier.height(t.css.space2xl))
@@ -142,7 +142,8 @@ fun EmptyWorkspace(
                 fontSize = 12.48.sp,
                 minHeight = 48.dp,
                 enabled = stage.connected,
-                modifier = Modifier.testTag(ShellTags.StartSessionKey),
+                // TetherKey pads its legend `0 var(--space-lg)`; this key's rule asks `space-xl`.
+                modifier = Modifier.extraWidth((t.css.spaceXl - t.css.spaceLg) * 2).testTag(ShellTags.StartSessionKey),
             )
             ProviderAvailabilityRow(stage.providers)
         }

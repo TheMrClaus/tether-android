@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -81,6 +82,17 @@ internal fun rememberDialogIn(): Animatable<Float, AnimationVector1D> {
         if (!reduced) progress.animateTo(1f, tween(t.css.duration, easing = t.css.easeOut.toEasing()))
     }
     return progress
+}
+
+/**
+ * Widens a centred-content control by [extra] beyond its intrinsic width — for a key whose web
+ * rule pads its legend more than [com.tether.app.ui.components.TetherKey]'s `0 var(--space-lg)`.
+ */
+internal fun Modifier.extraWidth(extra: Dp): Modifier = layout { measurable, constraints ->
+    val wanted = measurable.maxIntrinsicWidth(constraints.maxHeight) + extra.roundToPx()
+    val w = wanted.coerceIn(constraints.minWidth, constraints.maxWidth)
+    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 /** One painted state of a chrome control (face, edge, legend colour, box-shadow list, travel). */

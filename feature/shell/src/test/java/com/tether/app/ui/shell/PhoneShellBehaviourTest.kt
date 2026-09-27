@@ -233,3 +233,23 @@ class PhoneShellBehaviourTest {
     private fun describe(n: SemanticsNode): String =
         n.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)?.joinToString() ?: "node ${n.id}"
 }
+
+/**
+ * Above the 840dp cutoff the expanded layout (T4.2) takes over; until it lands the phone shell
+ * must still lay out and work at tablet width.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class PhoneShellExpandedWidthTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun layoutClassIsExpandedAndTheShellStillWorks() {
+        assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(1280))
+        val state = PhoneShellState()
+        rule.setContent { ShellUnderTest(TetherSkin.Precision, state, ShellFixtures.idle) }
+        rule.onNodeWithTag(ShellTags.Topbar).assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.MenuKey).performClick()
+        assertTrue(state.drawerOpen)
+        rule.onNodeWithTag(ShellTags.TelemetryHandle).assertExists()
+    }
+}
