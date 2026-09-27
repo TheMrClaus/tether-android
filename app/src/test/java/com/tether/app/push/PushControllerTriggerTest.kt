@@ -59,15 +59,57 @@ class PushControllerTriggerTest {
         serverB.shutdown()
     }
 
-    private fun controller() = PushController(
+    private val prefs = Prefs()
+
+    private fun controller(registrarFactory: (PushRegistrar) -> PushRegistrar = { it }) = PushController(
         app = ApplicationProvider.getApplicationContext<Application>(),
         settings = settings,
-        prefs = Prefs(),
+        prefs = prefs,
         httpClient = OkHttpClient(),
         scope = scope,
         tokenProvider = FirebaseTokenProvider { "fake-fcm-token-not-a-credential" },
         firebase = FirebaseInitializer.AlreadyInitialised,
+        registrarFactory = registrarFactory,
     ).also { it.startSync() }
+
+    @Test
+    fun anHtml200ConfigRegistersNothingAndPushKeepsWorking() = runBlocking {
+        // An auth proxy answering fcm-config with its login page. Before round 3
+        // the parse exception escaped into the app scope and crashed the app.
+        serverA.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Sign in</body></html>"))
+        controller()
+        settings.setServer(serverA.url("/").toString(), Credential.DeviceToken("fake-device-token-a"))
+        assertEquals("/api/push/fcm-config", serverA.takeRequest(10, TimeUnit.SECONDS)?.path)
+        assertNull("nothing registered", serverA.takeRequest(1, TimeUnit.SECONDS))
+
+        // The collector is still alive: the next change registers normally.
+        serverA.expectRegistration()
+        prefs.attachedSessions.value = listOf("s1")
+        serverA.awaitRegistration()
+        Unit
+    }
+
+    @Test
+    fun aThrowingRoundTripNeverEndsTheCollector() = runBlocking {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        controller(registrarFactory = { real ->
+            object : PushRegistrar(settings, OkHttpClient(), FirebaseTokenProvider { "fake" }) {
+                override suspend fun sync(scope: PushScope, attached: Set<String>, pinned: Set<String>, syncHints: Boolean): PushRegistrarResult {
+                    if (calls.incrementAndGet() == 1) throw IllegalStateException("simulated")
+                    return real.sync(scope, attached, pinned, syncHints)
+                }
+            }
+        })
+        serverA.expectRegistration()
+        settings.setServer(serverA.url("/").toString(), Credential.DeviceToken("fake-device-token-a"))
+        val deadline = System.currentTimeMillis() + 10_000
+        while (calls.get() < 1 && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertEquals(1, calls.get())
+
+        prefs.attachedSessions.value = listOf("s1")
+        serverA.awaitRegistration()
+        assertEquals(2, calls.get())
+    }
 
     private fun MockWebServer.expectRegistration() {
         enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true,"reason":null}"""))

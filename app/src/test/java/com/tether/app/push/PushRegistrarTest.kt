@@ -96,6 +96,26 @@ class PushRegistrarTest {
     }
 
     @Test
+    fun aMalformedConfigIsUnavailableNotACrash() = runBlocking {
+        val bodies = listOf(
+            "<!doctype html><html><body>Sign in to the proxy</body></html>", // auth proxy, 200
+            "{\"configured\":", // truncated
+            "[true]", // JSON, not an object
+            "{\"configured\":true,\"pad\":\"" + "x".repeat(20_000) + "\"}", // over the size cap
+        )
+        for (body in bodies) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+            val result = registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = false)
+            assertEquals(body.take(40), PushRegistrarResult.Error("Push config unreachable."), result)
+            server.takeRequest() // only the probe: nothing is registered
+        }
+        assertEquals(bodies.size, server.requestCount)
+        // A wrongly typed flag reads as "not configured": still no exception.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{\"configured\":{\"x\":1}}"))
+        assertEquals(PushRegistrarResult.ServerUnconfigured, registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = false))
+    }
+
+    @Test
     fun syncSendsTheStoredSyncHintsOptIn() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true}"""))
         server.enqueue(MockResponse().setResponseCode(201).setBody("""{"ok":true}"""))

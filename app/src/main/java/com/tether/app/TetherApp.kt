@@ -1,6 +1,7 @@
 package com.tether.app
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -13,6 +14,7 @@ import com.tether.app.push.PushChannels
 import com.tether.app.push.PushController
 import com.tether.app.ui.ClientLocator
 import com.tether.app.ui.prefs.UiPrefs
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +28,15 @@ class TetherApp : Application() {
         // Notification channels must exist before any FCM message can arrive.
         PushChannels.ensure(this)
 
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // The handler is the last line of defence: an exception that escapes a
+        // background job (push, sync) is dropped instead of crashing the process.
+        // Only the exception type is logged, never its message, which may carry
+        // server content.
+        val appScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+                Log.w("TetherApp", "Background job failed: ${e.javaClass.simpleName}")
+            },
+        )
         // Credentials are sealed with a non-exportable Android Keystore AES-GCM key
         // (PLAN D8); a pre-T1.4 plaintext install is migrated on first load.
         val settings = DataStoreSettings.create(

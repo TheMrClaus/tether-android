@@ -4,6 +4,7 @@ import com.tether.app.client.Credential
 import com.tether.app.client.SettingsStore
 import com.tether.app.protocol.TetherJson
 import java.io.IOException
+import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
@@ -226,13 +227,23 @@ open class PushRegistrar(
         return try {
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return null
-                val obj = TetherJson.parseToJsonElement(response.body.string()) as? JsonObject ?: return null
+                // The real body is ~300 bytes. Anything past the cap is not a
+                // config (an HTML login page from an auth proxy, say), and is
+                // never read whole into memory.
+                val bytes = response.peekBody(MAX_CONFIG_BYTES + 1).bytes()
+                if (bytes.size > MAX_CONFIG_BYTES) return null
+                val obj = TetherJson.parseToJsonElement(bytes.decodeToString()) as? JsonObject ?: return null
                 FcmConfig(
                     configured = (obj["configured"] as? JsonPrimitive)?.booleanOrNull == true,
                     client = FirebaseClientConfig.parse(obj.fcmClientObject()),
                 )
             }
         } catch (_: IOException) {
+            null
+        } catch (_: SerializationException) {
+            // A 200 that is not JSON (HTML from a proxy, a truncated body):
+            // "push config unreachable", never an exception out of the registrar.
+            // Before round 3 this escaped and crashed the app on every start.
             null
         }
     }
@@ -259,6 +270,10 @@ open class PushRegistrar(
         JsonArray(ids.map { JsonPrimitive(it) })
 
     private data class FcmConfig(val configured: Boolean, val client: FirebaseClientConfig?)
+
+    private companion object {
+        const val MAX_CONFIG_BYTES = 16L * 1024
+    }
 }
 
 /**

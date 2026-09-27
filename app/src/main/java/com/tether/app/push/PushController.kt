@@ -7,6 +7,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.tether.app.client.Credential
 import com.tether.app.client.SettingsStore
 import com.tether.app.ui.prefs.UiPrefs
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -102,7 +103,7 @@ class PushController(
             .distinctUntilChanged()
         combine(prefsRequest, server) { request, identity -> request.copy(server = identity) }
             .distinctUntilChanged()
-            .onEach { coordinator.onRequest(it) }
+            .onEach { request -> guarded { coordinator.onRequest(request) } }
             .launchIn(scope)
     }
 
@@ -114,7 +115,23 @@ class PushController(
      * signed-out phone.
      */
     suspend fun unregisterAfterLogout(baseUrl: String, credential: Credential) {
-        coordinator.onLoggedOut(baseUrl, credential)
+        guarded { coordinator.onLoggedOut(baseUrl, credential) }
+    }
+
+    /**
+     * Push is best-effort: a failed round-trip must never end the collector (push
+     * would stop until a restart) or reach the app scope (a crash, and on every
+     * start a crash loop). Cancellation still propagates. The next trigger
+     * retries. Nothing about the failure is logged.
+     */
+    private suspend fun guarded(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Swallowed by design; see above.
+        }
     }
 
     companion object {
@@ -146,7 +163,7 @@ class PushController(
          */
         fun handleNewToken() {
             val controller = instance ?: return
-            controller.scope.launch { controller.coordinator.onTokenRotated() }
+            controller.scope.launch { controller.guarded { controller.coordinator.onTokenRotated() } }
         }
     }
 }
