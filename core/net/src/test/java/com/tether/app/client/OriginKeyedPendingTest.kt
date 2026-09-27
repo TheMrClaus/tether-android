@@ -728,6 +728,31 @@ class OriginKeyedPendingTest {
         assertNull(client.signedOutReason.value)
     }
 
+    /**
+     * ta-cdh: the sign-in's own start() can bring the new server's socket up
+     * before the sign-in kicks the connection. That kick must not treat the
+     * fresh socket as one to probe: the hello is the first frame of the epoch.
+     */
+    @Test
+    fun aSocketTheSignInOpenedBeforeItsKickGetsTheHelloFirst() {
+        connectedToA()
+        val hold = Hold(RacePoint.SignInStarted) { true }
+        val result = java.util.concurrent.atomic.AtomicReference<LoginResult>()
+        val login = Thread { result.set(runBlocking { client.login(b.url(), "parity-fake-password") }) }
+        login.start()
+        hold.awaitReached() // start() ran; the kick has not...
+        val bws = b.nextSocket()
+        // ...and the client holds B's socket: onOpen runs before any frame is handled.
+        bws.send(createdFrame("opened-before-the-kick"))
+        await(client.sessions) { list -> list.any { it.id == "opened-before-the-kick" } }
+        hold.release()
+        login.join(10_000)
+        assertEquals(LoginResult.Success, result.get())
+        handshake(b, bws)
+        assertTrue(framesUntilBarrier(b).isEmpty())
+        assertEquals(listOf("hello", "pin"), b.allFrames.map { (TetherJson.parseToJsonElement(it) as JsonObject).type() })
+    }
+
     @Test
     fun aSaveQueuedBeforeTheSwitchNeverWritesTheOldStoreOrAnEmptyOneIntoTheNewServersSlot() {
         // B's slot already holds a record (a set-aside from an earlier visit).

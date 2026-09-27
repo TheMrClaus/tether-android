@@ -73,7 +73,7 @@ internal fun displayHost(origin: String, versus: String? = null): String {
 }
 
 /** See RealTetherClient.raceHook (tests only). */
-internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked }
+internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted }
 
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
@@ -538,7 +538,12 @@ class RealTetherClient(
         // The new origin's own unsent input, before the connection comes up.
         bindPendingToCurrentServer()
         start()
-        reconnectIfIdle()
+        raceHook?.invoke(RacePoint.SignInStarted, null)
+        // Connect if start() has not got there yet, but never probe: the lock
+        // above let every earlier socket go, so an open one is this sign-in's
+        // own, possibly still before its ready, and a ping would go out ahead
+        // of the hello (ta-cdh).
+        reconnectIfIdle(probeOpen = false)
     }
 
     /** The canonical origin of the server in force. Caller holds [lock]. */
@@ -1095,13 +1100,16 @@ class RealTetherClient(
         }
     }
 
-    override fun reconnectIfIdle() {
+    override fun reconnectIfIdle() = reconnectIfIdle(probeOpen = true)
+
+    /** [probeOpen] false: an open socket is left alone (see adoptCredential). */
+    private fun reconnectIfIdle(probeOpen: Boolean) {
         val probe = synchronized(lock) {
             if (haltedLocked()) return
             when {
                 // An OPEN socket cannot be trusted after a wake or a network
                 // change (the half-open case): probe it instead (web #135).
-                socketOpen -> true
+                socketOpen -> if (probeOpen) true else return
                 // An upgrade / auth probe is already in flight.
                 connecting || socket != null -> return
                 else -> {
@@ -2307,7 +2315,8 @@ class RealTetherClient(
      * Test seam for race windows that timing alone cannot force: invoked at each
      * [RacePoint] (a frame admitted by the listener's socket check and about to
      * be handled; pending frames computed and about to be sent; a probe verdict
-     * past its staleness check and about to act). Null in production.
+     * past its staleness check and about to act; a sign-in past its start()
+     * and about to kick the connection). Null in production.
      */
     @Volatile
     internal var raceHook: ((RacePoint, Any?) -> Unit)? = null
