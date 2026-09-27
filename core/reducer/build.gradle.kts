@@ -25,5 +25,7 @@ tasks.withType<Test>().configureEach {
     inputs.dir(corpusDir).withPropertyName("parityCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
     providers.gradleProperty("parity.only").orNull?.let { systemProperty("parity.only", it) }
     providers.gradleProperty("parity.strict").orNull?.let { systemProperty("parity.strict", it) }
+    // T2.1D Revision 9: `-Pparity.recordV40=<dir>` writes the v40 reducer's step outputs there.
+    providers.gradleProperty("parity.recordV40").orNull?.let { systemProperty("parity.recordV40", it) }
     maxHeapSize = "2g"
 }
