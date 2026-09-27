@@ -24,10 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** **T2.1 DONE — reducer at v128, 70/70 corpus cases green** (`af24229`); verifier running.
-Owner action pending: merge + deploy **tether#197** (S1.1, v129). IN FLIGHT: **T1.2** connection manager
-(`~/git/tether-android-wt/T1.2`); **S0.4** web screenshots. Next: T2.1D cutover (needs T2.1 VERIFIED;
-T1.1 merged ✓), S0.6, T1.3/T1.4/T1.5, T2.2/T2.3.
+**Next action:** VERIFIED + merged: T1.1, T1.2 (connection manager, `a755f4e`), T2.1 (reducer v128, 70/70).
+Owner action pending: merge + deploy **tether#197** (S1.1, v129) — the app on `main` now speaks 129, so
+**no release until it's deployed**. IN FLIGHT (own worktrees): **T2.1D** reducer cutover; **T1.4** auth +
+Keystore credentials + backup exclusion (security-executor); **T2.2** pure helpers; **S0.4** screenshot
+wait-bug fix. Next: T1.3 (after T2.1D), T1.5, T2.3, S0.6 PR, then Phase 3.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -66,9 +67,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
-| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | DONE | claude-main @ 2026-09-27 00:57 |  |  |
+| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
-| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
+| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
 ### Phase 2 — Reducer at v128
