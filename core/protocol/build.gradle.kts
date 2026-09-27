@@ -8,4 +8,20 @@ plugins {
 
 dependencies {
     api(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
+}
+
+// WireConformanceTest reads the vendored corpus (parity-corpus/wire) and the
+// parity matrix. Optional, local-only: TETHER_PROTOCOL_TS / TETHER_PROTOCOL_VALIDATE
+// point at a tether checkout's lib/protocol.ts / lib/protocol-validate.mjs
+// (CI has no tether checkout; those checks are skipped there).
+tasks.withType<Test>().configureEach {
+    val corpus = rootProject.file("parity-corpus/wire")
+    val matrix = rootProject.file("docs/parity/matrix.json")
+    inputs.dir(corpus).withPropertyName("parityCorpusWire")
+    inputs.file(matrix).withPropertyName("parityMatrix")
+    systemProperty("tether.parityCorpusWire", corpus.absolutePath)
+    systemProperty("tether.parityMatrix", matrix.absolutePath)
+    testLogging { showStandardStreams = true }
 }

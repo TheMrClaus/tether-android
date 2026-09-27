@@ -556,8 +556,9 @@ class RealTetherClient(
             is ServerMessage.ErrorFrame -> emitError(message.message)
             is ServerMessage.SessionControls ->
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
-            is ServerMessage.SearchResults, is ServerMessage.Log, is ServerMessage.Unknown,
-            -> Unit
+            // T1.1 modeled the full v129 union; frames this client does not act on
+            // yet (and Unknown) stay inert, exactly as before.
+            else -> Unit
         }
     }
 
@@ -606,16 +607,20 @@ class RealTetherClient(
     }
 
     private fun onSnapshot(message: ServerMessage.Snapshot) {
+        // A snapshot without a typed state (v115 at-head delta, or a state the
+        // legacy model cannot decode) used to parse as Unknown and be ignored;
+        // keep that behavior until T1.2 owns bounded snapshots.
+        val state = message.projection ?: return
         val cleared: List<String>
         synchronized(lock) {
             tracker.onSnapshot(message.sessionId, message.throughSeq)
-            val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, message.state)
+            val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, state)
             pendingStore = result.store
             cleared = result.cleared
             // Only now is redelivery for this session safe on this connection.
             reconciledSessions.add(message.sessionId)
         }
-        projectionsState.value = projectionsState.value + (message.sessionId to message.state)
+        projectionsState.value = projectionsState.value + (message.sessionId to state)
         if (cleared.isNotEmpty()) persistPending()
         drainPending()
     }

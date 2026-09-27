@@ -8,9 +8,32 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
-/** Must equal the server's PROTOCOL_VERSION (aidash lib/protocol.ts). */
+/**
+ * The protocol version the RUNTIME currently speaks (hello + the strict
+ * ready/healthz equality check in RealTetherClient). Deliberately still the
+ * legacy value: flipping it to [TARGET_PROTOCOL_VERSION] is T1.2's job (the
+ * connection manager owns the hello/ready version logic and its tests).
+ */
 const val PROTOCOL_VERSION: Int = 40
+
+/**
+ * The protocol the wire TYPES in this module model: tether lib/protocol.ts
+ * PROTOCOL_VERSION at 7d65611 + S1.1 (v129). Every ClientMessage/ServerMessage
+ * of that union has a Kotlin type; see WireConformanceTest.
+ */
+const val TARGET_PROTOCOL_VERSION: Int = 129
+
+/**
+ * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be
+ * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR). The server advertises
+ * its own value in `ready.nativeProtocolFloor` and `/healthz`.
+ */
+const val NATIVE_PROTOCOL_FLOOR: Int = 129
+
+/** v129 `hello.client` value that opts into the native compatibility window. */
+const val HELLO_CLIENT_ANDROID: String = "android"
 
 /**
  * The single Json configuration for the whole protocol layer.
@@ -68,3 +91,61 @@ internal fun nonNegativeFinite(value: Double?): Double? =
 internal fun JsonObject.nonNegLong(key: String): Long? = nonNegativeFinite(num(key))?.toLong()
 
 internal fun JsonObject.intOrNull(key: String): Int? = num(key)?.toInt()
+
+/**
+ * Integral numeric value, or null when absent / not a JSON number / not finite.
+ * A fractional number is truncated (the wire only ever carries integers where
+ * this is used: epoch ms, seqs, counters, indices).
+ */
+internal fun JsonObject.long(key: String): Long? = this[key].asLong()
+
+/** [JsonObject.long] for a bare element. */
+internal fun JsonElement?.asLong(): Long? {
+    val p = this as? JsonPrimitive ?: return null
+    if (p is JsonNull || p.isString) return null
+    p.longOrNull?.let { return it }
+    val d = p.doubleOrNull ?: return null
+    return if (d.isFinite()) d.toLong() else null
+}
+
+/** String array, or null when absent / not an array. Non-string elements are dropped. */
+internal fun JsonObject.strList(key: String): List<String>? =
+    arr(key)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+
+/** Object array, or null when absent / not an array. Non-object elements are dropped. */
+internal fun JsonObject.objList(key: String): List<JsonObject>? =
+    arr(key)?.mapNotNull { it as? JsonObject }
+
+/** True when the key is present with a literal JSON null. */
+internal fun JsonObject.isExplicitNull(key: String): Boolean = this[key] is JsonNull
+
+/**
+ * A TypeScript `field?: T | null` on an OUTBOUND frame: the Kotlin property is
+ * `OrNull<T>?` — Kotlin null = key absent, `OrNull(null)` = explicit JSON null,
+ * `OrNull(v)` = the value.
+ */
+data class OrNull<out T>(val value: T?)
+
+/** Raised inside the decoders when a REQUIRED field is absent or wrongly typed. */
+internal class MalformedFrame(val reason: String) : Exception(reason)
+
+/** Required-field reader: absence / wrong type raises [MalformedFrame] (never escapes a decoder). */
+internal class Req(val o: JsonObject) {
+    private fun missing(key: String, what: String): Nothing =
+        throw MalformedFrame("required field `$key` ($what) is missing or wrongly typed")
+
+    fun str(key: String): String = o.str(key) ?: missing(key, "string")
+    fun long(key: String): Long = o.long(key) ?: missing(key, "number")
+    fun int(key: String): Int = o.long(key)?.toInt() ?: missing(key, "number")
+    fun bool(key: String): Boolean = o.boolOrNull(key) ?: missing(key, "boolean")
+    fun obj(key: String): JsonObject = o.obj(key) ?: missing(key, "object")
+    fun arr(key: String): JsonArray = o.arr(key) ?: missing(key, "array")
+    fun strList(key: String): List<String> = o.strList(key) ?: missing(key, "string[]")
+    fun objList(key: String): List<JsonObject> = o.objList(key) ?: missing(key, "object[]")
+
+    /** Present, and either null or an object (TS `T | null`); the object or null. */
+    fun objOrNull(key: String): JsonObject? {
+        if (!o.containsKey(key)) missing(key, "object | null")
+        return o.obj(key)
+    }
+}
