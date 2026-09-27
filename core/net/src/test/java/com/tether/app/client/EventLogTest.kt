@@ -64,6 +64,12 @@ class EventLogTest {
     }
 
     @Test
+    fun theSignInGenerationSurvivesBatchesAndRestarts() {
+        val log = EventLog(generation = 4).accept(batch("b1", 1)).accept(batch("b2", 1)).accept(batch("b2", 1))
+        assertEquals(4L, log.generation)
+    }
+
+    @Test
     fun theLogKeepsTheNewest500() {
         var log = EventLog()
         for (start in 1L..600L step 100) log = log.accept(batch("b", *(start until start + 100).toList().toLongArray()))

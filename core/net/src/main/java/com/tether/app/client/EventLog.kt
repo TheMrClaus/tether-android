@@ -12,7 +12,17 @@ import kotlinx.serialization.json.doubleOrNull
  * batch, deduped by the server's monotonic `seq` (the tail is re-sent on every connect), emptied
  * when the server restarted (a new `bootId`), and capped at [LIMIT], oldest dropped.
  */
-data class EventLog(val entries: List<LogEntry> = emptyList(), val bootId: String? = null) {
+data class EventLog(
+    val entries: List<LogEntry> = emptyList(),
+    val bootId: String? = null,
+    /**
+     * The sign-in this log belongs to: bumped on every sign-out / new sign-in / server switch
+     * (RealTetherClient.clearSignInViews), kept through [accept] (a server restart is the same
+     * sign-in). The topbar badge's acknowledged mark only counts within one generation, which is
+     * what the web gets from the Dashboard unmounting on /login.
+     */
+    val generation: Long = 0,
+) {
 
     /** This log after [message]; `this` when the batch adds nothing (the web's `return current`). */
     fun accept(message: ServerMessage.Log): EventLog {
@@ -22,7 +32,7 @@ data class EventLog(val entries: List<LogEntry> = emptyList(), val bootId: Strin
         val fresh = message.entries.filter { it.seq > lastSeq }
         if (fresh.isEmpty() && !restarted) return if (bootId == message.bootId) this else copy(bootId = message.bootId)
         val next = base + fresh
-        return EventLog(if (next.size > LIMIT) next.subList(next.size - LIMIT, next.size) else next, message.bootId)
+        return EventLog(if (next.size > LIMIT) next.subList(next.size - LIMIT, next.size) else next, message.bootId, generation)
     }
 
     companion object {

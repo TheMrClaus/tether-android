@@ -99,26 +99,32 @@ class TetherViewModel(
 
     /**
      * The warning count the operator acknowledged by opening the log (dashboard.tsx:194-199
-     * `seenWarnAt`): the topbar badge shows only warnings logged since.
+     * `seenWarnAt`), with the sign-in [EventLog.generation] it was taken in. The web's mark lives
+     * in the Dashboard, which unmounts on /login, so every sign-in starts at 0; this view model
+     * outlives the login screen, so a mark from another generation reads as 0 instead.
      */
-    private val seenWarnAt = MutableStateFlow(0)
+    private data class SeenMark(val count: Int, val generation: Long)
+
+    private val seenWarnAt = MutableStateFlow(SeenMark(0, client.eventLog.value.generation))
 
     /**
      * Warnings (non-`info` log entries) not seen yet: `max(0, warnCount - seenWarnAt)`, like the
-     * web. After a server restart empties the log the count can only rise again past the
-     * acknowledged mark, exactly as there.
+     * web. After a server restart empties the log (same generation) the count can only rise again
+     * past the acknowledged mark, exactly as there.
      */
     val unseenWarnings: StateFlow<Int> = combine(client.eventLog, seenWarnAt) { log, seen -> unseen(log, seen) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, unseen(client.eventLog.value, 0))
+        .stateIn(viewModelScope, SharingStarted.Eagerly, unseen(client.eventLog.value, seenWarnAt.value))
 
     /** Opening the log acknowledges every warning logged so far (dashboard.tsx:199 `openLog`). */
     fun openLog() {
-        seenWarnAt.value = warnCount(client.eventLog.value)
+        val log = client.eventLog.value
+        seenWarnAt.value = SeenMark(warnCount(log), log.generation)
     }
 
     private fun warnCount(log: EventLog): Int = log.entries.count { it.isWarning }
 
-    private fun unseen(log: EventLog, seen: Int): Int = maxOf(0, warnCount(log) - seen)
+    private fun unseen(log: EventLog, seen: SeenMark): Int =
+        maxOf(0, warnCount(log) - if (seen.generation == log.generation) seen.count else 0)
 
     private val _activeToast = MutableStateFlow<String?>(null)
     val activeToast: StateFlow<String?> = _activeToast.asStateFlow()
@@ -151,13 +157,6 @@ class TetherViewModel(
                 }
                 for ((sessionId, text) in latest) draftStore.write(sessionId, text)
             }
-        }
-        // The web keeps seenWarnAt in the Dashboard, which unmounts on /login, so every sign-in starts
-        // the mark at 0. This view model outlives the login screen: reset the mark whenever the log
-        // is back to its signed-out state (no entries, no bootId: sign-out, new sign-in, server
-        // switch). A server restart keeps a bootId, so it keeps the mark, as on the web.
-        viewModelScope.launch {
-            client.eventLog.collect { log -> if (log.bootId == null && log.entries.isEmpty()) seenWarnAt.value = 0 }
         }
         viewModelScope.launch {
             client.errors.collect { message ->

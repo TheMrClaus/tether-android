@@ -99,7 +99,7 @@ class TetherViewModelLogBadgeTest {
         vm.openLog()
         advanceUntilIdle()
         assertEquals(0, vm.unseenWarnings.value)
-        client.log.value = EventLog() // sign-out: RealTetherClient.clearSignInViews()
+        client.log.value = EventLog(generation = client.log.value.generation + 1) // sign-out: clearSignInViews()
         advanceUntilIdle()
         client.push("b1", "warn", "warn") // the same server after sign-in replays its tail
         advanceUntilIdle()
@@ -113,7 +113,7 @@ class TetherViewModelLogBadgeTest {
         client.push("server-a", "warn", "error", "warn", "warn")
         advanceUntilIdle()
         vm.openLog()
-        client.log.value = EventLog() // a new sign-in to another server
+        client.log.value = EventLog(generation = client.log.value.generation + 1) // a new sign-in to another server
         advanceUntilIdle()
         client.push("server-b", "error")
         advanceUntilIdle()
@@ -128,7 +128,7 @@ class TetherViewModelLogBadgeTest {
         advanceUntilIdle()
         vm.openLog()
         advanceUntilIdle()
-        client.push("b2", "warn", "warn") // new bootId, never an empty bootless log
+        client.push("b2", "warn", "warn") // new bootId, same sign-in generation
         advanceUntilIdle()
         assertEquals("the restarted log's 2 warnings are under the mark of 3", 0, vm.unseenWarnings.value)
     }

@@ -2301,7 +2301,7 @@ class RealTetherClient(
     private fun clearSignInViews() {
         nodesState.value = emptyList()
         nodeResultState.value = null
-        eventLogState.value = EventLog()
+        eventLogState.update { EventLog(generation = it.generation + 1) }
     }
 
     /**

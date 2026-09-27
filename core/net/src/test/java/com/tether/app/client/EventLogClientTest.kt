@@ -59,8 +59,10 @@ class EventLogClientTest {
         next.send(logFrame(1, 1, 2, 3)) // server.mjs:8010 replays its tail on connect
         h.await(h.client.eventLog) { it.entries.size == 3 }
         assertEquals(listOf(1L, 2, 3), h.client.eventLog.value.entries.map { it.seq })
+        val generation = h.client.eventLog.value.generation
         next.send(logFrame(2, 1))
         h.await(h.client.eventLog) { it.bootId == "2" }
+        assertEquals("a restart is the same sign-in", generation, h.client.eventLog.value.generation)
         assertEquals(listOf(1L), h.client.eventLog.value.entries.map { it.seq })
     }
 
@@ -70,8 +72,9 @@ class EventLogClientTest {
         ws.send(logFrame(1, 1))
         h.await(h.client.eventLog) { it.entries.size == 1 }
         h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
+        val before = h.client.eventLog.value.generation
         runBlocking { h.client.logout() }
-        assertEquals(EventLog(), h.client.eventLog.value)
+        assertEquals("emptied, and a new sign-in generation", EventLog(generation = before + 1), h.client.eventLog.value)
     }
 
     private fun drainTo(path: String): okhttp3.mockwebserver.RecordedRequest {
