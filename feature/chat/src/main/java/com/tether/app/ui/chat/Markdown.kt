@@ -66,6 +66,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -645,7 +646,7 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = M
     Box(
         modifier
             .alpha(0.85f)
-            .offset(y = if (pressed) t.pressTravel else 0.dp)
+            .offset { IntOffset(0, if (pressed) t.pressTravel.roundToPx() else 0) }
             .size(44.dp)
             .cssSurface(
                 shape,

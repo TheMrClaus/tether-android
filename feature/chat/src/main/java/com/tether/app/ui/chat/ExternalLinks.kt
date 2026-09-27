@@ -1,5 +1,6 @@
 package com.tether.app.ui.chat
 
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -29,6 +30,8 @@ object CustomTabLinkOpener : LinkOpener {
     const val EXTRA_SESSION = "android.support.customtabs.extra.SESSION"
     const val EXTRA_TOOLBAR_COLOR = "android.support.customtabs.extra.TOOLBAR_COLOR"
 
+    // Uri.parse, not core-ktx's toUri: this module does not depend on androidx.core.
+    @SuppressLint("UseKtx")
     fun intentFor(href: String, toolbarColor: Color): Intent? {
         if (!isSafeHref(href)) return null // markdown.tsx SAFE_HREF: never javascript:/data:/intent:
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(href))
