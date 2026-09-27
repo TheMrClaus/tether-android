@@ -3,7 +3,18 @@ package com.tether.app.ui.theme
 import android.app.Activity
 import android.content.ContentResolver
 import android.provider.Settings
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsEndWidth
+import androidx.compose.foundation.layout.windowInsetsStartWidth
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -14,6 +25,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -33,7 +47,7 @@ private fun reducedMotion(resolver: ContentResolver): Boolean = try {
 
 /** Minimal Material3 interop mapping; components read [LocalTetherTokens] directly. */
 private fun interopScheme(t: TetherTokens): ColorScheme {
-    val base = if (t.family.isDark) darkColorScheme() else lightColorScheme()
+    val base = if (t.skin.isDark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = t.violetStrong,
         onPrimary = t.accentInk,
@@ -56,22 +70,26 @@ private fun interopScheme(t: TetherTokens): ColorScheme {
 
 @Composable
 fun TetherTheme(
-    choice: ThemeChoice = ThemeChoice.System,
+    choice: ThemeChoice = ThemeChoice.Default,
     content: @Composable () -> Unit,
 ) {
-    val family = choice.resolve(isSystemInDarkTheme())
-    val tokens = tokensFor(family)
+    // `system` mode follows the device's dark setting, like the web's prefers-color-scheme.
+    val skin = choice.resolve(isSystemInDarkTheme())
+    val tokens = tokensFor(skin)
     val view = LocalView.current
     val context = LocalContext.current
 
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
-            // Edge-to-edge: bars are transparent; our own graphite surfaces draw
-            // behind them. We only steer icon contrast per family.
+            // Edge-to-edge (targetSdk 35+ ignores window bar colours): the bar colour is
+            // painted by [SystemBarBackdrop]; here we only steer icon contrast from the
+            // skin's CSS color-scheme, and keep the system from scrimming over our colour.
             val controller = WindowCompat.getInsetsController(window, view)
-            controller.isAppearanceLightStatusBars = !family.isDark
-            controller.isAppearanceLightNavigationBars = !family.isDark
+            controller.isAppearanceLightStatusBars = !skin.isDark
+            controller.isAppearanceLightNavigationBars = !skin.isDark
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
         }
     }
 
@@ -92,7 +110,23 @@ fun TetherTheme(
         MaterialTheme(
             colorScheme = interopScheme(tokens),
             typography = typography,
-            content = content,
-        )
+        ) {
+            if (view.isInEditMode) content() else SystemBarBackdrop(skin.systemBarColor, content)
+        }
+    }
+}
+
+/**
+ * Paints the status and navigation bar areas in the skin's `chrome.graphite` (the web's
+ * theme-color: each skin's panel colour), over the edge-to-edge content.
+ */
+@Composable
+private fun SystemBarBackdrop(color: Color, content: @Composable () -> Unit) {
+    Box {
+        content()
+        Box(Modifier.align(Alignment.TopStart).fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(color))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(color))
+        Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().windowInsetsStartWidth(WindowInsets.navigationBars).background(color))
+        Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().windowInsetsEndWidth(WindowInsets.navigationBars).background(color))
     }
 }

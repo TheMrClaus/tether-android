@@ -34,3 +34,7 @@ include(":feature:auth")
 include(":feature:chat")
 include(":feature:sidebar")
 include(":feature:shell")
+
+// PLAN D9 / T3.1: design-token generator (pure JVM; drives :core:designsystem's
+// generateDesignTokens / verifyDesignTokens tasks).
+include(":tools:design-tokens")

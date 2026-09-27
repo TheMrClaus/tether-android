@@ -45,7 +45,7 @@ import com.tether.app.ui.theme.ThemeChoice
 fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     val context = LocalContext.current
     val prefs = remember { UiPrefs(context) }
-    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.System)
+    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
 
     val vm: TetherViewModel = viewModel(factory = remember(client) { TetherViewModelFactory(client) })
 

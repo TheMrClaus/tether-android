@@ -18,7 +18,10 @@ class UiPrefs(context: Context) {
     private val store = context.applicationContext.tetherUiDataStore
 
     private object Keys {
+        /** Legacy flat theme id (pre-T3.1); read only to migrate. */
         val theme = stringPreferencesKey("theme_choice")
+        val themeFamily = stringPreferencesKey("theme_family")
+        val themeMode = stringPreferencesKey("theme_mode")
         val showThinking = booleanPreferencesKey("show_thinking")
         val showEnded = booleanPreferencesKey("show_ended_sessions")
         val pinnedProjects = stringPreferencesKey("pinned_projects")
@@ -32,10 +35,18 @@ class UiPrefs(context: Context) {
         val pushPinnedSessions = stringPreferencesKey("push_pinned_sessions")
     }
 
-    val themeChoice: Flow<ThemeChoice> = store.data.map { ThemeChoice.fromId(it[Keys.theme]) }
+    /** Family × mode (web `themeFamily`/`themeMode`); a legacy flat `theme_choice` is migrated on read. */
+    val themeChoice: Flow<ThemeChoice> = store.data.map {
+        ThemeChoice.normalize(it[Keys.themeFamily], it[Keys.themeMode], it[Keys.theme])
+    }
 
     suspend fun setThemeChoice(choice: ThemeChoice) {
-        store.edit { it[Keys.theme] = choice.id }
+        store.edit {
+            it[Keys.themeFamily] = choice.family.id
+            it[Keys.themeMode] = choice.mode.id
+            // Like the web, the legacy flat id is dropped once the two axes are stored.
+            it.remove(Keys.theme)
+        }
     }
 
     val showThinking: Flow<Boolean> = store.data.map { it[Keys.showThinking] ?: true }

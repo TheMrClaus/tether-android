@@ -60,7 +60,7 @@ import com.tether.app.protocol.reduce.StoryPoint
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
-import com.tether.app.ui.theme.TetherThemeFamily
+import com.tether.app.ui.theme.ThemeFamily
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
@@ -194,7 +194,7 @@ fun ConversationTimeline(
     val inspecting = focusIndex >= 0 && focusIndex < storyPoints.size
 
     // Theme-aware mark colours.
-    val isMachineLike = t.family == TetherThemeFamily.Machine || t.family == TetherThemeFamily.Precision
+    val isMachineLike = t.skin.family == ThemeFamily.Precision
     val markColor = if (isMachineLike) lerp(t.lineStrong, t.running, 0.22f) else lerp(t.lineStrong, t.ink, 0.16f)
     val activeColor = if (isMachineLike) t.running else t.white
 

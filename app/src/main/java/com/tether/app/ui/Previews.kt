@@ -27,6 +27,8 @@ import com.tether.app.ui.chat.ToolCard
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
 import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeFamily
+import com.tether.app.ui.theme.ThemeMode
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -35,7 +37,7 @@ import kotlinx.serialization.json.put
 
 @Composable
 private fun PreviewSurface(content: @Composable () -> Unit) {
-    TetherTheme(choice = ThemeChoice.Machine) {
+    TetherTheme(choice = ThemeChoice(ThemeFamily.Precision, ThemeMode.Dark)) {
         val t = LocalTetherTokens.current
         Column(Modifier.background(t.mineral).padding(12.dp)) {
             content()

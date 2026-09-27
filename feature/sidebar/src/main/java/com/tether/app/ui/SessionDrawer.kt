@@ -81,6 +81,8 @@ import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeFamily
+import com.tether.app.ui.theme.ThemeMode
 import com.tether.app.ui.util.compactPath
 import com.tether.app.ui.util.projectName
 import com.tether.app.ui.util.providerGlyph
@@ -108,7 +110,7 @@ fun SessionDrawer(
     val directories by vm.client.directories.collectAsStateWithLifecycle()
     val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = false)
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
-    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.System)
+    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
     val pinnedProjects by prefs.pinnedProjects.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var providerPicker by remember { mutableStateOf(false) }
@@ -463,36 +465,26 @@ fun SessionDrawer(
                 letterSpacing = 0.08.em,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
+            // The web's two axes (Settings → Appearance): the family, then the lighting.
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ThemeChoice.entries.forEach { choice ->
-                    val chosen = choice == themeChoice
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (chosen) t.violetWash else t.keyFace,
-                                RoundedCornerShape(TetherDimens.radiusSm),
-                            )
-                            .border(
-                                1.dp,
-                                if (chosen) t.violetStrong else t.keySide,
-                                RoundedCornerShape(TetherDimens.radiusSm),
-                            )
-                            .clickable { scope.launch { prefs.setThemeChoice(choice) } }
-                            .heightIn(min = TetherDimens.touchTargetDp)
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            choice.label,
-                            color = if (chosen) t.white else t.ink,
-                            fontFamily = Manrope,
-                            fontWeight = TetherWeights.name,
-                            fontSize = 13.1.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (chosen) StatusDot(t.violet, size = 6.4.dp)
-                    }
+                ThemeFamily.entries.forEach { family ->
+                    ThemeOption(
+                        label = family.label,
+                        chosen = family == themeChoice.family,
+                        onClick = { scope.launch { prefs.setThemeChoice(themeChoice.copy(family = family)) } },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ThemeMode.entries.forEach { mode ->
+                    ThemeOption(
+                        label = mode.label,
+                        chosen = mode == themeChoice.mode,
+                        onClick = { scope.launch { prefs.setThemeChoice(themeChoice.copy(mode = mode)) } },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -1063,5 +1055,37 @@ private fun ModeTag(mode: String, label: String) {
             fontSize = 9.6.sp,
             letterSpacing = 0.04.em,
         )
+    }
+}
+
+/** One selectable theme family / mode in Settings. */
+@Composable
+private fun ThemeOption(label: String, chosen: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    Row(
+        modifier = modifier
+            .background(
+                if (chosen) t.violetWash else t.keyFace,
+                RoundedCornerShape(t.radiusSm),
+            )
+            .border(
+                1.dp,
+                if (chosen) t.violetStrong else t.keySide,
+                RoundedCornerShape(t.radiusSm),
+            )
+            .clickable(onClick = onClick)
+            .heightIn(min = TetherDimens.touchTargetDp)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = if (chosen) t.white else t.ink,
+            fontFamily = Manrope,
+            fontWeight = TetherWeights.name,
+            fontSize = 13.1.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (chosen) StatusDot(t.violet, size = 6.4.dp)
     }
 }

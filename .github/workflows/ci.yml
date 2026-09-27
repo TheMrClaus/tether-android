@@ -40,10 +40,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       # Android modules run testDebugUnitTest; the pure-JVM core modules (T0.3) only have `test`.
+      # verifyDesignTokens (T3.1, PLAN D9) fails when GeneratedTokens.kt drifts from the token JSON.
       - name: Assemble, lint, unit tests
         run: >
           ./gradlew assembleDebug lint testDebugUnitTest
-          :core:protocol:test :core:reducer:test
+          :core:protocol:test :core:reducer:test verifyDesignTokens
           --stacktrace --console=plain
 
       - name: Roborazzi verify (once T3.4 adds the plugin)
