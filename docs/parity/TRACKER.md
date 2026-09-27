@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Program status | IN PROGRESS |
-| Current phase | Phases 0 + 2 CLOSED; P1 tasks all verified; Phase 3 (T3.4) + Phase 4 in progress |
+| Current phase | Phases 0-3 CLOSED; Phase 4 in progress (T4.1, T4.3 merged) |
 | PARITY_BASE (tether SHA) | `7d65611` (PROTOCOL_VERSION 128) |
 | App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
@@ -29,21 +29,16 @@ possible when the owner asks. Release notes must cover: the Android 14 floor, Ke
 that pre-T1.4 backups may still hold the old plaintext credential file.
 **Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
 **[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
-**Production (owner deploy, 2026-09-27 afternoon):** tether `0e6e862` = PRs #198 (S0 scripts), #199 (ta-fsp node guard) and
-#200 (S13.1 v130 lastSeq + FCM sync hint, **part C kept**) merged; serves **PROTOCOL 130, floor 129**. Android `main` speaks 129 (accepted).
-**Owner queue:** `ta-xax` (how far should a paired device be trusted? ws-browser navigate full-read SSRF, agents reach the state dir);
-optional: scrub the operator account name still in git history (8 hits) and in the public `refs/dolt/data` (T0.2 note).
-Release blocker for the next APK: `ta-s8q` (in progress).
-**⚠ History rewrite (owner, 2026-09-27 ~12:18 CEST):** this PUBLIC repo's history was scrubbed of operator-identifying data
-(home paths → placeholders) and force-pushed. Tether's main and its `android-parity/*` branches were rewritten the same way (the PRs follow).
-Commit SHAs quoted in beads/notes before 12:18 refer to the pre-rewrite history; commit MESSAGES are unchanged, so find a commit by
-message. The vendored corpus manifests still name pre-rewrite tether SHAs until the next `sync-corpus.sh` run. Local-only
-`backup/*-pre-transplant` branches hold old history: **never push them**. Never commit absolute home paths or the operator's account name.
-**Merged today:** T3.5 (icons), T13.0 SYNC_DESIGN, T1.5 (node registry, `eb75153`), **T3.3** (primitives + class-set key
-cascade, 114 goldens, `c73b926`). **Phase 3 left: T3.4.**
-In flight (4 agents, all resumed after a usage-limit kill and the deploy restart; unsaved work checkpointed by the coordinator): **ta-s8q** (release blocker, origin-keyed pending store),
-**T3.4** gallery, **T4.1** phone shell, **T4.3** statusline/dial/gauge components (standalone; T4.1 hosts them after both merge).
-Next: T13.1 after ta-s8q (both touch RealTetherClient); T4.2 expanded shell after T4.1; T4.4/T4.5.
+**Production:** tether `0e6e862` (#198/#199/#200), PROTOCOL 130, floor 129; Android `main` speaks 129 (accepted).
+**History:** the account name was scrubbed from this repo's git history (owner force-push, `main` f388137 + tag v0.6.0) and the
+beads Dolt history was flattened to one commit and re-pushed fresh (`refs/dolt/data`), so a fresh clone has 0 hits.
+**Phases 0-3 CLOSED.** **Merged today:** T3.5, T13.0, T1.5, T3.3, **T3.4 gallery, T4.1 phone shell, T4.3 statusline** (`3f18f1b`,
+combined gate 1711/0 failed/4 skipped).
+**In flight:** **ta-s8q** (release blocker) r2 DONE → verifier re-check (security re-check PASS-WITH-NOTES);
+**T12.1** (FCM refresh) r2: registration trigger + Firebase init from /api/push/fcm-config + hardening.
+**Next:** T4.2 expanded shell, T4.4 deep links, T4.5 log dialog, T5.1 sidebar; T13.1 after ta-s8q. Follow-ups filed: ta-gxp
+(register() migration), ta-yhu (S12.1 server channel ids), ta-srn (T13.3b).
+**Owner queue:** optional tether history scrub (82 hits in the private repo; needs a production checkout reset + restart).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
 **In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
@@ -103,17 +98,17 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 | T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
-| T3.4 | Debug Component Gallery + screenshot tests | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  | done: README; assembleRelease dex scan: release-unsigned.apk 3 dex, 0 Lcom/tether/app/gallery/ refs, manifest 0; debug apk 413 refs + manif… |
+| T3.4 | Debug Component Gallery + screenshot tests | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T4.1 | Phone shell (web mobile layout) | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  | done: shell composables in feature/shell/.../ui/shell (Topbar, WorkspaceHeader, SessionLinksPopover, SessionDrawerHost, TelemetrySheet, Emp… |
-| T4.2 | Expanded shell (web desktop layout, resizable panels) | TODO |  |  |  |
-| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  | done: mapping layer feature/shell ui/statusline (TelemetryReadings, StatusSegments, TurnTokenReadings) + 28 tests, 64f0af2 / next: composab… |
+| T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
+| T4.2 | Expanded shell (web desktop layout, resizable panels) | TODO |  |  | From the T4.1 verifier (fold in here, same shell code): the Session links popover has no max height/scroll (web: calc(100dvh - 8rem) + scro… |
+| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
-| T4.5 | Log dialog | TODO |  |  |  |
+| T4.5 | Log dialog | TODO |  |  | From the T4.1 verifier: the topbar Health badge currently counts every vm.errorLog entry and never clears when opened; the web counts only … |
 
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -156,7 +151,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | TODO |  |  |  |
-| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  |  |
+| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
 ### Phase 10 — Settings & first run
@@ -165,7 +160,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T10.1 | Settings dialog, all tabs | TODO |  |  |  |
 | T10.2 | Session settings sheet | TODO |  |  |  |
 | T10.3 | Nodes settings | TODO |  |  |  |
-| T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  |  |
+| T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | TODO |  |  |  |
 | T10.5 | Passkeys via Credential Manager | TODO |  |  |  |
 | T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
@@ -179,7 +174,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | TODO |  |  | OWNER DECISION 2026-09-27: migrate FCM from deprecated getToken()/onNewToken() to register()/onRegistered() here (different identifier -> m… |
+| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | IN-PROGRESS | claude-main @ 2026-09-27 12:49 |  | VERIFY-PASS relayed (verifier: 13/15 mutations red; Y2 permission-asked persist and Z3 UiRoot select untested). r2 dispatched: F1 registrat… |
 | T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
 | T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
@@ -201,7 +196,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.1 | Performance + Baseline Profiles | TODO |  |  | DECISION: FoldAdapterStressTest p99<2ms bar is now OPT-IN (-Pparity.perfAssert=true) — wall-clock assertions flake under load in the defaul… |
 | T14.2 | Accessibility pass | TODO |  |  | From T3.2: CSS text-transform:uppercase keeps the ORIGINAL words as the accessible name; native uppercase labels must set contentDescriptio… |
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
-| T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
+| T14.4 | Full parity audit (fresh verifier) | TODO |  |  | From the T4.3 r2 verifier (fidelity detail): UsageTrack's colour transition uses Compose's default tween easing; the web uses CSS 'ease' (c… |
 | T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
 
 ---
@@ -272,6 +267,11 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | T3.3 keys: pressed = `:active` only. Chromium's touch-emulated `:hover` (Studio hover rules win on a held key) is not modelled | Native Android has no hover on touch; `:active` is the operator's actual "pressed" moment | claude-main (owner delegation) |
 | 2026-09-27 | After any interruption (usage limit, server restart), the coordinator checkpoints each worktree's uncommitted work as a WIP commit (identifier-scanned) before resuming the agent in context | Two interruptions today; resuming in context plus a checkpoint loses nothing | claude-main (owner delegation) |
 | 2026-09-27 | OQ1 resolved by the owner: #200 merged **with** S13.1 part C (`removedQueueIds`); T13.3b (`ta-srn`) now waits only on T13.3 | Owner merge | owner |
+| 2026-09-27 | **Owner decision:** a paired phone is **fully trusted** (operator-equivalent). The only owner-grade exceptions are device management, passkeys and claude-accounts (HTTP) and node-registry frames (#199). `ta-xax` closed | Owner answer | owner |
+| 2026-09-27 | **Owner decision:** remove the operator account name from git history. Done: this repo's `main` + tag v0.6.0 rewritten (filter-repo replace-text, identical tip tree) and force-pushed by the owner (the jev-gate hook blocks agent force-pushes to main); the beads Dolt history flattened (`bd flatten`) and the remote ref deleted and re-pushed fresh, so raw objects have 0 hits. Per-issue `bd history` before this point is gone; all current notes remain | Owner answer; the Dolt git-blobstore kept old table files until the ref was recreated | owner / claude-main |
+| 2026-09-27 | Executors run mutations only in a **scratch worktree**. A coordinator checkpoint after a restart once captured an in-flight mutation (ta-s8q M10) | Keep checkpoints and verifier reads of the real worktree trustworthy | claude-main (owner delegation) |
+| 2026-09-27 | T12.1 split: the `register()`/`onRegistered()` migration moved to `ta-gxp` (T12.1b). With the required manifest flag it yields a bare Firebase Installation ID, not proven to be a drop-in FCM v1 `message.token`. Background-notification channel ids went to server task `ta-yhu` (S12.1). Robolectric end-to-end tests stand in for PLAN §4's instrumented test while emulators are owner-deferred | Don't break push on an unverified API change | claude-main (owner delegation) |
+| 2026-09-27 | T4.1: Lock keeps the app's sign-out confirmation (the web logs out immediately); controls drawn smaller than 44dp keep the web's size with 48dp touch areas (tested) | Signing out forgets the paired credential; Android touch guidelines | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
