@@ -1,10 +1,13 @@
 package com.tether.app.ui
 
-import androidx.compose.foundation.background
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,84 +15,134 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tether.app.client.ConnectionState
+import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.chat.ChatScreen
-import com.tether.app.ui.components.BrandMark
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
+import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
-import com.tether.app.ui.components.Wordmark
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.shell.EmptyStage
+import com.tether.app.ui.shell.PhoneShell
+import com.tether.app.ui.shell.PhoneShellSlots
+import com.tether.app.ui.shell.ProviderAvailability
+import com.tether.app.ui.shell.TopbarActions
+import com.tether.app.ui.shell.WorkspaceHeaderActions
+import com.tether.app.ui.shell.rememberPhoneShellState
+import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
+import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-/** The main single-activity shell: topbar + chat workspace + session drawer. */
+/** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
+private const val CopiedFeedbackMs = 1_500L
+
+/**
+ * The signed-in app: the phone shell (the web's mobile layout, [PhoneShell]) wired to the view
+ * model. Windows at or above the 840dp layout cutoff get the desktop layout once T4.2 lands; until
+ * then they render this same shell, which lays out at any width.
+ */
 @Composable
 fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val t = LocalTetherTokens.current
-    val scope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val context = LocalContext.current
+    val shell = rememberPhoneShellState()
 
     val sessions by vm.client.sessions.collectAsStateWithLifecycle()
     val projections by vm.client.projections.collectAsStateWithLifecycle()
+    val providers by vm.client.providers.collectAsStateWithLifecycle()
+    val connection by vm.client.connection.collectAsStateWithLifecycle()
     val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
     val toast by vm.activeToast.collectAsStateWithLifecycle()
 
     val session = sessions.firstOrNull { it.id == selectedId }
     val projection = selectedId?.let { projections[it] }
-
-    val screenWidth = LocalConfiguration.current.screenWidthDp
-    val drawerWidth = minOf(320, (screenWidth * 0.88f).toInt()).dp
+    val connected = connection == ConnectionState.Connected
 
     var showErrorLog by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    var showProviderPicker by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<AgentSession?>(null) }
+    var confirmEnd by remember { mutableStateOf<AgentSession?>(null) }
+    var copiedPath by remember { mutableStateOf(false) }
+    var copiedTetherId by remember { mutableStateOf(false) }
+    LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
+    LaunchedEffect(copiedTetherId) { if (copiedTetherId) { delay(CopiedFeedbackMs); copiedTetherId = false } }
+
+    // issue #189: a remembered session whose snapshot has not arrived yet reads as "reopening",
+    // never as the welcome stage.
+    val emptyStage = if (selectedId != null && session == null && sessions.isEmpty()) {
+        EmptyStage.Reopening(connected)
+    } else {
+        EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available) })
+    }
 
     Box(Modifier.fillMaxSize()) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            scrimColor = t.scrim,
-            drawerContent = {
-                ModalDrawerSheet(
-                    modifier = Modifier.width(drawerWidth),
-                    drawerShape = RectangleShape,
-                    drawerContainerColor = t.graphite,
-                    drawerContentColor = t.ink,
-                ) {
+        PhoneShell(
+            state = shell,
+            session = session,
+            workspaceRoot = workspaceRoot,
+            emptyStage = emptyStage,
+            unseenWarnings = vm.errorLog.size,
+            copiedPath = copiedPath,
+            copiedTetherId = copiedTetherId,
+            onStartSession = { showProviderPicker = true },
+            topbar = TopbarActions(
+                onOpenDrawer = {},
+                // Hosts not built yet (files T11.1, accounts/usage T9.2): their keys render disabled.
+                onOpenFiles = null,
+                onOpenUsage = null,
+                onOpenUsageAnalytics = null,
+                // The log dialog proper is T4.5; the existing activity log stands in.
+                onOpenLog = { showErrorLog = true },
+                onLogout = { showLogoutConfirm = true },
+            ),
+            header = WorkspaceHeaderActions(
+                onRename = { renaming = session },
+                onEndSession = { confirmEnd = session },
+                onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
+                onCopyPath = {
+                    session?.let {
+                        copyToClipboard(context, "Working directory", it.cwd)
+                        copiedPath = true
+                    }
+                },
+                onCopyTetherId = {
+                    session?.let {
+                        copyToClipboard(context, "Tether session id", it.id)
+                        copiedTetherId = true
+                    }
+                },
+            ),
+            slots = PhoneShellSlots(
+                drawer = {
                     SessionDrawer(
                         vm = vm,
                         prefs = prefs,
@@ -98,31 +151,26 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         workspaceRoot = workspaceRoot,
                         onSelect = { id ->
                             vm.selectSession(id)
-                            scope.launch { drawerState.close() }
+                            shell.onSessionSelected()
                         },
-                        onClose = { scope.launch { drawerState.close() } },
+                        onClose = shell::closeDrawer,
                     )
-                }
-            },
-        ) {
-            Column(Modifier.fillMaxSize().background(t.mineral)) {
-                TopBar(
-                    errorCount = vm.errorLog.size,
-                    onMenu = { scope.launch { drawerState.open() } },
-                    onErrorLog = { showErrorLog = true },
-                    onLock = { showLogoutConfirm = true },
-                )
-                ChatScreen(
-                    vm = vm,
-                    session = session,
-                    projection = projection,
-                    workspaceRoot = workspaceRoot,
-                    prefs = prefs,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                )
-            }
-        }
+                },
+                chat = {
+                    ChatScreen(
+                        vm = vm,
+                        session = session,
+                        projection = projection,
+                        workspaceRoot = workspaceRoot,
+                        prefs = prefs,
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenDrawer = shell::openDrawer,
+                        showWorkspaceHeader = false,
+                    )
+                },
+                inspector = { session?.let { InterimTelemetry(it) } },
+            ),
+        )
 
         toast?.let { message ->
             LaunchedEffect(message) {
@@ -136,7 +184,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(12.dp)
-                    .zIndex(10f),
+                    .zIndex(20f),
             )
         }
     }
@@ -173,11 +221,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             )
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(
-                    onClick = { showLogoutConfirm = false },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = "Cancel",
-                )
+                TetherKey(onClick = { showLogoutConfirm = false }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
                 TetherKey(
                     onClick = {
                         showLogoutConfirm = false
@@ -190,58 +234,114 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             }
         }
     }
-}
 
-/** 52dp topbar over the status bar inset, graphite with a 1px bottom seam. */
-@Composable
-private fun TopBar(
-    errorCount: Int,
-    onMenu: () -> Unit,
-    onErrorLog: () -> Unit,
-    onLock: () -> Unit,
-) {
-    val t = LocalTetherTokens.current
-    Column(Modifier.fillMaxWidth().background(t.graphite).statusBarsPadding()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onMenu, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(TetherIcons.Menu, contentDescription = "Sessions", tint = t.ink, modifier = Modifier.size(20.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BrandMark()
-                Wordmark()
-            }
-            Spacer(Modifier.weight(1f))
-            Box {
-                IconButton(onClick = onErrorLog, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                    Icon(TetherIcons.Activity, contentDescription = "Activity log", tint = t.muted, modifier = Modifier.size(18.dp))
+    if (showProviderPicker) {
+        TetherDialog(onDismiss = { showProviderPicker = false }, title = "New session") {
+            providers.forEach { provider ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = provider.available) {
+                            showProviderPicker = false
+                            vm.createSession(provider.id)
+                        }
+                        .heightIn(min = TetherDimens.touchTargetDp)
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ProviderGlyph(provider.glyph)
+                    Text(
+                        provider.label,
+                        color = if (provider.available) t.ink else t.faint,
+                        fontFamily = Manrope,
+                        fontWeight = TetherWeights.label,
+                        fontSize = 13.6.sp,
+                    )
                 }
-                if (errorCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = (-6).dp, y = 6.dp)
-                            .size(15.dp)
-                            .background(t.danger, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = if (errorCount > 9) "9+" else "$errorCount",
-                            color = t.accentInk,
-                            fontFamily = Manrope,
-                            fontWeight = TetherWeights.strong,
-                            fontSize = 8.5.sp,
-                        )
-                    }
-                }
-            }
-            IconButton(onClick = onLock, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(TetherIcons.LogOut, contentDescription = "Disconnect", tint = t.muted, modifier = Modifier.size(18.dp))
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+    }
+
+    renaming?.let { target ->
+        var name by remember(target.id) { mutableStateOf(target.name) }
+        val submit = {
+            val trimmed = name.trim()
+            if (trimmed.isNotEmpty() && trimmed != target.name) vm.client.rename(target.id, trimmed)
+            renaming = null
+        }
+        TetherDialog(
+            onDismiss = { renaming = null },
+            title = "Rename session",
+            footer = {
+                TetherKey(onClick = { renaming = null }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
+                TetherKey(onClick = submit, classes = KeyClasses.ButtonPrimary, label = "Rename", enabled = name.isNotBlank())
+            },
+        ) {
+            TetherInputWell(value = name, onValueChange = { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+    }
+
+    confirmEnd?.let { target ->
+        TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
+            Text(
+                "Stop the agent process for \"${target.name}\"?",
+                color = t.ink,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.body,
+                fontSize = 13.6.sp,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TetherKey(onClick = { confirmEnd = null }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
+                TetherKey(
+                    onClick = {
+                        confirmEnd = null
+                        vm.client.kill(target.id)
+                    },
+                    classes = KeyClasses.ButtonDanger,
+                    label = "End session",
+                    icon = TetherIcons.CircleStop,
+                )
+            }
+        }
+    }
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    manager.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+/**
+ * The telemetry rows the app showed before the shell (its old Telemetry dialog), kept as the
+ * panel's body until the inspector (T9.1) fills the slot.
+ */
+@Composable
+private fun InterimTelemetry(session: AgentSession) {
+    val t = LocalTetherTokens.current
+    val rows = buildList {
+        add("Provider" to session.provider)
+        session.model?.let { add("Model" to it) }
+        session.metrics?.effort?.let { add("Effort" to it) }
+        session.metrics?.totalTokens?.let { add("Total tokens" to compactNumber(it)) }
+        session.metrics?.contextPercent?.let { add("Context" to "${it.toInt()}%") }
+        session.metrics?.gitBranch?.let { add("Branch" to it) }
+        add("Directory" to session.cwd)
+    }
+    rows.forEach { (label, value) ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text(
+                label.uppercase(),
+                color = t.faint,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.strong,
+                fontSize = 9.9.sp,
+                letterSpacing = 0.06.em,
+                modifier = Modifier.weight(0.4f),
+            )
+            Text(value, color = t.ink, fontFamily = JetBrainsMono, fontSize = 11.8.sp, modifier = Modifier.weight(0.6f))
+        }
     }
 }
 

@@ -144,6 +144,8 @@ fun ChatScreen(
     prefs: UiPrefs,
     modifier: Modifier = Modifier,
     onOpenDrawer: () -> Unit = {},
+    /** False when a shell hosts the workspace header itself (T4.1's phone shell). */
+    showWorkspaceHeader: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(
@@ -163,7 +165,7 @@ fun ChatScreen(
     }
 
     Column(modifier.background(t.mineralDeep)) {
-        if (session != null) {
+        if (session != null && showWorkspaceHeader) {
             WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot)
         }
 
