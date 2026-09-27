@@ -62,16 +62,14 @@ case errors-and-account-auth              A  ready
 case warnings-and-unknown-events          A  ready
 case code-point-bounds                    A  pending
 case native-session-id-with-initial       A  ready
-case cancel-interrupted                   A  pending
+case cancel-interrupted                   A  ready
 
 # ---- B: interaction and notices ----
-# The 4 B cases still pending fold unit A's tool_start/tool_end/user_message_accepted (their
-# first red path is turnsById.*.blocks); B's own arms go green on them once A lands.
-case approval-choices-metadata            B  pending
+case approval-choices-metadata            B  ready
 case approval-legacy-decision-and-expiry  B  ready
-case question-flow                        B  pending
-case permission-denials                   B  pending
-case queued-messages                      B  pending
+case question-flow                        B  ready
+case permission-denials                   B  ready
+case queued-messages                      B  ready
 case turn-interrupted-cap                 B  ready
 case dismissed-notices-cap                B  ready
 case session-notices-and-dismiss          B  ready
