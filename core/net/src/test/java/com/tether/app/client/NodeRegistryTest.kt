@@ -318,6 +318,50 @@ class NodeRegistryTest {
     }
 
     @Test
+    fun aProbeThatReturnsAfterStopNeverConnectsTheSignedOutClient() =
+        aProbeThatReturnsAfterSignOutNeverConnects(deviceToken = null) {
+            h.client.stop()
+            h.await(h.client.configured) { !it }
+        }
+
+    @Test
+    fun aProbeThatReturnsAfterLogoutNeverConnectsTheSignedOutClient() =
+        // A device token: logout() makes no server call, so the queue stays probe + upgrade.
+        aProbeThatReturnsAfterSignOutNeverConnects(deviceToken = "parity-fake-device-token") {
+            assertEquals(LogoutResult.LocalOnly, runBlocking { h.client.logout() })
+            h.await(h.client.configured) { !it }
+        }
+
+    /**
+     * stop()/logout() -> start() finds no credential -> AuthRequired. start()
+     * resets `stopped`, so only the attempt generation keeps the ended attempt's
+     * late "authenticated" from opening a socket with the credential that was
+     * just signed out.
+     */
+    private fun aProbeThatReturnsAfterSignOutNeverConnects(deviceToken: String?, signOut: () -> Unit) {
+        val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                h.sockets.put(webSocket)
+            }
+        }
+        h.server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
+                .setHeadersDelay(1_500, TimeUnit.MILLISECONDS),
+        )
+        h.server.enqueue(MockResponse().withWebSocketUpgrade(listener))
+        h.newClient(deviceToken = deviceToken)
+        h.client.start()
+        assertNotNull("the probe is out", h.server.takeRequest(10, TimeUnit.SECONDS))
+        signOut()
+        h.client.start()
+        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
+        Thread.sleep(2_000) // past the stopped attempt's probe (1.5 s)
+        assertEquals("no upgrade after sign-out", 1, h.server.requestCount)
+        assertTrue(h.sockets.isEmpty())
+        assertEquals(ConnectionState.AuthRequired, h.client.connection.value)
+    }
+
+    @Test
     fun stopThenStartWhileAProbeIsInFlightStillConnects() {
         // stop() launches settings.clear() asynchronously; a start() that runs
         // before it lands reloads the stored credential (a NEW object) and must
