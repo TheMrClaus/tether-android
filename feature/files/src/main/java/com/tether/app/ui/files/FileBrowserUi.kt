@@ -43,7 +43,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -132,6 +134,15 @@ private fun ui(size: Float, weight: Int = 400, trackingEm: Float = 0f, lineHeigh
 }
 
 private fun rem(r: Float) = r * 16f
+
+/**
+ * Consumes taps on a dialog case (so they never reach the scrim behind it) WITHOUT semantics: a
+ * `clickable {}` here would merge every control of the dialog into one button for TalkBack.
+ */
+internal fun Modifier.swallowTaps(): Modifier = pointerInput(Unit) { detectTapGestures { } }
+
+/** A tap on the scrim dismisses; like the swallow, no merged semantics (Back is the a11y path). */
+internal fun Modifier.tapToDismiss(onDismiss: () -> Unit): Modifier = pointerInput(onDismiss) { detectTapGestures { onDismiss() } }
 
 /**
  * `.icon-button`: a transparent 44dp control whose glyph takes the host's colour (the web's
@@ -229,7 +240,7 @@ fun FileBrowserFrame(
                 )
                 .clip(shape)
                 // The <dialog> swallows taps: only Back and Close dismiss it.
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {}),
+                .swallowTaps(),
         ) {
             BrowserHeader(state, narrow, studioPhone, onClose)
             Breadcrumbs(state, studioPhone)
@@ -842,7 +853,7 @@ fun NamePromptContent(
             onValueChange = onValueChange,
             singleLine = true,
             placeholder = "Name",
-            modifier = Modifier.fillMaxWidth().padding(top = LocalTetherTokens.current.css.spaceMd).semantics { contentDescription = "Name" },
+            modifier = Modifier.fillMaxWidth().padding(top = LocalTetherTokens.current.css.spaceMd),
         )
         if (error.isNotEmpty()) AlertText(error)
     }
@@ -922,7 +933,7 @@ fun DestinationPickerFrame(
                     if (t.studio) StudioDialog.shadows else listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowModal,
                 )
                 .clip(shape)
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {}),
+                .swallowTaps(),
         ) {
             val inlinePad = if (t.studio) (if (studioPhone) 20.dp else 28.dp) else t.css.spaceXl
             Row(

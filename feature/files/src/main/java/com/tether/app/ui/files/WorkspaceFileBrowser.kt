@@ -7,9 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -185,10 +183,10 @@ private fun SubDialog(onDismiss: () -> Unit, content: @Composable () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(dialogScrim(t))
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                .tapToDismiss(onDismiss),
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})) { content() }
+            Box(Modifier.swallowTaps()) { content() }
         }
     }
 }
