@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
 import androidx.core.view.WindowCompat
 
 /**
@@ -68,6 +67,17 @@ private fun interopScheme(t: TetherTokens): ColorScheme {
     )
 }
 
+/**
+ * Material3 interop typography (dialogs, text fields, menus that read MaterialTheme): the web
+ * roles, not Material's defaults. Tether components read [LocalTetherTypography] directly.
+ */
+internal fun materialTypography(t: TetherTypography): Typography = Typography(
+    bodyLarge = t.body,
+    bodyMedium = t.chatBody,
+    titleMedium = t.screenTitle,
+    labelLarge = t.keyLabel.style,
+)
+
 @Composable
 fun TetherTheme(
     choice: ThemeChoice = ThemeChoice.Default,
@@ -95,21 +105,16 @@ fun TetherTheme(
 
     val reduced = if (view.isInEditMode) false else remember { reducedMotion(context.contentResolver) }
 
-    val defaults = Typography()
-    val typography = Typography(
-        bodyLarge = defaults.bodyLarge.copy(fontFamily = Manrope, fontWeight = TetherWeights.body),
-        bodyMedium = defaults.bodyMedium.copy(fontFamily = Manrope, fontWeight = TetherWeights.body),
-        titleMedium = defaults.titleMedium.copy(fontFamily = Manrope, fontWeight = TetherWeights.strong),
-        labelLarge = defaults.labelLarge.copy(fontFamily = Manrope, fontWeight = TetherWeights.label),
-    )
+    val tetherType = typographyFor(skin)
 
     CompositionLocalProvider(
         LocalTetherTokens provides tokens,
+        LocalTetherTypography provides tetherType,
         LocalReducedMotion provides reduced,
     ) {
         MaterialTheme(
             colorScheme = interopScheme(tokens),
-            typography = typography,
+            typography = materialTypography(tetherType),
         ) {
             if (view.isInEditMode) content() else SystemBarBackdrop(skin.systemBarColor, content)
         }
