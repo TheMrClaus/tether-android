@@ -28,8 +28,11 @@ object ReleaseCheck {
             .url(url)
             .header("Accept", "application/vnd.github+json")
             .build()
+        // The API answers 200 directly; never follow a redirect off api.github.com (a 3xx
+        // just reads as "no answer"). T1.2 verifier finding.
+        val noRedirects = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
         try {
-            http.newCall(request).execute().use { response ->
+            noRedirects.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
                 val obj = TetherJson.parseToJsonElement(response.body.string()) as? JsonObject
                     ?: return@withContext null

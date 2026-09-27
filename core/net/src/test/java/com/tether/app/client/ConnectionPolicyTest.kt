@@ -122,4 +122,20 @@ class ConnectionPolicyTest {
             server.shutdown()
         }
     }
+
+    @Test
+    fun fetchLatestNeverFollowsARedirect() {
+        val server = MockWebServer()
+        // A redirect to a second path on the same server: if it were followed, the tag would parse.
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/elsewhere"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"tag_name":"v9.9.9"}"""))
+        server.start()
+        try {
+            val url = server.url("/repos/TheMrClaus/tether-android/releases/latest").toString()
+            assertNull(runBlocking { ReleaseCheck.fetchLatest(OkHttpClient(), url) })
+            assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
 }
