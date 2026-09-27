@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -54,9 +55,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
@@ -179,8 +182,6 @@ fun LogDialogFrame(
                 .testTag(LogDialogTags.Dialog)
                 .width(width)
                 .heightIn(max = maxHeight)
-                // A tap inside the case never reaches the backdrop.
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
                 .cssSurface(
                     shape, t.graphite,
                     if (studio) null else CssBorder(1.dp, t.keySide),
@@ -638,7 +639,8 @@ private fun LogRow(
             color = levelInk,
             style = cssText(type.ui, if (studio) 0.625f else 0.6f, 700, trackingEm = if (studio) 0f else 0.05f),
             maxLines = 1,
-            modifier = m.width(48.dp),
+            // `width: 3rem` scales with the font size; Studio's 48px does not.
+            modifier = m.width(if (studio) 48.dp else with(LocalDensity.current) { 48.sp.toDp() }),
         )
     }
     val body: @Composable (Modifier) -> Unit = { m ->
@@ -653,12 +655,12 @@ private fun LogRow(
     val radius = if (studio) 0.dp else t.radiusMd
     Box(
         modifier
-            .testTag(LogDialogTags.Row)
             .fillMaxWidth()
             .logRowEdges(t, first, last, radius, framed = !studio, tint)
             .padding(rowPadding)
             .padding(bottom = if (last) 0.dp else 1.dp)
             .clearAndSetSemantics {
+                testTag = LogDialogTags.Row
                 contentDescription = listOfNotNull(time, level, label, session, turn, detail.takeIf { it.isNotEmpty() }).joinToString(", ")
             },
     ) {
