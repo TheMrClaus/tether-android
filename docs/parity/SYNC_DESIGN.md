@@ -555,8 +555,8 @@ same commit.
      **Handover rule:** the socket is kept, so `onReady` does not run again. At the handover the client
      therefore attaches, via `afterSeqFor` (§3.1 rule 1a), every session with pending, staged or held
      input that was **not attached on this connection**. On each reply it runs promotion, then drain,
-     then the held-decision check, exactly as `onReady` plus `onSnapshot` would. Until a session's
-     `state` snapshot arrives, no frame goes out for its items.
+     then the held-decision check, exactly as `onReady` plus `onSnapshot` would. Until that session's
+     attach reply arrives (carrying `state` wherever rule 1a requires it), no frame goes out for its items.
   2. From `ready`: sessions where `lastSeq > cursor` (or all targets if `lastSeq` is absent, which means
      an older server), intersected with the **targets**: pinned, sessions with a mirror opened in the
      last 7 days, and sessions in the push scope. The cap is **8 per run**, lowered from 20. Each attach
