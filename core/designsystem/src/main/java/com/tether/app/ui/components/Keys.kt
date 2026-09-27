@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -101,6 +102,12 @@ fun TetherKey(
     wearPattern: KeyWear? = null,
     fixedVerb: Boolean = true,
     interactionSource: MutableInteractionSource? = null,
+    /** Null: the legend centred with `space-sm` gaps. T5.1: New session lays out `gap: space-md` from the start. */
+    contentArrangement: Arrangement.Horizontal? = null,
+    /** Null: `space-lg` inline padding (0 for an icon-only key). */
+    contentPadding: Dp? = null,
+    /** Content after the legend, e.g. New session's `<kbd>N</kbd>` cap (`margin-left: auto`). */
+    trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -185,9 +192,9 @@ fun TetherKey(
                     )
                 }
             }
-            .padding(horizontal = if (iconOnly) 0.dp else t.css.spaceLg),
+            .padding(horizontal = contentPadding ?: if (iconOnly) 0.dp else t.css.spaceLg),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),
+        horizontalArrangement = contentArrangement ?: Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),
     ) {
         if (icon != null) {
             Icon(icon, contentDescription = null, tint = look.ink, modifier = Modifier.size(iconSize))
@@ -201,5 +208,6 @@ fun TetherKey(
                 modifier = Modifier.clearAndSetSemantics { },
             )
         }
+        trailing?.invoke(this)
     }
 }

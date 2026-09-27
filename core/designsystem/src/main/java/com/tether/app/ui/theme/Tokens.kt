@@ -44,9 +44,15 @@ object TetherDimens {
 }
 
 @Immutable
-class TetherTokens(val skin: TetherSkin) {
-    /** Every generated token of this skin. */
-    val css: SkinTokens = skin.tokens
+class TetherTokens internal constructor(
+    val skin: TetherSkin,
+    /**
+     * Every generated token of this skin — or, inside a CSS scope that redeclares custom
+     * properties ([scoped], T5.1), the skin's tokens with that scope's values.
+     */
+    val css: SkinTokens,
+) {
+    constructor(skin: TetherSkin) : this(skin, skin.tokens)
 
     // Surfaces
     val mineral: Color = css.mineral
@@ -157,9 +163,12 @@ class TetherTokens(val skin: TetherSkin) {
      */
     val shadowElevation: Dp = css.shadowKey.filter { !it.inset }.getOrNull(1)?.offsetY ?: 0.dp
 
-    override fun equals(other: Any?): Boolean = other is TetherTokens && other.skin == skin
-    override fun hashCode(): Int = skin.hashCode()
-    override fun toString(): String = "TetherTokens(${skin.id})"
+    private val hash: Int = 31 * skin.hashCode() + css.hashCode()
+
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is TetherTokens && other.skin == skin && other.hash == hash && other.css == css)
+    override fun hashCode(): Int = hash
+    override fun toString(): String = if (css == skin.tokens) "TetherTokens(${skin.id})" else "TetherTokens(${skin.id}, scoped)"
 }
 
 private val tokensBySkin: Map<TetherSkin, TetherTokens> = TetherSkin.entries.associateWith(::TetherTokens)
