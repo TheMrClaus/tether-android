@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Program status | IN PROGRESS |
-| Current phase | Phase 0 — Bootstrap, baseline, parity matrix |
+| Current phase | Phases 0 + 2 CLOSED; Phase 1 (T1.5) and Phase 3 in progress |
 | PARITY_BASE (tether SHA) | `7d65611` (PROTOCOL_VERSION 128) |
 | App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
@@ -27,10 +27,10 @@
 **Next action:** Production runs tether `bde3cfa` (v129, floor 129). `main` speaks 129, so an APK release is
 possible when the owner asks. Release notes must cover: the Android 14 floor, Keystore-encrypted credentials, and
 that pre-T1.4 backups may still hold the old plaintext credential file.
-**Phase 0:** S0.4 VERIFIED (4 runs pixel-identical 360/360; the reference PNGs are pinned by
-`parity-corpus/screens/web/SHA256SUMS`). **S0.6 = tether PR [#198](https://github.com/TheMrClaus/tether/pull/198)**
-(`android-parity/S0` @ `4442954`), verifier running. Owner merges. Phase 0 closes once S0.6 is verified.
-In flight (≤4 agents): **T3.3** executor (from WIP `12398d9`), **T1.5** security-executor, **T3.5** DONE → verifier.
+**Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
+**[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
+In flight (≤4 agents): **T3.3** executor (from WIP `12398d9`), **T1.5** security-executor, **T3.5** DONE → verifier,
+**T13.0** executor (SYNC_DESIGN.md; doc-only gate exception).
 Next: T3.3 → verifier → **T3.4** gallery; T1.5 → verifier + security-reviewer; then Phase 4 (T4.1/T4.3).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
@@ -65,7 +65,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | VERIFIED | executor-S0.3 @ 2026-09-26 21:12 |  |  |
 | S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | VERIFIED | claude-main @ 2026-09-26 23:01 |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
-| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | DONE | claude-main @ 2026-09-27 08:54 |  |  |
+| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | VERIFIED | claude-main @ 2026-09-27 08:54 |  |  |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -174,7 +174,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 13 — Proper sync
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | TODO |  |  |  |
+| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | IN-PROGRESS | claude-main @ 2026-09-27 09:10 |  |  |
 | T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  |  |
 | T13.2 | Offline mode + stale indicators | TODO |  |  |  |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | From T1.3: PendingInput facade has no mention parameter; a queue item removed on another device can still be resent (web has the same gap);… |
@@ -240,6 +240,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Gate exception:** T1.5 (nodes) claimed while P0 is still open. It depends only on T1.1/T1.2 (verified). Routed to `security-executor` + security review, because `node-add` carries a peer credential bundle | Keep ≤4 lanes busy while S0.4/S0.6 close Phase 0 | claude-main (owner delegation) |
 | 2026-09-27 | S0.6 merge keeps only S0.2's anchored `/parity-corpus/` ignore rule and drops S0.5's unanchored one (`fa6807f`); `git check-ignore` confirms `scripts/parity-corpus/*.mjs` stays tracked | The unanchored rule hid S0.2's exporter modules | claude-main (owner delegation) |
 | 2026-09-27 | The 360 web reference PNGs (55 MB) are **not committed** to this repo. `tools/parity/sync-corpus.sh` copies them into a gitignored `parity-corpus/screens/web/`; the committed `manifest.json` + SHA256 list pins them. Per-surface montages (the DoD evidence) are committed under `docs/parity/screens/` | 55 MB per refresh would bloat history every catch-up; montages are a review aid, not a CI gate (PLAN §5.3) | claude-main (owner delegation) |
+| 2026-09-27 | **Closed epics P0 and P2** (`bd close --force`: the v1.3.0 guard counts `verified` children as open). P0 = 11/12 verified + T0.2 owner-deferred; P2 = 4/4 verified | Every child was verified by a separate actor (S0.4 and S0.6 today) | claude-main (owner delegation) |
+| 2026-09-27 | **Gate exception:** T13.0 (SYNC_DESIGN.md, doc only) started ahead of Phases 3–12 | It writes no code and touches no file another lane owns, so it fills the 4th slot without merge risk. T13.1+ stay gated on its plan-verifier review | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
