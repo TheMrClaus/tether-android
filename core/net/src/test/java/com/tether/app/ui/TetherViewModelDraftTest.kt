@@ -102,8 +102,12 @@ class TetherViewModelDraftTest {
         val backing = InMemoryDraftStore().apply { write("a", "stale") }
         val slow = object : DraftStore by backing {
             override suspend fun read(sessionId: String): String {
+                // Capture BEFORE waiting, like a real read that started before the user typed:
+                // it must deliver the old "stale" value late (verifier: reading after the gate
+                // returned the typed text and hid an overwrite bug).
+                val captured = backing.read(sessionId)
                 gate.await()
-                return backing.read(sessionId)
+                return captured
             }
         }
         val vm = vm(slow)
