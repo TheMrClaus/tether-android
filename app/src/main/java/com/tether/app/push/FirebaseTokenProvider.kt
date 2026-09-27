@@ -13,6 +13,13 @@ fun interface FirebaseTokenProvider {
     /** Returns the FCM registration token, or null when it could not be obtained. */
     suspend fun token(): String?
 
+    /**
+     * Logout: invalidate the current token everywhere, best-effort. A server
+     * that still holds it gets 404/410 on its next send and prunes the row.
+     * Never throws. Stubs default to doing nothing.
+     */
+    suspend fun delete() {}
+
     /** Production binding: delegates to [FirebaseMessaging.getInstance().token]. */
     companion object Default : FirebaseTokenProvider {
         // firebase-messaging 25.1.0 deprecated getToken/onNewToken in favour of
@@ -35,6 +42,17 @@ fun interface FirebaseTokenProvider {
             // caller surfaces "push not available" via the same `null` path the
             // unconfigured-server branch takes.
             null
+        }
+
+        // Deprecated alongside getToken (see above); same narrow suppression.
+        @Suppress("DEPRECATION")
+        override suspend fun delete() {
+            try {
+                Tasks.await(FirebaseMessaging.getInstance().deleteToken(), 10, TimeUnit.SECONDS)
+            } catch (_: Throwable) {
+                // Firebase not initialised, no Play services, offline: the DELETE
+                // to the server already went out; nothing else to do.
+            }
         }
     }
 }

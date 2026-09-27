@@ -55,7 +55,7 @@ class PushController(
         registrarFactory(PushRegistrar(settings, httpClient, tokenProvider, firebase))
     }
 
-    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) }
+    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar, tokenProvider::delete) }
 
     fun start() {
         // Bring FirebaseApp up from the last server config that worked, before
@@ -193,7 +193,11 @@ internal data class PushServerIdentity(val baseUrl: String, val credential: Cred
  * - A new server identity (sign-in, re-pair, server switch) is a full POST too.
  *   No identity (signed out, cookie login) calls nothing.
  */
-internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
+internal class PushSyncCoordinator(
+    private val registrar: PushRegistrar,
+    /** Logout: invalidate the FCM token everywhere (best-effort; see [FirebaseTokenProvider.delete]). */
+    private val deleteToken: suspend () -> Unit = {},
+) {
     private val mutex = Mutex()
     private var latest: PushSyncRequest? = null
     private var lastSyncKey: String? = null
@@ -212,6 +216,13 @@ internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
 
     suspend fun onLoggedOut(baseUrl: String, credential: Credential) = mutex.withLock {
         registrar.unregister(baseUrl, credential)
+        // Also kill the token itself: any other server that still holds it (a
+        // failed DELETE, an earlier pairing) prunes its row on the next send.
+        try {
+            deleteToken()
+        } catch (_: RuntimeException) {
+            // Best-effort by contract.
+        }
         lastSyncKey = null
         syncedServer = null
         needsFullSync = true

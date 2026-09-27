@@ -182,6 +182,34 @@ class PushSyncCoordinatorTest {
     }
 
     @Test
+    fun logoutDeletesTheRowThenTheTokenItself() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar, deleteToken = { registrar.calls += "deleteToken" })
+        coordinator.onRequest(request())
+        coordinator.onLoggedOut("https://a.tether.invalid/", Credential.DeviceToken("fake-device-token-a"))
+        assertEquals(listOf("POST attached [s1] [] syncHints=true", "DELETE logout", "deleteToken"), registrar.calls)
+    }
+
+    @Test
+    fun aFailingTokenDeleteDoesNotBreakLogout() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar, deleteToken = { throw IllegalStateException("no Firebase") })
+        coordinator.onRequest(request())
+        coordinator.onLoggedOut("https://a.tether.invalid/", Credential.DeviceToken("fake-device-token-a"))
+        coordinator.onRequest(request(server = null))
+        coordinator.onRequest(request())
+        assertEquals(
+            listOf("POST attached [s1] [] syncHints=true", "DELETE logout", "POST attached [s1] [] syncHints=true"),
+            registrar.calls,
+        )
+    }
+
+    @Test
+    fun theRealTokenDeleteNeverThrowsWithoutFirebase() = runBlocking {
+        FirebaseTokenProvider.Default.delete()
+    }
+
+    @Test
     fun withoutAPairedDeviceNothingIsCalled() = runBlocking {
         val registrar = RecordingRegistrar()
         val coordinator = PushSyncCoordinator(registrar)
