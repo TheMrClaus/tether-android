@@ -34,7 +34,10 @@ that pre-T1.4 backups may still hold the old plaintext credential file.
 security-reviewed) await merge (#199 also needs a deploy). Bead `ta-xax` needs an owner threat-model call: should a paired device be fully
 trusted apart from device management? (ws-browser navigate full-read SSRF, agents can reach the state dir.)
 **Merged today:** T3.5 (`b9f03a4`), T13.0 SYNC_DESIGN (`5b3781e`, approved after 3 plan-verifier rounds).
-In flight: **T3.3** DONE → verifier; **T1.5** fix round r2 DONE (`3c74686`, 1377 tests) → delta verifier + security re-review;
+**Release blocker:** `ta-s8q`: unsent turns for server A are replayed to server B after a sign-in switch (pre-existing, T1.3 area),
+to be scheduled right after T1.5 merges. No APK ships before it is fixed.
+In flight: **T3.3** r2 DONE (`e410cad`, CI green exact-match, 1485 tests) → verifier re-check; **T1.5** r3 (stop()/generation guard,
+send under lock, test gaps) after r2 passed verifier + security re-review;
 **S13.1** executor (tether `android-parity/S13.1`, PROTOCOL 129→130, part C in separate commits for owner OQ1).
 Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T1.5 merge → T13.1 (Room mirror, per SYNC_DESIGN).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
@@ -183,7 +186,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement r2 (SYNC_DESIGN §3.1 rule 1a): afterSeqFor(sessionId) returns null when the session holds a PendingStore record with trie… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
-| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | IN-PROGRESS | claude-main @ 2026-09-27 09:38 |  | design refinement r2: part C must also update lib/pending-input.mjs reconcileWithSnapshot to treat removedQueueIds as cleared (the web port… |
+| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | IN-PROGRESS | claude-main @ 2026-09-27 09:38 |  | done: A+B committed 0d9723c on android-parity/S13.1 (v130, lastSeq on ready/created/session, FcmSyncHinter + syncHints opt-in; unit 3520/35… |
 | T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | design refinement r3 (SYNC_DESIGN §6.2 step 1, R7): at the foreground handover (socket kept, no onReady), attach via afterSeqFor every sess… |
 | T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement r2: Clear cache also rotates the mirror data key (and rotation after 2^28 writes). |
 | T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement r2: the debug probe strips removedQueueIds until T13.3b lands, then demands exact equality; test both modes. |
@@ -258,6 +261,9 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | Sync: held approvals/answers stay in memory only, fingerprint-checked against a fresh snapshot; the background never sends, checks or discards them; saved-copy cards are disabled ("Connect to answer") | Approvals are operator-only; never replay stale consent (§4.2, §5.4) | claude-main (owner delegation) |
 | 2026-09-27 | Sync: offline prompts older than 10 min need an explicit "Send now"; a session with `tries>0` unsent input always attaches without afterSeq (rule 1a), including at the background→foreground handover | Never auto-retry a turn; only a snapshot with state authorises redelivery, as on the web (§3.1, §5.3) | claude-main (owner delegation) |
 | 2026-09-27 | Sync: the `ready` re-attach is capped (open + pending + pinned + 10 most recent); background runs attach at most 8 sessions; new task **T13.3b** (`ta-srn`) ports S13.1-C after it deploys | Server cost per attach and the 5 MB mobile-data budget; S13.1-C's port needed an owner (§3.1, §6) | claude-main (owner delegation) |
+| 2026-09-27 | Layout class cutoff = `WindowSizeClass` expanded width (**840dp**), per PLAN D10, not the web's 768px breakpoint (`LayoutClass.kt`, T3.3). 768–839dp windows get the phone layout | D10 names WindowSizeClass; it keeps foldables/split-screen on the phone layout until they are truly wide | claude-main (owner delegation) |
+| 2026-09-27 | S13.1 part C (`removedQueueIds`, changes the web's SessionProjection) ships in the **same PR as separate trailing commits**, flagged separable for the owner's OQ1 call at review | One PROTOCOL bump either way; the owner can drop part C without a re-bump | claude-main (owner delegation) |
+| 2026-09-27 | `ta-s8q` (cross-server replay of unsent turns) is **release-blocking** for the next APK | It leaks prompt content to a different server | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
