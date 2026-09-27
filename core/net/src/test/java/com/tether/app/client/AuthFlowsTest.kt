@@ -314,6 +314,37 @@ class AuthFlowsTest {
         awaitValue({ h.settings.credential.first() }) { it == null }
     }
 
+    /**
+     * T1.4 final verify: `start()` must take the URL and credential from ONE
+     * [SettingsStore.session] read. This store's `session()` is consistent (server B with
+     * B's token) but its raw flows are torn (B's URL, A's token), as a half-finished server
+     * switch would look to two separate reads. Only the pair may ever reach the server.
+     */
+    @Test
+    fun startPresentsTheSessionPairNeverSeparatelyReadFlows() {
+        h.server.start()
+        val consistent = InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_B")
+        val torn = object : SettingsStore by consistent {
+            override val deviceToken = kotlinx.coroutines.flow.flowOf<String?>("tthr_A")
+            override val cookie = kotlinx.coroutines.flow.flowOf<String?>(null)
+            override val credential = kotlinx.coroutines.flow.flowOf<Credential?>(Credential.DeviceToken("tthr_A"))
+        }
+        h.settings = consistent
+        h.client = RealTetherClient(
+            settings = torn,
+            httpClient = OkHttpClient(),
+            scope = h.scope,
+            clock = { h.now.get() },
+            backoff = testBackoff(),
+            sweepIntervalMs = 3_600_000,
+            scheduler = h.scheduler,
+        )
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        h.client.start()
+        val probe = take()
+        assertEquals("Bearer tthr_B", probe.getHeader("Authorization"))
+    }
+
     @Test
     fun gatewayRefusalKeepsTheCredentialAndDoesNotLoop() {
         newClient(token = "tthr_ok")
