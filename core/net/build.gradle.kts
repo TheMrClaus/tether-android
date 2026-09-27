@@ -28,4 +28,6 @@ tasks.withType<Test>().configureEach {
     val corpusDir = rootProject.layout.projectDirectory.dir("parity-corpus")
     systemProperty("parity.corpus", corpusDir.asFile.absolutePath)
     inputs.dir(corpusDir.dir("helpers")).withPropertyName("parityHelperCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
+    // T5.1: SidebarSyncTest re-encodes the sidebar frames against parity-corpus/wire.
+    inputs.dir(corpusDir.dir("wire")).withPropertyName("parityWireCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
 }
