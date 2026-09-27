@@ -816,7 +816,8 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions) {
             .fillMaxWidth()
             .heightIn(min = 2.75f.rem)
             .then(
-                if (block.isCurrent) Modifier.background(t.violetWash, shape).border(1.dp, t.violetStrong, shape)
+                // Studio zeroes the header's border width (studio.css 318); the current wash stays.
+                if (block.isCurrent) Modifier.background(t.violetWash, shape).border(1.dp, if (studio) Color.Transparent else t.violetStrong, shape)
                 else Modifier.border(1.dp, Color.Transparent, shape),
             ),
         verticalAlignment = Alignment.CenterVertically,

@@ -214,10 +214,10 @@ fun SidebarUnderTest(
                         }
                         .padding(end = if (studio) 0.dp else 1.dp)
                         .padding(
-                            start = if (studio) 14.dp else 16.dp,
-                            end = if (studio) 14.dp else 16.dp,
-                            top = if (studio) (if (phone) 16.dp else 21.6.dp) else 16.dp,
-                            bottom = if (studio) 12.dp else if (phone) 16.dp else 8.dp,
+                            start = if (studio) 14.dp else t.css.spaceMd,
+                            end = if (studio) 14.dp else t.css.spaceMd,
+                            top = if (studio) (if (phone) 16.dp else 21.6.dp) else t.css.spaceMd,
+                            bottom = if (studio) 12.dp else if (phone) t.css.spaceMd else t.css.spaceSm,
                         ),
                 ) {
                     SessionSidebar(state, actions, layout = layout, seed = seed)

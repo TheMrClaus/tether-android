@@ -399,9 +399,14 @@ internal fun SessionRow(
                             entry.history?.let(actions.onReopenHistory)
                         }
                     }
-                    .padding(top = 0.4f.rem, bottom = 0.4f.rem, end = t.css.spaceSm, start = if (studio) 0.25f.rem else 0.dp),
+                    // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
+                    .then(
+                        if (studio) Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem)
+                        else Modifier.padding(top = 0.4f.rem, bottom = 0.4f.rem, end = t.css.spaceSm),
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
+                // The grid gap: space-md on a phone, space-sm from 48rem (globals.css 4052-4058).
+                horizontalArrangement = Arrangement.spacedBy(if (phone) t.css.spaceMd else t.css.spaceSm),
             ) {
                 Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(if (studio) 0.2f.rem else 0.25f.rem)) {
                     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
