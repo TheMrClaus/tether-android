@@ -15,6 +15,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -86,7 +87,7 @@ class DataStoreSettingsTest {
         val first = open()
         assertEquals(Credential.Cookie(cookie), first.store.credential.first())
         assertEquals("https://tether.example.com", first.store.baseUrl.first())
-        assertEquals("{\"records\":[]}", first.store.readPendingInput())
+        assertEquals("{\"records\":[]}", first.store.readPendingInput(LEGACY_ORIGIN))
         first.close()
 
         val legacy = raw(settingsFile) { it.data.first() }
@@ -231,7 +232,7 @@ class DataStoreSettingsTest {
     fun clearCredentialKeepsTheServerUrlAndClearDropsEverything() = runBlocking {
         val first = open()
         first.store.setServer("https://a.example", Credential.Cookie(cookie))
-        first.store.writePendingInput("{}")
+        first.store.writePendingInput(ORIGIN_A, "{}")
         first.store.clearCredential()
         assertNull(first.store.credential.first())
         assertEquals("https://a.example", first.store.baseUrl.first())
@@ -241,7 +242,7 @@ class DataStoreSettingsTest {
         assertEquals("https://a.example", second.store.baseUrl.first())
         second.store.clear()
         assertNull(second.store.baseUrl.first())
-        assertNull(second.store.readPendingInput())
+        assertNull(second.store.readPendingInput(ORIGIN_A))
         second.close()
     }
 
@@ -622,19 +623,19 @@ class DataStoreSettingsTest {
         val next = """{"v":2,"records":[],"cleared":["k1"]}"""
         val first = open()
         first.store.setServer("https://a.example", Credential.Cookie(cookie))
-        first.store.writePendingInput(committed)
+        first.store.writePendingInput(ORIGIN_A, committed)
         first.close()
 
         // The killed write: the scratch file holds a prefix of the next payload.
         File(tmp.root, DataStoreSettings.SETTINGS_FILE + ".tmp").writeBytes(next.toByteArray().copyOf(next.length / 2))
         val second = open()
-        assertEquals(committed, second.store.readPendingInput())
+        assertEquals(committed, second.store.readPendingInput(ORIGIN_A))
         assertEquals(Credential.Cookie(cookie), second.store.credential.first())
         // ...and the next complete write replaces it whole.
-        second.store.writePendingInput(next)
+        second.store.writePendingInput(ORIGIN_A, next)
         second.close()
         val third = open()
-        assertEquals(next, third.store.readPendingInput())
+        assertEquals(next, third.store.readPendingInput(ORIGIN_A))
         third.close()
     }
 
@@ -665,7 +666,7 @@ class DataStoreSettingsTest {
         return Logged(DataStoreSettings(log, credentials, AesGcmCredentialCipher(keys)), log, job)
     }
 
-    private val pendingKey = stringPreferencesKey("pending_input")
+    private val pendingKey = stringPreferencesKey("pending_input|$ORIGIN_A")
     private val payloadA = """{"v":2,"records":[{"key":"k1","kind":"send","sessionId":"s1","text":"a","sentAt":0,"tries":1,"firstQueuedAt":1}],"cleared":[]}"""
     private val payloadB = """{"v":2,"records":[{"key":"k2","kind":"send","sessionId":"s1","text":"b","sentAt":0,"tries":0,"firstQueuedAt":2}],"cleared":["k1"]}"""
 
@@ -673,9 +674,9 @@ class DataStoreSettingsTest {
     @Test
     fun aPendingWriteIsOneCommitOfTheCompleteValue() = runBlocking {
         val opened = openLogged()
-        opened.store.writePendingInput(payloadA)
+        opened.store.writePendingInput(ORIGIN_A, payloadA)
         val before = opened.log.commits.size
-        opened.store.writePendingInput(payloadB)
+        opened.store.writePendingInput(ORIGIN_A, payloadB)
         val steps = opened.log.commits.drop(before).map { it[pendingKey] }
         assertEquals("one logical change, one commit: $steps", listOf(payloadB), steps)
         assertTrue(opened.log.commits.all { it[pendingKey] == payloadA || it[pendingKey] == payloadB })
@@ -688,15 +689,116 @@ class DataStoreSettingsTest {
         for (k in 1..3) {
             settingsFile.delete()
             val opened = openLogged()
-            opened.store.writePendingInput(payloadA)
+            opened.store.writePendingInput(ORIGIN_A, payloadA)
             opened.log.dieAt = opened.log.commits.size + k
-            runCatching { opened.store.writePendingInput(payloadB) }
+            runCatching { opened.store.writePendingInput(ORIGIN_A, payloadB) }
             opened.job.cancelAndJoin()
             val reloaded = open()
-            val value = reloaded.store.readPendingInput()
+            val value = reloaded.store.readPendingInput(ORIGIN_A)
             assertTrue("killed at commit $k of the write: reloaded $value", value == payloadA || value == payloadB)
             reloaded.close()
         }
+    }
+
+    // ------------------------------------------------------------------
+    // ta-s8q: one durable-send slot per server origin; the 0.6.0 single slot
+    // ------------------------------------------------------------------
+
+    @Test
+    fun serverOriginIgnoresCaseDefaultPortAndTrailingSlashButNotAnotherPort() {
+        assertEquals("https://host:443", serverOrigin("https://Host:443/"))
+        assertEquals(serverOrigin("https://Host:443/"), serverOrigin("https://host"))
+        assertEquals(serverOrigin("https://host"), serverOrigin("https://HOST/some/path?q=1"))
+        assertNotEquals(serverOrigin("https://host"), serverOrigin("https://host:8443"))
+        assertNotEquals(serverOrigin("https://host"), serverOrigin("http://host"))
+        assertNotEquals(serverOrigin("https://host"), serverOrigin("https://other"))
+        assertEquals(PendingSlots.keyFor("https://host:443"), PendingSlots.keyFor(serverOrigin("https://Host/")!!))
+    }
+
+    @Test
+    fun aSlotIsOnlyEverNamedByACanonicalOrigin() {
+        for (bad in listOf("https://Host", "https://host", "https://host:443/", "host", "")) {
+            assertTrue(bad, runCatching { PendingSlots.keyFor(bad) }.isFailure)
+        }
+    }
+
+    @Test
+    fun eachOriginHasItsOwnSlot() = runBlocking {
+        val first = open()
+        first.store.setServer("https://a.example", Credential.Cookie(cookie))
+        first.store.writePendingInput(ORIGIN_A, payloadA)
+        first.store.setServer("https://b.example", Credential.Cookie(cookie))
+        // The URL moved: B's slot is empty, A's is untouched.
+        assertNull(first.store.readPendingInput(ORIGIN_B))
+        first.store.writePendingInput(ORIGIN_B, payloadB)
+        first.close()
+        val second = open()
+        assertEquals(payloadA, second.store.readPendingInput(ORIGIN_A))
+        assertEquals(payloadB, second.store.readPendingInput(ORIGIN_B))
+        // A full clear drops every server's slot.
+        second.store.clear()
+        assertNull(second.store.readPendingInput(ORIGIN_A))
+        assertNull(second.store.readPendingInput(ORIGIN_B))
+        second.close()
+        val left = raw(settingsFile) { it.data.first() }.asMap().keys.map { it.name }
+        assertTrue("pending slots left after clear: $left", left.none { PendingSlots.isPendingKey(it) })
+    }
+
+    private suspend fun writeLegacyPending(baseUrl: String?, payload: String) = raw(settingsFile) { ds ->
+        ds.edit {
+            if (baseUrl != null) it[stringPreferencesKey("base_url")] = baseUrl
+            it[stringPreferencesKey(PendingSlots.LEGACY_KEY)] = payload
+        }
+    }
+
+    @Test
+    fun theLegacySlotBelongsToTheServerConfiguredNextToIt() = runBlocking {
+        writeLegacyPending("https://A.example/", payloadA)
+        val store = open()
+        assertEquals(payloadA, store.store.readPendingInput(ORIGIN_A))
+        assertNull(store.store.readPendingInput(ORIGIN_B))
+        assertNull(store.store.readUnattributedPendingInput())
+        store.close()
+        val prefs = raw(settingsFile) { it.data.first() }
+        assertNull("the legacy slot is moved, not copied", prefs[stringPreferencesKey(PendingSlots.LEGACY_KEY)])
+    }
+
+    @Test
+    fun aSignInToAnotherServerBeforeFirstAccessStillAttributesTheLegacySlotToTheOldOne() = runBlocking {
+        writeLegacyPending("https://a.example", payloadA)
+        val store = open()
+        // The very first thing this process does is sign in to B.
+        store.store.setServer("https://b.example", Credential.Cookie(cookie))
+        assertNull(store.store.readPendingInput(ORIGIN_B))
+        assertEquals(payloadA, store.store.readPendingInput(ORIGIN_A))
+        store.close()
+    }
+
+    @Test
+    fun aLegacySlotWithNoServerIsKeptUnattributedAndNeverReadAsAServers() = runBlocking {
+        writeLegacyPending(baseUrl = null, payloadA)
+        val store = open()
+        assertEquals(payloadA, store.store.readUnattributedPendingInput())
+        store.store.setServer("https://a.example", Credential.Cookie(cookie))
+        assertNull(store.store.readPendingInput(ORIGIN_A))
+        assertEquals(payloadA, store.store.readUnattributedPendingInput())
+        store.close()
+    }
+
+    @Test
+    fun aLegacySlotNeverOverwritesAnExistingSlot() = runBlocking {
+        // Only possible after a downgrade and a second upgrade.
+        raw(settingsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey("base_url")] = "https://a.example"
+                it[stringPreferencesKey(PendingSlots.keyFor(ORIGIN_A))] = payloadB
+                it[stringPreferencesKey(PendingSlots.LEGACY_KEY)] = payloadA
+            }
+        }
+        val store = open()
+        assertEquals(payloadB, store.store.readPendingInput(ORIGIN_A))
+        store.close()
+        assertEquals(payloadA, raw(settingsFile) { it.data.first() }[stringPreferencesKey(PendingSlots.LEGACY_KEY)])
     }
 
     /** Sealing always fails (Keystore unavailable); opening never succeeds either. */
@@ -704,5 +806,11 @@ class DataStoreSettingsTest {
         override fun seal(plaintext: ByteArray, aad: ByteArray): ByteArray = throw CredentialCipherException("keystore unavailable")
         override fun open(blob: ByteArray, aad: ByteArray): ByteArray = throw CredentialCipherException("keystore unavailable")
         override fun destroyKey() = Unit
+    }
+
+    private companion object {
+        const val ORIGIN_A = "https://a.example:443"
+        const val ORIGIN_B = "https://b.example:443"
+        const val LEGACY_ORIGIN = "https://tether.example.com:443"
     }
 }
