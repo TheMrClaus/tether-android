@@ -57,15 +57,15 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T0.6 | Dependency refresh: every toolchain, plugin, library and CI action to its latest stable (owner request) | VERIFIED | executor-T0.6 @ 2026-09-26 22:17 | `3541b4b`, `508198c` · `bd show` |  |
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
-| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | IN-PROGRESS | executor-S0.3 @ 2026-09-26 21:12 |  | Reopened after VERIFY-FAIL (nondeterministic ambient frames). Executor fixing: classify ambient pushes out of scenario ordering; acceptance… |
-| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  |  |
+| S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | VERIFIED | executor-S0.3 @ 2026-09-26 21:12 |  |  |
+| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  | done: shared scripts/parity-harness.mjs (boot/login/fixtures, S0.3 tests green), parity-clock preload, parity-seed.mjs (8 phases, ~30 scena… |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | TODO |  |  |  |
+| S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | IN-PROGRESS | claude-main @ 2026-09-27 00:09 |  | GATE EXCEPTION (claude-main, on owner's overnight delegation): started before Phase 0 closes — S1.1 depends on no Phase-0 artifact (corpora… |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S0.3: ServerMessage 'approval' and 'approval_resolved' are declared in lib/protocol.ts but never sent by server.mjs at 7d65611 (approv… |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.6 security review: reconnect loop has a fixed 1.8s delay (RealTetherClient.kt:384-385) — the new connection manager needs real back… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
