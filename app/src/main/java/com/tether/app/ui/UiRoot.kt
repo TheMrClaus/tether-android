@@ -34,6 +34,7 @@ import com.tether.app.ui.localnet.LocalNetworkPhase
 import com.tether.app.ui.localnet.LocalNetworkSource
 import com.tether.app.ui.localnet.rememberLocalNetworkPrompt
 import com.tether.app.ui.prefs.LoginVariant
+import com.tether.app.ui.prefs.DataStoreDraftStore
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
@@ -48,7 +49,9 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     val prefs = remember { UiPrefs(context) }
     val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
 
-    val vm: TetherViewModel = viewModel(factory = remember(client) { TetherViewModelFactory(client) })
+    val vm: TetherViewModel = viewModel(
+        factory = remember(client) { TetherViewModelFactory(client, DataStoreDraftStore(context)) },
+    )
 
     val configured by client.configured.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()

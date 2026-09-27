@@ -74,6 +74,7 @@ import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.WaitingPingDot
+import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -108,8 +109,8 @@ fun SessionDrawer(
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val currentWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
     val directories by vm.client.directories.collectAsStateWithLifecycle()
-    val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = false)
-    val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
+    val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default.showEndedSessions)
+    val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default.showThinking)
     val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
     val pinnedProjects by prefs.pinnedProjects.collectAsStateWithLifecycle(initialValue = emptyList())
 

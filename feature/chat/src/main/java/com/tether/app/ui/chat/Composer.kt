@@ -33,7 +33,9 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -82,6 +84,7 @@ import com.tether.app.ui.util.spinnerWordFor
 import com.tether.app.ui.util.tokenLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -113,9 +116,23 @@ fun Composer(
     onRequestControls: () -> Unit,
     modifier: Modifier = Modifier,
     onAttachError: (String) -> Unit = {},
+    initialDraft: String? = null,
+    awaitDraft: suspend () -> String = { "" },
+    onDraftChange: (String) -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
-    var draft by remember(session?.id) { mutableStateOf("") }
+    // T2.3: the editor keeps its own state (no async round-trip under the cursor). It opens on
+    // this session's draft when already loaded ([initialDraft]), otherwise hydrates once the
+    // stored one is read ([awaitDraft]) unless the operator already started typing, and mirrors
+    // every change back (`tether:draft:<id>`; "" after a send removes it).
+    var draft by remember(session?.id) { mutableStateOf(initialDraft ?: "") }
+    val currentOnDraftChange by rememberUpdatedState(onDraftChange)
+    val currentAwaitDraft by rememberUpdatedState(awaitDraft)
+    LaunchedEffect(session?.id) {
+        launch { snapshotFlow { draft }.drop(1).collect { currentOnDraftChange(it) } }
+        val stored = currentAwaitDraft()
+        if (draft.isEmpty() && stored.isNotEmpty()) draft = stored
+    }
     var picked by remember(session?.id) { mutableStateOf(listOf<PickedAttachment>()) }
 
     val activeTurn = projection?.activeTurnId?.let { projection.turnsById[it] }

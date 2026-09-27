@@ -64,6 +64,7 @@ import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.WaitingPingDot
+import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -151,7 +152,9 @@ fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
-    val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = true)
+    val showThinking by prefs.showThinking.collectAsStateWithLifecycle(
+        initialValue = TetherPreferences.Default.showThinking,
+    )
     val controlsMap by vm.client.sessionControls.collectAsStateWithLifecycle()
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
@@ -253,6 +256,10 @@ fun ChatScreen(
             onSetModel = { model -> session?.let { vm.client.setModel(it.id, model) } ?: false },
             onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
             onAttachError = { message -> vm.reportLocalError(message) },
+            // A plain read, not a subscription: only the opening value matters here.
+            initialDraft = session?.let { vm.drafts.value[it.id] },
+            awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
+            onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
         )
     }
 }

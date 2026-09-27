@@ -10,16 +10,26 @@ import com.tether.app.client.LogoutResult
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.ui.prefs.DraftStore
+import com.tether.app.ui.prefs.InMemoryDraftStore
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
  * Thin view-model over [TetherClient]: selection, create-then-select, the
- * event-anchored clock, and the error toast/log.
+ * event-anchored clock, per-session composer drafts, and the error toast/log.
  */
-class TetherViewModel(val client: TetherClient) : ViewModel() {
+class TetherViewModel(
+    val client: TetherClient,
+    private val draftStore: DraftStore = InMemoryDraftStore(),
+    private val monotonicClock: () -> Long = SystemClock::elapsedRealtime,
+) : ViewModel() {
 
     private val _selectedSessionId = MutableStateFlow<String?>(null)
     val selectedSessionId: StateFlow<String?> = _selectedSessionId.asStateFlow()
@@ -46,6 +56,39 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
         _selectedRunIdBySession.value = _selectedRunIdBySession.value + (sessionId to runId)
     }
 
+    /**
+     * Unsent composer text per session (T2.3; the web's `tether:draft:<id>`, chat-view.tsx:
+     * 1561-1584). A session is present once its stored draft has been loaded ([loadDraft]) or
+     * the operator has typed; absent means "not loaded yet". Every change is written through
+     * to [draftStore], so a draft survives a session switch and process death.
+     */
+    private val _drafts = MutableStateFlow<Map<String, String>>(emptyMap())
+    val drafts: StateFlow<Map<String, String>> = _drafts.asStateFlow()
+    private val draftLoads = HashSet<String>()
+    private val draftWrites = Channel<Pair<String, String>>(Channel.UNLIMITED)
+
+    /** Load [sessionId]'s stored draft once; never overwrites text typed meanwhile. */
+    fun loadDraft(sessionId: String) {
+        if (!draftLoads.add(sessionId) || sessionId in _drafts.value) return
+        viewModelScope.launch {
+            val stored = draftStore.read(sessionId)
+            _drafts.update { if (sessionId in it) it else it + (sessionId to stored) }
+        }
+    }
+
+    /** [sessionId]'s draft once loaded (immediately if it already is). */
+    suspend fun awaitDraft(sessionId: String): String {
+        loadDraft(sessionId)
+        return _drafts.mapNotNull { it[sessionId] }.first()
+    }
+
+    /** The composer's text changed; "" (sent or cleared) removes the stored draft, like the web. */
+    fun setDraft(sessionId: String, text: String) {
+        if (_drafts.value[sessionId] == text) return
+        _drafts.update { it + (sessionId to text) }
+        draftWrites.trySend(sessionId to text)
+    }
+
     /** Errors seen this connection, newest last (topbar badge + log dialog). */
     val errorLog = mutableStateListOf<String>()
 
@@ -70,6 +113,17 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
         viewModelScope.launch {
             client.sessions.collect { list -> onSessions(list) }
         }
+        // One ordered writer: a burst of keystrokes collapses to the latest text per session.
+        viewModelScope.launch {
+            for (first in draftWrites) {
+                val latest = linkedMapOf(first)
+                while (true) {
+                    val next = draftWrites.tryReceive().getOrNull() ?: break
+                    latest[next.first] = next.second
+                }
+                for ((sessionId, text) in latest) draftStore.write(sessionId, text)
+            }
+        }
         viewModelScope.launch {
             client.errors.collect { message ->
                 errorLog.add(message)
@@ -80,7 +134,7 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
     }
 
     private fun onSessions(list: List<AgentSession>) {
-        val mono = SystemClock.elapsedRealtime()
+        val mono = monotonicClock()
         for (session in list) {
             val existing = anchors[session.id]
             if (existing == null || session.updatedAt > existing.serverTs) {
@@ -121,11 +175,12 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
     fun serverNow(sessionId: String?): Long {
         val anchor = sessionId?.let { anchors[it] } ?: globalAnchor
         ?: return System.currentTimeMillis()
-        return anchor.serverTs + (SystemClock.elapsedRealtime() - anchor.monotonicMs)
+        return anchor.serverTs + (monotonicClock() - anchor.monotonicMs)
     }
 
     fun selectSession(id: String) {
         _selectedSessionId.value = id
+        loadDraft(id)
         client.attach(id)
     }
 
@@ -210,7 +265,10 @@ fun logoutNoticeFor(result: LogoutResult): String? = when (result) {
             "until it expires or you sign it out from a browser."
 }
 
-class TetherViewModelFactory(private val client: TetherClient) : ViewModelProvider.Factory {
+class TetherViewModelFactory(
+    private val client: TetherClient,
+    private val draftStore: DraftStore = InMemoryDraftStore(),
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client, draftStore) as T
 }
