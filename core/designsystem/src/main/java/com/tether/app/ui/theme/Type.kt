@@ -47,7 +47,10 @@ val JetBrainsMono: FontFamily = variableFamily(R.font.jetbrains_mono_variable, J
 /**
  * Legacy weight aliases used by the pre-T3.2 screens. New code should take a role from
  * [TetherTypography] (via [LocalTetherTypography]) instead; these stay so existing UI keeps
- * compiling and looking the same until each screen's parity task migrates it.
+ * compiling until each screen's parity task migrates it. Note: screens are NOT pixel-identical to
+ * pre-T3.2 — every `Text` without an explicit style now inherits the web body role (weight 400,
+ * CSS-style line height, no Material tracking) via the M3 typography mapping, a deliberate move
+ * toward the web (T3.2 verifier).
  */
 object TetherWeights {
     val body = FontWeight(500)
