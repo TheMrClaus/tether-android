@@ -42,7 +42,7 @@ object FileKinds {
     fun previewKind(entry: WorkspaceFileEntry): PreviewKind = previewKind(entry.name)
 
     /**
-     * Native divergence: the app has no SVG renderer (a WebView is not allowed, and a script-free
+     * Native divergence: the app has no SVG renderer (web views are not allowed, and a script-free
      * SVG rasteriser is a dependency this task does not add), so SVG shows the "no preview here"
      * panel; every other image kind is decoded as a bitmap.
      */
