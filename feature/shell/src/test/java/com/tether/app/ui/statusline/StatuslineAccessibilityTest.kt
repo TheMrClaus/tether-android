@@ -3,6 +3,7 @@ package com.tether.app.ui.statusline
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsToggleable
@@ -74,7 +75,7 @@ class StatuslineAccessibilityTest {
         rule.setContent { TetherTheme { SessionDial(BoardNow - 540_000, null, active = true, clock = { now }) } }
         rule.onNodeWithContentDescription("Session elapsed time 00:09:00").assertExists()
         now += 2_000
-        rule.mainClock.advanceTimeBy(1_000)
+        rule.mainClock.advanceTimeBy(1_100) // the 1s interval, plus the frame that recomposes
         rule.onNodeWithContentDescription("Session elapsed time 00:09:02").assertExists()
     }
 
