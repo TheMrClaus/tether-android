@@ -68,6 +68,7 @@ tasks.withType<Test>().configureEach {
 dependencies {
     // ThemeChoice (the persisted theme preference) is part of TetherTheme's API.
     api(project(":core:data"))
+    api(libs.lucide.icons)
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
