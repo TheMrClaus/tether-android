@@ -1,280 +1,609 @@
 package com.tether.app.ui.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.tether.app.ui.theme.JetBrainsMono
+import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.TetherExpandableBlock
+import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.hardShadow
+import com.tether.app.ui.components.currentLayoutClass
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
-import com.tether.app.ui.theme.Manrope
-import com.tether.app.ui.theme.TetherDimens
+import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.TetherWeights
+import com.tether.app.ui.theme.TetherTypography
+import kotlinx.coroutines.delay
+import kotlin.math.max
 
 /**
- * Compact hand-rolled markdown renderer for finished agent messages.
+ * T6.1: renders the [parseMarkdown] AST the way the web paints `components/markdown.tsx` with the
+ * `.md-*` rules of app/globals.css (4911-5047) — `md-body` inside a bubble or a thinking body.
  *
- * Supported subset: paragraphs, ATX headings (#, ##, ### -> w680), unordered
- * (-, *) and ordered (1.) lists, fenced code blocks (``` on mineral-deep),
- * `inline code` chips on a tint, **bold**, *italic* / _italic_, [links](url)
- * (violet, underlined, opened via LocalUriHandler), and > blockquotes.
- * Not supported: tables, images, nested lists, setext headings, HTML.
+ * Box model: every block carries its CSS margins in em of its own font; adjacent vertical margins
+ * collapse (the larger wins), `.md-body > :first-child` has no top margin and `:last-child` no
+ * bottom margin — the same arithmetic the browser does. A list's first/last `li` margin collapses
+ * through the `ol` (it has no padding or border), so a list's outer margins are max(li, ol).
  */
 
-internal sealed interface MdBlock {
-    data class Paragraph(val text: String) : MdBlock
-    data class Heading(val level: Int, val text: String) : MdBlock
-    data class Code(val code: String) : MdBlock
-    data class Bullets(val ordered: Boolean, val items: List<String>) : MdBlock
-    data class Quote(val text: String) : MdBlock
+/** Tag for the inline-code ranges whose rounded `--tint-md` background [MdText] paints. */
+private const val CODE_TAG = "md-code"
+
+/** `.md-code { padding: 0.05rem 0.35rem }`. */
+private const val CODE_PAD_X_REM = 0.35f
+private const val CODE_PAD_Y_REM = 0.05f
+
+/** JetBrains Mono's advance is exactly 0.6em, so a NBSP at this size is 0.35rem wide. */
+private val CODE_PAD_FONT_SIZE = (CODE_PAD_X_REM * TetherTypography.SP_PER_REM / 0.6f).sp
+
+/** JetBrains Mono hhea metrics (ascender 1020, descender 300 per 1000): the code span's box. */
+private const val MONO_ASCENT = 1.02f
+private const val MONO_DESCENT = 0.30f
+
+/** CSS `font-weight: bolder` (CSS Fonts 4 §2.2 table). */
+internal fun bolder(weight: Int): Int = when {
+    weight < 350 -> 400
+    weight < 550 -> 700
+    else -> 900
 }
 
-internal fun parseMarkdown(text: String): List<MdBlock> {
-    val blocks = mutableListOf<MdBlock>()
-    val lines = text.lines()
-    var i = 0
-    val paragraph = StringBuilder()
+/** `copied` resets after this long (markdown.tsx:54). */
+internal const val COPIED_RESET_MS = 1500L
 
-    fun flushParagraph() {
-        if (paragraph.isNotBlank()) blocks.add(MdBlock.Paragraph(paragraph.toString().trim()))
-        paragraph.setLength(0)
-    }
+/**
+ * [nodes] as an AnnotatedString: `<strong>` = bolder, `<em>` = (synthesised) italic, `.md-code`
+ * mono 0.85em with a NBSP pad each side (its background is painted by [MdText]), links violet +
+ * underlined and opened through [onLink] (a Custom Tab, never a WebView).
+ */
+internal fun inlineAnnotated(
+    nodes: List<MdInline>,
+    t: TetherTokens,
+    type: TetherTypography,
+    baseWeight: Int,
+    onLink: (String) -> Unit,
+): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink) }
 
-    while (i < lines.size) {
-        val line = lines[i]
-        val trimmed = line.trimEnd()
-        when {
-            trimmed.trimStart().startsWith("```") -> {
-                flushParagraph()
-                val code = StringBuilder()
-                i += 1
-                while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
-                    if (code.isNotEmpty()) code.append('\n')
-                    code.append(lines[i])
-                    i += 1
-                }
-                blocks.add(MdBlock.Code(code.toString()))
+private fun AnnotatedString.Builder.appendInline(
+    nodes: List<MdInline>,
+    t: TetherTokens,
+    type: TetherTypography,
+    weight: Int,
+    onLink: (String) -> Unit,
+) {
+    for (node in nodes) {
+        when (node) {
+            is MdInline.Text -> append(node.text)
+            is MdInline.Code -> {
+                val start = length
+                withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
+                withStyle(type.codeInline) { append(node.text) }
+                withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
+                addStringAnnotation(CODE_TAG, node.text, start, length)
             }
-            trimmed.matches(Regex("^#{1,3}\\s+.*")) -> {
-                flushParagraph()
-                val level = trimmed.takeWhile { it == '#' }.length
-                blocks.add(MdBlock.Heading(level, trimmed.dropWhile { it == '#' }.trim()))
+            is MdInline.Link -> withLink(
+                LinkAnnotation.Clickable(
+                    tag = node.href,
+                    styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
+                    linkInteractionListener = { onLink(node.href) },
+                ),
+            ) { appendInline(node.children, t, type, weight, onLink) }
+            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink)
+            is MdInline.Strong -> {
+                val w = bolder(weight)
+                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink) }
             }
-            trimmed.matches(Regex("^\\s*[-*]\\s+.*")) || trimmed.matches(Regex("^\\s*\\d+\\.\\s+.*")) -> {
-                flushParagraph()
-                val ordered = trimmed.matches(Regex("^\\s*\\d+\\.\\s+.*"))
-                val items = mutableListOf<String>()
-                while (i < lines.size) {
-                    val itemLine = lines[i].trimEnd()
-                    val m = Regex("^\\s*(?:[-*]|\\d+\\.)\\s+(.*)").find(itemLine) ?: break
-                    items.add(m.groupValues[1])
-                    i += 1
-                }
-                i -= 1
-                blocks.add(MdBlock.Bullets(ordered, items))
-            }
-            trimmed.startsWith("> ") || trimmed == ">" -> {
-                flushParagraph()
-                val quote = StringBuilder()
-                while (i < lines.size && (lines[i].trimEnd().startsWith(">"))) {
-                    if (quote.isNotEmpty()) quote.append('\n')
-                    quote.append(lines[i].trimEnd().removePrefix(">").trim())
-                    i += 1
-                }
-                i -= 1
-                blocks.add(MdBlock.Quote(quote.toString()))
-            }
-            trimmed.isBlank() -> flushParagraph()
-            else -> {
-                if (paragraph.isNotEmpty()) paragraph.append('\n')
-                paragraph.append(trimmed)
+            is MdInline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                appendInline(node.children, t, type, weight, onLink)
             }
         }
-        i += 1
     }
-    flushParagraph()
-    return blocks
 }
 
-private val INLINE = Regex(
-    "(`[^`\n]+`)" + // code
-        "|(\\*\\*[^*\n]+\\*\\*)" + // bold
-        "|(\\*[^*\n]+\\*)" + // italic *
-        "|(_[^_\n]+_)" + // italic _
-        "|(\\[[^\\]\n]+\\]\\([^)\n]+\\))", // link
-)
-
-internal fun inlineMarkdown(text: String, t: TetherTokens, codeSize: TextUnit = 13.sp): AnnotatedString =
-    buildAnnotatedString {
-        var cursor = 0
-        for (match in INLINE.findAll(text)) {
-            if (match.range.first > cursor) append(text.substring(cursor, match.range.first))
-            val token = match.value
-            when {
-                token.startsWith("`") -> withStyle(
-                    SpanStyle(
-                        fontFamily = JetBrainsMono,
-                        fontSize = codeSize,
-                        background = t.tintMd,
-                        color = t.white,
-                    ),
-                ) { append(token.trim('`')) }
-
-                token.startsWith("**") -> withStyle(SpanStyle(fontWeight = FontWeight(700))) {
-                    append(token.removeSurrounding("**"))
+/** A text run that paints `.md-code` backgrounds (rounded `--tint-md`, 0.05rem × 0.35rem pad). */
+@Composable
+internal fun MdText(
+    text: AnnotatedString,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign? = null,
+    softWrap: Boolean = true,
+) {
+    val t = LocalTetherTokens.current
+    val density = LocalDensity.current
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val codeRanges = remember(text) { text.getStringAnnotations(CODE_TAG, 0, text.length) }
+    val paint = if (codeRanges.isEmpty()) {
+        Modifier
+    } else {
+        Modifier.drawBehind {
+            val r = layout ?: return@drawBehind
+            val codePx = with(density) { (style.fontSize.value * 0.85f).sp.toPx() }
+            val padY = with(density) { (CODE_PAD_Y_REM * TetherTypography.SP_PER_REM).sp.toPx() }
+            val radius = CornerRadius(t.radiusSm.toPx())
+            for (range in codeRanges) {
+                val first = r.getLineForOffset(range.start)
+                val last = r.getLineForOffset(max(range.start, range.end - 1))
+                for (line in first..last) {
+                    val s = max(range.start, r.getLineStart(line))
+                    val e = minOf(range.end, r.getLineEnd(line, visibleEnd = true))
+                    if (e <= s) continue
+                    val left = r.getBoundingBox(s).left
+                    val right = r.getBoundingBox(e - 1).right
+                    val baseline = r.getLineBaseline(line)
+                    drawRoundRect(
+                        color = t.tintMd,
+                        topLeft = Offset(left, baseline - codePx * MONO_ASCENT - padY),
+                        size = Size(right - left, codePx * (MONO_ASCENT + MONO_DESCENT) + 2 * padY),
+                        cornerRadius = radius,
+                    )
                 }
-
-                token.startsWith("*") -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    append(token.removeSurrounding("*"))
-                }
-
-                token.startsWith("_") -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    append(token.removeSurrounding("_"))
-                }
-
-                token.startsWith("[") -> {
-                    val label = token.substringAfter('[').substringBefore(']')
-                    val url = token.substringAfter('(').substringBeforeLast(')')
-                    withLink(
-                        LinkAnnotation.Url(
-                            url,
-                            TextLinkStyles(
-                                style = SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline),
-                            ),
-                        ),
-                    ) { append(label) }
-                }
-
-                else -> append(token)
             }
-            cursor = match.range.last + 1
         }
-        if (cursor < text.length) append(text.substring(cursor))
     }
+    Text(
+        text,
+        style = style,
+        color = color,
+        textAlign = textAlign ?: TextAlign.Unspecified,
+        softWrap = softWrap,
+        onTextLayout = { layout = it },
+        modifier = modifier.then(paint),
+    )
+}
 
-/** Renders a finished message body. */
+/** One block's collapsed-margin contribution, in dp. */
+private class Margins(val top: Dp, val bottom: Dp)
+
+/**
+ * The web's `.md-body`: [blocks] with [style] as the inherited font (a bubble's `chatBody`, a
+ * thinking body's 0.82rem/1.6) and [color] as the inherited ink.
+ */
+@Composable
+fun MarkdownBody(
+    blocks: List<MdBlock>,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    val opener = LocalLinkOpener.current
+    val onLink: (String) -> Unit = remember(opener, context, t) { { href -> opener.open(context, href, t.graphite) } }
+    fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
+    val body = style.fontSize
+    val baseWeight = style.fontWeight?.weight ?: 400
+
+    Column(modifier) {
+        var previousBottom: Dp? = null
+        blocks.forEachIndexed { index, block ->
+            val headingStyle = (block as? MdBlock.Heading)?.let { headingStyle(type, it.tag) }
+            val m = when (block) {
+                is MdBlock.Paragraph -> Margins(0.dp, em(body, 0.5f))
+                is MdBlock.Heading -> Margins(em(headingStyle!!.fontSize, 0.6f), em(headingStyle.fontSize, 0.35f))
+                is MdBlock.OrderedList, is MdBlock.BulletList -> Margins(em(body, 0.15f), em(body, 0.5f))
+                is MdBlock.Table, is MdBlock.Code, is MdBlock.Quote -> Margins(0.dp, em(body, 0.5f))
+                MdBlock.Rule -> Margins(em(body, 0.75f), em(body, 0.75f))
+            }
+            // `.md-body > :first-child { margin-top: 0 }` — but a list's li margin still escapes.
+            val top = when {
+                index == 0 && (block is MdBlock.OrderedList || block is MdBlock.BulletList) -> em(body, 0.15f)
+                index == 0 -> 0.dp
+                else -> maxOf(previousBottom ?: 0.dp, m.top)
+            }
+            if (top > 0.dp) Spacer(Modifier.height(top))
+            when (block) {
+                is MdBlock.Paragraph -> MdParagraph(block, style, color, t, type, baseWeight, onLink)
+                is MdBlock.Heading -> MdText(
+                    inlineAnnotated(block.inlines, t, type, headingStyle!!.fontWeight!!.weight, onLink),
+                    style = headingStyle,
+                    color = color,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink)
+                is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink)
+                is MdBlock.Quote -> MdQuote(block, style, t, type, baseWeight, onLink)
+                is MdBlock.Table -> MdTable(block, style, t, type, onLink)
+                is MdBlock.Code -> MdCodeBlock(block)
+                MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+            }
+            previousBottom = m.bottom
+            // `.md-body > :last-child { margin-bottom: 0 }`; a last list keeps its li's 0.15em.
+            if (index == blocks.lastIndex && (block is MdBlock.OrderedList || block is MdBlock.BulletList)) {
+                Spacer(Modifier.height(em(body, 0.15f)))
+            }
+        }
+    }
+}
+
+/** `h3.md-h` 1.05rem, `h4` 0.98rem, `h5`/`h6` 0.92rem; 680, line-height 1.3 (globals.css:4915-4918). */
+private fun headingStyle(type: TetherTypography, tag: Int): TextStyle = when (tag) {
+    3 -> type.markdownH3
+    4 -> type.markdownH4
+    else -> type.markdownH5
+}
+
+@Composable
+private fun MdParagraph(
+    block: MdBlock.Paragraph,
+    style: TextStyle,
+    color: Color,
+    t: TetherTokens,
+    type: TetherTypography,
+    weight: Int,
+    onLink: (String) -> Unit,
+) {
+    val text = remember(block, t, type) {
+        buildAnnotatedString {
+            block.lines.forEachIndexed { i, line ->
+                if (i > 0) append('\n') // <br/>
+                append(inlineAnnotated(line, t, type, weight, onLink))
+            }
+        }
+    }
+    MdText(text, style, color, Modifier.fillMaxWidth())
+}
+
+/**
+ * `.md-list` (padding-left 1.35em; `li` margin 0.15em 0, collapsing between items). Chrome draws
+ * an outside marker as the text `"1. "` / `"• "` in the item's font, its end at the content edge.
+ */
+@Composable
+private fun MdList(
+    items: List<List<MdInline>>,
+    ordered: Boolean,
+    style: TextStyle,
+    color: Color,
+    t: TetherTokens,
+    type: TetherTypography,
+    weight: Int,
+    onLink: (String) -> Unit,
+) {
+    val density = LocalDensity.current
+    val indent = with(density) { (style.fontSize.value * 1.35f).sp.toDp() }
+    val gap = with(density) { (style.fontSize.value * 0.15f).sp.toDp() }
+    Column(Modifier.fillMaxWidth()) {
+        items.forEachIndexed { n, item ->
+            if (n > 0) Spacer(Modifier.height(gap))
+            Layout(
+                content = {
+                    Text(if (ordered) "${n + 1}. " else "• ", style = style, color = color, softWrap = false)
+                    MdText(inlineAnnotated(item, t, type, weight, onLink), style, color)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { measurables, constraints ->
+                val indentPx = indent.roundToPx()
+                val content = measurables[1].measure(
+                    constraints.copy(minWidth = 0, maxWidth = max(0, constraints.maxWidth - indentPx)),
+                )
+                val marker = measurables[0].measure(Constraints())
+                layout(constraints.maxWidth, max(content.height, marker.height)) {
+                    content.place(indentPx, 0)
+                    marker.place(indentPx - marker.width, 0)
+                }
+            }
+        }
+    }
+}
+
+/** `.md-quote`: 2px `--line-strong` left rule, padding 0.1em 0 0.1em 0.85em, `--muted`; its `p` keeps 0.5em below. */
+@Composable
+private fun MdQuote(
+    block: MdBlock.Quote,
+    style: TextStyle,
+    t: TetherTokens,
+    type: TetherTypography,
+    weight: Int,
+    onLink: (String) -> Unit,
+) {
+    val density = LocalDensity.current
+    fun em(f: Float): Dp = with(density) { (style.fontSize.value * f).sp.toDp() }
+    val rule = t.lineStrong
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .drawBehind { drawRect(rule, size = Size(2.dp.toPx(), size.height)) }
+            .padding(start = 2.dp + em(0.85f), top = em(0.1f), bottom = em(0.1f) + em(0.5f)),
+    ) {
+        MdParagraph(block.paragraph, style, t.muted, t, type, weight, onLink)
+    }
+}
+
+/**
+ * `.md-table-wrap > .md-table`: auto table layout (columns size to content; the wrapper scrolls
+ * sideways when the table is wider than the bubble), line-height 1.45, cells padded
+ * `space-xs space-md`; header cells `--tint-xs`, 680, nowrap over a 1px `--line-strong` rule;
+ * body cells top-aligned over a 1px `--line` rule, none under the last row.
+ */
+@Composable
+private fun MdTable(
+    block: MdBlock.Table,
+    style: TextStyle,
+    t: TetherTokens,
+    type: TetherTypography,
+    onLink: (String) -> Unit,
+) {
+    val cellStyle = style.copy(lineHeight = 1.45.em)
+    val headStyle = cellStyle.copy(fontWeight = FontWeight(680))
+    val padX = t.css.spaceMd
+    val padY = t.css.spaceXs
+    val cols = block.headers.size
+    val rows = block.rows.size + 1
+    val lineStrong = t.lineStrong
+    val line = t.line
+    val headBg = t.tintXs
+    fun align(n: Int): TextAlign = when (block.aligns.getOrNull(n)) {
+        MdAlign.Center -> TextAlign.Center
+        MdAlign.Right -> TextAlign.Right
+        else -> TextAlign.Left
+    }
+    val baseWeight = style.fontWeight?.weight ?: 400
+    val geo = remember { TableGeometry() }
+    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        Layout(
+            modifier = Modifier.drawBehind {
+                val w = geo.width.toFloat()
+                if (geo.heights.isEmpty()) return@drawBehind
+                drawRect(headBg, size = Size(w, geo.heights[0].toFloat()))
+                val px = 1.dp.toPx()
+                for (r in 0 until geo.heights.size - 1) {
+                    val y = (geo.rowTops[r] + geo.heights[r]).toFloat()
+                    drawRect(if (r == 0) lineStrong else line, topLeft = Offset(0f, y), size = Size(w, px))
+                }
+            },
+            content = {
+                block.headers.forEachIndexed { n, cell ->
+                    MdText(
+                        inlineAnnotated(cell, t, type, 680, onLink),
+                        headStyle,
+                        t.ink,
+                        Modifier.padding(horizontal = padX, vertical = padY),
+                        textAlign = align(n),
+                        softWrap = false,
+                    )
+                }
+                block.rows.forEach { row ->
+                    row.forEachIndexed { n, cell ->
+                        MdText(
+                            inlineAnnotated(cell, t, type, baseWeight, onLink),
+                            cellStyle,
+                            t.ink,
+                            Modifier.padding(horizontal = padX, vertical = padY),
+                            textAlign = align(n),
+                        )
+                    }
+                }
+            },
+        ) { measurables, constraints ->
+            val available = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+            val maxW = IntArray(cols)
+            val minW = IntArray(cols)
+            measurables.forEachIndexed { i, m ->
+                val c = i % cols
+                maxW[c] = max(maxW[c], m.maxIntrinsicWidth(Constraints.Infinity))
+                minW[c] = max(minW[c], if (i < cols) m.maxIntrinsicWidth(Constraints.Infinity) else m.minIntrinsicWidth(Constraints.Infinity))
+            }
+            // CSS auto table layout: max-content if it fits, else share the slack by (max - min).
+            val sumMax = maxW.sum()
+            val sumMin = minW.sum()
+            val widths = when {
+                sumMax <= available -> maxW
+                sumMin >= available -> minW
+                else -> IntArray(cols) { c ->
+                    val span = (sumMax - sumMin).coerceAtLeast(1)
+                    minW[c] + ((available - sumMin).toLong() * (maxW[c] - minW[c]) / span).toInt()
+                }
+            }
+            val placeables = measurables.mapIndexed { i, m -> m.measure(Constraints.fixedWidth(widths[i % cols])) }
+            val heights = IntArray(rows) { r -> (0 until cols).maxOf { c -> placeables[r * cols + c].height } }
+            val ruleStrong = 1.dp.roundToPx()
+            val rule = 1.dp.roundToPx()
+            val rowTops = IntArray(rows)
+            var y = 0
+            for (r in 0 until rows) {
+                rowTops[r] = y
+                y += heights[r] + when {
+                    r == 0 -> ruleStrong
+                    r < rows - 1 -> rule
+                    else -> 0
+                }
+            }
+            val width = widths.sum()
+            geo.width = width
+            geo.rowTops = rowTops
+            geo.heights = heights
+            layout(width, y) {
+                placeables.forEachIndexed { i, p ->
+                    val r = i / cols
+                    val c = i % cols
+                    p.place(widths.take(c).sum(), rowTops[r])
+                }
+            }
+        }
+    }
+}
+
+/** The last measured table grid, read by the rules/header-wash draw pass that follows layout. */
+private class TableGeometry {
+    var width: Int = 0
+    var rowTops: IntArray = IntArray(0)
+    var heights: IntArray = IntArray(0)
+}
+
+/**
+ * `CodeBlock` (markdown.tsx:39-81): the fence body in `.md-pre` (1px `--line`, `--radius-sm`,
+ * `--mineral-deep`, padding `space-sm space-md`, mono 0.8rem/1.5, `white-space: pre` scrolling
+ * sideways) clamped by the expandable block (9rem on a phone, 16rem wider), with a tap-to-copy
+ * key riding the top-right corner. Copy puts the EXACT raw fence body on the clipboard and shows
+ * a check ("Copied") for 1.5s. No syntax highlighting: the web renders fences as plain text.
+ */
+@Composable
+internal fun MdCodeBlock(block: MdBlock.Code) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val context = LocalContext.current
+    val phone = currentLayoutClass() == TetherLayoutClass.Phone
+    val clamp = if (phone) 9.dp * 16 else t.css.chatClamp
+    val shape = RoundedCornerShape(t.radiusSm)
+    var copied by remember(block.code) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(COPIED_RESET_MS)
+            copied = false
+        }
+    }
+    Box(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .cssSurface(shape, background = t.mineralDeep, border = CssBorder(1.dp, t.line)),
+        ) {
+            TetherExpandableBlock(clamp = clamp) {
+                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    Text(
+                        block.code,
+                        style = type.codeBlock,
+                        color = t.ink,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = t.css.spaceMd + 1.dp, vertical = t.css.spaceSm + 1.dp),
+                    )
+                }
+            }
+        }
+        CopyKey(
+            copied = copied,
+            onClick = { if (copyToClipboard(context, block.code)) copied = true },
+            modifier = Modifier.align(Alignment.TopEnd).offset(x = -t.css.spaceXs, y = t.css.spaceXs),
+        )
+    }
+}
+
+/** Put [code] on the system clipboard. False when the clipboard is unavailable (the web's silent fallback). */
+internal fun copyToClipboard(context: Context, code: String): Boolean = runCatching {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
+    clipboard.setPrimaryClip(ClipData.newPlainText("code", code))
+    true
+}.getOrDefault(false)
+
+/**
+ * `.md-copy-btn` under the material layer (`:root .md-copy-btn`, globals.css:8598): a key face
+ * (1px `--key-side`, `--key-face`, top/left bevels + `--shadow-key`), `--radius-sm`, 44×44 at
+ * 0.85 opacity on touch (`@media (hover: none)`); pressed travels `--press-travel` onto
+ * `--key-face-deep` with the pressed bevel. Lucide Copy / Check at 14px.
+ */
+@Composable
+private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val shape = RoundedCornerShape(t.radiusSm)
+    val shadows = if (pressed) {
+        t.css.bevelPressed + t.css.shadowKeyPressed
+    } else {
+        listOf(
+            hardShadow(1.dp, t.litStrong, inset = true),
+            hardShadow(0.dp, t.litSoft, x = 1.dp, inset = true),
+        ) + t.css.shadowKey
+    }
+    val label = if (copied) "Copied" else "Copy code"
+    Box(
+        modifier
+            .alpha(0.85f)
+            .offset(y = if (pressed) t.pressTravel else 0.dp)
+            .size(44.dp)
+            .cssSurface(
+                shape,
+                background = if (pressed) t.keyFaceDeep else t.keyFace,
+                border = CssBorder(1.dp, t.keySide),
+                shadows = shadows,
+            )
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (copied) TetherIcons.Check else TetherIcons.Copy,
+            contentDescription = null,
+            tint = t.ink,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+/**
+ * A finished message body as markdown (kept for the sub-agent panel's prompt, T6.4's surface):
+ * the bubble font at [fontSize].
+ */
 @Composable
 fun MarkdownText(
     text: String,
     color: Color,
     modifier: Modifier = Modifier,
-    fontSize: TextUnit = 14.4.sp,
+    fontSize: TextUnit = TextUnit.Unspecified,
 ) {
-    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
     val blocks = remember(text) { parseMarkdown(text) }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        blocks.forEach { block ->
-            when (block) {
-                is MdBlock.Paragraph -> Text(
-                    inlineMarkdown(block.text, t),
-                    color = color,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.body,
-                    fontSize = fontSize,
-                    lineHeight = fontSize * 1.55f,
-                )
-
-                is MdBlock.Heading -> Text(
-                    inlineMarkdown(block.text, t),
-                    color = t.white,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.heading,
-                    fontSize = when (block.level) {
-                        1 -> 16.8.sp
-                        2 -> 15.2.sp
-                        else -> 14.4.sp
-                    },
-                )
-
-                is MdBlock.Code -> Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(t.mineralDeep, RoundedCornerShape(TetherDimens.radiusSm))
-                        .border(1.dp, t.line, RoundedCornerShape(TetherDimens.radiusSm)),
-                ) {
-                    Text(
-                        block.code,
-                        color = t.ink,
-                        fontFamily = JetBrainsMono,
-                        fontSize = 12.8.sp,
-                        lineHeight = 12.8.sp * 1.5f,
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
-                }
-
-                is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    block.items.forEachIndexed { index, item ->
-                        Row {
-                            Text(
-                                if (block.ordered) "${index + 1}." else "•",
-                                color = t.muted,
-                                fontFamily = Manrope,
-                                fontWeight = TetherWeights.body,
-                                fontSize = fontSize,
-                                lineHeight = fontSize * 1.55f,
-                                modifier = Modifier.width(22.dp),
-                            )
-                            Text(
-                                inlineMarkdown(item, t),
-                                color = color,
-                                fontFamily = Manrope,
-                                fontWeight = TetherWeights.body,
-                                fontSize = fontSize,
-                                lineHeight = fontSize * 1.55f,
-                            )
-                        }
-                    }
-                }
-
-                is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                    Box(
-                        Modifier
-                            .width(2.dp)
-                            .fillMaxHeight()
-                            .background(t.lineStrong),
-                    )
-                    Text(
-                        inlineMarkdown(block.text, t),
-                        color = t.muted,
-                        fontFamily = Manrope,
-                        fontWeight = TetherWeights.body,
-                        fontSize = fontSize,
-                        lineHeight = fontSize * 1.55f,
-                        modifier = Modifier.padding(start = 10.dp),
-                    )
-                }
-            }
-        }
-    }
+    val style = if (fontSize == TextUnit.Unspecified) type.chatBody else type.chatBody.copy(fontSize = fontSize)
+    MarkdownBody(blocks, style, color, modifier)
 }

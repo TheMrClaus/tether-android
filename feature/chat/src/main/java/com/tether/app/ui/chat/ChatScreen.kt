@@ -70,70 +70,6 @@ import com.tether.app.ui.util.compactPath
 import com.tether.app.ui.util.statusCopy
 import kotlinx.coroutines.launch
 
-/** One renderable transcript item, keyed stably for the LazyColumn. */
-private sealed interface ChatItem {
-    val key: String
-
-    data class Continuation(val turnId: String) : ChatItem {
-        override val key = "$turnId/continuation"
-    }
-
-    data class Block(val turnId: String, val block: TurnBlock) : ChatItem {
-        override val key = "$turnId/${block.blockId}"
-    }
-
-    data class Denial(val turnId: String, val index: Int, val denial: PermissionDenialProjection) : ChatItem {
-        override val key = "$turnId/denial/$index"
-    }
-
-    data class Retry(val turn: TurnProjection) : ChatItem {
-        override val key = "${turn.turnId}/retry"
-    }
-
-    data class Approval(val turnId: String, val approval: PendingApproval) : ChatItem {
-        override val key = "$turnId/approval/${approval.requestId}"
-    }
-
-    data class Question(val turnId: String, val question: PendingQuestion) : ChatItem {
-        override val key = "$turnId/question/${question.requestId}"
-    }
-
-    data class Outcome(val turn: TurnProjection) : ChatItem {
-        override val key = "${turn.turnId}/outcome"
-    }
-}
-
-private fun buildChatItems(projection: SessionProjection, showThinking: Boolean): List<ChatItem> {
-    val items = mutableListOf<ChatItem>()
-    for (turnId in projection.turnOrder) {
-        val turn = projection.turnsById[turnId] ?: continue
-        if (turn.continuation) items.add(ChatItem.Continuation(turnId))
-        for (blockId in turn.blocks) {
-            val block = turn.blocksById[blockId] ?: continue
-            when (block.kind) {
-                Vocab.BLOCK_THINKING -> {
-                    if (showThinking && !block.text.isNullOrBlank()) items.add(ChatItem.Block(turnId, block))
-                }
-                Vocab.BLOCK_TOOL -> {
-                    // AskUserQuestion tool blocks are replaced by the question card.
-                    if (block.name != "AskUserQuestion") items.add(ChatItem.Block(turnId, block))
-                }
-                else -> items.add(ChatItem.Block(turnId, block))
-            }
-        }
-        turn.permissionDenials.forEachIndexed { index, denial ->
-            items.add(ChatItem.Denial(turnId, index, denial))
-        }
-        if (turn.apiRetry != null && turn.status == Vocab.TURN_RUNNING) items.add(ChatItem.Retry(turn))
-        turn.pendingApprovals.values.forEach { items.add(ChatItem.Approval(turnId, it)) }
-        turn.pendingQuestions.values.forEach { items.add(ChatItem.Question(turnId, it)) }
-        if (turn.status == Vocab.TURN_DONE && turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) {
-            items.add(ChatItem.Outcome(turn))
-        }
-    }
-    return items
-}
-
 /** The chat workspace: workspace header, transcript, composer (visual-spec §4). */
 @Composable
 fun ChatScreen(
@@ -152,6 +88,8 @@ fun ChatScreen(
         initialValue = TetherPreferences.Default.showThinking,
     )
     val controlsMap by vm.client.sessionControls.collectAsStateWithLifecycle()
+    // The v128 projection trees: block `ts` stamps for the bubbles' send times.
+    val trees by vm.client.projectionTrees.collectAsStateWithLifecycle()
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val runs = remember(projection) { collectSubagentRuns(projection) }
@@ -206,7 +144,7 @@ fun ChatScreen(
                 projection.turnOrder.isEmpty() -> EmptyCentered(
                     label = "HEADLESS AGENT",
                     title = "Send a message to start the conversation.",
-                    hint = "The agent runs on your server and streams every step back here.",
+                    hint = "Tools that need permission will surface an approval here before they run.",
                 )
 
                 activeRun != null -> RunTab(
@@ -217,11 +155,17 @@ fun ChatScreen(
                     showThinking = showThinking,
                 )
 
-                else -> Transcript(
-                    vm = vm,
-                    sessionId = session.id,
+                else -> ChatTranscript(
                     projection = projection,
+                    tree = trees[session.id],
                     showThinking = showThinking,
+                    onFetchTurns = { from, to -> vm.client.fetchTurns(session.id, from, to) },
+                    onApproval = { requestId, choiceId, decision ->
+                        vm.client.approval(session.id, requestId, choiceId, decision)
+                    },
+                    onAnswer = { requestId, answers, response ->
+                        vm.client.answerQuestion(session.id, requestId, answers, response)
+                    },
                     roster = if (runs.isNotEmpty()) {
                         {
                             SubagentRoster(
@@ -257,157 +201,6 @@ fun ChatScreen(
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
         )
-    }
-}
-
-@Composable
-private fun Transcript(
-    vm: TetherViewModel,
-    sessionId: String,
-    projection: SessionProjection,
-    showThinking: Boolean,
-    roster: (@Composable () -> Unit)? = null,
-) {
-    val t = LocalTetherTokens.current
-    val items = remember(projection, showThinking) { buildChatItems(projection, showThinking) }
-    val listState = rememberLazyListState()
-    val density = LocalDensity.current
-    val stickPx = with(density) { 80.dp.toPx() }
-
-    // Story points: the conversation timeline rail indexes operator prompts.
-    val storyPoints = remember(projection) { storyPointsFromSession(projection) }
-    val storyPointIndex = remember(storyPoints) {
-        storyPoints.withIndex().associate { (i, sp) -> "${sp.turnId}:${sp.blockId}" to i }
-    }
-    // Map story-point index → LazyColumn item index (where the user block renders).
-    val storyPointToLazyIndex = remember(items, storyPointIndex) {
-        val m = HashMap<Int, Int>()
-        items.forEachIndexed { lazyIndex, item ->
-            if (item is ChatItem.Block && item.block.kind == Vocab.BLOCK_USER_MESSAGE) {
-                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[sp] = lazyIndex }
-            }
-        }
-        m
-    }
-    // Map LazyColumn item key → story-point index (for active-dot tracking).
-    val itemKeyToSpIndex = remember(storyPointIndex) {
-        val m = HashMap<Any, Int>()
-        items.forEachIndexed { _, item ->
-            if (item is ChatItem.Block && item.block.kind == Vocab.BLOCK_USER_MESSAGE) {
-                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[item.key] = sp }
-            }
-        }
-        m
-    }
-    val hasTimeline = storyPoints.isNotEmpty()
-
-    val atBottom by remember {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
-            last.index >= info.totalItemsCount - 1 &&
-                (last.offset + last.size) <= info.viewportEndOffset + stickPx
-        }
-    }
-    var stick by remember { mutableStateOf(true) }
-    LaunchedEffect(listState) {
-        snapshotFlow { atBottom }.collect { stick = it }
-    }
-    // Follow the stream while stuck to the bottom.
-    LaunchedEffect(items) {
-        if (stick && items.isNotEmpty()) {
-            listState.scrollToItem(items.lastIndex, scrollOffset = Int.MAX_VALUE / 2)
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 12.dp,
-                end = if (hasTimeline) 66.dp else 12.dp,
-                top = 12.dp,
-                bottom = 16.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (roster != null) {
-                item(key = "subagent-roster") { roster() }
-            }
-            items.forEach { item ->
-                item(key = item.key) {
-                    when (item) {
-                        is ChatItem.Continuation -> ContinuationMarker()
-                        is ChatItem.Block -> when (item.block.kind) {
-                            Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block)
-                            Vocab.BLOCK_MESSAGE -> AgentBubble(item.block)
-                            Vocab.BLOCK_THINKING -> ThinkingCard(item.block)
-                            Vocab.BLOCK_TOOL -> ToolCard(item.block)
-                            else -> {}
-                        }
-                        is ChatItem.Denial -> DenialCard(item.denial)
-                        is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
-                        is ChatItem.Approval -> ApprovalCard(
-                            approval = item.approval,
-                            onChoice = { choiceId, decision ->
-                                vm.client.approval(sessionId, item.approval.requestId, choiceId, decision)
-                            },
-                        )
-                        is ChatItem.Question -> QuestionCard(
-                            question = item.question,
-                            onSubmit = { answers, response ->
-                                vm.client.answerQuestion(sessionId, item.question.requestId, answers, response)
-                            },
-                        )
-                        is ChatItem.Outcome -> OutcomeBadge(item.turn)
-                    }
-                }
-            }
-        }
-
-        // Conversation timeline rail (right edge).
-        if (hasTimeline) {
-            ConversationTimeline(
-                storyPoints = storyPoints,
-                listState = listState,
-                storyPointToLazyIndex = storyPointToLazyIndex,
-                itemKeyToSpIndex = itemKeyToSpIndex,
-                modifier = Modifier.align(Alignment.CenterEnd),
-            )
-        }
-
-        if (!atBottom) {
-            val scope = rememberCoroutineScope()
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp)
-                    .background(t.keyFace, RoundedCornerShape(999.dp))
-                    .border(1.dp, t.lineStrong, RoundedCornerShape(999.dp))
-                    .clickable {
-                        stick = true
-                        scope.launch {
-                            if (items.isNotEmpty()) {
-                                listState.animateScrollToItem(items.lastIndex, scrollOffset = Int.MAX_VALUE / 2)
-                            }
-                        }
-                    }
-                    .heightIn(min = 36.dp)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(TetherIcons.ArrowDown, contentDescription = null, tint = t.ink, modifier = Modifier.size(15.dp))
-                Text(
-                    "Latest",
-                    color = t.ink,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.label,
-                    fontSize = 12.5.sp,
-                )
-            }
-        }
     }
 }
 

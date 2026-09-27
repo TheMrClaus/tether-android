@@ -583,6 +583,9 @@ class FakeTetherClient : TetherClient {
     override fun retryConnection() {}
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
 
+    /** The fake never sends a bounded snapshot, so there is nothing to fetch. */
+    override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {}
+
     private companion object {
         val TREE_JSON = Json {
             encodeDefaults = true

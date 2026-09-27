@@ -2102,6 +2102,10 @@ class RealTetherClient(
         sendFrame(ClientMessage.Interrupt(sessionId))
     }
 
+    override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {
+        sendFrame(ClientMessage.FetchTurns(sessionId, fromIndex, toIndex))
+    }
+
     override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) {
         sendFrame(ClientMessage.Approval(sessionId, requestId, choiceId, decision))
     }

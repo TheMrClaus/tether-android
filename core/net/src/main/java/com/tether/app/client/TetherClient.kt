@@ -214,6 +214,14 @@ interface TetherClient {
      */
     val trimmedBefore: StateFlow<Map<String, Int>>
 
+    /**
+     * v115 `fetch-turns` (use-tether.ts:1528): ask for the full projections of turns
+     * [fromIndex] until [toIndex] (0-based, exclusive end) of a bounded snapshot; the server's
+     * `turns-detail` replaces the trimmed stubs (T6.1's "Load N earlier turns"). No-op offline.
+     * The default does nothing: only a client that receives bounded snapshots needs it.
+     */
+    fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {}
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------
