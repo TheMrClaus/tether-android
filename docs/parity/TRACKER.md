@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Program status | IN PROGRESS |
-| Current phase | Phases 0 + 2 CLOSED; Phase 1 (T1.5) and Phase 3 in progress |
+| Current phase | Phases 0 + 2 CLOSED; P1 tasks all verified; Phase 3 (T3.4) + Phase 4 in progress |
 | PARITY_BASE (tether SHA) | `7d65611` (PROTOCOL_VERSION 128) |
 | App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
@@ -39,10 +39,11 @@ trusted apart from device management? (ws-browser navigate full-read SSRF, agent
 Commit SHAs quoted in beads/notes before 12:18 refer to the pre-rewrite history; commit MESSAGES are unchanged, so find a commit by
 message. The vendored corpus manifests still name pre-rewrite tether SHAs until the next `sync-corpus.sh` run. Local-only
 `backup/*-pre-transplant` branches hold old history: **never push them**. Never commit absolute home paths or the operator's account name.
-**Merged today:** T3.5 (icons), T13.0 SYNC_DESIGN, **T1.5** (node registry; transplanted onto the rewritten main, `eb75153`).
-In flight: **T3.3** r3 DONE (keys = web class sets + cascade, 1490 tests; transplanted + pushed `fe4d6a8`) → verifier re-check;
-**ta-s8q** (release blocker: origin-keyed pending store, security-executor).
-Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T13.1 (Room mirror) after ta-s8q (both touch RealTetherClient).
+**Merged today:** T3.5 (icons), T13.0 SYNC_DESIGN, T1.5 (node registry, `eb75153`), **T3.3** (primitives + class-set key
+cascade, 114 goldens, `c73b926`). **Phase 3 left: T3.4.**
+In flight (4 agents): **ta-s8q** (release blocker, origin-keyed pending store; resumed after a usage-limit kill, WIP `509571b`),
+**T3.4** gallery, **T4.1** phone shell, **T4.3** statusline/dial/gauge components (standalone; T4.1 hosts them after both merge).
+Next: T13.1 after ta-s8q (both touch RealTetherClient); T4.2 expanded shell after T4.1; T4.4/T4.5.
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
 **In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
@@ -101,16 +102,16 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | DONE | claude-main @ 2026-09-27 04:16 |  |  |
-| T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
+| T3.4 | Debug Component Gallery + screenshot tests | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T4.1 | Phone shell (web mobile layout) | TODO |  |  |  |
+| T4.1 | Phone shell (web mobile layout) | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | TODO |  |  |  |
-| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | TODO |  |  | From T2.2: current designsystem ui/util/Format.kt diverges from web lib/format.ts — compactNumber floors (1250->'1.2K' vs web '1.3K'; 99995… |
+| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | IN-PROGRESS | claude-main @ 2026-09-27 11:53 |  | From T2.2: current designsystem ui/util/Format.kt diverges from web lib/format.ts — compactNumber floors (1250->'1.2K' vs web '1.3K'; 99995… |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
 | T4.5 | Log dialog | TODO |  |  |  |
 
