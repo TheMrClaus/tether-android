@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.ui.prefs.UiPrefs
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 /**
@@ -103,20 +104,45 @@ class NotificationPermissionPrompt internal constructor(
 }
 
 /**
+ * The persisted "have we shown the system dialog?" flag. Production reads it
+ * from [UiPrefs.pushPermissionAsked] ([of]). It is a seam because UiPrefs can
+ * only be built over the app's single DataStore.
+ */
+interface NotificationPermissionAskedStore {
+    val asked: Flow<Boolean>
+
+    /** Records that the system dialog was answered. */
+    suspend fun markAsked()
+
+    companion object {
+        fun of(prefs: UiPrefs): NotificationPermissionAskedStore = object : NotificationPermissionAskedStore {
+            override val asked: Flow<Boolean> = prefs.pushPermissionAsked
+            override suspend fun markAsked() = prefs.setPushPermissionAsked(true)
+        }
+    }
+}
+
+/** [rememberNotificationPermission] over the app's [UiPrefs]. */
+@Composable
+fun rememberNotificationPermission(prefs: UiPrefs): NotificationPermissionPrompt =
+    rememberNotificationPermission(remember(prefs) { NotificationPermissionAskedStore.of(prefs) })
+
+/**
  * Remembers the POST_NOTIFICATIONS flow. The status is re-read on every resume,
  * so a grant made on the settings page is picked up when the user returns.
  */
 @Composable
-fun rememberNotificationPermission(prefs: UiPrefs): NotificationPermissionPrompt {
+fun rememberNotificationPermission(store: NotificationPermissionAskedStore): NotificationPermissionPrompt {
     val context = LocalContext.current
     val activity = LocalActivity.current
     val scope = rememberCoroutineScope()
-    val asked by prefs.pushPermissionAsked.collectAsStateWithLifecycle(initialValue = null)
+    val asked by store.asked.collectAsStateWithLifecycle(initialValue = null)
     // Bumped on resume and after a result, so the status below is re-read.
     var refresh by remember { mutableIntStateOf(0) }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        scope.launch { prefs.setPushPermissionAsked(true) }
+        // Remembered, so a denial is never asked again automatically.
+        scope.launch { store.markAsked() }
         refresh++
     }
     LifecycleResumeEffect(Unit) {
