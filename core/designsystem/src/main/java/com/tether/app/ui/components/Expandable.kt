@@ -165,14 +165,6 @@ fun TetherExpandableBlock(
         val clip = Modifier
             .fillMaxWidth()
             .clipToBounds()
-            .layout { measurable, constraints ->
-                val limit = clamp.roundToPx()
-                val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
-                contentPx = placeable.height
-                clampPx = limit
-                val h = if (open) placeable.height else minOf(placeable.height, limit)
-                layout(placeable.width, h) { placeable.place(0, 0) }
-            }
             .then(
                 if (overflowing) {
                     Modifier
@@ -193,6 +185,14 @@ fun TetherExpandableBlock(
                     Modifier
                 },
             )
+            .layout { measurable, constraints ->
+                val limit = clamp.roundToPx()
+                val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                contentPx = placeable.height
+                clampPx = limit
+                val h = if (open) placeable.height else minOf(placeable.height, limit)
+                layout(placeable.width, h) { placeable.place(0, 0) }
+            }
         Box(clip) {
             Box(
                 if (scrollX) Modifier.horizontalScroll(rememberScrollState()) else Modifier,
@@ -219,13 +219,19 @@ fun TetherExpandablePre(
     color: Color = LocalTetherTokens.current.ink,
     contentDescription: String? = null,
     initiallyOpen: Boolean = false,
+    clamp: Dp = LocalTetherTokens.current.css.chatClamp,
     textModifier: Modifier = Modifier,
     onCollapseShift: ((deltaPx: Float) -> Unit)? = null,
 ) {
     var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // Line tops are in the text's own space; the clamp cut is measured from the block top, so the
+    // text's inset (e.g. a padding in [textModifier]) is subtracted from the cut.
+    var outerTop by remember { mutableFloatStateOf(0f) }
+    var textTop by remember { mutableFloatStateOf(0f) }
     TetherExpandableBlock(
         modifier = modifier,
         initiallyOpen = initiallyOpen,
+        clamp = clamp,
         onCollapseShift = onCollapseShift,
         hiddenRows = { cut, hiddenPx ->
             val r = layoutResult
@@ -234,7 +240,7 @@ fun TetherExpandablePre(
             } else {
                 val tops = List(r.lineCount) { r.getLineTop(it) }
                 val first = if (r.lineCount > 0) r.getLineBottom(0) - r.getLineTop(0) else 0f
-                hiddenRowCount(tops, first, cut, hiddenPx)
+                hiddenRowCount(tops, first, cut - (textTop - outerTop), hiddenPx)
             }
         },
     ) {
@@ -243,7 +249,11 @@ fun TetherExpandablePre(
             style = style,
             color = color,
             onTextLayout = { layoutResult = it },
-            modifier = textModifier.then(
+            modifier = Modifier
+                .onGloballyPositioned { outerTop = it.positionInWindow().y }
+                .then(textModifier)
+                .onGloballyPositioned { textTop = it.positionInWindow().y }
+                .then(
                 if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier,
             ),
         )

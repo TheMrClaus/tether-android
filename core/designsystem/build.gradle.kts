@@ -24,6 +24,7 @@ android {
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
 }
+tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
 // PLAN D9 / T3.1: GeneratedTokens.kt is generated from the vendored token export by
 // :tools:design-tokens and checked in. generateDesignTokens rewrites it;
