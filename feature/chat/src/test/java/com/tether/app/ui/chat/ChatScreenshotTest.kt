@@ -51,12 +51,12 @@ private fun fixtureFor(shot: ChatShot): ChatFixtures.Folded = when (shot) {
 /** 600ms past the first frame: enter transitions settled; the caret is in its "on" half. */
 private const val CaptureAtMs = 600L
 
-fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: String, size: String, wellHeight: Dp) {
+fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: String, size: String, wellHeight: Dp, wellWidth: Dp? = null) {
     mainClock.autoAdvance = false
     val fixture = fixtureFor(shot)
     val listState = LazyListState()
     setContent {
-        ChatHost(skin, wellHeight) {
+        ChatHost(skin, wellHeight, wellWidth) {
             ChatTranscript(
                 projection = fixture.projection,
                 tree = fixture.tree,
@@ -119,7 +119,7 @@ class ChatPhoneScreenshotTest(private val shot: ChatShot, private val skin: Teth
 class ChatTabletScreenshotTest(private val shot: ChatShot, private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun chat() = rule.snapChat(shot, skin, "chat-${shot.id}", "tablet", WellHeightTablet)
+    @Test fun chat() = rule.snapChat(shot, skin, "chat-${shot.id}", "tablet", WellHeightTablet, WellWidthTablet)
 
     companion object {
         @JvmStatic

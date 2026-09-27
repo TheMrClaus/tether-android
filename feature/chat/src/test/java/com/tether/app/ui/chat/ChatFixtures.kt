@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.background
@@ -174,12 +175,17 @@ fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin
  * composer (412dp wide; [wellHeight] tall). Ambient motion static unless [reducedMotion] is false.
  */
 @Composable
-fun ChatHost(skin: TetherSkin, wellHeight: Dp = WellHeightPhone, reducedMotion: Boolean = true, content: @Composable () -> Unit) {
+fun ChatHost(
+    skin: TetherSkin,
+    wellHeight: Dp = WellHeightPhone,
+    wellWidth: Dp? = null,
+    reducedMotion: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
             Box(
-                Modifier
-                    .fillMaxWidth()
+                (if (wellWidth != null) Modifier.width(wellWidth) else Modifier.fillMaxWidth())
                     .height(wellHeight)
                     .background(chatWellColor(LocalTetherTokens.current))
                     .testTag(WellTag),
@@ -193,5 +199,9 @@ const val WellTag = "chat-well"
 /** The web phone shot's transcript well: y 310..2090 px at 2.625 px/dp ≈ 678dp. */
 val WellHeightPhone: Dp = 678.dp
 
-/** The tablet well (1280×800): the transcript area under the header, above the composer. */
-val WellHeightTablet: Dp = 560.dp
+/**
+ * The tablet well (web desktop layout at 1280×800): the chat frame's transcript between the
+ * sidebar and the right edge (x 318..1268) and between the header and the composer (y 115..645).
+ */
+val WellHeightTablet: Dp = 530.dp
+val WellWidthTablet: Dp = 950.dp
