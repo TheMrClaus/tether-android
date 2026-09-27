@@ -144,6 +144,10 @@ private const val KEY_PERMANENTLY_INVALIDATED = "android.security.keystore.KeyPe
  * failures in doFinal to IllegalBlockSizeException and wraps the real cause, so
  * the cause chain decides:
  * 1. KeyPermanentlyInvalidatedException anywhere → [CipherFailure.KeyDead].
+ * 1b. A TOP-LEVEL AEADBadTagException → [CipherFailure.BadBlob], whatever its cause: on a
+ *    device Keystore throws the tag failure as `AEADBadTagException().initCause(
+ *    android.security.KeyStoreException)`, so rule 2 must not see its cause first (security
+ *    re-review, T1.4).
  * 2. A KeyStoreException anywhere (java.security's, or android.security's on
  *    API 33+) → [CipherFailure.Transient] — unless it reports
  *    `isTransientFailure() == false`, which makes it [CipherFailure.Suspect].
@@ -160,6 +164,7 @@ internal fun classifyCipherFailure(what: String, e: Throwable): CredentialCipher
         generateSequence<Class<*>>(t.javaClass) { it.superclass }.any { it.name == fqcn }
     val failure = when {
         chain.any { hierarchyNamed(it, KEY_PERMANENTLY_INVALIDATED) } -> CipherFailure.KeyDead
+        e is AEADBadTagException -> CipherFailure.BadBlob
         chain.any { isKeyStoreException(it) } -> {
             val reportsPermanent = chain.filter { isKeyStoreException(it) }.any { transientFlag(it) == false }
             if (reportsPermanent) CipherFailure.Suspect else CipherFailure.Transient

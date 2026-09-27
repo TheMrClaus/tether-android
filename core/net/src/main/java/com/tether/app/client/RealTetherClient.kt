@@ -782,8 +782,9 @@ class RealTetherClient(
                         credentialValue === credential && !haltedLocked()
                     }
                     if (current) {
-                        signedOutReasonState.value = SignedOutReason.GatewayRefused
+                        // State first: an observer that sees the reason must see the settled state.
                         connectionState.value = ConnectionState.AuthRequired
+                        signedOutReasonState.value = SignedOutReason.GatewayRefused
                     }
                 }
             }
@@ -806,8 +807,9 @@ class RealTetherClient(
             detachSocketLocked()
         }
         ws?.cancel()
-        signedOutReasonState.value = reason
+        // State first: an observer that sees the reason must see the settled state.
         connectionState.value = ConnectionState.AuthRequired
+        signedOutReasonState.value = reason
         scope.launch {
             try {
                 // Only if the store still holds THIS credential: never wipe a

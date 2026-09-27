@@ -174,6 +174,22 @@ class CredentialCipherTest {
         fun isTransientFailure(): Boolean = transientFailure
     }
 
+    /**
+     * The device shape (security re-review): Keystore throws a tag failure as
+     * `AEADBadTagException().initCause(android.security.KeyStoreException)`. It must still
+     * be a bad blob (deleted), not "transient" because of its cause.
+     */
+    @Test
+    fun aTagMismatchCausedByAKeyStoreExceptionIsStillABadBlob() {
+        val deviceShaped = javax.crypto.AEADBadTagException("tag").apply { initCause(KeyStoreException(transientFailure = true)) }
+        assertEquals(CipherFailure.BadBlob, kind(deviceShaped))
+        val javaCause = javax.crypto.AEADBadTagException("tag").apply { initCause(java.security.KeyStoreException("ks")) }
+        assertEquals(CipherFailure.BadBlob, kind(javaCause))
+        // A tag failure only DEEPER in the chain (not the thrown exception) is not proof enough.
+        val wrapped = javax.crypto.IllegalBlockSizeException("provider").apply { initCause(deviceShaped) }
+        assertEquals(CipherFailure.Transient, kind(wrapped))
+    }
+
     @Test
     fun onlyATagMismatchIsABadBlob() {
         assertEquals(CipherFailure.BadBlob, kind(javax.crypto.AEADBadTagException("tag")))
