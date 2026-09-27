@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsValue
 import com.tether.app.protocol.tree.bool
@@ -111,6 +112,27 @@ object PendingInput {
     fun fromPersisted(raw: String?): PendingStore = PendingStore(Web.fromPersisted(raw?.let(::js)))
 
     fun clearedFromPersisted(raw: String?): Set<String> = Web.clearedFromPersisted(raw?.let(::js))
+
+    /**
+     * How many records [raw] holds, or null when it is not a payload
+     * [fromPersisted] understands (not JSON, an unknown `v`, no `records`
+     * array). [fromPersisted] reads any such payload as EMPTY; this tells
+     * "genuinely empty" apart from "could not read it". Compare with
+     * `fromPersisted(raw).records.size` to see whether records were dropped
+     * as malformed.
+     */
+    fun persistedRecordCount(raw: String?): Int? {
+        if (raw.isNullOrEmpty()) return null
+        val parsed = try {
+            JsCodec.parse(raw)
+        } catch (_: IllegalArgumentException) {
+            return null // kotlinx SerializationException is an IllegalArgumentException
+        }
+        val obj = parsed as? JsObj ?: return null
+        val version = obj["v"].num
+        if (version != 1.0 && version != 2.0) return null
+        return (obj["records"] as? JsArr)?.size
+    }
 
     /** Union, [mine] wins, never adopting a [cleared] key, oldest-first overall. */
     fun mergeStores(mine: PendingStore, theirs: PendingStore, cleared: Collection<String>): PendingStore =

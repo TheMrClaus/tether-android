@@ -139,7 +139,7 @@ class OriginKeyedPendingTest {
     }
 
     /** A process over [settings]; the errors (notices) it emits are collected from the start. */
-    private fun process(settings: SettingsStore): RealTetherClient {
+    private fun process(settings: SettingsStore, collectErrors: Boolean = true): RealTetherClient {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scopes += scope
         client = RealTetherClient(
@@ -151,7 +151,8 @@ class OriginKeyedPendingTest {
             sweepIntervalMs = 3_600_000,
             scheduler = ManualScheduler(),
         )
-        scope.launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { errors += it } }
+        // A UI subscribes to errors before it starts the client; a headless start has nobody.
+        if (collectErrors) scope.launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { errors += it } }
         return client
     }
 
@@ -862,5 +863,95 @@ class OriginKeyedPendingTest {
         assertEquals(listOf("send", "queue-add"), resent.map { it.type() })
         assertEquals(onA.triedKey, resent[0].s("idempotencyKey"))
         assertTrue(b.allFrames.none { it.contains("private") || it.contains("s-a") })
+    }
+
+    // ------------------------------------------------------------------
+    // ta-cpn: slots that cannot be read are never pruned; one-time notices
+    // are delivered before their data is deleted; a late ready never shows
+    // ------------------------------------------------------------------
+
+    private fun seededDisk(): DiskSettings {
+        disk = DiskSettings(InMemorySettings(a.url(), initialCookie = "parity-fake-cookie-a"), a.url())
+        return disk
+    }
+
+    private fun expiredSlot(key: String) = PendingInput.toPersistable(
+        PendingInput.addRecord(PendingInput.emptyStore(), key, PendingInput.KIND_SEND, "s-x", "old text $key", now.get() - 10 * 60 * 1000L - 1).store,
+    )
+
+    @Test
+    fun onlyASlotThatWasReadAndUnderstoodIsEverPruned() {
+        val unreadable = "https://unreadable.example:443"
+        val futureVersion = "https://future.example:443"
+        val garbage = "https://garbage.example:443"
+        val malformed = "https://malformed.example:443"
+        val empty = "https://empty.example:443"
+        seededDisk()
+        disk.slots[unreadable] = expiredSlot("k-unreadable")
+        disk.slots[futureVersion] = """{"v":3,"records":[],"cleared":[]}"""
+        disk.slots[garbage] = "not json at all"
+        disk.slots[malformed] = """{"v":2,"records":[{"key":7}],"cleared":[]}"""
+        disk.slots[empty] = """{"v":2,"records":[],"cleared":["k-old"]}"""
+        disk.beforeRead = { origin -> if (origin == unreadable) throw java.io.IOException("disk read failed") }
+        process(disk).start()
+        handshake(a, a.nextSocket())
+        // The genuinely empty slot goes (the control: pruning ran)...
+        awaitCondition("the empty slot is pruned") { !disk.slots.containsKey(empty) }
+        // ...and nothing it could not read or understand does.
+        for (kept in listOf(unreadable, futureVersion, garbage, malformed)) {
+            assertTrue("pruned unseen: $kept", disk.slots.containsKey(kept))
+        }
+        assertTrue("a notice for a slot that was not read: $errors", errors.none { it.contains("expired before") })
+    }
+
+    @Test
+    fun aHeadlessStartNeverDeletesAOneTimeNoticesDataUntilSomeoneIsTold() {
+        // No UI subscribed (a push/WorkManager start): the expired slot and the
+        // unattributed 0.6.0 leftover both stay.
+        val stale = "https://stale.example:443"
+        seededDisk()
+        disk.slots[stale] = expiredSlot("k-stale")
+        val orphan = InMemorySettings(initialLegacyPendingInput = PendingInput.toPersistable(
+            PendingInput.addRecord(PendingInput.emptyStore(), "k-orphan", PendingInput.KIND_SEND, "s-a", "from 0.6.0", now.get()).store,
+        ))
+        process(disk, collectErrors = false).start()
+        handshake(a, a.nextSocket())
+        process(orphan, collectErrors = false).start()
+        await(client.connection) { it == ConnectionState.AuthRequired }
+        Thread.sleep(700) // both bindings ran their prune / notice step
+        assertTrue("an expired slot was deleted with nobody told", disk.slots.containsKey(stale))
+        assertTrue("the leftover was deleted with nobody told", runBlocking { orphan.readUnattributedPendingInput() } != null)
+
+        // The next start with the UI up tells, and only then deletes.
+        scopes.forEach { it.cancel() }
+        scopes.clear()
+        a.serverSockets.forEach { runCatching { it.close(1001, null) } }
+        process(disk).start()
+        handshake(a, a.nextSocket())
+        awaitErrors { list -> list.any { it.contains("for stale.example expired") && it.contains("old text k-stale") } }
+        awaitCondition("pruned once told") { !disk.slots.containsKey(stale) }
+        process(orphan).start()
+        awaitErrors { list -> list.any { it.contains("saved by an earlier version") && it.contains("from 0.6.0") } }
+        awaitCondition("deleted once told") { runBlocking { orphan.readUnattributedPendingInput() } == null }
+    }
+
+    @Test
+    fun aLateReadyFromTheOldServerNeverShowsItsSessionsOnTheNewOne() {
+        processOnA()
+        val hold = Hold(RacePoint.FrameAdmitted) { it is com.tether.app.protocol.ServerMessage.Ready }
+        client.start()
+        val aws = a.nextSocket()
+        aws.send(
+            """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"sessions":[${
+                createdFrame("a-only-session").substringAfter("\"session\":").removeSuffix("}")
+            }],"providers":[{"id":"a-provider","label":"A"}],"workspaceRoot":"/a-root"}""",
+        )
+        hold.awaitReached() // A's ready admitted, not yet handled...
+        loginTo(b) // ...when the sign-in to B lets A's socket go
+        hold.release()
+        hold.awaitHandled()
+        assertTrue("A's sessions show on B", client.sessions.value.none { it.id == "a-only-session" })
+        assertEquals(null, client.workspaceRoot.value)
+        assertTrue(client.providers.value.isEmpty())
     }
 }

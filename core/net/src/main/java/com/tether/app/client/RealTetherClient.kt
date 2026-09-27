@@ -659,22 +659,12 @@ class RealTetherClient(
             val current = currentOriginLocked()
             (if (current == null || pendingLoaded || pendingOrigin != current) null else current) to check
         }
-        // Checked once per process, with or without a server configured: it can
-        // never be sent, so the user is told once (with the first text, to
-        // retype it) and it is deleted.
-        if (checkUnattributed) {
-            val raw = readQuietly { settings.readUnattributedPendingInput() }
-            if (raw != null) {
-                val records = PendingInput.fromPersisted(raw).records
-                if (records.isNotEmpty()) emitError(unattributedMessage(records))
-                try {
-                    settings.removeUnattributedPendingInput()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // Retried (and shown again) by the next process.
-                }
-            }
+        // Checked once per binding until it is gone, with or without a server
+        // configured: it can never be sent, so the user is told once (with the
+        // first text, to retype it) and only THEN is it deleted. A payload that
+        // cannot be fully read is kept (inert), never deleted unseen.
+        if (checkUnattributed && !settleUnattributed()) {
+            synchronized(lock) { unattributedChecked = false }
         }
         pruneExpiredSlots()
         val origin = target ?: return
@@ -689,6 +679,46 @@ class RealTetherClient(
         attachPendingSessionsThenDrain()
     }
 
+    /**
+     * The unattributed 0.6.0 slot: told, then deleted. True = settled (gone,
+     * absent, or unreadable and kept for good); false = retry at the next
+     * binding (nobody observed the notice yet, or the store failed).
+     */
+    private suspend fun settleUnattributed(): Boolean {
+        val raw = try {
+            settings.readUnattributedPendingInput()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return false
+        } ?: return true
+        val count = PendingInput.persistedRecordCount(raw) ?: return true
+        val records = PendingInput.fromPersisted(raw).records
+        if (records.size != count) return true
+        if (records.isNotEmpty() && !deliverNotice(unattributedMessage(records))) return false
+        return try {
+            settings.removeUnattributedPendingInput()
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false // shown again by the next binding: a repeat, never a loss
+        }
+    }
+
+    /**
+     * A one-time notice whose data is deleted right after: emitted only when
+     * someone observes [errors] (the flow has no replay, so an emission with no
+     * collector is lost). False = not delivered: keep the data and try again
+     * later, e.g. on a start with the UI up rather than a headless one. The
+     * ViewModel subscribes before it starts the client, so on an app start this
+     * delivers at once.
+     */
+    private fun deliverNotice(message: String): Boolean {
+        if (errorsFlow.subscriptionCount.value == 0) return false
+        return errorsFlow.tryEmit(message)
+    }
+
     private fun unattributedMessage(records: List<PendingRecord>): String {
         val first = records.first().text
         val preview = if (first.length > 120) first.take(120) + "…" else first
@@ -701,8 +731,12 @@ class RealTetherClient(
      * Slots are never wiped by logout; this is what bounds them. A slot of any
      * origin other than the bound one (and with no store set aside in this
      * process) whose records have ALL expired by the T1.3 rules, or that holds
-     * none, is deleted, with the undelivered notice for what it held. Runs on
-     * every binding (start / sign-in), serialized with the pending writes.
+     * none, is deleted, with the undelivered notice for what it held. Only a
+     * slot that was READ and fully UNDERSTOOD is ever deleted: a read error, a
+     * payload of an unknown shape or version, or records dropped as malformed
+     * keep it. A slot with records is deleted only once its notice was
+     * delivered ([deliverNotice]). Runs on every binding (start / sign-in),
+     * serialized with the pending writes.
      */
     private fun pruneExpiredSlots() {
         scope.launch {
@@ -716,28 +750,36 @@ class RealTetherClient(
                 }
                 for (origin in origins) {
                     if (synchronized(lock) { pruneSkippedLocked(origin) }) continue
-                    val expiry = PendingInput.expireRecords(
-                        PendingInput.fromPersisted(readQuietly { settings.readPendingInput(origin) }),
-                        clock(),
-                    )
+                    val raw = try {
+                        settings.readPendingInput(origin)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        continue // unreadable: kept
+                    } ?: continue
+                    val count = PendingInput.persistedRecordCount(raw) ?: continue // not understood: kept
+                    val store = PendingInput.fromPersisted(raw)
+                    if (store.records.size != count) continue // malformed records: kept
+                    val expiry = PendingInput.expireRecords(store, clock())
                     if (expiry.store.records.isNotEmpty()) continue
                     if (synchronized(lock) { pruneSkippedLocked(origin) }) continue
+                    if (expiry.unsent.isNotEmpty()) {
+                        val n = expiry.unsent.size
+                        val first = expiry.unsent.first().text
+                        val preview = if (first.length > 120) first.take(120) + "…" else first
+                        val delivered = deliverNotice(
+                            "$n unsent message${if (n == 1) "" else "s"} for ${displayHost(origin)} expired before you " +
+                                "signed in there again and ${if (n == 1) "was" else "were"} dropped. " +
+                                "The first was: \"$preview\"",
+                        )
+                        if (!delivered) continue // kept until someone can be told
+                    }
                     try {
                         settings.removePendingInput(origin)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
-                        continue
-                    }
-                    if (expiry.unsent.isNotEmpty()) {
-                        val n = expiry.unsent.size
-                        val first = expiry.unsent.first().text
-                        val preview = if (first.length > 120) first.take(120) + "…" else first
-                        emitError(
-                            "$n unsent message${if (n == 1) "" else "s"} for ${displayHost(origin)} expired before you " +
-                                "signed in there again and ${if (n == 1) "was" else "were"} dropped. " +
-                                "The first was: \"$preview\"",
-                        )
+                        continue // told again next time: a repeat, never a loss
                     }
                 }
             }
