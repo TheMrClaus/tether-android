@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Program status | IN PROGRESS |
-| Current phase | Phases 0-3 CLOSED; Phase 4 in progress (T4.1, T4.3 merged) |
+| Current phase | Phases 0-3 CLOSED; Phase 4 in progress (T4.1-T4.3 merged); Phases 5/6/12 landing |
 | PARITY_BASE (tether SHA) | `7d65611` (PROTOCOL_VERSION 128) |
 | App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
@@ -24,34 +24,27 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** Production runs tether `bde3cfa` (v129, floor 129). `main` speaks 129, so an APK release is
-possible when the owner asks. Release notes must cover: the Android 14 floor, Keystore-encrypted credentials, and
-that pre-T1.4 backups may still hold the old plaintext credential file.
-**Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
-**[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
-**Production:** tether `0e6e862` (#198/#199/#200), PROTOCOL 130, floor 129; Android `main` speaks 129 (accepted).
-**History:** the account name was scrubbed from this repo's git history (owner force-push, `main` f388137 + tag v0.6.0) and the
-beads Dolt history was flattened to one commit and re-pushed fresh (`refs/dolt/data`), so a fresh clone has 0 hits.
-**Phases 0-3 CLOSED.** **Merged today:** T3.5, T13.0, T1.5, T3.3, **T3.4 gallery, T4.1 phone shell, T4.3 statusline** (`3f18f1b`,
-combined gate 1711/0 failed/4 skipped).
-**ta-s8q (release blocker) VERIFIED + MERGED** (`9b6a8d7`, gate 1747/0 failed): unsent turns are keyed by server origin and never
-replayed to another server. **No release blocker is open.**
-**Merged since:** ta-cpn (`ec592d7`), **T4.2 expanded shell** (`1a8b876`).
-**⚠ Push has never worked end to end** (found by T12.1): nothing initialised FirebaseApp in a real app process. The app side is fixed
-in T12.1; the server must now return the public Firebase client ids from `/api/push/fcm-config` (**S12.2**, `ta-hf0`), and then the
-**owner sets 3 env values in production** (the Android app id, API key and sender id) and deploys.
-**In flight (4):** **T12.1** r3 (crash-loop fix for a malformed fcm-config, off-main token delete, config pinned to the server),
-**S12.2** server PR, **T5.1** sidebar, **T6.1** chat turns/blocks/markdown/paging.
-**Next:** T4.4 deep links (after T12.1), T4.5 log dialog, T13.1 Room mirror. Follow-ups filed: ta-gxp
-(register() migration), ta-yhu (S12.1 server channel ids), ta-srn (T13.3b).
-**Owner queue:** optional tether history scrub (82 hits in the private repo; needs a production checkout reset + restart).
-VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
+**Resume point (2026-09-27 ~21:20 CEST, coordinator handover after a 5-hour usage limit):** `main` @ `98bf8ac`.
+Phases 0-3 CLOSED; Phase 4 T4.1-T4.3 merged; **T12.1 r3 VERIFIED + merged** (`98bf8ac`); **ta-s8q** (release blocker)
+merged `9b6a8d7`. **No release blocker is open.** Production: tether `0e6e862`, PROTOCOL 130, floor 129; `main` speaks 129.
+**History:** this repo's history was scrubbed of the operator account name (owner force-push, `main` f388137 + tag v0.6.0);
+beads Dolt history flattened and re-pushed. Branches cut before the scrub are **transplanted** (`git rebase --onto`), never merged.
 
-**In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
-`parity/T1.5-nodes` (wt T1.5). Tether: `android-parity/S0` pushed, PR #198. The per-task branches
-S0.2/S0.3/S0.4/S0.5 are merged into it. Tether S* work happens only in `~/git/tether-wt/` worktrees. **Never** switch
-branches in `~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
-with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
+**Unfinished lanes (worktrees under `tether-android-wt/`):**
+- **T5.1** sidebar: `parity/T5.1-sidebar` @ `c86219d` (base `9b6a8d7`), DONE on the bead (gate 1885/0 failed/4 skipped),
+  **awaiting its verifier**, then rebase onto `main` + merge.
+- **T6.1** chat turns: `parity/T6.1-chat-turns` @ `02b2d1b` (base `ec592d7`), **BLOCKED on a P1 VERIFY-FAIL**: the
+  markdown link allowlist uses `Regex(..., IGNORE_CASE)`, which on the JVM folds Unicode case (`U+017F` long s → `s`), so
+  `httpſ://` becomes a link where the web's `/i` would not. Fix per the bead note, then the same verifier re-checks, then merge.
+
+**Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2, verified) awaits
+merge; then the owner sets `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` in production,
+deploys, and restricts that API key to the app's package + signing fingerprints. **Push cannot work end to end until then.**
+Optional: tether private-history scrub (needs a production checkout reset + restart).
+**Follow-ups filed:** ta-ouu (T12.1 security Lows), ta-dtb, ta-gxp, ta-yhu, ta-srn.
+**Next frontier (`bd ready` is authoritative):** T4.4 deep links, T4.5 log dialog, T13.1 Room mirror, Phase 10 settings.
+Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
+from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
 **Machine notes for this host:** `local.properties` needs `sdk.dir=<home>/Android/Sdk`
 (gitignored). JVM network tools (sdkmanager) need the sandbox proxy CA: build a temp truststore
@@ -119,7 +112,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | IN-PROGRESS | claude-main @ 2026-09-27 13:53 |  | executor-T5.1: tests committed (feature/sidebar 124 tests green incl. goldens verify; core/net SidebarSyncTest 10) / next: montages docs/pa… |
+| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | DONE | claude-main @ 2026-09-27 13:53 |  |  |
 | T5.2 | History/resume picker | TODO |  |  |  |
 | T5.3 | Global + in-session search | TODO |  |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
@@ -127,7 +120,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 6 — Chat view
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | IN-PROGRESS | claude-main @ 2026-09-27 16:58 |  | executor-T6.1 start: worktree tether-android-wt/T6.1 (parity/T6.1-chat-turns @ ec592d7). Finding: web markdown.tsx has NO syntax highlighti… |
+| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | BLOCKED | claude-main @ 2026-09-27 16:58 |  | PARKED at the handover point (claude-main). VERIFY-FAIL (verifier): P1 link-allowlist bypass: MarkdownParser.kt:91 Regex("^(https?:///mailt… |
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | TODO |  |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
@@ -180,7 +173,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | IN-PROGRESS | claude-main @ 2026-09-27 12:49 |  | SECURITY RE-CHECK r2 (security-reviewer, relayed): PASS-WITH-NOTES. Server-supplied Firebase config grants nothing new (the server already … |
+| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | VERIFIED | claude-main @ 2026-09-27 12:49 |  |  |
 | T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
 | T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
@@ -306,3 +299,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 23:00 | claude-main / Opus 5.5 (+ executors S0.2, S0.3, T0.3; verifier) | S0.2, S0.3, T0.3, T0.4 | S0.2 VERIFIED (`157b87d`); S0.3 BLOCKED (cgroup guard; script `fdecbe9` untested live); T0.3 DONE (`cbd6042`) — verifier found a real duplicate-attach race, fixed `76b0431` + deterministic regression test; T0.4 DONE (CI green); T0.5 re-verified after a matrix regex fix | owner decisions: KVM, isolated-server scope |
 | 2026-09-27 08:55 | claude-main / Opus 5.5 (+ executors, verifiers, security reviewers) | T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1–T3.3, T3.5, S0.3, S0.4, S1.1 | v0.6.0 published; VERIFIED+merged T1.1, T1.2, T1.4 (security-blocked once, fixed), T2.1 (70/70), T2.1D, T2.2 (807/807), T3.1, T3.2; S1.1 PR tether#197 open; two outages (5 agents each) recovered by resuming agents in context | owner: merge/deploy tether#197; next: T1.3/T2.3 verify → merge, S0.4 → S0.6, T3.3 → T3.4 |
 | 2026-09-27 09:25 | claude-main / Opus 5.5 | S1.1 deploy, T1.3, T2.3, T3.2, S0.4, T3.3, T3.5 | Owner: merge + redeploy tether → tether#197 merged `bde3cfa` (8 port tests 44/44 first), idle-waiting safe-restart watcher launched; T1.3 (real OkHttp onOpen race fixed), T2.3, T3.2 VERIFIED+merged; S0.4/T3.3/T3.5 checkpointed + paused for the restart | read deploy log; resume S0.4, T3.3, T3.5, T1.5 |
+| 2026-09-27 19:15 | claude-main / Opus 5.5 (new coordinator session) | T5.1, T6.1 | Took over after the previous coordinator hit its 5-hour usage limit; RESUME HERE rewritten from disk (T12.1 r3 merged `98bf8ac`; T5.1 DONE unverified; T6.1 blocked P1) | T5.1 verifier; T6.1 allowlist fix → re-verify → merge |
