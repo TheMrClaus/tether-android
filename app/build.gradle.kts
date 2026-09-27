@@ -79,7 +79,7 @@ android {
     }
 }
 
-// T3.4: the Component Gallery lives in src/debug (never in release, see src/testRelease); its
+// T3.4: the Component Gallery lives in src/debug (never in release, see verifyGalleryNotInRelease); its
 // goldens are checked in, verifyRoborazziDebug (CI) fails on any changed pixel.
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/testDebug/screenshots"))

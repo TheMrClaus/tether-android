@@ -47,13 +47,12 @@ jobs:
           :core:protocol:test :core:reducer:test verifyDesignTokens
           --stacktrace --console=plain
 
-      - name: Roborazzi verify (once T3.4 adds the plugin)
-        run: |
-          if ./gradlew tasks --all --console=plain -q | grep -q '^[^ ]*verifyRoborazziDebug'; then
-            ./gradlew verifyRoborazziDebug --console=plain
-          else
-            echo "Roborazzi not configured yet (T3.4) — skipping."
-          fi
+      - name: Roborazzi verify (exact-match goldens)
+        run: ./gradlew verifyRoborazziDebug --console=plain
+
+      # T3.4: the debug-only Component Gallery must never reach a release build.
+      - name: Gallery absent from release
+        run: ./gradlew :app:verifyGalleryNotInRelease --console=plain
 
       - name: Corpus pin check (once parity-corpus/ is vendored)
         run: |
