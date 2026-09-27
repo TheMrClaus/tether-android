@@ -75,6 +75,13 @@ class MotionAndHapticsTest {
         assertEquals(19f, s.capLeftOn.value, 0f)
     }
 
+    @Test fun layoutClassFollowsWindowSizeClassExpanded() {
+        assertEquals(TetherLayoutClass.Phone, layoutClassFor(412))
+        assertEquals(TetherLayoutClass.Phone, layoutClassFor(839))
+        assertEquals(TetherLayoutClass.Expanded, layoutClassFor(840))
+        assertEquals(TetherLayoutClass.Expanded, layoutClassFor(1280))
+    }
+
     @Test fun expandToggleWords() {
         assertEquals("Show less", expandToggleLabel(open = true, hidden = 12, locale = Locale.US))
         assertEquals("Show 1 more line", expandToggleLabel(false, 1, Locale.US))

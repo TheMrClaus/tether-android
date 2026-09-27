@@ -6,7 +6,7 @@ from. Each primitive mirrors a web rule set in `~/git/tether` at `PARITY_BASE` (
 
 | Primitive | File | Web source |
 |---|---|---|
-| Keys (`TetherKey`, `resolveKey` cascade, wear) | `ui/components/Keys.kt`, `KeyStyle.kt`, `Wear.kt` | globals.css material layer (key system), studio.css |
+| Keys (`TetherKey`, `resolveKey` cascade, wear; brick roles Deny / Danger / Interrupt / EndSession, which Studio treats differently) | `ui/components/Keys.kt`, `KeyStyle.kt`, `Wear.kt` | globals.css material layer (key system), studio.css |
 | CSS box model (`cssSurface`, `focusRing`) | `Material.kt` | every `box-shadow` list, `:focus-visible` |
 | Wells (`TetherWell`, `TetherInputWell`) | `Wells.kt` | recessed wells |
 | Seams, perforated divider | `Seams.kt` | parting lines, `--perf-dots` |
@@ -17,6 +17,9 @@ from. Each primitive mirrors a web rule set in `~/git/tether` at `PARITY_BASE` (
 | Expandable block | `Expandable.kt` | components/expandable-block.tsx |
 | Settings rocker | `Rocker.kt` | rocker switches |
 | Haptics moment map | `Haptics.kt` | the web's single `navigator.vibrate(7)` + native key moments |
+
+**Layout class.** `currentLayoutClass()` (PLAN D10): below WindowSizeClass "expanded" (840dp) is
+the web's mobile layout — the sheet docks, the expand toggle is 44dp / 0.74rem.
 
 **Reduced motion.** `LocalReducedMotion` is true when Android's "Remove animations" sets the
 animator duration scale to 0 (`isReducedMotion`), the web's `prefers-reduced-motion`. Ambient
@@ -34,7 +37,9 @@ does draw offscreen).
   Pressed and focus are held with a real `PressInteraction` / `FocusInteraction`.
 - Tests: `PrimitiveScreenshotTest.kt` — every board × all 6 skins at phone
   (`w412dp-h915dp-420dpi`, the web's 412×915 @2.625), the sheet and dialog also at tablet
-  (`w1280dp-h800dp-mdpi`), and the indicators under reduced motion. The clock is paused and
+  (`w1280dp-h800dp-mdpi`) with the expandable block, the indicators under reduced motion, and keys /
+  chips / expandable at 1.3× font scale (Machine + Studio; a 1600dp-tall window so the grown board
+  is captured whole). The clock is paused and
   advanced 600ms, so ambient motion is captured at a fixed frame.
 - Goldens: `src/test/screenshots/<primitive>/<skin>-<size>.png`, checked in.
 

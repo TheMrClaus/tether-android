@@ -77,6 +77,9 @@ import kotlin.math.roundToInt
  *   "there is more"; a block that fits exactly never looks truncated.
  * - [reveal] (the in-chat find bar's active match is inside) opens the block on its rising edge
  *   and never re-collapses it.
+ * - The clamp defaults to `--chat-clamp` (16rem). The web's chat view lowers it to 9rem below
+ *   48rem (`.chat-view { --chat-clamp: 9rem }`, globals.css:8464); that is a chat-screen rule, so
+ *   the chat screen (T6.x) passes `clamp` — the primitive does not guess its host.
  * - Collapsing removes height ABOVE the toggle; the web pins the block's bottom edge by scrolling
  *   the transcript by the delta. Here the transcript owner receives that delta through
  *   [onCollapseShift] (e.g. `listState.scrollBy(delta)`).
@@ -261,9 +264,9 @@ fun TetherExpandablePre(
 
 /**
  * `.chat-expand-toggle`: full width, ≥2.25rem, a `--line` top rule over `--tint-xs`, muted
- * JetBrains Mono 0.7rem/0.02em, a 13px chevron that turns 180° when open. Touch: pressed is the
- * web's hover (`--ink` on `--tint-sm`). The row is 36dp tall like the web; Compose extends a
- * pointer target shorter than the minimum touch size, so the tap area is still ≥48dp.
+ * JetBrains Mono 0.7rem/0.02em, a 13px chevron that turns 180° when open. On a phone
+ * ([TetherLayoutClass.Phone], the web below 48rem) it is min 44px tall with 0.74rem text
+ * (globals.css:8466). Touch: pressed is the web's hover (`--ink` on `--tint-sm`).
  */
 @Composable
 private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
@@ -280,6 +283,7 @@ private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
         label = "expandInk",
     )
     val label = expandToggleLabel(open, hidden)
+    val phone = currentLayoutClass() == TetherLayoutClass.Phone
     val lineColor = t.line
     val bg = if (pressed) t.tintSm else t.tintXs
     Row(
@@ -290,7 +294,7 @@ private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
                 stateDescription = if (open) "Expanded" else "Collapsed"
             }
             .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
-            .heightIn(min = 36.dp)
+            .heightIn(min = if (phone) 44.dp else 36.dp)
             .drawWithContent {
                 drawRect(bg)
                 drawRect(lineColor, size = Size(size.width, 1.dp.toPx()), topLeft = Offset.Zero)
@@ -304,7 +308,7 @@ private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
         Text(
             label,
             color = ink,
-            style = TextStyle(fontFamily = type.mono, fontSize = 11.2.sp, letterSpacing = 0.02.em),
+            style = TextStyle(fontFamily = type.mono, fontSize = if (phone) 11.84.sp else 11.2.sp, letterSpacing = 0.02.em),
             modifier = Modifier.clearAndSetSemantics { },
         )
     }

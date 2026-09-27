@@ -7,6 +7,8 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -97,12 +99,25 @@ fun ComposeContentTestRule.snapBoard(
 const val BoardTag = "board"
 
 /** A labelled row of states on a board. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun StateRow(caption: String, content: @Composable RowScope.() -> Unit) {
+fun StateRow(caption: String, wrap: Boolean = false, content: @Composable RowScope.() -> Unit) {
     val t = LocalTetherTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(caption, color = t.faint, style = TextStyle(fontFamily = LocalTetherTypography.current.mono, fontSize = 10.sp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+        // [wrap]: the states flow onto another line when they outgrow the phone width (e.g. at
+        // 1.3× font scale), so a board never clips a primitive at its edge. Rows that size a child
+        // with `weight` keep a plain Row.
+        if (!wrap) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+            return@Column
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
     }
 }
 

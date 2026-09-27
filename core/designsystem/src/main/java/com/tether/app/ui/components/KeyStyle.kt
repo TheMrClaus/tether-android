@@ -25,8 +25,28 @@ enum class KeyVariant {
     /** `.button-secondary` and the neutral key group (quick keys, attach, question options). */
     Secondary,
 
-    /** Destructive: `.chat-interrupt`, `.chat-approval-deny`, `.button-danger`, `.end-session`. */
-    Brick,
+    /**
+     * The destructive (brick) keys share one globals look (globals.css 8663-8726) but are four
+     * roles, because Studio treats them differently:
+     *
+     * - [Deny] `.chat-approval-deny` — Studio flattens it in every state (studio.css 489-497).
+     * - [Danger] `.button-primary.button-danger` (confirm dialogs) — flattened likewise; being a
+     *   `.button-primary` it also takes the disabled rule and the slit.
+     * - [Interrupt] `.chat-interrupt` — Studio's key rule (studio.css:263) drops its shadow but
+     *   keeps the 1px `--brick-side` border; the globals pressed rule still wins when pressed.
+     * - [EndSession] `.end-session` — excluded from Studio's flat header (studio.css 355-365,
+     *   issue #177): the full raised brick key in every skin.
+     */
+    Deny,
+
+    /** `.button-primary.button-danger`: see [Deny]. */
+    Danger,
+
+    /** `.chat-interrupt`: see [Deny]. */
+    Interrupt,
+
+    /** `.end-session`: see [Deny]. */
+    EndSession,
 
     /** `.chat-jump`: the charcoal utility cap that floats over the transcript. */
     Utility,
@@ -77,11 +97,17 @@ fun resolveKey(
     val keyDrop = if (size == KeySize.Small) css.shadowKeySm else css.shadowKey
     val radius = when {
         variant == KeyVariant.Quiet -> t.radiusSm
-        studio -> StudioKeyRadius
+        // studio.css:263 rounds only its labelled key group (button-primary/secondary, send, interrupt).
+        studio && variant in StudioRoundedKeys -> StudioKeyRadius
         else -> t.radiusKey
     }
 
-    if (state == KeyState.Disabled && variant != KeyVariant.Quiet && variant != KeyVariant.Utility) {
+    if (state == KeyState.Disabled && variant == KeyVariant.Danger && studio) {
+        // The disabled rule (0,3,0) ties with Studio's flat danger rule, which comes later: the
+        // disabled face/legend, Studio's transparent border and no shadow.
+        return KeyLook(t.keyFace, Color.Transparent, t.muted, emptyList(), 0.dp, radius, DisabledOpacity, 0.25f)
+    }
+    if (state == KeyState.Disabled && variant in FlatWhenDisabled) {
         // globals.css 8757-8769: flat on the panel, muted legend (wins in Studio: (0,3,0)).
         return KeyLook(
             face = t.keyFace,
@@ -142,33 +168,8 @@ fun resolveKey(
             )
         }
 
-        KeyVariant.Brick -> when {
-            // Studio flattens destructive keys in every state (studio.css 489-497).
-            studio -> KeyLook(if (pressed) t.brickDeep else t.brick, Color.Transparent, t.accentInk, emptyList(), 0.dp, radius, 1f, 0.55f)
-            pressed -> KeyLook(
-                face = t.brickDeep,
-                border = t.brickSide,
-                ink = t.accentInk,
-                shadows = listOf(
-                    softShadow(2.dp, 3.dp, t.pressShade, inset = true),
-                    hardShadow(1.dp, t.brickSide),
-                    softShadow(1.dp, 2.dp, contact(0.24f)),
-                ),
-                travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-            else -> KeyLook(
-                face = t.brick,
-                border = t.brickSide,
-                ink = t.accentInk,
-                shadows = listOf(
-                    hardShadow(1.dp, t.litFaint, inset = true),
-                    hardShadow((-1).dp, contact(0.1f), x = (-1).dp, inset = true),
-                    hardShadow(2.dp, t.brickSide),
-                    softShadow(4.dp, 6.dp, contact(0.3f), spread = (-2).dp),
-                ),
-                travel = 0.dp, radius = radius, alpha = 1f, slitAlpha = 0.55f,
-            )
-        }
+        KeyVariant.Deny, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession ->
+            brickKey(t, variant, pressed, travel, radius, disabledAlpha)
 
         // globals.css 8734-8753 (no Studio override: Studio's tokens flatten the lit edge).
         KeyVariant.Utility -> if (pressed) {
@@ -195,6 +196,54 @@ fun resolveKey(
             selected -> latched(t, radius).copy(border = Color.Transparent)
             else -> KeyLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, radius, disabledAlpha, 0.55f)
         }
+    }
+}
+
+/** The keys studio.css:263 re-rounds to 0.625rem. */
+private val StudioRoundedKeys = setOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Danger, KeyVariant.Interrupt)
+
+/** The keys globals.css 8757-8769 lays flat when disabled (deny and end-session only fade). */
+private val FlatWhenDisabled = setOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Danger, KeyVariant.Interrupt)
+
+/** The keys that carry the machined execution slit (globals.css 9220-9247; Studio hides it). */
+val SlitKeys: Set<KeyVariant> = setOf(KeyVariant.Primary, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession)
+
+/** The four brick roles: one globals look, three Studio treatments (see [KeyVariant.Deny]). */
+private fun brickKey(t: TetherTokens, variant: KeyVariant, pressed: Boolean, travel: Dp, radius: Dp, alpha: Float): KeyLook {
+    val studio = t.skin.family == ThemeFamily.Studio
+    val contact = { a: Float -> t.contact.copy(alpha = a) }
+    val flatInStudio = studio && (variant == KeyVariant.Deny || variant == KeyVariant.Danger)
+    val face = if (pressed) t.brickDeep else t.brick
+    return when {
+        // studio.css 489-497 (its :active selector ties the globals one and comes later).
+        flatInStudio -> KeyLook(face, Color.Transparent, t.accentInk, emptyList(), 0.dp, radius, alpha, 0.55f)
+        // globals.css 8719-8726, (0,4,0): wins over Studio's interrupt rule too.
+        pressed -> KeyLook(
+            face = face,
+            border = t.brickSide,
+            ink = t.accentInk,
+            shadows = listOf(
+                softShadow(2.dp, 3.dp, t.pressShade, inset = true),
+                hardShadow(1.dp, t.brickSide),
+                softShadow(1.dp, 2.dp, contact(0.24f)),
+            ),
+            travel = travel, radius = radius, alpha = 1f, slitAlpha = 0.55f,
+        )
+        // studio.css:263: `box-shadow: none`, the globals border stays.
+        studio && variant == KeyVariant.Interrupt -> KeyLook(face, t.brickSide, t.accentInk, emptyList(), 0.dp, radius, alpha, 0.55f)
+        // globals.css 8663-8672 (and Studio's end-session, excluded from the flat rail).
+        else -> KeyLook(
+            face = face,
+            border = t.brickSide,
+            ink = t.accentInk,
+            shadows = listOf(
+                hardShadow(1.dp, t.litFaint, inset = true),
+                hardShadow((-1).dp, contact(0.1f), x = (-1).dp, inset = true),
+                hardShadow(2.dp, t.brickSide),
+                softShadow(4.dp, 6.dp, contact(0.3f), spread = (-2).dp),
+            ),
+            travel = 0.dp, radius = radius, alpha = alpha, slitAlpha = 0.55f,
+        )
     }
 }
 

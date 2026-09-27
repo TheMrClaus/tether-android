@@ -183,7 +183,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         showLogoutConfirm = false
                         vm.logout()
                     },
-                    variant = KeyVariant.Brick,
+                    variant = KeyVariant.Danger,
                     label = "Sign out",
                     icon = TetherIcons.LogOut,
                 )

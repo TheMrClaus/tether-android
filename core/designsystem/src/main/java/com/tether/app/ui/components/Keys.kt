@@ -140,7 +140,7 @@ fun TetherKey(
     val textStyle = (if (fixedVerb) baseStyle else baseStyle.copy(letterSpacing = 0.sp))
         .let { if (fontSize != TextUnit.Unspecified) it.copy(fontSize = fontSize) else it }
     val shown = label?.let { if (fixedVerb) legend.format(it) else it }
-    val slit = showSlit && t.keySlit > 0.dp && (variant == KeyVariant.Primary || variant == KeyVariant.Brick)
+    val slit = showSlit && t.keySlit > 0.dp && variant in SlitKeys
     val iconOnly = label == null
 
     Row(

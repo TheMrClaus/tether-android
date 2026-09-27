@@ -67,16 +67,28 @@ val PrimitiveBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
 val TabletBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
     "sheet" to { SheetBoard() },
     "dialog" to { DialogBoard() },
+    // The expand toggle is 44dp / 0.74rem on a phone, 36dp / 0.7rem from the expanded width.
+    "expandable" to { ExpandableBoard() },
+)
+
+/** PLAN §4 accessibility: the text-bearing primitives at 1.3× font scale. */
+val FontScaleBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
+    "keys" to { KeysBoard() },
+    "chips" to { ChipsBoard() },
+    "expandable" to { ExpandableBoard() },
 )
 
 @Composable
 fun KeysBoard() {
     for (variant in KeyVariant.entries) {
-        StateRow("${variant.name.lowercase()}: rest · pressed · focus · disabled") {
+        StateRow("${variant.name.lowercase()}: rest · pressed · focus · disabled", wrap = true) {
             val icon = if (variant == KeyVariant.Quiet) TetherIcons.Settings else null
             val label = if (variant == KeyVariant.Quiet) null else when (variant) {
                 KeyVariant.Primary -> "Send"
-                KeyVariant.Brick -> "Stop"
+                KeyVariant.Deny -> "Deny"
+                KeyVariant.Danger -> "Delete"
+                KeyVariant.Interrupt -> "Stop"
+                KeyVariant.EndSession -> "End"
                 KeyVariant.Utility -> "Jump"
                 else -> "Retry"
             }
@@ -86,14 +98,14 @@ fun KeysBoard() {
             TetherKey(onClick = {}, variant = variant, label = label, icon = icon, contentDescription = "k", enabled = false)
         }
     }
-    StateRow("latched · small · slit · circle cap · authored legend") {
+    StateRow("latched · small · slit · circle cap · authored legend", wrap = true) {
         TetherKey(onClick = {}, label = "Filter", selected = true)
         TetherKey(onClick = {}, variant = KeyVariant.Quiet, icon = TetherIcons.Paperclip, selected = true, contentDescription = "Attach")
         TetherKey(onClick = {}, label = "Yes", size = KeySize.Small, minHeight = 32.dp)
         TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Approve", showSlit = true)
     }
-    StateRow("") {
-        TetherKey(onClick = {}, variant = KeyVariant.Brick, label = "Deny", showSlit = true)
+    StateRow("", wrap = true) {
+        TetherKey(onClick = {}, variant = KeyVariant.Interrupt, label = "Stop", showSlit = true)
         TetherKey(onClick = {}, variant = KeyVariant.Utility, icon = TetherIcons.ArrowDown, shape = KeyShape.Circle, contentDescription = "Jump")
         TetherKey(onClick = {}, variant = KeyVariant.Primary, icon = TetherIcons.Send, contentDescription = "Send")
         TetherKey(onClick = {}, label = "use main.kt", fixedVerb = false)
@@ -152,12 +164,12 @@ fun StatusPillsBoard() {
 
 @Composable
 fun ChipsBoard() {
-    StateRow("rest · open · focus") {
+    StateRow("rest · open · focus", wrap = true) {
         TetherChip("Draft", {})
         TetherChip("Opus 4.1", {}, active = true, trailingIcon = TetherIcons.ChevronDown)
         TetherChip("Focus", {}, interactionSource = heldInteraction(focused = true))
     }
-    StateRow("leading glyph · disabled") {
+    StateRow("leading glyph · disabled", wrap = true) {
         val t = LocalTetherTokens.current
         TetherChip("notes.md", {}, leading = { androidx.compose.material3.Icon(TetherIcons.FileText, null, tint = t.muted, modifier = Modifier.size(12.dp)) })
         TetherChip("Off", {}, enabled = false)
@@ -199,7 +211,7 @@ fun DialogBoard() {
             title = "End session",
             footer = {
                 TetherKey(onClick = {}, label = "Cancel")
-                TetherKey(onClick = {}, variant = KeyVariant.Brick, label = "End session", showSlit = true)
+                TetherKey(onClick = {}, variant = KeyVariant.Danger, label = "End session", showSlit = true)
             },
         ) {
             TetherDialogText("The agent stops and the transcript is kept. You can resume from history.")
@@ -273,6 +285,6 @@ fun RockerBoard() {
 fun DialogFooterKeysBoard() {
     StateRow("settings footer: secondary · primary with glyph") {
         TetherKey(onClick = {}, label = "Cancel")
-        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = TetherIcons.Check, iconSize = 16.dp)
+        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = TetherIcons.Check, iconSize = 17.dp, showSlit = true)
     }
 }

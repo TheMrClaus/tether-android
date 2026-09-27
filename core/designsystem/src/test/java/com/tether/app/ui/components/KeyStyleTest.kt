@@ -67,20 +67,97 @@ class KeyStyleTest {
         }
     }
 
-    @Test fun studioDestructiveKeysStayFlatInEveryState() {
+    @Test fun brickRolesShareOneGlobalsLookOutsideStudio() {
+        for (skin in instrument) {
+            val t = tokensFor(skin)
+            val looks = listOf(KeyVariant.Deny, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession)
+                .map { resolveKey(t, it, KeyState.Rest) }
+            assertTrue(skin.id, looks.all { it == looks.first() })
+            assertEquals(t.brick, looks.first().face)
+            assertEquals(t.brickSide, looks.first().border)
+            assertEquals(4, looks.first().shadows.size)
+            val pressed = resolveKey(t, KeyVariant.Interrupt, KeyState.Pressed)
+            assertEquals(t.brickDeep, pressed.face)
+            assertEquals(t.pressTravel, pressed.travel)
+        }
+    }
+
+    @Test fun studioDenyAndDangerAreFlatInEveryState() {
         for (skin in studio) {
             val t = tokensFor(skin)
-            assertTrue(resolveKey(t, KeyVariant.Brick, KeyState.Rest).shadows.isEmpty())
-            val pressed = resolveKey(t, KeyVariant.Brick, KeyState.Pressed)
-            assertTrue(pressed.shadows.isEmpty())
-            assertEquals(t.brickDeep, pressed.face)
+            for (role in listOf(KeyVariant.Deny, KeyVariant.Danger)) {
+                val rest = resolveKey(t, role, KeyState.Rest)
+                assertTrue("${skin.id} $role", rest.shadows.isEmpty())
+                assertEquals("${skin.id} $role", Color.Transparent, rest.border)
+                assertEquals("${skin.id} $role", t.brick, rest.face)
+                val pressed = resolveKey(t, role, KeyState.Pressed)
+                assertTrue("${skin.id} $role", pressed.shadows.isEmpty())
+                assertEquals("${skin.id} $role", t.brickDeep, pressed.face)
+                assertEquals("${skin.id} $role", 0.dp, pressed.travel)
+            }
+            // Danger is a .button-primary: 0.625rem; deny keeps the skin's key radius.
+            assertEquals(StudioKeyRadius, resolveKey(t, KeyVariant.Danger, KeyState.Rest).radius)
+            assertEquals(t.radiusKey, resolveKey(t, KeyVariant.Deny, KeyState.Rest).radius)
         }
+    }
+
+    @Test fun studioInterruptKeepsItsBorderAndTheGlobalsPress() {
+        for (skin in studio) {
+            val t = tokensFor(skin)
+            val rest = resolveKey(t, KeyVariant.Interrupt, KeyState.Rest)
+            assertEquals(skin.id, t.brickSide, rest.border)
+            assertTrue(skin.id, rest.shadows.isEmpty())
+            assertEquals(skin.id, StudioKeyRadius, rest.radius)
+            val pressed = resolveKey(t, KeyVariant.Interrupt, KeyState.Pressed)
+            assertEquals(skin.id, t.brickDeep, pressed.face)
+            assertEquals(skin.id, 3, pressed.shadows.size)
+            assertTrue(skin.id, pressed.shadows.first().inset)
+        }
+    }
+
+    @Test fun studioEndSessionStaysRaised() {
+        for (skin in studio) {
+            val t = tokensFor(skin)
+            val rest = resolveKey(t, KeyVariant.EndSession, KeyState.Rest)
+            assertEquals(skin.id, t.brickSide, rest.border)
+            assertEquals(skin.id, 4, rest.shadows.size)
+            assertEquals(skin.id, hardShadow(2.dp, t.brickSide), rest.shadows[2])
+            assertEquals(skin.id, 3, resolveKey(t, KeyVariant.EndSession, KeyState.Pressed).shadows.size)
+        }
+    }
+
+    @Test fun disabledBrickRoles() {
+        for (skin in TetherSkin.entries) {
+            val t = tokensFor(skin)
+            // Deny and end-session are outside the flat-disabled rule: their own look, faded.
+            for (role in listOf(KeyVariant.Deny, KeyVariant.EndSession)) {
+                val look = resolveKey(t, role, KeyState.Disabled)
+                assertEquals("${skin.id} $role", t.brick, look.face)
+                assertEquals("${skin.id} $role", DisabledOpacity, look.alpha)
+            }
+            val interrupt = resolveKey(t, KeyVariant.Interrupt, KeyState.Disabled)
+            assertEquals(skin.id, listOf(hardShadow(1.dp, t.keySide)), interrupt.shadows)
+            val danger = resolveKey(t, KeyVariant.Danger, KeyState.Disabled)
+            assertEquals(skin.id, t.keyFace, danger.face)
+            assertEquals(skin.id, t.muted, danger.ink)
+            if (skin.family == ThemeFamily.Studio) {
+                // Studio's flat danger rule ties the disabled rule and comes later.
+                assertTrue(skin.id, danger.shadows.isEmpty())
+                assertEquals(skin.id, Color.Transparent, danger.border)
+            } else {
+                assertEquals(skin.id, listOf(hardShadow(1.dp, t.keySide)), danger.shadows)
+            }
+        }
+    }
+
+    @Test fun slitRoles() {
+        assertEquals(setOf(KeyVariant.Primary, KeyVariant.Danger, KeyVariant.Interrupt, KeyVariant.EndSession), SlitKeys)
     }
 
     @Test fun disabledKeysSitFlatAtTheDisabledOpacityInEverySkin() {
         for (skin in TetherSkin.entries) {
             val t = tokensFor(skin)
-            for (variant in listOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Brick)) {
+            for (variant in listOf(KeyVariant.Primary, KeyVariant.Secondary, KeyVariant.Interrupt)) {
                 val look = resolveKey(t, variant, KeyState.Disabled)
                 assertEquals("${skin.id} $variant", DisabledOpacity, look.alpha)
                 assertEquals("${skin.id} $variant", t.keyFace, look.face)

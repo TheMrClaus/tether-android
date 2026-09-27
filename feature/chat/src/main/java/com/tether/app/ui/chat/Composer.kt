@@ -412,7 +412,7 @@ fun Composer(
                 )
                 TetherKey(
                     onClick = onInterrupt,
-                    variant = KeyVariant.Brick,
+                    variant = KeyVariant.Interrupt,
                     icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     contentDescription = "Interrupt",

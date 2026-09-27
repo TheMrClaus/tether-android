@@ -64,3 +64,27 @@ class ReducedMotionScreenshotTest(private val skin: TetherSkin) {
         fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
     }
 }
+
+/**
+ * 1.3× font scale (PLAN §4): legends, chips and the expand toggle grow without clipping. Two
+ * skins (instrument uppercase legends; Studio's sentence-case ones), phone width. The window is
+ * taller than a phone (1600dp) only so the grown keys board is captured whole.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h1600dp-420dpi", fontScale = 1.3f)
+class FontScaleScreenshotTest(private val primitive: String, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun board() {
+        val board = FontScaleBoards.getValue(primitive)
+        rule.snapBoard("$primitive-font-1.3x", skin, ScreenSize.Phone) { board() }
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = FontScaleBoards.keys.flatMap { p ->
+            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(p, it) }
+        }
+    }
+}

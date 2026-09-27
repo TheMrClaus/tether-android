@@ -20,6 +20,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -80,7 +82,16 @@ fun TetherChip(
                 }
             }
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-            .defaultMinSize(minWidth = TetherDimens.touchTargetDp, minHeight = TetherDimens.touchTargetDp),
+            .defaultMinSize(minWidth = TetherDimens.touchTargetDp, minHeight = TetherDimens.touchTargetDp)
+            // `.draft-chip` is a <button>: `button:disabled { opacity: 0.48 }` (globals.css 641-647)
+            // dims the whole chip as one group. Every chip shadow is inset, so an offscreen layer
+            // clips nothing; a disabled chip never shows the focus ring.
+            .then(
+                if (enabled) Modifier else Modifier.graphicsLayer {
+                    alpha = DisabledOpacity
+                    compositingStrategy = CompositingStrategy.Offscreen
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Row(

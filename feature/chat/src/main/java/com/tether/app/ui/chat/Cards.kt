@@ -153,7 +153,7 @@ fun ApprovalCard(
                             onChoice(null, "deny")
                         },
                         modifier = Modifier.weight(1f),
-                        variant = KeyVariant.Brick,
+                        variant = KeyVariant.Deny,
                         label = "Deny",
                         icon = TetherIcons.Ban,
                         enabled = !submitted,

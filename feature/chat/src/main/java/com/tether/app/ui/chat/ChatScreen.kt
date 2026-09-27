@@ -562,7 +562,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             if (session.status != "exited") {
                 TetherKey(
                     onClick = { confirmEnd = true },
-                    variant = KeyVariant.Brick,
+                    variant = KeyVariant.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
                     contentDescription = "End session",
@@ -660,7 +660,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                         confirmEnd = false
                         vm.client.kill(session.id)
                     },
-                    variant = KeyVariant.Brick,
+                    variant = KeyVariant.Danger,
                     label = "End session",
                     icon = TetherIcons.CircleStop,
                 )

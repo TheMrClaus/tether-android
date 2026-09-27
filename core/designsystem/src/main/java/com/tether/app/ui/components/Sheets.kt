@@ -33,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -51,11 +50,9 @@ import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 
-/** The web's phone breakpoint: `@media (max-width: 47.9375rem)` — below 48rem a sheet docks. */
-val SheetDockBelow = 768.dp
-
 /**
  * The action sheet (`.attach-sheet`, globals.css 7161-7240 + phone rules 8518-8545): on a phone
+ * ([TetherLayoutClass.Phone], the web below 48rem)
  * a true bottom sheet — edge to edge, `--radius-lg` top corners only, a `1px var(--line-strong)`
  * top edge, a 2.25rem × 0.25rem `--line-strong` drag handle, `max-height: 80dvh`; from 48rem a
  * centred `min(22rem, 100vw - 1.5rem)` card with every edge. Both: `var(--graphite)`,
@@ -67,7 +64,7 @@ val SheetDockBelow = 768.dp
 fun TetherSheetSurface(
     title: String,
     modifier: Modifier = Modifier,
-    docked: Boolean = LocalConfiguration.current.screenWidthDp.dp < SheetDockBelow,
+    docked: Boolean = currentLayoutClass() == TetherLayoutClass.Phone,
     onClose: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -185,7 +182,7 @@ fun TetherSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val docked = LocalConfiguration.current.screenWidthDp.dp < SheetDockBelow
+    val docked = currentLayoutClass() == TetherLayoutClass.Phone
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         NoWindowDim()
         ModalScrim(onDismiss, dialogScrim(t), if (docked) Alignment.BottomCenter else Alignment.Center) {
