@@ -46,6 +46,8 @@ workspace files", "Account usage", "Usage analytics", "Health & event log" with 
 state, "Lock", "Rename session", "Session telemetry" with a toggle state, "Session links", "End
 session", "Close sessions", "Close"); the status pill's printed word; provider availability read
 as "available" or "unavailable", never by the dot colour alone. 1.3× font-scale goldens:
-`shell-{idle,empty,details}-font-1.3x` (Machine and Studio).
+`shell-{idle,empty,details}-font-1.3x` (Machine and Studio). The links popover is capped at
+`calc(100dvh - 8rem)` and scrolls (T4.2 follow-up): `shell-links-short-font-1.3x` (412×320 at 1.3×)
+and `LinksPopoverShortScreenTest`.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.

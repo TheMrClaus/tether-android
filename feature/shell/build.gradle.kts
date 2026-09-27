@@ -1,4 +1,5 @@
-// Main shell: the phone layout (topbar, workspace header, drawer, telemetry panel) hosting
+// Main shell: the phone layout (topbar, workspace header, drawer, telemetry panel) and the expanded
+// desktop layout (T4.2: rail | workspace | inspector columns, resize handles), hosting
 // :feature:sidebar and :feature:chat, plus toasts.
 plugins {
     alias(libs.plugins.android.library)

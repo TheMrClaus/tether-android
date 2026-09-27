@@ -254,8 +254,8 @@ class PhoneShellBehaviourTest {
 }
 
 /**
- * Above the 840dp cutoff the expanded layout (T4.2) takes over; until it lands the phone shell
- * must still lay out and work at tablet width.
+ * Above the 840dp cutoff MainShell hosts the expanded layout (T4.2); the phone shell itself must
+ * still lay out and work at tablet width (a window mid-resize, previews).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
