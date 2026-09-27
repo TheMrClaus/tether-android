@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- T11.1 "Share" out of the file browser: a read grant on ONE downloaded copy under
+             cache/workspace-files/share/ (see res/xml/workspace_file_paths.xml), handed to the
+             app the user picks. Not exported; access only through the per-intent URI grant.
+             Its own subclass so it never collides with another library's FileProvider. -->
+        <provider
+            android:name="com.tether.app.ui.files.WorkspaceFileProvider"
+            android:authorities="${applicationId}.workspacefiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+
+</manifest>

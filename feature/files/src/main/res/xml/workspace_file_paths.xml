@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T11.1: the only directory the WorkspaceFileProvider serves: shared copies in the app cache
+     (never files/, never the preview scratch files beside it). -->
+<paths>
+    <cache-path name="shared" path="workspace-files/share/" />
+</paths>

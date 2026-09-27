@@ -32,6 +32,7 @@ include(":core:data")
 include(":core:designsystem")
 include(":feature:auth")
 include(":feature:chat")
+include(":feature:files")
 include(":feature:sidebar")
 include(":feature:shell")
 

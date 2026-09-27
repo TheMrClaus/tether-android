@@ -24,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,8 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.files.WorkspaceFileBrowser
+import com.tether.app.ui.files.rememberFileBrowserState
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.log.LogDialog
 import com.tether.app.ui.log.LogDialogState
@@ -114,6 +117,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val eventLog by vm.client.eventLog.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val refreshStats: () -> Unit = { scope.launch { logState.onStats(vm.client.fetchStats()) } }
+    // T11.1: the workspace file browser (topbar Files key), on the selected session's cwd.
+    val fileBrowser = rememberFileBrowserState(vm.client.files)
+    SideEffect {
+        fileBrowser.cwd = session?.cwd.orEmpty()
+        fileBrowser.sessionName = session?.name.orEmpty()
+    }
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
@@ -137,8 +146,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     Box(Modifier.fillMaxSize()) {
         val topbarActions = TopbarActions(
                 onOpenDrawer = {},
-                // Hosts not built yet (files T11.1, accounts/usage T9.2): their keys render disabled.
-                onOpenFiles = null,
+                // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
+                onOpenFiles = { fileBrowser.open() },
+                // Hosts not built yet (accounts/usage T9.2): their keys render disabled.
                 onOpenUsage = null,
                 onOpenUsageAnalytics = null,
                 // dashboard.tsx:199 openLog: acknowledge the warnings, open, fetch fresh stats.
@@ -253,6 +263,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             )
         }
     }
+
+    WorkspaceFileBrowser(fileBrowser)
 
     if (showLog) {
         LogDialog(
