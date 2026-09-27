@@ -178,6 +178,7 @@ internal fun SessionRow(
     dragging: Boolean,
     dragController: DragController,
     rowBounds: MutableMap<String, Rect>,
+    endBounds: MutableMap<String, Rect>,
     actions: SidebarActions,
 ) {
     val t = LocalTetherTokens.current
@@ -448,6 +449,7 @@ internal fun SessionRow(
                     Modifier
                         .padding(end = 0.3f.rem)
                         .size(if (phone) 2.75f.rem else 1.75f.rem)
+                        .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
                         .semantics {
                             contentDescription = if (armed) "Tap again to end $name" else "End $name"
                             role = Role.Button

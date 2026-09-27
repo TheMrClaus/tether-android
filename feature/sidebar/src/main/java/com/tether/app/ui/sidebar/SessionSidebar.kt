@@ -3,6 +3,8 @@ package com.tether.app.ui.sidebar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +47,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -175,6 +180,8 @@ private fun SidebarContent(
     var archivedOpen by remember { mutableStateOf(seed.archivedOpen) }
     val openChildren = remember { mutableStateMapOf<String, Boolean>().apply { seed.openChildren.forEach { put(it, true) } } }
     val rowBounds = remember { HashMap<String, Rect>() }
+    val endBounds = remember { HashMap<String, Rect>() }
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val listState = rememberLazyListState()
     var listBounds by remember { mutableStateOf(Rect.Zero) }
 
@@ -216,7 +223,22 @@ private fun SidebarContent(
         }
     }
 
-    Column(modifier.fillMaxSize().testTag(SidebarTags.Root)) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .onGloballyPositioned { rootCoords = it }
+            // session-sidebar.tsx:821 handleEndBlur — pressing anywhere but the armed end control
+            // disarms it (another row's end control re-arms on its own click right after).
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val key = armedKey ?: return@awaitEachGesture
+                    val at = rootCoords?.localToRoot(down.position) ?: return@awaitEachGesture
+                    if (endBounds[key]?.contains(at) != true) armedKey = null
+                }
+            }
+            .testTag(SidebarTags.Root),
+    ) {
         if (phone) MobileHeader(onClose = actions.onCloseDrawer)
 
         NewSessionKey(onClick = actions.onNewSession)
@@ -261,6 +283,7 @@ private fun SidebarContent(
                         draggingKey = drag?.takeIf { it.engaged }?.key,
                         openChildren = openChildren,
                         rowBounds = rowBounds,
+                        endBounds = endBounds,
                         onShowMore = { ws -> visibleCounts = visibleCounts + (ws to ((visibleCounts[ws] ?: Web.WORKSPACE_PAGE_SIZE) + Web.WORKSPACE_PAGE_SIZE)) },
                         onShowLess = { ws -> visibleCounts = visibleCounts - ws },
                     )
@@ -725,6 +748,7 @@ private fun WorkspaceBlock(
     draggingKey: String?,
     openChildren: MutableMap<String, Boolean>,
     rowBounds: MutableMap<String, Rect>,
+    endBounds: MutableMap<String, Rect>,
     onShowMore: (String) -> Unit,
     onShowLess: (String) -> Unit,
 ) {
@@ -759,6 +783,7 @@ private fun WorkspaceBlock(
                             dragging = draggingKey == e.key,
                             dragController = dragController,
                             rowBounds = rowBounds,
+                            endBounds = endBounds,
                             actions = actions,
                         )
                     }

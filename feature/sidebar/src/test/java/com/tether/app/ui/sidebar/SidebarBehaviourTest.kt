@@ -96,6 +96,29 @@ class SidebarBehaviourTest {
         rule.onNodeWithContentDescription("Tap again to end Long task with notices").assertIsDisplayed()
     }
 
+    @Test fun pressingElsewhereDisarmsTheEndControl() {
+        show()
+        rule.onNodeWithContentDescription("End Add the version file").performClick()
+        rule.onNodeWithContentDescription("Tap again to end Add the version file").assertExists()
+        // session-sidebar.tsx:821 handleEndBlur: interacting anywhere else disarms at once, not after 4s.
+        row("Long task with notices").performClick()
+        rule.onNodeWithContentDescription("Tap again to end Add the version file").assertDoesNotExist()
+        rule.onNodeWithContentDescription("End Add the version file").performClick()
+        assertEquals("the next tap only re-arms", listOf("select:s03"), events)
+    }
+
+    @Test fun holdingTheCapAndLettingGoWithoutMovingCommitsNothing() {
+        show()
+        val cap = rule.onNodeWithContentDescription("Hold and drag to move Worktree with a service")
+        cap.performTouchInput { down(center) }
+        rule.mainClock.advanceTimeBy(400) // engaged: past the 350ms touch hold
+        cap.performTouchInput { up() }
+        rule.waitForIdle()
+        // session-sidebar.tsx:684-696: an unchanged order is not sent — no set-session-order that
+        // would freeze the block's recency order into a manual one.
+        assertTrue(events.toString(), events.none { it.startsWith("order:") })
+    }
+
     @Test fun holdingTheProviderCapAndDraggingReordersTheBlock() {
         show()
         val handle = rule.onNodeWithTag(SidebarTags.handle("live:s01"), useUnmergedTree = true)
