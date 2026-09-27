@@ -63,7 +63,8 @@ WrapUpNotice(state)   // in the telemetry sheet / inspector
 - The wrap-up expires on its own at `resetsAt` (a timer, as on the web). The reducer drops it at
   every turn boundary.
 - Reduced motion: the usage-track fill transition becomes a jump (`usage-track-motion` vs
-  `usage-track-reduced-motion` goldens, one frame after 0% to 80%). The dial's once-a-second tick is
+  `usage-track-reduced-motion` goldens, 64ms after a 0% to 80% flip inside the composition: mid-transition
+  vs already at 80%, asserted by `UsageTrackMotionGoldensTest`). The dial's once-a-second tick is
   content, not animation, so it keeps ticking, as on the web.
 - TalkBack: each statusline segment reads its full reading (the web `title`), and the context
   segment also exposes progress info. The gauge reads "Context N% full · …" (else "Session
