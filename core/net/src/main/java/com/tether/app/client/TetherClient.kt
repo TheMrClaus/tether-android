@@ -222,6 +222,13 @@ interface TetherClient {
      */
     fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {}
 
+    /**
+     * T11.1: the workspace file browser's `/api/files` routes on the paired server, with the
+     * credential in force and never following a redirect (see [WorkspaceFiles]). The default
+     * refuses every call without touching the network.
+     */
+    val files: WorkspaceFiles get() = WorkspaceFiles.Unavailable
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------

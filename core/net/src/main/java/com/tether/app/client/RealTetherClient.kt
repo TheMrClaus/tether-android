@@ -2128,6 +2128,24 @@ class RealTetherClient(
     }
 
     // ------------------------------------------------------------------
+    // T11.1 workspace files (/api/files/*)
+    // ------------------------------------------------------------------
+
+    /**
+     * Over [authHttp] (never follows a redirect), with the server and the credential read
+     * together under [lock] for each call: a call can only ever carry a credential to the origin
+     * it was adopted for, whatever sign-in happens in between.
+     */
+    override val files: WorkspaceFiles = HttpWorkspaceFiles(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential) }
+        }
+    })
+
+    // ------------------------------------------------------------------
     // Fire-and-forget commands
     // ------------------------------------------------------------------
 
