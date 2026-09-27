@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.layoutClassFor
@@ -127,6 +128,8 @@ fun PhoneShell(
                                         if (!collapsed) placeable.place(0, 0)
                                     }
                                 }
+                                // Collapsed: the stage stays composed but leaves the semantics tree.
+                                .then(if (collapsed) Modifier.clearAndSetSemantics { } else Modifier)
                                 .testTag(ShellTags.Stage),
                         ) { slots.chat() }
                         if (collapsed) {

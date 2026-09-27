@@ -35,7 +35,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -90,11 +89,8 @@ fun SessionDrawerHost(
                 Modifier
                     .fillMaxSize()
                     .background(t.scrim)
-                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClose)
-                    .clearAndSetSemantics {
-                        contentDescription = "Close sessions"
-                        role = Role.Button
-                    }
+                    .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClose)
+                    .semantics { contentDescription = "Close sessions" }
                     .testTag(ShellTags.DrawerBackdrop),
             )
         }
