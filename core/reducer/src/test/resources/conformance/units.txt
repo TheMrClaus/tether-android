@@ -82,7 +82,6 @@ case fast-mode                            B  ready
 
 # ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
 # (unit I: cli-inventory + cli-inventory-limits went green once FoldTurn used C's CLI-inventory helpers.)
-#   cli-inventory, cli-inventory-limits -> unit I: swap FoldTurn.kt stand-ins projectedCliInventory/sameProjectedCliInventory for C's internal normalizeProjectedCliInventory/sameCliInventory (proven green)
 case cli-inventory                        C  ready
 case cli-inventory-limits                 C  ready
 case mcp-health                           C  ready
