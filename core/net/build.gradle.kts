@@ -25,3 +25,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
 }
+
+// T1.3: PendingInputTest replays parity-corpus/helpers/pending-input.json through the typed facade.
+tasks.withType<Test>().configureEach {
+    val corpusDir = rootProject.layout.projectDirectory.dir("parity-corpus")
+    systemProperty("parity.corpus", corpusDir.asFile.absolutePath)
+    inputs.dir(corpusDir.dir("helpers")).withPropertyName("parityHelperCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
+}

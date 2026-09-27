@@ -102,8 +102,14 @@ interface SettingsStore {
 
     suspend fun clear()
 
+    /**
+     * The durable-send store, the web's `tether:pendingInput` payload
+     * (`{v:2, records, cleared}`, lib/pending-input.mjs toPersistable). Lives in
+     * the backup-excluded settings file: unsent prompts never leave the device.
+     */
     suspend fun readPendingInput(): String?
 
+    /** Replaces the whole payload atomically: a crash leaves the old one or the new one, never a mix. */
     suspend fun writePendingInput(raw: String)
 }
 

@@ -18,8 +18,8 @@ import kotlin.math.max
  * core. A store is `{ records: [...] }` as the web persists it; every function takes the clock and
  * returns a new store. Persistence and transmission live with the client state (T2.3).
  *
- * The existing core/net PendingInput.kt (typed records, used by the socket today) keeps its own
- * copy of the constants; T2.3 moves it onto this port.
+ * T1.3: the socket's durable send (core/net PendingInput.kt) is typed glue over this port; it owns
+ * no constant or rule of its own.
  */
 object PendingInput {
 

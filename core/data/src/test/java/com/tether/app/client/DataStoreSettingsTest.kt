@@ -611,6 +611,33 @@ class DataStoreSettingsTest {
         assertNull(DataStoreSettings.originOf(null))
     }
 
+    /**
+     * T1.3: the pending store is one value replaced by one DataStore edit (scratch
+     * file + rename). A process killed mid-write leaves a half-written scratch file
+     * and the previous COMMITTED payload — never a torn mix of the two.
+     */
+    @Test
+    fun pendingInputSurvivesAProcessKilledMidWriteWhole() = runBlocking {
+        val committed = """{"v":2,"records":[{"key":"k1","kind":"send","sessionId":"s1","text":"a","sentAt":0,"tries":1,"firstQueuedAt":1}],"cleared":[]}"""
+        val next = """{"v":2,"records":[],"cleared":["k1"]}"""
+        val first = open()
+        first.store.setServer("https://a.example", Credential.Cookie(cookie))
+        first.store.writePendingInput(committed)
+        first.close()
+
+        // The killed write: the scratch file holds a prefix of the next payload.
+        File(tmp.root, DataStoreSettings.SETTINGS_FILE + ".tmp").writeBytes(next.toByteArray().copyOf(next.length / 2))
+        val second = open()
+        assertEquals(committed, second.store.readPendingInput())
+        assertEquals(Credential.Cookie(cookie), second.store.credential.first())
+        // ...and the next complete write replaces it whole.
+        second.store.writePendingInput(next)
+        second.close()
+        val third = open()
+        assertEquals(next, third.store.readPendingInput())
+        third.close()
+    }
+
     /** Sealing always fails (Keystore unavailable); opening never succeeds either. */
     private class FailingCipher : CredentialCipher {
         override fun seal(plaintext: ByteArray, aad: ByteArray): ByteArray = throw CredentialCipherException("keystore unavailable")

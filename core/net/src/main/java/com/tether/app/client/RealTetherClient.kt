@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
@@ -177,8 +179,15 @@ class RealTetherClient(
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
     private var pendingStore = PendingInput.emptyStore()
+    // The persisted store was read and merged in (start()); nothing drains or is
+    // written before that, so a cold start never overwrites what the last process left.
     private var pendingLoaded = false
     private val reconciledSessions = HashSet<String>()
+    // use-tether.ts clearedRef: keys removed for any reason (acked, withdrawn,
+    // expired, evicted), persisted with the records; bounded by MAX_TOMBSTONES.
+    private var clearedKeys = LinkedHashSet<String>()
+    // Every store change bumps this; the writer only ever moves the file forward.
+    private var pendingVersion = 0L
 
     // --- flows ---
     private val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -410,7 +419,15 @@ class RealTetherClient(
             // credential the install holds — a password cookie from a pre-pairing
             // version still resolves here, so upgrading never logs anyone out.
             val session = settings.session()
-            val persisted = settings.readPendingInput()
+            // An unreadable store is "nothing to redeliver", never a failed start.
+            val persisted = try {
+                settings.readPendingInput()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            var restored = false
             synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
                 if (credentialValue == null && session.credential != null && base != null) {
@@ -422,10 +439,11 @@ class RealTetherClient(
                 }
                 settingsLoaded = true
                 if (!pendingLoaded) {
-                    pendingLoaded = true
-                    if (pendingStore.records.isEmpty()) pendingStore = PendingInput.fromPersisted(persisted)
+                    restorePendingLocked(persisted)
+                    restored = true
                 }
             }
+            if (restored) persistPending()
             if (baseUrlValue == null || credentialValue == null) {
                 connectionState.value = ConnectionState.AuthRequired
             } else {
@@ -1044,10 +1062,15 @@ class RealTetherClient(
             is ServerMessage.Created -> upsertSession(message.session)
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {
-                    synchronized(lock) {
-                        pendingStore = PendingInput.forgetSession(pendingStore, message.session.id)
+                    // use-tether.ts:827 — an archived session refuses every send: drop its records.
+                    val changed = synchronized(lock) {
+                        val next = PendingInput.forgetSession(pendingStore, message.session.id)
+                        if (next === pendingStore) return@synchronized false
+                        forgetLocked(pendingStore.records.filter { it.sessionId == message.session.id }.map { it.key })
+                        pendingStore = next
+                        true
                     }
-                    persistPending()
+                    if (changed) persistPending()
                 }
                 upsertSession(message.session)
             }
@@ -1112,12 +1135,13 @@ class RealTetherClient(
             sendFrame(ClientMessage.Browse(it))
             sendFrame(ClientMessage.Discover(it))
         }
+        // Fresh input filed while the socket was not yet live goes out now, right
+        // after the re-attach; an already-transmitted record still waits for its
+        // session's snapshot.
+        drainPending()
         // Published only once the handshake frames are on the wire: whatever a
         // caller sends after observing Connected is ordered after the re-attach.
         connectionState.value = ConnectionState.Connected
-        // Fresh input filed while the socket was not yet live goes out now; an
-        // already-transmitted record still waits for its session's snapshot.
-        drainPending()
     }
 
     /** Outside the native window: terminal until retryConnection() (user action). */
@@ -1149,23 +1173,27 @@ class RealTetherClient(
         // The tree is the source of truth and is always kept: live events fold onto it.
         // A state whose required session fields the legacy typed model cannot read
         // leaves no typed projection (the screens show nothing rather than a diverged
-        // base) and skips reconciliation, as before.
+        // base); pending input still reconciles against the tree, as on the web.
         val tree = message.state ?: return
-        val state = adapt(message.sessionId, tree)
-        if (state == null) {
-            publish(message.sessionId, tree, null)
-            return
-        }
-        val cleared: List<String>
-        synchronized(lock) {
-            val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, state)
+        publish(message.sessionId, tree, adapt(message.sessionId, tree))
+        // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
+        // journal-folded state exactly as the web does (not the typed view): a key it
+        // contains was accepted, whatever it lacks was not and is redelivered below.
+        val changed = synchronized(lock) {
+            val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, tree)
             pendingStore = result.store
-            cleared = result.cleared
+            forgetLocked(result.cleared)
             // Only now is redelivery for this session safe on this connection.
             reconciledSessions.add(message.sessionId)
+            // use-tether.ts:975 — never redeliver a key already cleared (tombstoned).
+            var discarded = false
+            for (record in pendingStore.records.filter { it.key in clearedKeys }) {
+                pendingStore = PendingInput.discardKey(pendingStore, record.key).store
+                discarded = true
+            }
+            result.cleared.isNotEmpty() || discarded
         }
-        publish(message.sessionId, tree, state)
-        if (cleared.isNotEmpty()) persistPending()
+        if (changed) persistPending()
         drainPending()
     }
 
@@ -1192,9 +1220,12 @@ class RealTetherClient(
             else -> null
         }
         if (ackedKey != null) {
+            // use-tether.ts:1022-1040 — acked on the turn STARTING: whatever the turn's
+            // outcome later (completed, interrupted, outcome_unknown) it is never re-sent.
             val removed = synchronized(lock) {
                 val result = PendingInput.ackKey(pendingStore, ackedKey)
                 pendingStore = result.store
+                if (result.removed) forgetLocked(listOf(ackedKey))
                 result.removed
             }
             if (removed) persistPending()
@@ -1265,36 +1296,55 @@ class RealTetherClient(
         recordAndDrain(PendingInput.KIND_QUEUE, sessionId, text)
     }
 
+    /** use-tether.ts:630 filePending: mint, record, persist, then one drain puts it on the wire. */
     private fun recordAndDrain(kind: String, sessionId: String, text: String, attachments: List<Attachment>? = null) {
-        val key = UUID.randomUUID().toString()
+        val key = PendingInput.newKey()
         val evicted = synchronized(lock) {
             val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments)
             pendingStore = result.store
+            forgetLocked(result.evicted.map { it.key })
             result.evicted
         }
-        for (record in evicted) {
-            emitError(undeliveredMessage(listOf(record)))
+        if (evicted.isNotEmpty()) {
+            emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
         }
         persistPending()
         drainPending()
     }
 
+    // use-tether.ts:1583-1600 — both withdrawal paths reconcile the pending store FIRST:
+    // the server no-ops a queue-edit / queue-remove for a queueId it never accepted.
     override fun queueEdit(sessionId: String, queueId: String, text: String) {
-        synchronized(lock) { pendingStore = PendingInput.editText(pendingStore, queueId, text) }
-        persistPending()
+        val changed = synchronized(lock) {
+            val next = PendingInput.editText(pendingStore, queueId, text)
+            (next !== pendingStore).also { pendingStore = next }
+        }
+        if (changed) persistPending()
         sendFrame(ClientMessage.QueueEdit(sessionId, queueId, text))
     }
 
     override fun queueRemove(sessionId: String, queueId: String) {
-        synchronized(lock) { pendingStore = PendingInput.discardKey(pendingStore, queueId).store }
-        persistPending()
+        val discarded = synchronized(lock) {
+            val result = PendingInput.discardKey(pendingStore, queueId)
+            if (result.removed) forgetLocked(listOf(queueId))
+            pendingStore = result.store
+            result.removed
+        }
+        if (discarded) persistPending()
         sendFrame(ClientMessage.QueueRemove(sessionId, queueId))
     }
 
+    /**
+     * use-tether.ts:570 drainPending: everything [PendingInput.sendableRecords] lets
+     * out over THIS connection, oldest-first, each under its own record key — so a
+     * redelivery is always the SAME idempotencyKey / queueId (server dedupe,
+     * session-manager.mjs:2520) and never a second new turn. Waits for the
+     * handshake and for the persisted store to be restored.
+     */
     private fun drainPending() {
         val frames: List<ClientMessage>
         synchronized(lock) {
-            if (!socketOpen || !handshakeDone) return
+            if (!pendingLoaded || !socketOpen || !handshakeDone) return
             val sendable = PendingInput.sendableRecords(pendingStore, reconciledSessions)
             if (sendable.isEmpty()) return
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
@@ -1332,6 +1382,7 @@ class RealTetherClient(
             val unsent = synchronized(lock) {
                 val result = PendingInput.expireRecords(pendingStore, now)
                 pendingStore = result.store
+                forgetLocked(result.unsent.map { it.key })
                 result.unsent
             }
             if (unsent.isNotEmpty()) {
@@ -1352,13 +1403,62 @@ class RealTetherClient(
         }
     }
 
+    /**
+     * Cold start (use-tether.ts:1225-1232): adopt the tombstones, then union the
+     * persisted records under what this process already holds, never adopting a
+     * cleared key. Restored records count as possibly transmitted
+     * ([PendingInput.restoredFromPreviousProcess]). Caller holds [lock].
+     */
+    private fun restorePendingLocked(raw: String?) {
+        val persistedCleared = PendingInput.clearedFromPersisted(raw)
+        val cleared = LinkedHashSet(persistedCleared).apply { addAll(clearedKeys) }
+        clearedKeys = LinkedHashSet(cleared.toList().takeLast(PendingInput.MAX_TOMBSTONES))
+        val restored = PendingInput.restoredFromPreviousProcess(PendingInput.fromPersisted(raw), clock())
+        pendingStore = PendingInput.mergeStores(pendingStore, restored, clearedKeys)
+        pendingLoaded = true
+    }
+
+    /** use-tether.ts:360 forget: tombstone removed keys, oldest falling off first. Caller holds [lock]. */
+    private fun forgetLocked(keys: Collection<String>) {
+        if (keys.isEmpty()) return
+        clearedKeys.addAll(keys)
+        if (clearedKeys.size > PendingInput.MAX_TOMBSTONES) {
+            clearedKeys = LinkedHashSet(clearedKeys.toList().takeLast(PendingInput.MAX_TOMBSTONES))
+        }
+    }
+
+    private val persistMutex = Mutex()
+
+    // Guarded by persistMutex: the version the file holds.
+    private var persistedVersion = 0L
+
+    /**
+     * Write the store after EVERY change. One DataStore edit replaces the whole
+     * payload atomically (temp file + rename), so a crash mid-write leaves the
+     * previous complete store, never a torn one. Writes are serialized and
+     * conflated: each writes the newest version, and an older snapshot can never
+     * land after a newer one (which could resurrect an acked record or drop a new one).
+     */
     private fun persistPending() {
-        val snapshot = synchronized(lock) { pendingStore }
+        synchronized(lock) {
+            if (!pendingLoaded) return
+            pendingVersion++
+        }
         scope.launch {
-            try {
-                settings.writePendingInput(PendingInput.toPersisted(snapshot))
-            } catch (_: Exception) {
-                // No persistence just means nothing to redeliver after a restart.
+            persistMutex.withLock {
+                val (version, store, cleared) = synchronized(lock) {
+                    Triple(pendingVersion, pendingStore, clearedKeys.toList())
+                }
+                if (version <= persistedVersion) return@withLock
+                try {
+                    settings.writePendingInput(PendingInput.toPersistable(store, cleared))
+                    persistedVersion = version
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // A failed write must never break sending; the in-memory store
+                    // still redelivers for the life of the process.
+                }
             }
         }
     }
