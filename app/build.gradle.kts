@@ -53,6 +53,8 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig.VERSION_NAME: the D13 update check compares it to the latest release tag.
+        buildConfig = true
     }
 
     kotlin {

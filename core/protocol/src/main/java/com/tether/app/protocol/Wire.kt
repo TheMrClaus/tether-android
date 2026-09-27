@@ -11,19 +11,20 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 
 /**
- * The protocol version the RUNTIME currently speaks (hello + the strict
- * ready/healthz equality check in RealTetherClient). Deliberately still the
- * legacy value: flipping it to [TARGET_PROTOCOL_VERSION] is T1.2's job (the
- * connection manager owns the hello/ready version logic and its tests).
- */
-const val PROTOCOL_VERSION: Int = 40
-
-/**
  * The protocol the wire TYPES in this module model: tether lib/protocol.ts
  * PROTOCOL_VERSION at 7d65611 + S1.1 (v129). Every ClientMessage/ServerMessage
- * of that union has a Kotlin type; see WireConformanceTest.
+ * of that union has a Kotlin type; see WireConformanceTest. Since T1.2 this is
+ * also what the runtime speaks ([PROTOCOL_VERSION]).
  */
 const val TARGET_PROTOCOL_VERSION: Int = 129
+
+/**
+ * The protocol version the RUNTIME speaks: the `hello` this app sends. The
+ * server serves it anywhere inside its native window
+ * `nativeProtocolFloor <= v <= server PROTOCOL_VERSION` (S1.1 / D5); see
+ * :core:net Compatibility for the client side of that decision.
+ */
+const val PROTOCOL_VERSION: Int = TARGET_PROTOCOL_VERSION
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be

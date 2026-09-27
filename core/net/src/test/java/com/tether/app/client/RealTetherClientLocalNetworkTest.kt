@@ -80,7 +80,7 @@ class RealTetherClientLocalNetworkTest {
             settings = settings,
             httpClient = http,
             scope = scope,
-            reconnectDelayMs = 50,
+            backoff = Backoff(baseMs = 50, capMs = 100),
             localNetworkAccess = access,
         ).also { client = it }
 
@@ -156,13 +156,28 @@ class RealTetherClientLocalNetworkTest {
     }
 
     @Test
-    fun `connect loop - remote server outage keeps the normal reconnect loop`() {
+    fun `connect loop - remote server outage while unrestricted keeps the normal reconnect loop`() {
+        val c = newClient(
+            FakeAccess(restricted = false),
+            InMemorySettings(initialBaseUrl = "http://tether.example.com", initialCookie = "cookie"),
+        )
+        c.start()
+        runBlocking { withTimeout(10_000) { while (sockets.connects.get() < 5) kotlinx.coroutines.delay(20) } }
+        assertTrue(c.connection.value != ConnectionState.LocalNetworkBlocked)
+    }
+
+    @Test
+    fun `connect loop - restricted and repeated timeouts surface the local-network notice, then stop`() {
+        // T0.6: a host the classifier cannot see as local (e.g. a global IPv6
+        // address on the Wi-Fi LAN) still times out under the block. A run of
+        // timeouts while restricted is read as the block: the notice shows and
+        // the loop stops (no hammering), exactly like a known-local host.
         val c = newClient(
             FakeAccess(restricted = true),
             InMemorySettings(initialBaseUrl = "http://tether.example.com", initialCookie = "cookie"),
         )
         c.start()
-        runBlocking { withTimeout(10_000) { while (sockets.connects.get() < 3) kotlinx.coroutines.delay(20) } }
-        assertTrue(c.connection.value != ConnectionState.LocalNetworkBlocked)
+        await(c.connection) { it == ConnectionState.LocalNetworkBlocked }
+        assertEquals(ConnectionTimings.LOCAL_NETWORK_SUSPECT_TIMEOUTS, sockets.connects.get())
     }
 }

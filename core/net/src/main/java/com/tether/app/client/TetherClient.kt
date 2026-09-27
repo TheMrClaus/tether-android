@@ -45,7 +45,7 @@ interface TetherClient {
 
     /**
      * Validate + persist server config from the first-launch screen:
-     * probes /healthz (protocol version), performs the password login, stores
+     * probes /healthz (the native compatibility window), performs the password login, stores
      * the base URL and session cookie, then starts the connection loop.
      */
     suspend fun login(baseUrl: String, password: String): LoginResult
@@ -116,8 +116,36 @@ interface TetherClient {
     fun archive(sessionId: String)
     fun kill(sessionId: String)
 
-    /** Called by lifecycle/network observers to trigger an immediate reconnect if idle. */
+    /**
+     * Called by network observers (and the local-network grant) to reconnect now
+     * if idle. With a socket that reads open it sends a liveness `ping` instead,
+     * because an open socket cannot be trusted after a network change (the web's
+     * reconnectIfIdle). A no-op in a terminal state.
+     */
     fun reconnectIfIdle()
+
+    /**
+     * Process lifecycle (ProcessLifecycleOwner ON_START / ON_STOP), the native
+     * twin of the web's `visibilitychange`. Foreground: re-check the link at once
+     * (ping an open socket, reconnect a dead one). Background: after
+     * [ConnectionTimings.BACKGROUND_GRACE_MS] the socket is closed and reconnects
+     * stop until the next foreground; FCM covers the background.
+     */
+    fun setAppForeground(foreground: Boolean)
+
+    /**
+     * User action out of a terminal [ConnectionState.VersionMismatch] (the
+     * banner's retry): clear the halt and connect now. Nothing automatic ever
+     * leaves that state, so a server that stays incompatible cannot loop.
+     */
+    fun retryConnection()
+
+    /**
+     * v115 bounded snapshots: per session, the turn index below which the last
+     * snapshot stripped `blocksById` (fetch them with `fetch-turns`, T6.1).
+     * Absent = nothing trimmed.
+     */
+    val trimmedBefore: StateFlow<Map<String, Int>>
 }
 
 sealed interface ConnectionState {
@@ -128,8 +156,13 @@ sealed interface ConnectionState {
     /** No valid credentials — surface the login/setup screen. */
     data object AuthRequired : ConnectionState
 
-    /** Server speaks a different PROTOCOL_VERSION; reconnect is disabled. */
-    data class VersionMismatch(val requiredVersion: Int) : ConnectionState
+    /**
+     * The server is outside this app's native compatibility window (D5):
+     * [Incompatibility.reason] says which side must update. Terminal until user
+     * action ([TetherClient.retryConnection]) or an app restart: no automatic
+     * reconnect, because every retry would fail the same way.
+     */
+    data class VersionMismatch(val incompatibility: Incompatibility) : ConnectionState
 
     /**
      * The server is on the local network and the OS blocks that traffic until the
@@ -145,7 +178,8 @@ sealed interface LoginResult {
     data object Success : LoginResult
     data class BadPassword(val message: String) : LoginResult
     data class RateLimited(val message: String) : LoginResult
-    data class VersionMismatch(val requiredVersion: Int) : LoginResult
+    /** /healthz shows the server is outside the native window (see [Compatibility]). */
+    data class VersionMismatch(val incompatibility: Incompatibility) : LoginResult
     data class Unreachable(val message: String) : LoginResult
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
@@ -165,7 +199,7 @@ sealed interface PairResult {
     /** /healthz did not report `pairing: true` — this server predates device pairing. */
     data class NotSupported(val message: String) : PairResult
 
-    data class VersionMismatch(val requiredVersion: Int) : PairResult
+    data class VersionMismatch(val incompatibility: Incompatibility) : PairResult
     data class Unreachable(val message: String) : PairResult
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */

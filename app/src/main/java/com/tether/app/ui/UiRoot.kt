@@ -20,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.app.client.ConnectionState
@@ -28,6 +27,7 @@ import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
 import com.tether.app.push.PushScope
 import com.tether.app.push.TetherFcmService
+import com.tether.app.ui.compat.CompatibilityBanner
 import com.tether.app.ui.localnet.LocalNetworkExplainDialog
 import com.tether.app.ui.localnet.LocalNetworkNotice
 import com.tether.app.ui.localnet.LocalNetworkPhase
@@ -90,11 +90,8 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
         }
     }
 
-    // Lifecycle: reconnect promptly when the app returns to the foreground.
-    LifecycleResumeEffect(client) {
-        client.reconnectIfIdle()
-        onPauseOrDispose { }
-    }
+    // Foreground/background is process-wide (ProcessLifecycleOwner, wired in
+    // TetherApp): client.setAppForeground re-checks the link on return.
 
     // Network: reconnect the moment a default network comes back.
     DisposableEffect(client) {
@@ -120,8 +117,14 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     TetherTheme(choice = themeChoice) {
         val tokens = LocalTetherTokens.current
         val phase = localNetwork.model.phase
+        val needsSetup = !configured || connection is ConnectionState.AuthRequired
+        // D5: an incompatible server does not lock the user out: the shell (and
+        // what it last showed) stays, with a banner saying which side to update.
+        val mismatch = (connection as? ConnectionState.VersionMismatch)?.takeIf { !needsSetup }
+        val denied = phase is LocalNetworkPhase.Denied
         Column(Modifier.fillMaxSize().background(tokens.mineral)) {
-            // Persistent denied state, above whichever screen is showing.
+            // Persistent notices, above whichever screen is showing. The first
+            // one clears the status bar.
             if (phase is LocalNetworkPhase.Denied) {
                 LocalNetworkNotice(
                     canRequest = phase.canRequest,
@@ -129,20 +132,23 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
                     modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                 )
             }
+            if (mismatch != null) {
+                CompatibilityBanner(
+                    incompatibility = mismatch.incompatibility,
+                    onRetry = client::retryConnection,
+                    modifier = Modifier.fillMaxWidth().then(if (denied) Modifier else Modifier.statusBarsPadding()),
+                )
+            }
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    // The notice already cleared the status bar.
-                    .then(if (phase is LocalNetworkPhase.Denied) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
+                    // A notice already cleared the status bar.
+                    .then(if (denied || mismatch != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
-                val needsSetup = !configured ||
-                    connection is ConnectionState.AuthRequired ||
-                    connection is ConnectionState.VersionMismatch
                 if (needsSetup) {
                     LoginScreen(
                         client = client,
-                        versionMismatch = connection as? ConnectionState.VersionMismatch,
                         onLocalNetworkBlocked = { retry -> localNetwork.onBlocked(LocalNetworkSource.Login, retry) },
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
                     )

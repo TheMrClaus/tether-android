@@ -32,7 +32,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.tether.app.client.ConnectionState
+import com.tether.app.client.IncompatibleReason
+import com.tether.app.client.Incompatibility
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
@@ -67,7 +68,6 @@ private const val CODE_FIELD_MAX = 12
 @Composable
 fun LoginScreen(
     client: TetherClient,
-    versionMismatch: ConnectionState.VersionMismatch? = null,
     /**
      * Android 17: the server is on the local network and access is not granted.
      * The host (UiRoot) runs the permission flow and calls [retry] once access is
@@ -89,8 +89,11 @@ fun LoginScreen(
 
     val deviceLabel = remember { Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android device" }
 
-    fun versionCopy(required: Int) =
-        "This server speaks protocol v$required, which this app does not. Update the app to connect."
+    // Which side must update is known from /healthz (the D5 native window).
+    fun versionCopy(incompatibility: Incompatibility) = when (incompatibility.reason) {
+        IncompatibleReason.ClientTooOld -> "This server needs a newer version of the app. Update Tether, then connect."
+        IncompatibleReason.ServerTooOld -> "This server is older than the app. Update the server, then connect."
+    }
 
     fun connect() {
         if (busy) return
@@ -114,7 +117,7 @@ fun LoginScreen(
                     is LoginResult.BadPassword -> result.message.ifBlank { "That password was not accepted." }
                     is LoginResult.RateLimited -> result.message.ifBlank { "Too many attempts — wait a moment and try again." }
                     is LoginResult.Unreachable -> result.message.ifBlank { "Could not reach the server." }
-                    is LoginResult.VersionMismatch -> versionCopy(result.requiredVersion)
+                    is LoginResult.VersionMismatch -> versionCopy(result.incompatibility)
                 }
                 AuthMode.Pairing -> when (val result = client.pair(url, code, deviceLabel)) {
                     is PairResult.LocalNetworkBlocked -> { blocked = true; null }
@@ -123,7 +126,7 @@ fun LoginScreen(
                     is PairResult.RateLimited -> result.message.ifBlank { "Too many pairing attempts — wait a few minutes." }
                     is PairResult.NotSupported -> result.message.ifBlank { "This server does not support device pairing." }
                     is PairResult.Unreachable -> result.message.ifBlank { "Could not reach the server." }
-                    is PairResult.VersionMismatch -> versionCopy(result.requiredVersion)
+                    is PairResult.VersionMismatch -> versionCopy(result.incompatibility)
                 }
             }
             busy = false
@@ -246,15 +249,6 @@ fun LoginScreen(
                 }
             }
 
-            versionMismatch?.let {
-                Text(
-                    text = "This server requires protocol v${it.requiredVersion}. Update the app, then reconnect.",
-                    color = t.warning,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.label,
-                    fontSize = 12.8.sp,
-                )
-            }
             error?.let {
                 Text(
                     text = it,

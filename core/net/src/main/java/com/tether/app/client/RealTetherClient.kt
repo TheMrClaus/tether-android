@@ -3,6 +3,7 @@ package com.tether.app.client
 import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.HELLO_CLIENT_ANDROID
 import com.tether.app.protocol.PROTOCOL_VERSION
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
@@ -13,6 +14,7 @@ import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.reduce.reduce
 import com.tether.app.protocol.str
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +52,22 @@ private const val CLOSE_DEVICE_REVOKED = 4001
  * Production [TetherClient]: OkHttp WebSocket + cookie/device-token auth + the
  * attach / reconnect / durable-send discipline of specs/protocol-spec.md §5.
  *
+ * Connection manager (T1.2), per connection EPOCH (one socket):
+ * ```
+ * Disconnected/AuthRequired --start/login/pair--> Connecting
+ * Connecting --auth probe ok, upgrade--> (socket open, NOT yet live)
+ *   --ready--> window check --> send hello --> Connected --> attach every
+ *   subscribed / pending session with afterSeq = its cursor
+ *   --ready outside the window / version_mismatch--> VersionMismatch (terminal)
+ * any socket loss / ping timeout / half-open sweep --> Disconnected
+ *   --> reconnect after Backoff.next() (reset by the next accepted ready)
+ * close 4001 --> AuthRequired, credential cleared (terminal)
+ * restricted local network (+ repeated timeouts) --> LocalNetworkBlocked (no loop)
+ * background > BACKGROUND_GRACE_MS --> socket closed, reconnects stop until foreground
+ * ```
+ * Nothing but `ping`/`hello` goes out before `ready`: every other frame waits for
+ * the handshake of the current epoch.
+ *
  * Construction (integrator):
  * ```
  * val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -74,21 +92,41 @@ class RealTetherClient(
     private val httpClient: OkHttpClient = OkHttpClient(),
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val reconnectDelayMs: Long = 1_800,
+    private val backoff: Backoff = Backoff(),
     private val sweepIntervalMs: Long = 2_000,
     private val localNetworkAccess: LocalNetworkAccess = LocalNetworkAccess.Unrestricted,
+    private val scheduler: Scheduler = CoroutineScheduler(scope),
 ) : TetherClient {
 
     private val lock = Any()
 
     // --- connection state (guarded by lock) ---
+    // Logout or 4001: nothing reconnects until a new credential is adopted.
     private var stopped = false
+    // Outside the native window: terminal until retryConnection() (user action).
+    private var versionHalt: Incompatibility? = null
+    // Backgrounded past the grace period: no socket, no reconnects, until foreground.
+    private var backgroundSuspended = false
+    private var inForeground = true
+    private var backgroundTask: Cancellable? = null
     private var connecting = false
     private var socket: WebSocket? = null
+    private var socketListener: SocketListener? = null
     private var socketOpen = false
-    private var reconnectJob: Job? = null
+    // The current socket's `ready` was accepted (window ok, hello sent): the
+    // connection is live and ordinary frames may go out.
+    private var handshakeDone = false
+    // Connection epoch = one socket. Sessions attached during the current epoch;
+    // an attach() for one of them is a no-op (T0.3: attach idempotent per epoch).
+    private var epoch = 0L
+    private val attachedThisEpoch = HashSet<String>()
+    private var reconnectTask: Cancellable? = null
+    private var pingTask: Cancellable? = null
+    private var consecutiveTimeouts = 0
     private var sweeperJob: Job? = null
     private var baseUrlValue: HttpUrl? = null
+    // start() has read the persisted server + credential at least once.
+    private var settingsLoaded = false
 
     // The ONE credential in force. Cookie (password login) and device token
     // (pairing) differ only in the header they add, so the connect loop below
@@ -114,6 +152,7 @@ class RealTetherClient(
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
+    private val trimmedBeforeState = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val errorsFlow = MutableSharedFlow<String>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -130,6 +169,7 @@ class RealTetherClient(
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
     override val errors: SharedFlow<String> = errorsFlow
     override val configured: StateFlow<Boolean> = configuredState
+    override val trimmedBefore: StateFlow<Map<String, Int>> = trimmedBeforeState
 
     init {
         scope.launch {
@@ -148,16 +188,14 @@ class RealTetherClient(
             ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
         if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
 
-        // 1. Cheapest pre-flight: /healthz carries protocolVersion unauthenticated.
+        // 1. Cheapest pre-flight: /healthz carries the native window unauthenticated.
         val health = try {
             probeHealth(normalized)
         } catch (e: IOException) {
             if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
             return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
         }
-        if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
-            return@withContext LoginResult.VersionMismatch(health.protocolVersion)
-        }
+        health.incompatibility()?.let { return@withContext LoginResult.VersionMismatch(it) }
 
         // 2. Password login (JSON form).
         val body = """{"password":${kotlinx.serialization.json.JsonPrimitive(password)}}"""
@@ -217,9 +255,7 @@ class RealTetherClient(
             if (blockedAfterFailure(normalized, e)) return@withContext PairResult.LocalNetworkBlocked
             return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
         }
-        if (health.protocolVersion != null && health.protocolVersion != PROTOCOL_VERSION) {
-            return@withContext PairResult.VersionMismatch(health.protocolVersion)
-        }
+        health.incompatibility()?.let { return@withContext PairResult.VersionMismatch(it) }
         if (!health.pairing) {
             return@withContext PairResult.NotSupported(
                 "This server does not support device pairing. Update the server, or connect with the password.",
@@ -273,6 +309,9 @@ class RealTetherClient(
             baseUrlValue = base
             credentialValue = credential
             stopped = false
+            // A fresh login is a user action: it also clears a version halt.
+            versionHalt = null
+            backoff.reset()
         }
         start()
         reconnectIfIdle()
@@ -280,6 +319,8 @@ class RealTetherClient(
 
     override fun start() {
         synchronized(lock) {
+            // Deliberately NOT clearing versionHalt: start() re-runs on every
+            // activity (re)creation, which is not a decision to retry.
             stopped = false
             if (sweeperJob?.isActive != true) {
                 sweeperJob = scope.launch { sweeperLoop() }
@@ -295,6 +336,7 @@ class RealTetherClient(
             synchronized(lock) {
                 if (base != null && baseUrlValue == null) baseUrlValue = base.toHttpUrlOrNull()
                 if (credential != null && credentialValue == null) credentialValue = credential
+                settingsLoaded = true
                 if (!pendingLoaded) {
                     pendingLoaded = true
                     if (pendingStore.records.isEmpty()) pendingStore = PendingInput.fromPersisted(persisted)
@@ -309,19 +351,19 @@ class RealTetherClient(
     }
 
     override fun stop() {
-        synchronized(lock) {
+        val ws = synchronized(lock) {
             stopped = true
-            reconnectJob?.cancel()
-            reconnectJob = null
+            versionHalt = null
+            cancelTimersLocked()
+            backgroundTask?.cancel()
+            backgroundTask = null
             sweeperJob?.cancel()
             sweeperJob = null
-            socket?.cancel()
-            socket = null
-            socketOpen = false
-            connecting = false
             baseUrlValue = null
             credentialValue = null
+            detachSocketLocked()
         }
+        ws?.cancel()
         connectionState.value = ConnectionState.Disconnected
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
@@ -330,10 +372,74 @@ class RealTetherClient(
     }
 
     override fun reconnectIfIdle() {
+        val probe = synchronized(lock) {
+            if (haltedLocked()) return
+            when {
+                // An OPEN socket cannot be trusted after a wake or a network
+                // change (the half-open case): probe it instead (web #135).
+                socketOpen -> true
+                // An upgrade / auth probe is already in flight.
+                connecting || socket != null -> return
+                else -> {
+                    reconnectTask?.cancel()
+                    reconnectTask = null
+                    false
+                }
+            }
+        }
+        if (probe) probeLink() else connectNow()
+    }
+
+    override fun setAppForeground(foreground: Boolean) {
+        if (foreground) {
+            val resume = synchronized(lock) {
+                inForeground = true
+                backgroundTask?.cancel()
+                backgroundTask = null
+                val wasSuspended = backgroundSuspended
+                backgroundSuspended = false
+                if (wasSuspended) backoff.reset()
+                wasSuspended
+            }
+            // Web visibilitychange -> reconnectIfIdle: ping an open socket,
+            // reconnect a dead one immediately.
+            if (resume) connectNow() else reconnectIfIdle()
+            return
+        }
         synchronized(lock) {
-            if (stopped || connecting || socket != null) return
-            reconnectJob?.cancel()
-            reconnectJob = null
+            inForeground = false
+            backgroundTask?.cancel()
+            backgroundTask = scheduler.schedule(ConnectionTimings.BACKGROUND_GRACE_MS) { suspendForBackground() }
+        }
+    }
+
+    /** Grace period over: close the socket and stop reconnecting until foreground. */
+    private fun suspendForBackground() {
+        val ws: WebSocket?
+        val publish: Boolean
+        val wasOpen: Boolean
+        synchronized(lock) {
+            backgroundTask = null
+            if (inForeground || backgroundSuspended) return
+            backgroundSuspended = true
+            cancelTimersLocked()
+            // An auth probe still in flight sees the suspension and gives up by
+            // itself (connectNow/openSocket); an upgrade in flight ends here.
+            wasOpen = socketOpen
+            ws = detachSocketLocked()
+            publish = !stopped && versionHalt == null
+        }
+        if (wasOpen) ws?.close(1000, "app in background") else ws?.cancel()
+        if (publish) connectionState.value = ConnectionState.Disconnected
+    }
+
+    override fun retryConnection() {
+        synchronized(lock) {
+            if (stopped) return
+            versionHalt = null
+            backoff.reset()
+            reconnectTask?.cancel()
+            reconnectTask = null
         }
         connectNow()
     }
@@ -342,15 +448,46 @@ class RealTetherClient(
     // Connection loop
     // ------------------------------------------------------------------
 
+    /** Anything that forbids connecting right now. Caller holds [lock]. */
+    private fun haltedLocked(): Boolean = stopped || versionHalt != null || backgroundSuspended
+
+    /** Caller holds [lock]. */
+    private fun cancelTimersLocked() {
+        reconnectTask?.cancel()
+        reconnectTask = null
+        pingTask?.cancel()
+        pingTask = null
+    }
+
+    /**
+     * Forget the current socket (the caller closes it). Its listener is retired,
+     * so a late onOpen can never re-adopt it; an upgrade still in flight ends
+     * the connect attempt. Caller holds [lock].
+     */
+    private fun detachSocketLocked(): WebSocket? {
+        val ws = socket
+        if (ws != null && !socketOpen) connecting = false
+        socketListener?.retired = true
+        socketListener = null
+        socket = null
+        socketOpen = false
+        handshakeDone = false
+        pingTask?.cancel()
+        pingTask = null
+        return ws
+    }
+
     private fun connectNow() {
         val base: HttpUrl
         val credential: Credential
         synchronized(lock) {
-            if (stopped || connecting || socket != null) return
+            if (haltedLocked() || connecting || socket != null) return
             val b = baseUrlValue
             val c = credentialValue
             if (b == null || c == null) {
-                connectionState.value = ConnectionState.AuthRequired
+                // Before start() read the settings (e.g. an early lifecycle
+                // signal) "no credential" is not known yet: stay quiet.
+                if (settingsLoaded) connectionState.value = ConnectionState.AuthRequired
                 return
             }
             connecting = true
@@ -372,11 +509,19 @@ class RealTetherClient(
                 authProbe(base, credential)
             } catch (e: IOException) {
                 val blocked = blockedAfterFailure(base, e)
-                val halted = synchronized(lock) {
+                val restricted = localNetworkAccess.isRestricted()
+                val (halted, suspect) = synchronized(lock) {
                     connecting = false
-                    stopped
+                    // T0.6: while the OS restricts local-network traffic, a run of
+                    // connect TIMEOUTS (the documented TCP signature of the block)
+                    // is treated as the block even when the host does not look
+                    // local. A refused connection or an HTTP error proves the path
+                    // works, so it breaks the run.
+                    consecutiveTimeouts = if (restricted && isTimeout(e)) consecutiveTimeouts + 1 else 0
+                    haltedLocked() to (consecutiveTimeouts >= ConnectionTimings.LOCAL_NETWORK_SUSPECT_TIMEOUTS)
                 }
-                if (blocked && !halted) {
+                if (halted) return@launch
+                if (blocked || suspect) {
                     // Same as above: no reconnect loop against a blocked network.
                     connectionState.value = ConnectionState.LocalNetworkBlocked
                     return@launch
@@ -385,6 +530,7 @@ class RealTetherClient(
                 scheduleReconnect()
                 return@launch
             }
+            synchronized(lock) { consecutiveTimeouts = 0 }
             if (!authenticated) {
                 synchronized(lock) { connecting = false }
                 connectionState.value = ConnectionState.AuthRequired
@@ -392,6 +538,17 @@ class RealTetherClient(
             }
             openSocket(base, credential)
         }
+    }
+
+    private fun isTimeout(error: Throwable): Boolean {
+        var e: Throwable? = error
+        var depth = 0
+        while (e != null && depth < 8) {
+            if (e is SocketTimeoutException) return true
+            e = e.cause
+            depth++
+        }
+        return false
     }
 
     private fun authProbe(base: HttpUrl, credential: Credential): Boolean {
@@ -421,49 +578,102 @@ class RealTetherClient(
         val ws = httpClient.newWebSocket(request, listener)
         listener.expected = ws
         val cancel = synchronized(lock) {
-            if (stopped) {
+            if (haltedLocked() || socket != null) {
+                connecting = false
                 true
             } else {
                 socket = ws
+                socketListener = listener
                 false
             }
         }
         if (cancel) ws.cancel()
     }
 
+    /** The next attempt after [Backoff.next] — never a fixed-rate or tight loop. */
     private fun scheduleReconnect() {
         synchronized(lock) {
-            if (stopped) return
-            reconnectJob?.cancel()
-            reconnectJob = scope.launch {
-                delay(reconnectDelayMs)
+            if (haltedLocked()) return
+            reconnectTask?.cancel()
+            reconnectTask = scheduler.schedule(backoff.next()) {
+                synchronized(lock) { reconnectTask = null }
                 connectNow()
             }
         }
+    }
+
+    /**
+     * App-level liveness probe (v105 `ping`, web issue #135): if NOTHING arrives
+     * within [ConnectionTimings.PING_TIMEOUT_MS] of the ping the socket is
+     * half-open (OPEN over dead TCP), so it is dropped and the reconnect path
+     * takes over. Any inbound frame counts, not only the pong. One probe at a time.
+     */
+    private fun probeLink() {
+        val ws: WebSocket
+        val sentAt: Long
+        synchronized(lock) {
+            if (!socketOpen || pingTask != null) return
+            ws = socket ?: return
+            sentAt = clock()
+            if (!ws.send(ClientMessage.Ping(nonce = UUID.randomUUID().toString()).encode())) return
+            pingTask = scheduler.schedule(ConnectionTimings.PING_TIMEOUT_MS) {
+                val dead = synchronized(lock) {
+                    pingTask = null
+                    socket === ws && socketOpen && lastInboundAt < sentAt
+                }
+                if (dead) dropSocket(ws)
+            }
+        }
+    }
+
+    /** Force a presumed-dead socket down and hand over to the reconnect path. */
+    private fun dropSocket(ws: WebSocket) {
+        ws.cancel()
+        // cancel() normally reports onFailure, but do not depend on it.
+        handleSocketGone(ws)
     }
 
     private inner class SocketListener : WebSocketListener() {
         @Volatile
         var expected: WebSocket? = null
 
+        /** Set (under lock) once the client let go of this socket. */
+        var retired = false
+
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            synchronized(lock) {
+            val reject = synchronized(lock) {
                 if (webSocket !== socket && webSocket !== expected) return
+                if (retired || haltedLocked() || (socket != null && socket !== webSocket)) {
+                    if (!retired && socket == null) connecting = false
+                    retired = true
+                    return@synchronized true
+                }
                 socket = webSocket
+                socketListener = this
                 socketOpen = true
+                handshakeDone = false
                 connecting = false
+                // A new epoch: nothing is attached on this socket yet.
+                epoch++
+                attachedThisEpoch.clear()
+                // A probe from the previous socket must not judge this one.
+                pingTask?.cancel()
+                pingTask = null
                 // §5.4: do NOT drain pending sends; reset in-flight and wait for ready.
                 pendingStore = PendingInput.resetInFlight(pendingStore)
                 reconciledSessions.clear()
                 tracker.clearResyncFlags()
+                lastInboundAt = clock()
+                false
             }
-            lastInboundAt = clock()
+            if (reject) webSocket.cancel()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (webSocket !== socket) return
+            // Stamped before parsing: even an undecodable frame proves traffic.
             lastInboundAt = clock()
-            handleFrame(ServerMessage.parse(text))
+            handleFrame(webSocket, ServerMessage.parse(text))
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -496,10 +706,8 @@ class RealTetherClient(
             // and clears `socket`, so the second is a no-op.
             if (webSocket != null && socket !== webSocket) return
             stopped = true
-            reconnectJob?.cancel()
-            reconnectJob = null
-            socket = null
-            socketOpen = false
+            cancelTimersLocked()
+            detachSocketLocked()
             connecting = false
             credentialValue = null
         }
@@ -518,10 +726,9 @@ class RealTetherClient(
     private fun handleSocketGone(webSocket: WebSocket) {
         synchronized(lock) {
             if (socket !== webSocket) return
-            socket = null
-            socketOpen = false
+            detachSocketLocked()
             connecting = false
-            if (stopped) return
+            if (haltedLocked()) return
         }
         connectionState.value = ConnectionState.Disconnected
         scheduleReconnect()
@@ -531,10 +738,13 @@ class RealTetherClient(
     // Frame handling
     // ------------------------------------------------------------------
 
-    private fun handleFrame(message: ServerMessage) {
+    private fun handleFrame(webSocket: WebSocket, message: ServerMessage) {
         when (message) {
-            is ServerMessage.Ready -> onReady(message)
-            is ServerMessage.VersionMismatch -> permanentVersionStop(message.requiredVersion)
+            is ServerMessage.Ready -> onReady(webSocket, message)
+            is ServerMessage.VersionMismatch -> haltForVersion(Compatibility.fromMismatch(message))
+            // Liveness confirmed: lastInboundAt was stamped for this frame already,
+            // so an outstanding probe sees the link alive. Nothing else to do.
+            is ServerMessage.Pong -> Unit
             is ServerMessage.Created -> upsertSession(message.session)
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {
@@ -562,9 +772,19 @@ class RealTetherClient(
         }
     }
 
-    private fun onReady(message: ServerMessage.Ready) {
-        if (message.protocolVersion != PROTOCOL_VERSION) {
-            permanentVersionStop(message.protocolVersion)
+    /**
+     * Handshake: `ready` (the server's first frame) -> `hello` -> attach. The
+     * native window replaces the old strict `protocolVersion` equality: a server
+     * whose ready has no `nativeProtocolFloor` (v128 and older) or whose window
+     * excludes this app halts here; otherwise the `hello` reply is authoritative
+     * (a later `version_mismatch` still halts).
+     */
+    private fun onReady(webSocket: WebSocket, message: ServerMessage.Ready) {
+        // The hello goes out first, before any other frame of this epoch. It is
+        // sent directly: ordinary frames wait for handshakeDone.
+        webSocket.send(ClientMessage.Hello(PROTOCOL_VERSION, HELLO_CLIENT_ANDROID).encode())
+        Compatibility.evaluate(message.protocolVersion, message.nativeProtocolFloor)?.let {
+            haltForVersion(it)
             return
         }
         sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
@@ -574,17 +794,20 @@ class RealTetherClient(
         // pending outbound input, from its last good cursor.
         val toAttach: List<Pair<String, Long?>>
         synchronized(lock) {
+            if (socket !== webSocket) return
+            handshakeDone = true
+            // A handshake the server accepted is the success that resets backoff.
+            backoff.reset()
             val ids = LinkedHashSet<String>()
             ids.addAll(subscribed)
             ids.addAll(tracker.attachedSessions())
             pendingStore.records.mapTo(ids) { it.sessionId }
+            // Claimed for this epoch BEFORE Connected is published: an attach()
+            // from a collector that reacts to Connected is then a no-op instead
+            // of a second attach (T0.3 verify).
+            attachedThisEpoch.addAll(ids)
             toAttach = ids.map { it to tracker.cursorFor(it) }
         }
-        // Publish Connected only AFTER the re-attach set is fixed: a caller that
-        // observes Connected and then attach()es must not also be swept into the
-        // set above, or the session is attached twice (two snapshots; a gap
-        // re-attach can then be mistaken for the duplicate). Surfaced by T0.3's
-        // parallel module test runs.
         connectionState.value = ConnectionState.Connected
         for ((sessionId, afterSeq) in toAttach) {
             sendFrame(ClientMessage.Attach(sessionId, afterSeq))
@@ -593,27 +816,46 @@ class RealTetherClient(
             sendFrame(ClientMessage.Browse(it))
             sendFrame(ClientMessage.Discover(it))
         }
+        // Fresh input filed while the socket was not yet live goes out now; an
+        // already-transmitted record still waits for its session's snapshot.
+        drainPending()
     }
 
-    private fun permanentVersionStop(requiredVersion: Int) {
-        connectionState.value = ConnectionState.VersionMismatch(requiredVersion)
+    /** Outside the native window: terminal until retryConnection() (user action). */
+    private fun haltForVersion(incompatibility: Incompatibility) {
         val ws = synchronized(lock) {
-            stopped = true
-            reconnectJob?.cancel()
-            reconnectJob = null
-            socket
+            versionHalt = incompatibility
+            cancelTimersLocked()
+            detachSocketLocked()
         }
+        connectionState.value = ConnectionState.VersionMismatch(incompatibility)
         ws?.close(1000, null)
     }
 
+    /**
+     * Snapshot semantics exactly as use-tether.ts: the cursor ALWAYS moves to
+     * `throughSeq` and a pending gap resync clears — including a `reset`
+     * (cursor was ahead of the journal: throughSeq may be lower) and the v115
+     * stateless reply (cursor already at head: no `state`, nothing changed).
+     * Only a snapshot WITH state replaces the projection, reconciles pending
+     * input and authorises redelivery for its session on this connection.
+     * `trimmedBefore` (v115 bounded snapshot) is recorded per session.
+     */
     private fun onSnapshot(message: ServerMessage.Snapshot) {
-        // A snapshot without a typed state (v115 at-head delta, or a state the
-        // legacy model cannot decode) used to parse as Unknown and be ignored;
-        // keep that behavior until T1.2 owns bounded snapshots.
-        val state = message.projection ?: return
+        synchronized(lock) { tracker.onSnapshot(message.sessionId, message.throughSeq) }
+        if (!message.hasState) return
+        trimmedBeforeState.value = message.trimmedBefore
+            ?.let { trimmedBeforeState.value + (message.sessionId to it) }
+            ?: (trimmedBeforeState.value - message.sessionId)
+        // A state the legacy typed model cannot decode: the old projection is no
+        // longer what the cursor describes, so drop it rather than fold live
+        // events onto a diverged base (T2.1D swaps in the raw-state projection).
+        val state = message.projection ?: run {
+            projectionsState.value = projectionsState.value - message.sessionId
+            return
+        }
         val cleared: List<String>
         synchronized(lock) {
-            tracker.onSnapshot(message.sessionId, message.throughSeq)
             val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, state)
             pendingStore = result.store
             cleared = result.cleared
@@ -671,6 +913,9 @@ class RealTetherClient(
 
     override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
         recordAndDrain(PendingInput.KIND_SEND, sessionId, text, attachments.ifEmpty { null })
+        // Web #135: an attachment frame is large and never persisted, so a
+        // half-open socket swallowing it is the worst case — probe right away.
+        if (attachments.isNotEmpty()) probeLink()
     }
 
     override fun queueAdd(sessionId: String, text: String) {
@@ -706,7 +951,7 @@ class RealTetherClient(
     private fun drainPending() {
         val frames: List<ClientMessage>
         synchronized(lock) {
-            if (!socketOpen) return
+            if (!socketOpen || !handshakeDone) return
             val sendable = PendingInput.sendableRecords(pendingStore, reconciledSessions)
             if (sendable.isEmpty()) return
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
@@ -740,7 +985,7 @@ class RealTetherClient(
                     null
                 }
             }
-            toCancel?.cancel()
+            toCancel?.let { dropSocket(it) }
             val unsent = synchronized(lock) {
                 val result = PendingInput.expireRecords(pendingStore, now)
                 pendingStore = result.store
@@ -779,9 +1024,19 @@ class RealTetherClient(
     // Fire-and-forget commands
     // ------------------------------------------------------------------
 
+    /**
+     * Subscribe [sessionId]. Idempotent per connection epoch: once a session was
+     * attached on the current socket (by this call or by the ready re-attach),
+     * another attach() sends nothing. Before the handshake it only subscribes;
+     * the ready handler attaches it (after `hello`).
+     */
     override fun attach(sessionId: String) {
-        synchronized(lock) { subscribed.add(sessionId) }
-        sendFrame(ClientMessage.Attach(sessionId, synchronized(lock) { tracker.cursorFor(sessionId) }))
+        val afterSeq = synchronized(lock) {
+            subscribed.add(sessionId)
+            if (!socketOpen || !handshakeDone || !attachedThisEpoch.add(sessionId)) return
+            tracker.cursorFor(sessionId)
+        }
+        sendFrame(ClientMessage.Attach(sessionId, afterSeq))
     }
 
     override fun interrupt(sessionId: String) {
@@ -844,8 +1099,9 @@ class RealTetherClient(
         sendFrame(ClientMessage.Kill(sessionId))
     }
 
+    /** Ordinary frames go out only on a LIVE connection: open and past `ready` + `hello`. */
     private fun sendFrame(message: ClientMessage): Boolean {
-        val ws = synchronized(lock) { if (socketOpen) socket else null } ?: return false
+        val ws = synchronized(lock) { if (socketOpen && handshakeDone) socket else null } ?: return false
         return ws.send(message.encode())
     }
 
@@ -895,8 +1151,16 @@ class RealTetherClient(
         null -> this
     }
 
-    /** What /healthz tells an unauthenticated client: wire version + pairing capability. */
-    private class Health(val protocolVersion: Int?, val pairing: Boolean)
+    /** What /healthz tells an unauthenticated client: the native window + pairing capability. */
+    private class Health(val protocolVersion: Int?, val nativeProtocolFloor: Int?, val pairing: Boolean) {
+        /**
+         * No protocolVersion at all = a probe this client cannot read; the WS
+         * handshake (ready + hello) decides then. Otherwise a missing floor is a
+         * pre-v129 server, too old for this app.
+         */
+        fun incompatibility(): Incompatibility? =
+            if (protocolVersion == null) null else Compatibility.evaluate(protocolVersion, nativeProtocolFloor)
+    }
 
     @Throws(IOException::class)
     private fun probeHealth(base: HttpUrl): Health {
@@ -912,6 +1176,7 @@ class RealTetherClient(
             val obj = parseJsonObject(response)
             return Health(
                 protocolVersion = obj?.get("protocolVersion")?.jsonPrimitive?.content?.toIntOrNull(),
+                nativeProtocolFloor = obj?.get("nativeProtocolFloor")?.jsonPrimitive?.content?.toIntOrNull(),
                 // Absent flag = an older server, which cannot pair.
                 pairing = obj?.get("pairing")?.jsonPrimitive?.content == "true",
             )

@@ -557,4 +557,7 @@ class FakeTetherClient : TetherClient {
     }
 
     override fun reconnectIfIdle() {}
+    override fun setAppForeground(foreground: Boolean) {}
+    override fun retryConnection() {}
+    override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
 }

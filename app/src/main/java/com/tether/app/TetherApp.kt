@@ -1,6 +1,9 @@
 package com.tether.app
 
 import android.app.Application
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.RealTetherClient
 import com.tether.app.net.AndroidLocalNetworkAccess
@@ -35,6 +38,19 @@ class TetherApp : Application() {
                 localNetworkAccess = AndroidLocalNetworkAccess(context),
             )
         }
+
+        // Process foreground/background ≈ the web's visibilitychange: the client
+        // re-checks the link on return and lets the socket go after a grace
+        // period in the background (FCM covers the background).
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> ClientLocator.obtain(this).setAppForeground(true)
+                    Lifecycle.Event.ON_STOP -> ClientLocator.obtain(this).setAppForeground(false)
+                    else -> Unit
+                }
+            },
+        )
 
         // Wire the push subsystem alongside the client. Observes prefs (enabled
         // / scope / sets) and settings.credential (logout → unregister).
