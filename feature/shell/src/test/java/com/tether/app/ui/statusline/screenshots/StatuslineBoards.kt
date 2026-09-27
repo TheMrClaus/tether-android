@@ -3,12 +3,14 @@ package com.tether.app.ui.statusline.screenshots
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
@@ -141,14 +143,22 @@ fun ColumnScope.GaugeBoard() {
         ContextGauge(m(45.0), pressed = false, onClick = {}, interactionSource = heldPress(), env = BoardEnv)
         ContextGauge(m(45.0), pressed = true, onClick = {}, env = BoardEnv)
     }
-    StateRow("no reading (the web scenarios' seed) · rest · open") {
-        ContextGauge(null, pressed = false, onClick = {}, env = BoardEnv)
-        ContextGauge(null, pressed = true, onClick = {}, env = BoardEnv)
+    HeaderSurface {
+        StateRow("on the header's --graphite · no reading (the web scenarios' seed) · rest · open") {
+            ContextGauge(null, pressed = false, onClick = {}, env = BoardEnv)
+            ContextGauge(null, pressed = true, onClick = {}, env = BoardEnv)
+        }
     }
     StateRow("labelled (≥48rem) · rest · open") {
         ContextGauge(m(45.0), showLabel = true, pressed = false, onClick = {}, env = BoardEnv)
         ContextGauge(m(45.0), showLabel = true, pressed = true, onClick = {}, env = BoardEnv)
     }
+}
+
+/** The workspace header's surface (`.workspace-header { background: var(--graphite) }`), where the dial and gauge live. */
+@Composable
+private fun HeaderSurface(content: @Composable () -> Unit) {
+    Box(Modifier.background(LocalTetherTokens.current.graphite).padding(8.dp)) { content() }
 }
 
 /** The wrap-up badge: the inspector notice (both variants) and the pill. */
@@ -163,9 +173,16 @@ fun ColumnScope.WrapUpBoard() {
 /** The tablet header rail as the web draws it at 1280×800: dial + labelled gauge (streaming). */
 @Composable
 fun ColumnScope.HeaderRailBoard() {
-    StateRow("dial + gauge (no reading), labelled") {
-        SessionDial(BoardNow - 540_000, null, active = true, clock = { BoardNow })
-        ContextGauge(null, showLabel = true, pressed = false, onClick = {}, env = BoardEnv)
+    HeaderSurface {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val t = LocalTetherTokens.current
+            Text("on the header's --graphite · dial + gauge (no reading), labelled", color = t.faint, style = TextStyle(fontFamily = LocalTetherTypography.current.mono, fontSize = 10.sp))
+            // `.workspace-actions { gap: var(--space-sm) }` (globals.css 3272, 11193).
+            Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm), verticalAlignment = Alignment.CenterVertically) {
+                SessionDial(BoardNow - 540_000, null, active = true, clock = { BoardNow })
+                ContextGauge(null, showLabel = true, pressed = false, onClick = {}, env = BoardEnv)
+            }
+        }
     }
 }
 
