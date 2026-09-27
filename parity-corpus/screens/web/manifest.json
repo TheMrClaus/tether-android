@@ -1,0 +1,725 @@
+{
+  "tetherSha": "3f69e4fa48eab33afdfc55769aace707d7026c13",
+  "protocolVersion": 128,
+  "browser": "chromium headless shell 153.0.8010.12",
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 412,
+      "height": 915,
+      "deviceScaleFactor": 2.625,
+      "isMobile": true,
+      "hasTouch": true
+    },
+    {
+      "name": "tablet",
+      "width": 1280,
+      "height": 800,
+      "deviceScaleFactor": 1,
+      "isMobile": true,
+      "hasTouch": true
+    }
+  ],
+  "skins": [
+    {
+      "skin": "tactile",
+      "themeFamily": "tactile",
+      "themeMode": "light"
+    },
+    {
+      "skin": "night",
+      "themeFamily": "tactile",
+      "themeMode": "dark"
+    },
+    {
+      "skin": "precision",
+      "themeFamily": "precision",
+      "themeMode": "light"
+    },
+    {
+      "skin": "machine",
+      "themeFamily": "precision",
+      "themeMode": "dark"
+    },
+    {
+      "skin": "studio",
+      "themeFamily": "studio",
+      "themeMode": "light"
+    },
+    {
+      "skin": "studio-dark",
+      "themeFamily": "studio",
+      "themeMode": "dark"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "empty-state",
+      "path": "/",
+      "phase": "live",
+      "notes": "open the console with no sessions (shot before the phase seeds anything)",
+      "files": [
+        "empty-state/tactile-phone.png",
+        "empty-state/night-phone.png",
+        "empty-state/precision-phone.png",
+        "empty-state/machine-phone.png",
+        "empty-state/studio-phone.png",
+        "empty-state/studio-dark-phone.png",
+        "empty-state/tactile-tablet.png",
+        "empty-state/night-tablet.png",
+        "empty-state/precision-tablet.png",
+        "empty-state/machine-tablet.png",
+        "empty-state/studio-tablet.png",
+        "empty-state/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "streaming",
+      "path": "/?session={streaming}",
+      "phase": "live",
+      "notes": "a turn frozen mid-flight (open Bash call, fake `hang` step)",
+      "files": [
+        "streaming/tactile-phone.png",
+        "streaming/night-phone.png",
+        "streaming/precision-phone.png",
+        "streaming/machine-phone.png",
+        "streaming/studio-phone.png",
+        "streaming/studio-dark-phone.png",
+        "streaming/tactile-tablet.png",
+        "streaming/night-tablet.png",
+        "streaming/precision-tablet.png",
+        "streaming/machine-tablet.png",
+        "streaming/studio-tablet.png",
+        "streaming/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "idle-session",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "a finished one-turn conversation",
+      "files": [
+        "idle-session/tactile-phone.png",
+        "idle-session/night-phone.png",
+        "idle-session/precision-phone.png",
+        "idle-session/machine-phone.png",
+        "idle-session/studio-phone.png",
+        "idle-session/studio-dark-phone.png",
+        "idle-session/tactile-tablet.png",
+        "idle-session/night-tablet.png",
+        "idle-session/precision-tablet.png",
+        "idle-session/machine-tablet.png",
+        "idle-session/studio-tablet.png",
+        "idle-session/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "session-drawer",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "phone: open the sessions drawer (tablet: sidebar is already visible)",
+      "files": [
+        "session-drawer/tactile-phone.png",
+        "session-drawer/night-phone.png",
+        "session-drawer/precision-phone.png",
+        "session-drawer/machine-phone.png",
+        "session-drawer/studio-phone.png",
+        "session-drawer/studio-dark-phone.png",
+        "session-drawer/tactile-tablet.png",
+        "session-drawer/night-tablet.png",
+        "session-drawer/precision-tablet.png",
+        "session-drawer/machine-tablet.png",
+        "session-drawer/studio-tablet.png",
+        "session-drawer/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "long-markdown",
+      "path": "/?session={markdown}",
+      "phase": "main",
+      "notes": "headings, lists, task list, table, code blocks, quote, link",
+      "files": [
+        "long-markdown/tactile-phone.png",
+        "long-markdown/night-phone.png",
+        "long-markdown/precision-phone.png",
+        "long-markdown/machine-phone.png",
+        "long-markdown/studio-phone.png",
+        "long-markdown/studio-dark-phone.png",
+        "long-markdown/tactile-tablet.png",
+        "long-markdown/night-tablet.png",
+        "long-markdown/precision-tablet.png",
+        "long-markdown/machine-tablet.png",
+        "long-markdown/studio-tablet.png",
+        "long-markdown/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "tool-cards",
+      "path": "/?session={tools}",
+      "phase": "main",
+      "notes": "Read/Glob/Grep/Bash/Edit/MultiEdit/Write/WebFetch/TodoWrite, a failed Bash, an MCP tool with image media, a plan",
+      "files": [
+        "tool-cards/tactile-phone.png",
+        "tool-cards/night-phone.png",
+        "tool-cards/precision-phone.png",
+        "tool-cards/machine-phone.png",
+        "tool-cards/studio-phone.png",
+        "tool-cards/studio-dark-phone.png",
+        "tool-cards/tactile-tablet.png",
+        "tool-cards/night-tablet.png",
+        "tool-cards/precision-tablet.png",
+        "tool-cards/machine-tablet.png",
+        "tool-cards/studio-tablet.png",
+        "tool-cards/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "codex-tool-cards",
+      "path": "/?session={codexTools}",
+      "phase": "main",
+      "notes": "codex app-server rich cards: command_execution, file_change (diff), mcp:, collaboration:, subagent_activity, a failed command",
+      "files": [
+        "codex-tool-cards/tactile-phone.png",
+        "codex-tool-cards/night-phone.png",
+        "codex-tool-cards/precision-phone.png",
+        "codex-tool-cards/machine-phone.png",
+        "codex-tool-cards/studio-phone.png",
+        "codex-tool-cards/studio-dark-phone.png",
+        "codex-tool-cards/tactile-tablet.png",
+        "codex-tool-cards/night-tablet.png",
+        "codex-tool-cards/precision-tablet.png",
+        "codex-tool-cards/machine-tablet.png",
+        "codex-tool-cards/studio-tablet.png",
+        "codex-tool-cards/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "subagent-runs",
+      "path": "/?session={subagents}",
+      "phase": "main",
+      "notes": "two Agent sub-agent runs (one done, one failed)",
+      "files": [
+        "subagent-runs/tactile-phone.png",
+        "subagent-runs/night-phone.png",
+        "subagent-runs/precision-phone.png",
+        "subagent-runs/machine-phone.png",
+        "subagent-runs/studio-phone.png",
+        "subagent-runs/studio-dark-phone.png",
+        "subagent-runs/tactile-tablet.png",
+        "subagent-runs/night-tablet.png",
+        "subagent-runs/precision-tablet.png",
+        "subagent-runs/machine-tablet.png",
+        "subagent-runs/studio-tablet.png",
+        "subagent-runs/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "conversation-timeline",
+      "path": "/?session={timeline}",
+      "phase": "main",
+      "notes": "five turns",
+      "files": [
+        "conversation-timeline/tactile-phone.png",
+        "conversation-timeline/night-phone.png",
+        "conversation-timeline/precision-phone.png",
+        "conversation-timeline/machine-phone.png",
+        "conversation-timeline/studio-phone.png",
+        "conversation-timeline/studio-dark-phone.png",
+        "conversation-timeline/tactile-tablet.png",
+        "conversation-timeline/night-tablet.png",
+        "conversation-timeline/precision-tablet.png",
+        "conversation-timeline/machine-tablet.png",
+        "conversation-timeline/studio-tablet.png",
+        "conversation-timeline/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "notices",
+      "path": "/?session={notices}",
+      "phase": "main",
+      "notes": "a turn recovered as outcome_unknown after a restart (the fake engine's api retry, failed MCP health and engine warning are journaled but render no inline notice)",
+      "files": [
+        "notices/tactile-phone.png",
+        "notices/night-phone.png",
+        "notices/precision-phone.png",
+        "notices/machine-phone.png",
+        "notices/studio-phone.png",
+        "notices/studio-dark-phone.png",
+        "notices/tactile-tablet.png",
+        "notices/night-tablet.png",
+        "notices/precision-tablet.png",
+        "notices/machine-tablet.png",
+        "notices/studio-tablet.png",
+        "notices/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "approval-pending",
+      "path": "/?session={approval}",
+      "phase": "main",
+      "notes": "a Write approval waiting for the operator",
+      "files": [
+        "approval-pending/tactile-phone.png",
+        "approval-pending/night-phone.png",
+        "approval-pending/precision-phone.png",
+        "approval-pending/machine-phone.png",
+        "approval-pending/studio-phone.png",
+        "approval-pending/studio-dark-phone.png",
+        "approval-pending/tactile-tablet.png",
+        "approval-pending/night-tablet.png",
+        "approval-pending/precision-tablet.png",
+        "approval-pending/machine-tablet.png",
+        "approval-pending/studio-tablet.png",
+        "approval-pending/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "handoff-source-locked",
+      "path": "/?session={handoffSource}",
+      "phase": "main",
+      "notes": "a session handed off to another: read-only lock",
+      "files": [
+        "handoff-source-locked/tactile-phone.png",
+        "handoff-source-locked/night-phone.png",
+        "handoff-source-locked/precision-phone.png",
+        "handoff-source-locked/machine-phone.png",
+        "handoff-source-locked/studio-phone.png",
+        "handoff-source-locked/studio-dark-phone.png",
+        "handoff-source-locked/tactile-tablet.png",
+        "handoff-source-locked/night-tablet.png",
+        "handoff-source-locked/precision-tablet.png",
+        "handoff-source-locked/machine-tablet.png",
+        "handoff-source-locked/studio-tablet.png",
+        "handoff-source-locked/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "handoff-target",
+      "path": "/?session={handoffTarget}",
+      "phase": "main",
+      "notes": "the codex session that claimed the handoff",
+      "files": [
+        "handoff-target/tactile-phone.png",
+        "handoff-target/night-phone.png",
+        "handoff-target/precision-phone.png",
+        "handoff-target/machine-phone.png",
+        "handoff-target/studio-phone.png",
+        "handoff-target/studio-dark-phone.png",
+        "handoff-target/tactile-tablet.png",
+        "handoff-target/night-tablet.png",
+        "handoff-target/precision-tablet.png",
+        "handoff-target/machine-tablet.png",
+        "handoff-target/studio-tablet.png",
+        "handoff-target/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "worktree-services",
+      "path": "/?session={worktree}",
+      "phase": "main",
+      "notes": "an isolated worktree session with a running `web` service and an exited `check` script: open the Telemetry gauge (session details) and scroll the scripts & services card into view",
+      "files": [
+        "worktree-services/tactile-phone.png",
+        "worktree-services/night-phone.png",
+        "worktree-services/precision-phone.png",
+        "worktree-services/machine-phone.png",
+        "worktree-services/studio-phone.png",
+        "worktree-services/studio-dark-phone.png",
+        "worktree-services/tactile-tablet.png",
+        "worktree-services/night-tablet.png",
+        "worktree-services/precision-tablet.png",
+        "worktree-services/machine-tablet.png",
+        "worktree-services/studio-tablet.png",
+        "worktree-services/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "session-details",
+      "path": "/?session={tools}",
+      "phase": "main",
+      "notes": "open the Telemetry gauge (session details / inspector) on the tool-cards session",
+      "files": [
+        "session-details/tactile-phone.png",
+        "session-details/night-phone.png",
+        "session-details/precision-phone.png",
+        "session-details/machine-phone.png",
+        "session-details/studio-phone.png",
+        "session-details/studio-dark-phone.png",
+        "session-details/tactile-tablet.png",
+        "session-details/night-tablet.png",
+        "session-details/precision-tablet.png",
+        "session-details/machine-tablet.png",
+        "session-details/studio-tablet.png",
+        "session-details/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "scheduled-actions",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Scheduled actions from the sidebar (phone: via the drawer)",
+      "files": [
+        "scheduled-actions/tactile-phone.png",
+        "scheduled-actions/night-phone.png",
+        "scheduled-actions/precision-phone.png",
+        "scheduled-actions/machine-phone.png",
+        "scheduled-actions/studio-phone.png",
+        "scheduled-actions/studio-dark-phone.png",
+        "scheduled-actions/tactile-tablet.png",
+        "scheduled-actions/night-tablet.png",
+        "scheduled-actions/precision-tablet.png",
+        "scheduled-actions/machine-tablet.png",
+        "scheduled-actions/studio-tablet.png",
+        "scheduled-actions/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "file-browser",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Files from the top bar",
+      "files": [
+        "file-browser/tactile-phone.png",
+        "file-browser/night-phone.png",
+        "file-browser/precision-phone.png",
+        "file-browser/machine-phone.png",
+        "file-browser/studio-phone.png",
+        "file-browser/studio-dark-phone.png",
+        "file-browser/tactile-tablet.png",
+        "file-browser/night-tablet.png",
+        "file-browser/precision-tablet.png",
+        "file-browser/machine-tablet.png",
+        "file-browser/studio-tablet.png",
+        "file-browser/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "usage",
+      "path": "/usage",
+      "phase": "main",
+      "notes": "the usage analytics page",
+      "files": [
+        "usage/tactile-phone.png",
+        "usage/night-phone.png",
+        "usage/precision-phone.png",
+        "usage/machine-phone.png",
+        "usage/studio-phone.png",
+        "usage/studio-dark-phone.png",
+        "usage/tactile-tablet.png",
+        "usage/night-tablet.png",
+        "usage/precision-tablet.png",
+        "usage/machine-tablet.png",
+        "usage/studio-tablet.png",
+        "usage/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-general",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → General tab",
+      "files": [
+        "settings-general/tactile-phone.png",
+        "settings-general/night-phone.png",
+        "settings-general/precision-phone.png",
+        "settings-general/machine-phone.png",
+        "settings-general/studio-phone.png",
+        "settings-general/studio-dark-phone.png",
+        "settings-general/tactile-tablet.png",
+        "settings-general/night-tablet.png",
+        "settings-general/precision-tablet.png",
+        "settings-general/machine-tablet.png",
+        "settings-general/studio-tablet.png",
+        "settings-general/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-appearance",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Appearance tab",
+      "files": [
+        "settings-appearance/tactile-phone.png",
+        "settings-appearance/night-phone.png",
+        "settings-appearance/precision-phone.png",
+        "settings-appearance/machine-phone.png",
+        "settings-appearance/studio-phone.png",
+        "settings-appearance/studio-dark-phone.png",
+        "settings-appearance/tactile-tablet.png",
+        "settings-appearance/night-tablet.png",
+        "settings-appearance/precision-tablet.png",
+        "settings-appearance/machine-tablet.png",
+        "settings-appearance/studio-tablet.png",
+        "settings-appearance/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-devices",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Devices tab",
+      "files": [
+        "settings-devices/tactile-phone.png",
+        "settings-devices/night-phone.png",
+        "settings-devices/precision-phone.png",
+        "settings-devices/machine-phone.png",
+        "settings-devices/studio-phone.png",
+        "settings-devices/studio-dark-phone.png",
+        "settings-devices/tactile-tablet.png",
+        "settings-devices/night-tablet.png",
+        "settings-devices/precision-tablet.png",
+        "settings-devices/machine-tablet.png",
+        "settings-devices/studio-tablet.png",
+        "settings-devices/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-nodes",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Nodes tab",
+      "files": [
+        "settings-nodes/tactile-phone.png",
+        "settings-nodes/night-phone.png",
+        "settings-nodes/precision-phone.png",
+        "settings-nodes/machine-phone.png",
+        "settings-nodes/studio-phone.png",
+        "settings-nodes/studio-dark-phone.png",
+        "settings-nodes/tactile-tablet.png",
+        "settings-nodes/night-tablet.png",
+        "settings-nodes/precision-tablet.png",
+        "settings-nodes/machine-tablet.png",
+        "settings-nodes/studio-tablet.png",
+        "settings-nodes/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-engines",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Engines tab",
+      "files": [
+        "settings-engines/tactile-phone.png",
+        "settings-engines/night-phone.png",
+        "settings-engines/precision-phone.png",
+        "settings-engines/machine-phone.png",
+        "settings-engines/studio-phone.png",
+        "settings-engines/studio-dark-phone.png",
+        "settings-engines/tactile-tablet.png",
+        "settings-engines/night-tablet.png",
+        "settings-engines/precision-tablet.png",
+        "settings-engines/machine-tablet.png",
+        "settings-engines/studio-tablet.png",
+        "settings-engines/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-metadata",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Metadata tab",
+      "files": [
+        "settings-metadata/tactile-phone.png",
+        "settings-metadata/night-phone.png",
+        "settings-metadata/precision-phone.png",
+        "settings-metadata/machine-phone.png",
+        "settings-metadata/studio-phone.png",
+        "settings-metadata/studio-dark-phone.png",
+        "settings-metadata/tactile-tablet.png",
+        "settings-metadata/night-tablet.png",
+        "settings-metadata/precision-tablet.png",
+        "settings-metadata/machine-tablet.png",
+        "settings-metadata/studio-tablet.png",
+        "settings-metadata/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "settings-advanced",
+      "path": "/?session={idle}",
+      "phase": "main",
+      "notes": "open Settings (phone: via the drawer) → Advanced tab",
+      "files": [
+        "settings-advanced/tactile-phone.png",
+        "settings-advanced/night-phone.png",
+        "settings-advanced/precision-phone.png",
+        "settings-advanced/machine-phone.png",
+        "settings-advanced/studio-phone.png",
+        "settings-advanced/studio-dark-phone.png",
+        "settings-advanced/tactile-tablet.png",
+        "settings-advanced/night-tablet.png",
+        "settings-advanced/precision-tablet.png",
+        "settings-advanced/machine-tablet.png",
+        "settings-advanced/studio-tablet.png",
+        "settings-advanced/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "long-markdown-top",
+      "path": "/?session={markdown}",
+      "phase": "main",
+      "notes": "long-markdown, with the transcript scrolled to the top (the default view is pinned to the newest message)",
+      "files": [
+        "long-markdown-top/tactile-phone.png",
+        "long-markdown-top/night-phone.png",
+        "long-markdown-top/precision-phone.png",
+        "long-markdown-top/machine-phone.png",
+        "long-markdown-top/studio-phone.png",
+        "long-markdown-top/studio-dark-phone.png",
+        "long-markdown-top/tactile-tablet.png",
+        "long-markdown-top/night-tablet.png",
+        "long-markdown-top/precision-tablet.png",
+        "long-markdown-top/machine-tablet.png",
+        "long-markdown-top/studio-tablet.png",
+        "long-markdown-top/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "tool-cards-top",
+      "path": "/?session={tools}",
+      "phase": "main",
+      "notes": "tool-cards, with the transcript scrolled to the top (the default view is pinned to the newest message)",
+      "files": [
+        "tool-cards-top/tactile-phone.png",
+        "tool-cards-top/night-phone.png",
+        "tool-cards-top/precision-phone.png",
+        "tool-cards-top/machine-phone.png",
+        "tool-cards-top/studio-phone.png",
+        "tool-cards-top/studio-dark-phone.png",
+        "tool-cards-top/tactile-tablet.png",
+        "tool-cards-top/night-tablet.png",
+        "tool-cards-top/precision-tablet.png",
+        "tool-cards-top/machine-tablet.png",
+        "tool-cards-top/studio-tablet.png",
+        "tool-cards-top/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "codex-tool-cards-top",
+      "path": "/?session={codexTools}",
+      "phase": "main",
+      "notes": "codex-tool-cards, with the transcript scrolled to the top (the default view is pinned to the newest message)",
+      "files": [
+        "codex-tool-cards-top/tactile-phone.png",
+        "codex-tool-cards-top/night-phone.png",
+        "codex-tool-cards-top/precision-phone.png",
+        "codex-tool-cards-top/machine-phone.png",
+        "codex-tool-cards-top/studio-phone.png",
+        "codex-tool-cards-top/studio-dark-phone.png",
+        "codex-tool-cards-top/tactile-tablet.png",
+        "codex-tool-cards-top/night-tablet.png",
+        "codex-tool-cards-top/precision-tablet.png",
+        "codex-tool-cards-top/machine-tablet.png",
+        "codex-tool-cards-top/studio-tablet.png",
+        "codex-tool-cards-top/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "subagent-runs-top",
+      "path": "/?session={subagents}",
+      "phase": "main",
+      "notes": "subagent-runs, with the transcript scrolled to the top (the default view is pinned to the newest message)",
+      "files": [
+        "subagent-runs-top/tactile-phone.png",
+        "subagent-runs-top/night-phone.png",
+        "subagent-runs-top/precision-phone.png",
+        "subagent-runs-top/machine-phone.png",
+        "subagent-runs-top/studio-phone.png",
+        "subagent-runs-top/studio-dark-phone.png",
+        "subagent-runs-top/tactile-tablet.png",
+        "subagent-runs-top/night-tablet.png",
+        "subagent-runs-top/precision-tablet.png",
+        "subagent-runs-top/machine-tablet.png",
+        "subagent-runs-top/studio-tablet.png",
+        "subagent-runs-top/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "conversation-timeline-top",
+      "path": "/?session={timeline}",
+      "phase": "main",
+      "notes": "conversation-timeline, with the transcript scrolled to the top (the default view is pinned to the newest message)",
+      "files": [
+        "conversation-timeline-top/tactile-phone.png",
+        "conversation-timeline-top/night-phone.png",
+        "conversation-timeline-top/precision-phone.png",
+        "conversation-timeline-top/machine-phone.png",
+        "conversation-timeline-top/studio-phone.png",
+        "conversation-timeline-top/studio-dark-phone.png",
+        "conversation-timeline-top/tactile-tablet.png",
+        "conversation-timeline-top/night-tablet.png",
+        "conversation-timeline-top/precision-tablet.png",
+        "conversation-timeline-top/machine-tablet.png",
+        "conversation-timeline-top/studio-tablet.png",
+        "conversation-timeline-top/studio-dark-tablet.png"
+      ]
+    },
+    {
+      "name": "health-log",
+      "notes": "",
+      "unsupportedReason": "the Health & Event Log dialog is live process telemetry — server pid, RSS/heap, uptime and a connection-event list whose length and order follow the browser's reconnects — so it cannot be made pixel-stable without masking most of it (the fake engine's warnings are not in it either: WARNINGS LOGGED stays 0)"
+    },
+    {
+      "name": "question-pending",
+      "notes": "",
+      "unsupportedReason": "the fake engine has no question step: it can only emit approval_request, never question_request (engines/fake-engine.mjs step list); an AskUserQuestion approval renders as a suppressed tool, not a QuestionCard"
+    },
+    {
+      "name": "rate-limit",
+      "notes": "",
+      "unsupportedReason": "no fake-engine step emits `rate_limit` (only Claude's rate_limit_event / Codex usage-limit adapters do), so neither the limit banner nor the resume-choice state can be reached"
+    },
+    {
+      "name": "model-fallback",
+      "notes": "",
+      "unsupportedReason": "no fake-engine step emits `model_fallback` (only the Claude system/model_fallback adapter does)"
+    },
+    {
+      "name": "wrap-up",
+      "notes": "",
+      "unsupportedReason": "the Wrap-Up Allowance is the `grace` field of a `rate_limit` event, which the fake engine cannot emit"
+    },
+    {
+      "name": "streaming-text-caret",
+      "notes": "",
+      "unsupportedReason": "the fake `message` step emits started+delta+completed back-to-back, so a message block that is still receiving deltas (the live text caret) cannot be frozen; `streaming` shows a frozen turn with an open tool call instead"
+    }
+  ],
+  "pathPlaceholders": "`{name}` in a path is the id of the session seeded for that scenario (random per run)",
+  "masks": [
+    {
+      "kind": "text-scrub",
+      "target": "any text node containing a seeded session id",
+      "replacement": "sess-XXXXXXXXX padded with X to the id's 14 chars",
+      "reason": "session ids are random per run and appear verbatim in handoff briefs"
+    },
+    {
+      "kind": "text-scrub",
+      "target": ".chat-activity-verb",
+      "replacement": "Working…",
+      "reason": "the live activity verb is picked by hashing the random turn id (lib/spinner-words.mjs)"
+    }
+  ],
+  "removedElements": [
+    {
+      "selector": "nextjs-portal",
+      "reason": "Next.js dev-mode overlay (the \"N · Issues\" badge); the harness runs `next dev`, and the overlay is not part of the app"
+    }
+  ],
+  "determinism": {
+    "browserClock": "Playwright clock.setFixedTime(<phase start> + 600500 ms); timezone UTC, locale en-US, colorScheme light, reducedMotion reduce",
+    "serverClock": "scripts/parity-clock.mjs: phase k starts at 2026-01-01T00:00:00Z + k h + k·100 ms, runs at 0.001x real time, and steps +60 s (SIGUSR2) before every seeded session, so sessions never share a timestamp",
+    "phases": [
+      "live",
+      "echo",
+      "markdown",
+      "tools",
+      "codex-tools",
+      "subagents",
+      "notices",
+      "main"
+    ],
+    "freezeCss": "*, *::before, *::after {\n  animation-duration: 0s !important;\n  animation-delay: 0s !important;\n  animation-iteration-count: 1 !important;\n  transition-duration: 0s !important;\n  transition-delay: 0s !important;\n  caret-color: transparent !important;\n}",
+    "screenshot": "animations: disabled, caret: hide, retaken until two consecutive captures are identical",
+    "waits": "each session shot waits for the page's own session-controls and server-settings replies (observed by an in-page WebSocket message listener); when next dev's StrictMode double-connect dropped the app's one-shot server-settings request, the harness re-sends that same ClientMessage on the app's open /ws socket"
+  }
+}
