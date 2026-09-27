@@ -25,7 +25,7 @@ tasks.withType<Test>().configureEach {
     inputs.dir(corpusDir).withPropertyName("parityCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
     providers.gradleProperty("parity.only").orNull?.let { systemProperty("parity.only", it) }
     providers.gradleProperty("parity.strict").orNull?.let { systemProperty("parity.strict", it) }
-    // T2.1D: `-Pparity.perfAssert=false` reports FoldAdapterStressTest's numbers without enforcing the 2 ms p99 bar.
+    // T2.1D: FoldAdapterStressTest always reports its timings; `-Pparity.perfAssert=true` also enforces the 2 ms p99 bar (opt-in: wall-clock bars flake on loaded CI).
     providers.gradleProperty("parity.perfAssert").orNull?.let { systemProperty("parity.perfAssert", it) }
     maxHeapSize = "2g"
 }
