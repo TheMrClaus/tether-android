@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -302,8 +303,10 @@ class RealTetherClient(
     private val serverUrlState = MutableStateFlow<String?>(null)
     private val nodesState = MutableStateFlow<List<NodeSummary>>(emptyList())
     private val nodeResultState = MutableStateFlow<NodeActionResult?>(null)
+    private val eventLogState = MutableStateFlow(EventLog())
 
     override val nodes: StateFlow<List<NodeSummary>> = nodesState
+    override val eventLog: StateFlow<EventLog> = eventLogState
     override val nodeResult: StateFlow<NodeActionResult?> = nodeResultState
     override val signedOutReason: StateFlow<SignedOutReason?> = signedOutReasonState
     override val serverUrl: StateFlow<String?> = serverUrlState
@@ -523,7 +526,7 @@ class RealTetherClient(
         if (previousWasOpen) previous?.close(1000, "signed in again") else previous?.cancel()
         signedOutReasonState.value = null
         // A new sign-in (possibly to another server): its hello brings its own list.
-        clearNodeRegistry()
+        clearSignInViews()
         switch?.let(::completeOriginSwitch)
         // The new origin's own unsent input, before the connection comes up.
         bindPendingToCurrentServer()
@@ -893,7 +896,7 @@ class RealTetherClient(
             socketGone
         }
         ws?.cancel()
-        clearNodeRegistry()
+        clearSignInViews()
         connectionState.value = ConnectionState.Disconnected
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
@@ -927,7 +930,7 @@ class RealTetherClient(
             endConnectAttemptsLocked()
         }
         ws?.close(1000, "logout")
-        clearNodeRegistry()
+        clearSignInViews()
         // A user logout is not a server verdict: no "session expired" copy.
         signedOutReasonState.value = null
         connectionState.value = ConnectionState.AuthRequired
@@ -1019,6 +1022,27 @@ class RealTetherClient(
             }
             SignInSessionsResult.Sessions(list)
         }
+
+    /**
+     * GET /api/stats (log-dialog.tsx refreshStats). Any credential the socket uses is accepted:
+     * the route sits behind the ordinary /api/ gate, not the owner-grade one.
+     */
+    override suspend fun fetchStats(): StatsResult = withContext(Dispatchers.IO) {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        if (base == null || credential == null) return@withContext StatsResult.Failed(STATS_FALLBACK_ERROR)
+        if (blockedBeforeConnect(base)) return@withContext StatsResult.Failed("Local network access is blocked.")
+        val url = base.newBuilder().encodedPath("/").addPathSegment("api").addPathSegment("stats").build()
+        val request = Request.Builder().url(url).authorize(credential).header("Cache-Control", "no-store").get().build()
+        try {
+            authHttp.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use StatsResult.Failed("stats request failed (${response.code})")
+                parseJsonObject(response)?.let { StatsResult.Loaded(ServerStats.fromJson(it)) }
+                    ?: StatsResult.Failed(STATS_FALLBACK_ERROR)
+            }
+        } catch (_: IOException) {
+            StatsResult.Failed(STATS_FALLBACK_ERROR)
+        }
+    }
 
     override suspend fun revokeSignInSession(id: String): SignInSessionsResult =
         ownerGradeCall("DELETE", listOf("api", "auth", "sessions", id)) { SignInSessionsResult.Revoked(1) }
@@ -1308,7 +1332,7 @@ class RealTetherClient(
             detachSocketLocked()
         }
         ws?.cancel()
-        clearNodeRegistry()
+        clearSignInViews()
         // State first: an observer that sees the reason must see the settled state.
         connectionState.value = ConnectionState.AuthRequired
         signedOutReasonState.value = reason
@@ -1599,6 +1623,8 @@ class RealTetherClient(
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
             is ServerMessage.Nodes -> ifCurrent(webSocket) { nodesState.value = message.nodes }
             is ServerMessage.NodeResult -> onNodeResult(webSocket, message)
+            // use-tether.ts:1047: every batch folds into the one log (seq dedupe, bootId restart).
+            is ServerMessage.Log -> ifCurrent(webSocket) { eventLogState.update { it.accept(message) } }
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             }
@@ -2268,10 +2294,14 @@ class RealTetherClient(
         waiter.complete(outcome)
     }
 
-    /** Another server's registry, or one seen before a sign-out, must never show. */
-    private fun clearNodeRegistry() {
+    /**
+     * Another server's registry and event log, or ones seen before a sign-out, must never show.
+     * (The web reloads the page on every sign-in, which starts both over.)
+     */
+    private fun clearSignInViews() {
         nodesState.value = emptyList()
         nodeResultState.value = null
+        eventLogState.value = EventLog()
     }
 
     /**

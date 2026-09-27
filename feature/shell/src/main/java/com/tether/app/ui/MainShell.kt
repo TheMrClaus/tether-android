@@ -98,6 +98,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
     val toast by vm.activeToast.collectAsStateWithLifecycle()
+    val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
 
     val session = sessions.firstOrNull { it.id == selectedId }
     val projection = selectedId?.let { projections[it] }
@@ -131,8 +132,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenFiles = null,
                 onOpenUsage = null,
                 onOpenUsageAnalytics = null,
-                // The log dialog proper is T4.5; the existing activity log stands in.
-                onOpenLog = { showErrorLog = true },
+                onOpenLog = {
+                    vm.openLog()
+                    showErrorLog = true
+                },
                 onLogout = { showLogoutConfirm = true },
             )
         val headerActions = WorkspaceHeaderActions(
@@ -202,7 +205,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     ConnectionState.Connecting -> LinkReadout.Connecting
                     else -> LinkReadout.Reconnecting
                 },
-                unseenWarnings = vm.errorLog.size,
+                unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
                 onStartSession = { showProviderPicker = true },
@@ -213,7 +216,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 session = session,
                 workspaceRoot = workspaceRoot,
                 emptyStage = emptyStage,
-                unseenWarnings = vm.errorLog.size,
+                unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
                 onStartSession = { showProviderPicker = true },
@@ -241,22 +244,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     if (showErrorLog) {
-        TetherDialog(onDismiss = { showErrorLog = false }, title = "Activity log") {
-            if (vm.errorLog.isEmpty()) {
-                Text("No errors this session.", color = t.muted, fontFamily = Manrope, fontSize = 13.1.sp)
-            } else {
-                vm.errorLog.asReversed().take(20).forEach { entry ->
-                    Text(
-                        entry,
-                        color = t.ink,
-                        fontFamily = Manrope,
-                        fontWeight = TetherWeights.body,
-                        fontSize = 12.8.sp,
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
-                }
-            }
-        }
+        TetherDialog(onDismiss = { showErrorLog = false }, title = "Health & Event Log") {}
     }
 
     if (showLogoutConfirm) {

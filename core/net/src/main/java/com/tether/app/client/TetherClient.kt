@@ -253,8 +253,23 @@ interface TetherClient {
 
     /** `node-probe`: re-check a peer now; its new status arrives in [nodes]. */
     suspend fun probeNode(nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
+
+    // ------------------------------------------------------------------
+    // v7 in-UI operational event log + /api/stats (the Health & Event Log dialog, T4.5).
+    // ------------------------------------------------------------------
+
+    /**
+     * The server's operational records (`log` frames) folded by [EventLog]: oldest first, deduped
+     * by seq, emptied on a server restart (new bootId), capped at 500. Kept across a reconnect
+     * (the replayed tail dedupes), emptied with the other per-server views on sign-out / sign-in.
+     */
+    val eventLog: StateFlow<EventLog> get() = NO_EVENT_LOG
+
+    /** GET /api/stats, the dialog's operational snapshot (fetched on every open and on Refresh). */
+    suspend fun fetchStats(): StatsResult = StatsResult.Failed(STATS_FALLBACK_ERROR)
 }
 
+private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 

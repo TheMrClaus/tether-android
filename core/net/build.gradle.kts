@@ -15,9 +15,6 @@ dependencies {
 
     api(libs.okhttp)
     api(libs.androidx.lifecycle.viewmodel)
-    // TetherViewModel.errorLog is a SnapshotStateList (runtime only, no compiler plugin).
-    api(platform(libs.androidx.compose.bom))
-    api(libs.androidx.compose.runtime)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(testFixtures(project(":core:reducer")))

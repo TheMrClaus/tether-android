@@ -1,29 +1,34 @@
 package com.tether.app.ui
 
 import android.os.SystemClock
-import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
 import com.tether.app.client.TetherClient
+import com.tether.app.client.isWarning
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.prefs.DraftStore
 import com.tether.app.ui.prefs.InMemoryDraftStore
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
  * Thin view-model over [TetherClient]: selection, create-then-select, the
- * event-anchored clock, per-session composer drafts, and the error toast/log.
+ * event-anchored clock, per-session composer drafts, the error toast, and the
+ * Health & Event Log badge (unseen warnings).
  */
 class TetherViewModel(
     val client: TetherClient,
@@ -92,8 +97,28 @@ class TetherViewModel(
         draftWrites.trySend(sessionId to text)
     }
 
-    /** Errors seen this connection, newest last (topbar badge + log dialog). */
-    val errorLog = mutableStateListOf<String>()
+    /**
+     * The warning count the operator acknowledged by opening the log (dashboard.tsx:194-199
+     * `seenWarnAt`): the topbar badge shows only warnings logged since.
+     */
+    private val seenWarnAt = MutableStateFlow(0)
+
+    /**
+     * Warnings (non-`info` log entries) not seen yet: `max(0, warnCount - seenWarnAt)`, like the
+     * web. After a server restart empties the log the count can only rise again past the
+     * acknowledged mark, exactly as there.
+     */
+    val unseenWarnings: StateFlow<Int> = combine(client.eventLog, seenWarnAt) { log, seen -> unseen(log, seen) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, unseen(client.eventLog.value, 0))
+
+    /** Opening the log acknowledges every warning logged so far (dashboard.tsx:199 `openLog`). */
+    fun openLog() {
+        seenWarnAt.value = warnCount(client.eventLog.value)
+    }
+
+    private fun warnCount(log: EventLog): Int = log.entries.count { it.isWarning }
+
+    private fun unseen(log: EventLog, seen: Int): Int = maxOf(0, warnCount(log) - seen)
 
     private val _activeToast = MutableStateFlow<String?>(null)
     val activeToast: StateFlow<String?> = _activeToast.asStateFlow()
@@ -129,8 +154,6 @@ class TetherViewModel(
         }
         viewModelScope.launch {
             client.errors.collect { message ->
-                errorLog.add(message)
-                if (errorLog.size > 50) errorLog.removeAt(0)
                 _activeToast.value = message
             }
         }
@@ -229,8 +252,6 @@ class TetherViewModel(
 
     /** Client-side failure that never hit the server (e.g. unreadable attachment). */
     fun reportLocalError(message: String) {
-        errorLog.add(message)
-        if (errorLog.size > 50) errorLog.removeAt(0)
         _activeToast.value = message
     }
 
