@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -327,9 +328,10 @@ private fun MaskedIcon(shape: Shape, content: @Composable () -> Unit) {
 @Composable
 private fun PlatformIcon(res: Int, size: Dp = ViewportSize) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val px = with(LocalDensity.current) { size.roundToPx() }
-    val bitmap = remember(res, px) {
-        val drawable = requireNotNull(context.getDrawable(res))
+    val bitmap = remember(res, px, resources) {
+        val drawable = resources.getDrawable(res, context.theme)
         Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).also { b ->
             drawable.setBounds(0, 0, px, px)
             drawable.draw(Canvas(b))
