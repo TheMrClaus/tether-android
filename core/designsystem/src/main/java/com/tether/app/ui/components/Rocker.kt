@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -114,7 +115,11 @@ fun TetherRocker(
             t.css.well,
         )
     }
-    val legend = TextStyle(fontFamily = type.mono, fontSize = 8.32.sp, fontWeight = FontWeight(750), letterSpacing = 0.08.em)
+    // The rocker is an `<i>` element, so its legend inherits the UA `font-style: italic`; the
+    // bundled mono face has no italic, so both Chromium and Compose synthesize the oblique.
+    val legend = TextStyle(
+        fontFamily = type.mono, fontSize = 8.32.sp, fontWeight = FontWeight(750), fontStyle = FontStyle.Italic, letterSpacing = 0.08.em,
+    )
     val capShadows: List<CssShadow> = if (studio) {
         listOf(softShadow(1.dp, 3.dp, Color(16, 30, 58).copy(alpha = 0.14f)))
     } else {
@@ -129,16 +134,21 @@ fun TetherRocker(
         modifier
             .semantics { contentDescription?.let { this.contentDescription = it } }
             .toggleable(checked, interaction, indication = null, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
-            .defaultMinSize(TetherDimens.touchTargetDp, TetherDimens.touchTargetDp),
+            .defaultMinSize(TetherDimens.touchTargetDp, TetherDimens.touchTargetDp)
+            // `opacity: 0.48` composites the rocker as ONE group (the cap must not show the legend
+            // through itself), so a disabled rocker draws offscreen. The layer is the ≥44dp touch
+            // box, which holds the well's 1px outer lip; a disabled rocker never shows focus.
+            .then(
+                if (enabled) Modifier else Modifier.graphicsLayer {
+                    alpha = DisabledOpacity
+                    compositingStrategy = CompositingStrategy.Offscreen
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
                 .size(g.width, g.height)
-                .graphicsLayer {
-                    alpha = if (enabled) 1f else DisabledOpacity
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                }
                 .focusRing(focused, frameShape, t.violet)
                 .then(frame),
         ) {

@@ -33,7 +33,7 @@ import kotlin.math.max
  * (key side-walls, bezels) and inset bevels/wells, which are geometrically exact: a hard layer is
  * the rounded rect grown by its spread and moved by its offset.
  *
- * Approximations (documented in docs/parity/screens/primitives/README.md):
+ * Approximations (documented in core/designsystem/README.md):
  *  - Blur: CSS blur radius B is a Gaussian with sigma = B/2 (CSS Backgrounds 3 §7.1.1). Android's
  *    BlurMaskFilter takes a Skia "radius" r with sigma = 0.57735·r + 0.5, so r is solved from
  *    sigma; below sigma 0.5 px (a 1px blur at mdpi) the blur is the minimum Skia draws.

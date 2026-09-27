@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Image
@@ -68,6 +69,7 @@ val PrimitiveBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
     "expandable" to { ExpandableBoard() },
     "indicators" to { IndicatorsBoard() },
     "rocker" to { RockerBoard() },
+    "keys-dialog-footer" to { DialogFooterKeysBoard() },
 )
 
 /** The primitives whose layout changes at the web's 48rem breakpoint get a tablet golden too. */
@@ -269,5 +271,17 @@ fun RockerBoard() {
         TetherRocker(checked = true, onCheckedChange = {})
         TetherRocker(checked = false, onCheckedChange = {}, interactionSource = heldInteraction(focused = true))
         TetherRocker(checked = true, onCheckedChange = {}, enabled = false)
+    }
+}
+
+/**
+ * The settings dialog footer keys with the web's own words (settings-general scenario), so the
+ * montage against the web reference compares like with like.
+ */
+@Composable
+fun DialogFooterKeysBoard() {
+    StateRow("settings footer: secondary · primary with glyph") {
+        TetherKey(onClick = {}, label = "Cancel")
+        TetherKey(onClick = {}, variant = KeyVariant.Primary, label = "Save settings", icon = Lucide.Check, iconSize = 16.dp)
     }
 }
