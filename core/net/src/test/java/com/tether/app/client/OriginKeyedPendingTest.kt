@@ -832,16 +832,20 @@ class OriginKeyedPendingTest {
     @Test
     fun processDeathBetweenTheURLMoveAndTheSetAsideWriteNeverLeaksToTheNewServer() {
         val onA = writeOnA()
-        // From here nothing reaches the disk: the process dies mid-switch, after
-        // setServer moved the URL and before the set-aside write landed.
-        disk.tear = true
+        // From here no write to A's slot lands: the process dies mid-switch,
+        // after setServer moved the URL and before the set-aside write reached
+        // A's slot. Writes to B's slot still land, so a store that followed the
+        // URL instead of its origin would be caught writing A's input there.
+        disk.beforeWrite = { origin -> if (origin == a.origin()) throw java.io.IOException("killed mid-write") }
         client.send("s-a", "private: lost with the process")
         loginTo(b)
         b.nextSocket() // the dying process reached B's upgrade
+        Thread.sleep(300) // its queued writes run
         scopes.forEach { it.cancel() }
         scopes.clear()
         b.serverSockets.forEach { runCatching { it.close(1001, null) } }
-        disk.tear = false
+        disk.beforeWrite = null
+        assertTrue("A's input in B's slot", PendingInput.fromPersisted(disk.slots[b.origin()]).records.none { it.sessionId == "s-a" })
 
         process(disk).start() // configured for B now
         handshake(b, b.nextSocket())
