@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -152,6 +153,9 @@ private fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, c
         Column(
             Modifier
                 .maxWidthFraction(look.maxFraction)
+                // Shrink-to-fit like the web's inline-sized bubble: as wide as its widest line
+                // (a short reply is a short bubble), capped at the max; block children fill that.
+                .width(IntrinsicSize.Max)
                 .cssSurface(look.shape, background = look.background, border = look.border, shadows = look.shadows)
                 .padding(look.border?.width ?: 0.dp)
                 .padding(look.padding),

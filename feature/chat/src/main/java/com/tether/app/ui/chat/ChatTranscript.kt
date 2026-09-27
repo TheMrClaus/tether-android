@@ -162,7 +162,7 @@ internal fun ChatTranscript(
         bottom = spacing.padding.calculateBottomPadding(),
     )
 
-    Box(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize().background(chatWellColor(t))) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().nestedScroll(followGuard).testTag("chat-transcript"),
@@ -214,6 +214,10 @@ internal fun ChatTranscript(
         }
     }
 }
+
+/** The transcript well: `--mineral-deep` (`:root .chat-frame`), Studio's `--graphite` (studio.css:369). */
+internal fun chatWellColor(t: TetherTokens): androidx.compose.ui.graphics.Color =
+    if (t.skin.family == ThemeFamily.Studio) t.graphite else t.mineralDeep
 
 private fun ChatItem.contentType(): String = when (this) {
     is ChatItem.Block -> block.kind

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -35,7 +36,16 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -306,7 +316,9 @@ private fun MdParagraph(
 
 /**
  * `.md-list` (padding-left 1.35em; `li` margin 0.15em 0, collapsing between items). Chrome draws
- * an outside marker as the text `"1. "` / `"• "` in the item's font, its end at the content edge.
+ * an ordered marker as the text `"1. "` in the item's font, its end at the content edge, and the
+ * `disc` as a filled circle a third of the font's ascent wide (Manrope ascent 1.066em → 0.355em),
+ * centred ~1em left of the content edge at the x-height middle (0.36em above the baseline).
  */
 @Composable
 private fun MdList(
@@ -320,30 +332,69 @@ private fun MdList(
     onLink: (String) -> Unit,
 ) {
     val density = LocalDensity.current
-    val indent = with(density) { (style.fontSize.value * 1.35f).sp.toDp() }
-    val gap = with(density) { (style.fontSize.value * 0.15f).sp.toDp() }
+    fun em(f: Float): Dp = with(density) { (style.fontSize.value * f).sp.toDp() }
+    val indent = em(1.35f)
+    val gap = em(0.15f)
+    val disc = em(0.355f)
     Column(Modifier.fillMaxWidth()) {
         items.forEachIndexed { n, item ->
             if (n > 0) Spacer(Modifier.height(gap))
             Layout(
                 content = {
-                    Text(if (ordered) "${n + 1}. " else "• ", style = style, color = color, softWrap = false)
+                    if (ordered) {
+                        Text("${n + 1}. ", style = style, color = color, softWrap = false)
+                    } else {
+                        Box(Modifier.size(disc).background(color, CircleShape))
+                    }
                     MdText(inlineAnnotated(item, t, type, weight, onLink), style, color)
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { measurables, constraints ->
-                val indentPx = indent.roundToPx()
-                val content = measurables[1].measure(
-                    constraints.copy(minWidth = 0, maxWidth = max(0, constraints.maxWidth - indentPx)),
-                )
-                val marker = measurables[0].measure(Constraints())
-                layout(constraints.maxWidth, max(content.height, marker.height)) {
-                    content.place(indentPx, 0)
-                    marker.place(indentPx - marker.width, 0)
-                }
+                measurePolicy = remember(ordered, indent) { ListItemPolicy(ordered, indent, em(1f), em(0.36f)) },
+            )
+        }
+    }
+}
+
+/** One `li`: the marker outside, the content at [indent]; intrinsic widths are indent + content. */
+private class ListItemPolicy(
+    private val ordered: Boolean,
+    private val indent: Dp,
+    private val discCenterX: Dp,
+    private val discRise: Dp,
+) : MeasurePolicy {
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        val indentPx = indent.roundToPx()
+        val maxContent = if (constraints.hasBoundedWidth) max(0, constraints.maxWidth - indentPx) else Constraints.Infinity
+        val content = measurables[1].measure(Constraints(maxWidth = maxContent))
+        val marker = measurables[0].measure(Constraints())
+        val width = if (constraints.hasBoundedWidth) max(constraints.minWidth, minOf(constraints.maxWidth, indentPx + content.width)) else indentPx + content.width
+        val baseline = content[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: content.height
+        return layout(width, max(content.height, marker.height)) {
+            content.place(indentPx, 0)
+            if (ordered) {
+                marker.place(indentPx - marker.width, 0)
+            } else {
+                val cx = indentPx - discCenterX.toPx()
+                val cy = baseline - discRise.toPx()
+                marker.place((cx - marker.width / 2f).toInt(), (cy - marker.height / 2f).toInt())
             }
         }
     }
+
+    private fun IntrinsicMeasureScope.contentWidth(width: Int): Int =
+        if (width == Constraints.Infinity) width else max(0, width - indent.roundToPx())
+
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
+        indent.roundToPx() + measurables[1].maxIntrinsicWidth(height)
+
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
+        indent.roundToPx() + measurables[1].minIntrinsicWidth(height)
+
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int =
+        measurables[1].minIntrinsicHeight(contentWidth(width))
+
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int =
+        measurables[1].maxIntrinsicHeight(contentWidth(width))
 }
 
 /** `.md-quote`: 2px `--line-strong` left rule, padding 0.1em 0 0.1em 0.85em, `--muted`; its `p` keeps 0.5em below. */
@@ -370,10 +421,10 @@ private fun MdQuote(
 }
 
 /**
- * `.md-table-wrap > .md-table`: auto table layout (columns size to content; the wrapper scrolls
- * sideways when the table is wider than the bubble), line-height 1.45, cells padded
- * `space-xs space-md`; header cells `--tint-xs`, 680, nowrap over a 1px `--line-strong` rule;
- * body cells top-aligned over a 1px `--line` rule, none under the last row.
+ * `.md-table-wrap > .md-table`: auto table layout (columns size to content within the bubble;
+ * the wrapper scrolls sideways when even the narrowest layout is wider), line-height 1.45, cells
+ * padded `space-xs space-md`; header cells `--tint-xs`, 680, nowrap over a 1px `--line-strong`
+ * rule; body cells top-aligned over a 1px `--line` rule, none under the last row.
  */
 @Composable
 private fun MdTable(
@@ -387,8 +438,6 @@ private fun MdTable(
     val headStyle = cellStyle.copy(fontWeight = FontWeight(680))
     val padX = t.css.spaceMd
     val padY = t.css.spaceXs
-    val cols = block.headers.size
-    val rows = block.rows.size + 1
     val lineStrong = t.lineStrong
     val line = t.line
     val headBg = t.tintXs
@@ -399,11 +448,42 @@ private fun MdTable(
     }
     val baseWeight = style.fontWeight?.weight ?: 400
     val geo = remember { TableGeometry() }
-    Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        Layout(
-            modifier = Modifier.drawBehind {
-                val w = geo.width.toFloat()
+    val policy = remember(block.headers.size) { TablePolicy(block.headers.size, geo) }
+    Layout(
+        content = {
+            block.headers.forEachIndexed { n, cell ->
+                MdText(
+                    inlineAnnotated(cell, t, type, 680, onLink),
+                    headStyle,
+                    t.ink,
+                    Modifier.padding(horizontal = padX, vertical = padY),
+                    textAlign = align(n),
+                    softWrap = false,
+                )
+            }
+            block.rows.forEach { row ->
+                row.forEachIndexed { n, cell ->
+                    MdText(
+                        inlineAnnotated(cell, t, type, baseWeight, onLink),
+                        cellStyle,
+                        t.ink,
+                        Modifier.padding(horizontal = padX, vertical = padY),
+                        textAlign = align(n),
+                    )
+                }
+            }
+        },
+        // The wrapper's width is the table's available width; then it scrolls sideways.
+        modifier = Modifier
+            .layout { measurable, constraints ->
+                geo.available = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+                val p = measurable.measure(constraints.copy(minWidth = 0))
+                layout(p.width, p.height) { p.place(0, 0) }
+            }
+            .horizontalScroll(rememberScrollState())
+            .drawBehind {
                 if (geo.heights.isEmpty()) return@drawBehind
+                val w = geo.width.toFloat()
                 drawRect(headBg, size = Size(w, geo.heights[0].toFloat()))
                 val px = 1.dp.toPx()
                 for (r in 0 until geo.heights.size - 1) {
@@ -411,83 +491,78 @@ private fun MdTable(
                     drawRect(if (r == 0) lineStrong else line, topLeft = Offset(0f, y), size = Size(w, px))
                 }
             },
-            content = {
-                block.headers.forEachIndexed { n, cell ->
-                    MdText(
-                        inlineAnnotated(cell, t, type, 680, onLink),
-                        headStyle,
-                        t.ink,
-                        Modifier.padding(horizontal = padX, vertical = padY),
-                        textAlign = align(n),
-                        softWrap = false,
-                    )
-                }
-                block.rows.forEach { row ->
-                    row.forEachIndexed { n, cell ->
-                        MdText(
-                            inlineAnnotated(cell, t, type, baseWeight, onLink),
-                            cellStyle,
-                            t.ink,
-                            Modifier.padding(horizontal = padX, vertical = padY),
-                            textAlign = align(n),
-                        )
-                    }
-                }
-            },
-        ) { measurables, constraints ->
-            val available = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
-            val maxW = IntArray(cols)
-            val minW = IntArray(cols)
-            measurables.forEachIndexed { i, m ->
-                val c = i % cols
-                maxW[c] = max(maxW[c], m.maxIntrinsicWidth(Constraints.Infinity))
-                minW[c] = max(minW[c], if (i < cols) m.maxIntrinsicWidth(Constraints.Infinity) else m.minIntrinsicWidth(Constraints.Infinity))
-            }
-            // CSS auto table layout: max-content if it fits, else share the slack by (max - min).
-            val sumMax = maxW.sum()
-            val sumMin = minW.sum()
-            val widths = when {
-                sumMax <= available -> maxW
-                sumMin >= available -> minW
-                else -> IntArray(cols) { c ->
-                    val span = (sumMax - sumMin).coerceAtLeast(1)
-                    minW[c] + ((available - sumMin).toLong() * (maxW[c] - minW[c]) / span).toInt()
-                }
-            }
-            val placeables = measurables.mapIndexed { i, m -> m.measure(Constraints.fixedWidth(widths[i % cols])) }
-            val heights = IntArray(rows) { r -> (0 until cols).maxOf { c -> placeables[r * cols + c].height } }
-            val ruleStrong = 1.dp.roundToPx()
-            val rule = 1.dp.roundToPx()
-            val rowTops = IntArray(rows)
-            var y = 0
-            for (r in 0 until rows) {
-                rowTops[r] = y
-                y += heights[r] + when {
-                    r == 0 -> ruleStrong
-                    r < rows - 1 -> rule
-                    else -> 0
-                }
-            }
-            val width = widths.sum()
-            geo.width = width
-            geo.rowTops = rowTops
-            geo.heights = heights
-            layout(width, y) {
-                placeables.forEachIndexed { i, p ->
-                    val r = i / cols
-                    val c = i % cols
-                    p.place(widths.take(c).sum(), rowTops[r])
-                }
-            }
-        }
-    }
+        measurePolicy = policy,
+    )
 }
 
-/** The last measured table grid, read by the rules/header-wash draw pass that follows layout. */
+/** The last measured table grid: the draw pass reads it; [available] comes from the wrapper. */
 private class TableGeometry {
+    var available: Int = Int.MAX_VALUE
     var width: Int = 0
     var rowTops: IntArray = IntArray(0)
     var heights: IntArray = IntArray(0)
+}
+
+/** CSS auto table layout over [cols] columns (header cells are nowrap: their min is their max). */
+private class TablePolicy(private val cols: Int, private val geo: TableGeometry) : MeasurePolicy {
+    private fun colWidths(measurables: List<IntrinsicMeasurable>, min: Boolean): IntArray {
+        val w = IntArray(cols)
+        measurables.forEachIndexed { i, m ->
+            val c = i % cols
+            val v = if (!min || i < cols) m.maxIntrinsicWidth(Constraints.Infinity) else m.minIntrinsicWidth(Constraints.Infinity)
+            w[c] = max(w[c], v)
+        }
+        return w
+    }
+
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        if (cols == 0) return layout(0, 0) {}
+        val available = geo.available
+        val maxW = colWidths(measurables, min = false)
+        val minW = colWidths(measurables, min = true)
+        val sumMax = maxW.sum()
+        val sumMin = minW.sum()
+        // Max-content if it fits; else share the slack in proportion to (max - min); never below min.
+        val widths = when {
+            sumMax <= available -> maxW
+            sumMin >= available -> minW
+            else -> IntArray(cols) { c ->
+                val span = (sumMax - sumMin).coerceAtLeast(1)
+                minW[c] + ((available - sumMin).toLong() * (maxW[c] - minW[c]) / span).toInt()
+            }
+        }
+        val placeables = measurables.mapIndexed { i, m -> m.measure(Constraints.fixedWidth(widths[i % cols])) }
+        val rows = placeables.size / cols
+        val heights = IntArray(rows) { r -> (0 until cols).maxOf { c -> placeables[r * cols + c].height } }
+        val rule = 1.dp.roundToPx()
+        val rowTops = IntArray(rows)
+        var y = 0
+        for (r in 0 until rows) {
+            rowTops[r] = y
+            y += heights[r] + if (r < rows - 1) rule else 0
+        }
+        val width = widths.sum()
+        geo.width = width
+        geo.rowTops = rowTops
+        geo.heights = heights
+        val xs = IntArray(cols)
+        for (c in 1 until cols) xs[c] = xs[c - 1] + widths[c - 1]
+        return layout(width, y) {
+            placeables.forEachIndexed { i, p -> p.place(xs[i % cols], rowTops[i / cols]) }
+        }
+    }
+
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
+        colWidths(measurables, min = false).sum()
+
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
+        colWidths(measurables, min = true).sum()
+
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int =
+        measurables.chunked(max(1, cols)).sumOf { row -> row.maxOf { it.maxIntrinsicHeight(Constraints.Infinity) } }
+
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int =
+        maxIntrinsicHeight(measurables, width)
 }
 
 /**

@@ -2,6 +2,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    // T6.1: JVM screenshot tests of the transcript states (recordRoborazziDebug / verifyRoborazziDebug).
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -9,7 +11,19 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        // Robolectric (screenshot + behaviour tests) needs the merged resources: fonts, the test activity.
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
+
+// T6.1: goldens live in the source tree (checked in), one PNG per state × skin × size; verifyRoborazziDebug fails on any difference.
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
+}
+tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
 dependencies {
     implementation(project(":core:net"))
@@ -28,4 +42,15 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    // The v128 fold + event builders, so transcript tests read real folded projections.
+    testImplementation(testFixtures(project(":core:reducer")))
+    testImplementation(libs.kotlinx.serialization.json)
+    testImplementation(composeBom)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
 }
