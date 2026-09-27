@@ -302,6 +302,36 @@ class OriginKeyedPendingTest {
         })
     }
 
+    /** Delegates to [inner]; once [armed], session() waits for [release] (start()'s settings read). */
+    private class GatedSession(private val inner: SettingsStore) : SettingsStore by inner {
+        @Volatile var armed = false
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        override suspend fun session(): Session {
+            if (armed) release.await()
+            return inner.session()
+        }
+    }
+
+    @Test
+    fun theSwitchHappensInTheSignInItselfBeforeAnyConnectionToTheNewServer() {
+        // start()'s settings read is held back, so the connection to B comes up
+        // through reconnectIfIdle() alone: only the sign-in's own switch stands
+        // between A's subscriptions / records and B.
+        var gated: GatedSession? = null
+        writeOnA { GatedSession(it).also { g -> gated = g } }
+        gated!!.armed = true
+        try {
+            loginTo(b)
+            val bws = b.nextSocket()
+            handshake(b, bws)
+            serverBarrier(bws)
+            assertTrue(framesUntilBarrier(b).isEmpty())
+            assertTrue(b.allFrames.none { it.contains("s-a") || it.contains("private") })
+        } finally {
+            gated!!.release.complete(Unit)
+        }
+    }
+
     // ------------------------------------------------------------------
     // 2. Back to A: the set-aside records return under the T1.3 rules
     // ------------------------------------------------------------------
