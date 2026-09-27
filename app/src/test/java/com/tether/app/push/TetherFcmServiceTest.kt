@@ -15,7 +15,6 @@ import com.google.firebase.messaging.RemoteMessage
 import com.tether.app.MainActivity
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -199,30 +198,25 @@ class TetherFcmServiceTest {
         assertEquals(PushDeepLink.ACTION_OPEN, intent.action)
         assertEquals("question", intent.getStringExtra(PushDeepLink.EXTRA_KIND))
         assertEquals("tether-question-abc", intent.getStringExtra(PushDeepLink.EXTRA_TAG))
-        // Today's server keeps url "/" (privacy floor): no session in the intent.
-        assertFalse(intent.hasExtra(PushDeepLink.EXTRA_SESSION_ID))
-        assertEquals(PushOpen(PushKind.Question, null), PushDeepLink.parse(intent))
+        assertEquals(PushOpen(PushKind.Question), PushDeepLink.parse(intent))
     }
 
     @Test
-    fun aValidSessionLinkRidesTheIntentAndAnInvalidOneDoesNot() {
+    fun aSessionInTheUrlNeverRidesTheTapIntent() {
+        // H1: a tap only opens the app, whatever the url says.
         service.onMessageReceived(serverMessage("approval", "tether-approval-a", "T", "B", url = "/?session=sess-1"))
-        service.onMessageReceived(serverMessage("approval", "tether-approval-b", "T", "B", url = "/?session=..%2Fx"))
-        val byTag = posted().associateBy { shadowOf(it.contentIntent).savedIntent.getStringExtra(PushDeepLink.EXTRA_TAG) }
-        val good = shadowOf(byTag.getValue("tether-approval-a").contentIntent).savedIntent
-        val bad = shadowOf(byTag.getValue("tether-approval-b").contentIntent).savedIntent
-        assertEquals("sess-1", good.getStringExtra(PushDeepLink.EXTRA_SESSION_ID))
-        assertEquals(PushOpen(PushKind.Approval, "sess-1"), PushDeepLink.parse(good))
-        assertFalse(bad.hasExtra(PushDeepLink.EXTRA_SESSION_ID))
+        val intent = shadowOf(posted().single().contentIntent).savedIntent
+        assertEquals(setOf(PushDeepLink.EXTRA_KIND, PushDeepLink.EXTRA_TAG), intent.extras!!.keySet())
+        assertEquals(PushOpen(PushKind.Approval), PushDeepLink.parse(intent))
     }
 
     @Test
     fun twoLiveNotificationsNeverShareAPendingIntent() {
-        service.onMessageReceived(serverMessage("approval", "tether-approval-a", "T", "B", url = "/?session=one"))
-        service.onMessageReceived(serverMessage("approval", "tether-approval-b", "T", "B", url = "/?session=two"))
-        val sessions = posted().map { shadowOf(it.contentIntent).savedIntent.getStringExtra(PushDeepLink.EXTRA_SESSION_ID) }.toSet()
-        // With one shared request code, FLAG_UPDATE_CURRENT would give both "two".
-        assertEquals(setOf("one", "two"), sessions)
+        service.onMessageReceived(serverMessage("approval", "tether-approval-a", "T", "B"))
+        service.onMessageReceived(serverMessage("question", "tether-question-b", "T", "B"))
+        val kinds = posted().map { shadowOf(it.contentIntent).savedIntent.getStringExtra(PushDeepLink.EXTRA_KIND) }.toSet()
+        // With one shared request code, FLAG_UPDATE_CURRENT would give both "question".
+        assertEquals(setOf("approval", "question"), kinds)
         val codes = posted().map { shadowOf(it.contentIntent).requestCode }
         assertNotEquals(codes[0], codes[1])
     }

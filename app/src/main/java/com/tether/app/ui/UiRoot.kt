@@ -17,9 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,7 +25,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
-import com.tether.app.push.PushDeepLink
 import com.tether.app.push.PushScope
 import com.tether.app.push.rememberNotificationPermission
 import com.tether.app.ui.compat.CompatibilityBanner
@@ -59,20 +56,11 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     val configured by client.configured.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
 
-    // Push: a notification tap routes here (PushDeepLink; T4.4 owns full routing).
-    // The server's FCM payload is id-free today, so a tap opens the app as it is.
-    // A session id, when one comes, is selected only once the server lists it.
-    val sessions by client.sessions.collectAsStateWithLifecycle()
-    var pushSessionId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(pushIntent) {
-        val open = PushDeepLink.parse(pushIntent) ?: return@LaunchedEffect
-        pushSessionId = open.sessionId
-    }
-    LaunchedEffect(pushSessionId, sessions) {
-        val id = PushDeepLink.resolve(pushSessionId, sessions.map { it.id }) ?: return@LaunchedEffect
-        pushSessionId = null
-        vm.selectSession(id)
-    }
+    // Push: a notification tap (PushDeepLink.parse(pushIntent)) only opens the app.
+    // It selects no session and attaches nothing: the server's FCM payload is
+    // id-free, so a session in the intent could only come from another app
+    // (T12.1 security review H1). T4.4 owns routing a tap to a session and
+    // re-adds it with a verified sender; this parameter is its hook.
 
     // Android 13+ POST_NOTIFICATIONS: asked once, automatically, after sign-in
     // while notifications are on (UiPrefs default). A denial is never re-asked

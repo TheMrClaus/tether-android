@@ -13,7 +13,8 @@ import org.robolectric.annotation.Config
 
 /**
  * [PushDeepLink.parse] treats every intent as untrusted. MainActivity is
- * exported, so any app can send it these actions with any extras.
+ * exported, so any app can send it these actions with any extras. A tap only
+ * opens the app: no session is ever read from an intent (H1).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -23,52 +24,39 @@ class PushDeepLinkTest {
 
     @Test
     fun ourOwnIntentRoundTrips() {
-        val message = PushMessage.Visible(PushKind.TurnEnd, "T", "B", "tether-complete-x", "sess-1")
-        val intent = PushDeepLink.intentFor(context, message)
-        assertEquals(PushOpen(PushKind.TurnEnd, "sess-1"), PushDeepLink.parse(intent))
+        val intent = PushDeepLink.intentFor(context, PushMessage.Visible(PushKind.TurnEnd, "T", "B", "tether-complete-x"))
+        assertEquals(PushOpen(PushKind.TurnEnd), PushDeepLink.parse(intent))
     }
 
     @Test
-    fun anInvalidSessionExtraIsDropped() {
-        for (bad in listOf("", "../x", "a b", "a".repeat(129), "https://evil.example")) {
-            val intent = Intent(PushDeepLink.ACTION_OPEN)
-                .putExtra(PushDeepLink.EXTRA_KIND, "approval")
-                .putExtra(PushDeepLink.EXTRA_SESSION_ID, bad)
-            assertEquals("id '$bad'", PushOpen(PushKind.Approval, null), PushDeepLink.parse(intent))
-        }
+    fun aSessionPlantedByAnotherAppIsIgnored() {
+        val planted = Intent(PushDeepLink.ACTION_OPEN)
+            .putExtra(PushDeepLink.EXTRA_KIND, "approval")
+            .putExtra("tether.push.sessionId", "sess-1")
+            .putExtra("url", "/?session=sess-1")
+        assertEquals(PushOpen(PushKind.Approval), PushDeepLink.parse(planted))
+        val viaFcmAction = Intent(PushDeepLink.ACTION_SDK_CLICK).putExtra("kind", "question").putExtra("url", "/?session=abc")
+        assertEquals(PushOpen(PushKind.Question), PushDeepLink.parse(viaFcmAction))
     }
 
     @Test
     fun aNonStringExtraReadsAsAbsent() {
-        val intent = Intent(PushDeepLink.ACTION_OPEN)
-            .putExtra(PushDeepLink.EXTRA_KIND, 7)
-            .putExtra(PushDeepLink.EXTRA_SESSION_ID, 42)
-        assertEquals(PushOpen(PushKind.Other, null), PushDeepLink.parse(intent))
+        val intent = Intent(PushDeepLink.ACTION_OPEN).putExtra(PushDeepLink.EXTRA_KIND, 7)
+        assertEquals(PushOpen(PushKind.Other), PushDeepLink.parse(intent))
     }
 
     @Test
     fun fcmsOwnTapCarriesTheDataMap() {
         val today = Intent(PushDeepLink.ACTION_SDK_CLICK).putExtra("kind", "approval").putExtra("url", "/").putExtra("tag", "t")
-        assertEquals(PushOpen(PushKind.Approval, null), PushDeepLink.parse(today))
-        val withSession = Intent(PushDeepLink.ACTION_SDK_CLICK).putExtra("kind", "question").putExtra("url", "/?session=abc")
-        assertEquals(PushOpen(PushKind.Question, "abc"), PushDeepLink.parse(withSession))
-        val offOrigin = Intent(PushDeepLink.ACTION_SDK_CLICK).putExtra("url", "https://evil.example/?session=abc")
-        assertEquals(PushOpen(PushKind.Other, null), PushDeepLink.parse(offOrigin))
+        assertEquals(PushOpen(PushKind.Approval), PushDeepLink.parse(today))
+        assertEquals(PushOpen(PushKind.Other), PushDeepLink.parse(Intent(PushDeepLink.ACTION_SDK_CLICK)))
     }
 
     @Test
     fun otherIntentsAreNotATap() {
         assertNull(PushDeepLink.parse(null))
-        assertNull(PushDeepLink.parse(Intent(Intent.ACTION_MAIN).putExtra(PushDeepLink.EXTRA_SESSION_ID, "s1")))
-        assertNull(PushDeepLink.parse(Intent().putExtra(PushDeepLink.EXTRA_SESSION_ID, "s1")))
-    }
-
-    @Test
-    fun onlyAListedSessionIsSelected() {
-        assertEquals("s1", PushDeepLink.resolve("s1", listOf("s0", "s1")))
-        assertNull(PushDeepLink.resolve("s9", listOf("s0", "s1")))
-        assertNull(PushDeepLink.resolve(null, listOf("s0")))
-        assertNull(PushDeepLink.resolve("a b", listOf("a b")))
+        assertNull(PushDeepLink.parse(Intent(Intent.ACTION_MAIN).putExtra(PushDeepLink.EXTRA_KIND, "approval")))
+        assertNull(PushDeepLink.parse(Intent().putExtra(PushDeepLink.EXTRA_KIND, "approval")))
     }
 
     @Test

@@ -33,8 +33,6 @@ class PushMessageParserTest {
             assertEquals(kind, message.kind)
             assertEquals(title, message.title)
             assertEquals("tether-$wire-AbC_dEf-123456789012345678", message.tag)
-            // The FCM privacy floor: url is always "/", so no session is named.
-            assertNull(message.sessionId)
         }
     }
 
@@ -118,6 +116,15 @@ class PushMessageParserTest {
         }
     }
 
+    @Test
+    fun aSessionInTheUrlIsNotCarriedIntoTheMessage() {
+        // H1: the url is not read on the notification path at all.
+        val withSession = visible("approval", "tether-approval-x", "Tether needs you", "Waiting.", url = "/?session=sess-1")
+        val without = visible("approval", "tether-approval-x", "Tether needs you", "Waiting.", url = "/")
+        assertEquals(without, withSession)
+    }
+
+    // sessionIdFromUrl / SessionIds are unwired (kept for T4.4); their rules still hold.
     @Test
     fun sessionIdIsReadOnlyFromTheWebDeepLinkForm() {
         assertEquals("sess-1", PushMessageParser.sessionIdFromUrl("/?session=sess-1"))

@@ -5,8 +5,12 @@ import android.content.Context
 import android.content.Intent
 import com.tether.app.MainActivity
 
-/** What a notification tap asks the UI to do. [sessionId] is always [SessionIds.isValid]. */
-data class PushOpen(val kind: PushKind, val sessionId: String?)
+/**
+ * A notification tap. It only opens the app. It never names a session: the
+ * server's FCM payload is id-free, so only another app could put a session into
+ * the tap intent (T12.1 round 2, security review H1).
+ */
+data class PushOpen(val kind: PushKind)
 
 /**
  * The notification tap → app route (T12.1). This is the one hook the UI
@@ -23,10 +27,11 @@ data class PushOpen(val kind: PushKind, val sessionId: String?)
  *   are the FCM `data` map (`url`, `kind`, `tag`).
  *
  * MainActivity is exported (it is the launcher), so any app can send it either
- * action with any extras. [parse] therefore treats every intent as untrusted. It
- * reads only the known extras and validates the session id again. The result
- * can only select a session: nothing from a notification ever answers an
- * approval or a question (T12.3 is deferred and needs an explicit owner opt-in).
+ * action with any extras. [parse] therefore reads only the kind. It ignores
+ * every other extra, including any session id or url. A tap only opens the app:
+ * it selects no session, attaches nothing, and never answers an approval or a
+ * question (T12.3 is deferred and needs an explicit owner opt-in). T4.4 re-adds
+ * routing to a session only with a verified sender.
  */
 object PushDeepLink {
     const val ACTION_OPEN = "com.tether.app.action.OPEN_FROM_PUSH"
@@ -34,7 +39,6 @@ object PushDeepLink {
 
     const val EXTRA_KIND = "tether.push.kind"
     const val EXTRA_TAG = "tether.push.tag"
-    const val EXTRA_SESSION_ID = "tether.push.sessionId"
 
     /** The explicit intent behind a notification the app posts. */
     fun intentFor(context: Context, message: PushMessage.Visible): Intent =
@@ -43,15 +47,13 @@ object PushDeepLink {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_KIND, message.kind.wire)
             message.tag?.let { putExtra(EXTRA_TAG, it) }
-            message.sessionId?.takeIf(SessionIds::isValid)?.let { putExtra(EXTRA_SESSION_ID, it) }
         }
 
     /**
      * Immutable, so the notification's holder cannot rewrite the target or the
      * extras. The request code comes from the collapse tag, so two live
      * notifications never share one PendingIntent. Without that,
-     * FLAG_UPDATE_CURRENT would give an older notification the newer one's
-     * session.
+     * FLAG_UPDATE_CURRENT would rewrite an older notification's extras.
      */
     fun pendingIntentFor(context: Context, message: PushMessage.Visible): PendingIntent =
         PendingIntent.getActivity(
@@ -68,26 +70,11 @@ object PushDeepLink {
     fun parse(intent: Intent?): PushOpen? {
         intent ?: return null
         return when (intent.action) {
-            ACTION_OPEN -> PushOpen(
-                kind = PushKind.fromWire(intent.stringExtra(EXTRA_KIND)),
-                sessionId = intent.stringExtra(EXTRA_SESSION_ID)?.takeIf(SessionIds::isValid),
-            )
-            ACTION_SDK_CLICK -> PushOpen(
-                kind = PushKind.fromWire(intent.stringExtra("kind")),
-                sessionId = PushMessageParser.sessionIdFromUrl(intent.stringExtra("url")),
-            )
+            ACTION_OPEN -> PushOpen(PushKind.fromWire(intent.stringExtra(EXTRA_KIND)))
+            ACTION_SDK_CLICK -> PushOpen(PushKind.fromWire(intent.stringExtra("kind")))
             else -> null
         }
     }
-
-    /**
-     * The session to select now, or null. A tap can arrive before the session
-     * list does (cold start), so the UI holds the id and asks again as the list
-     * changes. An id the server has not listed is never selected (and never
-     * attached), which is how the web holds `pendingSessionId`.
-     */
-    fun resolve(pendingSessionId: String?, knownSessionIds: Collection<String>): String? =
-        pendingSessionId?.takeIf { SessionIds.isValid(it) && it in knownSessionIds }
 
     /** A non-String extra (a hostile sender can put anything there) reads as absent. */
     private fun Intent.stringExtra(name: String): String? = try {

@@ -40,13 +40,15 @@ sealed interface PushMessage {
      */
     data object SyncHint : PushMessage
 
-    /** A notification to show. [sessionId] is null unless the url named a valid one. */
+    /**
+     * A notification to show. It carries no session: a tap only opens the app
+     * (see [PushDeepLink]).
+     */
     data class Visible(
         val kind: PushKind,
         val title: String,
         val body: String,
         val tag: String?,
-        val sessionId: String?,
     ) : PushMessage
 
     /** Dropped without a notification (for example, no title or no body). */
@@ -69,10 +71,11 @@ sealed interface PushMessage {
  * 3. `data.tag` is the server's collapse key (`tether-<kind>-<sha24>`). A tag
  *    outside the expected character set or length is dropped (the notifier falls
  *    back to one shared tag) rather than used as is.
- * 4. `data.url` is a same-origin path. The server keeps it id-free (`/`, the
- *    FCM privacy floor), so today there is never a session id. If a future server
- *    sends the web's `/?session=<id>` form, the id is taken only if it passes
- *    [SessionIds.isValid], as the web dashboard reads only that one parameter.
+ * 4. `data.url` is not read. The server keeps it id-free (`/`, the FCM privacy
+ *    floor), so a session named there could only come from someone else. A tap
+ *    just opens the app. T4.4 may route taps to a session, but only with a
+ *    verified sender; [sessionIdFromUrl] and [SessionIds] are kept, unwired, for
+ *    that.
  */
 object PushMessageParser {
     const val SYNC_KIND = "sync"
@@ -98,11 +101,14 @@ object PushMessageParser {
             title = title.take(MAX_TITLE),
             body = body.take(MAX_BODY),
             tag = data["tag"]?.takeIf { TAG_PATTERN.matches(it) },
-            sessionId = sessionIdFromUrl(data["url"]),
         )
     }
 
     /**
+     * NOT WIRED (T12.1 round 2, security review H1): nothing calls this on the
+     * notification path. It is kept, tested, for T4.4 to reuse once a tap's
+     * sender can be verified.
+     *
      * The session named by a same-origin `/?session=<id>` url, or null. Mirrors
      * the web: the service worker keeps only same-origin paths (`public/sw.js`,
      * `safeTarget`) and the dashboard reads only the `session` parameter
