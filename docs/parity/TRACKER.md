@@ -69,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
-| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  |  |
+| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  | checkpoint f6e3f05 (WIP, branch parity/T1.4-auth): credential cipher + encrypted DataStoreSettings + migration + backup rules + logout/expi… |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
 ### Phase 2 — Reducer at v128
@@ -77,7 +77,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
-| T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | IN-PROGRESS | claude-main @ 2026-09-27 02:17 |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
+| T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 02:17 |  |  |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
 
 ### Phase 3 — Design system
@@ -94,7 +94,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T4.1 | Phone shell (web mobile layout) | TODO |  |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | TODO |  |  |  |
-| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | TODO |  |  |  |
+| T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | TODO |  |  | From T2.2: current designsystem ui/util/Format.kt diverges from web lib/format.ts — compactNumber floors (1250->'1.2K' vs web '1.3K'; 99995… |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
 | T4.5 | Log dialog | TODO |  |  |  |
 
@@ -113,7 +113,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | TODO |  |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
-| T6.5 | Conversation timeline refresh | TODO |  |  | From T0.1: Android story-point limits PROMPT_MAX/REPLY_MAX = 270/320 (0.5.0.1 owner bump, wider bubble); web lib/conversation-story-points.… |
+| T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | TODO |  |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | TODO |  |  |  |
 
