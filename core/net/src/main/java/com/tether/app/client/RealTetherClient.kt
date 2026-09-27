@@ -802,13 +802,12 @@ class RealTetherClient(
             ids.addAll(subscribed)
             ids.addAll(tracker.attachedSessions())
             pendingStore.records.mapTo(ids) { it.sessionId }
-            // Claimed for this epoch BEFORE Connected is published: an attach()
-            // from a collector that reacts to Connected is then a no-op instead
-            // of a second attach (T0.3 verify).
+            // Claimed for this epoch under the lock: an attach() racing this
+            // handler (from any thread) is then a no-op instead of a second
+            // attach (T0.3 verify).
             attachedThisEpoch.addAll(ids)
             toAttach = ids.map { it to tracker.cursorFor(it) }
         }
-        connectionState.value = ConnectionState.Connected
         for ((sessionId, afterSeq) in toAttach) {
             sendFrame(ClientMessage.Attach(sessionId, afterSeq))
         }
@@ -816,6 +815,9 @@ class RealTetherClient(
             sendFrame(ClientMessage.Browse(it))
             sendFrame(ClientMessage.Discover(it))
         }
+        // Published only once the handshake frames are on the wire: whatever a
+        // caller sends after observing Connected is ordered after the re-attach.
+        connectionState.value = ConnectionState.Connected
         // Fresh input filed while the socket was not yet live goes out now; an
         // already-transmitted record still waits for its session's snapshot.
         drainPending()

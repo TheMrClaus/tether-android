@@ -90,6 +90,7 @@ class ConnectionHarness {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val sockets = LinkedBlockingQueue<WebSocket>()
     val received = LinkedBlockingQueue<String>()
+    val log = java.util.concurrent.ConcurrentLinkedQueue<String>()
     val serverCloses = LinkedBlockingQueue<Int>()
     val scheduler = ManualScheduler()
     val now = AtomicLong(1_000_000)
@@ -102,6 +103,7 @@ class ConnectionHarness {
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            log.add("${System.identityHashCode(webSocket)}:${text.take(40)}")
             received.put(text)
         }
 
@@ -153,7 +155,11 @@ class ConnectionHarness {
 
     fun frame(): JsonObject {
         val text = received.poll(10, TimeUnit.SECONDS)
-        assertNotNull("expected a client frame", text)
+        assertNotNull(
+            "expected a client frame; connection=${client.connection.value} " +
+                "pending=${scheduler.pending().map { it.delayMs }} requests=${server.requestCount} log=${log.toList()}",
+            text,
+        )
         return TetherJson.parseToJsonElement(text!!) as JsonObject
     }
 
