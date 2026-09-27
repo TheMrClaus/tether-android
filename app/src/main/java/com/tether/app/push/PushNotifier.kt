@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.tether.app.R
 
 /**
  * Posts a [PushMessage.Visible] as a system notification.
@@ -20,6 +21,9 @@ import androidx.core.content.ContextCompat
  *   opt-in), and a notification never resolves anything by itself.
  * - Only the server's text is shown. It is generic by design ("A Claude session
  *   is waiting for approval."). Nothing is logged.
+ * - Lock screen: VISIBILITY_PRIVATE, set explicitly. Approval and question
+ *   notifications carry a generic public version ("Tether needs you"), so a
+ *   locked screen shows that something waits, and not which provider or what.
  */
 object PushNotifier {
     const val FALLBACK_TAG = "tether-push"
@@ -33,7 +37,7 @@ object PushNotifier {
         // Checking first keeps that explicit (and lint-clean).
         if (!canPost(context)) return false
         val channelId = PushChannels.forKind(message.kind)
-        val notification = NotificationCompat.Builder(context, channelId)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(message.title)
             .setContentText(message.body)
@@ -47,11 +51,24 @@ object PushNotifier {
                 },
             )
             .setContentIntent(PushDeepLink.pendingIntentFor(context, message))
-            .build()
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        if (message.kind == PushKind.Approval || message.kind == PushKind.Question) {
+            builder.setPublicVersion(publicVersion(context, channelId))
+        }
+        val notification = builder.build()
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(message.tag ?: FALLBACK_TAG, NOTIFICATION_ID, notification)
         return true
     }
+
+    /** The lock-screen stand-in: generic text only, no server copy. */
+    private fun publicVersion(context: Context, channelId: String) =
+        NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(context.getString(R.string.push_public_title))
+            .setContentText(context.getString(R.string.push_public_text))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
 
     fun canPost(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==

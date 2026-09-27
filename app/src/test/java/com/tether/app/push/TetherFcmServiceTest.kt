@@ -116,6 +116,31 @@ class TetherFcmServiceTest {
     }
 
     @Test
+    fun approvalsAndQuestionsArePrivateWithAGenericPublicVersion() {
+        for (kind in listOf("approval", "question")) {
+            manager.cancelAll()
+            service.onMessageReceived(serverMessage(kind, "tether-$kind-abc", "Tether needs you", "A Claude session has a question."))
+            val notification = posted().single()
+            assertEquals(kind, Notification.VISIBILITY_PRIVATE, notification.visibility)
+            val public = notification.publicVersion
+            assertNotNull(kind, public)
+            assertEquals("Tether needs you", public.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+            val publicText = public.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+            assertEquals("A session is waiting for you.", publicText)
+            assertTrue(!publicText.contains("Claude"))
+        }
+    }
+
+    @Test
+    fun otherKindsArePrivateToo() {
+        for (kind in listOf("turn_end", "resume_choice", "brand_new_kind")) {
+            manager.cancelAll()
+            service.onMessageReceived(serverMessage(kind, "tether-$kind-abc", "Tether turn complete", "A session finished its turn."))
+            assertEquals(kind, Notification.VISIBILITY_PRIVATE, posted().single().visibility)
+        }
+    }
+
+    @Test
     fun theSyncHintPostsNothing() {
         service.onMessageReceived(dataMessage("kind" to "sync", "v" to "1"))
         assertEquals(0, posted().size)
