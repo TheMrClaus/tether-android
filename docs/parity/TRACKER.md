@@ -34,14 +34,15 @@ that pre-T1.4 backups may still hold the old plaintext credential file.
 security-reviewed) and **[#200](https://github.com/TheMrClaus/tether/pull/200)** (S13.1: PROTOCOL v130 lastSeq + content-free FCM
 sync hint; verified + security-reviewed; OQ1 = keep or drop the separable part C `7c36700`) await merge. #199 and #200 need a deploy. Bead `ta-xax` needs an owner threat-model call: should a paired device be fully
 trusted apart from device management? (ws-browser navigate full-read SSRF, agents can reach the state dir.)
-**Merged today:** T3.5 (`b9f03a4`), T13.0 SYNC_DESIGN (`5b3781e`, approved after 3 plan-verifier rounds).
-**Release blocker:** `ta-s8q`: unsent turns for server A are replayed to server B after a sign-in switch (pre-existing, T1.3 area),
-to be scheduled right after T1.5 merges. No APK ships before it is fixed.
-In flight: **T3.3** r3 (the r2 re-verify refuted the destructive keys: model keys as the web's CSS class sets
-with a cascade + expectation table; 5 of 6 r2 fixes held, CI green exact-match); **T1.5** r3 (stop()/generation guard,
-send under lock, test gaps) after r2 passed verifier + security re-review;
-**S13.1** VERIFIED → PR #200 (coordinator fixed FCM v1 `android.priority` "normal"→"NORMAL" before review).
-Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T1.5 merge → T13.1 (Room mirror, per SYNC_DESIGN).
+**⚠ History rewrite (owner, 2026-09-27 ~12:18 CEST):** this PUBLIC repo's history was scrubbed of operator-identifying data
+(home paths → placeholders) and force-pushed. Tether's main and its `android-parity/*` branches were rewritten the same way (the PRs follow).
+Commit SHAs quoted in beads/notes before 12:18 refer to the pre-rewrite history; commit MESSAGES are unchanged, so find a commit by
+message. The vendored corpus manifests still name pre-rewrite tether SHAs until the next `sync-corpus.sh` run. Local-only
+`backup/*-pre-transplant` branches hold old history: **never push them**. Never commit absolute home paths or the operator's account name.
+**Merged today:** T3.5 (icons), T13.0 SYNC_DESIGN, **T1.5** (node registry; transplanted onto the rewritten main, `eb75153`).
+In flight: **T3.3** r3 DONE (keys = web class sets + cascade, 1490 tests; transplanted + pushed `fe4d6a8`) → verifier re-check;
+**ta-s8q** (release blocker: origin-keyed pending store, security-executor).
+Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T13.1 (Room mirror) after ta-s8q (both touch RealTetherClient).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
 **In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
@@ -85,7 +86,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
-| T1.5 | Multi-host node registry awareness (v109) | DONE | claude-main @ 2026-09-27 08:53 |  |  |
+| T1.5 | Multi-host node registry awareness (v109) | VERIFIED | claude-main @ 2026-09-27 08:53 |  |  |
 
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -100,7 +101,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | claude-main: r3 dispatched. VERIFY-FAIL r2 root cause = keys modelled as ad-hoc roles instead of the web's class composition (chat-send+cha… |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | DONE | claude-main @ 2026-09-27 04:16 |  |  |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
@@ -266,6 +267,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | Layout class cutoff = `WindowSizeClass` expanded width (**840dp**), per PLAN D10, not the web's 768px breakpoint (`LayoutClass.kt`, T3.3). 768–839dp windows get the phone layout | D10 names WindowSizeClass; it keeps foldables/split-screen on the phone layout until they are truly wide | claude-main (owner delegation) |
 | 2026-09-27 | S13.1 part C (`removedQueueIds`, changes the web's SessionProjection) ships in the **same PR as separate trailing commits**, flagged separable for the owner's OQ1 call at review | One PROTOCOL bump either way; the owner can drop part C without a re-bump | claude-main (owner delegation) |
 | 2026-09-27 | `ta-s8q` (cross-server replay of unsent turns) is **release-blocking** for the next APK | It leaks prompt content to a different server | claude-main (owner delegation) |
+| 2026-09-27 | After the owner's history rewrite, unmerged local branches are **transplanted** with `git rebase --onto <rewritten main> <old base>` (their own commits only, identical diffstat, zero identifier hits verified), never merged with the old history. The remote task branch `parity/T3.3-primitives` was replaced with `--force-with-lease` pinned to the owner's rewritten tip | Pushing old-history commits would undo a privacy scrub on a public repo | claude-main (owner delegation) |
+| 2026-09-27 | T3.3 keys: pressed = `:active` only. Chromium's touch-emulated `:hover` (Studio hover rules win on a held key) is not modelled | Native Android has no hover on touch; `:active` is the operator's actual "pressed" moment | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
