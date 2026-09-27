@@ -47,7 +47,7 @@ class FirebaseSetupTest {
     @Before
     fun setUp() {
         FirebaseApp.clearInstancesForTest()
-        context.getSharedPreferences(FirebaseClientConfigStore.FILE, Context.MODE_PRIVATE).edit().clear().commit()
+        FirebaseClientConfigStore(context).clear()
         server.start()
         runBlocking { settings.setServer(server.url("/").toString(), Credential.DeviceToken("fake-device-token")) }
     }
@@ -109,33 +109,114 @@ class FirebaseSetupTest {
         assertNull("no fcm-register without a token", server.takeRequest(500, TimeUnit.MILLISECONDS))
     }
 
+    private val originA = "https://a.tether.invalid:443"
+    private val originB = "https://b.tether.invalid:443"
+
+    /** Records the project that was the default app each time a token delete ran. */
+    private val deletedFor = mutableListOf<String?>()
+
+    private fun initializer(override: FirebaseConfig? = null) = AndroidFirebaseInitializer(
+        context,
+        override = override,
+        deleteCurrentToken = {
+            deletedFor += FirebaseApp.getApps(context).firstOrNull()?.options?.projectId
+        },
+    )
+
+    private fun runningProject(): String? = FirebaseApp.getApps(context).firstOrNull()?.options?.projectId
+
     @Test
-    fun theSavedConfigIsRestoredAtTheNextStart() {
-        assertTrue(AndroidFirebaseInitializer(context).ensure(parse(fakeClient)))
+    fun theSavedConfigIsRestoredAtTheNextStart() = runBlocking {
+        assertEquals(FirebaseSetup.Ready, initializer().ensure(parse(fakeClient), originA))
         FirebaseApp.clearInstancesForTest() // a new process
 
-        assertTrue(AndroidFirebaseInitializer(context).restore())
+        assertTrue(initializer().restore())
 
-        assertEquals("fake-project-01", FirebaseApp.getInstance().options.projectId)
+        assertEquals("fake-project-01", runningProject())
     }
 
     @Test
     fun nothingSavedAndNothingRunningRestoresNothing() {
-        assertEquals(false, AndroidFirebaseInitializer(context).restore())
+        assertEquals(false, initializer().restore())
         assertTrue(FirebaseApp.getApps(context).isEmpty())
     }
 
     @Test
-    fun anotherServersProjectReplacesTheDefaultApp() {
-        val initializer = AndroidFirebaseInitializer(context)
-        assertTrue(initializer.ensure(parse(fakeClient)))
-        assertTrue(initializer.ensure(parse(otherClient)))
-        assertEquals("fake-project-02", FirebaseApp.getInstance().options.projectId)
-        assertEquals("fake-project-02", FirebaseClientConfigStore(context).load()?.projectId)
+    fun theSameServerNamingAnotherProjectIsNotSwitchedSilently() = runBlocking {
+        val init = initializer()
+        assertEquals(FirebaseSetup.Ready, init.ensure(parse(fakeClient), originA))
+
+        assertEquals(FirebaseSetup.ProjectChanged, init.ensure(parse(otherClient), originA))
+
+        assertEquals("the accepted project stays up", "fake-project-01", runningProject())
+        assertEquals("fake-project-01", FirebaseClientConfigStore(context).load()?.config?.projectId)
+        assertEquals(emptyList<String?>(), deletedFor)
     }
 
     @Test
-    fun anExplicitOverrideWinsAndIsNotSaved() {
+    fun theProjectChangeIsSurfacedByTheRegistrarAndNothingIsRegistered() = runBlocking {
+        initializer().ensure(parse(otherClient), "http://${server.hostName}:${server.port}")
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true,"client":$fakeClient}"""))
+        val tokenCalls = AtomicInteger()
+        val registrar = PushRegistrar(settings, OkHttpClient(), FirebaseTokenProvider { tokenCalls.incrementAndGet(); "fake" }, initializer())
+        assertEquals(PushRegistrarResult.ProjectChanged, registrar.sync(PushScope.All, emptySet(), emptySet(), syncHints = false))
+        assertEquals(0, tokenCalls.get())
+        server.takeRequest(5, TimeUnit.SECONDS)
+        assertNull("no fcm-register", server.takeRequest(500, TimeUnit.MILLISECONDS))
+    }
+
+    @Test
+    fun afterLogoutARePairAcceptsTheNewProject() = runBlocking {
+        val init = initializer()
+        init.ensure(parse(fakeClient), originA)
+        init.forget()
+        assertEquals(FirebaseSetup.Ready, init.ensure(parse(otherClient), originA))
+        assertEquals("fake-project-02", runningProject())
+        assertEquals(listOf<String?>("fake-project-01"), deletedFor)
+    }
+
+    @Test
+    fun theSameServerWithoutAClientBlockReusesItsOwnConfig() = runBlocking {
+        val init = initializer()
+        init.ensure(parse(fakeClient), originA)
+        FirebaseApp.clearInstancesForTest()
+        assertEquals(FirebaseSetup.Ready, init.ensure(null, originA))
+        assertEquals("fake-project-01", runningProject())
+    }
+
+    @Test
+    fun anotherServerWithoutAClientBlockNeverReusesTheOldConfig() = runBlocking {
+        val init = initializer()
+        init.ensure(parse(fakeClient), originA)
+
+        assertEquals(FirebaseSetup.Unavailable, init.ensure(null, originB))
+
+        assertEquals("the old project's token was deleted first", listOf<String?>("fake-project-01"), deletedFor)
+        assertTrue("the default app is gone", FirebaseApp.getApps(context).isEmpty())
+        assertNull("the binding is cleared", FirebaseClientConfigStore(context).load())
+        assertEquals(false, initializer().restore())
+    }
+
+    @Test
+    fun anotherServersProjectReplacesTheDefaultAppAfterDeletingTheOldToken() = runBlocking {
+        val init = initializer()
+        assertEquals(FirebaseSetup.Ready, init.ensure(parse(fakeClient), originA))
+        assertEquals(FirebaseSetup.Ready, init.ensure(parse(otherClient), originB))
+        assertEquals("deleted while the old project was still the default", listOf<String?>("fake-project-01"), deletedFor)
+        assertEquals("fake-project-02", runningProject())
+        assertEquals(BoundFirebaseConfig(originB, parse(otherClient)!!), FirebaseClientConfigStore(context).load())
+    }
+
+    @Test
+    fun theSameProjectNeedsNoTokenDelete() = runBlocking {
+        val init = initializer()
+        init.ensure(parse(fakeClient), originA)
+        init.ensure(parse(fakeClient), originA)
+        assertEquals(emptyList<String?>(), deletedFor)
+    }
+
+    @Test
+    fun anExplicitOverrideWinsAndIsNotSaved() = runBlocking {
         val override = FirebaseConfig {
             FirebaseOptions.Builder()
                 .setProjectId("fake-dev-project")
@@ -143,8 +224,8 @@ class FirebaseSetupTest {
                 .setApiKey("fake-api-key-not-a-real-key-9999")
                 .build()
         }
-        assertTrue(AndroidFirebaseInitializer(context, override = override).ensure(parse(fakeClient)))
-        assertEquals("fake-dev-project", FirebaseApp.getInstance().options.projectId)
+        assertEquals(FirebaseSetup.Ready, initializer(override).ensure(parse(fakeClient), originA))
+        assertEquals("fake-dev-project", runningProject())
         assertNull(FirebaseClientConfigStore(context).load())
     }
 

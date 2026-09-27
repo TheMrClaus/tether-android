@@ -56,7 +56,11 @@ class PushController(
         registrarFactory(PushRegistrar(settings, httpClient, tokenProvider, firebase))
     }
 
-    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar, tokenProvider::delete) }
+    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) {
+            tokenProvider.delete()
+            // A re-pair may then accept another project from the same server.
+            firebase.forget()
+        } }
 
     fun start() {
         // Bring FirebaseApp up from the last server config that worked, before

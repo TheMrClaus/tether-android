@@ -143,6 +143,7 @@ class PushEndToEndTest {
         assertEquals("GET /api/push/fcm-config", "${requests[0].method} ${requests[0].path}")
         assertEquals("Bearer fake-device-token-not-a-credential", requests[0].getHeader("Authorization"))
         assertEquals("fake-project-01", FirebaseApp.getInstance().options.projectId)
+        assertEquals("http://${tether.hostName}:${tether.port}", FirebaseClientConfigStore(context).load()?.origin)
         assertEquals(1, tokenCalls.get())
         val register = requests[1]
         assertEquals("POST /api/push/fcm-register", "${register.method} ${register.path}")
@@ -181,6 +182,8 @@ class PushEndToEndTest {
         assertEquals("DELETE /api/push/fcm-register", "${delete.method} ${delete.path}")
         assertEquals("Bearer fake-device-token-not-a-credential", delete.getHeader("Authorization"))
         assertEquals(1, deleteCalls.get())
+        // The accepted Firebase project is forgotten, so a re-pair can accept another.
+        assertEquals(null, FirebaseClientConfigStore(context).load())
 
         // Signed out: nothing else reaches the server.
         Thread.sleep(500)

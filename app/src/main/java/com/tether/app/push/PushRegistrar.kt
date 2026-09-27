@@ -31,6 +31,13 @@ sealed interface PushRegistrarResult {
     /** The server reports FCM is not configured — the app shows "not configured". */
     data object ServerUnconfigured : PushRegistrarResult
     data class Error(val message: String) : PushRegistrarResult
+
+    /**
+     * This server now names a different Firebase project than the one the
+     * device accepted from it. Nothing was registered. The UI should say "Push
+     * project changed; re-pair to accept."
+     */
+    data object ProjectChanged : PushRegistrarResult
 }
 
 /**
@@ -108,9 +115,13 @@ open class PushRegistrar(
             val config = fetchConfig(base, credential) ?: return@withContext PushRegistrarResult.Error("Push config unreachable.")
             if (!config.configured) return@withContext PushRegistrarResult.ServerUnconfigured
             // FirebaseApp must be up before a token exists. Its options come from
-            // this server (fcm-config `client`); see FirebaseClientConfig.
-            if (!firebase.ensure(config.client)) {
-                return@withContext PushRegistrarResult.Error("Firebase client config unavailable.")
+            // this server (fcm-config `client`), bound to its origin; see
+            // AndroidFirebaseInitializer for the first-use-wins rules.
+            when (firebase.ensure(config.client, originOf(base))) {
+                FirebaseSetup.Ready -> Unit
+                FirebaseSetup.Unavailable ->
+                    return@withContext PushRegistrarResult.Error("Firebase client config unavailable.")
+                FirebaseSetup.ProjectChanged -> return@withContext PushRegistrarResult.ProjectChanged
             }
 
             val fcmToken = tokenProvider.token() ?: return@withContext PushRegistrarResult.Error("FCM token unavailable.")
@@ -268,6 +279,9 @@ open class PushRegistrar(
 
     private fun toJsonArray(ids: Set<String>): JsonArray =
         JsonArray(ids.map { JsonPrimitive(it) })
+
+    /** scheme://host:port: what the Firebase binding is keyed on. */
+    private fun originOf(base: HttpUrl): String = "${base.scheme}://${base.host}:${base.port}"
 
     private data class FcmConfig(val configured: Boolean, val client: FirebaseClientConfig?)
 
