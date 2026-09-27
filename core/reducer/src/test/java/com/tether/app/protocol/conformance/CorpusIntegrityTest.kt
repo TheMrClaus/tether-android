@@ -53,6 +53,28 @@ class CorpusIntegrityTest {
         assertTrue(mismatches.joinToString("\n"), mismatches.isEmpty())
     }
 
+    /**
+     * The byte test above can't see key sorting: parsing preserves the already-sorted order.
+     * Rebuild every object with its keys in REVERSED insertion order and require the same bytes,
+     * so a writer that emits insertion order instead of sorting fails here (H0 harness check).
+     */
+    @Test
+    fun canonicalWriterSortsKeysRegardlessOfInsertionOrder() {
+        fun reversed(v: com.tether.app.protocol.tree.JsValue): com.tether.app.protocol.tree.JsValue = when (v) {
+            is JsObj -> JsObj.of(*v.entries.reversed().map { (k, x) -> k to reversed(x) }.toTypedArray())
+            is JsArr -> JsArr.of(v.map { reversed(it) })
+            else -> v
+        }
+        val mismatches = files.mapNotNull { entry ->
+            val path = entry["path"].str!!
+            val bytes = File(CanonicalJson.corpusDir, path).readBytes()
+            val tree = CanonicalJson.parse(String(bytes, Charsets.UTF_8))
+            val rewritten = CanonicalJson.fileText(reversed(tree)).toByteArray(Charsets.UTF_8)
+            if (rewritten.contentEquals(bytes)) null else "$path: writer output depends on key insertion order"
+        }
+        assertTrue(mismatches.joinToString("\n"), mismatches.isEmpty())
+    }
+
     @Test
     fun referenceEventsMjsMatchesItsRecordedSha() {
         val dir = File(CanonicalJson.corpusDir, "reference")

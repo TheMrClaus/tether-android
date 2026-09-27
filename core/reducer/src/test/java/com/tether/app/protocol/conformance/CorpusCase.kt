@@ -27,6 +27,12 @@ class CorpusCase(
         fun load(name: String): CorpusCase {
             val root = CanonicalJson.read(File(reducerDir, "$name.json")) as JsObj
             val steps = root["expectedProjectionAfterEachStep"] as JsArr
+            val events = root["inputEvents"] as JsArr
+            // A short expectation list would otherwise read as "sampled out" for the missing
+            // steps and silently skip them (H0 harness check, verifier 2026-09-27).
+            require(steps.size == events.size) {
+                "$name: ${steps.size} expected steps for ${events.size} input events"
+            }
             return CorpusCase(
                 name = root["name"].str ?: name,
                 sourceKind = (root["source"] as? JsObj)?.get("kind").str ?: "?",
