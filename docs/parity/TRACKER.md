@@ -67,8 +67,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
-| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | IN-PROGRESS | claude-main @ 2026-09-27 00:35 |  | GATE EXCEPTION extended (owner overnight delegation): T1.1 depends on S0.3 (VERIFIED) + S1.1 (VERIFIED, PR tether#197 pending merge); P0 re… |
-| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From S1.1: do NOT gate on ready.protocolVersion strict equality (today's permanentVersionStop) — decide on the hello reply; reason client_t… |
+| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
+| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T1.1 (fcc0c91): flip PROTOCOL_VERSION -> TARGET_PROTOCOL_VERSION (129) + update ~20 tests pinned to 40; Hello(TARGET_PROTOCOL_VERSION,… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
@@ -76,7 +76,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | TODO |  |  | From S0.2 verify: corpus-manifest tetherSha records the GENERATING commit (157b87d = scripts-only diff atop PARITY_BASE 7d65611). When vend… |
+| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | IN-PROGRESS | claude-main @ 2026-09-27 00:44 |  | PLAN APPROVED-WITH-CHANGES by plan-verifier; 10 binding revisions appended to docs/parity/T2.1_PLAN.md (enumerated unit I, disjoint line ow… |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
