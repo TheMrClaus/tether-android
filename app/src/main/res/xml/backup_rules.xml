@@ -2,9 +2,10 @@
 <!-- android:fullBackupContent, for completeness (it applies where
      dataExtractionRules does not). Same exclusions and reasons as
      data_extraction_rules.xml: never back up the sealed credentials or the
-     pre-T1.4 settings file that held them in plaintext. -->
+     pre-T1.4 settings file that held them in plaintext, nor the FCM token. -->
 <full-backup-content>
     <exclude domain="file" path="credentials" />
     <exclude domain="file" path="tether_settings.preferences_pb" />
     <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
+    <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
 </full-backup-content>

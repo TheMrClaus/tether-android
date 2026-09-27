@@ -9,16 +9,24 @@
        before T1.4. An install that was upgraded but not yet launched has not
        migrated them yet, so the whole file (and DataStore's .tmp sibling) is
        excluded too. It holds only the server URL and unsent input otherwise.
+     - shared_prefs/com.google.android.gms.appid.xml is where firebase-messaging
+       keeps the FCM registration token (T12.1), a credential-grade push
+       identifier bound to this device's registration. (Its -no-backup sibling
+       already lives in no_backup/.) Firebase Installations' file is named
+       after the app id, which comes from the server at runtime, so it has no
+       fixed path to exclude here.
      Keep this in sync with backup_rules.xml (android:fullBackupContent). -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="credentials" />
         <exclude domain="file" path="tether_settings.preferences_pb" />
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
+        <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="credentials" />
         <exclude domain="file" path="tether_settings.preferences_pb" />
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
+        <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
     </device-transfer>
 </data-extraction-rules>
