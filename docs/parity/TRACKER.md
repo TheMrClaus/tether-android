@@ -59,7 +59,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | VERIFIED | executor-S0.3 @ 2026-09-26 21:12 |  |  |
-| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  | Reopened after VERIFY-FAIL: cross-sitting determinism 198/360 — session sidebar order timing-dependent (two '10m' sessions swap; parity-clo… |
+| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  | done: sidebar-order fix = per-create +60s parity-clock step (SIGUSR2, acked on stdout) e4a745f/3f69e4f; clock back to 1/1000 (13ce1f8, warm… |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
 
@@ -69,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
-| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
+| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
