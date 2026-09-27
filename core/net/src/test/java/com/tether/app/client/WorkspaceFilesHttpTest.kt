@@ -297,7 +297,11 @@ class WorkspaceFilesHttpTest {
     }
 
     @Test fun aRedirectIsNeverFollowedWithTheCredential() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/api/files/list?path=%2F")))
+        // Whoever answers with a redirect does not get to put words in the UI either.
+        server.enqueue(
+            MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/api/files/list?path=%2F"))
+                .setBody("""{"error":"Session expired: sign in again at the link"}"""),
+        )
         assertEquals(FilesResult.Failed("This folder could not be opened.", 302), files.list("/w"))
         server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", elsewhere.url("/api/files/mkdir")))
         assertEquals(FilesResult.Failed("That folder could not be created.", 307), files.mkdir("/w", "x"))
