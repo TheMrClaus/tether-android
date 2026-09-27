@@ -3,7 +3,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
-    // T4.1: JVM screenshot tests of the shell states (recordRoborazziDebug / verifyRoborazziDebug).
+    // T4.1 + T4.3: JVM screenshot tests of the shell states and the statusline components (recordRoborazziDebug / verifyRoborazziDebug).
     alias(libs.plugins.roborazzi)
 }
 
@@ -20,7 +20,7 @@ android {
     }
 }
 
-// T4.1: shell goldens live in the source tree (checked in), one PNG per state × skin × size.
+// T4.1 + T4.3: goldens live in the source tree (checked in), one PNG per state × skin × size; verifyRoborazziDebug fails on any difference.
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
 }
@@ -33,6 +33,8 @@ dependencies {
     implementation(project(":core:net"))
     implementation(project(":core:data"))
     implementation(project(":core:designsystem"))
+    // T4.3: the faithful lib/format.ts port (protocol.helpers.Format) and the projection views.
+    implementation(project(":core:reducer"))
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
@@ -44,6 +46,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    // The v128 fold + event builders, so the mapping tests read real folded projections.
+    testImplementation(testFixtures(project(":core:reducer")))
+    testImplementation(libs.kotlinx.serialization.json)
     testImplementation(composeBom)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
