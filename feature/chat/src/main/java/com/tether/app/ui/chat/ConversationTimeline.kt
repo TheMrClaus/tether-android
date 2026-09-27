@@ -1,9 +1,5 @@
 package com.tether.app.ui.chat
 
-import android.content.Context
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -39,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import com.tether.app.ui.components.rememberTetherHaptics
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -49,7 +46,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,9 +71,6 @@ private val MAGNIFIED_OPACITIES = floatArrayOf(1f, 0.82f, 0.64f, 0.5f, 0.38f)
 private fun clamp(v: Float, min: Float, max: Float): Float = max(min, min(max, v))
 private fun clamp(v: Int, min: Int, max: Int): Int = max(min, min(max, v))
 
-private fun getVibrator(context: Context): Vibrator? =
-    (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-
 /**
  * Compact conversation index rail — Kotlin/Compose port of aidash's
  * ConversationTimeline. A fixed stack of up to 10 slots alongside the
@@ -101,28 +94,14 @@ fun ConversationTimeline(
 
     val t = LocalTetherTokens.current
     val reducedMotion = LocalReducedMotion.current
-    val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    val vibrator = remember { getVibrator(context) }
+    val haptics = rememberTetherHaptics()
     val lastHapticIndex = remember { mutableIntStateOf(-1) }
 
-    fun fireHaptic() {
-        val v = vibrator ?: return
-        if (!v.hasVibrator()) return
-        // PRIMITIVE_TICK is the light, crisp step primitive — the right
-        // feel for crossing into each dot while scrubbing.
-        if (v.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
-            v.vibrate(
-                VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f)
-                    .compose()
-            )
-        } else {
-            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 15, 20), -1))
-        }
-    }
+    // The web's one haptic moment: vibrate(7) per new scrub index (TetherHaptics map).
+    fun fireHaptic() = haptics.scrubStep()
 
     fun scrollToStoryPoint(index: Int) {
         val lazyIndex = storyPointToLazyIndex[index] ?: return

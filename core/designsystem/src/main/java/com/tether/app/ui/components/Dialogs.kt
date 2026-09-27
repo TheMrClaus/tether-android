@@ -1,52 +1,216 @@
 package com.tether.app.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import com.tether.app.ui.theme.CssShadow
+import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
-import com.tether.app.ui.theme.Manrope
-import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.TetherWeights
+import com.tether.app.ui.theme.LocalTetherTypography
+import com.tether.app.ui.theme.TetherTokens
+import com.tether.app.ui.theme.ThemeFamily
 
-/** Themed dialog surface: graphite, 1px line seam, 14dp corners (radius-lg). */
+/**
+ * Studio's dialog chrome is written as literals in studio.css (504-514), not tokens: 16px radius,
+ * no border, `0 24px 80px rgb(16 30 58 / 0.2), 0 4px 16px rgb(16 30 58 / 0.08)`, and a
+ * `rgb(16 25 44 / 0.34)` backdrop.
+ */
+object StudioDialog {
+    val radius: Dp = 16.dp
+    val shadows: List<CssShadow> = listOf(
+        softShadow(24.dp, 80.dp, Color(16, 30, 58).copy(alpha = 0.2f)),
+        softShadow(4.dp, 16.dp, Color(16, 30, 58).copy(alpha = 0.08f)),
+    )
+    val scrim: Color = Color(16, 25, 44).copy(alpha = 0.34f)
+}
+
+/** The skin's modal backdrop (`--scrim`; Studio's literal). */
+fun dialogScrim(t: TetherTokens): Color = if (t.skin.family == ThemeFamily.Studio) StudioDialog.scrim else t.scrim
+
+/**
+ * The molded case every dialog is (`.confirm-dialog`, globals.css 3584-3632 + material layer
+ * 9032-9039): `var(--graphite)`, `1px var(--key-side)` edge, `--radius-lg`, and the skin's
+ * `--edge-highlight` + `--shadow-modal` lists. Width `min(24rem, 100vw - 1.5rem)`. Studio
+ * (studio.css 504-547): borderless, 16px, its literal soft shadow, `min(440px, 100vw - 32px)`.
+ * Header: 1.05rem/650 white title (Studio 22px/700). Footer: right-aligned keys over a `--line`
+ * rule. This is the inline surface; [TetherDialog] hosts it in a window.
+ */
+@Composable
+fun TetherDialogSurface(
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    footer: (@Composable RowScope.() -> Unit)? = null,
+    scrollable: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val studio = t.skin.family == ThemeFamily.Studio
+    BoxWithConstraints(modifier) {
+        val width = if (studio) minOf(440.dp, maxWidth - 32.dp) else minOf(384.dp, maxWidth - 24.dp)
+        val shape = RoundedCornerShape(if (studio) StudioDialog.radius else t.radiusLg)
+        Column(
+            Modifier
+                .width(width)
+                .cssSurface(
+                    shape, t.graphite,
+                    if (studio) null else CssBorder(1.dp, t.keySide),
+                    if (studio) StudioDialog.shadows else t.css.edgeHighlight + t.css.shadowModal,
+                ),
+        ) {
+            Column(
+                Modifier
+                    .then(if (scrollable) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier)
+                    .padding(
+                        start = if (studio) 28.dp else t.css.spaceLg,
+                        end = if (studio) 28.dp else t.css.spaceLg,
+                        top = if (studio) 28.dp else t.css.spaceXl,
+                        bottom = if (studio) 28.dp else t.css.spaceLg,
+                    ),
+            ) {
+                if (title != null) {
+                    Text(
+                        text = title,
+                        color = t.white,
+                        style = if (studio) {
+                            type.body.copy(fontSize = 22.sp, fontWeight = FontWeight(700), letterSpacing = (-0.025).em, lineHeight = 1.3.em)
+                        } else {
+                            type.body.copy(fontSize = 16.8.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+                        },
+                        modifier = Modifier
+                            .semantics { heading() }
+                            .padding(bottom = if (studio) 12.dp else t.css.spaceSm),
+                    )
+                }
+                content()
+            }
+            if (footer != null) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = if (studio) 28.dp else t.css.spaceLg, vertical = if (studio) 18.dp else t.css.spaceLg),
+                    horizontalArrangement = Arrangement.spacedBy(if (studio) 10.dp else t.css.spaceSm, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = footer,
+                )
+            }
+        }
+    }
+}
+
+/** Dialog body copy (`.confirm-dialog p`: 0.8rem muted, 1.55; Studio 14px, 1.65). */
+@Composable
+fun TetherDialogText(text: String, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val studio = t.skin.family == ThemeFamily.Studio
+    Text(
+        text,
+        color = t.muted,
+        style = type.body.copy(fontSize = if (studio) 14.sp else 12.8.sp, lineHeight = if (studio) 1.65.em else 1.55.em),
+        modifier = modifier,
+    )
+}
+
+/**
+ * A modal dialog: the skin's scrim, then [TetherDialogSurface] rising in with `dialog-in`
+ * (`opacity 0, translateY(0.5rem) scale(0.99)` → rest over `--duration` `--ease-out`, globals.css
+ * 3869/3595). Reduced motion: it simply appears.
+ */
 @Composable
 fun TetherDialog(
     onDismiss: () -> Unit,
     title: String? = null,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+    footer: (@Composable RowScope.() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(t.graphite, RoundedCornerShape(TetherDimens.radiusLg))
-                .border(1.dp, t.line, RoundedCornerShape(TetherDimens.radiusLg))
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            if (title != null) {
-                Text(
-                    text = title,
-                    color = t.white,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.heading,
-                    fontSize = 15.2.sp,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
-            }
-            content()
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        NoWindowDim()
+        ModalScrim(onDismiss, dialogScrim(t)) {
+            val progress = rememberEnterProgress()
+            TetherDialogSurface(
+                title = title,
+                footer = footer,
+                content = content,
+                modifier = Modifier
+                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                    .graphicsLayer {
+                        val p = progress.value
+                        alpha = p
+                        translationY = (1f - p) * 8.dp.toPx()
+                        scaleX = 0.99f + 0.01f * p
+                        scaleY = 0.99f + 0.01f * p
+                    },
+            )
         }
     }
+}
+
+/** Our scrim replaces the platform's black window dim, so the backdrop is the skin's colour. */
+@Composable
+internal fun NoWindowDim() {
+    val view = LocalView.current
+    SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
+}
+
+@Composable
+internal fun ModalScrim(onDismiss: () -> Unit, color: Color, alignment: Alignment = Alignment.Center, content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(color)
+            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+        contentAlignment = alignment,
+    ) { content() }
+}
+
+/** 0 → 1 over `--duration` with `--ease-out`; 1 at once under reduced motion. */
+@Composable
+internal fun rememberEnterProgress(): Animatable<Float, *> {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val progress = remember { Animatable(if (reduced) 1f else 0f) }
+    LaunchedEffect(reduced) {
+        if (!reduced) progress.animateTo(1f, tween(t.css.duration, easing = t.css.easeOut.toEasing()))
+    }
+    return progress
 }

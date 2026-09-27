@@ -1,10 +1,9 @@
 package com.tether.app.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -18,30 +17,51 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
-import com.tether.app.ui.theme.Manrope
+import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.TetherWeights
+import com.tether.app.ui.theme.TetherTokens
 
 /**
- * Recessed input well (visual-spec §4 composer / §6): mineral-deep bg, 1px
- * line-strong border, inner top shadow approximated by a top-edge gradient,
- * violet-strong border + 3dp focus-glow ring when focused.
+ * Recessed wells: text inputs, filters, pickers, plates (globals.css 8923-8944). A well is a
+ * pocket machined into the panel — `1px solid var(--line-strong)`, `var(--mineral-deep)` floor,
+ * and the skin's `--well` shadow list (two inset shades + a lit outer lip), drawn layer for layer.
+ * Focus is `border-color: var(--violet-strong)` plus a `0 0 0 3px var(--focus-glow)` halo
+ * (violet = focus). Studio's `--well` is transparent, so its wells are flat fields.
+ */
+fun wellShadows(t: TetherTokens, focused: Boolean): List<CssShadow> =
+    if (focused) t.css.well + CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.focusGlow) else t.css.well
+
+/** The well surface on any shape; content goes inside. */
+fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false): Modifier =
+    cssSurface(shape, t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), wellShadows(t, focused))
+
+/** A recessed plate / frame (e.g. `.session-elapsed`, `.chat-frame`) holding arbitrary content. */
+@Composable
+fun TetherWell(
+    modifier: Modifier = Modifier,
+    radius: Dp? = null,
+    focused: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    Box(modifier.tetherWell(t, RoundedCornerShape(radius ?: t.radiusMd), focused), content = content)
+}
+
+/**
+ * The text-input well (`.chat-input` / `.field-group input`): radius `--radius-md`, touch height
+ * ≥44dp, body type (1rem, 400), `--faint` placeholder, violet caret. Disabled inputs fade to 0.48
+ * (globals.css 641-647).
  */
 @Composable
 fun TetherInputWell(
@@ -55,45 +75,26 @@ fun TetherInputWell(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     maxLines: Int = if (singleLine) 1 else 6,
-    // visual-spec §5: Manrope is the UI face; JetBrains Mono is for code-like
-    // values (paths, tool output, a typed pairing code).
-    fontFamily: FontFamily = Manrope,
+    // Manrope is the UI face; JetBrains Mono is for code-like values (paths, a pairing code).
+    fontFamily: FontFamily? = null,
     letterSpacing: TextUnit = TextUnit.Unspecified,
+    interactionSource: MutableInteractionSource? = null,
 ) {
     val t = LocalTetherTokens.current
-    val interaction = remember { MutableInteractionSource() }
+    val type = LocalTetherTypography.current
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(TetherDimens.radiusMd)
-    val borderColor = if (focused) t.violetStrong else t.lineStrong
+    val shape = RoundedCornerShape(t.radiusMd)
+    val base = type.body.let { if (fontFamily != null) it.copy(fontFamily = fontFamily) else it }
+        .let { if (letterSpacing != TextUnit.Unspecified) it.copy(letterSpacing = letterSpacing) else it }
 
     Box(
         modifier = modifier
-            .drawBehind {
-                if (focused) {
-                    // 3dp focus-glow ring just outside the border.
-                    val ring = 3.dp.toPx()
-                    drawRoundRect(
-                        color = t.focusGlow,
-                        topLeft = Offset(-ring / 2f, -ring / 2f),
-                        size = Size(size.width + ring, size.height + ring),
-                        cornerRadius = CornerRadius(TetherDimens.radiusMd.toPx() + ring / 2f),
-                        style = Stroke(width = ring),
-                    )
-                }
+            .graphicsLayer {
+                alpha = if (enabled) 1f else DisabledOpacity
+                compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .clip(shape)
-            .background(t.mineralDeep)
-            .drawBehind {
-                // Recessed: subtle dark shadow along the top edge.
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(t.contact.copy(alpha = 0.18f), Color.Transparent),
-                        startY = 0f,
-                        endY = 8.dp.toPx(),
-                    ),
-                )
-            }
-            .border(1.dp, borderColor, shape)
+            .tetherWell(t, shape, focused)
             .heightIn(min = TetherDimens.touchTargetDp),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -102,15 +103,9 @@ fun TetherInputWell(
             onValueChange = onValueChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 11.dp),
+                .padding(horizontal = t.css.spaceMd, vertical = 11.dp),
             enabled = enabled,
-            textStyle = TextStyle(
-                color = t.ink,
-                fontFamily = fontFamily,
-                fontWeight = TetherWeights.body,
-                fontSize = 16.sp,
-                letterSpacing = letterSpacing,
-            ),
+            textStyle = base.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
             singleLine = singleLine,
             maxLines = maxLines,
@@ -121,15 +116,7 @@ fun TetherInputWell(
             decorationBox = { innerTextField ->
                 Box {
                     if (value.isEmpty()) {
-                        Text(
-                            text = placeholder,
-                            color = t.faint,
-                            fontFamily = fontFamily,
-                            fontWeight = TetherWeights.body,
-                            fontSize = 16.sp,
-                            letterSpacing = letterSpacing,
-                            maxLines = 2,
-                        )
+                        Text(text = placeholder, style = base, color = t.faint, maxLines = 2)
                     }
                     innerTextField()
                 }

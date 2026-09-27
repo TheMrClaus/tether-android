@@ -2,6 +2,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    // T3.3: JVM screenshot tests (recordRoborazziDebug / verifyRoborazziDebug).
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -9,6 +11,18 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        // Robolectric (screenshot tests) needs the merged resources: fonts, the test activity.
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+// T3.3: goldens live in the source tree (checked in), one PNG per primitive × state × skin × size.
+// recordRoborazziDebug rewrites them; verifyRoborazziDebug (CI) fails on any difference.
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
 }
 
 // PLAN D9 / T3.1: GeneratedTokens.kt is generated from the vendored token export by
@@ -76,10 +90,20 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.core)
+    // Lucide glyphs the primitives draw (select chevron/check, expand chevron, sheet close).
+    implementation(libs.lucide.icons)
 
     designTokenGenerator(project(":tools:design-tokens"))
 
     testImplementation(libs.junit)
     testImplementation(project(":tools:design-tokens"))
     testImplementation(libs.kotlinx.serialization.json)
+    testImplementation(composeBom)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
 }

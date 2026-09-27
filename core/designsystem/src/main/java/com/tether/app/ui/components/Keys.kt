@@ -1,65 +1,80 @@
 package com.tether.app.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
-import com.tether.app.ui.theme.Manrope
+import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.TetherWeights
+import com.tether.app.ui.theme.ThemeFamily
+
+/** The key's silhouette: a labelled/rounded key, or the round `.chat-jump` cap. */
+enum class KeyShape { Rounded, Circle }
+
+/** The execution slit sits `left: 0.32rem` inside the key (globals.css:9238). */
+private val SlitInset: Dp = 5.12.dp
 
 /**
- * The molded "key" control (visual-spec §4 composer + §2.3 + globals.css
- * ":root .button-*" material layer): a raised face over a solid side-wall,
- * lit top-left bevel, soft drop contact shadow, uppercase legend. Pressing
- * travels the face down onto the side, swaps the lit bevel for a recessed
- * [pressShade], and shrinks the contact shadow. Hover deepens the fill only.
- * Disabled keys lose elevation and contrast. The most-used keys (primary
- * CTAs and the sidebar's New session) carry a subtle radial wear polish.
+ * The molded key of the web's material layer (globals.css 8565-8578 grammar): a raised face
+ * over a hard side-wall, lit from the upper left, with a soft contact shadow — every layer of
+ * the skin's box-shadow list drawn by [cssSurface] (resolved by [resolveKey]). Pressing travels
+ * the key down `--press-travel`, compresses the side-wall and darkens the top bevel; disabled
+ * keys sit flat at 0.48 opacity; focus is an independent violet ring ([focusRing]); a latched
+ * ([selected]) key carries the violet selected tone. Studio re-dresses it flat
+ * (studio.css 260-278).
  *
- * A strong mechanical haptic (QUICK_RISE on press, THUD on release, both at
- * maximum scale) fires on every enabled click, so the key feels like a
- * physical button.
+ * Legends: [label] is a fixed verb by default and takes the skin's etched-legend transform
+ * (uppercase + tracking in the instrument skins, none in Studio); pass `fixedVerb = false` for
+ * user/provider content, which must render as authored (globals.css 9197-9213). The accessible
+ * name is always the ORIGINAL words (`contentDescription ?: label`), never the uppercased
+ * string — like the web, where text-transform leaves the DOM text alone.
+ *
+ * Touch: at least 44×44dp (DESIGN.md). Haptics: [TetherHaptics.keyDown] / [TetherHaptics.keyUp].
  */
-
-enum class KeyVariant { Primary, Secondary, Brick, Utility }
-
 @Composable
 fun TetherKey(
     onClick: () -> Unit,
@@ -68,198 +83,116 @@ fun TetherKey(
     label: String? = null,
     icon: ImageVector? = null,
     iconSize: Dp = 15.dp,
-    fontSize: TextUnit = 13.sp,
+    /** Unspecified: the skin's key-legend role (0.8rem instrument, 0.8125rem Studio). */
+    fontSize: TextUnit = TextUnit.Unspecified,
     enabled: Boolean = true,
+    /** The machined families' execution slit (primary/destructive actuating keys only). */
     showSlit: Boolean = false,
-    /** Subtle contact-polish wear on the face — primary CTAs and the New
-     *  session key in the sidebar (visual-spec §2.3 "Wear / contact polish
-     *  goes ONLY on genuinely frequent controls"). */
+    /** Contact-polish wear — only on genuinely frequent controls (globals.css 8771-8781). */
     wear: Boolean = variant == KeyVariant.Primary,
     minHeight: Dp = TetherDimens.touchTargetDp,
     contentDescription: String? = null,
+    selected: Boolean = false,
+    size: KeySize = KeySize.Regular,
+    shape: KeyShape = KeyShape.Rounded,
+    /** Which wear composition [wear] paints (Send / primary CTA / New session). */
+    wearPattern: KeyWear = if (variant == KeyVariant.Primary) KeyWear.Primary else KeyWear.NewSession,
+    fixedVerb: Boolean = true,
+    interactionSource: MutableInteractionSource? = null,
 ) {
     val t = LocalTetherTokens.current
-    val haptics = rememberKeyHaptics()
-    val interaction = remember { MutableInteractionSource() }
+    val type = LocalTetherTypography.current
+    val reduced = LocalReducedMotion.current
+    val haptics = rememberTetherHaptics()
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val hovered by interaction.collectIsHoveredAsState()
-
-    // QUICK_RISE on press-down sells the button biting back; the THUD on
-    // release completes the mechanical feel — both at maximum scale.
-    LaunchedEffect(pressed) {
-        if (pressed && enabled) haptics.press()
-        else if (!pressed && enabled) haptics.release()
-    }
-
-    val face: Color
-    val faceHover: Color
-    val facePressed: Color
-    val side: Color
-    val inkColor: Color
-    when (variant) {
-        KeyVariant.Primary -> {
-            face = t.accent; faceHover = t.accentHover; facePressed = t.accentDeep
-            side = t.accentSide; inkColor = t.accentInk
-        }
-        KeyVariant.Secondary -> {
-            face = t.keyFace; faceHover = t.keyFaceHover; facePressed = t.keyFaceDeep
-            side = t.keySide; inkColor = t.ink
-        }
-        KeyVariant.Brick -> {
-            face = t.brick; faceHover = t.brickDeep; facePressed = t.brickDeep
-            side = t.brickSide; inkColor = t.accentInk
-        }
-        KeyVariant.Utility -> {
-            face = t.charcoal; faceHover = t.charcoal; facePressed = t.charcoal
-            side = t.charcoalSide; inkColor = t.utilityInk
-        }
-    }
-
-    val travel = t.pressTravel
-    val shape = RoundedCornerShape(t.radiusKey)
+    val focused by interaction.collectIsFocusedAsState()
     val down = pressed && enabled
-    // Disabled keys lose elevation: no travel, no contact shadow, no bevel.
-    val resting = enabled && !down
-    val density = LocalDensity.current
-    val radiusPx = with(density) { t.radiusKey.toPx() }
-    val travelPx = with(density) { travel.toPx() }
-    val elevationPx = with(density) { t.shadowElevation.toPx() }
 
-    // Face fill: hover deepens the fill, press sinks to the deep face.
-    val faceColor = when {
-        !enabled -> face
-        down -> facePressed
-        hovered -> faceHover
-        else -> face
+    // Press-down and release are the key's two moments (see TetherHaptics for the web map).
+    var wasDown by remember { mutableStateOf(false) }
+    LaunchedEffect(down) {
+        if (down && !wasDown) haptics.keyDown() else if (!down && wasDown) haptics.keyUp()
+        wasDown = down
     }
 
-    // The contact shadow under a resting key (the soft "0 3px 6px -2px"
-    // component of --shadow-key). Compose's Modifier.shadow draws a single
-    // Gaussian with the key's own shape, which is exactly this. We offset
-    // it down by ~half the side-wall so the shadow sits under the side slab.
-    val shadowModifier = if (resting) {
-        Modifier.shadow(
-            elevation = t.shadowElevation,
-            shape = shape,
-            clip = false,
-            ambientColor = t.contact.copy(alpha = 0.45f),
-            spotColor = t.contact.copy(alpha = 0.55f),
-        )
-    } else if (down) {
-        // Pressed: shrink to the --shadow-key-pressed "0 1px 2px" residual.
-        Modifier.shadow(
-            elevation = 1.dp,
-            shape = shape,
-            clip = false,
-            ambientColor = t.contact.copy(alpha = 0.4f),
-            spotColor = t.contact.copy(alpha = 0.45f),
-        )
-    } else {
-        Modifier
+    val state = when {
+        !enabled -> KeyState.Disabled
+        down -> KeyState.Pressed
+        else -> KeyState.Rest
     }
+    val look = resolveKey(t, variant, state, selected = selected, size = size)
+    val keyShape: Shape = if (shape == KeyShape.Circle) CircleShape else RoundedCornerShape(look.radius)
+
+    // CSS: `transition: background var(--duration-fast), transform 90ms var(--ease-out)`; the
+    // global prefers-reduced-motion rule collapses every transition to a state jump.
+    val face by animateColorAsState(
+        look.face,
+        if (reduced) snap() else tween(t.css.durationFast, easing = t.css.easeOut.toEasing()),
+        label = "keyFace",
+    )
+
+    val studio = t.skin.family == ThemeFamily.Studio
+    val legend = type.keyLabel
+    val baseStyle = if (studio) legend.style.copy(fontSize = 13.sp) else legend.style
+    val textStyle = (if (fixedVerb) baseStyle else baseStyle.copy(letterSpacing = 0.sp))
+        .let { if (fontSize != TextUnit.Unspecified) it.copy(fontSize = fontSize) else it }
+    val shown = label?.let { if (fixedVerb) legend.format(it) else it }
+    val slit = showSlit && t.keySlit > 0.dp && (variant == KeyVariant.Primary || variant == KeyVariant.Brick)
+    val iconOnly = label == null
 
     Row(
         modifier = modifier
-            .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
-            .then(shadowModifier)
-            .drawBehind {
-                // The hard side-wall the face travels onto (--shadow-key's
-                // "0 2px 0 key-side" component). Drawn as a solid slab offset
-                // down by the press travel; the face sits on top of it.
-                if (enabled) {
-                    drawRoundRect(
-                        color = side,
-                        topLeft = Offset(0f, travelPx),
-                        size = Size(size.width, size.height - travelPx),
-                        cornerRadius = CornerRadius(radiusPx, radiusPx),
-                    )
-                }
+            .semantics(mergeDescendants = true) {
+                (contentDescription ?: label)?.let { this.contentDescription = it }
+                if (selected) this.selected = true
             }
-            .padding(bottom = if (enabled) travel else 0.dp)
-            .offset(y = if (down) travel else 0.dp)
-            .background(faceColor, shape)
-            .drawBehind {
-                // Lit bevel on a resting key: the web's --edge-highlight is an
-                // INSET box-shadow ("inset 0 1px 0 lit-strong"), which feathers
-                // naturally. A 1dp solid strip reads as a crisp line, so we
-                // approximate the inset with a short vertical gradient that
-                // fades from litStrong to transparent over ~2dp — the same
-                // feather CSS gets for free. Press swaps it for a recessed
-                // [pressShade] along the top edge (--bevel-pressed).
-                val cornerRadius = CornerRadius(radiusPx, radiusPx)
-                if (resting) {
-                    drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(t.litStrong, Color.Transparent),
-                            startY = 0f,
-                            endY = 2.dp.toPx(),
-                        ),
-                        cornerRadius = cornerRadius,
-                    )
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(t.litSoft, Color.Transparent),
-                            startX = 0f,
-                            endX = 2.dp.toPx(),
-                        ),
-                        cornerRadius = cornerRadius,
-                    )
-                } else if (down) {
-                    drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(t.pressShade, Color.Transparent),
-                            startY = 0f,
-                            endY = 3.dp.toPx(),
-                        ),
-                        cornerRadius = cornerRadius,
-                    )
-                }
-            }
-            .then(if (wear && enabled) Modifier.drawBehind {
-                // Wear: a single soft radial polish, only on the most-used
-                // keys. Subtle material texture, never glossy.
-                drawRoundRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(t.wearHi, Color.Transparent),
-                        center = Offset(size.width * 0.5f, size.height * 0.3f),
-                        radius = size.maxDimension * 0.7f,
-                    ),
-                    cornerRadius = CornerRadius(radiusPx, radiusPx),
-                )
-            } else Modifier)
-            .border(1.dp, side, shape)
-            .clip(shape)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 enabled = enabled,
+                role = Role.Button,
                 onClick = onClick,
             )
-            .heightIn(min = minHeight)
-            .padding(horizontal = if (label != null) 14.dp else 12.dp),
+            .defaultMinSize(minWidth = if (iconOnly) TetherDimens.touchTargetDp else 0.dp, minHeight = minHeight)
+            .graphicsLayer {
+                alpha = look.alpha
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
+            .offset { IntOffset(0, look.travel.roundToPx()) }
+            .focusRing(focused, keyShape, t.violet)
+            .cssSurface(keyShape, face, CssBorder(1.dp, look.border), look.shadows)
+            .drawWithContent {
+                drawContent()
+                // ::before / ::after are positioned, so they paint over the legend.
+                if (wear && enabled && wearPattern != KeyWear.None) {
+                    val path = Path().apply { addOutline(keyShape.createOutline(size, layoutDirection, this@drawWithContent)) }
+                    clipPath(path) { drawKeyWear(t, wearPattern) }
+                }
+                if (slit) {
+                    val h = size.height * 0.42f
+                    drawRoundRect(
+                        color = t.accentInk.copy(alpha = look.slitAlpha),
+                        topLeft = Offset(SlitInset.toPx(), (size.height - h) / 2f),
+                        size = Size(t.keySlit.toPx(), h),
+                        cornerRadius = CornerRadius(1.dp.toPx()),
+                    )
+                }
+            }
+            .padding(horizontal = if (iconOnly) 0.dp else t.css.spaceLg),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),
     ) {
-        if (showSlit && t.keySlit > 0.dp) {
-            Box(
-                Modifier
-                    .size(width = t.keySlit, height = 10.dp)
-                    .alpha(0.55f)
-                    .background(inkColor, RoundedCornerShape(1.5.dp)),
-            )
-        }
         if (icon != null) {
-            Icon(icon, contentDescription = contentDescription ?: label, tint = inkColor, modifier = Modifier.size(iconSize))
+            Icon(icon, contentDescription = null, tint = look.ink, modifier = Modifier.size(iconSize))
         }
-        if (label != null) {
+        if (shown != null) {
             Text(
-                text = label.uppercase(),
-                color = inkColor,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.name,
-                fontSize = fontSize,
-                letterSpacing = t.keyTracking.em,
+                text = shown,
+                color = look.ink,
+                style = textStyle,
                 maxLines = 1,
+                modifier = Modifier.clearAndSetSemantics { },
             )
         }
     }
