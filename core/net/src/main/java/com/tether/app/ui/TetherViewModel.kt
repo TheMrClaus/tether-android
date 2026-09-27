@@ -76,6 +76,9 @@ class TetherViewModel(
         }
     }
 
+    /** [sessionId]'s draft if already loaded, else null (a snapshot read, not a subscription). */
+    fun loadedDraft(sessionId: String): String? = _drafts.value[sessionId]
+
     /** [sessionId]'s draft once loaded (immediately if it already is). */
     suspend fun awaitDraft(sessionId: String): String {
         loadDraft(sessionId)

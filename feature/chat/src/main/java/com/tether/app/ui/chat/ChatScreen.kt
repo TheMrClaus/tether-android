@@ -257,7 +257,7 @@ fun ChatScreen(
             onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
             onAttachError = { message -> vm.reportLocalError(message) },
             // A plain read, not a subscription: only the opening value matters here.
-            initialDraft = session?.let { vm.drafts.value[it.id] },
+            initialDraft = session?.let { vm.loadedDraft(it.id) },
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
         )
