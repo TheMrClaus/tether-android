@@ -16,8 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * The seam between the protocol/data layer and the Compose UI.
  * The protocol worker implements this (RealTetherClient); the UI consumes it.
- * All methods are fire-and-forget: results surface through the flows
- * (session/projection updates, error toasts) exactly like the web client.
+ * Session methods are fire-and-forget: results surface through the flows
+ * (session/projection updates, error toasts) exactly like the web client. The
+ * v109 node requests also surface that way ([nodes], [nodeResult]) and in
+ * addition return their own correlated outcome.
  */
 interface TetherClient {
 

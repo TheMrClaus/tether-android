@@ -92,6 +92,14 @@ private const val REDIRECT_MESSAGE =
  * Nothing but `ping`/`hello` goes out before `ready`: every other frame waits for
  * the handshake of the current epoch.
  *
+ * v109 node registry (T1.5): `nodes` replaces [nodes]; every `node-result`
+ * becomes [nodeResult]. addNode/removeNode/probeNode send ONE frame tagged with
+ * a fresh requestId and end on its `node-result` (or a correlated `error`), on
+ * the socket going away (LinkLost, from detachSocketLocked), or on
+ * [nodeRequestTimeoutMs]. Never queued, persisted or retried. The registry is
+ * kept across a reconnect (the web never clears it) and emptied on logout, a
+ * server-side sign-out and a new sign-in.
+ *
  * Construction (integrator):
  * ```
  * val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
