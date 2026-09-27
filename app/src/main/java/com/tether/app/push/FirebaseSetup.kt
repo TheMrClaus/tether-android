@@ -1,6 +1,7 @@
 package com.tether.app.push
 
 import android.content.Context
+import androidx.core.content.edit
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.tether.app.protocol.TetherJson
@@ -162,7 +163,7 @@ class FirebaseClientConfigStore(context: Context) {
     fun load(): FirebaseClientConfig? = FirebaseClientConfig.fromJson(prefs.getString(KEY, null))
 
     fun save(config: FirebaseClientConfig) {
-        prefs.edit().putString(KEY, config.toJson()).apply()
+        prefs.edit { putString(KEY, config.toJson()) }
     }
 
     companion object {
