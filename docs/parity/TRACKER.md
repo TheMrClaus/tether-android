@@ -31,14 +31,16 @@ that pre-T1.4 backups may still hold the old plaintext credential file.
 **[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
 **Owner queue:** tether PRs **[#198](https://github.com/TheMrClaus/tether/pull/198)** (S0 scripts, verified) and
 **[#199](https://github.com/TheMrClaus/tether/pull/199)** (ta-fsp: paired-device sockets may not manage nodes; verified +
-security-reviewed) await merge (#199 also needs a deploy). Bead `ta-xax` needs an owner threat-model call: should a paired device be fully
+security-reviewed) and **[#200](https://github.com/TheMrClaus/tether/pull/200)** (S13.1: PROTOCOL v130 lastSeq + content-free FCM
+sync hint; verified + security-reviewed; OQ1 = keep or drop the separable part C `7c36700`) await merge. #199 and #200 need a deploy. Bead `ta-xax` needs an owner threat-model call: should a paired device be fully
 trusted apart from device management? (ws-browser navigate full-read SSRF, agents can reach the state dir.)
 **Merged today:** T3.5 (`b9f03a4`), T13.0 SYNC_DESIGN (`5b3781e`, approved after 3 plan-verifier rounds).
 **Release blocker:** `ta-s8q`: unsent turns for server A are replayed to server B after a sign-in switch (pre-existing, T1.3 area),
 to be scheduled right after T1.5 merges. No APK ships before it is fixed.
-In flight: **T3.3** r2 DONE (`e410cad`, CI green exact-match, 1485 tests) → verifier re-check; **T1.5** r3 (stop()/generation guard,
+In flight: **T3.3** r3 (the r2 re-verify refuted the destructive keys: model keys as the web's CSS class sets
+with a cascade + expectation table; 5 of 6 r2 fixes held, CI green exact-match); **T1.5** r3 (stop()/generation guard,
 send under lock, test gaps) after r2 passed verifier + security re-review;
-**S13.1** executor (tether `android-parity/S13.1`, PROTOCOL 129→130, part C in separate commits for owner OQ1).
+**S13.1** VERIFIED → PR #200 (coordinator fixed FCM v1 `android.priority` "normal"→"NORMAL" before review).
 Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T1.5 merge → T13.1 (Room mirror, per SYNC_DESIGN).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
@@ -98,7 +100,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | DONE | claude-main @ 2026-09-27 04:16 |  |  |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | claude-main: r3 dispatched. VERIFY-FAIL r2 root cause = keys modelled as ad-hoc roles instead of the web's class composition (chat-send+cha… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
@@ -186,8 +188,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement r2 (SYNC_DESIGN §3.1 rule 1a): afterSeqFor(sessionId) returns null when the session holds a PendingStore record with trie… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
-| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | IN-PROGRESS | claude-main @ 2026-09-27 09:38 |  | done: A+B committed 0d9723c on android-parity/S13.1 (v130, lastSeq on ready/created/session, FcmSyncHinter + syncHints opt-in; unit 3520/35… |
-| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | design refinement r3 (SYNC_DESIGN §6.2 step 1, R7): at the foreground handover (socket kept, no onReady), attach via afterSeqFor every sess… |
+| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
+| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | From S13.1 security review: POST /api/push/fcm-register REPLACES the row (fcm-push.mjs:196, server.mjs:7029); PushRegistrar.sync() on FCM t… |
 | T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement r2: Clear cache also rotates the mirror data key (and rotation after 2^28 writes). |
 | T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement r2: the debug probe strips removedQueueIds until T13.3b lands, then demands exact equality; test both modes. |
 
