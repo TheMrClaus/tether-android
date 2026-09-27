@@ -42,13 +42,14 @@ class SessionDrawerWiringTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         val selected = mutableListOf<String>()
+        val sessions = listOf(live)
 
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.Machine)) {
                 SessionDrawer(
                     vm = vm,
                     prefs = prefs,
-                    sessions = client.sessions.value,
+                    sessions = sessions,
                     selectedId = null,
                     workspaceRoot = F.ROOT,
                     onSelect = { id ->
