@@ -24,11 +24,10 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** v0.6.0 is published. Owner action pending: merge + deploy **tether#197** (S1.1, v129).
-IN FLIGHT (executors, own worktrees): **S0.4** web screenshots; **T1.2** connection manager
-(`~/git/tether-android-wt/T1.2`); **T2.1 units A/B/C** in parallel (`~/git/tether-android-wt/T2.1-{A,B,C}`,
-disjoint fold files; H0+H1 merged `1b7b9d4`, 7/70 cases green); verifier mutation-testing the H0 harness.
-Then: T2.1 unit I (integration → 70/70) → T2.1 verify → T2.1D cutover; S0.6; T1.3/T1.4/T1.5; T2.2/T2.3.
+**Next action:** **T2.1 DONE — reducer at v128, 70/70 corpus cases green** (`af24229`); verifier running.
+Owner action pending: merge + deploy **tether#197** (S1.1, v129). IN FLIGHT: **T1.2** connection manager
+(`~/git/tether-android-wt/T1.2`); **S0.4** web screenshots. Next: T2.1D cutover (needs T2.1 VERIFIED;
+T1.1 merged ✓), S0.6, T1.3/T1.4/T1.5, T2.2/T2.3.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -75,7 +74,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | IN-PROGRESS | claude-main @ 2026-09-27 00:44 |  | H0+H1 MERGED to main as sha 1b7b9d4: JsValue tree + canonical codec + Ryu JsNumberFormat (matches node on 5,636 generated + 30k random doub… |
+| T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | DONE | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | TODO |  |  | From S0.2: sidebar unread/grouping (hasUnseenWork etc.) is inside components/session-sidebar.tsx, not in lib/, so it has no helper corpus t… |
 | T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
