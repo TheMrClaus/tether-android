@@ -638,6 +638,67 @@ class DataStoreSettingsTest {
         third.close()
     }
 
+    /**
+     * The settings DataStore with every committed edit recorded, and an optional
+     * process death at the [dieAt]-th commit (it never lands).
+     */
+    private class CommitLog(private val inner: DataStore<Preferences>) : DataStore<Preferences> {
+        val commits = java.util.concurrent.CopyOnWriteArrayList<Preferences>()
+        @Volatile var dieAt = -1
+        private var count = 0
+        override val data = inner.data
+        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences {
+            if (++count == dieAt) throw java.io.IOException("process killed mid-change")
+            return inner.updateData(transform).also { commits += it }
+        }
+    }
+
+    private class Logged(val store: DataStoreSettings, val log: CommitLog, val job: Job)
+
+    private fun openLogged(): Logged {
+        val job = Job()
+        val scope = CoroutineScope(Dispatchers.IO + job)
+        val log = CommitLog(PreferenceDataStoreFactory.create(scope = scope) { settingsFile })
+        val credentials = PreferenceDataStoreFactory.create(scope = scope) {
+            File(File(tmp.root, DataStoreSettings.CREDENTIALS_DIR).apply { mkdirs() }, DataStoreSettings.CREDENTIALS_FILE)
+        }
+        return Logged(DataStoreSettings(log, credentials, AesGcmCredentialCipher(keys)), log, job)
+    }
+
+    private val pendingKey = stringPreferencesKey("pending_input")
+    private val payloadA = """{"v":2,"records":[{"key":"k1","kind":"send","sessionId":"s1","text":"a","sentAt":0,"tries":1,"firstQueuedAt":1}],"cleared":[]}"""
+    private val payloadB = """{"v":2,"records":[{"key":"k2","kind":"send","sessionId":"s1","text":"b","sentAt":0,"tries":0,"firstQueuedAt":2}],"cleared":["k1"]}"""
+
+    /** T1.3: one pending write = ONE commit of the complete value — never a partial or empty step. */
+    @Test
+    fun aPendingWriteIsOneCommitOfTheCompleteValue() = runBlocking {
+        val opened = openLogged()
+        opened.store.writePendingInput(payloadA)
+        val before = opened.log.commits.size
+        opened.store.writePendingInput(payloadB)
+        val steps = opened.log.commits.drop(before).map { it[pendingKey] }
+        assertEquals("one logical change, one commit: $steps", listOf(payloadB), steps)
+        assertTrue(opened.log.commits.all { it[pendingKey] == payloadA || it[pendingKey] == payloadB })
+        opened.job.cancelAndJoin()
+    }
+
+    /** T1.3: a process killed at ANY commit of a pending write reloads the old or the new value. */
+    @Test
+    fun aProcessKilledAtAnyCommitOfAPendingWriteReloadsOldOrNew() = runBlocking {
+        for (k in 1..3) {
+            settingsFile.delete()
+            val opened = openLogged()
+            opened.store.writePendingInput(payloadA)
+            opened.log.dieAt = opened.log.commits.size + k
+            runCatching { opened.store.writePendingInput(payloadB) }
+            opened.job.cancelAndJoin()
+            val reloaded = open()
+            val value = reloaded.store.readPendingInput()
+            assertTrue("killed at commit $k of the write: reloaded $value", value == payloadA || value == payloadB)
+            reloaded.close()
+        }
+    }
+
     /** Sealing always fails (Keystore unavailable); opening never succeeds either. */
     private class FailingCipher : CredentialCipher {
         override fun seal(plaintext: ByteArray, aad: ByteArray): ByteArray = throw CredentialCipherException("keystore unavailable")

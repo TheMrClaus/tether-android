@@ -28,14 +28,18 @@ class DiskSettings(private val inner: InMemorySettings) : SettingsStore by inner
     @Volatile var tear = false
     private val writes = MutableStateFlow<String?>(null)
 
-    /** Every completed write, newest last (as a flow to await on — no sleeps). */
+    /** The newest completed write (a flow to await on — no sleeps). */
     val written: StateFlow<String?> = writes
+
+    /** Every completed write, in order: what the disk held at each moment. */
+    val history = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     override suspend fun readPendingInput(): String? = disk
 
     override suspend fun writePendingInput(raw: String) {
         if (tear) throw IOException("killed mid-write")
         disk = raw
+        history += raw
         writes.value = raw
     }
 }
@@ -250,6 +254,36 @@ class DurableSendTest {
         ws.send(snapshotFrame("s1", 1, turnState("s1")))
         h.serverBarrier(ws)
         assertEquals(listOf("k-restored"), h.framesUntilBarrier().map { key(it) })
+    }
+
+    @Test
+    fun oneLogicalChangeIsOneCompleteWriteNeverAnIntermediateOne() {
+        // Whatever the disk holds at ANY moment must be a complete store: a process
+        // killed between two writes of one change must not find an empty or partial
+        // one. k-held is pending throughout (its session is never snapshotted), so
+        // every write must carry it; the fresh key appears once and, once acked,
+        // never comes back.
+        seedDisk("k-held" to 1)
+        val client = process()
+        val ws = startConnected(client)
+        client.attach("s2")
+        h.framesUntilBarrier()
+        ws.send(snapshotFrame("s2", 1, turnState("s2")))
+        h.await(client.projections) { it.containsKey("s2") }
+        client.send("s2", "fresh")
+        val fresh = key(h.expectFrame("send"))
+        persistedMatches { s -> s.records.any { it.key == fresh && it.tries == 1 } }
+        ws.send(turnStartedEvent("s2", "t1", 2, fresh))
+        persistedMatches { s -> s.records.none { it.key == fresh } }
+
+        val states = settings.history.map { PendingInput.fromPersisted(it).records.map { r -> r.key } }
+        assertTrue("states=$states", states.size >= 3)
+        assertTrue("every write is a complete store: $states", states.all { "k-held" in it })
+        val presence = states.map { fresh in it }
+        val firstIn = presence.indexOf(true)
+        val lastIn = presence.lastIndexOf(true)
+        assertTrue("fresh never persisted: $states", firstIn >= 0)
+        assertTrue("an acked key reappeared: $states", presence.subList(firstIn, lastIn + 1).all { it })
     }
 
     // ------------------------------------------------------------------
