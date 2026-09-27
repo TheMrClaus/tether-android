@@ -11,6 +11,7 @@ import com.tether.app.protocol.tree.JsObj
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -367,20 +368,67 @@ data class SessionCommandOption(
     val supported: Boolean = false,
 )
 
-/** TS LogEntry (known fields; the event-specific `[key]` extras are ignored). */
-@Serializable
+/**
+ * TS LogEntry: one in-UI operational record (server.mjs recordEventLogEntry). Only the fields the
+ * log dialog reads are kept, each decoded the way log-dialog.tsx tests it, so an odd extra never
+ * drops the entry: [reason] / [message] only when a JSON string (`typeof === "string"`),
+ * [durationMs] / [outstanding] only when a JSON number, [outcome] and [continuation] by JS
+ * truthiness. [level] is null when absent or not a string; the dialog then counts the entry as a
+ * warning, like the web's `level !== "info"`.
+ */
 data class LogEntry(
     val seq: Long,
     val ts: Long = 0,
-    val level: String = "info",
+    val level: String? = "info",
     val event: String = "",
     val sid: String? = null,
     val turnId: String? = null,
     val nativeId: String? = null,
+    /** `String(entry.outcome)` when truthy (TS `TurnOutcome | null`). */
     val outcome: String? = null,
-    val durationMs: Long? = null,
+    val durationMs: Double? = null,
     val message: String? = null,
-)
+    val reason: String? = null,
+    val outstanding: Double? = null,
+    val continuation: Boolean = false,
+) {
+    companion object {
+        /**
+         * The entry, or null without a numeric `seq`: the web dedupes on `entry.seq > lastSeq`,
+         * which is false for a missing seq, so such a record never shows there either.
+         */
+        fun fromJson(o: JsonObject): LogEntry? {
+            val seq = o.long("seq") ?: return null
+            return LogEntry(
+                seq = seq,
+                ts = o.long("ts") ?: 0,
+                level = o.str("level"),
+                event = o.str("event") ?: "",
+                sid = o.str("sid"),
+                turnId = o.str("turnId"),
+                nativeId = o.str("nativeId"),
+                outcome = (o["outcome"] as? JsonPrimitive)?.takeIf { jsTruthy(it) }?.content,
+                durationMs = o.num("durationMs"),
+                message = o.str("message"),
+                reason = o.str("reason"),
+                outstanding = o.num("outstanding"),
+                continuation = jsTruthy(o["continuation"]),
+            )
+        }
+
+        /** JS truthiness of a JSON value (absent = `undefined` = false; objects and arrays are truthy). */
+        private fun jsTruthy(e: JsonElement?): Boolean = when (e) {
+            null, JsonNull -> false
+            is JsonPrimitive -> when {
+                e.isString -> e.content.isNotEmpty()
+                e.content == "true" -> true
+                e.content == "false" -> false
+                else -> e.content.toDoubleOrNull()?.let { it != 0.0 && !it.isNaN() } ?: false
+            }
+            else -> true
+        }
+    }
+}
 
 /** v109 multi-host peer. [status]: unknown|reachable|unreachable|unauthorized|identity_mismatch|skew|error. */
 @Serializable
@@ -484,7 +532,7 @@ private object ServerDecoders {
         "pong" to { r -> ServerMessage.Pong(r.o.str("nonce")) },
         "log" to { r ->
             val boot = r.o["bootId"] as? JsonPrimitive ?: throw MalformedFrame("required field `bootId` is missing")
-            ServerMessage.Log(r.list("entries", LogEntry.serializer()), boot.content)
+            ServerMessage.Log(r.objList("entries").mapNotNull(LogEntry::fromJson), boot.content)
         },
         "version_mismatch" to { r ->
             ServerMessage.VersionMismatch(
