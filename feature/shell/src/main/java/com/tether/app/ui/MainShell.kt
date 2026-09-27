@@ -166,9 +166,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     if (showLogoutConfirm) {
-        TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Disconnect") {
+        TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {
             Text(
-                "Sign out and forget this server?",
+                // The server URL is kept to prefill the sign-in screen; the
+                // credential is forgotten (and a cookie session revoked).
+                "Sign out of this server?",
                 color = t.ink,
                 fontFamily = Manrope,
                 fontWeight = TetherWeights.body,
@@ -184,10 +186,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 TetherKey(
                     onClick = {
                         showLogoutConfirm = false
-                        vm.client.stop()
+                        vm.logout()
                     },
                     variant = KeyVariant.Brick,
-                    label = "Disconnect",
+                    label = "Sign out",
                     icon = Lucide.LogOut,
                 )
             }

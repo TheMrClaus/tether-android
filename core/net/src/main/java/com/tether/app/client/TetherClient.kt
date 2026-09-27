@@ -8,6 +8,7 @@ import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.tree.JsObj
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -58,8 +59,60 @@ interface TetherClient {
      * Validate + persist server config from the first-launch screen:
      * probes /healthz (the native compatibility window), performs the password login, stores
      * the base URL and session cookie, then starts the connection loop.
+     *
+     * [username] is sent as the server's login form does (`{username, password}`);
+     * a server without a configured username ignores it (see [signInRequirements]).
      */
-    suspend fun login(baseUrl: String, password: String): LoginResult
+    suspend fun login(baseUrl: String, password: String, username: String = ""): LoginResult
+
+    /**
+     * The unauthenticated sign-in probe (`GET /api/auth/session`, no credential
+     * sent): what the login screen needs to choose its fields, like the web's
+     * use-login-flow. Null when the server cannot be asked (bad URL, unreachable,
+     * local network blocked): the screen then offers the password path only.
+     */
+    suspend fun signInRequirements(baseUrl: String): SignInRequirements? = null
+
+    /**
+     * Sign out (user action). Cookie session: `POST /api/auth/logout`, which
+     * REVOKES the session server-side for every holder of the cookie. Device
+     * token: local forget only — the server refuses device-management routes to
+     * device tokens by design, so a paired device cannot revoke itself; the owner
+     * revokes it from a browser (Settings → Paired devices).
+     *
+     * Either way the local credential is cleared FIRST (a network failure or a
+     * process death mid-call still leaves the phone signed out), the socket is
+     * closed, reconnects stop, and the server URL is kept to prefill the login
+     * screen.
+     */
+    suspend fun logout(): LogoutResult {
+        stop()
+        return LogoutResult.LocalOnly
+    }
+
+    /**
+     * Why the client last landed in [ConnectionState.AuthRequired] when the
+     * SERVER ended the sign-in (expired cookie, revoked session/device). Null
+     * after a user logout, a fresh install, or a successful login/pair.
+     */
+    val signedOutReason: StateFlow<SignedOutReason?> get() = NO_SIGNED_OUT_REASON
+
+    /** The persisted server URL — kept across expiry and logout (login-screen prefill). */
+    val serverUrl: StateFlow<String?> get() = NO_SERVER_URL
+
+    /**
+     * Sign-in security (`GET /api/auth/sessions`): the owner's browser/passkey
+     * sessions. Owner-grade only — a device token gets
+     * [SignInSessionsResult.OwnerGradeRequired] without a request being made
+     * (the server would 403). The UI is T10.4; T1.4 ships the call + model.
+     */
+    suspend fun listSignInSessions(): SignInSessionsResult = SignInSessionsResult.Failed("Not supported.")
+
+    /** `DELETE /api/auth/sessions/<id>`: sign one session out. */
+    suspend fun revokeSignInSession(id: String): SignInSessionsResult = SignInSessionsResult.Failed("Not supported.")
+
+    /** `DELETE /api/auth/sessions`: sign out everywhere except this session. */
+    suspend fun revokeOtherSignInSessions(): SignInSessionsResult = SignInSessionsResult.Failed("Not supported.")
 
     /**
      * The SSO-friendly alternative to [login]: exchange the 8-character pairing
@@ -185,10 +238,82 @@ sealed interface ConnectionState {
     data object LocalNetworkBlocked : ConnectionState
 }
 
+private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow(null)
+private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
+
+/** Why the server ended the sign-in; the login screen explains it. */
+enum class SignedOutReason {
+    /** The cookie session expired or was revoked (auth probe said `authenticated:false`, or close 4002). */
+    SessionExpired,
+
+    /** The device token is no longer accepted (close 4001, or the probe refused it). */
+    DeviceUnpaired,
+
+    /**
+     * Something in front of the server refused the credential probe (HTTP 401/403
+     * or a redirect on `/api/auth/session` — a sign-in gateway). The credential is
+     * kept: it may be fine once the gateway lets the probe through.
+     */
+    GatewayRefused,
+}
+
+/** The unauthenticated `/api/auth/session` reading (see [TetherClient.signInRequirements]). */
+data class SignInRequirements(
+    val usernameRequired: Boolean,
+    val passwordLoginEnabled: Boolean,
+    val passkeyCount: Int,
+    val passkeysUsable: Boolean,
+)
+
+sealed interface LogoutResult {
+    /** Cookie session revoked on the server and forgotten locally. */
+    data object Revoked : LogoutResult
+
+    /** Device token (or nothing) — forgotten locally; only a browser can revoke a device. */
+    data object LocalOnly : LogoutResult
+
+    /**
+     * Forgotten locally, but the server could not be told: the cookie session
+     * stays valid server-side until it expires or is signed out from a browser.
+     */
+    data object ServerNotReached : LogoutResult
+}
+
+/** One owner sign-in session, as `GET /api/auth/sessions` lists it (hooks/use-sign-in-security.ts). */
+data class SignInSession(
+    val id: String,
+    /** "password" | "passkey" | "service" (anything else reads as "password", as on the web). */
+    val method: String,
+    val createdAt: Long,
+    val lastSeenAt: Long,
+    val expiresAt: Long,
+    val userAgent: String,
+    val current: Boolean,
+)
+
+sealed interface SignInSessionsResult {
+    data class Sessions(val sessions: List<SignInSession>) : SignInSessionsResult
+
+    /** Revoke done; [count] is how many sessions the server signed out (1 for a single revoke). */
+    data class Revoked(val count: Int) : SignInSessionsResult
+
+    /** A paired device (device token) cannot manage sign-in sessions — by server design. */
+    data object OwnerGradeRequired : SignInSessionsResult
+
+    data object NotSignedIn : SignInSessionsResult
+
+    data object NotFound : SignInSessionsResult
+
+    data class Failed(val message: String) : SignInSessionsResult
+}
+
 sealed interface LoginResult {
     data object Success : LoginResult
     data class BadPassword(val message: String) : LoginResult
     data class RateLimited(val message: String) : LoginResult
+
+    /** 403 `password_login_disabled`: this console accepts passkeys only (passkeys → T10.5). */
+    data class PasswordDisabled(val message: String) : LoginResult
     /** /healthz shows the server is outside the native window (see [Compatibility]). */
     data class VersionMismatch(val incompatibility: Incompatibility) : LoginResult
     data class Unreachable(val message: String) : LoginResult

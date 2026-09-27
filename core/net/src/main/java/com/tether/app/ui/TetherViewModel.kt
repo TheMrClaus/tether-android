@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.LogoutResult
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
@@ -178,6 +179,35 @@ class TetherViewModel(val client: TetherClient) : ViewModel() {
     fun dismissToast() {
         _activeToast.value = null
     }
+
+    /**
+     * What the login screen says after a user logout, when there is something
+     * to say about the server side (null = nothing to add).
+     */
+    private val _logoutNotice = MutableStateFlow<String?>(null)
+    val logoutNotice: StateFlow<String?> = _logoutNotice.asStateFlow()
+
+    fun logout() {
+        viewModelScope.launch {
+            _logoutNotice.value = logoutNoticeFor(client.logout())
+            _selectedSessionId.value = null
+        }
+    }
+
+    fun dismissLogoutNotice() {
+        _logoutNotice.value = null
+    }
+}
+
+/** Login-screen copy for a finished logout (see [TetherClient.logout] for the semantics). */
+fun logoutNoticeFor(result: LogoutResult): String? = when (result) {
+    LogoutResult.Revoked -> null
+    LogoutResult.LocalOnly ->
+        "Signed out on this phone. A paired device can only be revoked from a browser: " +
+            "Settings → Paired devices."
+    LogoutResult.ServerNotReached ->
+        "Signed out on this phone, but the server could not be reached. That session stays valid " +
+            "until it expires or you sign it out from a browser."
 }
 
 class TetherViewModelFactory(private val client: TetherClient) : ViewModelProvider.Factory {

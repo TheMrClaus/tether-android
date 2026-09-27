@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup + device-to-device transfer rules (android:dataExtractionRules,
+     API 31+). Credentials never leave the device:
+     - files/credentials/ holds the Keystore-sealed tether_session cookie and
+       tthr_ device token. A sealed blob is useless off-device (the Keystore key
+       is never backed up), but it is excluded anyway: a restored blob would only
+       read as "logged out", and nothing about a credential belongs in a backup.
+     - files/tether_settings.preferences_pb held those credentials in PLAINTEXT
+       before T1.4. An install that was upgraded but not yet launched has not
+       migrated them yet, so the whole file (and DataStore's .tmp sibling) is
+       excluded too. It holds only the server URL and unsent input otherwise.
+     Keep this in sync with backup_rules.xml (android:fullBackupContent). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="credentials" />
+        <exclude domain="file" path="tether_settings.preferences_pb" />
+        <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="credentials" />
+        <exclude domain="file" path="tether_settings.preferences_pb" />
+        <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
+    </device-transfer>
+</data-extraction-rules>

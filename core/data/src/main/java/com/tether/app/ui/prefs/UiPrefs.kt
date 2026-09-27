@@ -33,6 +33,19 @@ class UiPrefs(context: Context) {
         // can't contain newlines, and DataStore string sets are unordered.
         val pushAttachedSessions = stringPreferencesKey("push_attached_sessions")
         val pushPinnedSessions = stringPreferencesKey("push_pinned_sessions")
+        val loginVariant = stringPreferencesKey("login_variant")
+    }
+
+    /**
+     * The web's `loginVariant` preference (Settings → Sign-in screen): Retro is
+     * the opt-in, anything else is Instrument (hooks/use-preferences.ts). The
+     * Settings control arrives with the settings surface; the login screen
+     * already honours the stored value.
+     */
+    val loginVariant: Flow<LoginVariant> = store.data.map { LoginVariant.fromId(it[Keys.loginVariant]) }
+
+    suspend fun setLoginVariant(variant: LoginVariant) {
+        store.edit { it[Keys.loginVariant] = variant.id }
     }
 
     /** Family × mode (web `themeFamily`/`themeMode`); a legacy flat `theme_choice` is migrated on read. */
@@ -127,5 +140,15 @@ class UiPrefs(context: Context) {
 
     suspend fun setPinnedSessions(ids: Collection<String>) {
         store.edit { it[Keys.pushPinnedSessions] = ids.sorted().distinct().joinToString("\n") }
+    }
+}
+
+/** Stored sign-in screen choice; see [UiPrefs.loginVariant]. */
+enum class LoginVariant(val id: String) {
+    Instrument("instrument"),
+    Retro("retro");
+
+    companion object {
+        fun fromId(id: String?): LoginVariant = if (id == Retro.id) Retro else Instrument
     }
 }

@@ -33,6 +33,7 @@ import com.tether.app.ui.localnet.LocalNetworkNotice
 import com.tether.app.ui.localnet.LocalNetworkPhase
 import com.tether.app.ui.localnet.LocalNetworkSource
 import com.tether.app.ui.localnet.rememberLocalNetworkPrompt
+import com.tether.app.ui.prefs.LoginVariant
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
@@ -74,9 +75,21 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     }
 
     // Open the connection loop once credentials exist; re-kick when regained.
+    // A fresh credential also retires the last logout's notice.
     LaunchedEffect(configured) {
-        if (configured) client.start()
+        if (configured) {
+            vm.dismissLogoutNotice()
+            client.start()
+        }
     }
+
+    // PLAN D12 / app/login/page.tsx: Retro is the opt-in, otherwise the theme
+    // family picks the screen. There is no Studio family in ThemeChoice yet
+    // (the Studio skins arrive with the design-system phase), so Instrument is
+    // what every current family gets — exactly the web's mapping for them.
+    val loginVariant by prefs.loginVariant.collectAsStateWithLifecycle(initialValue = LoginVariant.Instrument)
+    val studioFamily = false
+    val logoutNotice by vm.logoutNotice.collectAsStateWithLifecycle()
 
     // Android 17 local-network permission. The client reports LocalNetworkBlocked
     // only for a server on the local network, so remote servers never get here.
@@ -149,6 +162,9 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
                 if (needsSetup) {
                     LoginScreen(
                         client = client,
+                        surface = loginSurfaceFor(loginVariant, studioFamily),
+                        studioFamily = studioFamily,
+                        logoutNotice = logoutNotice,
                         onLocalNetworkBlocked = { retry -> localNetwork.onBlocked(LocalNetworkSource.Login, retry) },
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
                     )

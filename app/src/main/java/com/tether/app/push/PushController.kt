@@ -93,6 +93,19 @@ class PushController(
         }
     }
 
+    /**
+     * User logout ([com.tether.app.client.RealTetherClient.logout] hook): drop
+     * this device's push row with the credential that was just forgotten. The
+     * credential-null collector above cannot — by then there is nothing to
+     * authenticate the DELETE with, so the server would keep pushing to a
+     * signed-out phone.
+     */
+    suspend fun unregisterAfterLogout(baseUrl: String, credential: com.tether.app.client.Credential) {
+        registrar.unregister(baseUrl, credential)
+        lastSyncKey = null
+        pendingConfigured = true
+    }
+
     private suspend fun sync(request: SyncRequest) {
         if (!request.enabled) {
             // Disabled: unregister on the server (best-effort) and reset the

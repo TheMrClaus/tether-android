@@ -329,7 +329,7 @@ class FakeTetherClient : TetherClient {
 
     // --- TetherClient -----------------------------------------------------------
 
-    override suspend fun login(baseUrl: String, password: String): LoginResult {
+    override suspend fun login(baseUrl: String, password: String, username: String): LoginResult {
         delay(400)
         return when {
             baseUrl.contains("unreachable") -> LoginResult.Unreachable("Could not reach $baseUrl")

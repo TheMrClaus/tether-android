@@ -133,21 +133,38 @@ open class PushRegistrar(
             }
         }
 
-    /** DELETE the authed device's row. Called on logout and on disable. */
+    /** DELETE the authed device's row. Called on disable. */
     suspend fun unregister(): PushRegistrarResult = withContext(Dispatchers.IO) {
         val base = baseUrl() ?: return@withContext PushRegistrarResult.Success
         val credential = settings.credential.first() ?: return@withContext PushRegistrarResult.Success
         if (credential !is Credential.DeviceToken) return@withContext PushRegistrarResult.Success
+        unregisterWith(base, credential)
+    }
+
+    /**
+     * Logout: the credential is already gone from [settings] (it is forgotten
+     * first, fail-safe), so the caller hands over the one that was in force.
+     * Without this the server would keep pushing to a signed-out phone.
+     */
+    suspend fun unregister(baseUrl: String, credential: Credential): PushRegistrarResult = withContext(Dispatchers.IO) {
+        val base = baseUrl.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Success
+        if (credential !is Credential.DeviceToken) return@withContext PushRegistrarResult.Success
+        unregisterWith(base, credential)
+    }
+
+    private fun unregisterWith(base: HttpUrl, credential: Credential.DeviceToken): PushRegistrarResult {
         val response = send(
             base = base,
             credential = credential,
             method = "DELETE",
             path = "/api/push/fcm-register",
             body = "",
-        ) ?: return@withContext PushRegistrarResult.Error("Push unregister request failed.")
-        when (response.code) {
-            200 -> PushRegistrarResult.Success
-            else -> PushRegistrarResult.Error("Push unregister returned HTTP ${response.code}.")
+        ) ?: return PushRegistrarResult.Error("Push unregister request failed.")
+        return response.use {
+            when (it.code) {
+                200 -> PushRegistrarResult.Success
+                else -> PushRegistrarResult.Error("Push unregister returned HTTP ${it.code}.")
+            }
         }
     }
 
