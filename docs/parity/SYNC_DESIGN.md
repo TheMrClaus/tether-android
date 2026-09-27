@@ -180,7 +180,7 @@ batches a transaction every ≤ 100 ms or 64 operations.
 
 | Input (existing handler) | Mirror write (one transaction) |
 |---|---|
-| `Snapshot` with `state` (`RealTetherClient.kt:1190`) | Replace `session_base` (origin `server`), delete that session's `journal_event` rows and `turn_detail` rows with `turn_index ≥ trimmedBefore` (the server's new state is newer), set `cursor := throughSeq`, set `last_verified_at := now`. |
+| `Snapshot` with `state` (`RealTetherClient.kt:1190`) | Replace `session_base` (origin `server`), delete that session's `journal_event` rows and the `turn_detail` rows the new state already holds in full (`turn_index ≥ trimmedBefore`, or all rows when `trimmedBefore` is absent), set `cursor := throughSeq`, set `last_verified_at := now`. |
 | `Snapshot` with `reset` | As above. The cursor may go **down** (`tether:engines/session-manager.mjs:1685-1689`). A reset always carries state because it is never at head. |
 | Stateless `Snapshot` (at head) | `cursor := throughSeq` (unchanged in practice) and `last_verified_at := now`. |
 | `Event`, decision `Fold` | Insert `journal_event` and set `cursor := seq`. |
@@ -263,6 +263,8 @@ enum class Freshness { Live, CatchingUp, Saved, NotDownloaded }
    The `ready` re-attach includes the open session, sessions with pending or staged input, pinned
    sessions, and the 10 most recently opened. The rest keep their saved copy and are attached when
    opened. Attaching at head costs one tiny frame, but a behind session costs up to about 1 MB.
+   A capped-out session that gets a live event while behind hits the normal gap resync, so active
+   sessions catch up on their own and idle ones cost nothing.
 6. **Bounded snapshots and `fetch-turns`.** The mirror stores `trimmedBefore`. The chat's lazy loader
    (T6.1) sends `fetch-turns`, and the replies land in `turn_detail`, so a turn fetched once stays
    readable offline. A new server base with a smaller `trimmedBefore` supersedes older details (§2.3).
@@ -317,7 +319,8 @@ Disconnected or Connecting shows `wifi-off` + "Offline. Showing saved copies" or
 - **Qualify live-looking status from a saved copy.** In Saved state, run badges (running, waiting for
   approval) and the context gauge read "was running · 12 min ago". A saved copy must never claim an
   agent is waiting on you *now*. Approval and question cards from a saved copy are rendered but
-  disabled, with "Connect to answer" (see §5.4 for held decisions while connected-but-reconnecting).
+  disabled, with "Connect to answer". The one exception is the held decision in §5.4: a card this
+  process saw Live before the link dropped.
 - **Sidebar rows:** a `history` glyph plus a short age ("12m") for Saved. The TalkBack label is the
   full sentence.
 - **Composer:** it stays usable offline. Sends go to the staged outbox and appear as pending rows with
@@ -392,7 +395,8 @@ and is read-only. It is evicted first (§7).
 ### 5.4 Held decisions (approvals, answers)
 
 - **When connected**, a tap sends immediately. The server is first-wins, so this is unchanged.
-- **When not connected**, a tap records `{sessionId, turnId, requestId, choiceId|answers, fingerprint,
+- **When not connected**, a tap is accepted only for a request this process saw **Live** before the
+  link dropped. A card that has only ever come from a saved copy stays disabled (§4.2). The tap records `{sessionId, turnId, requestId, choiceId|answers, fingerprint,
   decidedAt}` **in memory only**. `fingerprint` = SHA-256 of the canonical JSON of the
   `pendingApprovals[requestId]` object (or `pendingQuestions`) plus `activeTurnId`. The card shows
   "Your decision will be sent when reconnected · Cancel".
@@ -696,6 +700,7 @@ commit with its own green gate.
 | R6 | Control-API subscribers that fold `readSince` from a mid-turn cursor can diverge after compaction (§3.2). This is a server concern, not ours. | **Flag upstream** as a tether issue, the same way T2.1's prototype-key issue was flagged. |
 | R7 | The catch-up epoch shares the singleton client with a foreground that starts mid-run. | A foreground transition ends the catch-up epoch's suppression: the socket is kept and the normal handshake-time drain runs once. Tested in T13.4. |
 | R8 | Holding decisions in memory loses them on process death, which is annoying. | Intentional (§5.4). The card reappears from the mirror. |
+| R9 | `turn_detail` rows for old, done turns are treated as immutable until a new base supersedes them. | Compaction is projection-preserving (`tether:engines/journal.mjs:222-236`). Any new server base drops the rows it covers. The debug probe (§10) would expose drift. |
 
 ### 13.2 Open questions
 
