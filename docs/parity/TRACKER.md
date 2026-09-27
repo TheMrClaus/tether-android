@@ -65,9 +65,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 1 — Protocol v128, connection, auth, compatibility
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | IN-PROGRESS | claude-main @ 2026-09-27 00:09 |  | GATE EXCEPTION (claude-main, on owner's overnight delegation): started before Phase 0 closes — S1.1 depends on no Phase-0 artifact (corpora… |
-| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S0.3: ServerMessage 'approval' and 'approval_resolved' are declared in lib/protocol.ts but never sent by server.mjs at 7d65611 (approv… |
-| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From T0.6 security review: reconnect loop has a fixed 1.8s delay (RealTetherClient.kt:384-385) — the new connection manager needs real back… |
+| S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
+| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S1.1 (f5df6b0): speak PROTOCOL 129; hello sends client:'android'; decode ready.nativeProtocolFloor + /healthz nativeProtocolFloor; ver… |
+| T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From S1.1: do NOT gate on ready.protocolVersion strict equality (today's permanentVersionStop) — decide on the hello reply; reason client_t… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
