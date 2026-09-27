@@ -115,13 +115,18 @@ class SidebarBehaviourTest {
 
     @Test fun aQuickMoveOnTheCapIsAScrollNotADrag() {
         show()
-        rule.onNodeWithContentDescription("Hold and drag to move Worktree with a service").performTouchInput {
-            down(center)
-            moveBy(androidx.compose.ui.geometry.Offset(0f, 200f))
-            up()
-        }
+        val rowHeight = rule.onNodeWithTag(SidebarTags.row("live:s01")).fetchSemanticsNode().size.height.toFloat()
+        val cap = rule.onNodeWithContentDescription("Hold and drag to move Worktree with a service")
+        // Past 8px before the 350ms hold: session-sidebar.tsx:736 lets the list have the gesture.
+        cap.performTouchInput { down(center) }
+        cap.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(0f, 40f)) }
+        rule.mainClock.advanceTimeBy(400)
+        cap.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(0f, rowHeight)) }
+        rule.mainClock.advanceTimeBy(50)
+        cap.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(0f, 1f)) }
+        cap.performTouchInput { up() }
         rule.waitForIdle()
-        assertTrue(events.none { it.startsWith("order:") })
+        assertTrue(events.toString(), events.none { it.startsWith("order:") })
     }
 
     @Test fun talkBackCanMoveARowWithoutDragging() {
