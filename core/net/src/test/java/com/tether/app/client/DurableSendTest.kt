@@ -19,28 +19,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The pending store's disk: what a process leaves behind is exactly what the
- * last COMPLETED write put there. [tear] makes every later write die before it
- * lands (the process is killed mid-write) — the previous payload stays, whole.
+ * The pending store's disk, one slot per server origin: what a process leaves
+ * behind is exactly what the last COMPLETED write put there. [tear] makes every
+ * later write die before it lands (the process is killed mid-write) — the
+ * previous payload stays, whole. [disk], [written] and [history] are the slot of
+ * [homeUrl]'s origin (the server these tests start configured for).
  */
-class DiskSettings(private val inner: InMemorySettings) : SettingsStore by inner {
-    @Volatile var disk: String? = null
+class DiskSettings(private val inner: InMemorySettings, homeUrl: String) : SettingsStore by inner {
+    val home: String = serverOrigin(homeUrl)!!
+
+    /** Every slot by origin. */
+    val slots = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    var disk: String?
+        get() = slots[home]
+        set(value) {
+            if (value == null) slots.remove(home) else slots[home] = value
+        }
+
     @Volatile var tear = false
     private val writes = MutableStateFlow<String?>(null)
 
-    /** The newest completed write (a flow to await on — no sleeps). */
+    /** The newest completed write to the home slot (a flow to await on — no sleeps). */
     val written: StateFlow<String?> = writes
 
-    /** Every completed write, in order: what the disk held at each moment. */
+    /** Every completed write to the home slot, in order: what it held at each moment. */
     val history = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    override suspend fun readPendingInput(): String? = disk
+    /** Every completed write to any slot, in order, with its origin. */
+    val allWrites = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
-    override suspend fun writePendingInput(raw: String) {
+    override suspend fun readPendingInput(origin: String): String? {
+        PendingSlots.keyFor(origin) // the client only ever names canonical origins
+        return slots[origin]
+    }
+
+    override suspend fun writePendingInput(origin: String, raw: String) {
+        PendingSlots.keyFor(origin)
         if (tear) throw IOException("killed mid-write")
-        disk = raw
-        history += raw
-        writes.value = raw
+        slots[origin] = raw
+        allWrites += origin to raw
+        if (origin == home) {
+            history += raw
+            writes.value = raw
+        }
     }
 }
 
@@ -68,7 +90,8 @@ class DurableSendTest {
     private fun disk(): DiskSettings {
         if (!::settings.isInitialized) {
             h.server.start()
-            settings = DiskSettings(InMemorySettings(h.server.url("/").toString().trimEnd('/'), initialCookie = "cookie"))
+            val url = h.server.url("/").toString().trimEnd('/')
+            settings = DiskSettings(InMemorySettings(url, initialCookie = "cookie"), url)
         }
         return settings
     }

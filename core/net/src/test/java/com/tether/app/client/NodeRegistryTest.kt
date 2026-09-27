@@ -733,7 +733,8 @@ class NodeRegistryTest {
             println(h.client.nodeResult.value)
             println(h.client.nodes.value)
             // The durable send queue never saw it.
-            assertFalse((runBlocking { h.settings.readPendingInput() } ?: "").contains(secret))
+            val origin = serverOrigin(h.server.url("/").toString())!!
+            assertFalse((runBlocking { h.settings.readPendingInput(origin) } ?: "").contains(secret))
             // Exactly what went out: the four node-add frames carried it, verbatim.
             assertEquals(List(4) { secret }, listOf(f1, f2, f3, f4).map { it.s("credential") })
             assertEquals(

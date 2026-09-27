@@ -51,6 +51,71 @@ sealed interface Credential {
 /** A consistent (server, credential) pair; see [SettingsStore.session]. */
 data class Session(val baseUrl: String?, val credential: Credential?)
 
+/**
+ * The canonical server ORIGIN: `scheme://host:port` as OkHttp canonicalises a URL
+ * (scheme and host lower-cased, IDN in punycode, the default port written out,
+ * any path, query or trailing slash ignored, `_` allowed in the host). So
+ * `https://Host:443/` and `https://host` are one origin; `https://host:8443`,
+ * `http://host` and `https://other` are three others. Null for anything that is
+ * not an http(s) URL.
+ *
+ * It is the identity everything bound to one server is keyed by: the sealed
+ * credential's AAD and the durable-send slots ([SettingsStore.readPendingInput]).
+ */
+fun serverOrigin(baseUrl: String?): String? {
+    val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }?.toHttpUrlOrNull() ?: return null
+    return "${url.scheme}://${url.host}:${url.port}"
+}
+
+/**
+ * The durable-send slots in the settings file, one per server origin, and the
+ * migration of the single slot app 0.6.0 wrote. Shared by [DataStoreSettings]
+ * and [InMemorySettings] so both apply exactly the same rule.
+ *
+ * - `pending_input|<origin>`: that server's `{v:2, records, cleared}` payload.
+ * - `pending_input` (0.6.0): ONE slot, not keyed by server. It was only ever
+ *   filled for the server configured at the time, so it belongs to the origin
+ *   of the `base_url` stored next to it. It is moved there once, in the same
+ *   atomic edit that reads that URL (and before any edit that moves the URL).
+ *   With no parsable `base_url` it moves to [UNATTRIBUTED_KEY]: kept on the
+ *   device, never loaded, never sent. If the target slot already exists (only
+ *   possible after a downgrade and a second upgrade) the legacy value is left
+ *   where it is, inert: never merged into a slot it may not belong to.
+ */
+object PendingSlots {
+    const val LEGACY_KEY = "pending_input"
+    const val UNATTRIBUTED_KEY = "pending_input_unattributed"
+    private const val ORIGIN_PREFIX = "pending_input|"
+
+    /** The slot of [origin], which must already be canonical ([serverOrigin] of itself). */
+    fun keyFor(origin: String): String {
+        require(serverOrigin(origin) == origin) { "not a canonical server origin" }
+        return ORIGIN_PREFIX + origin
+    }
+
+    /** Every durable-send key (for a full wipe). */
+    fun isPendingKey(name: String): Boolean =
+        name == LEGACY_KEY || name == UNATTRIBUTED_KEY || name.startsWith(ORIGIN_PREFIX)
+
+    /**
+     * Move the 0.6.0 slot to its owner. [get]/[set]/[remove] address ONE
+     * consistent snapshot (a DataStore edit, or state under a lock) that also
+     * holds `base_url`, read through [baseUrl].
+     */
+    fun migrateLegacy(
+        baseUrl: String?,
+        get: (String) -> String?,
+        set: (String, String) -> Unit,
+        remove: (String) -> Unit,
+    ) {
+        val legacy = get(LEGACY_KEY) ?: return
+        val target = serverOrigin(baseUrl)?.let(::keyFor) ?: UNATTRIBUTED_KEY
+        if (get(target) != null) return
+        set(target, legacy)
+        remove(LEGACY_KEY)
+    }
+}
+
 /** Cookie wins over a device token (the narrower, older grant); empty = absent. */
 fun credentialInForce(cookie: String?, deviceToken: String?): Credential? = when {
     !cookie.isNullOrEmpty() -> Credential.Cookie(cookie)
@@ -103,14 +168,25 @@ interface SettingsStore {
     suspend fun clear()
 
     /**
-     * The durable-send store, the web's `tether:pendingInput` payload
-     * (`{v:2, records, cleared}`, lib/pending-input.mjs toPersistable). Lives in
-     * the backup-excluded settings file: unsent prompts never leave the device.
+     * The durable-send store of ONE server: the web's `tether:pendingInput`
+     * payload (`{v:2, records, cleared}`, lib/pending-input.mjs toPersistable),
+     * kept per canonical [origin] ([serverOrigin]) exactly as the web keeps it
+     * per origin in localStorage. Input written for server A can therefore
+     * never be read back as server B's, whatever the configured URL says.
+     * Lives in the backup-excluded settings file: unsent prompts never leave
+     * the device. A 0.6.0 single-slot payload is attributed on first access
+     * (see [PendingSlots]). [origin] must be canonical.
      */
-    suspend fun readPendingInput(): String?
+    suspend fun readPendingInput(origin: String): String?
 
-    /** Replaces the whole payload atomically: a crash leaves the old one or the new one, never a mix. */
-    suspend fun writePendingInput(raw: String)
+    /** Replaces [origin]'s whole payload atomically: a crash leaves the old one or the new one, never a mix. */
+    suspend fun writePendingInput(origin: String, raw: String)
+
+    /**
+     * A 0.6.0 payload that no server could be attributed to (no server was
+     * configured next to it): kept, never loaded into a live store, never sent.
+     */
+    suspend fun readUnattributedPendingInput(): String?
 }
 
 /**
@@ -154,7 +230,10 @@ class DataStoreSettings(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SettingsStore {
     private val baseUrlKey = stringPreferencesKey("base_url")
-    private val pendingKey = stringPreferencesKey("pending_input")
+
+    // The 0.6.0 single pending slot was attributed to its server (this process).
+    @Volatile
+    private var pendingMigrated = false
 
     /** Set when a logout could not delete the sealed credentials: they are dead regardless. */
     private val clearedTombstoneKey = booleanPreferencesKey("credentials_cleared")
@@ -390,8 +469,11 @@ class DataStoreSettings(
                 credentials.value = Credentials(null, null)
                 removeSealedSlots()
                 // (2) Move the URL. The old credential is gone from disk, so a
-                //     logout tombstone is obsolete too.
+                //     logout tombstone is obsolete too. A 0.6.0 pending slot is
+                //     attributed to the OLD URL in this same edit, so it can
+                //     never be read as the new server's.
                 dataStore.edit {
+                    migrateLegacyPending(it)
                     it[baseUrlKey] = baseUrl
                     it.remove(legacyCookieKey)
                     it.remove(legacyDeviceTokenKey)
@@ -438,9 +520,10 @@ class DataStoreSettings(
 
     override suspend fun clear() {
         mutex.withLock {
-            forgetCredentialsLocked {
-                it.remove(baseUrlKey)
-                it.remove(pendingKey)
+            forgetCredentialsLocked { prefs ->
+                prefs.remove(baseUrlKey)
+                // Every server's unsent input, and any 0.6.0 leftover.
+                prefs.asMap().keys.filter { PendingSlots.isPendingKey(it.name) }.forEach { prefs.remove(it) }
             }
         }
     }
@@ -476,10 +559,46 @@ class DataStoreSettings(
         Session(dataStore.data.first()[baseUrlKey], credentialInForce(c.cookie, c.deviceToken))
     }
 
-    override suspend fun readPendingInput(): String? = dataStore.data.first()[pendingKey]
+    override suspend fun readPendingInput(origin: String): String? {
+        val key = stringPreferencesKey(PendingSlots.keyFor(origin))
+        ensurePendingMigrated()
+        return dataStore.data.first()[key]
+    }
 
-    override suspend fun writePendingInput(raw: String) {
-        dataStore.edit { it[pendingKey] = raw }
+    override suspend fun writePendingInput(origin: String, raw: String) {
+        val key = stringPreferencesKey(PendingSlots.keyFor(origin))
+        ensurePendingMigrated()
+        dataStore.edit { it[key] = raw }
+    }
+
+    override suspend fun readUnattributedPendingInput(): String? {
+        ensurePendingMigrated()
+        return dataStore.data.first()[stringPreferencesKey(PendingSlots.UNATTRIBUTED_KEY)]
+    }
+
+    /**
+     * Attribute the 0.6.0 single slot once per process, in ONE edit that reads
+     * the `base_url` stored next to it (see [PendingSlots]). Under [mutex], so
+     * it cannot interleave with a [setServer] moving the URL. A failure leaves
+     * the flag unset and the next access retries; [setServer] migrates in its
+     * own URL edit regardless.
+     */
+    private suspend fun ensurePendingMigrated() {
+        if (pendingMigrated) return
+        mutex.withLock {
+            if (pendingMigrated) return
+            withContext(ioDispatcher) { dataStore.edit { migrateLegacyPending(it) } }
+            pendingMigrated = true
+        }
+    }
+
+    private fun migrateLegacyPending(prefs: androidx.datastore.preferences.core.MutablePreferences) {
+        PendingSlots.migrateLegacy(
+            baseUrl = prefs[baseUrlKey],
+            get = { prefs[stringPreferencesKey(it)] },
+            set = { k, v -> prefs[stringPreferencesKey(k)] = v },
+            remove = { prefs.remove(stringPreferencesKey(it)) },
+        )
     }
 
     companion object {
@@ -502,10 +621,7 @@ class DataStoreSettings(
          * — the identity a credential is bound to. Null for anything that is not
          * an http(s) URL.
          */
-        fun originOf(baseUrl: String?): String? {
-            val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }?.toHttpUrlOrNull() ?: return null
-            return "${url.scheme}://${url.host}:${url.port}"
-        }
+        fun originOf(baseUrl: String?): String? = serverOrigin(baseUrl)
 
         /**
          * Build the file-backed store. Production:
@@ -526,16 +642,33 @@ class DataStoreSettings(
     }
 }
 
-/** In-memory store for tests and previews. */
+/**
+ * In-memory store for tests and previews. [initialLegacyPendingInput] seeds a
+ * 0.6.0 single-slot payload, attributed on first access exactly as
+ * [DataStoreSettings] does ([PendingSlots]).
+ */
 class InMemorySettings(
     initialBaseUrl: String? = null,
     initialCookie: String? = null,
     initialDeviceToken: String? = null,
+    initialLegacyPendingInput: String? = null,
 ) : SettingsStore {
     private val baseUrlState = MutableStateFlow(initialBaseUrl)
     private val cookieState = MutableStateFlow(initialCookie)
     private val deviceTokenState = MutableStateFlow(initialDeviceToken)
-    private var pending: String? = null
+
+    // Pending slots by key (PendingSlots naming), guarded by [lock].
+    private val pending = HashMap<String, String>().apply {
+        if (initialLegacyPendingInput != null) put(PendingSlots.LEGACY_KEY, initialLegacyPendingInput)
+    }
+
+    /** Caller holds [lock]. */
+    private fun migrateLocked() = PendingSlots.migrateLegacy(
+        baseUrl = baseUrlState.value,
+        get = { pending[it] },
+        set = { k, v -> pending[k] = v },
+        remove = { pending.remove(it) },
+    )
 
     // Every write and [session] take this, so a (URL, credential) pair is never torn.
     private val lock = Any()
@@ -553,6 +686,7 @@ class InMemorySettings(
             // Same order as DataStoreSettings: the old credential goes before the URL moves.
             cookieState.value = null
             deviceTokenState.value = null
+            migrateLocked()
             baseUrlState.value = baseUrl
             when (credential) {
                 is Credential.Cookie -> cookieState.value = credential.value
@@ -573,13 +707,28 @@ class InMemorySettings(
             baseUrlState.value = null
             cookieState.value = null
             deviceTokenState.value = null
-            pending = null
+            pending.clear()
         }
     }
 
-    override suspend fun readPendingInput(): String? = pending
+    override suspend fun readPendingInput(origin: String): String? {
+        val key = PendingSlots.keyFor(origin)
+        return synchronized(lock) {
+            migrateLocked()
+            pending[key]
+        }
+    }
 
-    override suspend fun writePendingInput(raw: String) {
-        pending = raw
+    override suspend fun writePendingInput(origin: String, raw: String) {
+        val key = PendingSlots.keyFor(origin)
+        synchronized(lock) {
+            migrateLocked()
+            pending[key] = raw
+        }
+    }
+
+    override suspend fun readUnattributedPendingInput(): String? = synchronized(lock) {
+        migrateLocked()
+        pending[PendingSlots.UNATTRIBUTED_KEY]
     }
 }

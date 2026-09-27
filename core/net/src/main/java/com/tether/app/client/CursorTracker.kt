@@ -78,4 +78,10 @@ class CursorTracker {
     fun clearResyncFlags() {
         resyncPending.clear()
     }
+
+    /** Forget every cursor: they belong to one server and mean nothing to another. */
+    fun clear() {
+        cursors.clear()
+        resyncPending.clear()
+    }
 }

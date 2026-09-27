@@ -100,6 +100,33 @@ private const val REDIRECT_MESSAGE =
  * kept across a reconnect (the web never clears it) and emptied on logout, a
  * server-side sign-out and a new sign-in.
  *
+ * Durable send is per server ORIGIN (ta-s8q), as the web's localStorage is.
+ * The origin is [serverOrigin]: `scheme://host:port`, OkHttp-canonical (case,
+ * default port and trailing slash do not matter; another port, scheme or host
+ * is another server). The in-memory pending store is tagged with the origin
+ * it belongs to ([pendingOrigin]) and persisted in that origin's slot only
+ * ([SettingsStore.readPendingInput]). Invariants:
+ * - a record, and the attach of its session, only ever go out on a socket
+ *   opened for the store's origin (drainPending / onReady check [socketOrigin],
+ *   and pending frames go out on the socket they were computed for);
+ * - a sign-in to ANOTHER origin sets the current store aside under its own
+ *   origin (kept in memory for this process, exact, and merged into that
+ *   origin's slot on disk), surfaces a notice, and clears everything else that
+ *   is per server: subscriptions, cursors, reconciled sessions, tombstones,
+ *   attached sessions, sessions and projections. Signing in to that origin
+ *   again brings its records back under the ordinary T1.3 rules;
+ * - a sign-in to the SAME origin (a re-login after expiry) changes nothing:
+ *   the T1.3 guarantees hold exactly as for a reconnect;
+ * - set-aside records do not expire while away. On return the T1.3 10-minute
+ *   rule applies (the sweeper expires them with its notice), exactly as it
+ *   does to a store restored after process death and as the web does to an
+ *   origin whose page was closed: expiring them while signed in elsewhere
+ *   would only move that notice out of the context it is about.
+ *
+ * Origin keying of the staged outbox (SYNC_DESIGN §5.3, T13.3) must follow the
+ * same slots: the outbox key sits next to its origin's pending slot, in the
+ * same edit.
+ *
  * Construction (integrator):
  * ```
  * val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -197,8 +224,21 @@ class RealTetherClient(
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
     private var pendingStore = PendingInput.emptyStore()
-    // The persisted store was read and merged in (start()); nothing drains or is
-    // written before that, so a cold start never overwrites what the last process left.
+    // The canonical origin [pendingStore] belongs to. Null = not bound to a
+    // server yet (a fresh process before its first start(), or after stop()).
+    private var pendingOrigin: String? = null
+    // The origin [socket] was opened for (set with its listener, cleared on detach).
+    private var socketOrigin: String? = null
+    // Stores of OTHER origins set aside by a sign-in switch in this process:
+    // exact (tries, attachments), so returning restores them as they were.
+    private val setAside = HashMap<String, SetAsideStore>()
+    // Bumped by stop(): a set-aside write queued before the wipe must not land after it.
+    private var pendingWipe = 0L
+    // The unattributed 0.6.0 slot was checked (and its notice shown) in this process.
+    private var unattributedChecked = false
+    // [pendingOrigin]'s persisted store was read and merged in (start()/a sign-in);
+    // nothing drains or is written before that, so a cold start never overwrites
+    // what the last process left.
     private var pendingLoaded = false
     private val reconciledSessions = HashSet<String>()
     // use-tether.ts clearedRef: keys removed for any reason (acked, withdrawn,
@@ -408,6 +448,15 @@ class RealTetherClient(
 
     /** Persist a freshly-obtained credential and (re)start the connection loop. */
     private suspend fun adoptCredential(base: HttpUrl, credential: Credential) {
+        // Read BEFORE the URL moves: the server that unsent input filed before
+        // the store was bound (a fresh process) was written for.
+        val configuredBefore = try {
+            settings.baseUrl.first()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
         try {
             settings.setServer(base.toString().trimEnd('/'), credential)
         } catch (e: CancellationException) {
@@ -419,6 +468,7 @@ class RealTetherClient(
         }
         val previous: WebSocket?
         val previousWasOpen: Boolean
+        val switch: OriginSwitch?
         synchronized(lock) {
             // Whatever socket is still bound belongs to the PREVIOUS sign-in
             // (possibly another server): let it go now, or connectNow() would
@@ -437,13 +487,204 @@ class RealTetherClient(
             // A fresh login is a user action: it also clears a version halt.
             versionHalt = null
             backoff.reset()
+            // Same origin (a re-login): nothing changes. Another origin: the
+            // unsent input and every per-server state of the previous one are
+            // set aside / cleared HERE, in the same critical section that
+            // moves the URL, so no connection to the new server can see them.
+            switch = followServerLocked(fallbackOwner = serverOrigin(configuredBefore), adoptUnbound = false)
         }
         if (previousWasOpen) previous?.close(1000, "signed in again") else previous?.cancel()
         signedOutReasonState.value = null
         // A new sign-in (possibly to another server): its hello brings its own list.
         clearNodeRegistry()
+        switch?.let(::completeOriginSwitch)
+        // The new origin's own unsent input, before the connection comes up.
+        bindPendingToCurrentServer()
         start()
         reconnectIfIdle()
+    }
+
+    /** The canonical origin of the server in force. Caller holds [lock]. */
+    private fun currentOriginLocked(): String? = baseUrlValue?.let { serverOrigin(it.toString()) }
+
+    /** A store set aside for [SetAsideStore]'s origin; [cleared] are its tombstones. */
+    private class SetAsideStore(val store: PendingStore, val cleared: List<String>)
+
+    /**
+     * What an origin switch leaves to do outside the lock: persist [write] (the
+     * set-aside store, into its own origin's slot) and tell the user.
+     */
+    private class OriginSwitch(val write: SetAsideWrite?, val discarded: Int)
+
+    private class SetAsideWrite(
+        val origin: String,
+        val version: Long,
+        val wipe: Long,
+        val store: PendingStore,
+        val cleared: List<String>,
+        // The store was not merged with its origin's slot yet: merge on write.
+        val mergeWithDisk: Boolean,
+    )
+
+    /**
+     * Make the pending store and the per-server state belong to the server in
+     * force. Caller holds [lock]; returns the follow-up for
+     * [completeOriginSwitch], or null when nothing changed.
+     *
+     * - Same origin: nothing changes (T1.3 unchanged: a re-login keeps it all).
+     * - Unbound store ([pendingOrigin] null): it belongs to [fallbackOwner], the
+     *   server configured when it was filed. With none known, [adoptUnbound]
+     *   decides: start() binds a fresh process to its configured server
+     *   (T1.3's cold-start merge); a sign-in DISCARDS it (with a notice)
+     *   instead of guessing: it was never proven to be the new server's.
+     * - Another origin: the store is set aside under its owner (never
+     *   replayed here), and subscriptions, cursors, reconciled sessions,
+     *   tombstones and attached sessions are cleared. [pendingLoaded] drops,
+     *   so nothing drains until the new origin's slot is merged in.
+     */
+    private fun followServerLocked(fallbackOwner: String?, adoptUnbound: Boolean): OriginSwitch? {
+        val target = currentOriginLocked() ?: return null
+        val owner = pendingOrigin ?: fallbackOwner
+        if (owner == target || (owner == null && adoptUnbound)) {
+            pendingOrigin = target
+            return null
+        }
+        val store = PendingInput.resetInFlight(pendingStore)
+        val cleared = clearedKeys.toList()
+        var write: SetAsideWrite? = null
+        var discarded = 0
+        if (owner != null) {
+            if (pendingLoaded || store.records.isNotEmpty()) {
+                val prior = setAside[owner]
+                val keptCleared = ((prior?.cleared ?: emptyList()) + cleared).distinct().takeLast(PendingInput.MAX_TOMBSTONES)
+                val kept = if (prior == null) store else PendingInput.mergeStores(store, prior.store, keptCleared)
+                setAside[owner] = SetAsideStore(kept, keptCleared)
+                pendingVersion++
+                write = SetAsideWrite(owner, pendingVersion, pendingWipe, kept, keptCleared, mergeWithDisk = !pendingLoaded)
+            }
+        } else {
+            discarded = store.records.size
+        }
+        pendingStore = PendingInput.emptyStore()
+        clearedKeys = LinkedHashSet()
+        pendingLoaded = false
+        pendingOrigin = target
+        clearServerStateLocked()
+        return OriginSwitch(write, discarded)
+    }
+
+    /** Everything that is per server and not the pending store. Caller holds [lock]. */
+    private fun clearServerStateLocked() {
+        subscribed.clear()
+        tracker.clear()
+        reconciledSessions.clear()
+        attachedThisEpoch.clear()
+    }
+
+    /** The published per-server views: another server's sessions must never show. */
+    private fun clearServerViews() {
+        sessionsState.value = emptyList()
+        providersState.value = emptyList()
+        workspaceRootState.value = null
+        projectionTreesState.value = emptyMap()
+        projectionsState.value = emptyMap()
+        historiesState.value = emptyList()
+        directoriesState.value = null
+        sessionControlsState.value = emptyMap()
+        trimmedBeforeState.value = emptyMap()
+    }
+
+    /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
+    private fun completeOriginSwitch(switch: OriginSwitch) {
+        clearServerViews()
+        switch.write?.let { write ->
+            persistSetAside(write)
+            val count = write.store.records.size
+            if (count > 0) {
+                emitError(
+                    "$count unsent message${if (count == 1) " was" else "s were"} not sent to this server. " +
+                        "${if (count == 1) "It was" else "They were"} kept for ${displayHost(write.origin)} " +
+                        "and will only go there if you sign in to it again.",
+                )
+            }
+        }
+        if (switch.discarded > 0) {
+            emitError(
+                "${switch.discarded} unsent message${if (switch.discarded == 1) " was" else "s were"} discarded: " +
+                    "the server ${if (switch.discarded == 1) "it was" else "they were"} written for is not known.",
+            )
+        }
+    }
+
+    /** `host`, or `host:port` for a non-default port: what the user typed, minus the scheme. */
+    private fun displayHost(origin: String): String {
+        val url = origin.toHttpUrlOrNull() ?: return origin
+        return if (url.port == HttpUrl.defaultPort(url.scheme)) url.host else "${url.host}:${url.port}"
+    }
+
+    /**
+     * Merge the persisted slot of the current origin into the pending store
+     * (once per binding): what this process holds wins, then a store set aside
+     * earlier in this process (exact), then the disk copy (restored records
+     * count as possibly transmitted, T1.3). A no-op when already loaded, when
+     * no server is configured, or when the server changed while reading (the
+     * newer binding loads its own). Checks the unattributed 0.6.0 slot once.
+     */
+    private suspend fun bindPendingToCurrentServer() {
+        val (origin, checkUnattributed) = synchronized(lock) {
+            val target = currentOriginLocked() ?: return
+            if (pendingLoaded || pendingOrigin != target) return
+            val check = !unattributedChecked
+            unattributedChecked = true
+            target to check
+        }
+        val raw = readQuietly { settings.readPendingInput(origin) }
+        if (checkUnattributed) {
+            val count = PendingInput.fromPersisted(readQuietly { settings.readUnattributedPendingInput() }).records.size
+            if (count > 0) {
+                emitError(
+                    "$count unsent message${if (count == 1) "" else "s"} saved by an earlier version could not be " +
+                        "matched to a server. ${if (count == 1) "It was" else "They were"} kept on this device and " +
+                        "will not be sent.",
+                )
+            }
+        }
+        val loaded = synchronized(lock) {
+            if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return@synchronized false
+            restorePendingLocked(raw, setAside.remove(origin))
+            true
+        }
+        if (!loaded) return
+        persistPending()
+        attachPendingSessionsThenDrain()
+    }
+
+    /** An unreadable store is "nothing there", never a failed start or sign-in. */
+    private suspend fun readQuietly(read: suspend () -> String?): String? = try {
+        read()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * After a late binding (the socket was already live): attach the sessions
+     * with pending input that this epoch has not attached yet, then drain, all
+     * on the socket that is live now and only if it is the store's origin.
+     */
+    private fun attachPendingSessionsThenDrain() {
+        val ws: WebSocket
+        val toAttach: List<Pair<String, Long?>>
+        synchronized(lock) {
+            if (!pendingLoaded || !socketOpen || !handshakeDone || pendingOrigin != socketOrigin) return
+            ws = socket ?: return
+            toAttach = pendingStore.records.map { it.sessionId }.distinct()
+                .filter { attachedThisEpoch.add(it) }
+                .map { it to tracker.cursorFor(it) }
+        }
+        for ((sessionId, afterSeq) in toAttach) sendFrameOn(ws, ClientMessage.Attach(sessionId, afterSeq))
+        drainPending()
     }
 
     override fun start() {
@@ -461,16 +702,7 @@ class RealTetherClient(
             // credential the install holds — a password cookie from a pre-pairing
             // version still resolves here, so upgrading never logs anyone out.
             val session = settings.session()
-            // An unreadable store is "nothing to redeliver", never a failed start.
-            val persisted = try {
-                settings.readPendingInput()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null
-            }
-            var restored = false
-            synchronized(lock) {
+            val switch = synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
                 if (credentialValue == null && session.credential != null && base != null) {
                     // Adopted as a pair, never the credential under another URL.
@@ -480,12 +712,15 @@ class RealTetherClient(
                     baseUrlValue = base
                 }
                 settingsLoaded = true
-                if (!pendingLoaded) {
-                    restorePendingLocked(persisted)
-                    restored = true
-                }
+                // The first start of a process binds the store (and whatever was
+                // filed before it) to the configured server; a server that
+                // changed under a bound store is an origin switch.
+                followServerLocked(fallbackOwner = null, adoptUnbound = true)
             }
-            if (restored) persistPending()
+            switch?.let(::completeOriginSwitch)
+            // Restore before the first drain or write (an unreadable store is
+            // "nothing to redeliver", never a failed start).
+            bindPendingToCurrentServer()
             if (baseUrlValue == null || credentialValue == null) {
                 connectionState.value = ConnectionState.AuthRequired
             } else {
@@ -508,7 +743,23 @@ class RealTetherClient(
             // A probe in flight must not keep the slot: a start() before the
             // async settings.clear() lands reloads the credential and connects.
             endConnectAttemptsLocked()
-            detachSocketLocked()
+            // The store's disk copy goes with settings.clear() below; the
+            // memory goes too, set-aside stores included, so nothing of this
+            // configuration can be replayed after a later sign-in.
+            val dropped = pendingStore.records.size
+            pendingStore = PendingInput.emptyStore()
+            clearedKeys = LinkedHashSet()
+            pendingLoaded = false
+            pendingOrigin = null
+            setAside.clear()
+            pendingWipe++
+            clearServerStateLocked()
+            detachSocketLocked() to dropped
+        }.let { (socketGone, dropped) ->
+            if (dropped > 0) {
+                emitError("$dropped unsent message${if (dropped == 1) " was" else "s were"} discarded when you signed out.")
+            }
+            socketGone
         }
         ws?.cancel()
         clearNodeRegistry()
@@ -516,7 +767,8 @@ class RealTetherClient(
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
         // successful login()/pair() resets `stopped` and restarts the loop.
-        scope.launch { settings.clear() }
+        // Serialized with the pending writes: none queued before it lands after it.
+        scope.launch { persistMutex.withLock { settings.clear() } }
     }
 
     override suspend fun logout(): LogoutResult {
@@ -784,6 +1036,7 @@ class RealTetherClient(
         socketListener?.retired = true
         socketListener = null
         socket = null
+        socketOrigin = null
         socketOpen = false
         handshakeDone = false
         pingTask?.cancel()
@@ -869,12 +1122,18 @@ class RealTetherClient(
                 ProbeVerdict.Rejected -> handleCredentialRejected(
                     credential,
                     if (credential is Credential.Cookie) SignedOutReason.SessionExpired else SignedOutReason.DeviceUnpaired,
+                    generation,
                 )
                 ProbeVerdict.Refused -> {
                     // A gateway, not Tether, said no: keep the credential (it may be
                     // fine once the probe gets through) and wait for a user action,
                     // a network change or the next foreground — no timer loop.
                     val current = synchronized(lock) {
+                        // Staleness is re-checked in the SAME critical section that
+                        // releases the slot: a sign-in / stop / logout since the
+                        // check above started a newer attempt, whose slot this
+                        // verdict must not free.
+                        if (staleLocked(generation)) return@launch
                         connecting = false
                         credentialValue === credential && !haltedLocked()
                     }
@@ -892,12 +1151,17 @@ class RealTetherClient(
      * Tether itself says [credential] is no longer valid (auth probe
      * `authenticated:false`, close 4001/4002): terminal. Forget the credential,
      * keep the server URL, land on the login screen with [reason]. A no-op when a
-     * different credential has been adopted since (a login racing the probe).
+     * different credential has been adopted since (a login racing the probe) or,
+     * for a probe verdict, when its attempt [generation] ended since; then the
+     * connect slot belongs to the newer attempt and is left alone. Unsent input
+     * is kept: a re-login to the same origin delivers it (T1.3).
      */
-    private fun handleCredentialRejected(credential: Credential, reason: SignedOutReason) {
+    private fun handleCredentialRejected(credential: Credential, reason: SignedOutReason, generation: Long? = null) {
         val ws = synchronized(lock) {
-            connecting = false
+            if (generation != null && staleLocked(generation)) return
             if (credentialValue !== credential) return
+            // Every attempt still in flight for this dead credential is over.
+            endConnectAttemptsLocked()
             stopped = true
             cancelTimersLocked()
             credentialValue = null
@@ -971,37 +1235,29 @@ class RealTetherClient(
             .authorize(credential)
             .header("Origin", origin)
             .build()
-        // The listener is registered BEFORE the upgrade starts: OkHttp may call
-        // onOpen / onMessage / onFailure on its own thread before newWebSocket()
-        // even returns, and a callback from the current listener must bind its
-        // socket rather than be dropped as a stranger's (a lost onOpen left the
-        // client stuck in Connecting with an open socket).
         val listener = SocketListener()
         synchronized(lock) {
             // Ended since the probe (a sign-in / stop / logout in between): a
-            // newer attempt owns the slot. After this point those paths retire
-            // [listener] (detachSocketLocked).
+            // newer attempt owns the slot.
             if (staleLocked(generation)) return
             if (haltedLocked() || socket != null) {
                 connecting = false
                 return
             }
+            // The listener is registered, the upgrade started and its socket
+            // bound in ONE critical section: once stop() / logout() / a
+            // sign-in has taken the lock no upgrade can start with the old
+            // credential, and whichever of them comes next finds the socket
+            // bound and cancels it (detachSocketLocked). newWebSocket() only
+            // enqueues the call; OkHttp's callbacks run on its own threads and
+            // wait for this lock, and bind the socket first if they win
+            // (bindLocked is idempotent). The monitor is reentrant, so a
+            // callback OkHttp makes inline (a rejected enqueue) is safe too.
             socketListener = listener
+            socketOrigin = serverOrigin(base.toString())
+            // No redirects on the credential-bearing upgrade either (see authHttp).
+            listener.bindLocked(authHttp.newWebSocket(request, listener))
         }
-        // No redirects on the credential-bearing upgrade either (see authHttp).
-        val ws = authHttp.newWebSocket(request, listener)
-        val cancel = synchronized(lock) {
-            if (listener.retired) {
-                true
-            } else if (haltedLocked()) {
-                detachSocketLocked()
-                true
-            } else {
-                listener.bindLocked(ws)
-                false
-            }
-        }
-        if (cancel) ws.cancel()
     }
 
     /** The next attempt after [Backoff.next] — never a fixed-rate or tight loop. */
@@ -1170,6 +1426,7 @@ class RealTetherClient(
                 if (message.session.runtimeArchived) {
                     // use-tether.ts:827 — an archived session refuses every send: drop its records.
                     val changed = synchronized(lock) {
+                        if (socket !== webSocket) return@synchronized false
                         val next = PendingInput.forgetSession(pendingStore, message.session.id)
                         if (next === pendingStore) return@synchronized false
                         forgetLocked(pendingStore.records.filter { it.sessionId == message.session.id }.map { it.key })
@@ -1182,8 +1439,8 @@ class RealTetherClient(
             }
             is ServerMessage.Histories -> historiesState.value = message.sessions
             is ServerMessage.Directories -> directoriesState.value = message.listing
-            is ServerMessage.Snapshot -> onSnapshot(message)
-            is ServerMessage.Event -> onEvent(message)
+            is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
+            is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(message)
             is ServerMessage.InterruptResult ->
                 if (message.status == "failed") {
@@ -1235,15 +1492,18 @@ class RealTetherClient(
             val ids = LinkedHashSet<String>()
             ids.addAll(subscribed)
             ids.addAll(tracker.attachedSessions())
-            pendingStore.records.mapTo(ids) { it.sessionId }
+            // Only the store of THIS socket's server: another origin's session
+            // ids never reach it (ta-s8q).
+            if (pendingOrigin != null && pendingOrigin == socketOrigin) pendingStore.records.mapTo(ids) { it.sessionId }
             // Claimed for this epoch under the lock: an attach() racing this
             // handler (from any thread) is then a no-op instead of a second
             // attach (T0.3 verify).
             attachedThisEpoch.addAll(ids)
             toAttach = ids.map { it to tracker.cursorFor(it) }
         }
+        // On THIS socket only: if it is gone by now, the next one re-attaches.
         for ((sessionId, afterSeq) in toAttach) {
-            sendFrame(ClientMessage.Attach(sessionId, afterSeq))
+            sendFrameOn(webSocket, ClientMessage.Attach(sessionId, afterSeq))
         }
         message.workspaceRoot?.let {
             sendFrame(ClientMessage.Browse(it))
@@ -1278,8 +1538,15 @@ class RealTetherClient(
      * input and authorises redelivery for its session on this connection.
      * `trimmedBefore` (v115 bounded snapshot) is recorded per session.
      */
-    private fun onSnapshot(message: ServerMessage.Snapshot) {
-        synchronized(lock) { tracker.onSnapshot(message.sessionId, message.throughSeq) }
+    private fun onSnapshot(webSocket: WebSocket, message: ServerMessage.Snapshot) {
+        // A frame of a socket let go meanwhile (a sign-in to another server)
+        // must not seed a cursor or authorise redelivery on the next one.
+        val current = synchronized(lock) {
+            if (socket !== webSocket) return@synchronized false
+            tracker.onSnapshot(message.sessionId, message.throughSeq)
+            true
+        }
+        if (!current) return
         if (!message.hasState) return
         trimmedBeforeState.value = message.trimmedBefore
             ?.let { trimmedBeforeState.value + (message.sessionId to it) }
@@ -1294,6 +1561,7 @@ class RealTetherClient(
         // journal-folded state exactly as the web does (not the typed view): a key it
         // contains was accepted, whatever it lacks was not and is redelivered below.
         val changed = synchronized(lock) {
+            if (socket !== webSocket) return
             val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, tree)
             pendingStore = result.store
             forgetLocked(result.cleared)
@@ -1311,9 +1579,11 @@ class RealTetherClient(
         drainPending()
     }
 
-    private fun onEvent(message: ServerMessage.Event) {
+    private fun onEvent(webSocket: WebSocket, message: ServerMessage.Event) {
         val event = message.event
         val decision = synchronized(lock) {
+            // A let-go socket's event: dropped (its cursor and acks are not ours).
+            if (socket !== webSocket) return
             tracker.onEvent(message.sessionId, event.seq, canSend = socketOpen)
         }
         when (decision) {
@@ -1322,7 +1592,7 @@ class RealTetherClient(
             CursorTracker.Decision.AwaitSnapshot,
             -> return
             is CursorTracker.Decision.Resync -> {
-                sendFrame(ClientMessage.Attach(message.sessionId, decision.afterSeq))
+                sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, decision.afterSeq))
                 return
             }
             CursorTracker.Decision.Fold -> Unit
@@ -1337,6 +1607,7 @@ class RealTetherClient(
             // use-tether.ts:1022-1040 — acked on the turn STARTING: whatever the turn's
             // outcome later (completed, interrupted, outcome_unknown) it is never re-sent.
             val removed = synchronized(lock) {
+                if (socket !== webSocket) return
                 val result = PendingInput.ackKey(pendingStore, ackedKey)
                 pendingStore = result.store
                 if (result.removed) forgetLocked(listOf(ackedKey))
@@ -1354,7 +1625,7 @@ class RealTetherClient(
             // (no afterSeq — a cursor-at-head attach would come back stateless).
             projectionTreesState.value = projectionTreesState.value - message.sessionId
             projectionsState.value = projectionsState.value - message.sessionId
-            sendFrame(ClientMessage.Attach(message.sessionId, null))
+            sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
@@ -1453,12 +1724,19 @@ class RealTetherClient(
      * out over THIS connection, oldest-first, each under its own record key — so a
      * redelivery is always the SAME idempotencyKey / queueId (server dedupe,
      * session-manager.mjs:2520) and never a second new turn. Waits for the
-     * handshake and for the persisted store to be restored.
+     * handshake and for the persisted store to be restored. Only on a socket
+     * opened for the store's own origin, and only on the socket the frames were
+     * computed for: if it goes meanwhile, the frames are dropped (they count as
+     * one attempt and wait for that origin's next snapshot), never handed to
+     * whatever socket is live next (ta-s8q).
      */
     private fun drainPending() {
+        val ws: WebSocket
         val frames: List<ClientMessage>
         synchronized(lock) {
             if (!pendingLoaded || !socketOpen || !handshakeDone) return
+            if (pendingOrigin == null || pendingOrigin != socketOrigin) return
+            ws = socket ?: return
             val sendable = PendingInput.sendableRecords(pendingStore, reconciledSessions)
             if (sendable.isEmpty()) return
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
@@ -1470,7 +1748,7 @@ class RealTetherClient(
                 }
             }
         }
-        for (frame in frames) sendFrame(frame)
+        for (frame in frames) sendFrameOn(ws, frame)
         persistPending()
     }
 
@@ -1521,14 +1799,21 @@ class RealTetherClient(
      * Cold start (use-tether.ts:1225-1232): adopt the tombstones, then union the
      * persisted records under what this process already holds, never adopting a
      * cleared key. Restored records count as possibly transmitted
-     * ([PendingInput.restoredFromPreviousProcess]). Caller holds [lock].
+     * ([PendingInput.restoredFromPreviousProcess]). A store this process set
+     * aside for the same origin ([overlay]) sits between the two: it is exact
+     * (a record it holds with tries 0 was never transmitted), so it keeps its
+     * counts and attachments. Caller holds [lock]; [raw] is [pendingOrigin]'s slot.
      */
-    private fun restorePendingLocked(raw: String?) {
+    private fun restorePendingLocked(raw: String?, overlay: SetAsideStore?) {
         val persistedCleared = PendingInput.clearedFromPersisted(raw)
-        val cleared = LinkedHashSet(persistedCleared).apply { addAll(clearedKeys) }
+        val cleared = LinkedHashSet(persistedCleared)
+        overlay?.let { cleared.addAll(it.cleared) }
+        cleared.addAll(clearedKeys)
         clearedKeys = LinkedHashSet(cleared.toList().takeLast(PendingInput.MAX_TOMBSTONES))
+        var mine = pendingStore
+        if (overlay != null) mine = PendingInput.mergeStores(mine, overlay.store, clearedKeys)
         val restored = PendingInput.restoredFromPreviousProcess(PendingInput.fromPersisted(raw), clock())
-        pendingStore = PendingInput.mergeStores(pendingStore, restored, clearedKeys)
+        pendingStore = PendingInput.mergeStores(mine, restored, clearedKeys)
         pendingLoaded = true
     }
 
@@ -1543,15 +1828,18 @@ class RealTetherClient(
 
     private val persistMutex = Mutex()
 
-    // Guarded by persistMutex: the version the file holds.
-    private var persistedVersion = 0L
+    // Guarded by persistMutex: the version each origin's slot holds.
+    private val persistedVersions = HashMap<String, Long>()
 
     /**
-     * Write the store after EVERY change. One DataStore edit replaces the whole
-     * payload atomically (temp file + rename), so a crash mid-write leaves the
-     * previous complete store, never a torn one. Writes are serialized and
-     * conflated: each writes the newest version, and an older snapshot can never
-     * land after a newer one (which could resurrect an acked record or drop a new one).
+     * Write the store after EVERY change, into its own origin's slot. One
+     * DataStore edit replaces the whole payload atomically (temp file +
+     * rename), so a crash mid-write leaves the previous complete store, never a
+     * torn one. Writes are serialized and conflated: each writes the newest
+     * version of the store AND its origin as they are when it runs (so a write
+     * queued before a sign-in switch writes nothing of the old store into the
+     * new slot), and an older snapshot can never land after a newer one in the
+     * same slot (which could resurrect an acked record or drop a new one).
      */
     private fun persistPending() {
         synchronized(lock) {
@@ -1560,18 +1848,54 @@ class RealTetherClient(
         }
         scope.launch {
             persistMutex.withLock {
-                val (version, store, cleared) = synchronized(lock) {
-                    Triple(pendingVersion, pendingStore, clearedKeys.toList())
+                val snapshot = synchronized(lock) {
+                    val origin = pendingOrigin
+                    if (!pendingLoaded || origin == null) return@withLock
+                    PersistSnapshot(origin, pendingVersion, pendingStore, clearedKeys.toList())
                 }
-                if (version <= persistedVersion) return@withLock
+                if (snapshot.version <= (persistedVersions[snapshot.origin] ?: 0L)) return@withLock
                 try {
-                    settings.writePendingInput(PendingInput.toPersistable(store, cleared))
-                    persistedVersion = version
+                    settings.writePendingInput(snapshot.origin, PendingInput.toPersistable(snapshot.store, snapshot.cleared))
+                    persistedVersions[snapshot.origin] = snapshot.version
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
                     // A failed write must never break sending; the in-memory store
                     // still redelivers for the life of the process.
+                }
+            }
+        }
+    }
+
+    private class PersistSnapshot(val origin: String, val version: Long, val store: PendingStore, val cleared: List<String>)
+
+    /**
+     * Persist a store set aside by an origin switch into ITS origin's slot, in
+     * the same serialized, versioned order as [persistPending]. A store that
+     * was never merged with its slot (filed before the process bound it) is
+     * merged with it here, never written over it. Skipped once stop() wiped
+     * everything after the switch.
+     */
+    private fun persistSetAside(write: SetAsideWrite) {
+        scope.launch {
+            persistMutex.withLock {
+                if (synchronized(lock) { pendingWipe } != write.wipe) return@withLock
+                if (write.version <= (persistedVersions[write.origin] ?: 0L)) return@withLock
+                try {
+                    var store = write.store
+                    var cleared = write.cleared
+                    if (write.mergeWithDisk) {
+                        val raw = settings.readPendingInput(write.origin)
+                        cleared = (PendingInput.clearedFromPersisted(raw) + cleared).distinct()
+                            .takeLast(PendingInput.MAX_TOMBSTONES)
+                        store = PendingInput.mergeStores(store, PendingInput.fromPersisted(raw), cleared)
+                    }
+                    settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared))
+                    persistedVersions[write.origin] = write.version
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The set-aside copy in memory still holds for this process.
                 }
             }
         }
@@ -1769,6 +2093,19 @@ class RealTetherClient(
         synchronized(lock) {
             val ws = (if (socketOpen && handshakeDone) socket else null) ?: return false
             return ws.send(text)
+        }
+    }
+
+    /**
+     * [sendFrame], but only on [expected]: a frame computed for one socket (a
+     * pending record, the attach of its session) is dropped rather than handed
+     * to a socket that replaced it, possibly one to another server.
+     */
+    private fun sendFrameOn(expected: WebSocket, message: ClientMessage): Boolean {
+        val text = message.encode()
+        synchronized(lock) {
+            if (socket !== expected || !socketOpen || !handshakeDone) return false
+            return expected.send(text)
         }
     }
 
