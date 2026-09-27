@@ -29,8 +29,10 @@ possible when the owner asks. Release notes must cover: the Android 14 floor, Ke
 that pre-T1.4 backups may still hold the old plaintext credential file.
 **Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
 **[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
-In flight (≤4 agents): **T3.3** executor (from WIP `12398d9`), **T1.5** security-executor, **T3.5** DONE → verifier,
-**T13.0** executor (SYNC_DESIGN.md; doc-only gate exception).
+**T3.5 VERIFIED + merged** (`b9f03a4`; main gate 1350/0 failed/4 skipped). In flight (≤4 agents): **T3.3** executor,
+**T1.5** DONE → verifier + security-reviewer, **T13.0** executor (SYNC_DESIGN.md; doc-only gate exception).
+**Upstream security bead `ta-fsp`**: tether `/ws` lets paired-device sockets run node-add/remove/probe (the server comment assumes
+owner-only). Next: an S-task PR once the security review rates it; the owner merges and deploys.
 Next: T3.3 → verifier → **T3.4** gallery; T1.5 → verifier + security-reviewer; then Phase 4 (T4.1/T4.3).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
@@ -75,7 +77,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
-| T1.5 | Multi-host node registry awareness (v109) | IN-PROGRESS | claude-main @ 2026-09-27 08:53 |  | done: tests e295309: NodeRegistryTest 15/15, NodesWireTest 8/8 green / half: none / next: mutation checks, full gate x2 |
+| T1.5 | Multi-host node registry awareness (v109) | DONE | claude-main @ 2026-09-27 08:53 |  |  |
 
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -90,9 +92,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | checkpoint dbc932c: done: screenshot harness (core/designsystem/src/test/.../components/screenshots), 84 goldens in core/designsystem/src/t… |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | checkpoint 63ec706: done: unit tests (KeyStyleTest, MotionAndHapticsTest, PrimitiveBehaviourTest), tools/compare-screens (CompareScreens.ja… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
-| T3.5 | Icons, provider logos, adaptive app icon | DONE | claude-main @ 2026-09-27 04:16 |  |  |
+| T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -242,6 +244,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | The 360 web reference PNGs (55 MB) are **not committed** to this repo. `tools/parity/sync-corpus.sh` copies them into a gitignored `parity-corpus/screens/web/`; the committed `manifest.json` + SHA256 list pins them. Per-surface montages (the DoD evidence) are committed under `docs/parity/screens/` | 55 MB per refresh would bloat history every catch-up; montages are a review aid, not a CI gate (PLAN §5.3) | claude-main (owner delegation) |
 | 2026-09-27 | **Closed epics P0 and P2** (`bd close --force`: the v1.3.0 guard counts `verified` children as open). P0 = 11/12 verified + T0.2 owner-deferred; P2 = 4/4 verified | Every child was verified by a separate actor (S0.4 and S0.6 today) | claude-main (owner delegation) |
 | 2026-09-27 | **Gate exception:** T13.0 (SYNC_DESIGN.md, doc only) started ahead of Phases 3–12 | It writes no code and touches no file another lane owns, so it fills the 4th slot without merge risk. T13.1+ stay gated on its plan-verifier review | claude-main (owner delegation) |
+| 2026-09-27 | Verifier finding F1 on T3.5 (logo path text not asserted) fixed by the coordinator before merge: a fixture test plus a mutation proof (edited path → red). It was a test-only hardening of already-verified, byte-identical paths | Keeps the merge clean without another verifier round for a test-only change | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
