@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.NodeSummary
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
@@ -210,7 +211,42 @@ interface TetherClient {
      * Absent = nothing trimmed.
      */
     val trimmedBefore: StateFlow<Map<String, Int>>
+
+    // ------------------------------------------------------------------
+    // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
+    // ------------------------------------------------------------------
+
+    /**
+     * The console's peer nodes, replaced wholesale by every `nodes` frame (sent
+     * after each accepted `hello` and broadcast after any node-add/remove/probe
+     * from any client). Public identity + last probe result only: never a
+     * bearer. Kept across a reconnect until the new connection's list arrives,
+     * as on the web; emptied on logout, on a server-side sign-out and on a new
+     * sign-in (another server's registry must never show).
+     */
+    val nodes: StateFlow<List<NodeSummary>> get() = NO_NODES
+
+    /** The last `node-result`, whichever request it answers (the web's `nodeResult`). Null until one arrives. */
+    val nodeResult: StateFlow<NodeActionResult?> get() = NO_NODE_RESULT
+
+    /**
+     * `node-add`: register a peer from its credential bundle. [label] and
+     * [baseUrl] are trimmed and omitted when blank (the web form + hook);
+     * [baseUrl] overrides the bundle's own hint. The credential is sent once and
+     * never kept, logged or persisted (see [NodeCredential]).
+     */
+    suspend fun addNode(credential: NodeCredential, label: String? = null, baseUrl: String? = null): NodeRequestOutcome =
+        NodeRequestOutcome.NotSent
+
+    /** `node-remove`: forget a peer (the server also deletes its stored bearer). */
+    suspend fun removeNode(nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
+
+    /** `node-probe`: re-check a peer now; its new status arrives in [nodes]. */
+    suspend fun probeNode(nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
 }
+
+private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
+private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState

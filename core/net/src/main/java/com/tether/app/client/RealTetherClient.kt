@@ -4,6 +4,7 @@ import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.HELLO_CLIENT_ANDROID
+import com.tether.app.protocol.NodeSummary
 import com.tether.app.protocol.PROTOCOL_VERSION
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
@@ -21,6 +22,7 @@ import java.net.SocketTimeoutException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -124,6 +126,8 @@ class RealTetherClient(
      * Bounded by [LOGOUT_CALL_TIMEOUT_MS]; failures are ignored.
      */
     private val onLogout: suspend (baseUrl: String, credential: Credential) -> Unit = { _, _ -> },
+    /** How long a node-add/remove/probe waits for its `node-result` (timed on [scheduler]). */
+    private val nodeRequestTimeoutMs: Long = NodeRegistryRules.REQUEST_TIMEOUT_MS,
 ) : TetherClient {
 
     /**
@@ -188,6 +192,10 @@ class RealTetherClient(
     private var clearedKeys = LinkedHashSet<String>()
     // Every store change bumps this; the writer only ever moves the file forward.
     private var pendingVersion = 0L
+    // v109 node requests awaiting their `node-result`, by requestId. Only the
+    // requestId and the waiter live here, never the frame (node-add's credential
+    // is not retained past the send). Emptied (LinkLost) whenever the socket goes.
+    private val nodeRequests = HashMap<String, CompletableDeferred<NodeRequestOutcome>>()
 
     // --- flows ---
     private val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -211,7 +219,11 @@ class RealTetherClient(
     private val configuredState = MutableStateFlow(false)
     private val signedOutReasonState = MutableStateFlow<SignedOutReason?>(null)
     private val serverUrlState = MutableStateFlow<String?>(null)
+    private val nodesState = MutableStateFlow<List<NodeSummary>>(emptyList())
+    private val nodeResultState = MutableStateFlow<NodeActionResult?>(null)
 
+    override val nodes: StateFlow<List<NodeSummary>> = nodesState
+    override val nodeResult: StateFlow<NodeActionResult?> = nodeResultState
     override val signedOutReason: StateFlow<SignedOutReason?> = signedOutReasonState
     override val serverUrl: StateFlow<String?> = serverUrlState
     override val connection: StateFlow<ConnectionState> = connectionState
@@ -400,6 +412,8 @@ class RealTetherClient(
             backoff.reset()
         }
         signedOutReasonState.value = null
+        // A new sign-in (possibly to another server): its hello brings its own list.
+        clearNodeRegistry()
         start()
         reconnectIfIdle()
     }
@@ -466,6 +480,7 @@ class RealTetherClient(
             detachSocketLocked()
         }
         ws?.cancel()
+        clearNodeRegistry()
         connectionState.value = ConnectionState.Disconnected
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
@@ -490,6 +505,7 @@ class RealTetherClient(
             connecting = false
         }
         ws?.close(1000, "logout")
+        clearNodeRegistry()
         // A user logout is not a server verdict: no "session expired" copy.
         signedOutReasonState.value = null
         connectionState.value = ConnectionState.AuthRequired
@@ -729,6 +745,15 @@ class RealTetherClient(
         handshakeDone = false
         pingTask?.cancel()
         pingTask = null
+        // Replies to node requests can only come on the socket that carried them:
+        // every waiter ends now instead of at its timeout. Safe under the lock,
+        // because a waiter resumes on Dispatchers.Default (nodeRequest), never
+        // inline on this thread.
+        if (nodeRequests.isNotEmpty()) {
+            val lost = nodeRequests.values.toList()
+            nodeRequests.clear()
+            lost.forEach { it.complete(NodeRequestOutcome.LinkLost) }
+        }
         return ws
     }
 
@@ -826,6 +851,7 @@ class RealTetherClient(
             detachSocketLocked()
         }
         ws?.cancel()
+        clearNodeRegistry()
         // State first: an observer that sees the reason must see the settled state.
         connectionState.value = ConnectionState.AuthRequired
         signedOutReasonState.value = reason
@@ -1106,7 +1132,15 @@ class RealTetherClient(
                 if (message.status == "failed") {
                     emitError(message.error ?: "The interrupt request could not be delivered.")
                 }
-            is ServerMessage.ErrorFrame -> emitError(message.message)
+            is ServerMessage.ErrorFrame -> {
+                // Every error is shown, as the web does (use-tether.ts setError);
+                // one that echoes a node request's requestId also ends that request.
+                emitError(message.message)
+                message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
+            }
+            // v109: the registry is replaced wholesale (use-tether.ts setNodes).
+            is ServerMessage.Nodes -> nodesState.value = message.nodes
+            is ServerMessage.NodeResult -> onNodeResult(message)
             is ServerMessage.SessionControls ->
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             // T1.1 modeled the full v129 union; frames this client does not act on
@@ -1563,6 +1597,88 @@ class RealTetherClient(
 
     override fun kill(sessionId: String) {
         sendFrame(ClientMessage.Kill(sessionId))
+    }
+
+    // ------------------------------------------------------------------
+    // v109 node registry
+    // ------------------------------------------------------------------
+
+    override suspend fun addNode(credential: NodeCredential, label: String?, baseUrl: String?): NodeRequestOutcome =
+        when (val fields = NodeRegistryRules.nodeAdd(credential, label, baseUrl)) {
+            is NodeAddFields.Refused -> refuseNodeRequest(fields.message, fields.emit)
+            // The frame (and the credential in it) is built inside the send and
+            // not referenced after it: nothing here outlives ws.send().
+            is NodeAddFields.Ok -> nodeRequest { requestId ->
+                ClientMessage.NodeAdd(credential.value, fields.label, fields.baseUrl, requestId)
+            }
+        }
+
+    override suspend fun removeNode(nodeId: String): NodeRequestOutcome {
+        NodeRegistryRules.nodeIdProblem("node-remove", nodeId)?.let { return refuseNodeRequest(it, emit = true) }
+        return nodeRequest { requestId -> ClientMessage.NodeRemove(nodeId, requestId) }
+    }
+
+    override suspend fun probeNode(nodeId: String): NodeRequestOutcome {
+        NodeRegistryRules.nodeIdProblem("node-probe", nodeId)?.let { return refuseNodeRequest(it, emit = true) }
+        return nodeRequest { requestId -> ClientMessage.NodeProbe(nodeId, requestId) }
+    }
+
+    private fun refuseNodeRequest(message: String, emit: Boolean): NodeRequestOutcome {
+        if (emit) emitError(message)
+        return NodeRequestOutcome.Invalid(message)
+    }
+
+    /**
+     * One node request: a fresh requestId, ONE send on the live socket, then the
+     * first of (its `node-result` / a correlated `error`, the socket going away,
+     * the timeout). Never queued, never retried (use-tether.ts sends once too).
+     * The waiter is always removed, including when the caller is cancelled.
+     */
+    private suspend fun nodeRequest(build: (requestId: String) -> ClientMessage): NodeRequestOutcome {
+        val requestId = "node-" + UUID.randomUUID()
+        val waiter = CompletableDeferred<NodeRequestOutcome>()
+        val ws = synchronized(lock) {
+            val live = if (socketOpen && handshakeDone) socket else null
+            if (live != null) nodeRequests[requestId] = waiter
+            live
+        }
+        if (ws == null) {
+            emitError(NodeRegistryRules.NOT_SENT_MESSAGE)
+            return NodeRequestOutcome.NotSent
+        }
+        val timeout = scheduler.schedule(nodeRequestTimeoutMs) { waiter.complete(NodeRequestOutcome.TimedOut) }
+        try {
+            if (!ws.send(build(requestId).encode())) {
+                // OkHttp refused it (the socket is closing): nothing went out, unless
+                // the link-loss path already settled this waiter.
+                if (waiter.complete(NodeRequestOutcome.NotSent)) emitError(NodeRegistryRules.NOT_SENT_MESSAGE)
+            }
+            // Resumed on Default, never inline on the thread that completes the
+            // waiter (which may hold [lock]: detachSocketLocked).
+            return withContext(Dispatchers.Default) { waiter.await() }
+        } finally {
+            timeout.cancel()
+            synchronized(lock) { nodeRequests.remove(requestId) }
+        }
+    }
+
+    /** `node-result`: always the new [nodeResult] (as on the web); also ends its own request, if still waiting. */
+    private fun onNodeResult(message: ServerMessage.NodeResult) {
+        val result = NodeActionResult(message.ok, message.nodeId, message.message, clock())
+        nodeResultState.value = result
+        message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.Answered(result)) }
+    }
+
+    /** An unknown / already-settled requestId is ignored. */
+    private fun completeNodeRequest(requestId: String, outcome: NodeRequestOutcome) {
+        val waiter = synchronized(lock) { nodeRequests.remove(requestId) } ?: return
+        waiter.complete(outcome)
+    }
+
+    /** Another server's registry, or one seen before a sign-out, must never show. */
+    private fun clearNodeRegistry() {
+        nodesState.value = emptyList()
+        nodeResultState.value = null
     }
 
     /** Ordinary frames go out only on a LIVE connection: open and past `ready` + `hello`. */
