@@ -24,18 +24,20 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** ✅ **Production deployed** (2026-09-27 10:10 CEST): tether `bde3cfa` serves protocol **v129**,
-`nativeProtocolFloor 129` (`safe-restart exit=0`, protocol check passed). `main` of this repo speaks 129 → a
-new APK release is now possible when the owner wants one (release notes: Android 14 floor, Keystore-encrypted
-credentials, pre-T1.4 backups may hold the old plaintext credential file).
-Resume, ≤4 agents: **S0.4** (run 3 + `--compare` runs 1–3 in /tmp/parity-s04-{1,2}; regenerate the
-reference) → verifier → **S0.6** PR; **T3.3** (WIP `12398d9`, bead has next step) → verifier → **T3.4**;
-**T3.5** (WIP `5231b82`; may add `api(libs.lucide.icons)` to core/designsystem); **T1.5** nodes.
-VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.3, S0.5, S1.1 (deployed).
+**Next action:** Production runs tether `bde3cfa` (v129, floor 129). `main` speaks 129, so an APK release is
+possible when the owner asks. Release notes must cover: the Android 14 floor, Keystore-encrypted credentials, and
+that pre-T1.4 backups may still hold the old plaintext credential file.
+**Phase 0:** S0.4 VERIFIED (4 runs pixel-identical 360/360; the reference PNGs are pinned by
+`parity-corpus/screens/web/SHA256SUMS`). **S0.6 = tether PR [#198](https://github.com/TheMrClaus/tether/pull/198)**
+(`android-parity/S0` @ `4442954`), verifier running. Owner merges. Phase 0 closes once S0.6 is verified.
+In flight (≤4 agents): **T3.3** executor (from WIP `12398d9`), **T1.5** security-executor, **T3.5** DONE → verifier.
+Next: T3.3 → verifier → **T3.4** gallery; T1.5 → verifier + security-reviewer; then Phase 4 (T4.1/T4.3).
+VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
-**In-flight state:** none uncommitted. Open branches: `parity/T3.3-primitives` (WIP `12398d9`), `parity/T3.5-icons` (WIP `5231b82`); tether `android-parity/S0.4` @ `3f69e4f` (+ S0.2/S0.3/S0.5 branches for S0.6). Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
-`~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
-`~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
+**In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
+`parity/T1.5-nodes` (wt T1.5). Tether: `android-parity/S0` pushed, PR #198. The per-task branches
+S0.2/S0.3/S0.4/S0.5 are merged into it. Tether S* work happens only in `~/git/tether-wt/` worktrees. **Never** switch
+branches in `~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
 with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
 **Machine notes for this host:** `local.properties` needs `sdk.dir=/home/op/Android/Sdk`
@@ -61,9 +63,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | VERIFIED | executor-S0.3 @ 2026-09-26 21:12 |  |  |
-| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  | done: sidebar-order fix = per-create +60s parity-clock step (SIGUSR2, acked on stdout) e4a745f/3f69e4f; clock back to 1/1000 (13ce1f8, warm… |
+| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | VERIFIED | claude-main @ 2026-09-26 23:01 |  |  |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
-| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
+| S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | DONE | claude-main @ 2026-09-27 08:54 |  |  |
 
 ### Phase 1 — Protocol v128, connection, auth, compatibility
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -73,7 +75,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
-| T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
+| T1.5 | Multi-host node registry awareness (v109) | IN-PROGRESS | claude-main @ 2026-09-27 08:53 |  | done: tests e295309: NodeRegistryTest 15/15, NodesWireTest 8/8 green / half: none / next: mutation checks, full gate x2 |
 
 ### Phase 2 — Reducer at v128
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -88,9 +90,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | Paused at WIP 12398d9 for the owner-requested production deploy; resume from the bead's 'next' note. |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | checkpoint dbc932c: done: screenshot harness (core/designsystem/src/test/.../components/screenshots), 84 goldens in core/designsystem/src/t… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
-| T3.5 | Icons, provider logos, adaptive app icon | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | DECISION (claude-main): add api(libs.lucide.icons) to core/designsystem/build.gradle.kts (one line; T3.5 may make this build edit when resu… |
+| T3.5 | Icons, provider logos, adaptive app icon | DONE | claude-main @ 2026-09-27 04:16 |  |  |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -235,6 +237,9 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
 | 2026-09-27 | **Owner asked: merge tether#197 + redeploy.** Merged `bde3cfa`; production restart delegated to a watcher OUTSIDE `tether.service` that waits for Tether to be idle (no active turns, no background work) and runs `safe-restart --abort-if-busy` (never `--force`) | This session and its agents run inside `tether.service`; a forced restart would kill them mid-work | owner request / claude-main |
+| 2026-09-27 | **Gate exception:** T1.5 (nodes) claimed while P0 is still open. It depends only on T1.1/T1.2 (verified). Routed to `security-executor` + security review, because `node-add` carries a peer credential bundle | Keep ≤4 lanes busy while S0.4/S0.6 close Phase 0 | claude-main (owner delegation) |
+| 2026-09-27 | S0.6 merge keeps only S0.2's anchored `/parity-corpus/` ignore rule and drops S0.5's unanchored one (`fa6807f`); `git check-ignore` confirms `scripts/parity-corpus/*.mjs` stays tracked | The unanchored rule hid S0.2's exporter modules | claude-main (owner delegation) |
+| 2026-09-27 | The 360 web reference PNGs (55 MB) are **not committed** to this repo. `tools/parity/sync-corpus.sh` copies them into a gitignored `parity-corpus/screens/web/`; the committed `manifest.json` + SHA256 list pins them. Per-surface montages (the DoD evidence) are committed under `docs/parity/screens/` | 55 MB per refresh would bloat history every catch-up; montages are a review aid, not a CI gate (PLAN §5.3) | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
