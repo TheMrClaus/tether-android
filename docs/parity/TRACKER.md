@@ -24,11 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED + merged this stretch: T1.1, T1.2, T2.1, T2.1D (app on the v128 reducer; v40
-deleted), T2.2 (807/807 helpers). Owner action pending: merge + deploy **tether#197** (S1.1, v129) —
-`main` speaks 129, so **no release until it's deployed**. IN FLIGHT: **T1.4** auth (security review
-BLOCKED merge on a non-atomic URL/credential write → fixing, then re-verify); **T3.1** generated tokens
-(gate exception); **S0.4** screenshot wait-bug fix. Queued behind T1.4 (same files): T1.3, T1.5, T2.3.
+**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4 (auth + Keystore creds, `c855d02`), T2.1, T2.1D, T2.2,
+T3.1. Owner action pending: merge + deploy **tether#197** (S1.1, v129) — `main` speaks 129, so **no
+release until it's deployed**; next release notes must mention that pre-T1.4 backups may hold the old
+plaintext credential file. IN FLIGHT (own worktrees): **T1.3** durable send; **T2.3** prefs + drafts;
+**T3.2** typography; **S0.4** sidebar-order determinism fix. Next: T1.5 (after T1.3), S0.6 PR, T3.3–T3.5.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -58,7 +58,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S0.1 | tether branch `android-parity/S0` | VERIFIED | claude-main @ 2026-09-26 21:05 | `bd show` |  |
 | S0.2 | `scripts/export-parity-corpus.mjs` (reducer + pure helpers) | VERIFIED | executor-S0.2 @ 2026-09-26 21:12 |  |  |
 | S0.3 | `scripts/capture-wire-corpus.mjs` (all frame types, fake engine) | VERIFIED | executor-S0.3 @ 2026-09-26 21:12 |  |  |
-| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | DONE | claude-main @ 2026-09-26 23:01 |  |  |
+| S0.4 | `scripts/parity-seed.mjs` + `scripts/parity-screens.mjs` (web reference screenshots) | IN-PROGRESS | claude-main @ 2026-09-26 23:01 |  | Reopened after VERIFY-FAIL: cross-sitting determinism 198/360 — session sidebar order timing-dependent (two '10m' sessions swap; parity-clo… |
 | S0.5 | `scripts/export-design-tokens.mjs` (6 skins → JSON) | VERIFIED | executor-S0.5 @ 2026-09-26 21:12 |  |  |
 | S0.6 | PR S0 scripts to tether (no PROTOCOL bump) | TODO |  |  | Merge note: S0.5 (356b456) adds unanchored 'parity-corpus/' to .gitignore, which would ALSO hide S0.2's scripts/parity-corpus/*.mjs — keep … |
 
@@ -68,8 +68,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
-| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
-| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  | Security RE-review at 0c3a082: CLEAR of the Medium blocker (every crash/failure interleaving safe; origin AAD is defense-in-depth). Taking … |
+| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
+| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
 ### Phase 2 — Reducer at v128
@@ -78,14 +78,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T2.1 | Reducer v40→v128; ReducerConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 00:44 | `af24229` · `bd show` |  |
 | T2.1D | Reducer cutover: typed views + legacy adapter, delete v40 reducer (T2.1 unit D) | TODO |  |  |  |
 | T2.2 | Pure helpers (format, model-picker, ordering, seen) ; HelperConformanceTest 100% | VERIFIED | claude-main @ 2026-09-27 02:17 |  |  |
-| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | TODO |  |  |  |
+| T2.3 | Client-state parity with use-tether.ts (seq dedupe, cursor, drafts, prefs) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
 
 ### Phase 3 — Design system
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | IN-PROGRESS | claude-main @ 2026-09-27 03:14 |  | checkpoint (executor-T3.1, wt ~/git/tether-android-wt/T3.1 branch parity/T3.1-tokens, uncommitted): generator :tools:design-tokens + genera… |
-| T3.2 | Typography (Manrope, JetBrains Mono) | TODO |  |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | TODO |  |  |  |
+| T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
+| T3.2 | Typography (Manrope, JetBrains Mono) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  |  |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | TODO |  |  | From T3.1: draw generated shadow lists (bevels/wells/bezel/keys incl. inset layers); use per-skin radii (TetherDimens.radius* only holds ba… |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | TODO |  |  |  |
 
