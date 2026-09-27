@@ -51,11 +51,11 @@ private fun foldNativeSessionId(state: JsObj, event: JsObj): JsObj {
     val rawCapabilities = event["cliCapabilities"]
     val capabilities: JsArr? = if (rawCapabilities is JsArr) rawCapabilities.filterKeep { it is JsStr } else null
     val version = event["cliVersion"].str?.takeIf { it.isNotEmpty() }
-    val inventory = projectedCliInventory(event["cliInventory"], state["cliInventory"])
+    val inventory = normalizeProjectedCliInventory(event["cliInventory"], state["cliInventory"])
     val idUnchanged = strictEquals(state["nativeSessionId"], event["nativeSessionId"])
     val capabilitiesUnchanged = capabilities == null || sameStringList(state["cliCapabilities"], capabilities)
     val versionUnchanged = version == null || strictEquals(state["cliVersion"], JsStr(version))
-    val inventoryUnchanged = inventory == null || sameProjectedCliInventory(state["cliInventory"], inventory)
+    val inventoryUnchanged = inventory == null || sameCliInventory(state["cliInventory"], inventory)
     if (idUnchanged && capabilitiesUnchanged && versionUnchanged && inventoryUnchanged) return state
     return state.with(
         "nativeSessionId" to event["nativeSessionId"],
@@ -64,20 +64,6 @@ private fun foldNativeSessionId(state: JsObj, event: JsObj): JsObj {
         "cliInventory" to (inventory ?: state["cliInventory"]),
     )
 }
-
-// events.mjs:1163 (unit C's normalizeProjectedCliInventory) — PRIVATE STAND-IN until unit C lands
-// it: only the non-object guard (`return null`) is ported. An object inventory is ignored here
-// (treated as absent), so native_session_id events carrying a cliInventory are NOT yet faithful.
-// Hoist: replace with C's normalizeProjectedCliInventory(inventory, previous).
-@Suppress("UNUSED_PARAMETER")
-private fun projectedCliInventory(inventory: JsValue?, previous: JsValue?): JsObj? {
-    if (inventory !is JsObj) return null
-    return null
-}
-
-// events.mjs:1142 (unit C's sameCliInventory) — PRIVATE STAND-IN; unreachable until
-// [projectedCliInventory] returns non-null. Hoist: replace with C's sameCliInventory.
-private fun sameProjectedCliInventory(a: JsValue?, b: JsObj): Boolean = a == b
 
 // events.mjs:2112
 private fun foldTurnStarted(state: JsObj, event: JsObj): JsObj {

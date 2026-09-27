@@ -81,10 +81,10 @@ case limit-hit-resume-now                 B  ready
 case fast-mode                            B  ready
 
 # ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
-# Still pending on another unit's arm (C's folds proven green with it swapped in):
+# (unit I: cli-inventory + cli-inventory-limits went green once FoldTurn used C's CLI-inventory helpers.)
 #   cli-inventory, cli-inventory-limits -> unit I: swap FoldTurn.kt stand-ins projectedCliInventory/sameProjectedCliInventory for C's internal normalizeProjectedCliInventory/sameCliInventory (proven green)
-case cli-inventory                        C  pending
-case cli-inventory-limits                 C  pending
+case cli-inventory                        C  ready
+case cli-inventory-limits                 C  ready
 case mcp-health                           C  ready
 case mcp-health-cap                       C  ready
 case todo-incremental-tasks               C  ready
@@ -105,22 +105,22 @@ case plan-diff-reroute-review-compaction  C  ready
 case code-point-bounds                    C  ready
 
 # ---- I: integration (Revision 1: the 16 fixture cases + 3 named) ----
-case fixture-acp-session-updates          I  pending
-case fixture-claude-cli-inventory         I  pending
-case fixture-claude-forwarded-subagent    I  pending
-case fixture-claude-init-capabilities-retry I pending
-case fixture-claude-model-fallback        I  pending
-case fixture-claude-multi-model-usage     I  pending
-case fixture-claude-permission-denials    I  pending
-case fixture-claude-task-telemetry        I  pending
-case fixture-claude-todo-write            I  pending
-case fixture-claude-tool-lifecycle        I  pending
-case fixture-claude-tool-turn             I  pending
-case fixture-claude-wrap-up               I  pending
-case fixture-codex-app-server-engine      I  pending
-case fixture-codex-app-server-rich        I  pending
-case fixture-codex-rollout                I  pending
-case fixture-codex-turn                   I  pending
-case provider-projection-limits           I  pending
-case codex-app-server-representative      I  pending
-case opencode-provider-session            I  pending
+case fixture-acp-session-updates          I  ready
+case fixture-claude-cli-inventory         I  ready
+case fixture-claude-forwarded-subagent    I  ready
+case fixture-claude-init-capabilities-retry I ready
+case fixture-claude-model-fallback        I  ready
+case fixture-claude-multi-model-usage     I  ready
+case fixture-claude-permission-denials    I  ready
+case fixture-claude-task-telemetry        I  ready
+case fixture-claude-todo-write            I  ready
+case fixture-claude-tool-lifecycle        I  ready
+case fixture-claude-tool-turn             I  ready
+case fixture-claude-wrap-up               I  ready
+case fixture-codex-app-server-engine      I  ready
+case fixture-codex-app-server-rich        I  ready
+case fixture-codex-rollout                I  ready
+case fixture-codex-turn                   I  ready
+case provider-projection-limits           I  ready
+case codex-app-server-representative      I  ready
+case opencode-provider-session            I  ready

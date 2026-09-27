@@ -16,7 +16,7 @@ class FoldSourceChecksTest {
 
     companion object {
         /** Unit I flips this to true: from then on a dispatched-but-unported label fails the build. */
-        const val STRICT_DEFAULT = false
+        const val STRICT_DEFAULT = true
 
         private val strict: Boolean
             get() = System.getProperty("parity.strict")?.toBooleanStrictOrNull() ?: STRICT_DEFAULT
