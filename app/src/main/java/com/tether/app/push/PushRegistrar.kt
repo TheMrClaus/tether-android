@@ -72,11 +72,22 @@ open class PushRegistrar(
      * server (upsert keyed by deviceId). Use on first enable / scope change /
      * FCM token rotation.
      *
+     * The POST **replaces** the device's row (tether `lib/fcm-push.mjs` upsert),
+     * and an absent `syncHints` is stored as false. So [syncHints], the device's
+     * stored opt-in to the v130 sync hint, is always sent explicitly. Otherwise a
+     * token rotation would silently opt the device out (T13.4 note from the
+     * S13.1 review).
+     *
      * Returns [PushRegistrarResult.ServerUnconfigured] when the server has no
      * FCM credentials, so the UI can show the "Server push not configured" line
      * without a toast.
      */
-    suspend fun sync(scope: PushScope, attached: Set<String>, pinned: Set<String>): PushRegistrarResult =
+    open suspend fun sync(
+        scope: PushScope,
+        attached: Set<String>,
+        pinned: Set<String>,
+        syncHints: Boolean,
+    ): PushRegistrarResult =
         withContext(Dispatchers.IO) {
             // One consistent (URL, credential) snapshot: never URL A + token B.
             val session = settings.session()
@@ -97,6 +108,7 @@ open class PushRegistrar(
                 put("scope", scope.wire)
                 put("attachedSessions", toJsonArray(attached))
                 put("pinnedSessions", toJsonArray(pinned))
+                put("syncHints", syncHints)
             }.toString()
             val response = send(
                 base = base,
@@ -116,8 +128,14 @@ open class PushRegistrar(
      * Partial update of the authed device's row — no token re-fetch. Use when
      * only the scope or the attached/pinned sets change. The server returns 404
      * if the row does not exist; the caller should fall back to [sync].
+     * [syncHints] is sent here too, so the row always holds the stored opt-in.
      */
-    suspend fun update(scope: PushScope, attached: Set<String>, pinned: Set<String>): PushRegistrarResult =
+    open suspend fun update(
+        scope: PushScope,
+        attached: Set<String>,
+        pinned: Set<String>,
+        syncHints: Boolean,
+    ): PushRegistrarResult =
         withContext(Dispatchers.IO) {
             // One consistent (URL, credential) snapshot: never URL A + token B.
             val session = settings.session()
@@ -130,6 +148,7 @@ open class PushRegistrar(
                 put("scope", scope.wire)
                 put("attachedSessions", toJsonArray(attached))
                 put("pinnedSessions", toJsonArray(pinned))
+                put("syncHints", syncHints)
             }.toString()
             val response = send(
                 base = base,
@@ -147,7 +166,7 @@ open class PushRegistrar(
         }
 
     /** DELETE the authed device's row. Called on disable. */
-    suspend fun unregister(): PushRegistrarResult = withContext(Dispatchers.IO) {
+    open suspend fun unregister(): PushRegistrarResult = withContext(Dispatchers.IO) {
         val session = settings.session()
         val base = session.baseUrl?.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Success
         val credential = session.credential ?: return@withContext PushRegistrarResult.Success
@@ -160,7 +179,7 @@ open class PushRegistrar(
      * first, fail-safe), so the caller hands over the one that was in force.
      * Without this the server would keep pushing to a signed-out phone.
      */
-    suspend fun unregister(baseUrl: String, credential: Credential): PushRegistrarResult = withContext(Dispatchers.IO) {
+    open suspend fun unregister(baseUrl: String, credential: Credential): PushRegistrarResult = withContext(Dispatchers.IO) {
         val base = baseUrl.toHttpUrlOrNull() ?: return@withContext PushRegistrarResult.Success
         if (credential !is Credential.DeviceToken) return@withContext PushRegistrarResult.Success
         unregisterWith(base, credential)
@@ -234,7 +253,7 @@ open class PushRegistrar(
 class FakePushRegistrar : PushRegistrar(
     settings = com.tether.app.client.InMemorySettings(),
     httpClient = OkHttpClient(),
-    tokenProvider = FirebaseTokenProvider { "fake-fcm-token" },
+    tokenProvider = FirebaseTokenProvider { "fake-fcm-token-not-a-real-credential" },
 ) {
     // The base class is fully functional against a MockWebServer; this fake is
     // a marker type so tests can assert "the UI is wired to a fake" if needed.

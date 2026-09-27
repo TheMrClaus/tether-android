@@ -2,21 +2,24 @@ package com.tether.app.push
 
 import android.app.Application
 import android.content.Context
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
+import com.tether.app.client.Credential
 import com.tether.app.client.SettingsStore
 import com.tether.app.ui.prefs.UiPrefs
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 
 /**
@@ -24,10 +27,11 @@ import okhttp3.OkHttpClient
  * session sets), [PushRegistrar] (the server round-trips), and the
  * [ForegroundState] the FCM service reads for foreground suppression.
  *
- * Wired from [com.tether.app.TetherApp.onCreate]. Observes the prefs flows,
- * debounces 500 ms, and calls [PushRegistrar.sync] on enable / scope change or
- * [PushRegistrar.update] on set-only changes. Observes the client `configured`
- * flow; on logout calls [PushRegistrar.unregister].
+ * Wired from [com.tether.app.TetherApp.onCreate]. Observes the prefs flows and
+ * hands every change to a [PushSyncCoordinator], which calls
+ * [PushRegistrar.sync] on enable / token rotation or [PushRegistrar.update] on
+ * set-only changes. Observes the client `configured` flow; on logout calls
+ * [PushRegistrar.unregister].
  *
  * Firebase initialisation: if the build supplies the three env-backed
  * `TETHER_FIREBASE_*` values (read from `BuildConfig`-style fields or, in this
@@ -45,15 +49,15 @@ class PushController(
     private val scope: CoroutineScope,
     private val firebaseConfig: FirebaseConfig = FirebaseConfig.FromEnv,
     private val tokenProvider: FirebaseTokenProvider = FirebaseTokenProvider.Default,
+    private val syncHints: SyncHintsSource = SyncHintsSource.Off,
     private val registrarFactory: (PushRegistrar) -> PushRegistrar = { it },
 ) {
-    private var lastSyncKey: String? = null
-    private var pendingConfigured = true
-
     /** Lazily-created registrar; tests inject a fake via [registrarFactory]. */
     private val registrar: PushRegistrar by lazy {
         registrarFactory(PushRegistrar(settings, httpClient, tokenProvider))
     }
+
+    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) }
 
     fun start() {
         // Firebase init (no google-services plugin path). Idempotent.
@@ -67,28 +71,26 @@ class PushController(
             },
         )
 
-        // Observe prefs: pushEnabled + pushScope + sets. Debounce 500 ms and
-        // route to sync / update / unregister.
+        // Observe prefs: pushEnabled + pushScope + sets + the sync-hint opt-in,
+        // and route to sync / update / unregister.
         combine(
             prefs.pushEnabled,
             prefs.pushScope,
             prefs.attachedSessions,
             prefs.pinnedSessions,
-        ) { enabled, scopeChoice, attached, pinned ->
-            SyncRequest(enabled, scopeChoice, attached.toSet(), pinned.toSet())
+            syncHints.optedIn(),
+        ) { enabled, scopeChoice, attached, pinned, hints ->
+            PushSyncRequest(enabled, scopeChoice, attached.toSet(), pinned.toSet(), hints)
         }
             .distinctUntilChanged()
-            .onEach { sync(it) }
+            .onEach { coordinator.onRequest(it) }
             .launchIn(scope)
 
         // Logout: unregister. The settings.credential flow flips to null when
         // RealTetherClient.stop() clears it; that is the signal.
         scope.launch {
             settings.credential.collect { credential ->
-                if (credential == null) {
-                    registrar.unregister()
-                    pendingConfigured = true
-                }
+                if (credential == null) coordinator.onCredentialCleared()
             }
         }
     }
@@ -100,41 +102,8 @@ class PushController(
      * authenticate the DELETE with, so the server would keep pushing to a
      * signed-out phone.
      */
-    suspend fun unregisterAfterLogout(baseUrl: String, credential: com.tether.app.client.Credential) {
-        registrar.unregister(baseUrl, credential)
-        lastSyncKey = null
-        pendingConfigured = true
-    }
-
-    private suspend fun sync(request: SyncRequest) {
-        if (!request.enabled) {
-            // Disabled: unregister on the server (best-effort) and reset the
-            // sync key so a re-enable re-runs the full sync path.
-            if (lastSyncKey != null) {
-                registrar.unregister()
-                lastSyncKey = null
-            }
-            return
-        }
-        val key = "${request.scope.wire}|${request.attached.sorted()}|${request.pinned.sorted()}"
-        val tokenChanged = pendingConfigured
-        if (key == lastSyncKey && !tokenChanged) return
-        val result = if (tokenChanged) {
-            registrar.sync(request.scope, request.attached, request.pinned)
-        } else {
-            // Scope or sets changed but the row already exists: PATCH. If the
-            // PATCH 404s (row vanished server-side), fall back to a full sync.
-            val patched = registrar.update(request.scope, request.attached, request.pinned)
-            if (patched is PushRegistrarResult.Error && patched.message.contains("Not registered")) {
-                registrar.sync(request.scope, request.attached, request.pinned)
-            } else {
-                patched
-            }
-        }
-        if (result is PushRegistrarResult.Success || result is PushRegistrarResult.ServerUnconfigured) {
-            lastSyncKey = key
-            pendingConfigured = false
-        }
+    suspend fun unregisterAfterLogout(baseUrl: String, credential: Credential) {
+        coordinator.onLoggedOut(baseUrl, credential)
     }
 
     private fun maybeInitialiseFirebase() {
@@ -143,20 +112,13 @@ class PushController(
         FirebaseApp.initializeApp(app, options)
     }
 
-    private data class SyncRequest(
-        val enabled: Boolean,
-        val scope: PushScope,
-        val attached: Set<String>,
-        val pinned: Set<String>,
-    )
-
     companion object {
         @Volatile private var instance: PushController? = null
 
         /**
          * Called from [com.tether.app.TetherApp.onCreate] to wire the
          * process-wide controller. Also exposed as a process-wide singleton so
-         * [TetherFcmService.onNewToken] can hand the new token to it.
+         * [TetherFcmService.onNewToken] can reach it.
          */
         fun start(
             app: Application,
@@ -171,24 +133,113 @@ class PushController(
             return controller
         }
 
-        /** Handle a fresh FCM token by re-syncing the registration. */
-        fun handleNewToken(context: Context, token: String) {
+        /**
+         * FCM rotated the token: re-register now with the latest prefs, including
+         * the stored sync-hint opt-in. Before T12.1 this only set flags, and the
+         * prefs combine never re-emits on its own, so a rotated token did not
+         * reach the server until an unrelated pref changed.
+         */
+        fun handleNewToken() {
             val controller = instance ?: return
-            controller.scope.launch {
-                // Force a full sync: the token changed.
-                controller.pendingConfigured = true
-                controller.lastSyncKey = null
-                // Re-read prefs and trigger a sync via the same flow path. The
-                // simplest route is to mark the next collect as a full sync,
-                // which the next emission of the prefs combine will pick up.
-                // We do not call sync() directly here because the prefs combine
-                // owns the current request; instead, nudge the foreground
-                // signal so the next emission re-syncs. For a token rotation
-                // while the app is backgrounded, the next foreground tick
-                // re-runs the combine and sync() sees pendingConfigured=true.
-                // In the foreground the combine is live and emits immediately.
+            controller.scope.launch { controller.coordinator.onTokenRotated() }
+        }
+    }
+}
+
+/** One snapshot of everything the server's push row holds for this device. */
+internal data class PushSyncRequest(
+    val enabled: Boolean,
+    val scope: PushScope,
+    val attached: Set<String>,
+    val pinned: Set<String>,
+    val syncHints: Boolean,
+)
+
+/**
+ * Keeps the server's push row in step with the prefs. Every entry point runs
+ * under one lock, so a token rotation and a prefs change never interleave
+ * their round-trips.
+ *
+ * - First sync, and every sync after a token rotation, is a full POST
+ *   ([PushRegistrar.sync]). The POST replaces the row, so it carries the whole
+ *   request, `syncHints` included.
+ * - Later changes are a PATCH ([PushRegistrar.update]). A 404 (the row vanished
+ *   server-side) falls back to the full POST.
+ * - A rotation re-applies the latest request, so the new token is sent at once.
+ *   If the prefs have not emitted yet, the first emission does the full sync.
+ */
+internal class PushSyncCoordinator(private val registrar: PushRegistrar) {
+    private val mutex = Mutex()
+    private var latest: PushSyncRequest? = null
+    private var lastSyncKey: String? = null
+    private var needsFullSync = true
+
+    suspend fun onRequest(request: PushSyncRequest) = mutex.withLock {
+        latest = request
+        reconcile(request)
+    }
+
+    suspend fun onTokenRotated() = mutex.withLock {
+        needsFullSync = true
+        latest?.let { reconcile(it) }
+    }
+
+    suspend fun onCredentialCleared() = mutex.withLock {
+        registrar.unregister()
+        needsFullSync = true
+    }
+
+    suspend fun onLoggedOut(baseUrl: String, credential: Credential) = mutex.withLock {
+        registrar.unregister(baseUrl, credential)
+        lastSyncKey = null
+        needsFullSync = true
+    }
+
+    private suspend fun reconcile(request: PushSyncRequest) {
+        if (!request.enabled) {
+            // Disabled: unregister on the server (best-effort); a re-enable then
+            // re-runs the full sync path.
+            if (lastSyncKey != null) {
+                registrar.unregister()
+                lastSyncKey = null
+            }
+            needsFullSync = true
+            return
+        }
+        val key = "${request.scope.wire}|${request.attached.sorted()}|${request.pinned.sorted()}|${request.syncHints}"
+        if (key == lastSyncKey && !needsFullSync) return
+        val result = if (needsFullSync) {
+            registrar.sync(request.scope, request.attached, request.pinned, request.syncHints)
+        } else {
+            val patched = registrar.update(request.scope, request.attached, request.pinned, request.syncHints)
+            if (patched is PushRegistrarResult.Error && patched.message.contains("Not registered")) {
+                registrar.sync(request.scope, request.attached, request.pinned, request.syncHints)
+            } else {
+                patched
             }
         }
+        if (result is PushRegistrarResult.Success || result is PushRegistrarResult.ServerUnconfigured) {
+            lastSyncKey = key
+            needsFullSync = false
+        }
+    }
+}
+
+/**
+ * The device's stored opt-in to the server's content-free sync hint (tether
+ * v130 `syncHints`). It is always sent with the registration ([PushRegistrar]),
+ * so a token rotation keeps it.
+ *
+ * [Off] until the opt-in exists. The setting ("Keep sessions up to date in the
+ * background", SYNC_DESIGN §6.2) needs a key in `core/data` (T10.1/T13.4). The
+ * catch-up worker that acts on a hint is T13.4. Opting in before then would only
+ * wake the device for hints that the app ignores.
+ */
+fun interface SyncHintsSource {
+    fun optedIn(): Flow<Boolean>
+
+    companion object Off : SyncHintsSource {
+        override fun optedIn(): Flow<Boolean> = flowOf(false)
     }
 }
 

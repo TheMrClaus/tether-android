@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification channels (T12.1). One per server push kind, plus the general
+         channel that FCM uses for notifications it shows while Tether is closed. -->
+    <string name="push_channel_approval_name">Waiting for approval</string>
+    <string name="push_channel_approval_description">An agent session is waiting for you to approve an action.</string>
+    <string name="push_channel_question_name">Questions</string>
+    <string name="push_channel_question_description">An agent session asked you a question.</string>
+    <string name="push_channel_turn_done_name">Turn done</string>
+    <string name="push_channel_turn_done_description">An agent session finished its turn.</string>
+    <string name="push_channel_rate_limit_name">Rate limit</string>
+    <string name="push_channel_rate_limit_description">A session hit a rate limit and asks whether to resume when it resets.</string>
+    <string name="push_channel_general_name">Other session alerts</string>
+    <string name="push_channel_general_description">Alerts shown while Tether is closed, and any other session alert.</string>
+</resources>

@@ -39,12 +39,23 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Tap on a notification FCM showed while the app was in the
+                 background: the server sets android.notification.click_action
+                 "OPEN_TETHER" (tether lib/fcm-push.mjs), and FCM starts this
+                 action with the data map as extras. Without this filter the tap
+                 resolves no activity and does nothing. The activity is already
+                 exported (launcher), so this adds no new entry point.
+                 push/PushDeepLink.parse treats the extras as untrusted. -->
+            <intent-filter>
+                <action android:name="OPEN_TETHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <!-- FCM message receiver. exported=false: only the FCM system service
-             (same APK signature) may start it. The service posts the shared
-             push payload (approval / question / turn_end) as a system
-             notification on the channel selected by data.kind. -->
+             (same APK signature) may start it. The service posts the visible
+             server kinds (approval / question / turn_end / resume_choice) on
+             their own channels and ignores the data-only sync hint. -->
         <service
             android:name=".push.TetherFcmService"
             android:exported="false">
@@ -52,6 +63,17 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Channel and icon for notifications FCM shows itself (app in the
+             background). The server sends no channel_id, so without this they
+             would land in FCM's "Misc" fallback channel. push/PushChannels
+             creates the channel at startup. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="tether-general" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@android:drawable/stat_notify_chat" />
     </application>
 
 </manifest>

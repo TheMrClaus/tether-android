@@ -17,7 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,8 +27,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
+import com.tether.app.push.PushDeepLink
 import com.tether.app.push.PushScope
-import com.tether.app.push.TetherFcmService
+import com.tether.app.push.rememberNotificationPermission
 import com.tether.app.ui.compat.CompatibilityBanner
 import com.tether.app.ui.localnet.LocalNetworkExplainDialog
 import com.tether.app.ui.localnet.LocalNetworkNotice
@@ -56,15 +59,28 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     val configured by client.configured.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
 
-    // Push: a tap on a notification routes here. For v1 we only clear the
-    // foreground-suppression tag so the next push for the same event still
-    // posts (the user has acknowledged the current one by tapping it). A
-    // session-specific deep link is a follow-up.
+    // Push: a notification tap routes here (PushDeepLink; T4.4 owns full routing).
+    // The server's FCM payload is id-free today, so a tap opens the app as it is.
+    // A session id, when one comes, is selected only once the server lists it.
+    val sessions by client.sessions.collectAsStateWithLifecycle()
+    var pushSessionId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pushIntent) {
-        val tag = pushIntent?.getStringExtra(TetherFcmService.EXTRA_PUSH_TAG)
-        if (tag != null) {
-            ForegroundState.activeTag = null
-        }
+        val open = PushDeepLink.parse(pushIntent) ?: return@LaunchedEffect
+        pushSessionId = open.sessionId
+    }
+    LaunchedEffect(pushSessionId, sessions) {
+        val id = PushDeepLink.resolve(pushSessionId, sessions.map { it.id }) ?: return@LaunchedEffect
+        pushSessionId = null
+        vm.selectSession(id)
+    }
+
+    // Android 13+ POST_NOTIFICATIONS: asked once, automatically, after sign-in
+    // while notifications are on (UiPrefs default). A denial is never re-asked
+    // from here; the settings toggles (T12.2) use notificationPermission.onAllow().
+    val notificationPermission = rememberNotificationPermission(prefs)
+    val pushEnabled by prefs.pushEnabled.collectAsStateWithLifecycle(initialValue = false)
+    LaunchedEffect(configured, pushEnabled, notificationPermission.asked, notificationPermission.granted) {
+        notificationPermission.autoRequestIfDue(signedIn = configured, pushEnabled = pushEnabled)
     }
 
     // Track the currently-selected session's push tag so the FCM service can

@@ -22,7 +22,7 @@ import org.junit.Test
 class PushRegistrarTest {
 
     private val server = MockWebServer()
-    private val token = "tthr_test_token_value_abcdefghijklmnopqrstuvwxyz"
+    private val token = "fake-device-token-not-a-credential"
     private val settings = InMemorySettings()
 
     @Before
@@ -40,7 +40,7 @@ class PushRegistrarTest {
         server.shutdown()
     }
 
-    private fun registrar(token: String? = "fcm-token-abc-123"): PushRegistrar =
+    private fun registrar(token: String? = "fake-fcm-token-not-a-credential"): PushRegistrar =
         PushRegistrar(
             settings = settings,
             httpClient = OkHttpClient(),
@@ -54,7 +54,7 @@ class PushRegistrarTest {
         // 2. POST register → 201
         server.enqueue(MockResponse().setResponseCode(201).setBody("""{"ok":true,"created":true}"""))
 
-        val result = registrar().sync(PushScope.Attached, setOf("s1", "s2"), setOf("p1"))
+        val result = registrar().sync(PushScope.Attached, setOf("s1", "s2"), setOf("p1"), syncHints = false)
 
         assertEquals(PushRegistrarResult.Success, result)
 
@@ -66,30 +66,48 @@ class PushRegistrarTest {
         assertEquals("POST", postReq.method)
         assertEquals("/api/push/fcm-register", postReq.path)
         val body = postReq.body.readUtf8()
-        assertTrue(body.contains("\"fcmToken\":\"fcm-token-abc-123\""))
+        assertTrue(body.contains("\"fcmToken\":\"fake-fcm-token-not-a-credential\""))
         assertTrue(body.contains("\"scope\":\"attached\""))
         assertTrue(body.contains("\"attachedSessions\":[\"s1\",\"s2\"]"))
         assertTrue(body.contains("\"pinnedSessions\":[\"p1\"]"))
+        // The POST replaces the server row, so the opt-in is never left out.
+        assertTrue(body.contains("\"syncHints\":false"))
+    }
+
+    @Test
+    fun syncSendsTheStoredSyncHintsOptIn() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true}"""))
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"ok":true}"""))
+        assertEquals(PushRegistrarResult.Success, registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = true))
+        server.takeRequest() // config probe
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"syncHints\":true"))
+    }
+
+    @Test
+    fun updateSendsTheStoredSyncHintsOptIn() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
+        registrar().update(PushScope.All, emptySet(), emptySet(), syncHints = true)
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"syncHints\":true"))
     }
 
     @Test
     fun syncReturnsServerUnconfiguredWhenConfigReportsFalse() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":false,"reason":"not configured"}"""))
-        val result = registrar().sync(PushScope.All, emptySet(), emptySet())
+        val result = registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = false)
         assertEquals(PushRegistrarResult.ServerUnconfigured, result)
     }
 
     @Test
     fun syncReturnsErrorWhenFirebaseTokenIsNull() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true,"reason":null}"""))
-        val result = registrar(token = null).sync(PushScope.All, emptySet(), emptySet())
+        val result = registrar(token = null).sync(PushScope.All, emptySet(), emptySet(), syncHints = false)
         assertTrue(result is PushRegistrarResult.Error)
     }
 
     @Test
     fun updatePatchesScopeAndSets() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
-        val result = registrar().update(PushScope.Pinned, emptySet(), setOf("p1"))
+        val result = registrar().update(PushScope.Pinned, emptySet(), setOf("p1"), syncHints = false)
         assertEquals(PushRegistrarResult.Success, result)
         val req = server.takeRequest()
         assertEquals("PATCH", req.method)
@@ -104,7 +122,7 @@ class PushRegistrarTest {
     @Test
     fun updateReturnsErrorOn404() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(404).setBody("""{"error":"No FCM registration for this device."}"""))
-        val result = registrar().update(PushScope.All, emptySet(), emptySet())
+        val result = registrar().update(PushScope.All, emptySet(), emptySet(), syncHints = false)
         assertTrue(result is PushRegistrarResult.Error)
     }
 
@@ -127,7 +145,7 @@ class PushRegistrarTest {
             httpClient = OkHttpClient(),
             tokenProvider = FirebaseTokenProvider { "tok" },
         )
-        val result = r.sync(PushScope.All, emptySet(), emptySet())
+        val result = r.sync(PushScope.All, emptySet(), emptySet(), syncHints = false)
         assertTrue(result is PushRegistrarResult.Error)
     }
 
@@ -137,7 +155,7 @@ class PushRegistrarTest {
         other.start()
         try {
             server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", other.url("/api/push/fcm-config")))
-            assertTrue(registrar().sync(PushScope.All, emptySet(), emptySet()) is PushRegistrarResult.Error)
+            assertTrue(registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = false) is PushRegistrarResult.Error)
             server.enqueue(MockResponse().setResponseCode(307).addHeader("Location", other.url("/api/push/fcm-register")))
             assertTrue(registrar().unregister() is PushRegistrarResult.Error)
             assertEquals(0, other.requestCount)

@@ -9,8 +9,8 @@ import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.KeystoreCredentialKeySource
 import com.tether.app.client.RealTetherClient
 import com.tether.app.net.AndroidLocalNetworkAccess
+import com.tether.app.push.PushChannels
 import com.tether.app.push.PushController
-import com.tether.app.push.TetherFcmService
 import com.tether.app.ui.ClientLocator
 import com.tether.app.ui.prefs.UiPrefs
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +24,7 @@ class TetherApp : Application() {
         super.onCreate()
 
         // Notification channels must exist before any FCM message can arrive.
-        TetherFcmService.ensureChannels(this)
+        PushChannels.ensure(this)
 
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         // Credentials are sealed with a non-exportable Android Keystore AES-GCM key
