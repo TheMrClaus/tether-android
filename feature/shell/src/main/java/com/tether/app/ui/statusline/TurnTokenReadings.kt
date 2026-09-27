@@ -2,6 +2,7 @@ package com.tether.app.ui.statusline
 
 import androidx.compose.runtime.Immutable
 import com.tether.app.protocol.helpers.Format
+import com.tether.app.protocol.helpers.jsToNumber
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.protocol.model.TurnView
 import com.tether.app.protocol.tree.JsNum
@@ -38,12 +39,15 @@ private fun jsMax(a: Double, b: Double): Double = if (a.isNaN() || b.isNaN()) Do
 /**
  * turn-activity.tsx:169-173: the open run's own count — `liveTokens` is cumulative for the turn,
  * so subtract what had been counted when the run opened. Null without a live estimate or a run.
+ *
+ * `live - run.tokensStart` is JS subtraction: an absent (or non-numeric) `tokensStart` makes it
+ * NaN, and `Math.max(0, NaN)` is NaN — which the web still renders, as [tokenLabel] → "— tokens"
+ * (compactNumber prints "—" for a non-finite value). A JSON-null one coerces to 0.
  */
 fun runTokens(turn: TurnView?): Double? {
     val live = turn?.liveTokens ?: return null
     val run = turn.run ?: return null
-    val start = (run["tokensStart"] as? JsNum)?.value ?: 0.0
-    return jsMax(0.0, live - start)
+    return jsMax(0.0, live - jsToNumber(run["tokensStart"]))
 }
 
 /** turn-activity.tsx:104-117: the session total over completed turns only. */

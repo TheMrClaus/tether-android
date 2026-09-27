@@ -2,7 +2,9 @@ package com.tether.app.ui.statusline.screenshots
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -11,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import com.tether.app.ui.statusline.UsageTrack
 import com.tether.app.ui.statusline.UsageTrackPlacement
 import com.tether.app.ui.theme.TetherSkin
+import kotlinx.coroutines.delay
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,29 +82,31 @@ class StatuslineFontScaleScreenshotTest(private val board: String, private val s
 }
 
 /**
- * Reduced motion: the usage track's width transition (`var(--duration) var(--ease-out)`) is a
- * jump. Both captures are one frame (16ms) after the reading changes 0% → 80%: with motion the
- * fill is mid-transition, under reduced motion it is already at 80%.
+ * Reduced motion: the usage track's width transition (`var(--duration) var(--ease-out)`, 200ms) is
+ * a jump. The reading flips 0% → 80% INSIDE the composition ([FlipAfterMs] on the paused test
+ * clock), and both captures are taken [FrameAfterFlipMs] later: with motion the fill is
+ * mid-transition, under reduced motion it is already at 80%. [UsageTrackMotionGoldensTest] asserts
+ * the two goldens differ in exactly that way.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class UsageTrackMotionScreenshotTest(private val reduced: Boolean) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun oneFrameAfterAChange() {
-        var percent by mutableIntStateOf(0)
+    @Test fun framesAfterAChange() {
         rule.snapBoard(
             if (reduced) "usage-track-reduced-motion" else "usage-track-motion",
             TetherSkin.Machine,
             ScreenSize.Phone,
             reducedMotion = reduced,
-            captureAtMs = 16,
-            beforeCapture = {
-                rule.mainClock.advanceTimeBy(100)
-                percent = 80
-            },
+            captureAtMs = FlipAfterMs + FrameAfterFlipMs,
         ) {
-            StateRow("statusline · meter, 16ms after 0% → 80%") {
+            var percent by remember { mutableIntStateOf(0) }
+            LaunchedEffect(Unit) {
+                delay(FlipAfterMs)
+                percent = 80
+            }
+            StateRow("statusline · meter, ${FrameAfterFlipMs}ms after 0% → 80%") {
                 UsageTrack(percent, "Context")
                 Box(Modifier.width(200.dp)) {
                     UsageTrack(percent, "Five hour", placement = UsageTrackPlacement.Meter)
@@ -116,3 +121,7 @@ class UsageTrackMotionScreenshotTest(private val reduced: Boolean) {
         fun params(): List<Array<Any>> = listOf(arrayOf<Any>(false), arrayOf<Any>(true))
     }
 }
+
+/** When the motion board's reading flips, and when it is captured: a few frames in, well inside the 200ms transition. */
+const val FlipAfterMs: Long = 100
+const val FrameAfterFlipMs: Long = 64

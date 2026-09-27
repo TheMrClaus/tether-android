@@ -4,10 +4,16 @@ import com.tether.app.protocol.model.SessionView
 import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.reduce.freshTree
+import com.tether.app.protocol.model.TurnView
+import com.tether.app.protocol.tree.JsNull
+import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
+import com.tether.app.protocol.tree.JsStr
+import com.tether.app.protocol.tree.JsValue
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -58,6 +64,25 @@ class TurnTokenReadingsTest {
         val tree = fold(freshTree(), e("turn_started", "t1"), e("turn_end", "t1") { put("outcome", "success") })
         assertEquals(0.0, settledTurnTokens(SessionView(tree).turn("t1")!!)!!, 0.0)
         assertEquals(SessionTokenTotal(0.0, 1), sessionTokenTotal(SessionView(tree)))
+    }
+
+    // turn-activity.tsx:171-173 with a malformed run: JS `live - undefined` is NaN, Math.max keeps
+    // it, and the web renders tokenLabel(NaN) = "— tokens"; a JSON-null start coerces to 0.
+    @Test fun runTokensFollowJsSubtraction() {
+        fun turn(start: JsValue?) = TurnView(
+            JsObj.of(
+                "turnId" to JsStr("t1"),
+                "liveTokens" to JsNum(420.0),
+                "run" to JsObj.of("index" to JsNum(0.0), "startedAt" to JsNum(1.0), "tokensStart" to start),
+            ),
+        )
+        assertEquals(320.0, runTokens(turn(JsNum(100.0)))!!, 0.0)
+        assertEquals(0.0, runTokens(turn(JsNum(900.0)))!!, 0.0) // never below 0
+        assertEquals(420.0, runTokens(turn(JsNull))!!, 0.0) // null → 0
+        val missing = runTokens(turn(null))!! // absent → NaN, still a reading
+        assertTrue(missing.isNaN())
+        assertEquals("— tokens", tokenLabel(missing))
+        assertTrue(runTokens(turn(JsStr("abc")))!!.isNaN())
     }
 
     @Test fun tokenLabelSingularAndCompact() {
