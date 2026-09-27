@@ -217,14 +217,14 @@ class TetherViewModel(
     }
 
     /**
-     * Choose the project folder new sessions run in (folder picker / pinned
-     * project). The session list filters to it, so the open chat is dropped —
-     * the same setActiveId(null) the web client applies on a project switch.
+     * Choose the workspace new sessions run in (a sidebar block, "Add workspace"). Since v93 every
+     * block is on screen at once, so the open conversation stays put (dashboard.tsx switchProject /
+     * chooseWorkspace leave it alone, T5.1); the sidebar re-declares its full watch set after this
+     * `discover`.
      */
     fun selectWorkspace(cwd: String) {
         if (cwd == _currentWorkspace.value) return
         _currentWorkspace.value = cwd
-        _selectedSessionId.value = null
         client.discover(cwd)
     }
 

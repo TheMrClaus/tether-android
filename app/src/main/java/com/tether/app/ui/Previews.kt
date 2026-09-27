@@ -57,17 +57,6 @@ private fun previewSession(status: String, name: String = "tether-ui polish") = 
     updatedAt = previewNow - 90_000,
 )
 
-@Preview(name = "Session rows", showBackground = true, backgroundColor = 0xFF111517)
-@Composable
-private fun SessionRowPreview() {
-    PreviewSurface {
-        SessionRow(previewSession("active"), selected = false, now = previewNow, onClick = {})
-        SessionRow(previewSession("waiting", "release pipeline"), selected = false, now = previewNow, onClick = {})
-        SessionRow(previewSession("ready", "docs sweep"), selected = true, now = previewNow, onClick = {})
-        SessionRow(previewSession("exited", "spike: worker threads"), selected = false, now = previewNow, onClick = {})
-    }
-}
-
 @Preview(name = "Approval card", showBackground = true, backgroundColor = 0xFF070A0B)
 @Composable
 private fun ApprovalCardPreview() {
