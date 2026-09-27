@@ -3,6 +3,7 @@ package com.tether.app.client
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.WebSocket
 import org.junit.After
@@ -110,6 +111,23 @@ class RealTetherClientTreeTest {
         assertNull("full snapshot requested", attach["afterSeq"])
         assertFalse(h.client.projectionTrees.value.containsKey("s1"))
         assertFalse(h.client.projections.value.containsKey("s1"))
+
+        // Bounded: further events for the dropped session send NO more attaches until the
+        // snapshot arrives (T2.1D verifier gap). The reader handles frames in order, so once the
+        // trailing error frame is observed, both events before it have been processed.
+        val errors = java.util.concurrent.LinkedBlockingQueue<String>()
+        val errorJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch(
+            start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED,
+        ) { h.client.errors.collect { errors.put(it) } }
+        ws.send("""{"type":"event","sessionId":"s1","event":{"type":"message_delta","turnId":"t1","blockId":"b1","text":"x","seq":3,"ts":3000}}""")
+        ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_end","turnId":"t1","seq":4,"ts":4000}}""")
+        ws.send("""{"type":"error","message":"barrier"}""")
+        assertEquals("barrier", errors.poll(10, java.util.concurrent.TimeUnit.SECONDS))
+        errorJob.cancel()
+        assertTrue(
+            "no second attach before the healing snapshot",
+            h.framesUntilBarrier().none { it.type() == "attach" },
+        )
 
         // The full snapshot heals it.
         ws.send(snapshotFrame("s1", 2, fullState()))
