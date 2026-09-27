@@ -6,6 +6,15 @@
 //   S04_WT=<tether worktree on android-parity/S0.4> OUT=<dir> \
 //     systemd-run --user --scope --quiet --unit=tether-parity-log-$(date +%s) \
 //       --setenv=S04_WT="$S04_WT" --setenv=OUT="$OUT" node docs/parity/screens/log-dialog/capture-web.mjs
+import { readFileSync } from "node:fs";
+
+// Refuse to run anywhere but its own transient scope: never inside tether.service's cgroup.
+const cgroup = readFileSync("/proc/self/cgroup", "utf8");
+if (cgroup.includes("tether.service") || !/tether-parity-[^/\n]*\.scope/u.test(cgroup)) {
+  console.error("capture-web: run me in my own scope (systemd-run --user --scope --unit=tether-parity-log-<n> ...), see the header. Current cgroup:\n" + cgroup);
+  process.exit(2);
+}
+
 const WT = process.env.S04_WT;
 const OUT = process.env.OUT;
 if (!WT || !OUT) throw new Error("set S04_WT (the S0.4 worktree) and OUT (an output dir outside the repos)");

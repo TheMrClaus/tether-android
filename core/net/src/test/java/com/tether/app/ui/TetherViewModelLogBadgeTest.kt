@@ -91,6 +91,49 @@ class TetherViewModelLogBadgeTest {
     }
 
     @Test
+    fun signingOutAndBackInStartsTheMarkOver() = runTest(dispatcher) {
+        val client = LogClient()
+        val vm = vm(client)
+        client.push("b1", "warn", "warn", "warn")
+        advanceUntilIdle()
+        vm.openLog()
+        advanceUntilIdle()
+        assertEquals(0, vm.unseenWarnings.value)
+        client.log.value = EventLog() // sign-out: RealTetherClient.clearSignInViews()
+        advanceUntilIdle()
+        client.push("b1", "warn", "warn") // the same server after sign-in replays its tail
+        advanceUntilIdle()
+        assertEquals(2, vm.unseenWarnings.value)
+    }
+
+    @Test
+    fun switchingServersStartsTheMarkOver() = runTest(dispatcher) {
+        val client = LogClient()
+        val vm = vm(client)
+        client.push("server-a", "warn", "error", "warn", "warn")
+        advanceUntilIdle()
+        vm.openLog()
+        client.log.value = EventLog() // a new sign-in to another server
+        advanceUntilIdle()
+        client.push("server-b", "error")
+        advanceUntilIdle()
+        assertEquals(1, vm.unseenWarnings.value)
+    }
+
+    @Test
+    fun aServerRestartKeepsTheMark() = runTest(dispatcher) {
+        val client = LogClient()
+        val vm = vm(client)
+        client.push("b1", "warn", "warn", "warn")
+        advanceUntilIdle()
+        vm.openLog()
+        advanceUntilIdle()
+        client.push("b2", "warn", "warn") // new bootId, never an empty bootless log
+        advanceUntilIdle()
+        assertEquals("the restarted log's 2 warnings are under the mark of 3", 0, vm.unseenWarnings.value)
+    }
+
+    @Test
     fun clientSideErrorsNoLongerFeedTheBadge() = runTest(dispatcher) {
         val client = LogClient()
         val vm = vm(client)

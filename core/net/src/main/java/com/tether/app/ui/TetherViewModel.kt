@@ -152,6 +152,13 @@ class TetherViewModel(
                 for ((sessionId, text) in latest) draftStore.write(sessionId, text)
             }
         }
+        // The web keeps seenWarnAt in the Dashboard, which unmounts on /login, so every sign-in starts
+        // the mark at 0. This view model outlives the login screen: reset the mark whenever the log
+        // is back to its signed-out state (no entries, no bootId: sign-out, new sign-in, server
+        // switch). A server restart keeps a bootId, so it keeps the mark, as on the web.
+        viewModelScope.launch {
+            client.eventLog.collect { log -> if (log.bootId == null && log.entries.isEmpty()) seenWarnAt.value = 0 }
+        }
         viewModelScope.launch {
             client.errors.collect { message ->
                 _activeToast.value = message
