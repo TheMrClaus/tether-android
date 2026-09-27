@@ -34,9 +34,11 @@ that pre-T1.4 backups may still hold the old plaintext credential file.
 beads Dolt history was flattened to one commit and re-pushed fresh (`refs/dolt/data`), so a fresh clone has 0 hits.
 **Phases 0-3 CLOSED.** **Merged today:** T3.5, T13.0, T1.5, T3.3, **T3.4 gallery, T4.1 phone shell, T4.3 statusline** (`3f18f1b`,
 combined gate 1711/0 failed/4 skipped).
-**In flight:** **ta-s8q** (release blocker) r2 DONE → verifier re-check (security re-check PASS-WITH-NOTES);
-**T12.1** (FCM refresh) r2: registration trigger + Firebase init from /api/push/fcm-config + hardening.
-**Next:** T4.2 expanded shell, T4.4 deep links, T4.5 log dialog, T5.1 sidebar; T13.1 after ta-s8q. Follow-ups filed: ta-gxp
+**ta-s8q (release blocker) VERIFIED + MERGED** (`9b6a8d7`, gate 1747/0 failed): unsent turns are keyed by server origin and never
+replayed to another server. **No release blocker is open.**
+**In flight (4):** **T12.1** r2 (push registration + Firebase init; branch on pre-scrub base, the coordinator transplants),
+**T4.2** expanded shell, **T5.1** sidebar, **ta-cpn** (ta-s8q follow-ups: unreadable-slot prune, notice delivery, onReady test).
+**Next:** T4.4 deep links (after T12.1), T4.5 log dialog, T13.1 Room mirror. Follow-ups filed: ta-gxp
 (register() migration), ta-yhu (S12.1 server channel ids), ta-srn (T13.3b).
 **Owner queue:** optional tether history scrub (82 hits in the private repo; needs a production checkout reset + restart).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
@@ -105,7 +107,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.2 | Expanded shell (web desktop layout, resizable panels) | TODO |  |  | From the T4.1 verifier (fold in here, same shell code): the Session links popover has no max height/scroll (web: calc(100dvh - 8rem) + scro… |
+| T4.2 | Expanded shell (web desktop layout, resizable panels) | IN-PROGRESS | claude-main @ 2026-09-27 13:32 |  | executor-T4.2: done: PanelWidthGeometry + PanelPrefs + 9 unit tests (6054c3d) / next: resize handle, ExpandedShell, chrome variants |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
 | T4.5 | Log dialog | TODO |  |  | From the T4.1 verifier: the topbar Health badge currently counts every vm.errorLog entry and never clears when opened; the web counts only … |
@@ -113,7 +115,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | TODO |  |  |  |
+| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | IN-PROGRESS | claude-main @ 2026-09-27 13:53 |  |  |
 | T5.2 | History/resume picker | TODO |  |  |  |
 | T5.3 | Global + in-session search | TODO |  |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
