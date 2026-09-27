@@ -19,8 +19,10 @@ fun statusCopy(status: String): String = when (status) {
 fun providerGlyph(provider: String?): String = when (provider) {
     "claude" -> "C"
     "codex" -> "X"
-    "gemini" -> "G"
     "opencode" -> "O"
+    "reasonix" -> "R"
+    "pi" -> "P"
+    "gemini" -> "G"
     else -> "?"
 }
 
