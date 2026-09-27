@@ -142,7 +142,7 @@ background catch-up) so the app behaves *better* than a browser tab on a phone.
 | D5 | Version compatibility | **Server change: native compatibility window** (task S1.1): the `hello` gains `client: "android"`, and `/healthz` + `ready` gain `nativeProtocolFloor`. The server accepts a native client with `floor ≤ v ≤ current`; the app shows an "Update available" banner instead of locking out. `nativeProtocolFloor` rises **only** on changes that break native clients; add that rule to tether `CLAUDE.md`. | Server deploys must not brick the phone. |
 | D6 | Parity reference | **`PARITY_BASE = 7d65611` (tether, v128).** Parity is measured against this SHA; later tether changes go through the Catch-up Loop (§9). | You can't hit a moving target; freeze it, then roll forward in batches. |
 | D7 | Architecture | Single activity, unidirectional data flow (ViewModel → immutable UiState via StateFlow), coroutines. Gradle modules: `:app`, `:core:protocol`, `:core:reducer`, `:core:net`, `:core:data` (Room + DataStore), `:core:designsystem`, `:feature:*` (shell, sidebar, chat, composer, newsession, inspector, settings, files, usage, search, scheduled, auth). DI: keep the existing manual `ClientLocator` unless it becomes a pain (then Hilt, as a logged decision). | Modules let parallel agents work without merge fights and keep the core pure/testable. |
-| D8 | Local storage | **Room** for the journal mirror/snapshots/outbox (sync, Phase 13), **DataStore** for prefs, **Android Keystore-backed encryption** for credentials (cookie, `tthr_` device token). | Sync needs an indexed store; credentials need hardware-backed protection. |
+| D8 | Local storage | **Room** for the journal mirror/snapshots (sync, Phase 13; *T13.0: the outbox stays in DataStore beside T1.3's PendingStore, see `SYNC_DESIGN.md` §2.2*), **DataStore** for prefs, **Android Keystore-backed encryption** for credentials (cookie, `tthr_` device token). | Sync needs an indexed store; credentials need hardware-backed protection. |
 | D9 | Design tokens | **Generated, not hand-copied:** a tether script exports the CSS custom properties for all 6 skins from `app/globals.css` + `app/studio.css` to JSON → a Gradle task / checked-in generator writes `Tokens.kt`. A CI check fails on drift. | 88 versions of drift happened by hand-copying. |
 | D10 | Layout classes | **Phone = web mobile layout** (the web below its mobile breakpoint). **Tablet/foldable/landscape ≥ expanded width = web desktop layout** (sidebar + chat + inspector, resizable). Use `WindowSizeClass`. | Same app on every Android form factor. |
 | D11 | Markdown & code | Native Kotlin markdown (e.g. `org.jetbrains:markdown` or commonmark-java + GFM tables/strikethrough/task lists) rendered to Compose; syntax highlighting via a Kotlin highlighter. Match `components/markdown.tsx` feature by feature. | No WebView for markdown. |
@@ -478,21 +478,23 @@ Phases 3–12 can partially overlap once Phases 0–2 are VERIFIED.
   message after an explicit tap (+ biometric confirm option). Never auto-resolve.
 
 ### Phase 13 — Proper sync (the "works better than the browser" layer)
-Design first (**T13.0**: write `docs/parity/SYNC_DESIGN.md`, reviewed by `plan-verifier`),
-then:
+Design first (**T13.0**: `docs/parity/SYNC_DESIGN.md`, **approved by `plan-verifier` 2026-09-27**; it is
+binding for T13.1–T13.6, T13.3b and S13.1), then:
 - **T13.1** Room **journal mirror**: `(sessionId, seq)`-keyed events + latest projection
   snapshot per session; the UI reads from Room (single source of truth), the network
-  writes into it. Reconnect = `attach {afterSeq = max local seq}` → true deltas.
+  writes into it. Reconnect = `attach {afterSeq = max local seq}` → the empty at-head reply when
+  current, otherwise a bounded snapshot. *(T13.0: the server never sends event deltas on attach, and
+  journal compaction re-stamps seqs, so "true deltas" means the at-head reply; see `SYNC_DESIGN.md` §3.)*
 - **T13.2** Offline mode: every mirrored session readable with no network; clear
   offline/stale indicators (icon + text).
 - **T13.3** Outbox: durable sends/approvals queued while offline, flushed on reconnect
   with server-side dedupe; approvals older than their request are dropped with a notice,
   never replayed blindly. Never auto-retry a turn.
-- **T13.4** Background catch-up: FCM data hint ("session X advanced to seq N", no content)
+- **T13.4** Background catch-up: FCM data hint (*T13.0: a session-free `{kind:"sync"}`, since push data
+  never names a session; see `SYNC_DESIGN.md` §6*)
   → WorkManager expedited job attaches and pulls the delta, so opening the app is instant.
-  Needs **S13.1** (server: content-free "advanced" hint payload on the FCM relay +
-  optional `sessions-changed-since` cursor to reconcile the list cheaply; PROTOCOL bump
-  if on the wire).
+  Needs **S13.1** (server: content-free sync hint on the FCM relay + `AgentSession.lastSeq` in place of a
+  `sessions-changed-since` cursor; one PROTOCOL bump, not native-breaking).
 - **T13.5** Cache policy: size caps, per-session eviction, pinned sessions kept, "clear
   cache" in settings, schema migrations tested.
 - **T13.6** Conflict rules documented + tested: server is authoritative; local
