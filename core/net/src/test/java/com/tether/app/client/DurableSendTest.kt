@@ -49,6 +49,12 @@ class DiskSettings(private val inner: InMemorySettings, homeUrl: String) : Setti
     /** Every completed write to any slot, in order, with its origin. */
     val allWrites = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
+    /** Like the real store's: every server's slot goes with the configuration. */
+    override suspend fun clear() {
+        inner.clear()
+        slots.clear()
+    }
+
     override suspend fun readPendingInput(origin: String): String? {
         PendingSlots.keyFor(origin) // the client only ever names canonical origins
         return slots[origin]

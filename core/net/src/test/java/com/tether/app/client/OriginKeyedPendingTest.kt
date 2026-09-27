@@ -156,9 +156,18 @@ class OriginKeyedPendingTest {
     }
 
     /** Configured for A (cookie), on a per-origin disk whose home slot is A's. */
-    private fun processOnA(): RealTetherClient {
+    private fun processOnA(wrap: (DiskSettings) -> SettingsStore = { it }): RealTetherClient {
         disk = DiskSettings(InMemorySettings(a.url(), initialCookie = "parity-fake-cookie-a"), a.url())
-        return process(disk)
+        return process(wrap(disk))
+    }
+
+    /** Delegates to [inner]; clear() waits for [release] (the async clear stop() launches). */
+    private class GatedClear(private val inner: SettingsStore) : SettingsStore by inner {
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        override suspend fun clear() {
+            release.await()
+            inner.clear()
+        }
     }
 
     private fun <T> await(flow: StateFlow<T>, predicate: (T) -> Boolean): T =
@@ -226,8 +235,8 @@ class OriginKeyedPendingTest {
      * never acked); then A goes away. While A is unreachable the user types a
      * turn with an attachment and a queued message (tries 0, never sent).
      */
-    private fun writeOnA(): OnA {
-        val c = processOnA()
+    private fun writeOnA(wrap: (DiskSettings) -> SettingsStore = { it }): OnA {
+        val c = processOnA(wrap)
         c.start()
         val ws = a.nextSocket()
         handshake(a, ws)
@@ -405,6 +414,39 @@ class OriginKeyedPendingTest {
         // Each turn went out once, the tried one once more after the snapshot (T1.3).
         val sends = a.allFrames.map { TetherJson.parseToJsonElement(it) as JsonObject }.filter { it.type() == "send" }
         assertEquals(listOf(tried, fresh, tried), sends.map { it.s("idempotencyKey") })
+    }
+
+    @Test
+    fun stopDiscardsTheUnsentInputInMemoryAsWellAsOnDisk() {
+        writeOnA()
+        client.stop()
+        awaitErrors { list -> list.any { it.startsWith("3 unsent messages were discarded when you signed out") } }
+        a.down = false
+        loginTo(a)
+        val aws = a.nextSocket()
+        handshake(a, aws)
+        aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        serverBarrier(aws)
+        assertTrue("stop() left input to replay", framesUntilBarrier(a).isEmpty())
+    }
+
+    @Test
+    fun stopDiscardsTheUnsentInputEvenBeforeItsDiskWipeLands() {
+        var gated: GatedClear? = null
+        writeOnA { GatedClear(it).also { g -> gated = g } }
+        try {
+            client.stop()
+            a.down = false
+            // Signed in again while the wipe of A's slot is still held back.
+            loginTo(a)
+            val aws = a.nextSocket()
+            handshake(a, aws)
+            aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+            serverBarrier(aws)
+            assertTrue("a slot being wiped was read back", framesUntilBarrier(a).isEmpty())
+        } finally {
+            gated!!.release.complete(Unit)
+        }
     }
 
     // ------------------------------------------------------------------

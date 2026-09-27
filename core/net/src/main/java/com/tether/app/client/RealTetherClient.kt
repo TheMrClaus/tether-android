@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -234,6 +235,9 @@ class RealTetherClient(
     private val setAside = HashMap<String, SetAsideStore>()
     // Bumped by stop(): a set-aside write queued before the wipe must not land after it.
     private var pendingWipe = 0L
+    // The newest wipe whose settings.clear() completed. Until it catches up
+    // with [pendingWipe] the disk slots are dead: a binding reads them as empty.
+    private var wipeLanded = 0L
     // The unattributed 0.6.0 slot was checked (and its notice shown) in this process.
     private var unattributedChecked = false
     // [pendingOrigin]'s persisted store was read and merged in (start()/a sign-in);
@@ -649,7 +653,8 @@ class RealTetherClient(
             }
         }
         val origin = target ?: return
-        val raw = readQuietly { settings.readPendingInput(origin) }
+        // A stop() whose disk wipe has not landed yet: what is there is dead.
+        val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
         val loaded = synchronized(lock) {
             if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return@synchronized false
             restorePendingLocked(raw, setAside.remove(origin))
@@ -768,8 +773,16 @@ class RealTetherClient(
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
         // successful login()/pair() resets `stopped` and restarts the loop.
-        // Serialized with the pending writes: none queued before it lands after it.
-        scope.launch { persistMutex.withLock { settings.clear() } }
+        // Serialized with the pending writes (it queues on the lock at once, so
+        // no write queued after this call lands before it, and none queued
+        // before it resurrects anything: they find the store unloaded).
+        val wipe = synchronized(lock) { pendingWipe }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            persistMutex.withLock {
+                settings.clear()
+                synchronized(lock) { if (wipe > wipeLanded) wipeLanded = wipe }
+            }
+        }
     }
 
     override suspend fun logout(): LogoutResult {
