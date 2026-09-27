@@ -30,6 +30,8 @@ import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.TurnRun
 import com.tether.app.protocol.model.TurnUsage
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsObj
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -105,6 +108,25 @@ class FakeTetherClient : TetherClient {
 
     private val _projections = MutableStateFlow(seedProjections())
     override val projections: StateFlow<Map<String, SessionProjection>> = _projections.asStateFlow()
+
+    // T2.1D: the fake scripts the typed projection; its tree flow is the typed state encoded
+    // (every field, defaults included), re-encoded only for sessions whose projection changed.
+    private var encoded: Map<String, Pair<SessionProjection, JsObj>> = emptyMap()
+    private val _projectionTrees = MutableStateFlow(treesOf(_projections.value))
+    override val projectionTrees: StateFlow<Map<String, JsObj>> = _projectionTrees.asStateFlow()
+
+    init {
+        scope.launch { _projections.collect { _projectionTrees.value = treesOf(it) } }
+    }
+
+    private fun treesOf(projections: Map<String, SessionProjection>): Map<String, JsObj> {
+        val next = projections.mapValues { (id, p) ->
+            encoded[id]?.takeIf { it.first === p }
+                ?: (p to (JsCodec.fromJson(TREE_JSON.encodeToJsonElement(SessionProjection.serializer(), p)) as JsObj))
+        }
+        encoded = next
+        return next.mapValues { it.value.second }
+    }
 
     // --- seeds -----------------------------------------------------------------
 
@@ -560,4 +582,11 @@ class FakeTetherClient : TetherClient {
     override fun setAppForeground(foreground: Boolean) {}
     override fun retryConnection() {}
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
+
+    private companion object {
+        val TREE_JSON = Json {
+            encodeDefaults = true
+            explicitNulls = true
+        }
+    }
 }

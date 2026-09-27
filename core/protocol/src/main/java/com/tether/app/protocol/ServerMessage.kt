@@ -3,8 +3,11 @@ package com.tether.app.protocol
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
+import com.tether.app.protocol.model.LegacyProjectionAdapter
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionProjection
+import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsObj
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -29,8 +32,8 @@ import kotlinx.serialization.json.JsonPrimitive
  *    SINGLE object makes the frame [Unknown] with a reason.
  *
  * Deep payloads with no Kotlin model yet stay raw [JsonObject]s (named after
- * their TS type in each KDoc) — notably `snapshot.state` and `turns-detail.turns`,
- * which are handed to the reducer layer (T2.1) untouched.
+ * their TS type in each KDoc). `snapshot.state` and `turns-detail.turns` are the
+ * v128 fold's own JsValue trees ([JsObj], T2.1D), handed to the reducer untouched.
  */
 sealed interface ServerMessage {
 
@@ -116,42 +119,43 @@ sealed interface ServerMessage {
     /**
      * Attach reply or manager-pushed broadcast.
      *
-     * [stateJson] is the raw SessionProjection — the source of truth handed to the
-     * reducer layer. v115: it is ABSENT (null) when the client's cursor already
-     * equals [throughSeq]. [trimmedBefore]: turns below that index had their
-     * blocksById stripped (fetch them with `fetch-turns`). [events] is normally
+     * [state] is the SessionProjection as a JsValue tree — the source of truth the
+     * v128 fold continues from (T2.1D). v115: it is ABSENT (null) when the client's
+     * cursor already equals [throughSeq]. [trimmedBefore]: turns below that index had
+     * their blocksById stripped (fetch them with `fetch-turns`). [events] is normally
      * omitted from the wire.
      *
-     * [projection] is the legacy typed view (protocol/model), decoded eagerly and
-     * tolerantly: null when state is absent OR does not fit the typed model.
+     * [projection] is the legacy typed view (protocol/model) through the
+     * [LegacyProjectionAdapter], decoded lazily and tolerantly: null when state is
+     * absent OR its required session fields do not fit the typed model.
      */
     data class Snapshot(
         val sessionId: String,
         val throughSeq: Long,
-        val stateJson: JsonObject?,
+        val state: JsObj?,
         val reset: Boolean = false,
         val trimmedBefore: Int? = null,
         val events: List<AgentEvent>? = null,
     ) : ServerMessage {
-        val projection: SessionProjection? = stateJson?.let { decodeOrNull(SessionProjection.serializer(), it) }
+        val projection: SessionProjection? by lazy { state?.let { LegacyProjectionAdapter.adaptOnce(it) } }
 
         /** True when the frame carries a state (false = v115 "nothing changed" delta). */
-        val hasState: Boolean get() = stateJson != null
+        val hasState: Boolean get() = state != null
 
         /**
-         * Legacy non-null accessor for pre-v115 call sites. Throws when there is no
-         * decodable state — check [projection] / [hasState] first.
+         * Legacy non-null typed accessor. Throws when there is no decodable state —
+         * check [projection] / [hasState] first.
          */
-        val state: SessionProjection
+        val typedState: SessionProjection
             get() = checkNotNull(projection) { "snapshot for $sessionId carries no decodable state" }
     }
 
-    /** v115: `turns` is Record<turnId, TurnProjection>, raw, for the reducer layer. */
+    /** v115: `turns` is Record<turnId, TurnProjection>, as JsValue trees, for the reducer layer. */
     data class TurnsDetail(
         val sessionId: String,
         val fromIndex: Int,
         val toIndex: Int,
-        val turns: JsonObject,
+        val turns: JsObj,
     ) : ServerMessage
 
     /**
@@ -517,14 +521,14 @@ private object ServerDecoders {
             ServerMessage.Snapshot(
                 sessionId = r.str("sessionId"),
                 throughSeq = r.long("throughSeq"),
-                stateJson = r.o.obj("state"),
+                state = r.o.obj("state")?.let { JsCodec.fromJson(it) as JsObj },
                 reset = r.o.boolTrue("reset"),
                 trimmedBefore = r.o.long("trimmedBefore")?.toInt(),
                 events = r.o.objList("events")?.map(AgentEvent::parse),
             )
         },
         "turns-detail" to { r ->
-            ServerMessage.TurnsDetail(r.str("sessionId"), r.int("fromIndex"), r.int("toIndex"), r.obj("turns"))
+            ServerMessage.TurnsDetail(r.str("sessionId"), r.int("fromIndex"), r.int("toIndex"), JsCodec.fromJson(r.obj("turns")) as JsObj)
         },
         "approval" to { r ->
             ServerMessage.Approval(

@@ -10,9 +10,12 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.fold.reduce
+import com.tether.app.protocol.model.LegacyProjectionAdapter
 import com.tether.app.protocol.model.SessionProjection
-import com.tether.app.protocol.reduce.reduce
 import com.tether.app.protocol.str
+import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsObj
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.UUID
@@ -149,6 +152,11 @@ class RealTetherClient(
     private val providersState = MutableStateFlow<List<ProviderInfo>>(emptyList())
     private val workspaceRootState = MutableStateFlow<String?>(null)
     private val projectionsState = MutableStateFlow<Map<String, SessionProjection>>(emptyMap())
+
+    // T2.1D: the v128 trees are the source of truth; the typed projections are adapted from
+    // them by one memoized adapter per session (frame thread only).
+    private val projectionTreesState = MutableStateFlow<Map<String, JsObj>>(emptyMap())
+    private val adapters = HashMap<String, LegacyProjectionAdapter>()
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
@@ -164,6 +172,7 @@ class RealTetherClient(
     override val providers: StateFlow<List<ProviderInfo>> = providersState
     override val workspaceRoot: StateFlow<String?> = workspaceRootState
     override val projections: StateFlow<Map<String, SessionProjection>> = projectionsState
+    override val projectionTrees: StateFlow<Map<String, JsObj>> = projectionTreesState
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
@@ -759,6 +768,7 @@ class RealTetherClient(
             is ServerMessage.Directories -> directoriesState.value = message.listing
             is ServerMessage.Snapshot -> onSnapshot(message)
             is ServerMessage.Event -> onEvent(message)
+            is ServerMessage.TurnsDetail -> onTurnsDetail(message)
             is ServerMessage.InterruptResult ->
                 if (message.status == "failed") {
                     emitError(message.error ?: "The interrupt request could not be delivered.")
@@ -849,11 +859,14 @@ class RealTetherClient(
         trimmedBeforeState.value = message.trimmedBefore
             ?.let { trimmedBeforeState.value + (message.sessionId to it) }
             ?: (trimmedBeforeState.value - message.sessionId)
-        // A state the legacy typed model cannot decode: the old projection is no
-        // longer what the cursor describes, so drop it rather than fold live
-        // events onto a diverged base (T2.1D swaps in the raw-state projection).
-        val state = message.projection ?: run {
-            projectionsState.value = projectionsState.value - message.sessionId
+        // The tree is the source of truth and is always kept: live events fold onto it.
+        // A state whose required session fields the legacy typed model cannot read
+        // leaves no typed projection (the screens show nothing rather than a diverged
+        // base) and skips reconciliation, as before.
+        val tree = message.state ?: return
+        val state = adapt(message.sessionId, tree)
+        if (state == null) {
+            publish(message.sessionId, tree, null)
             return
         }
         val cleared: List<String>
@@ -864,7 +877,7 @@ class RealTetherClient(
             // Only now is redelivery for this session safe on this connection.
             reconciledSessions.add(message.sessionId)
         }
-        projectionsState.value = projectionsState.value + (message.sessionId to state)
+        publish(message.sessionId, tree, state)
         if (cleared.isNotEmpty()) persistPending()
         drainPending()
     }
@@ -899,9 +912,50 @@ class RealTetherClient(
             }
             if (removed) persistPending()
         }
-        val current = projectionsState.value
-        val projection = current[message.sessionId] ?: return
-        projectionsState.value = current + (message.sessionId to reduce(projection, event))
+        val tree = projectionTreesState.value[message.sessionId] ?: return
+        val next = try {
+            reduce(tree, JsCodec.fromJson(event.raw) as JsObj)
+        } catch (e: RuntimeException) {
+            // The fold is a line port of events.mjs and, like it, assumes the server's full
+            // projection shape (a JS reduce throws on the same malformed base). Never let that
+            // take down the socket thread: drop the diverged base and ask for a FULL snapshot
+            // (no afterSeq — a cursor-at-head attach would come back stateless).
+            projectionTreesState.value = projectionTreesState.value - message.sessionId
+            projectionsState.value = projectionsState.value - message.sessionId
+            sendFrame(ClientMessage.Attach(message.sessionId, null))
+            return
+        }
+        // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
+        if (next !== tree) publish(message.sessionId, next, adapt(message.sessionId, next))
+    }
+
+    /**
+     * v115 lazy-loaded turns (use-tether.ts `turns-detail`): the full turn projections
+     * replace the trimmed stubs in `turnsById`; nothing else changes. Ignored for a
+     * session with no projection yet.
+     */
+    private fun onTurnsDetail(message: ServerMessage.TurnsDetail) {
+        val tree = projectionTreesState.value[message.sessionId] ?: return
+        val turnsById = tree["turnsById"] as? JsObj ?: JsObj.EMPTY
+        val next = tree.put("turnsById", turnsById.spread(message.turns))
+        publish(message.sessionId, next, adapt(message.sessionId, next))
+    }
+
+    /**
+     * [tree]'s typed view through [sessionId]'s memoized adapter: null when the tree's
+     * required session fields do not fit the typed model.
+     */
+    private fun adapt(sessionId: String, tree: JsObj): SessionProjection? =
+        adapters.getOrPut(sessionId) { LegacyProjectionAdapter() }.adapt(tree)
+
+    /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). */
+    private fun publish(sessionId: String, tree: JsObj, typed: SessionProjection?) {
+        projectionTreesState.value = projectionTreesState.value + (sessionId to tree)
+        projectionsState.value = if (typed != null) {
+            projectionsState.value + (sessionId to typed)
+        } else {
+            projectionsState.value - sessionId
+        }
     }
 
     private fun upsertSession(session: AgentSession) {

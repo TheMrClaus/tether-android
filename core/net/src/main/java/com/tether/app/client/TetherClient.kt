@@ -7,6 +7,7 @@ import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionProjection
+import com.tether.app.protocol.tree.JsObj
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -28,8 +29,18 @@ interface TetherClient {
     /** Default folder reported by the server's ready frame (not a boundary). */
     val workspaceRoot: StateFlow<String?>
 
-    /** Folded projections for every attached session, keyed by tetherSessionId. */
+    /**
+     * Folded projections for every attached session, keyed by tetherSessionId: the legacy
+     * typed view, adapted (memoized per turn/block) from [projectionTrees].
+     */
     val projections: StateFlow<Map<String, SessionProjection>>
+
+    /**
+     * T2.1D: the v128 projection trees themselves — the source of truth the client folds live
+     * events onto — keyed by tetherSessionId. T5/T6 screens read them through the
+     * `protocol.model` views (SessionView / TurnView / BlockView).
+     */
+    val projectionTrees: StateFlow<Map<String, JsObj>>
 
     /** Discovered resumable conversations for the current workspace. */
     val histories: StateFlow<List<HistorySession>>

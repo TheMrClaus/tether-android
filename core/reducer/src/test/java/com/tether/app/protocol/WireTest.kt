@@ -1,7 +1,10 @@
 package com.tether.app.protocol
 
 import com.tether.app.protocol.model.Vocab
-import com.tether.app.protocol.reduce.reduce
+import com.tether.app.protocol.fold.reduce
+import com.tether.app.protocol.model.LegacyProjectionAdapter
+import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsObj
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -128,7 +131,7 @@ class WireTest {
         assertEquals(42L, snapshot.throughSeq)
         assertFalse(snapshot.reset)
 
-        val state = snapshot.state
+        val state = snapshot.typedState
         assertEquals("claude", state.provider)
         assertEquals("active", state.status)
         assertEquals("turn-2", state.activeTurnId)
@@ -161,15 +164,13 @@ class WireTest {
         assertEquals("command", approval.metadata?.kind)
         assertEquals(529, turn2.apiRetry?.errorStatus)
 
-        // The snapshot is a valid reducer input: fold a live event on top.
-        val folded = reduce(
-            state,
-            AgentEvent.parse(
-                TetherJson.parseToJsonElement(
-                    """{"type":"turn_end","turnId":"turn-2","outcome":"ok","seq":43,"ts":9000}""",
-                ).jsonObject,
+        // The snapshot's tree is a valid reducer input: fold a live event on top.
+        val folded = LegacyProjectionAdapter.adaptOnce(
+            reduce(
+                snapshot.state!!,
+                JsCodec.parse("""{"type":"turn_end","turnId":"turn-2","outcome":"ok","seq":43,"ts":9000}""") as JsObj,
             ),
-        )
+        )!!
         assertEquals(Vocab.SESSION_READY, folded.status)
         assertNull(folded.activeTurnId)
     }
