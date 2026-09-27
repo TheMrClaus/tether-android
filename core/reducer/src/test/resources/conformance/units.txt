@@ -60,7 +60,6 @@ case message-aborted-literal              A  ready
 case user-message-engine-text-equal       A  ready
 case errors-and-account-auth              A  ready
 case warnings-and-unknown-events          A  ready
-case code-point-bounds                    A  pending
 case native-session-id-with-initial       A  ready
 case cancel-interrupted                   A  ready
 
@@ -82,24 +81,29 @@ case limit-hit-resume-now                 B  ready
 case fast-mode                            B  ready
 
 # ---- C: session lists and background (plan-diff-reroute-review-compaction: C owns, runs after B) ----
+# Still pending on other units' arms (C's own folds proven green with them stubbed in):
+#   cli-inventory, cli-inventory-limits -> unit I: swap FoldTurn.kt stand-ins projectedCliInventory/sameProjectedCliInventory for C's internal normalizeProjectedCliInventory/sameCliInventory (proven green)
+#   model-fallback, code-point-bounds -> B notice_dismissed; plan-diff-reroute-review-compaction -> B context_compacted
 case cli-inventory                        C  pending
 case cli-inventory-limits                 C  pending
-case mcp-health                           C  pending
-case mcp-health-cap                       C  pending
-case todo-incremental-tasks               C  pending
-case todo-limits                          C  pending
-case todo-write                           C  pending
+case mcp-health                           C  ready
+case mcp-health-cap                       C  ready
+case todo-incremental-tasks               C  ready
+case todo-limits                          C  ready
+case todo-write                           C  ready
 case model-fallback                       C  pending
-case background-command-lifecycle         C  pending
-case background-commands-cap              C  pending
-case background-task-lifecycle            C  pending
-case background-tasks-cap                 C  pending
-case spawned-run-keys-cap                 C  pending
-case spawned-run-lifecycle                C  pending
-case spawned-runs-cap                     C  pending
-case continuation-command-run-output      C  pending
-case diff-chars-cap                       C  pending
+case background-command-lifecycle         C  ready
+case background-commands-cap              C  ready
+case background-task-lifecycle            C  ready
+case background-tasks-cap                 C  ready
+case spawned-run-keys-cap                 C  ready
+case spawned-run-lifecycle                C  ready
+case spawned-runs-cap                     C  ready
+case continuation-command-run-output      C  ready
+case diff-chars-cap                       C  ready
 case plan-diff-reroute-review-compaction  C  pending
+# code-point-bounds: reassigned A -> C (2026-09-27, coordinator) — only C labels + B notice_dismissed.
+case code-point-bounds                    C  pending
 
 # ---- I: integration (Revision 1: the 16 fixture cases + 3 named) ----
 case fixture-acp-session-updates          I  pending
