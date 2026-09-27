@@ -1,6 +1,11 @@
 package com.tether.app.ui.shell
 
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.CssBorder
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,11 +51,17 @@ import com.tether.app.ui.theme.LocalTetherTypography
  * jumps. Focus moves into the panel on open (the web focuses the section).
  *
  * [body] is the inspector slot (T9.1: the same `Inspector` the expanded layout's third column shows).
+ *
+ * [floating] (the expanded layout between 48rem and 100rem, T4.2): "details float beside the
+ * conversation" — the same panel as a card over the stage, `1px --line-strong` all round,
+ * `--radius-lg`, `--shadow-floating`; the stage stays visible (globals.css 11894-11910). The host
+ * places it (`top: 4.5rem; right/bottom: space-sm; width: min(23rem, 100% - 1rem)`).
  */
 @Composable
 fun TelemetrySheet(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    floating: Boolean = false,
     body: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -67,13 +78,21 @@ fun TelemetrySheet(
                 scaleX = 0.99f + 0.01f * p
                 scaleY = 0.99f + 0.01f * p
             }
-            .drawBehind {
-                drawRect(t.graphite)
-                drawRect(t.line, Offset.Zero, Size(size.width, 1.dp.toPx()))
-            }
+            .then(
+                if (floating) {
+                    Modifier
+                        .cssSurface(RoundedCornerShape(t.radiusLg), t.graphite, CssBorder(1.dp, t.lineStrong), t.css.shadowFloating)
+                        .clip(RoundedCornerShape(t.radiusLg))
+                } else {
+                    Modifier.drawBehind {
+                        drawRect(t.graphite)
+                        drawRect(t.line, Offset.Zero, Size(size.width, 1.dp.toPx()))
+                    }
+                },
+            )
             // The panel is opaque to touches: nothing below it (the collapsed stage) reacts.
             .pointerInput(Unit) { detectTapGestures { } }
-            .padding(top = 1.dp)
+            .padding(if (floating) PaddingValues(1.dp) else PaddingValues(top = 1.dp))
             .semantics { paneTitle = "Session details" }
             .focusRequester(focus)
             .focusTarget()

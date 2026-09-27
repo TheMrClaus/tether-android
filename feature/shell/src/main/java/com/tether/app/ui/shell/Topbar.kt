@@ -50,6 +50,27 @@ import com.tether.app.ui.theme.TetherTokens
 /** `.dashboard-shell` phone row: `grid-template-rows: calc(3.5rem + env(safe-area-inset-top))` (both families). */
 val TopbarHeight: Dp = 56.dp
 
+/**
+ * `.dashboard-shell` desktop row (≥ 48rem): `grid-template-rows: 3rem …` (globals.css 3960);
+ * Studio keeps `calc(4rem + safe-top)` (studio.css 280).
+ */
+val ExpandedTopbarHeight: Dp = 48.dp
+val StudioExpandedTopbarHeight: Dp = 64.dp
+
+/** The topbar's link readout (`.connection-state`, topbar.tsx:36-39): its word and whether it spins. */
+enum class LinkReadout(val word: String) {
+    Connected("Secure link"),
+    Connecting("Connecting"),
+    Reconnecting("Reconnecting"),
+}
+
+/**
+ * The expanded layout's topbar inputs: the rail's rendered width (the brand shares its vertical,
+ * globals.css 3978-3987; null while the rail is collapsed), the viewport width for the 74rem /
+ * 80rem breakpoints, and the link state the readout prints.
+ */
+data class ExpandedTopbar(val railWidth: Int?, val viewportWidth: Int, val link: LinkReadout)
+
 /** The topbar's host actions (topbar.tsx props). A null action has no host yet: its key renders disabled. */
 data class TopbarActions(
     val onOpenDrawer: () -> Unit,
@@ -76,7 +97,13 @@ fun TetherTopbar(
     modifier: Modifier = Modifier,
     unseenWarnings: Int = 0,
     fileBrowserDisabled: Boolean = false,
+    /** Non-null: the desktop topbar ([ExpandedTetherTopbar]). */
+    expanded: ExpandedTopbar? = null,
 ) {
+    if (expanded != null) {
+        ExpandedTetherTopbar(actions, expanded, modifier, unseenWarnings, fileBrowserDisabled)
+        return
+    }
     val t = LocalTetherTokens.current
     val studio = t.studio
     val edge = if (studio) t.line else t.lineStrong
@@ -129,7 +156,12 @@ fun TetherTopbar(
  * "tether" (studio.css 250, 282-285, 437-438). The accessible name is "Tether" (`aria-label`).
  */
 @Composable
-internal fun TopbarBrand(modifier: Modifier = Modifier) {
+internal fun TopbarBrand(
+    modifier: Modifier = Modifier,
+    /** Studio from 48rem: the 1.24rem wordmark and 1.85rem tile (studio.css 282-283), not the phone's. */
+    studioDesktop: Boolean = false,
+    ink: Color? = null,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val studio = t.studio
@@ -139,24 +171,28 @@ internal fun TopbarBrand(modifier: Modifier = Modifier) {
             heading()
         },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 8.dp else 11.2.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (studio && !studioDesktop) 8.dp else 11.2.dp),
     ) {
-        BrandMark(t)
+        BrandMark(t, if (studioDesktop) 29.6.dp else 25.6.dp)
         Text(
             if (studio) "tether" else "TETHER",
-            color = t.white,
+            color = ink ?: t.white,
             maxLines = 1,
-            style = if (studio) cssText(type.ui, 1.1f, 770, trackingEm = -0.04f) else cssText(type.ui, 0.74f, 740, trackingEm = 0.22f),
+            style = when {
+                studioDesktop -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
+                studio -> cssText(type.ui, 1.1f, 770, trackingEm = -0.04f)
+                else -> cssText(type.ui, 0.74f, 740, trackingEm = 0.22f)
+            },
         )
     }
 }
 
 @Composable
-private fun BrandMark(t: TetherTokens) {
+private fun BrandMark(t: TetherTokens, studioSize: Dp = 25.6.dp) {
     if (t.studio) {
-        // 1.6rem tile, 0.58rem radius, --accent; bars 0.19×0.72rem, 3px radius, white, both opaque.
+        // 1.6rem tile (1.85rem from 48rem), 0.58rem radius, --accent; bars 0.19×0.72rem, 3px radius, white, both opaque.
         val shape = RoundedCornerShape(9.28.dp)
-        Canvas(Modifier.size(25.6.dp).cssSurface(shape, t.accent)) {
+        Canvas(Modifier.size(studioSize).cssSurface(shape, t.accent)) {
             drawNeedle(Color.White, 3.04.dp.toPx(), 11.52.dp.toPx(), 3.dp.toPx(), -3.52.dp.toPx(), 5.12.dp.toPx(), 1f)
         }
     } else {
@@ -274,7 +310,7 @@ private fun ToolBank(actions: TopbarActions, unseenWarnings: Int, fileBrowserDis
  * the log key's state description, so it is never carried by the red dot alone.
  */
 @Composable
-private fun WarningBadge(count: Int, modifier: Modifier) {
+internal fun WarningBadge(count: Int, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Box(

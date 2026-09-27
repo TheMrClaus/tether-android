@@ -4,6 +4,13 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -176,6 +183,82 @@ internal fun ChromeIconKey(
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = l.ink, modifier = Modifier.size(iconSize))
+        overlay?.invoke(this)
+    }
+}
+
+/**
+ * [ChromeIconKey] with a printed word: the desktop topbar's tool keys (`Files`, `Accounts`,
+ * `Usage`, `Health`, globals.css 11843-11846), Lock ("Lock", 4029-4031) and the rail's dock. At
+ * least [minWidth] × [height], the glyph and [label] [gap] apart inside [padStart] / [padEnd].
+ * A null [label] draws the glyph alone.
+ */
+@Composable
+internal fun ChromeLabelKey(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    label: String?,
+    contentDescription: String,
+    look: (KeyState) -> ChromeLook,
+    minWidth: Dp,
+    height: Dp,
+    iconSize: Dp,
+    labelStyle: TextStyle,
+    modifier: Modifier = Modifier,
+    padStart: Dp = 0.dp,
+    padEnd: Dp = 0.dp,
+    gap: Dp = 0.dp,
+    underline: Boolean = false,
+    enabled: Boolean = true,
+    stateDescription: String? = null,
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
+) {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val state = when {
+        !enabled -> KeyState.Disabled
+        pressed -> KeyState.Pressed
+        else -> KeyState.Rest
+    }
+    val l = look(state)
+    val shape = RoundedCornerShape(l.radius)
+    val travel = if (reduced) 0.dp else l.travel
+    Box(
+        modifier = modifier
+            .semantics {
+                this.contentDescription = contentDescription
+                stateDescription?.let { this.stateDescription = it }
+            }
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .widthIn(min = minWidth)
+            .height(height)
+            .graphicsLayer {
+                alpha = l.alpha
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
+            .offset { IntOffset(0, travel.roundToPx()) }
+            .focusRing(focused, shape, t.violet)
+            .cssSurface(shape, l.face, if (l.border.alpha > 0f) CssBorder(1.dp, l.border) else null, l.shadows),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.padding(start = padStart, end = padEnd),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            Icon(icon, contentDescription = null, tint = l.ink, modifier = Modifier.size(iconSize))
+            if (label != null) {
+                Text(
+                    label,
+                    color = l.ink,
+                    maxLines = 1,
+                    style = if (underline) labelStyle.copy(textDecoration = TextDecoration.Underline) else labelStyle,
+                )
+            }
+        }
         overlay?.invoke(this)
     }
 }

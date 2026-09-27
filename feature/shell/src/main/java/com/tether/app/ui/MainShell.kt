@@ -59,20 +59,39 @@ import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalConfiguration
+import com.tether.app.protocol.model.SessionView
+import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.shell.ExpandedShell
+import com.tether.app.ui.shell.LinkReadout
+import com.tether.app.ui.shell.PanelPrefs
+import com.tether.app.ui.shell.shellLayoutFor
+import com.tether.app.ui.statusline.ContextGauge
+import com.tether.app.ui.statusline.SessionStatusline
+import com.tether.app.ui.statusline.TelemetryMetrics
+import kotlinx.coroutines.launch
 
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
 
 /**
- * The signed-in app: the phone shell (the web's mobile layout, [PhoneShell]) wired to the view
- * model. Windows at or above the 840dp layout cutoff get the desktop layout once T4.2 lands; until
- * then they render this same shell, which lays out at any width.
+ * The signed-in app wired to the view model: below the 840dp layout cutoff the phone shell (the
+ * web's mobile layout, [PhoneShell]); at or above it the expanded shell (the web's desktop layout,
+ * [ExpandedShell]) with its column widths and collapsed rail persisted in [prefs] (the web's
+ * per-device `sidebarWidth` / `inspectorWidth` / `sidebarCollapsed`). Both take the same slots
+ * and the same shell state, so a window that crosses the cutoff keeps its popover and panel state.
  */
 @Composable
 fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     val shell = rememberPhoneShellState()
+    val layout = shellLayoutFor(LocalConfiguration.current.screenWidthDp)
+    val scope = rememberCoroutineScope()
+    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = null)
+    val panels = preferences?.let(PanelPrefs::from) ?: PanelPrefs()
+    val projectionTrees by vm.client.projectionTrees.collectAsStateWithLifecycle()
 
     val sessions by vm.client.sessions.collectAsStateWithLifecycle()
     val projections by vm.client.projections.collectAsStateWithLifecycle()
@@ -104,17 +123,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available) })
     }
 
+    val metrics = TelemetryMetrics.from(session?.metrics)
+    val sessionView = session?.let { s -> projectionTrees[s.id]?.let(::SessionView) }
+
     Box(Modifier.fillMaxSize()) {
-        PhoneShell(
-            state = shell,
-            session = session,
-            workspaceRoot = workspaceRoot,
-            emptyStage = emptyStage,
-            unseenWarnings = vm.errorLog.size,
-            copiedPath = copiedPath,
-            copiedTetherId = copiedTetherId,
-            onStartSession = { showProviderPicker = true },
-            topbar = TopbarActions(
+        val topbarActions = TopbarActions(
                 onOpenDrawer = {},
                 // Hosts not built yet (files T11.1, accounts/usage T9.2): their keys render disabled.
                 onOpenFiles = null,
@@ -123,8 +136,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 // The log dialog proper is T4.5; the existing activity log stands in.
                 onOpenLog = { showErrorLog = true },
                 onLogout = { showLogoutConfirm = true },
-            ),
-            header = WorkspaceHeaderActions(
+            )
+        val headerActions = WorkspaceHeaderActions(
                 onRename = { renaming = session },
                 onEndSession = { confirmEnd = session },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
@@ -140,8 +153,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         copiedTetherId = true
                     }
                 },
-            ),
-            slots = PhoneShellSlots(
+            )
+        val slots = PhoneShellSlots(
                 drawer = {
                     SessionDrawer(
                         vm = vm,
@@ -169,8 +182,48 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     )
                 },
                 inspector = { session?.let { InterimTelemetry(it) } },
-            ),
-        )
+                // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
+                gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle) },
+                statusline = { expanded ->
+                    SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End)
+                },
+            )
+        if (layout == TetherLayoutClass.Expanded) {
+            ExpandedShell(
+                state = shell,
+                panels = panels,
+                onPanelsChange = { next -> scope.launch { prefs.updatePreferences { next.applyTo(it) } } },
+                session = session,
+                workspaceRoot = workspaceRoot,
+                emptyStage = emptyStage,
+                topbar = topbarActions,
+                header = headerActions,
+                slots = slots,
+                link = when (connection) {
+                    ConnectionState.Connected -> LinkReadout.Connected
+                    ConnectionState.Connecting -> LinkReadout.Connecting
+                    else -> LinkReadout.Reconnecting
+                },
+                unseenWarnings = vm.errorLog.size,
+                copiedPath = copiedPath,
+                copiedTetherId = copiedTetherId,
+                onStartSession = { showProviderPicker = true },
+            )
+        } else {
+            PhoneShell(
+                state = shell,
+                session = session,
+                workspaceRoot = workspaceRoot,
+                emptyStage = emptyStage,
+                unseenWarnings = vm.errorLog.size,
+                copiedPath = copiedPath,
+                copiedTetherId = copiedTetherId,
+                onStartSession = { showProviderPicker = true },
+                topbar = topbarActions,
+                header = headerActions,
+                slots = slots,
+            )
+        }
 
         toast?.let { message ->
             LaunchedEffect(message) {

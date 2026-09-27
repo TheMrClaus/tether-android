@@ -39,6 +39,16 @@ object ShellTags {
     const val StartSessionKey = "shell-start-session"
     const val Drawer = "shell-drawer"
     const val DrawerBackdrop = "shell-drawer-backdrop"
+
+    // The expanded (desktop) layout, T4.2.
+    const val Sidebar = "shell-sidebar"
+    const val Workspace = "shell-workspace"
+    const val InspectorColumn = "shell-inspector-column"
+    const val RailHandle = "shell-rail-handle"
+    const val InspectorHandle = "shell-inspector-handle"
+    const val ExpandDock = "shell-expand-dock"
+    const val ConnectionReadout = "shell-connection"
+    const val Dial = "shell-dial"
 }
 
 /**
@@ -48,17 +58,24 @@ object ShellTags {
 fun shellLayoutFor(widthDp: Int): TetherLayoutClass = layoutClassFor(widthDp)
 
 /**
- * Everything the phone shell hosts but does not own — each one is another task's surface.
+ * Everything the shell hosts but does not own — each one is another task's surface. The phone
+ * layout ([PhoneShell]) and the expanded one ([ExpandedShell]) take the same slots: the drawer's
+ * list is the expanded layout's sidebar column, and the inspector is both the telemetry panel's
+ * body and the third column.
  */
 class PhoneShellSlots(
-    /** The drawer's session list (T5.1; today's SessionDrawer). */
+    /** The drawer's session list (T5.1; today's SessionDrawer); the expanded layout's rail. */
     val drawer: @Composable () -> Unit,
     /** The chat stage — transcript + composer (T6.x / T7.x; today's ChatScreen). */
     val chat: @Composable () -> Unit,
-    /** The telemetry panel body: the inspector (T9.1). */
+    /** The telemetry panel body and the expanded layout's third column: the inspector (T9.1). */
     val inspector: @Composable ColumnScope.() -> Unit,
     /** The header's context gauge, the panel's handle (T4.3). */
-    val gauge: GaugeSlot = { open, toggle -> TelemetryHandlePlaceholder(open, toggle) },
+    val gauge: GaugeSlot = { host -> TelemetryHandlePlaceholder(host.open == true, host.onToggle ?: {}) },
+    /** The header's elapsed dial, shown from 48rem only, so only the expanded layout hosts it (T4.3). */
+    val dial: DialSlot = { session ->
+        com.tether.app.ui.statusline.SessionDial(session.startedAt, session.endedAt, active = session.status != "exited")
+    },
     /** The statusline in the "Session links" popover (T4.3). */
     val statusline: StatuslineSlot = {},
     /** Studio's empty stage, StudioWelcome (T8.1). */

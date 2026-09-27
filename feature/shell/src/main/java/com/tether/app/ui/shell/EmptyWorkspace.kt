@@ -49,6 +49,7 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.softShadow
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -76,6 +77,11 @@ sealed interface EmptyStage {
  * (globals.css 2218-2295, 11241-11269, 11713-11717). The orbit turns once per 24s (static under
  * reduced motion). Studio forks this stage into `StudioWelcome` (T8.1); [studioWelcome] is that
  * slot, and until it is filled Studio renders this instrument composition in its own tokens.
+ *
+ * [expanded] (from 48rem, T4.2): the well is seated in the bay like the chat screen —
+ * `margin: calc(space-lg + 7px)`, `padding: space-2xl space-xl`, the `--bezel` ring and its
+ * contact shade (globals.css 11241-11252) — and the title follows `clamp(1.7rem, 2.6vw, 2.15rem)`
+ * of [viewportWidth] (11257).
  */
 @Composable
 fun EmptyWorkspace(
@@ -83,6 +89,8 @@ fun EmptyWorkspace(
     onStartSession: () -> Unit,
     modifier: Modifier = Modifier,
     studioWelcome: (@Composable () -> Unit)? = null,
+    expanded: Boolean = false,
+    viewportWidth: Int = 0,
 ) {
     val t = LocalTetherTokens.current
     if (t.studio && studioWelcome != null && stage is EmptyStage.Welcome) {
@@ -93,11 +101,19 @@ fun EmptyWorkspace(
     Column(
         modifier
             .fillMaxSize()
-            .padding(t.css.spaceMd)
-            .cssSurface(RoundedCornerShape(t.radiusLg), t.mineralDeep, CssBorder(1.dp, t.lineStrong), t.css.well)
+            .padding(if (expanded) t.css.spaceLg + 7.dp else t.css.spaceMd)
+            .cssSurface(
+                RoundedCornerShape(t.radiusLg),
+                t.mineralDeep,
+                CssBorder(1.dp, t.lineStrong),
+                if (expanded) t.css.well + t.css.bezel + softShadow(2.dp, 6.dp, t.contact.copy(alpha = 0.1f), spread = 7.dp) else t.css.well,
+            )
             .padding(1.dp)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = t.css.spaceLg, vertical = t.css.spaceXl)
+            .padding(
+                horizontal = if (expanded) t.css.spaceXl else t.css.spaceLg,
+                vertical = if (expanded) t.css.space2xl else t.css.spaceXl,
+            )
             .semantics { if (stage is EmptyStage.Reopening) stateDescription = "Busy" }
             .testTag(ShellTags.EmptyWorkspace),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -118,7 +134,8 @@ fun EmptyWorkspace(
             title,
             color = t.white,
             textAlign = TextAlign.Center,
-            style = cssText(type.ui, 1.7f, 640, trackingEm = -0.035f, lineHeight = 1.18f).copy(lineBreak = LineBreak.Heading),
+            style = cssText(type.ui, if (expanded) (viewportWidth * 0.026f / 16f).coerceIn(1.7f, 2.15f) else 1.7f, 640, trackingEm = -0.035f, lineHeight = 1.18f)
+                .copy(lineBreak = LineBreak.Heading),
             modifier = Modifier.semantics { heading() },
         )
         Spacer(Modifier.height(t.css.spaceMd))

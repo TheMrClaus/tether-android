@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.geometry.Offset
@@ -127,6 +128,24 @@ class PhoneShellBehaviourTest {
         rule.waitForIdle()
         assertFalse(state.linksOpen)
         assertTrue(state.telemetryOpen)
+    }
+
+    /** T4.1 verifier follow-up: the popover (top layer) closes before the drawer, through BackHandler. */
+    @Test fun backClosesThePopoverBeforeTheDrawer() {
+        val state = PhoneShellState(drawerOpen = true, linksOpen = true)
+        show(state)
+        rule.onNodeWithTag(ShellTags.LinksPopover).assertIsDisplayed()
+        back()
+        rule.waitForIdle()
+        assertFalse(state.linksOpen)
+        assertTrue(state.drawerOpen)
+        rule.onNodeWithTag(ShellTags.LinksPopover).assertDoesNotExist()
+        rule.onNodeWithTag(DrawerSlotTag).assertIsDisplayed()
+        back()
+        rule.waitForIdle()
+        assertFalse(state.drawerOpen)
+        rule.onNodeWithTag(DrawerSlotTag).assertDoesNotExist()
+        assertFalse(rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
     }
 
     @Test fun headerActionsReachTheirHosts() {
@@ -251,5 +270,26 @@ class PhoneShellExpandedWidthTest {
         rule.onNodeWithTag(ShellTags.MenuKey).performClick()
         assertTrue(state.drawerOpen)
         rule.onNodeWithTag(ShellTags.TelemetryHandle).assertExists()
+    }
+}
+
+/**
+ * T4.1 verifier follow-up: at 1.3× on a short window the Session links popover is capped at
+ * `calc(100dvh - 8rem)` and scrolls, so its last control stays reachable (globals.css 11865-11866).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h320dp-420dpi", fontScale = 1.3f)
+class LinksPopoverShortScreenTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun popoverIsCappedAndScrollsToItsLastControl() {
+        val events = mutableListOf<String>()
+        rule.setContent { ShellUnderTest(TetherSkin.Machine, PhoneShellState(linksOpen = true), ShellFixtures.idle, onEvent = { events += it }) }
+        val card = rule.onNodeWithTag(ShellTags.LinksPopover).fetchSemanticsNode()
+        val cap = with(rule.density) { (320.dp - 128.dp).toPx() }
+        assertTrue("card ${card.boundsInRoot.height}px > cap ${cap}px", card.boundsInRoot.height <= cap + 1f)
+        assertTrue("the card scrolls", card.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange)!!.maxValue() > 0f)
+        rule.onNodeWithContentDescription("Pin session").performScrollTo().performClick()
+        assertEquals(listOf("pin"), events)
     }
 }
