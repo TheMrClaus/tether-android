@@ -28,6 +28,10 @@ import org.junit.Test
 class DiskSettings(private val inner: InMemorySettings, homeUrl: String) : SettingsStore by inner {
     val home: String = serverOrigin(homeUrl)!!
 
+    /** Runs before a slot is read / written (a test can hold the call there). */
+    @Volatile var beforeRead: (suspend (origin: String) -> Unit)? = null
+    @Volatile var beforeWrite: (suspend (origin: String) -> Unit)? = null
+
     /** Every slot by origin. */
     val slots = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -57,11 +61,13 @@ class DiskSettings(private val inner: InMemorySettings, homeUrl: String) : Setti
 
     override suspend fun readPendingInput(origin: String): String? {
         PendingSlots.keyFor(origin) // the client only ever names canonical origins
+        beforeRead?.invoke(origin)
         return slots[origin]
     }
 
     override suspend fun writePendingInput(origin: String, raw: String) {
         PendingSlots.keyFor(origin)
+        beforeWrite?.invoke(origin)
         if (tear) throw IOException("killed mid-write")
         slots[origin] = raw
         allWrites += origin to raw

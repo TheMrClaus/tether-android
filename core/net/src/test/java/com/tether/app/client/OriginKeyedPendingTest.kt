@@ -573,4 +573,262 @@ class OriginKeyedPendingTest {
         assertNull(client.signedOutReason.value)
         assertEquals(ConnectionState.Connected, client.connection.value)
     }
+
+    // ------------------------------------------------------------------
+    // Round 2: race windows (held open with RealTetherClient.raceHook)
+    // ------------------------------------------------------------------
+
+    /** Holds the first [point] matching [match] until [release]; [handled] once a held frame is fully handled. */
+    private inner class Hold(private val point: RacePoint, private val match: (Any?) -> Boolean) {
+        private val taken = java.util.concurrent.atomic.AtomicBoolean()
+        private val reached = java.util.concurrent.CountDownLatch(1)
+        private val go = java.util.concurrent.CountDownLatch(1)
+        private val done = java.util.concurrent.CountDownLatch(1)
+        @Volatile private var held: Any? = null
+
+        init {
+            client.raceHook = { p, x ->
+                if (p == point && match(x) && taken.compareAndSet(false, true)) {
+                    held = x
+                    reached.countDown()
+                    go.await(20, TimeUnit.SECONDS)
+                } else if (p == RacePoint.FrameHandled && x != null && x === held) {
+                    done.countDown()
+                }
+            }
+        }
+
+        fun awaitReached() = assertTrue("the race point was never reached", reached.await(10, TimeUnit.SECONDS))
+        fun release() = go.countDown()
+        fun awaitHandled() = assertTrue("the held frame was never handled", done.await(10, TimeUnit.SECONDS))
+    }
+
+    private fun createdFrame(id: String) =
+        """{"type":"created","session":{"id":"$id","provider":"claude","name":"x","cwd":"/w","status":"ready",
+           "startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}}"""
+
+    /** Connected to A with s-a attached and snapshotted. */
+    private fun connectedToA(): WebSocket {
+        val c = processOnA()
+        c.start()
+        val ws = a.nextSocket()
+        handshake(a, ws)
+        c.attach("s-a")
+        assertEquals("attach", a.frame().type())
+        ws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        await(c.projections) { it.containsKey("s-a") }
+        return ws
+    }
+
+    @Test
+    fun aLateFrameFromTheOldServerNeverRepopulatesTheViewsAfterTheSwitch() {
+        val aws = connectedToA()
+        val hold = Hold(RacePoint.FrameAdmitted) { it is com.tether.app.protocol.ServerMessage.Created && it.session.id == "late-a" }
+        aws.send(createdFrame("late-a"))
+        hold.awaitReached() // admitted by A's listener, not yet handled...
+        loginTo(b) // ...when the sign-in to B lets A's socket go and clears the views
+        hold.release()
+        hold.awaitHandled()
+        assertTrue("A's late session shows on B", client.sessions.value.none { it.id == "late-a" })
+    }
+
+    @Test
+    fun aLateSnapshotFromTheOldServerNeverSeedsACursorThatWouldBeAttachedOnTheNewOne() {
+        val aws = connectedToA()
+        val hold = Hold(RacePoint.FrameAdmitted) { it is com.tether.app.protocol.ServerMessage.Snapshot && it.sessionId == "s-late" }
+        aws.send(snapshotFrame("s-late", 7, turnState("s-late")))
+        hold.awaitReached()
+        loginTo(b)
+        hold.release()
+        hold.awaitHandled()
+        assertTrue(client.projections.value.isEmpty())
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        assertTrue("A's session was attached on B", framesUntilBarrier(b).isEmpty())
+        assertTrue(b.allFrames.none { it.contains("s-late") || it.contains("s-a") })
+    }
+
+    @Test
+    fun pendingFramesComputedForTheOldSocketAreNeverSentOnTheNewServersSocket() {
+        connectedToA()
+        val hold = Hold(RacePoint.DrainComputed) { frames ->
+            (frames as? List<*>)?.any { it.toString().contains("held in the drain") } == true
+        }
+        val sender = Thread { client.send("s-a", "private: held in the drain") }
+        sender.start()
+        hold.awaitReached() // computed for A's socket, not yet sent...
+        loginTo(b) // ...when the switch lets A's socket go and B's comes up
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        hold.release()
+        sender.join(10_000)
+        serverBarrier(bws)
+        assertTrue(framesUntilBarrier(b).isEmpty())
+        assertTrue("a frame computed for A went to B", b.allFrames.none { it.contains("held in the drain") || it.contains("s-a") })
+    }
+
+    @Test
+    fun aRefusedVerdictPastItsStalenessCheckStillNeverFreesTheNewAttemptsSlot() =
+        aVerdictInTheNarrowWindowLeavesTheNewAttemptAlone(MockResponse().setResponseCode(401).setBody("{}"))
+
+    @Test
+    fun aRejectedVerdictPastItsStalenessCheckStillNeverFreesTheNewAttemptsSlot() =
+        aVerdictInTheNarrowWindowLeavesTheNewAttemptAlone(MockResponse().setResponseCode(200).setBody("""{"authenticated":false}"""))
+
+    /**
+     * A's verdict passes the staleness check before the verdict switch and is
+     * held there; THEN the sign-in to B starts B's attempt (probe out for 3 s).
+     * Released, A's verdict must still not free B's slot: otherwise the
+     * reconnectIfIdle() below starts a second, parallel attempt at B.
+     */
+    private fun aVerdictInTheNarrowWindowLeavesTheNewAttemptAlone(verdict: MockResponse) {
+        a.probeAnswers += verdict
+        processOnA()
+        val hold = Hold(RacePoint.VerdictChecked) { true }
+        client.start()
+        hold.awaitReached()
+        b.probeAnswers += MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
+            .setHeadersDelay(3_000, TimeUnit.MILLISECONDS)
+        loginTo(b)
+        hold.release()
+        Thread.sleep(500) // A's released verdict runs to its end (no network involved)
+        client.reconnectIfIdle()
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        assertEquals("a second attempt ran in parallel", 1, b.probes.get())
+        assertNull(client.signedOutReason.value)
+    }
+
+    @Test
+    fun aSaveQueuedBeforeTheSwitchNeverWritesTheOldStoreOrAnEmptyOneIntoTheNewServersSlot() {
+        // B's slot already holds a record (a set-aside from an earlier visit).
+        val bRecord = PendingInput.resetInFlight(
+            PendingInput.markSent(
+                PendingInput.addRecord(PendingInput.emptyStore(), "k-b", PendingInput.KIND_SEND, "s-b", "for B", now.get()).store,
+                listOf("k-b"),
+                now.get(),
+            ),
+        )
+        connectedToA()
+        disk.slots[b.origin()] = PendingInput.toPersistable(bRecord)
+
+        // A save of A's store is stuck in its write; more saves queue behind it.
+        val writeA = kotlinx.coroutines.CompletableDeferred<Unit>()
+        disk.beforeWrite = { origin -> if (origin == a.origin()) writeA.await() }
+        client.send("s-a", "private: queued saves")
+        client.queueAdd("s-a", "private: queued saves two")
+        // The switch to B, held while it reads B's slot.
+        val readB = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val readingB = java.util.concurrent.CountDownLatch(1)
+        disk.beforeRead = { origin -> if (origin == b.origin()) { readingB.countDown(); readB.await() } }
+        val login = Thread { loginTo(b) }
+        login.start()
+        assertTrue(readingB.await(10, TimeUnit.SECONDS))
+        // The queued saves now run, with the store switched to B but not yet loaded.
+        writeA.complete(Unit)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(800)
+        while (System.nanoTime() < deadline && disk.allWrites.none { it.first == b.origin() }) Thread.sleep(10)
+        readB.complete(Unit)
+        login.join(10_000)
+
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        assertEquals(listOf("attach"), framesUntilBarrier(b).map { it.type() })
+        bws.send(snapshotFrame("s-b", 1, turnState("s-b")))
+        serverBarrier(bws)
+        assertEquals("B's own record survived", listOf("k-b"), framesUntilBarrier(b).map { it.s("idempotencyKey") })
+        assertTrue(b.allFrames.none { it.contains("private") || it.contains("s-a") })
+    }
+
+    // ------------------------------------------------------------------
+    // Round 2: rapid switches, process death mid-switch
+    // ------------------------------------------------------------------
+
+    /** Signed in to [server] (up), whose link then drops: the user types [text] for [sessionId]. */
+    private fun typeWhileDown(server: FakeTether, ws: WebSocket, sessionId: String, text: String) {
+        server.down = true
+        ws.close(1001, null)
+        await(client.connection) { it == ConnectionState.Disconnected }
+        client.send(sessionId, text)
+    }
+
+    @Test
+    fun rapidSwitchesAToBToAToBDeliverEachServersInputOnlyThere() {
+        writeOnA()
+        loginTo(b)
+        val b1 = b.nextSocket()
+        handshake(b, b1)
+        typeWhileDown(b, b1, "s-b", "private-b: typed for B")
+
+        a.down = false
+        loginTo(a)
+        val a2 = a.nextSocket()
+        handshake(a, a2)
+        assertEquals(listOf("attach", "send", "queue-add"), framesUntilBarrier(a).map { it.type() })
+
+        b.down = false
+        loginTo(b)
+        val b2 = b.nextSocket()
+        handshake(b, b2)
+        val onB = framesUntilBarrier(b)
+        assertEquals(listOf("attach", "send"), onB.map { it.type() })
+        assertEquals("private-b: typed for B", onB[1].s("text"))
+
+        assertTrue("B's input reached A", a.allFrames.none { it.contains("private-b") || it.contains("s-b") })
+        assertTrue("A's input reached B", b.allFrames.none { it.contains("typed offline for A") || it.contains("tried on A") || it.contains("s-a") })
+        awaitErrors { list -> list.count { it.contains("kept for") } >= 2 }
+    }
+
+    @Test
+    fun switchesAToBToCNeverCarryEitherServersInputToTheNext() {
+        FakeTether().use { c ->
+            writeOnA()
+            loginTo(b)
+            val b1 = b.nextSocket()
+            handshake(b, b1)
+            typeWhileDown(b, b1, "s-b", "private-b: typed for B")
+            loginTo(c)
+            val cws = c.nextSocket()
+            handshake(c, cws)
+            cws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+            cws.send(snapshotFrame("s-b", 1, turnState("s-b")))
+            serverBarrier(cws)
+            assertTrue(framesUntilBarrier(c).isEmpty())
+            assertTrue(c.allFrames.none { it.contains("private") || it.contains("s-a") || it.contains("s-b") })
+            awaitErrors { list ->
+                list.any { it.contains("kept for ${displayHost(a)}") } && list.any { it.contains("kept for ${displayHost(b)}") }
+            }
+        }
+    }
+
+    @Test
+    fun processDeathBetweenTheURLMoveAndTheSetAsideWriteNeverLeaksToTheNewServer() {
+        val onA = writeOnA()
+        // From here nothing reaches the disk: the process dies mid-switch, after
+        // setServer moved the URL and before the set-aside write landed.
+        disk.tear = true
+        client.send("s-a", "private: lost with the process")
+        loginTo(b)
+        b.nextSocket() // the dying process reached B's upgrade
+        scopes.forEach { it.cancel() }
+        scopes.clear()
+        b.serverSockets.forEach { runCatching { it.close(1001, null) } }
+        disk.tear = false
+
+        process(disk).start() // configured for B now
+        handshake(b, b.nextSocket())
+        assertTrue(framesUntilBarrier(b).isEmpty())
+
+        a.down = false
+        loginTo(a)
+        val aws = a.nextSocket()
+        handshake(a, aws)
+        assertEquals(listOf("attach"), framesUntilBarrier(a).map { it.type() })
+        aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        serverBarrier(aws)
+        val resent = framesUntilBarrier(a)
+        assertEquals(listOf("send", "queue-add"), resent.map { it.type() })
+        assertEquals(onA.triedKey, resent[0].s("idempotencyKey"))
+        assertTrue(b.allFrames.none { it.contains("private") || it.contains("s-a") })
+    }
 }

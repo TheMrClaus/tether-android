@@ -57,6 +57,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
+/** See RealTetherClient.raceHook (tests only). */
+internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked }
+
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
 
@@ -1136,6 +1139,7 @@ class RealTetherClient(
                 if (staleLocked(generation)) return@launch
                 consecutiveTimeouts = 0
             }
+            raceHook?.invoke(RacePoint.VerdictChecked, verdict)
             when (verdict) {
                 ProbeVerdict.Authenticated -> openSocket(base, credential, generation)
                 ProbeVerdict.Rejected -> handleCredentialRejected(
@@ -1370,7 +1374,10 @@ class RealTetherClient(
             if (!synchronized(lock) { bindLocked(webSocket) }) return
             // Stamped before parsing: even an undecodable frame proves traffic.
             lastInboundAt = clock()
-            handleFrame(webSocket, ServerMessage.parse(text))
+            val message = ServerMessage.parse(text)
+            raceHook?.invoke(RacePoint.FrameAdmitted, message)
+            handleFrame(webSocket, message)
+            raceHook?.invoke(RacePoint.FrameHandled, message)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -1441,7 +1448,7 @@ class RealTetherClient(
             // Liveness confirmed: lastInboundAt was stamped for this frame already,
             // so an outstanding probe sees the link alive. Nothing else to do.
             is ServerMessage.Pong -> Unit
-            is ServerMessage.Created -> upsertSession(message.session)
+            is ServerMessage.Created -> ifCurrent(webSocket) { upsertSessionLocked(message.session) }
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {
                     // use-tether.ts:827 — an archived session refuses every send: drop its records.
@@ -1455,13 +1462,13 @@ class RealTetherClient(
                     }
                     if (changed) persistPending()
                 }
-                upsertSession(message.session)
+                ifCurrent(webSocket) { upsertSessionLocked(message.session) }
             }
-            is ServerMessage.Histories -> historiesState.value = message.sessions
-            is ServerMessage.Directories -> directoriesState.value = message.listing
+            is ServerMessage.Histories -> ifCurrent(webSocket) { historiesState.value = message.sessions }
+            is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
             is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
             is ServerMessage.Event -> onEvent(webSocket, message)
-            is ServerMessage.TurnsDetail -> onTurnsDetail(message)
+            is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
             is ServerMessage.InterruptResult ->
                 if (message.status == "failed") {
                     emitError(message.error ?: "The interrupt request could not be delivered.")
@@ -1473,10 +1480,11 @@ class RealTetherClient(
                 message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
-            is ServerMessage.Nodes -> nodesState.value = message.nodes
-            is ServerMessage.NodeResult -> onNodeResult(message)
-            is ServerMessage.SessionControls ->
+            is ServerMessage.Nodes -> ifCurrent(webSocket) { nodesState.value = message.nodes }
+            is ServerMessage.NodeResult -> onNodeResult(webSocket, message)
+            is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
+            }
             // T1.1 modeled the full v129 union; frames this client does not act on
             // yet (and Unknown) stay inert, exactly as before.
             else -> Unit
@@ -1498,14 +1506,16 @@ class RealTetherClient(
             haltForVersion(it)
             return
         }
-        sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
-        providersState.value = message.providers
-        workspaceRootState.value = message.workspaceRoot
         // §5.5: re-attach every subscribed session and every session that has
         // pending outbound input, from its last good cursor.
         val toAttach: List<Pair<String, Long?>>
         synchronized(lock) {
             if (socket !== webSocket) return
+            // Published under the same check: a late ready of a socket let go
+            // (another server's) can never show its sessions.
+            sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
+            providersState.value = message.providers
+            workspaceRootState.value = message.workspaceRoot
             handshakeDone = true
             // A handshake the server accepted is the success that resets backoff.
             backoff.reset()
@@ -1526,8 +1536,8 @@ class RealTetherClient(
             sendFrameOn(webSocket, ClientMessage.Attach(sessionId, afterSeq))
         }
         message.workspaceRoot?.let {
-            sendFrame(ClientMessage.Browse(it))
-            sendFrame(ClientMessage.Discover(it))
+            sendFrameOn(webSocket, ClientMessage.Browse(it))
+            sendFrameOn(webSocket, ClientMessage.Discover(it))
         }
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
@@ -1568,15 +1578,19 @@ class RealTetherClient(
         }
         if (!current) return
         if (!message.hasState) return
-        trimmedBeforeState.value = message.trimmedBefore
-            ?.let { trimmedBeforeState.value + (message.sessionId to it) }
-            ?: (trimmedBeforeState.value - message.sessionId)
         // The tree is the source of truth and is always kept: live events fold onto it.
         // A state whose required session fields the legacy typed model cannot read
         // leaves no typed projection (the screens show nothing rather than a diverged
         // base); pending input still reconciles against the tree, as on the web.
-        val tree = message.state ?: return
-        publish(message.sessionId, tree, adapt(message.sessionId, tree))
+        val tree = message.state
+        val typed = tree?.let { adapt(message.sessionId, it) }
+        val published = ifCurrent(webSocket) {
+            trimmedBeforeState.value = message.trimmedBefore
+                ?.let { trimmedBeforeState.value + (message.sessionId to it) }
+                ?: (trimmedBeforeState.value - message.sessionId)
+            if (tree != null) publishLocked(message.sessionId, tree, typed)
+        }
+        if (!published || tree == null) return
         // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
         // journal-folded state exactly as the web does (not the typed view): a key it
         // contains was accepted, whatever it lacks was not and is redelivered below.
@@ -1643,13 +1657,18 @@ class RealTetherClient(
             // projection shape (a JS reduce throws on the same malformed base). Never let that
             // take down the socket thread: drop the diverged base and ask for a FULL snapshot
             // (no afterSeq — a cursor-at-head attach would come back stateless).
-            projectionTreesState.value = projectionTreesState.value - message.sessionId
-            projectionsState.value = projectionsState.value - message.sessionId
-            sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
+            val current = ifCurrent(webSocket) {
+                projectionTreesState.value = projectionTreesState.value - message.sessionId
+                projectionsState.value = projectionsState.value - message.sessionId
+            }
+            if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
-        if (next !== tree) publish(message.sessionId, next, adapt(message.sessionId, next))
+        if (next !== tree) {
+            val typed = adapt(message.sessionId, next)
+            ifCurrent(webSocket) { publishLocked(message.sessionId, next, typed) }
+        }
     }
 
     /**
@@ -1657,11 +1676,12 @@ class RealTetherClient(
      * replace the trimmed stubs in `turnsById`; nothing else changes. Ignored for a
      * session with no projection yet.
      */
-    private fun onTurnsDetail(message: ServerMessage.TurnsDetail) {
+    private fun onTurnsDetail(webSocket: WebSocket, message: ServerMessage.TurnsDetail) {
         val tree = projectionTreesState.value[message.sessionId] ?: return
         val turnsById = tree["turnsById"] as? JsObj ?: JsObj.EMPTY
         val next = tree.put("turnsById", turnsById.spread(message.turns))
-        publish(message.sessionId, next, adapt(message.sessionId, next))
+        val typed = adapt(message.sessionId, next)
+        ifCurrent(webSocket) { publishLocked(message.sessionId, next, typed) }
     }
 
     /**
@@ -1671,8 +1691,20 @@ class RealTetherClient(
     private fun adapt(sessionId: String, tree: JsObj): SessionProjection? =
         adapters.getOrPut(sessionId) { LegacyProjectionAdapter() }.adapt(tree)
 
-    /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). */
-    private fun publish(sessionId: String, tree: JsObj, typed: SessionProjection?) {
+    /**
+     * Run [write] (a write of the published per-server state) under [lock], and
+     * only while [webSocket] is still the current socket: a frame that passed
+     * the listener's check just before a sign-in switch (and is still being
+     * handled) must not repopulate what the switch cleared. True = written.
+     */
+    private inline fun ifCurrent(webSocket: WebSocket, write: () -> Unit): Boolean = synchronized(lock) {
+        if (socket !== webSocket) return@synchronized false
+        write()
+        true
+    }
+
+    /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). Caller holds [lock]. */
+    private fun publishLocked(sessionId: String, tree: JsObj, typed: SessionProjection?) {
         projectionTreesState.value = projectionTreesState.value + (sessionId to tree)
         projectionsState.value = if (typed != null) {
             projectionsState.value + (sessionId to typed)
@@ -1681,7 +1713,8 @@ class RealTetherClient(
         }
     }
 
-    private fun upsertSession(session: AgentSession) {
+    /** Caller holds [lock] (see [ifCurrent]). */
+    private fun upsertSessionLocked(session: AgentSession) {
         sessionsState.value = (listOf(session) + sessionsState.value.filter { it.id != session.id })
             .sortedByDescending { it.updatedAt }
     }
@@ -1768,6 +1801,7 @@ class RealTetherClient(
                 }
             }
         }
+        raceHook?.invoke(RacePoint.DrainComputed, frames)
         for (frame in frames) sendFrameOn(ws, frame)
         persistPending()
     }
@@ -2089,11 +2123,20 @@ class RealTetherClient(
     }
 
     /** `node-result`: always the new [nodeResult] (as on the web); also ends its own request, if still waiting. */
-    private fun onNodeResult(message: ServerMessage.NodeResult) {
+    private fun onNodeResult(webSocket: WebSocket, message: ServerMessage.NodeResult) {
         val result = NodeActionResult(message.ok, message.nodeId, message.message, clock())
-        nodeResultState.value = result
+        if (!ifCurrent(webSocket) { nodeResultState.value = result }) return
         message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.Answered(result)) }
     }
+
+    /**
+     * Test seam for race windows that timing alone cannot force: invoked at each
+     * [RacePoint] (a frame admitted by the listener's socket check and about to
+     * be handled; pending frames computed and about to be sent; a probe verdict
+     * past its staleness check and about to act). Null in production.
+     */
+    @Volatile
+    internal var raceHook: ((RacePoint, Any?) -> Unit)? = null
 
     /** Test seam: node requests still waiting for an answer (must return to 0: nothing leaks). */
     internal fun pendingNodeRequestCount(): Int = synchronized(lock) { nodeRequests.size }
