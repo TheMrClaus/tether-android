@@ -5,6 +5,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    // T3.4: JVM screenshot tests of the debug-only Component Gallery (recordRoborazziDebug /
+    // verifyRoborazziDebug); goldens in src/testDebug/screenshots.
+    alias(libs.plugins.roborazzi)
 }
 
 // Release signing comes from the environment (CI decodes the keystore from a
@@ -72,6 +75,13 @@ android {
     }
 }
 
+// T3.4: the Component Gallery lives in src/debug (never in release, see src/testRelease); its
+// goldens are checked in, verifyRoborazziDebug (CI) fails on any changed pixel.
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("src/testDebug/screenshots"))
+}
+tasks.named("check") { dependsOn("verifyRoborazziDebug") }
+
 dependencies {
     implementation(project(":core:protocol"))
     implementation(project(":core:net"))
@@ -119,4 +129,11 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // T3.4 gallery screenshot tests (compose rule + Roborazzi capture).
+    testImplementation(composeBom)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
 }

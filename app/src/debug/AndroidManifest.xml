@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only additions to the app manifest (merged into the debug variant alone; the release
+     manifest never sees this file). T3.4: the Component Gallery gets its own launcher entry,
+     "Tether Gallery", next to the app in debug installs. Also reachable with
+     `adb shell am start -n com.tether.app/.gallery.GalleryActivity`. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name=".gallery.GalleryActivity"
+            android:exported="true"
+            android:label="@string/gallery_name"
+            android:taskAffinity="com.tether.app.gallery">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

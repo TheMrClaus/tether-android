@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- T3.4: the debug-only Component Gallery's launcher label. -->
+    <string name="gallery_name">Tether Gallery</string>
+</resources>
