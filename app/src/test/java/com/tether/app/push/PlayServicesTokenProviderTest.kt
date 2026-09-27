@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -78,8 +79,11 @@ class PlayServicesTokenProviderTest {
     fun aHungTaskIsCutShortByTheTimeout() = runBlocking {
         val hung = provider(deleteToken = { TaskCompletionSource<Void>().task }, getToken = { TaskCompletionSource<String>().task }, timeoutMs = 100)
         val started = System.nanoTime()
-        hung.delete()
-        assertNull(hung.token())
+        // The outer bound only fails the test fast if the internal timeout is lost.
+        withTimeout(5_000) {
+            hung.delete()
+            assertNull(hung.token())
+        }
         assertTrue("took ${(System.nanoTime() - started) / 1_000_000} ms", System.nanoTime() - started < 3_000_000_000)
     }
 
