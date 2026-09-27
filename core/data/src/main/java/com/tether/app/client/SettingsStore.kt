@@ -3,6 +3,8 @@ package com.tether.app.client
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
@@ -34,10 +36,15 @@ import kotlinx.coroutines.withContext
  */
 sealed interface Credential {
     /** Password login: the raw `tether_session` cookie VALUE (still URL-encoded). */
-    data class Cookie(val value: String) : Credential
+    data class Cookie(val value: String) : Credential {
+        /** Redacted: a credential must never reach a log, a crash report or a string template. */
+        override fun toString(): String = "Cookie(***)"
+    }
 
     /** Paired device: a `tthr_…` bearer token from POST /api/devices/claim. */
-    data class DeviceToken(val value: String) : Credential
+    data class DeviceToken(val value: String) : Credential {
+        override fun toString(): String = "DeviceToken(***)"
+    }
 }
 
 /**
@@ -90,19 +97,32 @@ interface SettingsStore {
 /**
  * DataStore-backed settings with the credentials sealed at rest.
  *
- * - [dataStore] (`tether_settings.preferences_pb`): base URL + pending input.
- *   Versions before T1.4 also kept `session_cookie` / `device_token` here in
- *   PLAINTEXT; the first load migrates them (see [loadLocked]) and deletes them.
+ * - [dataStore] (`tether_settings.preferences_pb`): base URL + pending input,
+ *   and the logout tombstone. Versions before T1.4 also kept `session_cookie` /
+ *   `device_token` here in PLAINTEXT; the first load migrates them (see
+ *   [loadLocked]) and deletes them.
  * - [credentialStore] (`credentials/tether_credentials.preferences_pb`): each
  *   credential sealed by [cipher] (AES-256-GCM under a non-exportable Keystore
- *   key in production), Base64, with the slot name as AAD.
+ *   key in production), Base64. The AAD is `slot|origin`: a blob only opens for
+ *   the slot AND the server origin it was sealed for, so a URL that changed
+ *   without its credential (a torn write) reads as logged out instead of
+ *   presenting server A's credential to server B.
+ *
+ * Write order in [setServer] — never a moment on disk where the new URL pairs
+ * with the old credential: (1) delete the old credential, (2) move the URL,
+ * (3) seal the new credential for the new origin. A crash between any two steps
+ * leaves "signed out", never a cross-origin pair.
  *
  * Failure policy — fail closed, never crash, never log a value:
- * - a blob that does not open (corrupt, truncated, wrong slot, key invalidated
- *   or missing) reads as "no credential", i.e. logged out, and is deleted; an
- *   unusable key is destroyed so the next login seals under a fresh one;
+ * - a blob that does not open (corrupt, truncated, wrong slot/origin, key
+ *   missing / permanently invalidated) reads as logged out and is deleted; a
+ *   dead key is destroyed so the next login seals under a fresh one;
+ * - a TRANSIENT Keystore error reads as logged out for now but leaves the key
+ *   and the blob alone; the next read (e.g. the next start()) retries;
  * - a credential that cannot be sealed is kept in memory for this process only
  *   (the user signs in again after a restart) — never written in plaintext;
+ * - a clear that cannot reach the credential file (logout) is retried once, then
+ *   recorded as a tombstone in [dataStore] that [loadLocked] honours;
  * - migration deletes the plaintext whether or not sealing succeeded.
  *
  * The decrypted values live in memory after the first load, so the Keystore is
@@ -117,6 +137,9 @@ class DataStoreSettings(
     private val baseUrlKey = stringPreferencesKey("base_url")
     private val pendingKey = stringPreferencesKey("pending_input")
 
+    /** Set when a logout could not delete the sealed credentials: they are dead regardless. */
+    private val clearedTombstoneKey = booleanPreferencesKey("credentials_cleared")
+
     // Pre-T1.4 plaintext slots in [dataStore]. Read once for migration, then deleted.
     private val legacyCookieKey = stringPreferencesKey(SLOT_COOKIE)
     private val legacyDeviceTokenKey = stringPreferencesKey(SLOT_DEVICE_TOKEN)
@@ -125,12 +148,38 @@ class DataStoreSettings(
     private val sealedCookieKey = stringPreferencesKey(SLOT_COOKIE)
     private val sealedDeviceTokenKey = stringPreferencesKey(SLOT_DEVICE_TOKEN)
 
-    private data class Credentials(val cookie: String?, val deviceToken: String?)
+    /**
+     * [AAD_FORMAT_ORIGIN] once every blob in the file is origin-bound. Absent =
+     * blobs from an early T1.4 build (slot-only AAD) may exist: they are opened
+     * with the old AAD ONCE and re-sealed with the origin. With the marker set the
+     * old AAD is never tried again.
+     */
+    private val aadFormatKey = intPreferencesKey("aad_format")
+
+    private data class Credentials(val cookie: String?, val deviceToken: String?) {
+        override fun toString(): String = "Credentials(cookie=${if (cookie == null) "null" else "***"}, " +
+            "deviceToken=${if (deviceToken == null) "null" else "***"})"
+    }
+
+    private sealed interface Slot {
+        data object Empty : Slot
+        data class Opened(val value: String, val reseal: Boolean) : Slot {
+            override fun toString(): String = "Opened(***, reseal=$reseal)"
+        }
+        /** Undecryptable for good: delete it. */
+        data object Dead : Slot
+        /** Keystore not usable right now: leave the blob, retry later. */
+        data object Unavailable : Slot
+    }
 
     private val mutex = Mutex()
 
     // null = not loaded yet. Every read waits for the first load.
     private val credentials = MutableStateFlow<Credentials?>(null)
+
+    // A transient Keystore failure left a blob unopened: the next read retries.
+    @Volatile
+    private var retryPending = false
 
     override val baseUrl: Flow<String?> = dataStore.data.map { it[baseUrlKey] }
 
@@ -144,67 +193,124 @@ class DataStoreSettings(
     }.distinctUntilChanged()
 
     private suspend fun ensureLoaded() {
-        if (credentials.value != null) return
-        mutex.withLock { if (credentials.value == null) loadLocked() }
+        if (credentials.value != null && !retryPending) return
+        mutex.withLock { if (credentials.value == null || retryPending) loadLocked() }
     }
 
     /** Open the sealed slots and migrate any plaintext left by an older version. Caller holds [mutex]. */
     private suspend fun loadLocked() = withContext(ioDispatcher) {
+        retryPending = false
+        val prefs = dataStore.data.first()
         val sealed = credentialStore.data.first()
-        var cookieValue = openSlot(sealed[sealedCookieKey], SLOT_COOKIE)
-        var tokenValue = openSlot(sealed[sealedDeviceTokenKey], SLOT_DEVICE_TOKEN)
 
-        val legacy = dataStore.data.first()
-        val legacyCookie = legacy[legacyCookieKey]?.takeIf { it.isNotEmpty() }
-        val legacyToken = legacy[legacyDeviceTokenKey]?.takeIf { it.isNotEmpty() }
-        // A sealed value wins over a plaintext one: it can only exist if a
-        // migration already sealed it (the plaintext is a leftover of a crash
-        // between the two writes) or a newer login replaced it.
-        if (cookieValue == null && tokenValue == null) {
-            cookieValue = legacyCookie
-            tokenValue = legacyToken
+        if (prefs[clearedTombstoneKey] == true) {
+            // A logout whose clear never reached the credential file: honour it.
+            credentials.value = Credentials(null, null)
+            val cleared = runCatching { removeSealedSlots() }.isSuccess
+            runCatching {
+                dataStore.edit {
+                    it.remove(legacyCookieKey)
+                    it.remove(legacyDeviceTokenKey)
+                    if (cleared) it.remove(clearedTombstoneKey)
+                }
+            }
+            return@withContext
         }
 
-        // Rewrite the sealed file to exactly what is in force: undecryptable
-        // blobs are dropped, migrated plaintext is sealed (or, if sealing fails,
-        // held in memory only).
-        val cookieBlob = cookieValue?.let { sealSlot(it, SLOT_COOKIE) }
-        val tokenBlob = tokenValue?.let { sealSlot(it, SLOT_DEVICE_TOKEN) }
-        credentialStore.edit { prefs ->
-            if (cookieBlob != null) prefs[sealedCookieKey] = cookieBlob else prefs.remove(sealedCookieKey)
-            if (tokenBlob != null) prefs[sealedDeviceTokenKey] = tokenBlob else prefs.remove(sealedDeviceTokenKey)
+        val origin = originOf(prefs[baseUrlKey])
+        val allowSlotOnlyAad = sealed[aadFormatKey] != AAD_FORMAT_ORIGIN
+        var cookieSlot = openSlot(sealed[sealedCookieKey], SLOT_COOKIE, origin, allowSlotOnlyAad)
+        var tokenSlot = openSlot(sealed[sealedDeviceTokenKey], SLOT_DEVICE_TOKEN, origin, allowSlotOnlyAad)
+
+        // Pre-T1.4 plaintext: written in ONE edit together with its base URL, so
+        // it belongs to [origin]. A sealed or temporarily unreadable value wins
+        // (the plaintext is then a leftover of a crash mid-migration).
+        val legacy = prefs.contains(legacyCookieKey) || prefs.contains(legacyDeviceTokenKey)
+        val nothingSealed = listOf(cookieSlot, tokenSlot).none { it is Slot.Opened || it is Slot.Unavailable }
+        if (legacy && nothingSealed && origin != null) {
+            prefs[legacyCookieKey]?.takeIf { it.isNotEmpty() }?.let { cookieSlot = Slot.Opened(it, reseal = true) }
+            prefs[legacyDeviceTokenKey]?.takeIf { it.isNotEmpty() }?.let { tokenSlot = Slot.Opened(it, reseal = true) }
         }
-        // Only after the sealed copy is on disk: delete the plaintext.
-        if (legacy.contains(legacyCookieKey) || legacy.contains(legacyDeviceTokenKey)) {
-            dataStore.edit {
-                it.remove(legacyCookieKey)
-                it.remove(legacyDeviceTokenKey)
+
+        // Bring the sealed file in line: dead blobs go, migrated values are sealed
+        // for the origin (or held in memory only), unavailable ones stay as they are.
+        val cookieWrite = rewriteFor(cookieSlot, SLOT_COOKIE, origin)
+        val tokenWrite = rewriteFor(tokenSlot, SLOT_DEVICE_TOKEN, origin)
+        val unavailable = cookieSlot is Slot.Unavailable || tokenSlot is Slot.Unavailable
+        val markOriginFormat = !unavailable || !allowSlotOnlyAad
+        if (cookieWrite != null || tokenWrite != null || (markOriginFormat && sealed[aadFormatKey] != AAD_FORMAT_ORIGIN)) {
+            runCatching {
+                credentialStore.edit { p ->
+                    cookieWrite?.let { w -> if (w.isEmpty()) p.remove(sealedCookieKey) else p[sealedCookieKey] = w }
+                    tokenWrite?.let { w -> if (w.isEmpty()) p.remove(sealedDeviceTokenKey) else p[sealedDeviceTokenKey] = w }
+                    if (markOriginFormat) p[aadFormatKey] = AAD_FORMAT_ORIGIN
+                }
             }
         }
-        credentials.value = Credentials(cookieValue, tokenValue)
+        // Only after the sealed copy is on disk: delete the plaintext.
+        if (legacy) {
+            runCatching {
+                dataStore.edit {
+                    it.remove(legacyCookieKey)
+                    it.remove(legacyDeviceTokenKey)
+                }
+            }
+        }
+        retryPending = unavailable
+        credentials.value = Credentials(
+            (cookieSlot as? Slot.Opened)?.value,
+            (tokenSlot as? Slot.Opened)?.value,
+        )
     }
 
-    private fun openSlot(encoded: String?, slot: String): String? {
-        if (encoded.isNullOrEmpty()) return null
-        return try {
-            val blob = Base64.getDecoder().decode(encoded)
-            String(cipher.open(blob, aadFor(slot)), Charsets.UTF_8).takeIf { it.isNotEmpty() }
-        } catch (e: CredentialCipherException) {
-            if (e.keyUnusable) cipher.destroyKey()
-            null
+    /** null = leave the slot as it is; "" = delete it; otherwise the new sealed value. */
+    private fun rewriteFor(slot: Slot, name: String, origin: String?): String? = when (slot) {
+        Slot.Empty, Slot.Unavailable -> null
+        Slot.Dead -> ""
+        is Slot.Opened -> if (!slot.reseal) null else origin?.let { sealSlot(slot.value, name, it) } ?: ""
+    }
+
+    private fun openSlot(encoded: String?, slot: String, origin: String?, allowSlotOnlyAad: Boolean): Slot {
+        if (encoded.isNullOrEmpty()) return Slot.Empty
+        // A credential with no (parsable) server cannot be bound to one: dead.
+        if (origin == null) return Slot.Dead
+        val blob = try {
+            Base64.getDecoder().decode(encoded)
         } catch (_: IllegalArgumentException) {
-            null // not Base64: corrupt
+            return Slot.Dead // not Base64: corrupt
+        }
+        val first = tryOpen(blob, aadFor(slot, origin))
+        if (first !is Slot.Dead || !allowSlotOnlyAad) return first.asFresh()
+        // One-time migration of a slot-only-AAD blob (early T1.4 builds).
+        val legacy = tryOpen(blob, legacyAadFor(slot))
+        return if (legacy is Slot.Opened) legacy.copy(reseal = true) else legacy
+    }
+
+    private fun Slot.asFresh(): Slot = if (this is Slot.Opened) copy(reseal = false) else this
+
+    private fun tryOpen(blob: ByteArray, aad: ByteArray): Slot = try {
+        String(cipher.open(blob, aad), Charsets.UTF_8).takeIf { it.isNotEmpty() }
+            ?.let { Slot.Opened(it, reseal = false) } ?: Slot.Dead
+    } catch (e: CredentialCipherException) {
+        when {
+            e.transient -> Slot.Unavailable
+            e.keyUnusable -> {
+                cipher.destroyKey()
+                Slot.Dead
+            }
+            else -> Slot.Dead
         }
     }
 
     /** Sealed + Base64, or null when sealing is impossible (then: memory only). */
-    private fun sealSlot(value: String, slot: String): String? {
+    private fun sealSlot(value: String, slot: String, origin: String): String? {
         val plaintext = value.toByteArray(Charsets.UTF_8)
         repeat(2) { attempt ->
             try {
-                return Base64.getEncoder().encodeToString(cipher.seal(plaintext, aadFor(slot)))
+                return Base64.getEncoder().encodeToString(cipher.seal(plaintext, aadFor(slot, origin)))
             } catch (e: CredentialCipherException) {
-                // One retry under a fresh key when the old one is dead.
+                // One retry under a fresh key when the old one is dead; a transient
+                // error never destroys the key.
                 if (!e.keyUnusable || attempt == 1) return null
                 cipher.destroyKey()
             }
@@ -212,54 +318,86 @@ class DataStoreSettings(
         return null
     }
 
-    private fun aadFor(slot: String): ByteArray = "$AAD_PREFIX$slot".toByteArray(Charsets.UTF_8)
+    private fun aadFor(slot: String, origin: String): ByteArray = "$AAD_PREFIX$slot|$origin".toByteArray(Charsets.UTF_8)
+
+    private fun legacyAadFor(slot: String): ByteArray = "$LEGACY_AAD_PREFIX$slot".toByteArray(Charsets.UTF_8)
+
+    private suspend fun removeSealedSlots() {
+        credentialStore.edit {
+            it.remove(sealedCookieKey)
+            it.remove(sealedDeviceTokenKey)
+        }
+    }
 
     override suspend fun setServer(baseUrl: String, credential: Credential) {
         mutex.withLock {
-            if (credentials.value == null) loadLocked()
-            dataStore.edit {
-                it[baseUrlKey] = baseUrl
-                it.remove(legacyCookieKey)
-                it.remove(legacyDeviceTokenKey)
-            }
-            // Writing one credential clears the other: two live credentials would
-            // make "which one is in force" ambiguous on the next launch.
-            val next = when (credential) {
-                is Credential.Cookie -> Credentials(credential.value, null)
-                is Credential.DeviceToken -> Credentials(null, credential.value)
-            }
+            if (credentials.value == null || retryPending) loadLocked()
+            retryPending = false
             withContext(ioDispatcher) {
-                val cookieBlob = next.cookie?.let { sealSlot(it, SLOT_COOKIE) }
-                val tokenBlob = next.deviceToken?.let { sealSlot(it, SLOT_DEVICE_TOKEN) }
-                credentialStore.edit { prefs ->
-                    if (cookieBlob != null) prefs[sealedCookieKey] = cookieBlob else prefs.remove(sealedCookieKey)
-                    if (tokenBlob != null) prefs[sealedDeviceTokenKey] = tokenBlob else prefs.remove(sealedDeviceTokenKey)
+                // (1) The old credential goes first — in memory and on disk — so
+                //     no reader, and no crash, ever pairs it with the new URL. If
+                //     this fails the URL is not touched (the caller keeps the new
+                //     credential in memory only).
+                credentials.value = Credentials(null, null)
+                removeSealedSlots()
+                // (2) Move the URL. The old credential is gone from disk, so a
+                //     logout tombstone is obsolete too.
+                dataStore.edit {
+                    it[baseUrlKey] = baseUrl
+                    it.remove(legacyCookieKey)
+                    it.remove(legacyDeviceTokenKey)
+                    it.remove(clearedTombstoneKey)
+                }
+                // (3) Seal for the NEW origin. Writing one credential clears the
+                //     other: two live credentials would make "which one is in
+                //     force" ambiguous on the next launch.
+                val next = when (credential) {
+                    is Credential.Cookie -> Credentials(credential.value, null)
+                    is Credential.DeviceToken -> Credentials(null, credential.value)
+                }
+                val origin = originOf(baseUrl)
+                val cookieBlob = origin?.let { o -> next.cookie?.let { sealSlot(it, SLOT_COOKIE, o) } }
+                val tokenBlob = origin?.let { o -> next.deviceToken?.let { sealSlot(it, SLOT_DEVICE_TOKEN, o) } }
+                credentials.value = next
+                if (cookieBlob != null || tokenBlob != null) {
+                    credentialStore.edit { p ->
+                        cookieBlob?.let { p[sealedCookieKey] = it }
+                        tokenBlob?.let { p[sealedDeviceTokenKey] = it }
+                        p[aadFormatKey] = AAD_FORMAT_ORIGIN
+                    }
                 }
             }
-            credentials.value = next
         }
     }
 
     override suspend fun clearCredential() {
-        mutex.withLock {
-            credentials.value = Credentials(null, null)
-            credentialStore.edit { it.clear() }
-            dataStore.edit {
-                it.remove(legacyCookieKey)
-                it.remove(legacyDeviceTokenKey)
-            }
-        }
+        mutex.withLock { forgetCredentialsLocked(extra = {}) }
     }
 
     override suspend fun clear() {
         mutex.withLock {
-            credentials.value = Credentials(null, null)
-            credentialStore.edit { it.clear() }
-            dataStore.edit {
+            forgetCredentialsLocked {
                 it.remove(baseUrlKey)
+                it.remove(pendingKey)
+            }
+        }
+    }
+
+    /**
+     * Forget in memory at once; delete the sealed blobs (one retry); if the
+     * credential file cannot be written, leave a tombstone in [dataStore] so the
+     * next load reads "logged out" anyway. Throws only if neither file can be written.
+     */
+    private suspend fun forgetCredentialsLocked(extra: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        credentials.value = Credentials(null, null)
+        retryPending = false
+        withContext(ioDispatcher) {
+            val removed = runCatching { removeSealedSlots() }.isSuccess || runCatching { removeSealedSlots() }.isSuccess
+            dataStore.edit {
                 it.remove(legacyCookieKey)
                 it.remove(legacyDeviceTokenKey)
-                it.remove(pendingKey)
+                if (removed) it.remove(clearedTombstoneKey) else it[clearedTombstoneKey] = true
+                extra(it)
             }
         }
     }
@@ -279,7 +417,33 @@ class DataStoreSettings(
 
         const val SLOT_COOKIE = "session_cookie"
         const val SLOT_DEVICE_TOKEN = "device_token"
-        private const val AAD_PREFIX = "tether.credential.v1|"
+        private const val AAD_PREFIX = "tether.credential.v2|"
+        private const val LEGACY_AAD_PREFIX = "tether.credential.v1|"
+        private const val AAD_FORMAT_ORIGIN = 2
+
+        /**
+         * `scheme://host:port`, lower-cased, default port made explicit — the
+         * identity a credential is bound to. Null for anything that is not an
+         * http(s) URL with a host.
+         */
+        fun originOf(baseUrl: String?): String? {
+            if (baseUrl.isNullOrBlank()) return null
+            val uri = try {
+                java.net.URI(baseUrl.trim())
+            } catch (_: java.net.URISyntaxException) {
+                return null
+            }
+            val scheme = uri.scheme?.lowercase() ?: return null
+            val host = uri.host?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+            val port = when {
+                uri.port != -1 -> uri.port
+                scheme == "https" -> 443
+                scheme == "http" -> 80
+                else -> return null
+            }
+            if (scheme != "http" && scheme != "https") return null
+            return "$scheme://$host:$port"
+        }
 
         /**
          * Build the file-backed store. Production:

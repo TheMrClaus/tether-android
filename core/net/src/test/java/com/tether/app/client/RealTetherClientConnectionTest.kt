@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -302,10 +303,24 @@ class RealTetherClientConnectionTest {
     @Test
     fun closeCode4001IsTerminalAndClearsTheCredential() {
         val ws = connected()
+        val baseUrl = runBlocking { h.settings.baseUrl.first() }
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val collecting = h.scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            h.client.errors.collect { errors += it }
+        }
         ws.close(4001, "device revoked")
         h.await(h.client.connection) { it == ConnectionState.AuthRequired }
         h.await(h.client.configured) { !it }
         assertNull(runBlocking { h.settings.credential.first() })
+        // T1.4: the server URL survives (login-screen prefill) and the login
+        // screen gets its reason; the toast says what happened.
+        assertEquals(baseUrl, runBlocking { h.settings.baseUrl.first() })
+        assertEquals(baseUrl, h.client.serverUrl.value)
+        assertEquals(SignedOutReason.DeviceUnpaired, h.client.signedOutReason.value)
+        val deadline = System.nanoTime() + 5_000_000_000
+        while (errors.isEmpty() && System.nanoTime() < deadline) Thread.sleep(5)
+        assertEquals(listOf("This device was unpaired from the server. Pair it again to reconnect."), errors.toList())
+        collecting.cancel()
         assertTrue("terminal: no reconnect", h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
         val requests = h.server.requestCount
         h.client.reconnectIfIdle()

@@ -130,4 +130,33 @@ class PushRegistrarTest {
         val result = r.sync(PushScope.All, emptySet(), emptySet())
         assertTrue(result is PushRegistrarResult.Error)
     }
+
+    @Test
+    fun noCallFollowsARedirectWithTheDeviceToken() = runBlocking {
+        val other = MockWebServer()
+        other.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", other.url("/api/push/fcm-config")))
+            assertTrue(registrar().sync(PushScope.All, emptySet(), emptySet()) is PushRegistrarResult.Error)
+            server.enqueue(MockResponse().setResponseCode(307).addHeader("Location", other.url("/api/push/fcm-register")))
+            assertTrue(registrar().unregister() is PushRegistrarResult.Error)
+            assertEquals(0, other.requestCount)
+        } finally {
+            other.shutdown()
+        }
+    }
+
+    @Test
+    fun logoutUnregisterUsesTheForgottenTokenAndSkipsCookies() = runBlocking {
+        val cleared = InMemorySettings() // logout already forgot the credential
+        val r = PushRegistrar(cleared, OkHttpClient(), FirebaseTokenProvider { "fcm" })
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
+        assertEquals(PushRegistrarResult.Success, r.unregister(server.url("/").toString(), Credential.DeviceToken(token)))
+        val req = server.takeRequest()
+        assertEquals("DELETE", req.method)
+        assertEquals("Bearer $token", req.getHeader("Authorization"))
+        val before = server.requestCount
+        assertEquals(PushRegistrarResult.Success, r.unregister(server.url("/").toString(), Credential.Cookie("c")))
+        assertEquals(before, server.requestCount)
+    }
 }

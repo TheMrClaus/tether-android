@@ -373,7 +373,15 @@ class RealTetherClient(
 
     /** Persist a freshly-obtained credential and (re)start the connection loop. */
     private suspend fun adoptCredential(base: HttpUrl, credential: Credential) {
-        settings.setServer(base.toString().trimEnd('/'), credential)
+        try {
+            settings.setServer(base.toString().trimEnd('/'), credential)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The store could not be written: this sign-in lives in memory for
+            // this process only. The store deletes the old credential before it
+            // moves the URL, so disk never pairs the new URL with the old one.
+        }
         synchronized(lock) {
             baseUrlValue = base
             credentialValue = credential
@@ -464,10 +472,10 @@ class RealTetherClient(
 
         // 1. Forget locally FIRST: whatever happens next, this phone is signed out.
         //    The server URL stays (login-screen prefill).
-        try {
-            settings.clearCredential()
-        } catch (_: Exception) {
-            // In-memory credential is already gone; start() re-reads the store.
+        // The store retries its own delete and falls back to a tombstone; one
+        // more attempt here covers a store that threw before getting that far.
+        if (runCatching { settings.clearCredential() }.isFailure) {
+            runCatching { settings.clearCredential() }
         }
         if (base == null || credential == null) return LogoutResult.LocalOnly
 

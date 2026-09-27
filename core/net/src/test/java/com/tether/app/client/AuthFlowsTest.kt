@@ -1,8 +1,16 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.TetherJson
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -17,7 +25,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 /**
  * T1.4 auth flows against a MockWebServer "Tether": password login and pairing
@@ -25,6 +35,9 @@ import org.junit.Test
  * no-cross-origin credential rules, and the owner-grade sessions API.
  */
 class AuthFlowsTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
     private val h = ConnectionHarness()
     private val other = MockWebServer()
     private val loggedOut = CopyOnWriteArrayList<Pair<String, Credential>>()
@@ -310,6 +323,60 @@ class AuthFlowsTest {
         assertEquals(ConnectionState.AuthRequired, h.client.connection.value)
         assertEquals(Credential.DeviceToken("tthr_ok"), runBlocking { h.settings.credential.first() })
         assertTrue(h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun probe403IsAGatewayRefusalToo() {
+        newClient(cookie = "cookie")
+        h.server.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":"Forbidden"}"""))
+        h.client.start()
+        assertEquals(SignedOutReason.GatewayRefused, h.await(h.client.signedOutReason) { it != null })
+        assertEquals(ConnectionState.AuthRequired, h.client.connection.value)
+        assertEquals(Credential.Cookie("cookie"), runBlocking { h.settings.credential.first() })
+        assertTrue(h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
+    }
+
+    /**
+     * T1.4 review (blocking): a URL that moved without its credential (a torn
+     * write) must never make the client present server A's credential to
+     * server B. Real encrypted store on disk + the real client.
+     */
+    @Test
+    fun aTornUrlWriteNeverSendsOneServersCredentialToAnother() {
+        other.start() // server B
+        h.server.start() // server A
+        val cipher = AesGcmCredentialCipher(JvmKeySource())
+        val dir = tmp.newFolder("files")
+        runBlocking {
+            val job = Job()
+            val a = DataStoreSettings.create(dir, CoroutineScope(Dispatchers.IO + job), cipher)
+            a.setServer(base, Credential.Cookie("server-a-cookie"))
+            job.cancelAndJoin()
+            // The torn state: B's URL over A's sealed cookie.
+            val raw = Job()
+            PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + raw)) {
+                File(dir, DataStoreSettings.SETTINGS_FILE)
+            }.edit { it[stringPreferencesKey("base_url")] = other.url("/").toString().trimEnd('/') }
+            raw.cancelAndJoin()
+        }
+        val settings = DataStoreSettings.create(dir, h.scope, cipher)
+        h.client = RealTetherClient(settings = settings, httpClient = OkHttpClient(), scope = h.scope, scheduler = h.scheduler)
+        h.client.start()
+        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
+        assertNull(runBlocking { settings.credential.first() })
+        assertEquals(0, other.requestCount) // B saw nothing, let alone A's cookie
+        assertEquals(0, h.server.requestCount)
+    }
+
+    /** A software AES key standing in for the Keystore (no AndroidKeyStore on the JVM). */
+    private class JvmKeySource : CredentialKeySource {
+        private var key: javax.crypto.SecretKey? = null
+        override fun existingKey() = key
+        override fun getOrCreateKey() = key ?: javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }
+            .generateKey().also { key = it }
+        override fun destroyKey() {
+            key = null
+        }
     }
 
     @Test

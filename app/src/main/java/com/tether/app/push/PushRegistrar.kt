@@ -51,9 +51,19 @@ sealed interface PushRegistrarResult {
  */
 open class PushRegistrar(
     private val settings: SettingsStore,
-    private val httpClient: OkHttpClient,
+    httpClient: OkHttpClient,
     private val tokenProvider: FirebaseTokenProvider,
 ) {
+
+    /**
+     * Every call here carries the device token, so none follows a redirect: a
+     * 3xx to another host must not receive the bearer (T1.4 review; same rule as
+     * RealTetherClient.authHttp). Derived here so every caller gets it.
+     */
+    private val http: OkHttpClient = httpClient.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     private val json = "application/json".toMediaType()
 
@@ -178,7 +188,7 @@ open class PushRegistrar(
             .authorize(credential)
             .build()
         return try {
-            httpClient.newCall(request).execute().use { response ->
+            http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return null
                 val obj = TetherJson.parseToJsonElement(response.body.string()) as? JsonObject ?: return null
                 FcmConfig(
@@ -199,7 +209,7 @@ open class PushRegistrar(
         }
         val request = builder.build()
         return try {
-            httpClient.newCall(request).execute()
+            http.newCall(request).execute()
         } catch (_: IOException) {
             null
         }

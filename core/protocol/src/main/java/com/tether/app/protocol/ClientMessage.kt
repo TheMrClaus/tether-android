@@ -60,6 +60,9 @@ sealed interface ClientMessage {
             opt("baseUrl", baseUrl)
             opt("requestId", requestId)
         }
+
+        /** Redacted: [credential] is a secret and must never reach a log. The wire form is [toJsonObject]. */
+        override fun toString(): String = "NodeAdd(credential=***, label=$label, baseUrl=$baseUrl, requestId=$requestId)"
     }
 
     data class NodeRemove(val nodeId: String, val requestId: String? = null) : ClientMessage {

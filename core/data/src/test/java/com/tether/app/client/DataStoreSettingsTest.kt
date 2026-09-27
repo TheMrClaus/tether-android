@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -250,6 +251,246 @@ class DataStoreSettingsTest {
         store.store.clearCredential()
         store.close()
         assertNoPlaintextOnDisk()
+    }
+
+    // ------------------------------------------------------------------
+    // T1.4 review: never pair one server's credential with another's URL
+    // ------------------------------------------------------------------
+
+    /** A DataStore whose next writes can be made to fail (a crash / full disk mid-sequence). */
+    private class FlakyDataStore(private val inner: DataStore<Preferences>) : DataStore<Preferences> {
+        /** Successful writes still allowed before every further write fails; -1 = never fail. */
+        @Volatile var allowWrites = -1
+        override val data = inner.data
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            if (allowWrites == 0) throw java.io.IOException("simulated crash before this write")
+            if (allowWrites > 0) allowWrites--
+            return inner.updateData(transform)
+        }
+    }
+
+    private class OpenedFlaky(val store: DataStoreSettings, val settings: FlakyDataStore, val creds: FlakyDataStore, val job: Job)
+
+    private fun openFlaky(cipher: CredentialCipher = AesGcmCredentialCipher(keys)): OpenedFlaky {
+        val job = Job()
+        val scope = CoroutineScope(Dispatchers.IO + job)
+        credentialsFile.parentFile!!.mkdirs()
+        val settings = FlakyDataStore(PreferenceDataStoreFactory.create(scope = scope) { settingsFile })
+        val creds = FlakyDataStore(PreferenceDataStoreFactory.create(scope = scope) { credentialsFile })
+        return OpenedFlaky(DataStoreSettings(settings, creds, cipher), settings, creds, job)
+    }
+
+    private val serverA = "https://a.example"
+    private val serverB = "https://b.example:8443"
+
+    @Test
+    fun crashBeforeTheUrlMovesLeavesTheOldServerWithNoCredential() = runBlocking {
+        val first = openFlaky()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.settings.allowWrites = 0 // the URL write for B never happens
+        runCatching { first.store.setServer(serverB, Credential.DeviceToken(token)) }
+        first.job.cancelAndJoin()
+
+        val second = open()
+        assertEquals(serverA, second.store.baseUrl.first())
+        // A's cookie was deleted BEFORE the URL was to move; B's token never landed.
+        assertNull(second.store.credential.first())
+        second.close()
+    }
+
+    @Test
+    fun crashBetweenUrlAndCredentialWritesLeavesTheNewServerWithNoCredential() = runBlocking {
+        val first = openFlaky()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.creds.allowWrites = 1 // step 1 (delete A's blob) lands, step 3 (B's blob) does not
+        runCatching { first.store.setServer(serverB, Credential.DeviceToken(token)) }
+        first.job.cancelAndJoin()
+
+        val second = open()
+        assertEquals(serverB, second.store.baseUrl.first())
+        assertNull(second.store.credential.first()) // never A's cookie against B
+        second.close()
+    }
+
+    @Test
+    fun aBlobNeverOpensAgainstAnotherOrigin() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        // The torn write the old ordering allowed: URL moved, A's blob stayed.
+        raw(settingsFile) { ds -> ds.edit { it[stringPreferencesKey("base_url")] = serverB } }
+
+        val second = open()
+        assertNull(second.store.credential.first())
+        second.close()
+        // ...and the blob is gone, not just unread.
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("session_cookie")])
+        // Same origin spelled differently still opens (scheme/host case, default port).
+        val third = open()
+        third.store.setServer("https://A.example", Credential.Cookie(cookie))
+        third.close()
+        raw(settingsFile) { ds -> ds.edit { it[stringPreferencesKey("base_url")] = "https://a.example:443" } }
+        val fourth = open()
+        assertEquals(Credential.Cookie(cookie), fourth.store.credential.first())
+        fourth.close()
+    }
+
+    @Test
+    fun slotOnlyAadBlobsMigrateOnceToOriginBound() = runBlocking {
+        // An early-T1.4 blob: AAD = slot only, no format marker.
+        val cipher = AesGcmCredentialCipher(keys)
+        val v1 = java.util.Base64.getEncoder().encodeToString(
+            cipher.seal(token.toByteArray(), "tether.credential.v1|device_token".toByteArray()),
+        )
+        raw(settingsFile) { ds -> ds.edit { it[stringPreferencesKey("base_url")] = serverA } }
+        raw(credentialsFile) { ds -> ds.edit { it[stringPreferencesKey("device_token")] = v1 } }
+
+        val first = open()
+        assertEquals(Credential.DeviceToken(token), first.store.credential.first())
+        first.close()
+        val migrated = raw(credentialsFile) { it.data.first() }
+        assertEquals(2, migrated[androidx.datastore.preferences.core.intPreferencesKey("aad_format")])
+        val resealed = java.util.Base64.getDecoder().decode(migrated[stringPreferencesKey("device_token")]!!)
+        assertEquals(
+            token,
+            String(cipher.open(resealed, "tether.credential.v2|device_token|https://a.example:443".toByteArray())),
+        )
+
+        // Once migrated, a slot-only blob is never accepted again (fail closed).
+        raw(credentialsFile) { ds -> ds.edit { it[stringPreferencesKey("device_token")] = v1 } }
+        val second = open()
+        assertNull(second.store.credential.first())
+        second.close()
+    }
+
+    @Test
+    fun noCredentialWithoutAParsableServer() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        raw(settingsFile) { ds -> ds.edit { it.remove(stringPreferencesKey("base_url")) } }
+        val second = open()
+        assertNull(second.store.credential.first())
+        second.close()
+    }
+
+    // ------------------------------------------------------------------
+    // Logout that cannot reach the credential file: tombstone
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aClearThatCannotDeleteTheBlobLeavesATombstone() = runBlocking {
+        val first = openFlaky()
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        first.creds.allowWrites = 0 // both delete attempts fail
+        first.store.clearCredential()
+        assertNull(first.store.credential.first())
+        first.job.cancelAndJoin()
+        // The sealed blob really survived on disk...
+        assertNotNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+
+        // ...but the next launch reads logged out and finishes the delete.
+        val second = open()
+        assertNull(second.store.credential.first())
+        assertEquals(serverA, second.store.baseUrl.first())
+        second.close()
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+        assertNull(raw(settingsFile) { it.data.first() }[androidx.datastore.preferences.core.booleanPreferencesKey("credentials_cleared")])
+
+        // And a later login is not shadowed by the old tombstone.
+        val third = open()
+        third.store.setServer(serverA, Credential.Cookie(cookie))
+        third.close()
+        val fourth = open()
+        assertEquals(Credential.Cookie(cookie), fourth.store.credential.first())
+        fourth.close()
+    }
+
+    @Test
+    fun aClearRetriesOnceBeforeFallingBackToTheTombstone() = runBlocking {
+        val first = openFlaky()
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        // Same files, through a credential store whose FIRST write fails.
+        val once = OnceFailing(first.creds)
+        val store = DataStoreSettings(first.settings, once, AesGcmCredentialCipher(keys))
+        assertEquals(Credential.DeviceToken(token), store.credential.first())
+        store.clearCredential()
+        assertEquals(2, once.calls) // failed once, retried once
+        first.job.cancelAndJoin()
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("device_token")])
+        // The retry worked, so no tombstone was needed.
+        assertNull(raw(settingsFile) { it.data.first() }[androidx.datastore.preferences.core.booleanPreferencesKey("credentials_cleared")])
+    }
+
+    private class OnceFailing(private val inner: DataStore<Preferences>) : DataStore<Preferences> {
+        @Volatile var calls = 0
+        override val data = inner.data
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            calls++
+            if (calls == 1) throw java.io.IOException("first attempt fails")
+            return inner.updateData(transform)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Transient Keystore errors: no destroy, retry on the next read
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aTransientKeystoreErrorKeepsKeyAndBlobAndRetriesOnTheNextRead() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        first.close()
+
+        keys.failure = java.security.KeyStoreException("keystore busy")
+        val second = open()
+        assertNull(second.store.credential.first()) // unavailable this time
+        assertEquals(0, keys.destroyed)
+        assertNotNull(keys.key)
+        keys.failure = null
+        // The next read (e.g. the next start()) retries and gets it back.
+        assertEquals(Credential.DeviceToken(token), second.store.credential.first())
+        second.close()
+        assertEquals(1, keys.created)
+    }
+
+    @Test
+    fun aTransientErrorAtLaunchLeavesTheBlobOnDisk() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        keys.failure = java.security.ProviderException("daemon restarting")
+        val second = open()
+        assertNull(second.store.credential.first())
+        second.close()
+        keys.failure = null
+        val third = open()
+        assertEquals(Credential.Cookie(cookie), third.store.credential.first())
+        third.close()
+    }
+
+    @Test
+    fun anUnrecoverableKeyIsDestroyedAndReadsAsLoggedOut() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        keys.failure = java.security.UnrecoverableKeyException("gone")
+        val second = open()
+        assertNull(second.store.credential.first())
+        second.close()
+        assertEquals(1, keys.destroyed)
+        keys.failure = null
+        assertNull(raw(credentialsFile) { it.data.first() }[stringPreferencesKey("session_cookie")])
+    }
+
+    @Test
+    fun originNormalization() {
+        assertEquals("https://a.example:443", DataStoreSettings.originOf("https://A.Example/"))
+        assertEquals("http://10.0.2.2:4290", DataStoreSettings.originOf("http://10.0.2.2:4290"))
+        assertEquals("http://h:80", DataStoreSettings.originOf("http://h"))
+        assertNull(DataStoreSettings.originOf("ftp://h"))
+        assertNull(DataStoreSettings.originOf("not a url"))
+        assertNull(DataStoreSettings.originOf(null))
     }
 
     /** Sealing always fails (Keystore unavailable); opening never succeeds either. */

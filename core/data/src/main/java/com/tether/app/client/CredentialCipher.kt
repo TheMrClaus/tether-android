@@ -1,8 +1,10 @@
 package com.tether.app.client
 
-import java.security.GeneralSecurityException
-import java.security.ProviderException
+import java.security.UnrecoverableKeyException
+import javax.crypto.AEADBadTagException
+import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
+import javax.crypto.IllegalBlockSizeException
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
@@ -27,16 +29,21 @@ interface CredentialCipher {
 }
 
 /**
- * [keyUnusable] = the key itself is gone or permanently invalid, so every blob
- * sealed under it is dead (the store then destroys the key). Otherwise only this
- * blob is bad (corrupt, truncated, wrong slot). The message never contains
- * credential material.
+ * Three kinds of failure, which the store treats differently:
+ * - [keyUnusable]: the key is missing, permanently invalidated
+ *   (KeyPermanentlyInvalidatedException) or unrecoverable. Every blob sealed
+ *   under it is dead; the store destroys the key and deletes the blobs.
+ * - [transient]: the Keystore could not be used right now (KeyStoreException,
+ *   ProviderException, a daemon hiccup). The key and the blob are LEFT alone and
+ *   the credential reads as "unavailable this time"; the next use retries.
+ * - neither: this blob is bad (corrupt, truncated, wrong slot/origin) and is deleted.
+ * The message never contains credential material.
  */
 class CredentialCipherException(
     message: String,
     val keyUnusable: Boolean = false,
-    cause: Throwable? = null,
-) : Exception(message, cause)
+    val transient: Boolean = false,
+) : Exception(message)
 
 /** Where the AES key lives. The production source is the Android Keystore. */
 interface CredentialKeySource {
@@ -69,18 +76,13 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
             cipher.init(Cipher.ENCRYPT_MODE, keys.getOrCreateKey())
             cipher.updateAAD(aad)
             val iv = cipher.iv
-            if (iv == null || iv.size != IV_BYTES) throw CredentialCipherException("unexpected IV length")
+            if (iv == null || iv.size != IV_BYTES) throw CredentialCipherException("unexpected IV length", transient = true)
             val sealed = cipher.doFinal(plaintext)
             return byteArrayOf(VERSION) + iv + sealed
         } catch (e: CredentialCipherException) {
             throw e
-        } catch (e: GeneralSecurityException) {
-            throw CredentialCipherException("seal failed: ${e.javaClass.simpleName}", keyUnusable = isKeyFailure(e), cause = null)
-        } catch (e: ProviderException) {
-            // Keystore daemon / hardware errors surface as ProviderException.
-            throw CredentialCipherException("seal failed: ${e.javaClass.simpleName}", keyUnusable = false, cause = null)
-        } catch (e: RuntimeException) {
-            throw CredentialCipherException("seal failed: ${e.javaClass.simpleName}", keyUnusable = false, cause = null)
+        } catch (e: Exception) {
+            throw classify("seal", e)
         }
     }
 
@@ -89,22 +91,16 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
         if (blob[0] != VERSION) throw CredentialCipherException("unknown blob version")
         val key = try {
             keys.existingKey()
-        } catch (e: GeneralSecurityException) {
-            throw CredentialCipherException("key unavailable: ${e.javaClass.simpleName}", keyUnusable = true)
-        } catch (e: RuntimeException) {
-            throw CredentialCipherException("key unavailable: ${e.javaClass.simpleName}", keyUnusable = true)
+        } catch (e: Exception) {
+            throw classify("key fetch", e)
         } ?: throw CredentialCipherException("no key", keyUnusable = true)
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BYTES * 8, blob, 1, IV_BYTES))
             cipher.updateAAD(aad)
             return cipher.doFinal(blob, 1 + IV_BYTES, blob.size - 1 - IV_BYTES)
-        } catch (e: GeneralSecurityException) {
-            throw CredentialCipherException("open failed: ${e.javaClass.simpleName}", keyUnusable = isKeyFailure(e))
-        } catch (e: ProviderException) {
-            throw CredentialCipherException("open failed: ${e.javaClass.simpleName}", keyUnusable = false)
-        } catch (e: RuntimeException) {
-            throw CredentialCipherException("open failed: ${e.javaClass.simpleName}", keyUnusable = false)
+        } catch (e: Exception) {
+            throw classify("open", e)
         }
     }
 
@@ -117,17 +113,33 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
     }
 
     /**
-     * The key itself is unusable: android.security.keystore.KeyPermanentlyInvalidatedException
-     * (a Keystore reset, a lock-screen change on some OEMs) is an
-     * InvalidKeyException. A bad tag (corrupt blob, wrong slot) is not.
+     * Only a permanently invalidated or unrecoverable key is "unusable" (and gets
+     * destroyed). A bad tag / bad padding is this blob's fault. Everything else —
+     * KeyStoreException, ProviderException, a generic InvalidKeyException from a
+     * Keystore hiccup — is transient: destroying the key for it would sign the
+     * user out over a momentary error.
      */
-    private fun isKeyFailure(e: Throwable): Boolean =
-        e is java.security.InvalidKeyException || e is java.security.UnrecoverableKeyException
+    private fun classify(what: String, e: Exception): CredentialCipherException {
+        val name = e.javaClass.simpleName
+        return when {
+            isPermanentKeyFailure(e) -> CredentialCipherException("$what: key unusable ($name)", keyUnusable = true)
+            e is AEADBadTagException || e is BadPaddingException || e is IllegalBlockSizeException ->
+                CredentialCipherException("$what: blob rejected ($name)")
+            else -> CredentialCipherException("$what: keystore unavailable ($name)", transient = true)
+        }
+    }
+
+    private fun isPermanentKeyFailure(e: Throwable): Boolean =
+        e is UnrecoverableKeyException ||
+            // android.security.keystore.KeyPermanentlyInvalidatedException (matched by
+            // name: it is an Android class, and this file is JVM-tested).
+            generateSequence<Class<*>>(e.javaClass) { it.superclass }.any { it.name == KEY_PERMANENTLY_INVALIDATED }
 
     companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val VERSION: Byte = 1
         const val IV_BYTES = 12
         const val TAG_BYTES = 16
+        private const val KEY_PERMANENTLY_INVALIDATED = "android.security.keystore.KeyPermanentlyInvalidatedException"
     }
 }

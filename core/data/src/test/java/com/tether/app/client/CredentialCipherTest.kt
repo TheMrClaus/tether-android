@@ -13,14 +13,24 @@ import org.junit.Test
 class SoftwareKeySource : CredentialKeySource {
     var key: SecretKey? = null
     var created = 0
+    var destroyed = 0
 
-    override fun existingKey(): SecretKey? = key
+    /** When set, every key access throws it (a Keystore that is down / locked / broken). */
+    var failure: Exception? = null
 
-    override fun getOrCreateKey(): SecretKey = key ?: KeyGenerator.getInstance("AES").apply { init(256) }
-        .generateKey().also { key = it; created++ }
+    override fun existingKey(): SecretKey? {
+        failure?.let { throw it }
+        return key
+    }
+
+    override fun getOrCreateKey(): SecretKey {
+        failure?.let { throw it }
+        return key ?: KeyGenerator.getInstance("AES").apply { init(256) }.generateKey().also { key = it; created++ }
+    }
 
     override fun destroyKey() {
         key = null
+        destroyed++
     }
 }
 
@@ -30,12 +40,13 @@ class CredentialCipherTest {
     private val aad = "tether.credential.v1|session_cookie".toByteArray()
     private val secret = "tthr_0123456789abcdefghijklmnopqrstuvwxyz".toByteArray()
 
-    private fun expectFailure(keyUnusable: Boolean, block: () -> Unit) {
+    private fun expectFailure(keyUnusable: Boolean, transient: Boolean = false, block: () -> Unit) {
         try {
             block()
             fail("expected CredentialCipherException")
         } catch (e: CredentialCipherException) {
             assertEquals(keyUnusable, e.keyUnusable)
+            assertEquals(transient, e.transient)
             // The failure never carries the plaintext.
             assertFalse(e.message.orEmpty().contains(String(secret)))
         }
@@ -111,9 +122,43 @@ class CredentialCipherTest {
     }
 
     @Test
-    fun wrongKeyTypeIsKeyUnusable() {
+    fun aGenericInvalidKeyIsTransientNotADestroy() {
+        // Only a missing / permanently invalidated / unrecoverable key is dead.
         val blob = cipher.seal(secret, aad)
         keys.key = KeyGenerator.getInstance("HmacSHA256").generateKey()
+        expectFailure(keyUnusable = false, transient = true) { cipher.open(blob, aad) }
+    }
+
+    @Test
+    fun keystoreErrorsWhileFetchingTheKeyAreTransient() {
+        val blob = cipher.seal(secret, aad)
+        for (error in listOf(java.security.KeyStoreException("locked"), java.security.ProviderException("daemon"), IllegalStateException("x"))) {
+            keys.failure = error
+            expectFailure(keyUnusable = false, transient = true) { cipher.open(blob, aad) }
+            expectFailure(keyUnusable = false, transient = true) { cipher.seal(secret, aad) }
+        }
+        keys.failure = null
+        assertArrayEquals(secret, cipher.open(blob, aad)) // the key survived
+        assertEquals(0, keys.destroyed)
+    }
+
+    @Test
+    fun anUnrecoverableKeyIsKeyUnusable() {
+        val blob = cipher.seal(secret, aad)
+        keys.failure = java.security.UnrecoverableKeyException("gone")
         expectFailure(keyUnusable = true) { cipher.open(blob, aad) }
+        expectFailure(keyUnusable = true) { cipher.seal(secret, aad) }
+    }
+
+    @Test
+    fun credentialsNeverPrintTheirValue() {
+        val cookie = Credential.Cookie("s3cr3t-cookie")
+        val token = Credential.DeviceToken("tthr_s3cr3t")
+        assertEquals("Cookie(***)", cookie.toString())
+        assertEquals("DeviceToken(***)", token.toString())
+        assertFalse("$cookie $token ${listOf(cookie, token)}".contains("s3cr3t"))
+        // Equality still compares the value.
+        assertEquals(Credential.Cookie("s3cr3t-cookie"), cookie)
+        assertNotEquals(Credential.Cookie("other"), cookie)
     }
 }
