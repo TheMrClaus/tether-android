@@ -74,6 +74,8 @@ class LocalNetworkUiTest {
             n.config.getOrNull(SemanticsActions.OnClick) != null
     }
 
+    // Key legends are exposed in their original words: the etched uppercase is presentation only
+    // (the web's text-transform), so the semantics tree carries "Allow", not "ALLOW" (T3.3).
     @Test
     fun `denied notice - icon plus words, a 44dp Allow key with a TalkBack label, announced politely`() {
         var allowed = 0
@@ -82,7 +84,7 @@ class LocalNetworkUiTest {
         val texts = nodes.texts()
         assertTrue(texts.toString(), LocalNetworkCopy.NOTICE_TITLE in texts)
         assertTrue(texts.toString(), LocalNetworkCopy.NOTICE_BODY in texts)
-        assertTrue(texts.toString(), LocalNetworkCopy.ALLOW.uppercase() in texts)
+        assertTrue(texts.toString(), LocalNetworkCopy.ALLOW in texts)
         assertTrue(
             "notice is a polite live region",
             nodes.any { it.config.getOrNull(SemanticsProperties.LiveRegion) == LiveRegionMode.Polite },
@@ -100,7 +102,7 @@ class LocalNetworkUiTest {
         val nodes = render { LocalNetworkNotice(canRequest = false, onAllow = {}) }
         val texts = nodes.texts()
         assertTrue(texts.toString(), LocalNetworkCopy.NOTICE_BODY_SETTINGS in texts)
-        assertTrue(texts.toString(), LocalNetworkCopy.OPEN_SETTINGS.uppercase() in texts)
+        assertTrue(texts.toString(), LocalNetworkCopy.OPEN_SETTINGS in texts)
         assertNotNull(nodes.clickableLabelled(LocalNetworkCopy.OPEN_SETTINGS_A11Y))
     }
 
@@ -115,7 +117,7 @@ class LocalNetworkUiTest {
 
         fun click(legend: String) = nodes.first { n ->
             n.config.getOrNull(SemanticsActions.OnClick) != null &&
-                flatten(n).texts().contains(legend.uppercase())
+                listOf(n).texts().contains(legend)
         }.config[SemanticsActions.OnClick].action!!.invoke()
         click(LocalNetworkCopy.CONTINUE)
         click(LocalNetworkCopy.NOT_NOW)

@@ -41,6 +41,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -145,6 +147,8 @@ fun TetherKey(
         modifier = modifier
             .semantics(mergeDescendants = true) {
                 (contentDescription ?: label)?.let { this.contentDescription = it }
+                // The visible legend in its original words (label-in-name; Voice Access matches it).
+                label?.let { this.text = AnnotatedString(it) }
                 if (selected) this.selected = true
             }
             .clickable(
