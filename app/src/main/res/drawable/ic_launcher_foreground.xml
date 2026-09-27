@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon foreground: the session dial of the web's public/icon-maskable.svg.
+     The SVG's 512 viewBox maps to the 72dp visible area centred in the 108dp layer:
+     a 768 viewport (512 * 108 / 72) with the SVG translated by 128 ((768 - 512) / 2).
+     The mark's outer edge (ring 152 + 13 = 165 from centre, ~23dp) sits inside the
+     launcher's 33dp safe-zone radius. Geometry is copied verbatim from the SVG:
+     circle r152 stroke 26 #4c4c55; rotate(32 256 256) needle pair, rx19 capsules #a17aff,
+     the lower one at opacity 0.45. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="768"
+    android:viewportHeight="768">
+    <group
+        android:translateX="128"
+        android:translateY="128">
+        <path
+            android:strokeColor="#4c4c55"
+            android:strokeWidth="26"
+            android:pathData="M256,104a152,152 0,1 1,0 304a152,152 0,1 1,0 -304z" />
+        <group
+            android:pivotX="256"
+            android:pivotY="256"
+            android:rotation="32">
+            <path
+                android:fillColor="#a17aff"
+                android:pathData="M237,157a19,19 0,0 1,38 0v52a19,19 0,0 1,-38 0z" />
+            <path
+                android:fillAlpha="0.45"
+                android:fillColor="#a17aff"
+                android:pathData="M237,304a19,19 0,0 1,38 0v52a19,19 0,0 1,-38 0z" />
+        </group>
+    </group>
+</vector>

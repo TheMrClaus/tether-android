@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon monochrome layer (themed icons): ic_launcher_foreground's geometry in a single
+     colour; the launcher tints it and only alpha matters. The lower needle keeps the web's
+     0.45 opacity so the dial still reads as a needle pair. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="768"
+    android:viewportHeight="768">
+    <group
+        android:translateX="128"
+        android:translateY="128">
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="26"
+            android:pathData="M256,104a152,152 0,1 1,0 304a152,152 0,1 1,0 -304z" />
+        <group
+            android:pivotX="256"
+            android:pivotY="256"
+            android:rotation="32">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M237,157a19,19 0,0 1,38 0v52a19,19 0,0 1,-38 0z" />
+            <path
+                android:fillAlpha="0.45"
+                android:fillColor="#FFFFFF"
+                android:pathData="M237,304a19,19 0,0 1,38 0v52a19,19 0,0 1,-38 0z" />
+        </group>
+    </group>
+</vector>
