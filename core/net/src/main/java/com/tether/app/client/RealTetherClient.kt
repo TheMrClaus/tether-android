@@ -411,7 +411,20 @@ class RealTetherClient(
             // this process only. The store deletes the old credential before it
             // moves the URL, so disk never pairs the new URL with the old one.
         }
+        val previous: WebSocket?
+        val previousWasOpen: Boolean
         synchronized(lock) {
+            // Whatever socket is still bound belongs to the PREVIOUS sign-in
+            // (possibly another server): let it go now, or connectNow() would
+            // keep using it and a node-add would hand a peer bearer to the old
+            // server. Its listener is retired, so none of its late frames land.
+            previousWasOpen = socketOpen
+            previous = detachSocketLocked()
+            cancelTimersLocked()
+            // An auth probe of the previous sign-in may still be in flight: it
+            // no longer owns the connect slot and gives up when it returns
+            // (supersededLocked), so this sign-in connects at once.
+            connecting = false
             baseUrlValue = base
             credentialValue = credential
             stopped = false
@@ -419,6 +432,7 @@ class RealTetherClient(
             versionHalt = null
             backoff.reset()
         }
+        if (previousWasOpen) previous?.close(1000, "signed in again") else previous?.cancel()
         signedOutReasonState.value = null
         // A new sign-in (possibly to another server): its hello brings its own list.
         clearNodeRegistry()
@@ -726,6 +740,14 @@ class RealTetherClient(
     // Connection loop
     // ------------------------------------------------------------------
 
+    /**
+     * A connect attempt for [credential] was overtaken by a newer sign-in
+     * (adoptCredential). Null in force (logout / stop / rejection) is NOT
+     * superseded: those paths are handled as halts. Caller holds [lock].
+     */
+    private fun supersededLocked(credential: Credential): Boolean =
+        credentialValue != null && credentialValue !== credential
+
     /** Anything that forbids connecting right now. Caller holds [lock]. */
     private fun haltedLocked(): Boolean = stopped || versionHalt != null || backgroundSuspended
 
@@ -799,6 +821,8 @@ class RealTetherClient(
                 val blocked = blockedAfterFailure(base, e)
                 val restricted = localNetworkAccess.isRestricted()
                 val (halted, suspect) = synchronized(lock) {
+                    // A newer sign-in owns the connect slot now: touch nothing.
+                    if (supersededLocked(credential)) return@launch
                     connecting = false
                     // T0.6: while the OS restricts local-network traffic, a run of
                     // connect TIMEOUTS (the documented TCP signature of the block)
@@ -818,7 +842,13 @@ class RealTetherClient(
                 scheduleReconnect()
                 return@launch
             }
-            synchronized(lock) { consecutiveTimeouts = 0 }
+            synchronized(lock) {
+                // The verdict is about a credential that has been replaced since
+                // (login()/pair() while this probe was in flight): never act on
+                // it, and above all never open a socket with it.
+                if (supersededLocked(credential)) return@launch
+                consecutiveTimeouts = 0
+            }
             when (verdict) {
                 ProbeVerdict.Authenticated -> openSocket(base, credential)
                 ProbeVerdict.Rejected -> handleCredentialRejected(
@@ -933,6 +963,10 @@ class RealTetherClient(
         // client stuck in Connecting with an open socket).
         val listener = SocketListener()
         synchronized(lock) {
+            // Replaced since the probe (a sign-in landed in between): the new
+            // credential's own attempt owns the slot. After this point a sign-in
+            // retires [listener] (adoptCredential -> detachSocketLocked).
+            if (supersededLocked(credential)) return
             if (haltedLocked() || socket != null) {
                 connecting = false
                 return

@@ -1,8 +1,10 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.TetherJson
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -15,9 +17,13 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -128,6 +134,169 @@ class NodeRegistryTest {
         runBlocking { h.client.logout() }
         assertEquals(emptyList<Any>(), h.client.nodes.value)
         assertNull(h.client.nodeResult.value)
+    }
+
+    @Test
+    fun stopClearsTheRegistryAndTheLastResult() {
+        val ws = connected()
+        ws.send(nodesFrame("a"))
+        ws.send(nodeResult(true, null, "a", "Reachable."))
+        h.await(h.client.nodeResult) { it != null }
+        h.await(h.client.nodes) { it.size == 1 }
+        h.client.stop()
+        assertEquals(emptyList<Any>(), h.client.nodes.value)
+        assertNull(h.client.nodeResult.value)
+    }
+
+    /** A second "Tether" to sign in to: healthz, password login, auth probe, upgrade. */
+    private class OtherServer : AutoCloseable {
+        val server = MockWebServer().apply { start() }
+        val sockets = LinkedBlockingQueue<WebSocket>()
+        val received = LinkedBlockingQueue<String>()
+        private val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                sockets.put(webSocket)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                received.put(text)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+        }
+
+        fun url(): String = server.url("/").toString().trimEnd('/')
+
+        fun enqueueLoginAndConnect(cookie: String, probeDelayMs: Long = 0) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_129))
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("{}")
+                    .addHeader("Set-Cookie", "tether_session=$cookie; Path=/; HttpOnly"),
+            )
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
+                    .setHeadersDelay(probeDelayMs, TimeUnit.MILLISECONDS),
+            )
+            server.enqueue(MockResponse().withWebSocketUpgrade(listener))
+        }
+
+        fun frame(): JsonObject {
+            val text = received.poll(10, TimeUnit.SECONDS)
+            assertNotNull("expected a frame at the other server", text)
+            return TetherJson.parseToJsonElement(text!!) as JsonObject
+        }
+
+        override fun close() {
+            while (true) {
+                val ws = sockets.poll() ?: break
+                runCatching { ws.close(1000, null) }
+            }
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun signingInToAnotherServerDropsTheOldSocketAndItsRegistry() {
+        val a = connected()
+        a.send(nodesFrame("from-a"))
+        h.await(h.client.nodes) { it.map { n -> n.nodeId } == listOf("from-a") }
+        OtherServer().use { b ->
+            b.enqueueLoginAndConnect("parity-fake-cookie-b")
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url(), "parity-fake-password") })
+            // Right after the new sign-in: nothing of A's registry is shown.
+            assertEquals(emptyList<Any>(), h.client.nodes.value)
+            assertNull(h.client.nodeResult.value)
+            // A's socket was closed by the client (a clean close, as on logout).
+            assertEquals(1000, h.serverCloses.poll(10, TimeUnit.SECONDS))
+            // A late frame from A never lands.
+            a.send(nodesFrame("late-from-a"))
+
+            val bws = b.sockets.poll(10, TimeUnit.SECONDS)
+            assertNotNull("the client never connected to the new server", bws)
+            bws!!.send(readyFrame())
+            assertEquals("hello", b.frame().type())
+            h.await(h.client.connection) { it == ConnectionState.Connected }
+            bws.send(nodesFrame("from-b"))
+            h.await(h.client.nodes) { it.map { n -> n.nodeId } == listOf("from-b") }
+            h.serverBarrier(bws)
+            assertEquals(listOf("from-b"), h.client.nodes.value.map { it.nodeId })
+
+            // The next node request (and its credential) goes to B, never to A.
+            val add = request { h.client.addNode(NodeCredential("parity-fake-bundle")) }
+            val frame = b.frame()
+            assertEquals("node-add", frame.type())
+            assertEquals("parity-fake-bundle", frame.s("credential"))
+            bws.send(nodeResult(true, frame.s("requestId"), "peer-b", "Reachable."))
+            assertTrue(add.get() is NodeRequestOutcome.Answered)
+            assertTrue("A received a node frame", h.received.none { it.contains("\"node-") })
+        }
+    }
+
+    @Test
+    fun anAuthProbeOfTheOldSignInThatReturnsLateNeverOpensItsSocket() {
+        // A's probe answers after 1.5 s; the sign-in to B lands meanwhile, and
+        // B's own probe (3 s) is still in flight when A's verdict comes back.
+        h.enqueueConnect(probeDelayMs = 1_500)
+        h.newClient()
+        h.client.start()
+        assertNotNull("A's auth probe", h.server.takeRequest(10, TimeUnit.SECONDS))
+        OtherServer().use { b ->
+            b.enqueueLoginAndConnect("parity-fake-cookie-b", probeDelayMs = 3_000)
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url(), "parity-fake-password") })
+            // B connects (A's stale attempt does not hold the connect slot)...
+            val bws = b.sockets.poll(15, TimeUnit.SECONDS)
+            assertNotNull("the client never connected to the new server", bws)
+            bws!!.send(readyFrame())
+            assertEquals("hello", b.frame().type())
+            h.await(h.client.connection) { it == ConnectionState.Connected }
+            // ...and A's late "authenticated" verdict never opened a socket to A
+            // with A's credential: A saw its probe and nothing else.
+            assertEquals(1, h.server.requestCount)
+            assertTrue(h.sockets.isEmpty())
+        }
+    }
+
+    /**
+     * OkHttp refuses a send once it has started closing, while the client still
+     * holds the socket as live (the close handshake is not finished). One frame
+     * over OkHttp's 16 MiB queue cap starts that close (RealWebSocket.send); the
+     * server here never answers the close, so the window stays open.
+     */
+    @Test
+    fun aSendOkHttpRefusesIsNotSentNotLinkLost() {
+        val silent = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                h.sockets.put(webSocket)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                h.received.put(text)
+            }
+            // onClosing deliberately unanswered.
+        }
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        h.server.enqueue(MockResponse().withWebSocketUpgrade(silent))
+        h.newClient()
+        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        h.client.start()
+        val serverSide = h.nextSocket()
+        try {
+            h.handshake(serverSide)
+
+            assertFalse("OkHttp refuses the oversized frame", h.client.setModel("x".repeat(17 * 1024 * 1024), "m"))
+            assertEquals(ConnectionState.Connected, h.client.connection.value)
+
+            assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode("node-a") })
+            awaitErrors(1)
+            assertEquals(listOf(NodeRegistryRules.NOT_SENT_MESSAGE), errors.toList())
+            awaitNoPendingRequests()
+            assertTrue(h.scheduler.pending().none { it.delayMs == NodeRegistryRules.REQUEST_TIMEOUT_MS })
+        } finally {
+            // Answer the close now, so the server can shut down.
+            runCatching { serverSide.close(1000, null) }
+        }
     }
 
     @Test

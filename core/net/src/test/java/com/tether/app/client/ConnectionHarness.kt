@@ -119,8 +119,11 @@ class ConnectionHarness {
     }
 
     /** The next connect attempt: auth probe ok, then the WS upgrade. */
-    fun enqueueConnect() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+    fun enqueueConnect(probeDelayMs: Long = 0) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
+                .setHeadersDelay(probeDelayMs, TimeUnit.MILLISECONDS),
+        )
         server.enqueue(MockResponse().withWebSocketUpgrade(listener))
     }
 
