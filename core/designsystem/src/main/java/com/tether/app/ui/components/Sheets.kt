@@ -83,11 +83,12 @@ fun TetherSheetSurface(
             Modifier
                 .width(boxWidth)
                 .heightIn(max = if (docked) maxHeight * 0.8f else maxHeight - 24.dp)
-                .cssSurface(shape, t.graphite, null, shadows)
-                // `border-width: 1px 0 0 0` when docked; every edge as a card.
-                .then(
-                    if (docked) Modifier.topEdge(t.lineStrong)
-                    else Modifier.cssSurface(shape, Color.Transparent, CssBorder(1.dp, t.lineStrong)),
+                // `border-width: 1px 0 0 0` when docked (drawn as the equivalent 1px inset top
+                // line, which follows the rounded top corners); every edge as a card.
+                .cssSurface(
+                    shape, t.graphite,
+                    if (docked) null else CssBorder(1.dp, t.lineStrong),
+                    if (docked) shadows + hardShadow(1.dp, t.lineStrong, inset = true) else shadows,
                 )
                 .then(if (docked) Modifier.windowInsetsPadding(WindowInsets.navigationBars) else Modifier),
         ) {
@@ -132,15 +133,6 @@ fun TetherSheetSurface(
         }
     }
 }
-
-private fun Modifier.topEdge(color: Color): Modifier = this.then(
-    Modifier.graphicsLayer().then(
-        Modifier.cssSurface(
-            RoundedCornerShape(0.dp),
-            shadows = listOf(CssShadow(inset = true, offsetX = 0.dp, offsetY = 1.dp, blur = 0.dp, spread = 0.dp, color = color)),
-        ),
-    ),
-)
 
 /**
  * One sheet row (`.attach-sheet-row`, globals.css 7207-7233): ≥44px, `--radius-md`, a muted

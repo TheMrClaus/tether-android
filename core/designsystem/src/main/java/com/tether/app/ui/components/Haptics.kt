@@ -26,20 +26,26 @@ import androidx.compose.ui.platform.LocalContext
  */
 enum class HapticMoment { ScrubStep, KeyDown, KeyUp }
 
+/** What a moment plays: a composition primitive, or the waveform when primitives are unsupported. */
+class HapticSpec(val primitive: Int, val scale: Float, val fallback: LongArray)
+
+/** The moment map (the table above), pure so it is unit-testable. */
+fun hapticSpec(moment: HapticMoment): HapticSpec = when (moment) {
+    HapticMoment.ScrubStep -> HapticSpec(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f, longArrayOf(0, 20, 15, 20))
+    HapticMoment.KeyDown -> HapticSpec(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, 1.0f, longArrayOf(0, 35, 20, 35))
+    HapticMoment.KeyUp -> HapticSpec(VibrationEffect.Composition.PRIMITIVE_THUD, 1.0f, longArrayOf(0, 45, 25, 45))
+}
+
 /** Plays a [HapticMoment]. [LocalTetherHaptics] lets tests (and previews) observe the moments. */
 open class TetherHaptics(private val vibrator: Vibrator?) {
     open fun perform(moment: HapticMoment) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
-        val (primitive, fallback) = when (moment) {
-            HapticMoment.ScrubStep -> VibrationEffect.Composition.PRIMITIVE_TICK to longArrayOf(0, 20, 15, 20)
-            HapticMoment.KeyDown -> VibrationEffect.Composition.PRIMITIVE_QUICK_RISE to longArrayOf(0, 35, 20, 35)
-            HapticMoment.KeyUp -> VibrationEffect.Composition.PRIMITIVE_THUD to longArrayOf(0, 45, 25, 45)
-        }
-        if (v.areAllPrimitivesSupported(primitive)) {
-            v.vibrate(VibrationEffect.startComposition().addPrimitive(primitive, 1.0f).compose())
+        val spec = hapticSpec(moment)
+        if (v.areAllPrimitivesSupported(spec.primitive)) {
+            v.vibrate(VibrationEffect.startComposition().addPrimitive(spec.primitive, spec.scale).compose())
         } else {
-            v.vibrate(VibrationEffect.createWaveform(fallback, -1))
+            v.vibrate(VibrationEffect.createWaveform(spec.fallback, -1))
         }
     }
 

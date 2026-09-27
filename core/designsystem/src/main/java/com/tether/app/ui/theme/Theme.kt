@@ -38,11 +38,20 @@ import androidx.core.view.WindowCompat
  */
 val LocalReducedMotion = staticCompositionLocalOf { false }
 
-private fun reducedMotion(resolver: ContentResolver): Boolean = try {
-    Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-} catch (_: Exception) {
-    false
-}
+/**
+ * The web's `prefers-reduced-motion: reduce` (globals.css 4530-4539 collapses every animation and
+ * transition to 0.01ms, one iteration). Android's equivalent is "Remove animations", which sets
+ * the animator duration scale to 0; any other scale (including an unreadable setting) animates.
+ */
+fun isReducedMotion(animatorDurationScale: Float?): Boolean = animatorDurationScale == 0f
+
+private fun reducedMotion(resolver: ContentResolver): Boolean = isReducedMotion(
+    try {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    } catch (_: Exception) {
+        null
+    },
+)
 
 /** Minimal Material3 interop mapping; components read [LocalTetherTokens] directly. */
 private fun interopScheme(t: TetherTokens): ColorScheme {

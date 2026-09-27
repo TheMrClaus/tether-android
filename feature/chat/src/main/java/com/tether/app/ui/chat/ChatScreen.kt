@@ -52,12 +52,11 @@ import com.tether.app.protocol.reduce.storyPointsFromSession
 import com.tether.app.protocol.reduce.subagentRosterSummary
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.components.KeyVariant
-import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
-import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherDialog
+import com.tether.app.ui.components.TetherStatusPill
+import com.tether.app.ui.components.statusToneOf
 import com.tether.app.ui.components.TetherKey
-import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
@@ -543,29 +542,12 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            val statusColor = when (session.status) {
-                "active" -> t.running
-                "waiting" -> t.violet
-                else -> t.faint
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            // `.status-badge`: dot + printed word in an etched pill (never colour alone).
+            TetherStatusPill(
+                label = statusCopy(session.status),
+                tone = statusToneOf(session.status),
                 modifier = Modifier.padding(horizontal = 6.dp),
-            ) {
-                when (session.status) {
-                    "active" -> SpinnerRing(color = statusColor, size = 10.4.dp)
-                    "waiting" -> WaitingPingDot(color = statusColor)
-                    else -> StatusDot(color = statusColor)
-                }
-                Text(
-                    statusCopy(session.status),
-                    color = statusColor,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.label,
-                    fontSize = 11.2.sp,
-                )
-            }
+            )
             IconButton(onClick = { showTelemetry = true }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
                 Icon(TetherIcons.Gauge, contentDescription = "Telemetry", tint = t.muted, modifier = Modifier.size(16.dp))
             }

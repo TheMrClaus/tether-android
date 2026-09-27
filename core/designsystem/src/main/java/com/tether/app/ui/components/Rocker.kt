@@ -1,0 +1,186 @@
+package com.tether.app.ui.components
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import com.tether.app.ui.theme.CssShadow
+import com.tether.app.ui.theme.LocalReducedMotion
+import com.tether.app.ui.theme.LocalTetherTokens
+import com.tether.app.ui.theme.LocalTetherTypography
+import com.tether.app.ui.theme.TetherDimens
+import com.tether.app.ui.theme.TetherTokens
+import com.tether.app.ui.theme.ThemeFamily
+
+/**
+ * Geometry of the settings rocker in one skin (globals.css 8861-8921, Studio studio.css 570-586).
+ * Offsets are inside the frame's border (the positioned children's containing block).
+ */
+data class RockerGeometry(
+    val width: Dp,
+    val height: Dp,
+    val border: Dp,
+    val radius: Dp,
+    val capTop: Dp,
+    val capWidth: Dp,
+    val capHeight: Dp,
+    val capRadius: Dp,
+    /** Cap `left` when OFF and when ON (after its translateX). */
+    val capLeftOff: Dp,
+    val capLeftOn: Dp,
+)
+
+fun rockerGeometry(t: TetherTokens): RockerGeometry = if (t.skin.family == ThemeFamily.Studio) {
+    // 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on.
+    RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
+} else {
+    // 4.1rem × 1.8rem with a 1px border; cap at left 50%, calc(50% - 1px) × calc(100% - 4px),
+    // top 1px; ON translates it by calc(-100% + 1px).
+    val w = 65.6.dp
+    val h = 28.8.dp
+    val innerW = w - 2.dp
+    val innerH = h - 2.dp
+    val capW = innerW / 2 - 1.dp
+    RockerGeometry(w, h, 1.dp, 8.dp, 1.dp, capW, innerH - 4.dp, 5.44.dp, innerW / 2, innerW / 2 - capW + 1.dp)
+}
+
+/**
+ * The bi-stable settings rocker (`.settings-toggle > i`): a recessed frame (`--key-face-deep`,
+ * `--well`, 1px `--line-strong`, `--accent-side` when on); the SELECTED half pressed into it with
+ * its etched legend on the well floor (OFF muted / ON `--accent` with `--accent-ink`); the other
+ * half a raised `--key-face` cap that slides across in `--rocker-ms` `--ease-out` (a state jump
+ * under reduced motion). Studio re-dresses it as a 40×24 track (`--line-strong`, violet-strong
+ * when on) with a white 18px cap; the globals legend layer still sits under the cap, exactly as
+ * the browser paints it.
+ *
+ * The visual stays the web's size; the touch target around it is at least 44×44dp.
+ */
+@Composable
+fun TetherRocker(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    contentDescription: String? = null,
+    interactionSource: MutableInteractionSource? = null,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val reduced = LocalReducedMotion.current
+    val studio = t.skin.family == ThemeFamily.Studio
+    val g = rockerGeometry(t)
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val capLeft by animateFloatAsState(
+        if (checked) g.capLeftOn.value else g.capLeftOff.value,
+        if (reduced) snap() else tween(t.css.rockerMs, easing = t.css.easeOut.toEasing()),
+        label = "rockerCap",
+    )
+    val frameShape = RoundedCornerShape(g.radius)
+    val frame = when {
+        studio -> Modifier.cssSurface(frameShape, if (checked) t.violetStrong else t.lineStrong)
+        else -> Modifier.cssSurface(
+            frameShape, t.keyFaceDeep,
+            CssBorder(g.border, if (checked) t.accentSide else t.lineStrong),
+            t.css.well,
+        )
+    }
+    val legend = TextStyle(fontFamily = type.mono, fontSize = 8.32.sp, fontWeight = FontWeight(750), letterSpacing = 0.08.em)
+    val capShadows: List<CssShadow> = if (studio) {
+        listOf(softShadow(1.dp, 3.dp, Color(16, 30, 58).copy(alpha = 0.14f)))
+    } else {
+        listOf(
+            hardShadow(1.dp, t.litStrong, inset = true),
+            hardShadow(0.dp, t.litFaint, x = (-1).dp, inset = true),
+            hardShadow(2.dp, t.keySide),
+            softShadow(2.dp, 3.dp, t.contact.copy(alpha = 0.28f)),
+        )
+    }
+    Box(
+        modifier
+            .semantics { contentDescription?.let { this.contentDescription = it } }
+            .toggleable(checked, interaction, indication = null, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .defaultMinSize(TetherDimens.touchTargetDp, TetherDimens.touchTargetDp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(g.width, g.height)
+                .graphicsLayer {
+                    alpha = if (enabled) 1f else DisabledOpacity
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                }
+                .focusRing(focused, frameShape, t.violet)
+                .then(frame),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(g.border)
+                    .clip(RoundedCornerShape((g.radius - g.border).coerceAtLeast(0.dp))),
+            ) {
+                val half = (g.width - g.border * 2) / 2
+                // ::before: the depressed (selected) half and its legend.
+                Box(
+                    Modifier
+                        .offset(x = if (checked) half else 0.dp)
+                        .size(half, g.height - g.border * 2)
+                        .cssSurface(
+                            RoundedCornerShape(0.dp),
+                            if (checked) t.accent else Color.Transparent,
+                            shadows = if (checked) {
+                                listOf(softShadow(2.dp, 3.dp, t.pressShade, inset = true), hardShadow((-1).dp, t.litFaint, inset = true))
+                            } else {
+                                listOf(softShadow(2.dp, 3.dp, t.contact.copy(alpha = 0.2f), inset = true))
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (checked) "ON" else "OFF",
+                        style = legend,
+                        color = if (checked) t.accentInk else t.muted,
+                        maxLines = 1,
+                        modifier = Modifier.clearAndSetSemantics { },
+                    )
+                }
+                // b: the raised cap.
+                Box(
+                    Modifier
+                        .offset(x = capLeft.dp, y = g.capTop)
+                        .size(g.capWidth, g.capHeight)
+                        .cssSurface(RoundedCornerShape(g.capRadius), if (studio) Color.White else t.keyFace, shadows = capShadows),
+                )
+            }
+        }
+    }
+}

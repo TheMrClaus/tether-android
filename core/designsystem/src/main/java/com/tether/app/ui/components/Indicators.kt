@@ -167,6 +167,15 @@ val PingSpread: Dp = 7.2.dp
 /** A session status as the web names it (`status-${session.status}`, globals.css 1580-1599). */
 enum class StatusTone { Active, Waiting, Ready, Exited, History }
 
+/** A wire `session.status` string → its [StatusTone] (unknown statuses print faint, like the web). */
+fun statusToneOf(status: String): StatusTone = when (status) {
+    "active" -> StatusTone.Active
+    "waiting" -> StatusTone.Waiting
+    "ready" -> StatusTone.Ready
+    "exited" -> StatusTone.Exited
+    else -> StatusTone.History
+}
+
 /**
  * Status as an etched pill: dot + printed word, never the dot alone (globals.css 11161-11175;
  * Studio: studio.css:354). Active carries the spinner, Waiting the pinging violet dot (violet

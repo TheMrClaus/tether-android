@@ -166,14 +166,14 @@ fun TetherKey(
                 drawContent()
                 // ::before / ::after are positioned, so they paint over the legend.
                 if (wear && enabled && wearPattern != KeyWear.None) {
-                    val path = Path().apply { addOutline(keyShape.createOutline(size, layoutDirection, this@drawWithContent)) }
+                    val path = Path().apply { addOutline(keyShape.createOutline(this@drawWithContent.size, layoutDirection, this@drawWithContent)) }
                     clipPath(path) { drawKeyWear(t, wearPattern) }
                 }
                 if (slit) {
-                    val h = size.height * 0.42f
+                    val h = this.size.height * 0.42f
                     drawRoundRect(
                         color = t.accentInk.copy(alpha = look.slitAlpha),
-                        topLeft = Offset(SlitInset.toPx(), (size.height - h) / 2f),
+                        topLeft = Offset(SlitInset.toPx(), (this.size.height - h) / 2f),
                         size = Size(t.keySlit.toPx(), h),
                         cornerRadius = CornerRadius(1.dp.toPx()),
                     )
