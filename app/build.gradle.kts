@@ -1,3 +1,7 @@
+import com.android.build.api.artifact.ScopedArtifact
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.ScopedArtifacts
+import java.util.zip.ZipFile
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -82,6 +86,60 @@ roborazzi {
 }
 tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
+/**
+ * T3.4: proves the debug-only Component Gallery is absent from what release ships — no class of
+ * the `com.tether.app.gallery` package among the release variant's compiled classes (dirs and
+ * jars) and no gallery activity in the release merged manifest. Needs no signing secrets.
+ */
+abstract class VerifyGalleryNotInRelease : DefaultTask() {
+    @get:InputFiles abstract val classJars: ListProperty<RegularFile>
+    @get:InputFiles abstract val classDirs: ListProperty<Directory>
+    @get:InputFile abstract val mergedManifest: RegularFileProperty
+    @get:OutputFile abstract val report: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val prefix = "com/tether/app/gallery/"
+        val leaks = mutableListOf<String>()
+        var scanned = 0
+        classDirs.get().forEach { dir ->
+            dir.asFile.walkTopDown().filter { it.isFile && it.name.endsWith(".class") }.forEach { f ->
+                scanned++
+                val rel = f.relativeTo(dir.asFile).invariantSeparatorsPath
+                if (rel.startsWith(prefix)) leaks += rel
+            }
+        }
+        classJars.get().forEach { jar ->
+            ZipFile(jar.asFile).use { zip ->
+                zip.entries().asSequence().filter { it.name.endsWith(".class") }.forEach { e ->
+                    scanned++
+                    if (e.name.startsWith(prefix)) leaks += e.name
+                }
+            }
+        }
+        val manifest = mergedManifest.get().asFile.readText()
+        if ("gallery" in manifest.lowercase()) leaks += "merged manifest mentions the gallery"
+        check(scanned > 0) { "no release classes were scanned" }
+        check(leaks.isEmpty()) { "Component Gallery leaked into release: $leaks" }
+        report.get().asFile.writeText("release classes scanned: $scanned; gallery classes: 0; manifest: clean\n")
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val verify = tasks.register<VerifyGalleryNotInRelease>("verifyGalleryNotInRelease") {
+            group = "verification"
+            description = "Fails when the debug-only Component Gallery reaches the release variant."
+            report.set(layout.buildDirectory.file("reports/gallery-not-in-release.txt"))
+        }
+        variant.artifacts.forScope(ScopedArtifacts.Scope.PROJECT)
+            .use(verify)
+            .toGet(ScopedArtifact.CLASSES, VerifyGalleryNotInRelease::classJars, VerifyGalleryNotInRelease::classDirs)
+        verify.configure { mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST)) }
+    }
+}
+tasks.named("check") { dependsOn("verifyGalleryNotInRelease") }
+
 dependencies {
     implementation(project(":core:protocol"))
     implementation(project(":core:net"))
@@ -132,7 +190,9 @@ dependencies {
     // T3.4 gallery screenshot tests (compose rule + Roborazzi capture).
     testImplementation(composeBom)
     testImplementation(libs.androidx.compose.ui.test.junit4)
-    testImplementation(libs.androidx.compose.ui.test.manifest)
+    // An application's unit tests use its own merged manifest: the compose rule's host activity
+    // must be in the DEBUG manifest (debug only; release never sees it).
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)

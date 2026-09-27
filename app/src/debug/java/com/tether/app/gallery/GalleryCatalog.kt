@@ -179,7 +179,7 @@ private fun describe(style: TextStyle): String {
 }
 
 private fun fmt(u: TextUnit): String {
-    val v = (Math.round(u.value * 100) / 100.0).toString().removeSuffix(".0")
+    val v = (Math.round(u.value * 1000) / 1000.0).toString().removeSuffix(".0")
     return v + if (u.isSp) "sp" else if (u.isEm) "em" else ""
 }
 
