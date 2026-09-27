@@ -24,11 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED + merged: T1.1, T1.2 (connection manager, `a755f4e`), T2.1 (reducer v128, 70/70).
-Owner action pending: merge + deploy **tether#197** (S1.1, v129) — the app on `main` now speaks 129, so
-**no release until it's deployed**. IN FLIGHT (own worktrees): **T2.1D** reducer cutover; **T1.4** auth +
-Keystore credentials + backup exclusion (security-executor); **T2.2** pure helpers; **S0.4** screenshot
-wait-bug fix. Next: T1.3 (after T2.1D), T1.5, T2.3, S0.6 PR, then Phase 3.
+**Next action:** VERIFIED + merged this stretch: T1.1, T1.2, T2.1, T2.1D (app on the v128 reducer; v40
+deleted), T2.2 (807/807 helpers). Owner action pending: merge + deploy **tether#197** (S1.1, v129) —
+`main` speaks 129, so **no release until it's deployed**. IN FLIGHT: **T1.4** auth (security review
+BLOCKED merge on a non-atomic URL/credential write → fixing, then re-verify); **T3.1** generated tokens
+(gate exception); **S0.4** screenshot wait-bug fix. Queued behind T1.4 (same files): T1.3, T1.5, T2.3.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -69,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
-| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  | checkpoint f6e3f05 (WIP, branch parity/T1.4-auth): credential cipher + encrypted DataStoreSettings + migration + backup rules + logout/expi… |
+| T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | IN-PROGRESS | claude-main @ 2026-09-27 02:41 |  | Security review: 1 BLOCKING (Medium) — setServer writes URL then credential in two non-atomic writes (was one atomic dataStore.edit on main… |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
 ### Phase 2 — Reducer at v128
@@ -83,7 +83,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 3 — Design system
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | TODO |  |  |  |
+| T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | IN-PROGRESS | claude-main @ 2026-09-27 03:14 |  | GATE EXCEPTION (owner delegation): Phase 3 starts before P1/P2 close — T3.1 depends only on S0.5 (VERIFIED, tokens vendored in parity-corpu… |
 | T3.2 | Typography (Manrope, JetBrains Mono) | TODO |  |  |  |
 | T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | TODO |  |  |  |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
@@ -181,7 +181,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 14 — Hardening & release 1.0.0
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T14.1 | Performance + Baseline Profiles | TODO |  |  | From v0.6.0: release build has isMinifyEnabled=false (since before the program) — ~31 MB dex. Since minSdk 34 AGP stores dex uncompressed, … |
+| T14.1 | Performance + Baseline Profiles | TODO |  |  | From T2.1D perf test (JVM 17): per-delta (JSON->tree->fold->adapt) p99 0.024-0.039ms at 100 turns x 50 blocks; worst case one live turn x 5… |
 | T14.2 | Accessibility pass | TODO |  |  |  |
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  |  |
@@ -233,6 +233,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
+| 2026-09-27 | **Gate exception:** Phase 3 (T3.1 tokens) starts before P1/P2 close — depends only on S0.5 (verified), disjoint files | Keep the pipeline full while T1.3/T1.5/T2.3 queue behind T1.4 | claude-main (owner delegation) |
 | 2026-09-27 | **Gate exception:** S1.1 (server native compat window) starts before Phase 0 closes | It needs no Phase-0 artifact; only S0.3-verify/S0.4/S0.6 remain in P0 | claude-main (owner delegation) |
 | 2026-09-27 | **Published v0.6.0** (code 16) from `34b1c9b` after CI + verifier + security review; same signing cert as 0.5.1 (upgrade-installs). APK is 33 MB because dex is stored uncompressed at minSdk ≥ 28 (AGP default, not a regression); R8 minification (off since before the program) → T14.1 | Owner asked for a morning APK; decided on owner's behalf | claude-main |
 | 2026-09-27 | Owner away overnight: agent works autonomously, decides on the owner's behalf (logged here), and publishes a new APK release when the SDK work lands | Owner message | owner |
