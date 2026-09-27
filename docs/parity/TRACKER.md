@@ -29,11 +29,14 @@ possible when the owner asks. Release notes must cover: the Android 14 floor, Ke
 that pre-T1.4 backups may still hold the old plaintext credential file.
 **Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
 **[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
-**T3.5 VERIFIED + merged** (`b9f03a4`; main gate 1350/0 failed/4 skipped). In flight (4 agents):
-**T3.3** DONE (`e3e5ec6`, 1467 tests, 90 Roborazzi goldens) → verifier; **T13.0** DONE (SYNC_DESIGN.md `056f79b`) →
-plan-verifier; **T1.5** fix round (detach the old socket on a new login + 3 test gaps from verifier/security review);
-**ta-fsp** server fix (security-executor, tether branch `android-parity/node-ws-guard`, PR after verification).
-Then: T3.4 gallery (after T3.3 merges), Phase 4 (T4.1 phone shell, T4.3 statusline), S13.1/T13.1 after the design is approved.
+**Owner queue:** tether PRs **[#198](https://github.com/TheMrClaus/tether/pull/198)** (S0 scripts, verified) and
+**[#199](https://github.com/TheMrClaus/tether/pull/199)** (ta-fsp: paired-device sockets may not manage nodes; verified +
+security-reviewed) await merge (#199 also needs a deploy). Bead `ta-xax` needs an owner threat-model call: should a paired device be fully
+trusted apart from device management? (ws-browser navigate full-read SSRF, agents can reach the state dir.)
+**Merged today:** T3.5 (`b9f03a4`), T13.0 SYNC_DESIGN (`5b3781e`, approved after 3 plan-verifier rounds).
+In flight: **T3.3** DONE → verifier; **T1.5** fix round r2 DONE (`3c74686`, 1377 tests) → delta verifier + security re-review;
+**S13.1** executor (tether `android-parity/S13.1`, PROTOCOL 129→130, part C in separate commits for owner OQ1).
+Next: T3.3 merge → T3.4 gallery + Phase 4 (T4.1, T4.3); T1.5 merge → T13.1 (Room mirror, per SYNC_DESIGN).
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
 **In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
@@ -176,14 +179,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 13 — Proper sync
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | DONE | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement (T13.0 SYNC_DESIGN §2-3,§12): split into 3 commits: (a) shadow-write Room mirror, (b) cold-start hydration + CursorTracke… |
+| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement r2 (SYNC_DESIGN §3.1 rule 1a): afterSeqFor(sessionId) returns null when the session holds a PendingStore record with trie… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
-| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement (SYNC_DESIGN §5): PendingStore unchanged. A staged outbox (DataStore key tether:outbox.v1, same atomic edit as tether:pen… |
-| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | TODO |  |  | design refinement (SYNC_DESIGN §6.1): (A) AgentSession.lastSeq replaces sessions-changed-since. (B) FCM data-only {kind:sync,v:1}: priority… |
-| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | design refinement (SYNC_DESIGN §6.2): FCM data kind=sync (no content, no session id) enqueues unique expedited work (RUN_AS_NON_EXPEDITED o… |
-| T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement (SYNC_DESIGN §7-8): 200 MB default. Evict turn_detail first, then gone sessions, then unpinned LRU. Never evict pinned, o… |
-| T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement (SYNC_DESIGN §10): rules C1-C9, one test each, plus the property tree == fold(DB.base, DB.tail). Debug-only divergence pr… |
+| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
+| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | IN-PROGRESS | claude-main @ 2026-09-27 09:38 |  | design refinement r2: part C must also update lib/pending-input.mjs reconcileWithSnapshot to treat removedQueueIds as cleared (the web port… |
+| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | design refinement r3 (SYNC_DESIGN §6.2 step 1, R7): at the foreground handover (socket kept, no onReady), attach via afterSeqFor every sess… |
+| T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement r2: Clear cache also rotates the mirror data key (and rotation after 2^28 writes). |
+| T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement r2: the debug probe strips removedQueueIds until T13.3b lands, then demands exact equality; test both modes. |
 
 ### Phase 14 — Hardening & release 1.0.0
 | ID | Task | Status | Claimed by | Evidence | Notes |
