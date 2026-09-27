@@ -38,8 +38,11 @@ beads Dolt history flattened and re-pushed. Branches cut before the scrub are **
   web's JS regex is identical; transplanted onto `main`, gate 2101/0 failed/4 skipped.
 - **T4.5** log dialog: **VERIFIED + MERGED** (`61f868a`). Two verify rounds: the unseen-warnings mark now belongs to a sign-in
   generation on `EventLog` (a StateFlow-conflation race made the first reset unreliable). Rebased gate 2208/0 failed/4 skipped.
-- **T5.1** re-verify in flight after a wiring-test deadlock fix (`6458ffa`, `03db718`). **T11.1** file browser (security-executor)
-  and **ta-cdh** (load-sensitive `OriginKeyedPendingTest`) in flight.
+- **T5.1** sidebar: **VERIFIED + MERGED** (`a41178a`) after a wiring-test deadlock fix and a keep-both rebase over T4.5/T6.1;
+  gate 2348/0 failed/4 skipped.
+- **In flight:** **T11.1** file browser (verify + security review done: 1 Medium image-decode crash + 4 Lows to fix before
+  merge), **ta-cdh** (diagnosed: a real low-severity sign-in ping-before-hello race; fix `91ed0f9` in verification),
+  **T4.4** deep links (security-executor).
 - Follow-ups filed tonight: ta-cdh, two design-system parity bugs (line-height:1 text, dialog top light line), error-toast
   auto-dismiss vs the web's persistent toast.
 
@@ -112,13 +115,13 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.4 | Navigation + deep links | TODO |  |  |  |
+| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  |  |
 | T4.5 | Log dialog | VERIFIED | TheMrClaus @ 2026-09-27 21:58 |  |  |
 
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | DONE | claude-main @ 2026-09-27 13:53 |  |  |
+| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | VERIFIED | claude-main @ 2026-09-27 13:53 |  |  |
 | T5.2 | History/resume picker | TODO |  |  |  |
 | T5.3 | Global + in-session search | TODO |  |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
@@ -173,7 +176,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 11 — Files
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T11.1 | Workspace file browser (all /api/files ops) | DONE | TheMrClaus @ 2026-09-27 22:25 |  |  |
+| T11.1 | Workspace file browser (all /api/files ops) | TODO | TheMrClaus @ 2026-09-27 22:25 |  | VERIFY-FAIL (medium, integration): branch c3a52b6 itself holds but does not rebase cleanly onto current main 14c7243. git rebase --onto 14c… |
 | T11.2 | Android share target → session | TODO |  |  |  |
 
 ### Phase 12 — Notifications
@@ -243,6 +246,9 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | Date | Decision | Reason | By |
 |---|---|---|---|
 | 2026-09-28 | Owner asleep overnight: the coordinator works autonomously, decides on the owner's behalf (logged here), merges verified work, and delivers a morning report plus a live-deployment test list. Production deploys, releases and history rewrites stay owner calls | Owner message | owner |
+| 2026-09-28 | A security reviewer without a shell reads a **`git archive` snapshot** of the committed candidate (read-only, outside every worktree) when a verifier is mutating in parallel | The reviewer agent has no git; the archive is byte-identical to the commit and immune to in-flight mutations | claude-main (owner delegation) |
+| 2026-09-28 | The coordinator resolves **keep-both** rebase conflicts itself (additive blocks from two merged lanes at the same spot), re-runs the full gate, and has the task's verifier review the resolution before merge | T5.1 vs T4.5/T6.1 collided only on appended interface members; a new executor round would add nothing | claude-main (owner delegation) |
+| 2026-09-28 | T4.5: the unseen-warnings mark is scoped to a **sign-in generation** carried by `EventLog`, not reset by observing an empty log | StateFlow conflation can skip the empty state (reproduced by the verifier) | claude-main (owner delegation) |
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
 | 2026-09-27 | **Emulators skipped for now**: T0.2 deferred (SDK emulator + both AVDs stay installed); behavior checks run on JVM/Robolectric; Phase 0 closes without T0.2 | Owner answer (question card) | owner |
