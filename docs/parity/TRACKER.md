@@ -36,8 +36,8 @@ beads Dolt history was flattened to one commit and re-pushed fresh (`refs/dolt/d
 combined gate 1711/0 failed/4 skipped).
 **ta-s8q (release blocker) VERIFIED + MERGED** (`9b6a8d7`, gate 1747/0 failed): unsent turns are keyed by server origin and never
 replayed to another server. **No release blocker is open.**
-**In flight (4):** **T12.1** r2 (push registration + Firebase init; branch on pre-scrub base, the coordinator transplants),
-**T4.2** expanded shell, **T5.1** sidebar, **ta-cpn** (ta-s8q follow-ups: unreadable-slot prune, notice delivery, onReady test).
+**ta-cpn merged** (`ec592d7`). **In flight (4):** **T12.1** r2 (push; pre-scrub base, the coordinator transplants), **T5.1** sidebar,
+**T4.2** expanded shell DONE → verifier, **T6.1** chat turns/blocks/markdown/paging (new).
 **Next:** T4.4 deep links (after T12.1), T4.5 log dialog, T13.1 Room mirror. Follow-ups filed: ta-gxp
 (register() migration), ta-yhu (S12.1 server channel ids), ta-srn (T13.3b).
 **Owner queue:** optional tether history scrub (82 hits in the private repo; needs a production checkout reset + restart).
@@ -107,7 +107,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.2 | Expanded shell (web desktop layout, resizable panels) | IN-PROGRESS | claude-main @ 2026-09-27 13:32 |  | executor-T4.2: done: PanelWidthGeometry + PanelPrefs + 9 unit tests (6054c3d) / next: resize handle, ExpandedShell, chrome variants |
+| T4.2 | Expanded shell (web desktop layout, resizable panels) | DONE | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
 | T4.5 | Log dialog | TODO |  |  | From the T4.1 verifier: the topbar Health badge currently counts every vm.errorLog entry and never clears when opened; the web counts only … |
@@ -115,7 +115,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | IN-PROGRESS | claude-main @ 2026-09-27 13:53 |  |  |
+| T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | IN-PROGRESS | claude-main @ 2026-09-27 13:53 |  | executor-T5.1: wt T5.1 branch parity/T5.1-sidebar. done: b4e50d3 core/net sidebar sync (SidebarSync.kt, TetherClient defaults, Real+Fake) +… |
 | T5.2 | History/resume picker | TODO |  |  |  |
 | T5.3 | Global + in-session search | TODO |  |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
@@ -123,7 +123,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 6 — Chat view
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | TODO |  |  |  |
+| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | IN-PROGRESS | claude-main @ 2026-09-27 16:58 |  |  |
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | TODO |  |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
@@ -176,7 +176,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | IN-PROGRESS | claude-main @ 2026-09-27 12:49 |  | VERIFY-PASS relayed (verifier: 13/15 mutations red; Y2 permission-asked persist and Z3 UiRoot select untested). r2 dispatched: F1 registrat… |
+| T12.1 | FCM refresh, channels, deep link, Android 13+ permission | IN-PROGRESS | claude-main @ 2026-09-27 12:49 |  | executor-T12.1 round 2 done: F1 7488acb, F2 88e32a9, H1+Z3 a81c255, H2 97ee2de, H3 bea11e5, H4 35cf3d9, H5 831b7ad, Y2 da4b288, E2E 433e866… |
 | T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
 | T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
