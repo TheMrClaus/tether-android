@@ -120,6 +120,9 @@ enum class CssFile { Globals, Studio }
 /** What a key rule's selector requires beyond its classes. */
 enum class KeyPseudo { None, Active, Disabled, On }
 
+/** A rule inside `@media (max-width: 47.9375rem)` applies only to the phone layout (PLAN D10). */
+enum class KeyMedia { All, Phone }
+
 /** The mutable computed style a rule's declarations write into. */
 class KeyComputed(
     var face: Color = Color.Transparent,
@@ -148,6 +151,7 @@ class KeyRule(
     val specificity: Int,
     val pseudo: KeyPseudo = KeyPseudo.None,
     val studioOnly: Boolean = false,
+    val media: KeyMedia = KeyMedia.All,
     val declare: KeyComputed.(KeyContext) -> Unit,
 ) {
     val selector: String
@@ -251,8 +255,8 @@ private val studioFlatDestructive: KeyComputed.(KeyContext) -> Unit = {
     travel = 0.dp
 }
 
-private fun g(line: Int, classes: Set<KeyClass>, specificity: Int, pseudo: KeyPseudo = KeyPseudo.None, declare: KeyComputed.(KeyContext) -> Unit) =
-    KeyRule(CssFile.Globals, line, classes, specificity, pseudo, studioOnly = false, declare = declare)
+private fun g(line: Int, classes: Set<KeyClass>, specificity: Int, pseudo: KeyPseudo = KeyPseudo.None, media: KeyMedia = KeyMedia.All, declare: KeyComputed.(KeyContext) -> Unit) =
+    KeyRule(CssFile.Globals, line, classes, specificity, pseudo, studioOnly = false, media = media, declare = declare)
 
 private fun s(line: Int, classes: Set<KeyClass>, specificity: Int, pseudo: KeyPseudo = KeyPseudo.None, declare: KeyComputed.(KeyContext) -> Unit) =
     KeyRule(CssFile.Studio, line, classes, specificity, pseudo, studioOnly = true, declare = declare)
@@ -306,26 +310,28 @@ val KeyRules: List<KeyRule> = listOf(
     g(8678, Interrupt, spec(2)) { radius = it.t.radiusKey },
     g(8679, NewSession, spec(2)) { radius = it.t.radiusKey },
     g(8680, End, spec(2)) { radius = it.t.radiusKey },
-    g(8686, Secondary, spec(4), KeyPseudo.Active, neutralActive),
-    g(8687, NewSession, spec(3), KeyPseudo.Active, neutralActive),
-    g(8691, Attach, spec(3), KeyPseudo.Active, neutralActive),
-    g(8711, Primary, spec(4), KeyPseudo.Active, primaryActive),
-    g(8712, Send, spec(4), KeyPseudo.Active, primaryActive),
-    g(8719, Interrupt, spec(4), KeyPseudo.Active, brickActive),
-    g(8720, Deny, spec(5), KeyPseudo.Active, brickActive),
-    g(8721, Danger, spec(5), KeyPseudo.Active, brickActive),
-    g(8722, End, spec(4), KeyPseudo.Active, brickActive),
+    g(8686, Secondary, spec(4), KeyPseudo.Active, declare = neutralActive),
+    g(8687, NewSession, spec(3), KeyPseudo.Active, declare = neutralActive),
+    g(8691, Attach, spec(3), KeyPseudo.Active, declare = neutralActive),
+    g(8711, Primary, spec(4), KeyPseudo.Active, declare = primaryActive),
+    g(8712, Send, spec(4), KeyPseudo.Active, declare = primaryActive),
+    g(8719, Interrupt, spec(4), KeyPseudo.Active, declare = brickActive),
+    g(8720, Deny, spec(5), KeyPseudo.Active, declare = brickActive),
+    g(8721, Danger, spec(5), KeyPseudo.Active, declare = brickActive),
+    g(8722, End, spec(4), KeyPseudo.Active, declare = brickActive),
     g(8734, Jump, spec(2)) { border = it.t.charcoalSide; face = it.t.charcoal; ink = it.t.utilityInk; shadows = listOf(hardShadow(1.dp, it.t.litSoft, inset = true), hardShadow(2.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
     g(8749, Jump, spec(3), KeyPseudo.Active) { travel = it.t.pressTravel; face = oklabMix(it.t.charcoal, it.t.contact, 0.9f); shadows = listOf(softShadow(2.dp, 3.dp, it.t.pressShade, inset = true), hardShadow(1.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
-    g(8757, Primary, spec(3), KeyPseudo.Disabled, flatDisabled),
-    g(8758, Secondary, spec(3), KeyPseudo.Disabled, flatDisabled),
-    g(8759, Send, spec(3), KeyPseudo.Disabled, flatDisabled),
-    g(8760, Interrupt, spec(3), KeyPseudo.Disabled, flatDisabled),
+    g(8757, Primary, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
+    g(8758, Secondary, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
+    g(8759, Send, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
+    g(8760, Interrupt, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
     // Wear ::after (globals.css 8786-8857): Send / Primary / New session compositions.
     g(8786, Send, spec(2, 1)) { wear = KeyWear.Send },
     g(8787, Primary, spec(2, 1)) { wear = KeyWear.Primary },
     g(8788, NewSession, spec(2, 1)) { wear = KeyWear.NewSession },
-    g(8983, Icon, spec(3), KeyPseudo.Active, neutralActive), // icon controls (8983-8989)
+    // Phone: the 44px icon-only Send square gets its compact composition (8847-8857).
+    g(8848, Send, spec(2, 1), media = KeyMedia.Phone) { wear = KeyWear.SendCompact },
+    g(8983, Icon, spec(3), KeyPseudo.Active, declare = neutralActive), // icon controls (8983-8989)
     // Execution slit ::before (globals.css 9220-9253).
     g(9228, Primary, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
     g(9229, Send, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
@@ -334,6 +340,18 @@ val KeyRules: List<KeyRule> = listOf(
     g(9250, Primary, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
     g(9251, Send, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
     g(9253, Interrupt, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
+    // The composer paperclip (inside .chat-composer-toolbar): a round key at pill height on
+    // desktop (11389-11406), the key radius on a phone (11941, inside the 47.9375rem query).
+    g(11315, Attach, spec(2)) { border = it.t.keySide; radius = it.t.radiusKey },
+    g(11389, Attach, spec(3)) {
+        border = it.t.keySide
+        radius = KeyRadiusCircle
+        face = it.t.keyFace
+        shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowKeySm
+        ink = it.t.muted
+    },
+    g(11402, Attach, spec(4), KeyPseudo.Active, declare = neutralActive),
+    g(11941, Attach, spec(3), media = KeyMedia.Phone) { radius = it.t.radiusKey },
     // Latched (.is-on) keys: raised, the violet selected tone (globals.css 11048-11056).
     g(11049, emptySet(), spec(3), KeyPseudo.On) {
         face = it.t.violetWash
@@ -360,16 +378,23 @@ val KeyRules: List<KeyRule> = listOf(
     s(303, NewSession, spec(2)) { face = Color(0xFF365CDE) },
     s(389, Attach, spec(3)) { border = Color.Transparent; radius = 9.6.dp; face = it.t.graphiteRaised; shadows = emptyList() }, // .chat-composer-toolbar .chat-attach-btn
     s(489, Deny, spec(3), declare = studioFlatDestructive),
-    s(491, Deny, spec(5), KeyPseudo.Active, studioFlatDestructive),
+    s(491, Deny, spec(5), KeyPseudo.Active, declare = studioFlatDestructive),
     s(492, Danger, spec(3), declare = studioFlatDestructive),
-    s(493, Danger, spec(5), KeyPseudo.Active, studioFlatDestructive),
+    s(493, Danger, spec(5), KeyPseudo.Active, declare = studioFlatDestructive),
 )
 
 /** The rules that apply to [classes] in [state] for this skin, in cascade (application) order. */
-fun matchingKeyRules(t: TetherTokens, classes: Set<KeyClass>, state: KeyState, selected: Boolean = false): List<KeyRule> {
+fun matchingKeyRules(
+    t: TetherTokens,
+    classes: Set<KeyClass>,
+    state: KeyState,
+    selected: Boolean = false,
+    layout: TetherLayoutClass = TetherLayoutClass.Phone,
+): List<KeyRule> {
     val studio = t.skin.family == ThemeFamily.Studio
     return KeyRules.filter { r ->
-        (!r.studioOnly || studio) && classes.containsAll(r.classes) && when (r.pseudo) {
+        (!r.studioOnly || studio) && (r.media == KeyMedia.All || layout == TetherLayoutClass.Phone) &&
+            classes.containsAll(r.classes) && when (r.pseudo) {
             KeyPseudo.None -> true
             KeyPseudo.Active -> state == KeyState.Pressed
             KeyPseudo.Disabled -> state == KeyState.Disabled
@@ -385,10 +410,11 @@ fun resolveKey(
     state: KeyState,
     selected: Boolean = false,
     size: KeySize = KeySize.Regular,
+    layout: TetherLayoutClass = TetherLayoutClass.Phone,
 ): KeyLook {
     val c = KeyComputed(ink = t.ink)
     val ctx = KeyContext(t, size)
-    for (rule in matchingKeyRules(t, classes, state, selected)) rule.declare(c, ctx)
+    for (rule in matchingKeyRules(t, classes, state, selected, layout)) rule.declare(c, ctx)
     return KeyLook(c.face, c.border, c.ink, c.shadows, c.travel, c.radius, c.alpha, c.slit, c.slitAlpha, c.wear)
 }
 

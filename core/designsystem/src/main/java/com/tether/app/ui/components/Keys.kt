@@ -123,7 +123,7 @@ fun TetherKey(
         down -> KeyState.Pressed
         else -> KeyState.Rest
     }
-    val look = resolveKey(t, classes, state, selected = selected, size = size)
+    val look = resolveKey(t, classes, state, selected = selected, size = size, layout = currentLayoutClass())
     val round = shape == KeyShape.Circle || (shape == null && look.radius == KeyRadiusCircle)
     val keyShape: Shape = if (round) CircleShape else RoundedCornerShape(if (look.radius == KeyRadiusCircle) 0.dp else look.radius)
     val wearShown = if (look.wear == KeyWear.None) KeyWear.None else wearPattern ?: look.wear

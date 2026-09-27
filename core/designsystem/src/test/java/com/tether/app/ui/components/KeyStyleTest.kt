@@ -119,17 +119,17 @@ class KeyStyleTest {
         Row("g8758 then s489 (0,3,0, later)", KeyClasses.ApprovalDeny, S, D, { it.keyFace }, clear, { it.muted }, none, radius = studioRadius, alpha = 0.48f),
 
         // ── {chat-send} ──
-        Row("g8635 + g8677 + g9229 + g8786", KeyClasses.ChatSend, I, R, { it.accent }, { it.accentSide }, { it.accentInk }, primary, radius = keyRadius, slit = true, wear = KeyWear.Send),
-        Row("g8712 (0,4,0)", KeyClasses.ChatSend, I, P, { it.accentDeep }, { it.accentSide }, { it.accentInk }, primaryPressed, travel, keyRadius, slit = true, wear = KeyWear.Send),
-        Row("g8759 + g7127 opacity 0.5 + g9251", KeyClasses.ChatSend, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Send),
+        Row("g8635 + g8677 + g9229 + g8848 (phone wear)", KeyClasses.ChatSend, I, R, { it.accent }, { it.accentSide }, { it.accentInk }, primary, radius = keyRadius, slit = true, wear = KeyWear.SendCompact),
+        Row("g8712 (0,4,0)", KeyClasses.ChatSend, I, P, { it.accentDeep }, { it.accentSide }, { it.accentInk }, primaryPressed, travel, keyRadius, slit = true, wear = KeyWear.SendCompact),
+        Row("g8759 + g7127 opacity 0.5 + g9251", KeyClasses.ChatSend, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.SendCompact),
         Row("s262 + s266 + s275", KeyClasses.ChatSend, S, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
         Row("g8712 (0,4,0)", KeyClasses.ChatSend, S, P, { it.accentDeep }, clear, { it.accentInk }, primaryPressed, travel, studioRadius),
         Row("g8759 + g7127", KeyClasses.ChatSend, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.5f, slitAlpha = 0.25f),
 
         // ── {chat-send, chat-interrupt} ──
-        Row("g8656 ties g8635, later + g9231 + g8786", KeyClasses.ChatInterrupt, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true, wear = KeyWear.Send),
-        Row("g8719 ties g8712, later", KeyClasses.ChatInterrupt, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true, wear = KeyWear.Send),
-        Row("g8760 + g7127 + g9253", KeyClasses.ChatInterrupt, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.Send),
+        Row("g8656 ties g8635, later + g9231 + g8786", KeyClasses.ChatInterrupt, I, R, { it.brick }, { it.brickSide }, { it.accentInk }, brick, radius = keyRadius, slit = true, wear = KeyWear.SendCompact),
+        Row("g8719 ties g8712, later", KeyClasses.ChatInterrupt, I, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, travel, keyRadius, slit = true, wear = KeyWear.SendCompact),
+        Row("g8760 + g7127 + g9253", KeyClasses.ChatInterrupt, I, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = keyRadius, alpha = 0.5f, slit = true, slitAlpha = 0.25f, wear = KeyWear.SendCompact),
         Row("s266 (.chat-send accent) ties g8656, later: BLUE", KeyClasses.ChatInterrupt, S, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
         Row("g8719 (0,4,0) ties g8712, later; s266 border stays", KeyClasses.ChatInterrupt, S, P, { it.brickDeep }, clear, { it.accentInk }, brickPressed, travel, studioRadius),
         Row("g8760 (0,3,0)", KeyClasses.ChatInterrupt, S, D, { it.keyFace }, { it.lineStrong }, { it.muted }, flat, radius = studioRadius, alpha = 0.5f, slitAlpha = 0.25f),
@@ -147,11 +147,12 @@ class KeyStyleTest {
         Row("s264 + s267 + s273 + s303 #365cde", KeyClasses.NewSession, S, R, { Color(0xFF365CDE) }, clear, { it.accentInk }, none, radius = studioRadius),
         Row("g8687 (0,3,0) beats s303 (0,2,0)", KeyClasses.NewSession, S, P, { it.keyFaceDeep }, clear, { it.accentInk }, neutralPressed, travel, studioRadius),
 
-        // ── {chat-attach-btn} (in .chat-composer-toolbar) ──
-        Row("g8597 + g7136 radius-md", KeyClasses.Attach, I, R, { it.keyFace }, { it.keySide }, { it.ink }, neutral, radius = { it.radiusMd }),
-        Row("g8691 (0,3,0)", KeyClasses.Attach, I, P, { it.keyFaceDeep }, { it.keySide }, { it.ink }, neutralPressed, travel, { it.radiusMd }),
-        Row("s389 (0,3,0)", KeyClasses.Attach, S, R, { it.graphiteRaised }, clear, { it.ink }, none, radius = { 9.6.dp }),
-        Row("s389 ties g8691, later; travel from g8691", KeyClasses.Attach, S, P, { it.graphiteRaised }, clear, { it.ink }, none, travel, { 9.6.dp }),
+        // ── {chat-attach-btn} (in .chat-composer-toolbar), phone layout ──
+        Row("g11389 (0,3,0) + g11941 phone radius", KeyClasses.Attach, I, R, { it.keyFace }, { it.keySide }, { it.muted },
+            { t -> listOf(inset(1.dp, t.litStrong)) + t.css.shadowKeySm }, radius = keyRadius),
+        Row("g11402 (0,4,0)", KeyClasses.Attach, I, P, { it.keyFaceDeep }, { it.keySide }, { it.muted }, neutralPressed, travel, keyRadius),
+        Row("s389 (0,3,0) ties g11389/g11941, later; ink from g11389", KeyClasses.Attach, S, R, { it.graphiteRaised }, clear, { it.muted }, none, radius = { 9.6.dp }),
+        Row("g11402 (0,4,0) beats s389", KeyClasses.Attach, S, P, { it.keyFaceDeep }, clear, { it.muted }, neutralPressed, travel, { 9.6.dp }),
 
         // ── {chat-jump} ──
         Row("g8734 + g4774 radius 50%", KeyClasses.ChatJump, I, R, { it.charcoal }, { it.charcoalSide }, { it.utilityInk }, jump, radius = { KeyRadiusCircle }),
@@ -205,6 +206,18 @@ class KeyStyleTest {
         assertTrue(brick in 0 until accent)
         val sorted = rules.sortedWith(compareBy({ it.specificity }, { it.file.ordinal }, { it.line }))
         assertEquals(sorted, rules)
+    }
+
+    @Test fun desktopPaperclipIsARoundKey() {
+        val t = tokensFor(TetherSkin.Machine)
+        assertEquals(KeyRadiusCircle, resolveKey(t, KeyClasses.Attach, KeyState.Rest, layout = TetherLayoutClass.Expanded).radius)
+        assertEquals(t.radiusKey, resolveKey(t, KeyClasses.Attach, KeyState.Rest, layout = TetherLayoutClass.Phone).radius)
+    }
+
+    @Test fun desktopSendWearsTheFullComposition() {
+        val t = tokensFor(TetherSkin.Tactile)
+        assertEquals(KeyWear.Send, resolveKey(t, KeyClasses.ChatSend, KeyState.Rest, layout = TetherLayoutClass.Expanded).wear)
+        assertEquals(KeyWear.SendCompact, resolveKey(t, KeyClasses.ChatInterrupt, KeyState.Rest).wear)
     }
 
     @Test fun latchedKeysCarryTheVioletSelectedTone() {

@@ -3,6 +3,11 @@
 //
 //   java tools/compare-screens/CompareScreens.java diff    <web.png[@crop]> <android.png[@crop]> [out-diff.png]
 //   java tools/compare-screens/CompareScreens.java montage <out.png> <title> <web.png[@crop]> <android.png[@crop]> [<web2@crop> <android2@crop> ...]
+//   java tools/compare-screens/CompareScreens.java align   <web.png@search-window> <android.png@crop>
+//
+// `align` finds where the android crop sits inside the web search window (least mean absolute
+// difference, coarse-to-fine) and prints the matching web crop `x,y,w,h`, so a montage pairs the
+// same part pixel for pixel without hand-measuring each skin.
 //
 // A crop is `@x,y,w,h` in the source image's pixels. Both captures are at 2.625 px/dp on a phone
 // (web: 412×915 CSS px at DPR 2.625; Android: 412dp at 420dpi), so crops compare 1:1 without
@@ -59,12 +64,67 @@ public class CompareScreens {
                 ImageIO.write(montage(args[2], rows, captions), "png", new File(args[1]));
                 System.out.println("wrote " + args[1]);
             }
+            case "align" -> {
+                if (args.length < 3) usage();
+                int[] win = cropOf(args[1]);
+                BufferedImage web = load(args[1]);
+                BufferedImage android = load(args[2]);
+                int[] best = align(web, android);
+                System.out.println((win[0] + best[0]) + "," + (win[1] + best[1]) + "," + android.getWidth() + "," + android.getHeight()
+                    + "  (mean|Δ| " + String.format("%.2f", best[2] / 100.0) + ")");
+            }
             default -> usage();
         }
     }
 
+    static int[] cropOf(String spec) {
+        int at = spec.lastIndexOf('@');
+        if (at < 0) return new int[] {0, 0};
+        String[] p = spec.substring(at + 1).split(",");
+        return new int[] {Integer.parseInt(p[0]), Integer.parseInt(p[1])};
+    }
+
+    /** Best offset of [needle] inside [hay]: {dx, dy, mean|Δ|×100}. Coarse step 4, then refine ±4. */
+    static int[] align(BufferedImage hay, BufferedImage needle) {
+        int[][] h = grey(hay), n = grey(needle);
+        int maxX = hay.getWidth() - needle.getWidth(), maxY = hay.getHeight() - needle.getHeight();
+        if (maxX < 0 || maxY < 0) throw new IllegalArgumentException("search window smaller than the crop");
+        long bestScore = Long.MAX_VALUE;
+        int bx = 0, by = 0;
+        for (int y = 0; y <= maxY; y += 4) for (int x = 0; x <= maxX; x += 4) {
+            long sc = sad(h, n, x, y, 3, bestScore);
+            if (sc < bestScore) { bestScore = sc; bx = x; by = y; }
+        }
+        bestScore = Long.MAX_VALUE;
+        int fx = bx, fy = by;
+        for (int y = Math.max(0, by - 4); y <= Math.min(maxY, by + 4); y++) for (int x = Math.max(0, bx - 4); x <= Math.min(maxX, bx + 4); x++) {
+            long sc = sad(h, n, x, y, 1, bestScore);
+            if (sc < bestScore) { bestScore = sc; fx = x; fy = y; }
+        }
+        long px = (long) needle.getWidth() * needle.getHeight();
+        return new int[] {fx, fy, (int) (bestScore * 100 / px)};
+    }
+
+    static long sad(int[][] h, int[][] n, int ox, int oy, int step, long cap) {
+        long sum = 0;
+        for (int y = 0; y < n.length; y += step) {
+            for (int x = 0; x < n[0].length; x += step) sum += Math.abs(h[oy + y][ox + x] - n[y][x]);
+            if (sum * step * step > cap) return Long.MAX_VALUE;
+        }
+        return sum * step * step;
+    }
+
+    static int[][] grey(BufferedImage img) {
+        int[][] g = new int[img.getHeight()][img.getWidth()];
+        for (int y = 0; y < img.getHeight(); y++) for (int x = 0; x < img.getWidth(); x++) {
+            int p = img.getRGB(x, y);
+            g[y][x] = (((p >> 16) & 255) * 299 + ((p >> 8) & 255) * 587 + (p & 255) * 114) / 1000;
+        }
+        return g;
+    }
+
     static void usage() {
-        System.err.println("usage: diff <a[@x,y,w,h]> <b[@x,y,w,h]> [out.png] | montage <out.png> <title> <web[@crop]> <android[@crop]> ...");
+        System.err.println("usage: diff <a[@x,y,w,h]> <b[@x,y,w,h]> [out.png] | montage <out.png> <title> <web[@crop]> <android[@crop]> ... | align <web@window> <android@crop>");
         System.exit(2);
     }
 
@@ -140,6 +200,7 @@ public class CompareScreens {
         Graphics2D probe = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
         int width = 0, height = head;
         for (String c : captions) width = Math.max(width, pad * 2 + probe.getFontMetrics(captionFont).stringWidth(c));
+        width = Math.max(width, pad * 2 + probe.getFontMetrics(new Font(Font.SANS_SERIF, Font.BOLD, 20)).stringWidth(title));
         for (BufferedImage[] r : rows) {
             width = Math.max(width, pad + (column(r[0]) + pad) * 3);
             height += colHead + r[0].getHeight() + cap + pad;

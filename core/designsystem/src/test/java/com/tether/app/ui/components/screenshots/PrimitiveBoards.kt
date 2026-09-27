@@ -63,6 +63,7 @@ val PrimitiveBoards: Map<String, @Composable () -> Unit> = linkedMapOf(
     "indicators" to { IndicatorsBoard() },
     "rocker" to { RockerBoard() },
     "keys-dialog-footer" to { DialogFooterKeysBoard() },
+    "keys-web" to { WebKeysBoard() },
 )
 
 /** The primitives whose layout changes at the web's 48rem breakpoint get a tablet golden too. */
@@ -103,7 +104,7 @@ fun KeysBoard(part: Int? = null) {
         TetherKey(onClick = {}, classes = KeyClasses.IconButton, icon = TetherIcons.Paperclip, selected = true, contentDescription = "Attach")
         TetherKey(onClick = {}, label = "Yes", size = KeySize.Small, minHeight = 32.dp)
         TetherKey(onClick = {}, classes = KeyClasses.ChatJump, icon = TetherIcons.ArrowDown, contentDescription = "Jump")
-        TetherKey(onClick = {}, classes = KeyClasses.ChatSend, icon = TetherIcons.Send, contentDescription = "Send", wearPattern = KeyWear.SendCompact)
+        TetherKey(onClick = {}, classes = KeyClasses.ChatSend, icon = TetherIcons.Send, contentDescription = "Send")
         TetherKey(onClick = {}, label = "use main.kt", fixedVerb = false)
     }
 }
@@ -297,5 +298,28 @@ fun DialogFooterKeysBoard() {
     StateRow("settings footer: secondary · primary with glyph") {
         TetherKey(onClick = {}, label = "Cancel")
         TetherKey(onClick = {}, classes = KeyClasses.ButtonPrimary, label = "Save settings", icon = TetherIcons.Check, iconSize = 17.dp)
+    }
+}
+
+/**
+ * The keys as the web reference scenarios show them, same class sets, glyphs and legends, so the
+ * montages compare like with like: approval-pending (Approve / Deny), the composer's icon-only
+ * Interrupt and paperclip (streaming), the session header's End session and the jump cap.
+ */
+@Composable
+fun WebKeysBoard() {
+    StateRow("approval: button-primary · button-secondary chat-approval-deny") {
+        TetherKey(onClick = {}, classes = KeyClasses.ButtonPrimary, label = "Approve", icon = TetherIcons.Check)
+        TetherKey(onClick = {}, classes = KeyClasses.ApprovalDeny, label = "Deny", icon = TetherIcons.Ban)
+    }
+    StateRow("composer interrupt · paperclip · header end-session · jump") {
+        TetherKey(onClick = {}, classes = KeyClasses.ChatInterrupt, icon = TetherIcons.CircleStop, iconSize = 18.dp, contentDescription = "Interrupt")
+        TetherKey(onClick = {}, classes = KeyClasses.Attach, icon = TetherIcons.Paperclip, iconSize = 18.dp, contentDescription = "Attach")
+        TetherKey(onClick = {}, classes = KeyClasses.EndSession, icon = TetherIcons.CircleStop, iconSize = 16.dp, contentDescription = "End session")
+        TetherKey(onClick = {}, classes = KeyClasses.ChatJump, icon = TetherIcons.ArrowDown, iconSize = 18.dp, contentDescription = "Jump")
+    }
+    StateRow("approval disabled (submitted)") {
+        TetherKey(onClick = {}, classes = KeyClasses.ButtonPrimary, label = "Approve", icon = TetherIcons.Check, enabled = false)
+        TetherKey(onClick = {}, classes = KeyClasses.ApprovalDeny, label = "Deny", icon = TetherIcons.Ban, enabled = false)
     }
 }
