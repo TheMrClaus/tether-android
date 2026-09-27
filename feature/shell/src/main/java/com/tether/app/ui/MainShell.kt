@@ -60,7 +60,8 @@ import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.shell.ExpandedShell
@@ -87,7 +88,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     val shell = rememberPhoneShellState()
-    val layout = shellLayoutFor(LocalConfiguration.current.screenWidthDp)
+    val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
+    val layout = shellLayoutFor(windowWidthDp)
     val scope = rememberCoroutineScope()
     val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = null)
     val panels = preferences?.let(PanelPrefs::from) ?: PanelPrefs()
