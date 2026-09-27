@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -282,7 +283,8 @@ private fun SidebarContent(
                     val live = entry.live
                     if (live != null) actions.onSelectSession(live.id) else entry.history?.let(actions.onReopenHistory)
                 },
-                modifier = Modifier.weight(1f, fill = false),
+                // The web's list shrinks for an open group; here the group is capped and scrolls.
+                modifier = Modifier.heightIn(max = 12f.rem),
             )
         }
         SidebarFooter(phone = phone, onOpenSettings = actions.onOpenSettings, onCollapse = actions.onCollapse)
@@ -421,7 +423,10 @@ private fun ListHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (studio && phone) 0.dp else t.css.spaceSm),
     ) {
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.45f.rem)) {
+        // The legend keeps its natural width (the web's flex row never shrinks it); on a rail too
+        // narrow for both, the bank runs past the edge as on the web (tablet shot) rather than
+        // squeezing the count away.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.45f.rem)) {
             Text(
                 if (studio) "Workspaces" else "WORKSPACES",
                 style = if (studio) css(type.ui, 0.75f, 700) else css(type.ui, 0.62f, 700, trackingEm = 0.13f),
@@ -430,7 +435,7 @@ private fun ListHeader(
                 modifier = Modifier.semantics { heading(); contentDescription = "Workspaces, $openCount open" },
             )
             if (studio) {
-                Text("$openCount", style = css(type.ui, 0.7f, 500), color = t.faint, modifier = Modifier.clearAndSetSemantics { })
+                Text("$openCount", style = css(type.ui, 0.7f, 500), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
             } else {
                 Box(
                     Modifier
@@ -442,7 +447,10 @@ private fun ListHeader(
                 ) { Text("$openCount", style = css(type.mono, 0.6f, 700), color = t.ink) }
             }
         }
-        FilterBank(state, actions, phone, harnessOpen, onHarnessOpen, sortOpen, onSortOpen)
+        Spacer(Modifier.weight(1f))
+        Box(Modifier.wrapContentWidth(Alignment.Start, unbounded = true)) {
+            FilterBank(state, actions, phone, harnessOpen, onHarnessOpen, sortOpen, onSortOpen)
+        }
     }
 }
 
@@ -546,7 +554,10 @@ private fun BankKey(
 ) {
     val t = LocalTetherTokens.current
     val studio = t.studio
-    val w = if (studio) (if (phone) 2.75f else 1.9f).rem else 1.7f.rem
+    // Studio phones draw 2.75rem keys (studio.css 445-447); 2.5rem here so the legend and its count
+    // fit the 21rem drawer on one line (the web's row lets the title shrink under the bank). The
+    // touch target stays ≥ 44dp (Compose's minimum touch size).
+    val w = if (studio) (if (phone) 2.5f else 1.9f).rem else 1.7f.rem
     val h = if (studio) (if (phone) 2.75f else 2f).rem else 1.7f.rem
     val shape = RoundedCornerShape(if (studio) 0.4f.rem else t.radiusKey - 4.dp)
     val shadows = if (on) listOf(
@@ -850,7 +861,17 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions) {
             }
             block.activity?.let { a ->
                 // .project-dot: waiting (violet, radar ping) or active (running); the count is in words above.
-                if (a.waiting > 0) WaitingPingDot(t.violet, dotSize = 0.5f.rem)
+                if (a.waiting > 0) {
+                    // `.project-dot-waiting { box-shadow: 0 0 0 3px var(--violet-wash) }` — the ring the
+                    // radar ping animates away from; it is what remains under reduced motion.
+                    val reduced = com.tether.app.ui.theme.LocalReducedMotion.current
+                    val wash = t.violetWash
+                    WaitingPingDot(
+                        t.violet,
+                        dotSize = 0.5f.rem,
+                        modifier = if (reduced) Modifier.drawBehind { drawCircle(wash, radius = size.minDimension / 2 + 3.dp.toPx()) } else Modifier,
+                    )
+                }
                 else if (a.active > 0) StatusDot(t.running, size = 0.5f.rem)
             }
             if (block.index < 9 && block.pinned) {
@@ -1054,7 +1075,7 @@ private fun ArchivedGroup(
         }
         if (open) {
             Column(
-                Modifier.verticalScroll(rememberScrollState()).padding(top = 0.15f.rem, bottom = t.css.spaceXs),
+                Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 0.15f.rem, bottom = t.css.spaceXs),
                 verticalArrangement = Arrangement.spacedBy(0.1f.rem),
             ) {
                 rows.forEach { entry ->
