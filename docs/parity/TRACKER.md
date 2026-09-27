@@ -24,14 +24,20 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** VERIFIED + merged: T1.1, T1.2, T1.4, T2.1, T2.1D, T2.2, T2.3 (`30340e2`), T3.1, T3.2. Owner action
-pending: merge + deploy **tether#197** (S1.1, v129) — `main` speaks 129, so **no release until it's
-deployed**; next release notes must mention pre-T1.4 backups may hold the old plaintext credential file.
-IN FLIGHT (≤4 agents): **T1.3** durable send (refuted on an atomicity test gap → fixing, plus the
-reconnect-handshake test flake in `reconnectAfterDrop`); **S0.4** sidebar-order determinism; **T3.3**
-primitives + Roborazzi; **T3.5** icons. Next: T1.5 (after T1.3), S0.6 PR, T3.4 gallery, Phase 4 shell.
+**Next action:** ⏸ **Paused for the owner-requested production deploy.** tether#197 (S1.1, protocol v129) is
+merged (`bde3cfa`); the restart is owned by the watcher unit `tether-deploy-20260927-091413.service`
+(waits for Tether idle → `safe-restart --abort-if-busy`; log `~/.local/state/tether-deploy/deploy-20260927-091413.log`).
+**First thing next session:** read that log — expect `safe-restart exit=0` and post-deploy healthz
+`protocolVersion 129, nativeProtocolFloor 129`; if not, diagnose from the log (never `--force`).
+Then resume, ≤4 agents: **S0.4** (run 3 + `--compare` runs 1–3 in /tmp/parity-s04-{1,2}; regenerate the
+reference) → verifier → **S0.6** PR; **T3.3** (WIP `12398d9`, bead has next step) → verifier → **T3.4**;
+**T3.5** (WIP `5231b82`; may add `api(libs.lucide.icons)` to core/designsystem); **T1.5** nodes.
+Then a new APK release is possible (main speaks 129 and the server will too): release notes must mention
+the Android 14 floor (already), Keystore-encrypted credentials, and that pre-T1.4 backups may hold the
+old plaintext credential file.
+VERIFIED + merged so far: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.3, S0.5, S1.1.
 
-**In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
+**In-flight state:** none uncommitted. Open branches: `parity/T3.3-primitives` (WIP `12398d9`), `parity/T3.5-icons` (WIP `5231b82`); tether `android-parity/S0.4` @ `3f69e4f` (+ S0.2/S0.3/S0.5 branches for S0.6). Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
 `~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
 with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
@@ -258,3 +264,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 21:40 | claude-main / Opus 5.5 (+ executor-S0.5, verifier) | T0.1, S0.1, T0.5, S0.5, S0.2, S0.3 | T0.1+S0.1 VERIFIED (verifier caught AIDASH_ env names → fixed `fed0ab1`); T0.5 DONE (291-row matrix, 6-skin correction); S0.5 DONE (`356b456`); S0.2/S0.3 running | T0.3; verify T0.5/S0.5 |
 | 2026-09-26 23:00 | claude-main / Opus 5.5 (+ executors S0.2, S0.3, T0.3; verifier) | S0.2, S0.3, T0.3, T0.4 | S0.2 VERIFIED (`157b87d`); S0.3 BLOCKED (cgroup guard; script `fdecbe9` untested live); T0.3 DONE (`cbd6042`) — verifier found a real duplicate-attach race, fixed `76b0431` + deterministic regression test; T0.4 DONE (CI green); T0.5 re-verified after a matrix regex fix | owner decisions: KVM, isolated-server scope |
 | 2026-09-27 08:55 | claude-main / Opus 5.5 (+ executors, verifiers, security reviewers) | T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1–T3.3, T3.5, S0.3, S0.4, S1.1 | v0.6.0 published; VERIFIED+merged T1.1, T1.2, T1.4 (security-blocked once, fixed), T2.1 (70/70), T2.1D, T2.2 (807/807), T3.1, T3.2; S1.1 PR tether#197 open; two outages (5 agents each) recovered by resuming agents in context | owner: merge/deploy tether#197; next: T1.3/T2.3 verify → merge, S0.4 → S0.6, T3.3 → T3.4 |
+| 2026-09-27 09:25 | claude-main / Opus 5.5 | S1.1 deploy, T1.3, T2.3, T3.2, S0.4, T3.3, T3.5 | Owner: merge + redeploy tether → tether#197 merged `bde3cfa` (8 port tests 44/44 first), idle-waiting safe-restart watcher launched; T1.3 (real OkHttp onOpen race fixed), T2.3, T3.2 VERIFIED+merged; S0.4/T3.3/T3.5 checkpointed + paused for the restart | read deploy log; resume S0.4, T3.3, T3.5, T1.5 |
