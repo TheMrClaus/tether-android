@@ -24,11 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** Owner is away until morning and asked for: finish → commit → push `main` → **publish a
-new APK release** (plan: 0.6.0 / code 16 via `android-release.yml` `publish`). IN FLIGHT: T0.6 second
-half (targetSdk 37 + local-network permission + minSdk 34; security-executor, worktree
-`~/git/tether-android-wt/T0.6b`); S0.3 DONE → verifier; S0.4 web screenshots (executor, scoped server).
-After the release: S0.6 (merge S0.x → `android-parity/S0`, PR) then close Phase 0 and start Phase 1.
+**Next action:** v0.6.0 is published. VERIFIED this session: T0.1, T0.3–T0.6, S0.1–S0.3, S0.5, S1.1.
+Owner action pending: merge + deploy PR **tether#197** (S1.1, protocol v129) — no Android release
+that speaks 129 may ship before it's deployed. IN FLIGHT: **S0.4** web screenshots (executor, scoped
+server); **T1.1** v129 protocol types + WireConformanceTest (executor, `~/git/tether-android-wt/T1.1`);
+**T2.1** design pass (Plan agent → plan-verifier → executors). Corpora vendored in `parity-corpus/`
+(`tools/parity/sync-corpus.sh`). Then: S0.6 (S0 PR), T1.2 connection manager, T2.2, T2.3.
 
 **In-flight state:** none uncommitted. Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -66,7 +67,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
-| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | TODO |  |  | From S1.1 (f5df6b0): speak PROTOCOL 129; hello sends client:'android'; decode ready.nativeProtocolFloor + /healthz nativeProtocolFloor; ver… |
+| T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | IN-PROGRESS | claude-main @ 2026-09-27 00:35 |  | GATE EXCEPTION extended (owner overnight delegation): T1.1 depends on S0.3 (VERIFIED) + S1.1 (VERIFIED, PR tether#197 pending merge); P0 re… |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | TODO |  |  | From S1.1: do NOT gate on ready.protocolVersion strict equality (today's permanentVersionStop) — decide on the hello reply; reason client_t… |
 | T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | TODO |  |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | TODO |  |  |  |
