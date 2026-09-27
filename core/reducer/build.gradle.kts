@@ -1,4 +1,4 @@
-// Pure Kotlin/JVM: the session reducer and the derived models built on it.
+// Pure Kotlin/JVM: the v128 session reducer (fold/) and the derived models built on it.
 // Test fixtures (ReducerTestSupport: ev/fold/freshState) are shared with
 // other modules' tests via testFixtures(project(":core:reducer")).
 plugins {
@@ -25,7 +25,7 @@ tasks.withType<Test>().configureEach {
     inputs.dir(corpusDir).withPropertyName("parityCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
     providers.gradleProperty("parity.only").orNull?.let { systemProperty("parity.only", it) }
     providers.gradleProperty("parity.strict").orNull?.let { systemProperty("parity.strict", it) }
-    // T2.1D Revision 9: `-Pparity.recordV40=<dir>` writes the v40 reducer's step outputs there.
-    providers.gradleProperty("parity.recordV40").orNull?.let { systemProperty("parity.recordV40", it) }
+    // T2.1D: `-Pparity.perfAssert=false` reports FoldAdapterStressTest's numbers without enforcing the 2 ms p99 bar.
+    providers.gradleProperty("parity.perfAssert").orNull?.let { systemProperty("parity.perfAssert", it) }
     maxHeapSize = "2g"
 }

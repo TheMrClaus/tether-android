@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import org.jetbrains.kotlin.compose.compiler.gradle.ComposeCompilerGradlePluginExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -25,6 +26,14 @@ subprojects {
         extensions.configure<JavaPluginExtension> {
             sourceCompatibility = JavaVersion.VERSION_17
             targetCompatibility = JavaVersion.VERSION_17
+        }
+    }
+    // T2.1 Revision 7: every Compose (UI) module treats the v128 projection tree
+    // (com.tether.app.protocol.tree.*, immutable persistent JsValues) as stable, so an
+    // untouched subtree lets Compose skip. Core stays free of any Compose dependency.
+    pluginManager.withPlugin("org.jetbrains.kotlin.plugin.compose") {
+        extensions.configure<ComposeCompilerGradlePluginExtension> {
+            stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose-stability.conf"))
         }
     }
     pluginManager.withPlugin("com.android.library") {
