@@ -33,9 +33,10 @@ beads Dolt history flattened and re-pushed. Branches cut before the scrub are **
 **Unfinished lanes (worktrees under `tether-android-wt/`):**
 - **T5.1** sidebar: `parity/T5.1-sidebar` @ `c86219d` (base `9b6a8d7`), DONE on the bead (gate 1885/0 failed/4 skipped),
   **awaiting its verifier**, then rebase onto `main` + merge.
-- **T6.1** chat turns: `parity/T6.1-chat-turns` @ `02b2d1b` (base `ec592d7`), **BLOCKED on a P1 VERIFY-FAIL**: the
-  markdown link allowlist uses `Regex(..., IGNORE_CASE)`, which on the JVM folds Unicode case (`U+017F` long s → `s`), so
-  `httpſ://` becomes a link where the web's `/i` would not. Fix per the bead note, then the same verifier re-checks, then merge.
+- **T6.1** chat turns: **VERIFIED + MERGED** (`19abfbc`). The P1 link-allowlist bypass (JVM `IGNORE_CASE` folds
+  Unicode, so `httpſ://` / `maılto:` linked) was fixed with ASCII-only folding; exhaustive U+0000-U+FFFF comparison against the
+  web's JS regex is identical; transplanted onto `main`, gate 2101/0 failed/4 skipped.
+- **T4.5** log dialog: executor running in `tether-android-wt/T4.5` (branch `parity/T4.5-log-dialog`, cut from `f96c6ee`).
 
 **Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2, verified) awaits
 merge; then the owner sets `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` in production,
@@ -107,7 +108,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.4 | Navigation + deep links | TODO |  |  |  |
-| T4.5 | Log dialog | TODO |  |  | From the T4.1 verifier: the topbar Health badge currently counts every vm.errorLog entry and never clears when opened; the web counts only … |
+| T4.5 | Log dialog | IN-PROGRESS | TheMrClaus @ 2026-09-27 21:58 |  | checkpoint 3: LogDialog + LogReadings in feature/shell/ui/log, MainShell wired (openLog acks badge + fetches stats). next: LogReadingsTest,… |
 
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -120,7 +121,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 6 — Chat view
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | BLOCKED | claude-main @ 2026-09-27 16:58 |  | PARKED at the handover point (claude-main). VERIFY-FAIL (verifier): P1 link-allowlist bypass: MarkdownParser.kt:91 Regex("^(https?:///mailt… |
+| T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | TODO |  |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
