@@ -21,13 +21,20 @@ import org.robolectric.annotation.Config
  * The log dialog's seeded states at the web's device classes (phone 412×915 @2.625, tablet
  * 1280×800 @1), all 6 skins, plus 1.3× font. `full` = a mixed log with stats loaded; `empty` =
  * stats loaded, no entries; `warnings` = the Warnings filter on; `corpus` = the fake-engine
- * capture's own records (parity-corpus/wire/ambient.jsonl), stats loaded.
+ * capture's own records (parity-corpus/wire/ambient.jsonl), stats loaded; `web` = the web
+ * reference's own state (phone and tablet), for the montages.
  */
-enum class LogShot(val id: String) { Full("log-dialog"), Empty("log-dialog-empty"), Warnings("log-dialog-warnings"), Corpus("log-dialog-corpus") }
+enum class LogShot(val id: String) {
+    Full("log-dialog"), Empty("log-dialog-empty"), Warnings("log-dialog-warnings"), Corpus("log-dialog-corpus"),
 
-private fun entriesFor(shot: LogShot): List<LogEntry> = when (shot) {
+    /** The web reference's seeded state, for the montages (docs/parity/screens/log-dialog). */
+    Web("log-dialog-web"),
+}
+
+private fun entriesFor(shot: LogShot, size: String): List<LogEntry> = when (shot) {
     LogShot.Empty -> emptyList()
     LogShot.Corpus -> LogFixtures.corpusLog("ambient.jsonl")
+    LogShot.Web -> if (size == "tablet") LogFixtures.webTablet else LogFixtures.webPhone
     else -> LogFixtures.mixed
 }
 
@@ -35,13 +42,13 @@ fun ComposeContentTestRule.snapLog(shot: LogShot, skin: TetherSkin, size: String
     mainClock.autoAdvance = false
     val state = LogDialogState(
         level = if (shot == LogShot.Warnings) LogLevelFilter.Warnings else LogLevelFilter.All,
-        stats = LogFixtures.stats,
+        stats = if (shot == LogShot.Web) LogFixtures.webStats else LogFixtures.stats,
     )
     setContent {
         TetherTheme(choiceFor(skin)) {
             CompositionLocalProvider(LocalReducedMotion provides true) {
                 LogDialogFrame(
-                    entries = entriesFor(shot),
+                    entries = entriesFor(shot, size),
                     sessions = LogFixtures.sessions,
                     state = state,
                     onRefresh = {},
@@ -76,15 +83,15 @@ class LogDialogPhoneScreenshotTest(private val shot: LogShot, private val skin: 
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
-class LogDialogTabletScreenshotTest(private val skin: TetherSkin) {
+class LogDialogTabletScreenshotTest(private val shot: LogShot, private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun log() = rule.snapLog(LogShot.Full, skin, "tablet")
+    @Test fun log() = rule.snapLog(shot, skin, "tablet")
 
     companion object {
         @JvmStatic
-        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = listOf(LogShot.Full, LogShot.Web).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 

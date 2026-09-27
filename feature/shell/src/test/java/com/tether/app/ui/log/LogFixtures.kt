@@ -60,6 +60,30 @@ object LogFixtures {
         memoryRss = 162_529_280, memoryHeapUsed = 49_283_072, clients = 2,
     )
 
+    /**
+     * The web reference's own state (docs/parity/screens/log-dialog/capture-web.mjs: the S0.4 fake
+     * server, the idle-session page): its stats, and the connection records each viewport's log
+     * held, oldest first, all at the frozen browser clock 07:02:00 UTC.
+     */
+    val webStats = ServerStats(
+        uptimeMs = 120_000, pid = 2_888_656, protocolVersion = 128, headlessMode = "fake",
+        headlessPersistent = false, sessionsTotal = 11, sessionsHeadless = 11,
+        runtime = ServerStats.Runtime(warm = 0, activeTurns = 1, maxConcurrentTurns = 0),
+        memoryRss = 1_167L * 1024 * 1024, memoryHeapUsed = 571L * 1024 * 1024, clients = 5,
+    )
+
+    private const val WEB_TS = T0 + 7 * 3_600_000L + 2 * 60_000L
+
+    private fun webLog(vararg events: String): List<LogEntry> = events.mapIndexed { i, event ->
+        entry("""{"seq":${i + 1},"ts":$WEB_TS,"level":"info","event":"$event","connId":${i + 1}}""")
+    }
+
+    /** Newest first on screen: attach, connect, attach, attach, connect, connect. */
+    val webPhone: List<LogEntry> = webLog("ws.connect", "ws.connect", "ws.attach", "ws.attach", "ws.connect", "ws.attach")
+
+    /** Newest first on screen: attach, connect, attach. */
+    val webTablet: List<LogEntry> = webLog("ws.attach", "ws.connect", "ws.attach")
+
     private fun session(id: String, name: String) =
         AgentSession(id = id, provider = "claude", name = name, cwd = "/work/app", status = "ready", startedAt = 1, updatedAt = 1)
 }

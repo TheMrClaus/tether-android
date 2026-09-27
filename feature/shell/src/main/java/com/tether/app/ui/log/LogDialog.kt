@@ -45,6 +45,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -168,7 +171,8 @@ fun LogDialogFrame(
         val width = when {
             studio && narrow -> maxWidth - 24.dp
             studio -> minOf(980.dp, maxWidth - 48.dp)
-            else -> minOf(928.dp, maxWidth - 24.dp)
+            // The UA sheet's `dialog { max-width: calc(100% - 6px - 2em) }` still caps the instrument case.
+            else -> minOf(928.dp, maxWidth - 24.dp, maxWidth - 38.dp)
         }
         val maxHeight = maxHeight - when {
             studio && narrow -> 32.dp
@@ -435,7 +439,9 @@ private fun StatTile(tile: Tile, firstInRow: Boolean, lastInRow: Boolean, modifi
         Text(
             tile.value,
             color = if (tile.alarm) t.danger else t.white,
-            style = if (studio) cssText(type.ui, 1.75f, 680, trackingEm = -0.02f, lineHeight = 1.25f) else cssText(type.ui, 1.6f, 680, trackingEm = -0.02f, lineHeight = 1f),
+            style = if (studio) cssText(type.ui, 1.75f, 680, trackingEm = -0.02f) else cssText(type.ui, 1.6f, 680, trackingEm = -0.02f),
+            // `line-height: 1` (Studio 1.25) is tighter than the face's natural line, which Compose never shrinks to.
+            modifier = Modifier.cssLineBox(if (studio) (28 * 1.25).sp else 25.6.sp),
         )
         Text(
             if (studio) tile.caption else tile.caption.uppercase(Locale.ROOT),
@@ -705,6 +711,17 @@ private fun Modifier.logRowEdges(t: TetherTokens, first: Boolean, last: Boolean,
             if (!last) drawRect(t.line, Offset(0f, size.height - px), Size(size.width, px))
         }
     }
+
+/**
+ * A CSS line box of [height] around one line of text: the line is centred in it (half-leading,
+ * negative when [height] is below the face's natural line) and the box takes exactly [height].
+ * Compose's own `lineHeight` never goes below the natural line, so a `line-height: 1` needs this.
+ */
+private fun Modifier.cssLineBox(height: TextUnit): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+    val box = height.roundToPx()
+    layout(placeable.width, box) { placeable.place(0, (box - placeable.height) / 2) }
+}
 
 /** A 1px `--line` rule along the bottom edge (a `border-bottom`). */
 private fun Modifier.drawBottomRule(color: Color): Modifier = drawBehind {
