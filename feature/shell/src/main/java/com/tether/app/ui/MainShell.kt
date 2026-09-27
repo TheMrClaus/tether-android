@@ -59,19 +59,17 @@ import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.shell.ExpandedShell
 import com.tether.app.ui.shell.LinkReadout
-import com.tether.app.ui.shell.PanelPrefs
+import com.tether.app.ui.shell.rememberPersistedPanels
 import com.tether.app.ui.shell.shellLayoutFor
 import com.tether.app.ui.statusline.ContextGauge
 import com.tether.app.ui.statusline.SessionStatusline
 import com.tether.app.ui.statusline.TelemetryMetrics
-import kotlinx.coroutines.launch
 
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
@@ -90,9 +88,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val shell = rememberPhoneShellState()
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
-    val scope = rememberCoroutineScope()
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = null)
-    val panels = preferences?.let(PanelPrefs::from) ?: PanelPrefs()
+    val persisted = rememberPersistedPanels(prefs)
     val projectionTrees by vm.client.projectionTrees.collectAsStateWithLifecycle()
 
     val sessions by vm.client.sessions.collectAsStateWithLifecycle()
@@ -193,8 +189,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
                 state = shell,
-                panels = panels,
-                onPanelsChange = { next -> scope.launch { prefs.updatePreferences { next.applyTo(it) } } },
+                panels = persisted.panels,
+                onPanelsChange = persisted.onChange,
                 session = session,
                 workspaceRoot = workspaceRoot,
                 emptyStage = emptyStage,

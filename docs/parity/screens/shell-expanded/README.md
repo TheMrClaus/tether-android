@@ -59,7 +59,7 @@ inspector column at its defaults, 320 / 272; `column-resized`: 300 / 360), and 1
 - **Handle touch area.** The web's handle is 1rem wide so it does not swallow the rail's and the
   transcript's own edge controls. The app draws the same 16dp strip. Compose's pointer
   hit-expansion gives it a 48dp touch area where no other control is hit.
-  `theHandleTakesATouchBesideItsDrawnStripOn{Stage,Rail}Side` prove that a touch 21.5dp either
+  `theHandleTakesATouchBesideItsDrawnStripOn{Stage,Rail}Side` prove that a touch 23.5dp either
   side of the strip's centre drags it.
 - **TalkBack instead of `role="separator"`.** Compose has no separator role. The handle is an
   adjustable range (the width in px between the bounds, named "Resize session sidebar" /

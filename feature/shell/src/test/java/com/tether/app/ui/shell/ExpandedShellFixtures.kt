@@ -91,13 +91,15 @@ fun ExpandedShellUnderTest(
     reducedMotion: Boolean = true,
     unseenWarnings: Int = 0,
     onEvent: (String) -> Unit = {},
+    /** Non-null: the real preference-store binding instead of [store]. */
+    persisted: PersistedPanels? = null,
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
             ExpandedShell(
                 state = state,
-                panels = store.panels,
-                onPanelsChange = store::commit,
+                panels = persisted?.panels ?: store.panels,
+                onPanelsChange = persisted?.onChange ?: store::commit,
                 session = session,
                 workspaceRoot = ShellFixtures.workspaceRoot,
                 emptyStage = emptyStage,

@@ -70,7 +70,7 @@ abstract class ExpandedBehaviourBase {
         val root = rule.onNodeWithTag(ShellTags.Shell).fetchSemanticsNode()
         val nodes = mutableListOf<SemanticsNode>()
         fun walk(n: SemanticsNode) {
-            // The resize handles take their 48dp through pointer hit-expansion, which the semantics
+            // The resize handles take a 48dp touch through pointer hit-expansion, which the semantics
             // touch bounds do not report; theHandleTakesATouchBesideItsDrawnStrip* prove it by touch.
             val actionable = n.config.getOrNull(SemanticsActions.OnClick) != null
             if (actionable && n.boundsInRoot.width > 0f) nodes += n
@@ -176,9 +176,9 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
     @Test fun theHandleTakesATouchBesideItsDrawnStripOnTheStageSide() {
         val store = PanelStore()
         show(store = store)
-        // 22dp right of the 16dp strip's centre (a 44dp target): over the stage's gutter.
+        // 23.5dp right of the 16dp strip's centre (inside the 48dp minimum touch target): over the stage's gutter.
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
-            down(Offset(centerX + dpPx(21.5f), centerY))
+            down(Offset(centerX + dpPx(23.5f), centerY))
             moveBy(Offset(dpPx(40f), 0f))
             up()
         }
@@ -190,7 +190,7 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
         val store = PanelStore()
         show(store = store)
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
-            down(Offset(centerX - dpPx(21.5f), centerY))
+            down(Offset(centerX - dpPx(23.5f), centerY))
             moveBy(Offset(-dpPx(24f), 0f))
             up()
         }
@@ -431,5 +431,46 @@ class ExpandedShellFoldableBehaviourTest : ExpandedBehaviourBase() {
     @Test fun everyControlHasA44dpTouchTarget() {
         show()
         assertTouchTargets()
+    }
+}
+
+/**
+ * Just below the 100rem switch (1560dp): still two columns, the telemetry sheet floats and the
+ * gauge is its handle (globals.css 11896: `max-width: 99.999rem`).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1560dp-h1000dp-mdpi")
+class ExpandedShellBelowColumnBehaviourTest : ExpandedBehaviourBase() {
+
+    @Test fun belowOneHundredRemTheSheetFloatsAndThereIsNoColumn() {
+        val state = PhoneShellState()
+        show(state)
+        rule.onNodeWithTag(ShellTags.InspectorColumn).assertDoesNotExist()
+        rule.onNodeWithTag(ShellTags.InspectorHandle).assertDoesNotExist()
+        assertEquals(264f, widthDp(ShellTags.Sidebar), 0.5f) // 16.5rem at 48-100rem (11856)
+        val gauge = rule.onNodeWithContentDescription("Session telemetry").fetchSemanticsNode()
+        assertEquals(androidx.compose.ui.state.ToggleableState.Off, gauge.config[SemanticsProperties.ToggleableState])
+        rule.onNodeWithContentDescription("Session telemetry").performClick()
+        assertTrue(state.telemetryOpen)
+        rule.onNodeWithTag(ShellTags.TelemetrySheet).assertIsDisplayed()
+        rule.onNodeWithTag(ChatSlotTag).assertIsDisplayed()
+    }
+}
+
+/** Exactly 100rem (1600dp): the inspector becomes the third column (globals.css 4139). */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1600dp-h1000dp-mdpi")
+class ExpandedShellAtColumnBehaviourTest : ExpandedBehaviourBase() {
+
+    @Test fun atOneHundredRemTheInspectorIsAColumn() {
+        val state = PhoneShellState()
+        show(state)
+        rule.onNodeWithTag(ShellTags.InspectorColumn).assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.InspectorHandle).assertExists()
+        assertEquals(320f, widthDp(ShellTags.Sidebar), 0.5f) // 20rem from 100rem (11727)
+        assertEquals(272f, widthDp(ShellTags.InspectorColumn), 0.5f)
+        val gauge = rule.onNodeWithContentDescription("Session telemetry").fetchSemanticsNode()
+        assertEquals(null, gauge.config.getOrNull(SemanticsActions.OnClick))
+        rule.onNodeWithTag(ShellTags.TelemetrySheet).assertDoesNotExist()
     }
 }
