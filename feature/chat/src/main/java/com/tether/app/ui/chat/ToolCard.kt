@@ -35,15 +35,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Bot
-import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.Loader
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.TriangleAlert
-import com.composables.icons.lucide.Wrench
 import com.tether.app.protocol.model.SubagentEntry
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.ui.components.SpinningIcon
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -157,9 +152,9 @@ fun ToolCard(block: TurnBlock, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             when {
-                running -> SpinningIcon(Lucide.Loader, tint = t.muted, size = 14.dp)
-                isError -> Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
-                else -> Icon(Lucide.Wrench, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+                running -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 14.dp)
+                isError -> Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
+                else -> Icon(TetherIcons.Wrench, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
             }
             Text(
                 block.name ?: "tool",
@@ -320,7 +315,7 @@ private fun SubagentThreadView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Lucide.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+            Icon(TetherIcons.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
             Text(
                 "Subagent · ${order.size} step${if (order.size == 1) "" else "s"}",
                 color = t.muted,
@@ -330,7 +325,7 @@ private fun SubagentThreadView(
             )
             Spacer(Modifier.weight(1f))
             Icon(
-                Lucide.ChevronRight,
+                TetherIcons.ChevronRight,
                 contentDescription = if (expanded) "Collapse" else "Expand",
                 tint = t.faint,
                 modifier = Modifier.size(14.dp).rotate(if (expanded) 90f else 0f),
@@ -360,9 +355,9 @@ private fun SubagentThreadView(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 if (entry.done != true) {
-                                    SpinningIcon(Lucide.Loader, tint = t.muted, size = 12.dp)
+                                    SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 12.dp)
                                 } else {
-                                    Icon(Lucide.Wrench, contentDescription = null, tint = t.faint, modifier = Modifier.size(12.dp))
+                                    Icon(TetherIcons.Wrench, contentDescription = null, tint = t.faint, modifier = Modifier.size(12.dp))
                                 }
                                 Text(
                                     entry.name ?: "tool",

@@ -14,12 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.RotateCw
-import com.composables.icons.lucide.TriangleAlert
 import com.tether.app.protocol.model.ApiRetryState
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
@@ -43,7 +41,7 @@ fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Lucide.TriangleAlert, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
         Text(
             text,
             color = color,
@@ -75,7 +73,7 @@ private fun MarkerRow(text: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Lucide.RotateCw, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
+        Icon(TetherIcons.RotateCw, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
         Text(
             text,
             color = t.muted,

@@ -37,13 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.ArrowDown
-import com.composables.icons.lucide.CircleStop
 import com.composables.icons.lucide.Cpu
-import com.composables.icons.lucide.Gauge
-import com.composables.icons.lucide.Loader
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Pin
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.PendingApproval
 import com.tether.app.protocol.model.PendingQuestion
@@ -64,6 +58,7 @@ import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.WaitingPingDot
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.JetBrainsMono
@@ -196,7 +191,7 @@ fun ChatScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    SpinningIcon(Lucide.Loader, tint = t.muted, size = 18.dp)
+                    SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp)
                     Spacer(Modifier.height(10.dp))
                     Text(
                         "Connecting to the session…",
@@ -402,7 +397,7 @@ private fun Transcript(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(Lucide.ArrowDown, contentDescription = null, tint = t.ink, modifier = Modifier.size(15.dp))
+                Icon(TetherIcons.ArrowDown, contentDescription = null, tint = t.ink, modifier = Modifier.size(15.dp))
                 Text(
                     "Latest",
                     color = t.ink,
@@ -572,11 +567,11 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 )
             }
             IconButton(onClick = { showTelemetry = true }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(Lucide.Gauge, contentDescription = "Telemetry", tint = t.muted, modifier = Modifier.size(16.dp))
+                Icon(TetherIcons.Gauge, contentDescription = "Telemetry", tint = t.muted, modifier = Modifier.size(16.dp))
             }
             IconButton(onClick = { vm.client.pin(session.id, !session.pinned) }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
                 Icon(
-                    Lucide.Pin,
+                    TetherIcons.Pin,
                     contentDescription = if (session.pinned) "Unpin" else "Pin",
                     tint = if (session.pinned) t.violet else t.muted,
                     modifier = Modifier.size(16.dp),
@@ -586,7 +581,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 TetherKey(
                     onClick = { confirmEnd = true },
                     variant = KeyVariant.Brick,
-                    icon = Lucide.CircleStop,
+                    icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
                     contentDescription = "End session",
                     wear = false,
@@ -685,7 +680,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                     },
                     variant = KeyVariant.Brick,
                     label = "End session",
-                    icon = Lucide.CircleStop,
+                    icon = TetherIcons.CircleStop,
                 )
             }
         }

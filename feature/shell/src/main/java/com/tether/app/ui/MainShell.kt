@@ -42,18 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.Activity
-import com.composables.icons.lucide.CircleAlert
-import com.composables.icons.lucide.LogOut
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Menu
-import com.composables.icons.lucide.X
 import com.tether.app.ui.chat.ChatScreen
 import com.tether.app.ui.components.BrandMark
 import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.Wordmark
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -190,7 +185,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     },
                     variant = KeyVariant.Brick,
                     label = "Sign out",
-                    icon = Lucide.LogOut,
+                    icon = TetherIcons.LogOut,
                 )
             }
         }
@@ -212,7 +207,7 @@ private fun TopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onMenu, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(Lucide.Menu, contentDescription = "Sessions", tint = t.ink, modifier = Modifier.size(20.dp))
+                Icon(TetherIcons.Menu, contentDescription = "Sessions", tint = t.ink, modifier = Modifier.size(20.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 BrandMark()
@@ -221,7 +216,7 @@ private fun TopBar(
             Spacer(Modifier.weight(1f))
             Box {
                 IconButton(onClick = onErrorLog, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                    Icon(Lucide.Activity, contentDescription = "Activity log", tint = t.muted, modifier = Modifier.size(18.dp))
+                    Icon(TetherIcons.Activity, contentDescription = "Activity log", tint = t.muted, modifier = Modifier.size(18.dp))
                 }
                 if (errorCount > 0) {
                     Box(
@@ -243,7 +238,7 @@ private fun TopBar(
                 }
             }
             IconButton(onClick = onLock, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(Lucide.LogOut, contentDescription = "Disconnect", tint = t.muted, modifier = Modifier.size(18.dp))
+                Icon(TetherIcons.LogOut, contentDescription = "Disconnect", tint = t.muted, modifier = Modifier.size(18.dp))
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
@@ -265,7 +260,7 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(Lucide.CircleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(18.dp))
+        Icon(TetherIcons.CircleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(18.dp))
         Text(
             text = message,
             color = t.white,
@@ -275,7 +270,7 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = onClose, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-            Icon(Lucide.X, contentDescription = "Dismiss", tint = t.muted, modifier = Modifier.size(16.dp))
+            Icon(TetherIcons.X, contentDescription = "Dismiss", tint = t.muted, modifier = Modifier.size(16.dp))
         }
     }
 }

@@ -55,16 +55,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.ArrowLeft
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.Folder
-import com.composables.icons.lucide.FolderOpen
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Plus
-import com.composables.icons.lucide.Settings
-import com.composables.icons.lucide.Star
-import com.composables.icons.lucide.X
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.push.PushScope
 import com.tether.app.ui.components.KeyVariant
@@ -74,6 +64,7 @@ import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.WaitingPingDot
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.JetBrainsMono
@@ -176,7 +167,7 @@ fun SessionDrawer(
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onClose, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(Lucide.X, contentDescription = "Close", tint = t.muted, modifier = Modifier.size(20.dp))
+                Icon(TetherIcons.X, contentDescription = "Close", tint = t.muted, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -189,7 +180,7 @@ fun SessionDrawer(
                 modifier = Modifier.fillMaxWidth(),
                 variant = KeyVariant.Secondary,
                 label = "New session",
-                icon = Lucide.Plus,
+                icon = TetherIcons.Plus,
                 iconSize = 17.dp,
                 fontSize = 13.1.sp,
                 wear = true,
@@ -330,7 +321,7 @@ fun SessionDrawer(
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { settingsOpen = true }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-                Icon(Lucide.Settings, contentDescription = "Settings", tint = t.muted, modifier = Modifier.size(17.dp))
+                Icon(TetherIcons.Settings, contentDescription = "Settings", tint = t.muted, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -368,7 +359,7 @@ fun SessionDrawer(
                             )
                         }
                     }
-                    Icon(Lucide.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
+                    Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
                 }
             }
         }
@@ -383,7 +374,7 @@ fun SessionDrawer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Lucide.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+                Icon(TetherIcons.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
                 Text(
                     pickerCurrent ?: "—",
                     color = t.muted,
@@ -395,7 +386,7 @@ fun SessionDrawer(
             }
             listing?.parent?.let { parent ->
                 FolderRow(
-                    icon = { Icon(Lucide.ArrowLeft, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
+                    icon = { Icon(TetherIcons.ArrowLeft, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
                     name = "Parent folder",
                     detail = "Go up one level",
                     onClick = { vm.client.browse(parent) },
@@ -403,7 +394,7 @@ fun SessionDrawer(
             }
             listing?.entries?.forEach { entry ->
                 FolderRow(
-                    icon = { Icon(Lucide.Folder, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
+                    icon = { Icon(TetherIcons.Folder, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp)) },
                     name = entry.name,
                     detail = entry.path,
                     onClick = { vm.client.browse(entry.path) },
@@ -436,7 +427,7 @@ fun SessionDrawer(
                     },
                     variant = KeyVariant.Primary,
                     label = "Use this folder",
-                    icon = Lucide.Check,
+                    icon = TetherIcons.Check,
                     iconSize = 15.dp,
                 )
             }
@@ -670,7 +661,7 @@ private fun WorkspaceSwitcher(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Lucide.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
+        Icon(TetherIcons.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 "WORKSPACE",
@@ -690,7 +681,7 @@ private fun WorkspaceSwitcher(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Icon(Lucide.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
+        Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
     }
 }
 
@@ -780,7 +771,7 @@ private fun PinProjectKey(
             verticalArrangement = Arrangement.Center,
         ) {
             Icon(
-                Lucide.Star,
+                TetherIcons.Star,
                 contentDescription = if (pinned) "Unpin this project" else "Pin this project to the drawer",
                 tint = t.faint,
                 modifier = Modifier.size(16.dp),
@@ -856,7 +847,7 @@ private fun ProjectRow(
         }
         IconButton(onClick = onUnpin, modifier = Modifier.size(36.dp)) {
             Icon(
-                Lucide.X,
+                TetherIcons.X,
                 contentDescription = "Unpin ${projectName(project)}",
                 tint = t.faint,
                 modifier = Modifier.size(15.dp),
@@ -1031,7 +1022,7 @@ fun SessionRow(
                 )
             }
         }
-        Icon(Lucide.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(16.dp))
+        Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(16.dp))
     }
 }
 

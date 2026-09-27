@@ -35,13 +35,9 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Brain
-import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.CircleStop
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Paperclip
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.ui.components.maxWidthFraction
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -84,7 +80,7 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier) {
                         .background(t.tintMd, RoundedCornerShape(TetherDimens.radiusSm))
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
-                    Icon(Lucide.Paperclip, contentDescription = null, tint = t.userBubbleInk, modifier = Modifier.size(12.dp))
+                    Icon(TetherIcons.Paperclip, contentDescription = null, tint = t.userBubbleInk, modifier = Modifier.size(12.dp))
                     Text(
                         attachment.name,
                         color = t.userBubbleInk,
@@ -128,7 +124,7 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier) {
             }
             if (block.aborted == true) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Lucide.CircleStop, contentDescription = null, tint = t.faint, modifier = Modifier.size(12.dp))
+                    Icon(TetherIcons.CircleStop, contentDescription = null, tint = t.faint, modifier = Modifier.size(12.dp))
                     Text(
                         "interrupted",
                         color = t.faint,
@@ -214,7 +210,7 @@ fun ThinkingCard(block: TurnBlock, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Lucide.Brain, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+            Icon(TetherIcons.Brain, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
             Text(
                 "Thinking",
                 color = t.muted,
@@ -224,7 +220,7 @@ fun ThinkingCard(block: TurnBlock, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
             )
             Icon(
-                Lucide.ChevronRight,
+                TetherIcons.ChevronRight,
                 contentDescription = if (expanded) "Collapse" else "Expand",
                 tint = t.faint,
                 modifier = Modifier.size(14.dp).rotate(if (expanded) 90f else 0f),

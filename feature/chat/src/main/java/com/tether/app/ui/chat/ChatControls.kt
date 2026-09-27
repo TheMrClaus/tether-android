@@ -43,14 +43,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.Cpu
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.ShieldCheck
-import com.composables.icons.lucide.Terminal
-import com.composables.icons.lucide.X
 import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.protocol.SessionModelOption
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -85,7 +80,7 @@ fun ChatModeRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Lucide.ShieldCheck, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+        Icon(TetherIcons.ShieldCheck, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
         Text("Mode", color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 12.5.sp)
         Box {
             RaisedPill(
@@ -129,7 +124,7 @@ fun ChatModeRow(
                                 fontSize = 13.6.sp,
                             )
                             if (option.value == current.value) {
-                                Icon(Lucide.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
+                                Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
                             }
                         }
                         Text(
@@ -151,7 +146,7 @@ fun ChatModeRow(
                 interactionSource = modelHover,
                 modifier = Modifier.height(29.dp),
             ) {
-                Icon(Lucide.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+                Icon(TetherIcons.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
                 Text(
                     modelLabel,
                     color = t.ink,
@@ -250,12 +245,12 @@ fun ModelPickerPanel(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Lucide.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+            Icon(TetherIcons.Cpu, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
             Spacer(Modifier.size(6.dp))
             Text("Model", color = t.white, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 13.1.sp)
             Spacer(Modifier.weight(1f))
             Icon(
-                Lucide.X,
+                TetherIcons.X,
                 contentDescription = "Close",
                 tint = t.muted,
                 modifier = Modifier
@@ -293,7 +288,7 @@ fun ModelPickerPanel(
                             fontWeight = if (isActive) TetherWeights.label else TetherWeights.body,
                             fontSize = 13.6.sp,
                         )
-                        if (isActive) Icon(Lucide.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
+                        if (isActive) Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
                     }
                     model.description?.let {
                         Text(it, color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.2.sp)
@@ -359,7 +354,7 @@ fun SlashCommandMenu(
                     Text("Tether", color = t.violet, fontFamily = Manrope, fontWeight = TetherWeights.strong, fontSize = 10.6.sp)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Icon(Lucide.Terminal, contentDescription = null, tint = t.faint, modifier = Modifier.size(11.dp))
+                        Icon(TetherIcons.Terminal, contentDescription = null, tint = t.faint, modifier = Modifier.size(11.dp))
                         Text("terminal only", color = t.faint, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 10.6.sp)
                     }
                 }
@@ -377,7 +372,7 @@ fun ComposerNotice(message: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Lucide.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+        Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
         Text(message, color = t.ink, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.8.sp)
     }
 }

@@ -36,14 +36,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Bot
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.CircleStop
-import com.composables.icons.lucide.Loader
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.TriangleAlert
-import com.composables.icons.lucide.Wrench
 import com.tether.app.protocol.model.SubagentEntry
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.protocol.reduce.RUN_DONE
@@ -53,6 +45,7 @@ import com.tether.app.protocol.reduce.SubagentRun
 import com.tether.app.protocol.reduce.SubagentRosterSummary
 import com.tether.app.protocol.reduce.subagentRunEntries
 import com.tether.app.ui.components.SpinningIcon
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -68,9 +61,9 @@ private val STATUS_TEXT = mapOf(RUN_RUNNING to "running", RUN_ERROR to "error", 
 private fun RunStatusIcon(status: String, size: Dp) {
     val t = LocalTetherTokens.current
     when (status) {
-        RUN_RUNNING -> SpinningIcon(Lucide.Loader, tint = t.muted, size = size)
-        RUN_ERROR -> Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(size))
-        else -> Icon(Lucide.Check, contentDescription = null, tint = t.faint, modifier = Modifier.size(size))
+        RUN_RUNNING -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = size)
+        RUN_ERROR -> Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(size))
+        else -> Icon(TetherIcons.Check, contentDescription = null, tint = t.faint, modifier = Modifier.size(size))
     }
 }
 
@@ -115,7 +108,7 @@ fun SubagentTabs(
                 )
                 if (runningCount > 0 && activeRunId != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SpinningIcon(Lucide.Loader, tint = t.muted, size = 11.dp)
+                        SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 11.dp)
                         Text("$runningCount", color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 11.2.sp)
                     }
                 }
@@ -253,7 +246,7 @@ fun SubagentRoster(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Lucide.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+            Icon(TetherIcons.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
             Text("Subagents", color = t.ink, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 12.8.sp)
             Text("${summary.total}", color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.strong, fontSize = 11.5.sp)
             Spacer(Modifier.weight(1f))
@@ -267,7 +260,7 @@ fun SubagentRoster(
                 overflow = TextOverflow.Ellipsis,
             )
             Icon(
-                Lucide.ChevronRight,
+                TetherIcons.ChevronRight,
                 contentDescription = if (expanded) "Collapse" else "Expand",
                 tint = t.faint,
                 modifier = Modifier.size(14.dp).rotate(if (expanded) 90f else 0f),
@@ -338,7 +331,7 @@ fun SubagentRunPanel(run: SubagentRun, showThinking: Boolean) {
         // Header: title + identity/status chips + readings.
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Lucide.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+                Icon(TetherIcons.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
                 Text(
                     run.title,
                     color = t.white,
@@ -400,7 +393,7 @@ fun SubagentRunPanel(run: SubagentRun, showThinking: Boolean) {
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
-                        Lucide.ChevronRight,
+                        TetherIcons.ChevronRight,
                         contentDescription = if (promptExpanded) "Collapse" else "Expand",
                         tint = t.faint,
                         modifier = Modifier.size(14.dp).rotate(if (promptExpanded) 90f else 0f),
@@ -418,7 +411,7 @@ fun SubagentRunPanel(run: SubagentRun, showThinking: Boolean) {
         if (entries.isEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (run.status == RUN_RUNNING) {
-                    SpinningIcon(Lucide.Loader, tint = t.muted, size = 14.dp)
+                    SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 14.dp)
                     Text(
                         "Waiting for this sub-agent’s first step…",
                         color = t.muted,
@@ -427,7 +420,7 @@ fun SubagentRunPanel(run: SubagentRun, showThinking: Boolean) {
                         fontSize = 13.1.sp,
                     )
                 } else {
-                    Icon(Lucide.CircleStop, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
+                    Icon(TetherIcons.CircleStop, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
                     Text(
                         "No step-by-step activity was recorded for this run.",
                         color = t.muted,
@@ -466,9 +459,9 @@ fun SubagentRunPanel(run: SubagentRun, showThinking: Boolean) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (run.isError) {
-                        Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(13.dp))
+                        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(13.dp))
                     } else {
-                        Icon(Lucide.Check, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+                        Icon(TetherIcons.Check, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
                     }
                     Text(
                         if (run.isError) "Error returned to the parent" else "Result returned to the parent",
@@ -520,9 +513,9 @@ private fun SubrunToolCard(entry: SubagentEntry) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             when {
-                running -> SpinningIcon(Lucide.Loader, tint = t.muted, size = 14.dp)
-                isError -> Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
-                else -> Icon(Lucide.Wrench, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+                running -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 14.dp)
+                isError -> Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
+                else -> Icon(TetherIcons.Wrench, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
             }
             Text(
                 entry.name ?: "tool",

@@ -51,9 +51,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.ArrowRight
-import com.composables.icons.lucide.LockKeyhole
-import com.composables.icons.lucide.Lucide
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
@@ -65,6 +62,7 @@ import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.Wordmark
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -493,7 +491,7 @@ private fun InstrumentLogin(ui: LoginUi) {
                                     onClick = ui.onSubmit,
                                     modifier = Modifier.semantics { contentDescription = "Unlock Tether" },
                                     variant = KeyVariant.Primary,
-                                    icon = Lucide.ArrowRight,
+                                    icon = TetherIcons.ArrowRight,
                                     enabled = !ui.busy,
                                 )
                             }
@@ -509,7 +507,7 @@ private fun InstrumentLogin(ui: LoginUi) {
                                     onClick = ui.onSubmit,
                                     modifier = Modifier.semantics { contentDescription = "Pair device" },
                                     variant = KeyVariant.Primary,
-                                    icon = Lucide.ArrowRight,
+                                    icon = TetherIcons.ArrowRight,
                                     enabled = !ui.busy,
                                 )
                             }
@@ -593,7 +591,7 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false) {
             MonoText("Your agents · Your workspace · Anywhere", t.faint, fontSize = 11.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Lucide.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
+            Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
             Text("Private by design. Self-hosted by you.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
         }
     }
@@ -638,7 +636,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Unlock Tether" },
                     variant = KeyVariant.Primary,
                     label = if (ui.phase == LoginPhase.Verifying) "Opening workspace…" else "Open workspace",
-                    icon = Lucide.ArrowRight,
+                    icon = TetherIcons.ArrowRight,
                     enabled = !ui.busy,
                     showSlit = true,
                 )
@@ -659,7 +657,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                     modifier = Modifier.fillMaxWidth(),
                     variant = KeyVariant.Primary,
                     label = if (ui.phase == LoginPhase.Verifying) "Pairing…" else "Pair this device",
-                    icon = Lucide.ArrowRight,
+                    icon = TetherIcons.ArrowRight,
                     enabled = !ui.busy,
                     showSlit = true,
                 )
@@ -676,7 +674,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Lucide.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
+            Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
             Text("Your private workspace", color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
             if (ui.hostname.isNotEmpty()) MonoText(ui.hostname, t.faint, fontSize = 11.5.sp)
         }

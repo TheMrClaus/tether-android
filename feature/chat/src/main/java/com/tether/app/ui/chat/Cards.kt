@@ -30,17 +30,13 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.Ban
-import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.CircleHelp
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.TriangleAlert
 import com.tether.app.protocol.model.PendingApproval
 import com.tether.app.protocol.model.PendingQuestion
 import com.tether.app.protocol.model.PermissionDenialProjection
 import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -72,7 +68,7 @@ fun ApprovalCard(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
+            Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
             Text(
                 "Approval needed",
                 color = t.white,
@@ -134,7 +130,7 @@ fun ApprovalCard(
                         modifier = Modifier.fillMaxWidth(),
                         variant = if (grants) KeyVariant.Primary else KeyVariant.Secondary,
                         label = choice.label,
-                        icon = if (grants) Lucide.Check else Lucide.Ban,
+                        icon = if (grants) TetherIcons.Check else TetherIcons.Ban,
                         enabled = !submitted,
                     )
                 }
@@ -148,7 +144,7 @@ fun ApprovalCard(
                         modifier = Modifier.weight(1f),
                         variant = KeyVariant.Primary,
                         label = "Approve",
-                        icon = Lucide.Check,
+                        icon = TetherIcons.Check,
                         enabled = !submitted,
                     )
                     TetherKey(
@@ -159,7 +155,7 @@ fun ApprovalCard(
                         modifier = Modifier.weight(1f),
                         variant = KeyVariant.Brick,
                         label = "Deny",
-                        icon = Lucide.Ban,
+                        icon = TetherIcons.Ban,
                         enabled = !submitted,
                     )
                 }
@@ -222,7 +218,7 @@ fun QuestionCard(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Lucide.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
+            Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
             Text(
                 "The agent needs your input",
                 color = t.white,
@@ -327,7 +323,7 @@ fun QuestionCard(
             modifier = Modifier.fillMaxWidth(),
             variant = KeyVariant.Primary,
             label = if (submitted) "Answer sent" else "Submit answer",
-            icon = Lucide.Check,
+            icon = TetherIcons.Check,
             enabled = allAnswered && !submitted,
         )
     }
@@ -347,7 +343,7 @@ fun DenialCard(denial: PermissionDenialProjection, modifier: Modifier = Modifier
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Lucide.Ban, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
+            Icon(TetherIcons.Ban, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
             Text(
                 denial.name,
                 color = t.ink,

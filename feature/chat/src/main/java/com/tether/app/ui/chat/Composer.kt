@@ -49,15 +49,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.composables.icons.lucide.CircleHelp
-import com.composables.icons.lucide.CircleStop
-import com.composables.icons.lucide.FileText
-import com.composables.icons.lucide.Loader
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Paperclip
-import com.composables.icons.lucide.Send
-import com.composables.icons.lucide.TriangleAlert
-import com.composables.icons.lucide.X
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
@@ -75,6 +66,7 @@ import com.tether.app.ui.components.KeyVariant
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
@@ -310,7 +302,7 @@ fun Composer(
                 modifier = Modifier.padding(horizontal = 4.dp),
             ) {
                 if (hasApproval) {
-                    Icon(Lucide.TriangleAlert, contentDescription = null, tint = t.warning, modifier = Modifier.size(14.dp))
+                    Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.warning, modifier = Modifier.size(14.dp))
                     Text(
                         "Waiting for your approval before the turn can continue.",
                         color = t.ink,
@@ -319,7 +311,7 @@ fun Composer(
                         fontSize = 12.8.sp,
                     )
                 } else {
-                    Icon(Lucide.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(14.dp))
+                    Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(14.dp))
                     Text(
                         "Answer the agent's question above to continue.",
                         color = t.ink,
@@ -385,7 +377,7 @@ fun Composer(
             TetherKey(
                 onClick = { attachmentPicker.launch(arrayOf("*/*")) },
                 variant = KeyVariant.Secondary,
-                icon = Lucide.Paperclip,
+                icon = TetherIcons.Paperclip,
                 iconSize = 18.dp,
                 enabled = session != null && !busy,
                 contentDescription = "Attach",
@@ -411,7 +403,7 @@ fun Composer(
                     onClick = { submit() },
                     variant = KeyVariant.Primary,
                     label = "Queue",
-                    icon = Lucide.Send,
+                    icon = TetherIcons.Send,
                     iconSize = 18.dp,
                     fontSize = 12.sp,
                     enabled = draft.isNotBlank(),
@@ -421,7 +413,7 @@ fun Composer(
                 TetherKey(
                     onClick = onInterrupt,
                     variant = KeyVariant.Brick,
-                    icon = Lucide.CircleStop,
+                    icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     contentDescription = "Interrupt",
                 )
@@ -429,7 +421,7 @@ fun Composer(
                 TetherKey(
                     onClick = { submit() },
                     variant = KeyVariant.Primary,
-                    icon = Lucide.Send,
+                    icon = TetherIcons.Send,
                     iconSize = 18.dp,
                     enabled = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                     showSlit = true,
@@ -452,7 +444,7 @@ private fun AttachmentChip(item: PickedAttachment, onRemove: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Lucide.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+        Icon(TetherIcons.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
         Text(
             item.attachment.name,
             color = t.ink,
@@ -470,7 +462,7 @@ private fun AttachmentChip(item: PickedAttachment, onRemove: () -> Unit) {
             fontSize = 10.4.sp,
         )
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Lucide.X, contentDescription = "Remove ${item.attachment.name}", tint = t.muted, modifier = Modifier.size(13.dp))
+            Icon(TetherIcons.X, contentDescription = "Remove ${item.attachment.name}", tint = t.muted, modifier = Modifier.size(13.dp))
         }
     }
 }
@@ -561,7 +553,7 @@ private fun QueuedRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        SpinningIcon(Lucide.Loader, tint = t.violet, size = 13.dp)
+        SpinningIcon(TetherIcons.Loader, tint = t.violet, size = 13.dp)
         BasicTextField(
             value = text,
             onValueChange = { text = it },
@@ -581,7 +573,7 @@ private fun QueuedRow(
             maxLines = 3,
         )
         IconButton(onClick = onRemove, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-            Icon(Lucide.X, contentDescription = "Remove", tint = t.muted, modifier = Modifier.size(15.dp))
+            Icon(TetherIcons.X, contentDescription = "Remove", tint = t.muted, modifier = Modifier.size(15.dp))
         }
     }
 }
