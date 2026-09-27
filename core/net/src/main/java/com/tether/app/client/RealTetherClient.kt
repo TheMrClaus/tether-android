@@ -654,7 +654,7 @@ class RealTetherClient(
         }
         val origin = target ?: return
         // A stop() whose disk wipe has not landed yet: what is there is dead.
-        val raw = readQuietly { settings.readPendingInput(origin) }
+        val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
         val loaded = synchronized(lock) {
             if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return@synchronized false
             restorePendingLocked(raw, setAside.remove(origin))
