@@ -66,6 +66,7 @@ class PushControllerTriggerTest {
         httpClient = OkHttpClient(),
         scope = scope,
         tokenProvider = FirebaseTokenProvider { "fake-fcm-token-not-a-credential" },
+        firebase = FirebaseInitializer.AlreadyInitialised,
     ).also { it.startSync() }
 
     private fun MockWebServer.expectRegistration() {

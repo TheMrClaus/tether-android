@@ -9,7 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -47,11 +47,16 @@ sealed interface PushRegistrarResult {
  * @param tokenProvider seam over the Firebase token call, so unit tests can
  *   stub it without Play Services. Production passes
  *   [FirebaseTokenProvider.Default].
+ * @param firebase brings FirebaseApp up from the server's fcm-config `client`
+ *   block before a token is requested. Production passes
+ *   [AndroidFirebaseInitializer]; JVM tests default to
+ *   [FirebaseInitializer.AlreadyInitialised].
  */
 open class PushRegistrar(
     private val settings: SettingsStore,
     httpClient: OkHttpClient,
     private val tokenProvider: FirebaseTokenProvider,
+    private val firebase: FirebaseInitializer = FirebaseInitializer.AlreadyInitialised,
 ) {
 
     /**
@@ -101,6 +106,11 @@ open class PushRegistrar(
 
             val config = fetchConfig(base, credential) ?: return@withContext PushRegistrarResult.Error("Push config unreachable.")
             if (!config.configured) return@withContext PushRegistrarResult.ServerUnconfigured
+            // FirebaseApp must be up before a token exists. Its options come from
+            // this server (fcm-config `client`); see FirebaseClientConfig.
+            if (!firebase.ensure(config.client)) {
+                return@withContext PushRegistrarResult.Error("Firebase client config unavailable.")
+            }
 
             val fcmToken = tokenProvider.token() ?: return@withContext PushRegistrarResult.Error("FCM token unavailable.")
             val body = buildJsonObject {
@@ -213,7 +223,8 @@ open class PushRegistrar(
                 if (!response.isSuccessful) return null
                 val obj = TetherJson.parseToJsonElement(response.body.string()) as? JsonObject ?: return null
                 FcmConfig(
-                    configured = obj["configured"]?.jsonPrimitive?.boolean == true,
+                    configured = (obj["configured"] as? JsonPrimitive)?.booleanOrNull == true,
+                    client = FirebaseClientConfig.parse(obj.fcmClientObject()),
                 )
             }
         } catch (_: IOException) {
@@ -242,7 +253,7 @@ open class PushRegistrar(
     private fun toJsonArray(ids: Set<String>): JsonArray =
         JsonArray(ids.map { JsonPrimitive(it) })
 
-    private data class FcmConfig(val configured: Boolean)
+    private data class FcmConfig(val configured: Boolean, val client: FirebaseClientConfig?)
 }
 
 /**

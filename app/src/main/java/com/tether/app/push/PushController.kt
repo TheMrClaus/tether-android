@@ -1,12 +1,9 @@
 package com.tether.app.push
 
 import android.app.Application
-import android.content.Context
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import com.tether.app.client.Credential
 import com.tether.app.client.SettingsStore
 import com.tether.app.ui.prefs.UiPrefs
@@ -16,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -33,12 +31,12 @@ import okhttp3.OkHttpClient
  * set-only changes. Observes the client `configured` flow; on logout calls
  * [PushRegistrar.unregister].
  *
- * Firebase initialisation: if the build supplies the three env-backed
- * `TETHER_FIREBASE_*` values (read from `BuildConfig`-style fields or, in this
- * no-plugin setup, from the app's process environment via a [FirebaseConfig]
- * seam), [PushController] initialises Firebase once with [FirebaseOptions].
- * When the values are absent, Firebase stays uninitialised and the push
- * subsystem reports "not configured" at runtime — the app still builds and
+ * Firebase initialisation (T12.1 round 2): there is no google-services plugin
+ * and no build-time config, and an app process has no environment, so the
+ * options come from the paired server's fcm-config response
+ * ([FirebaseClientConfig], via [AndroidFirebaseInitializer]). [start] restores
+ * the last working config, so FirebaseApp is up before any FCM delivery. Until
+ * the server sends the config, push reports "not available" and the app still
  * runs.
  */
 class PushController(
@@ -47,21 +45,23 @@ class PushController(
     private val prefs: PushPrefs,
     private val httpClient: OkHttpClient,
     private val scope: CoroutineScope,
-    private val firebaseConfig: FirebaseConfig = FirebaseConfig.FromEnv,
     private val tokenProvider: FirebaseTokenProvider = FirebaseTokenProvider.Default,
+    private val firebase: FirebaseInitializer = AndroidFirebaseInitializer(app),
     private val syncHints: SyncHintsSource = SyncHintsSource.Off,
     private val registrarFactory: (PushRegistrar) -> PushRegistrar = { it },
 ) {
     /** Lazily-created registrar; tests inject a fake via [registrarFactory]. */
     private val registrar: PushRegistrar by lazy {
-        registrarFactory(PushRegistrar(settings, httpClient, tokenProvider))
+        registrarFactory(PushRegistrar(settings, httpClient, tokenProvider, firebase))
     }
 
     private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) }
 
     fun start() {
-        // Firebase init (no google-services plugin path). Idempotent.
-        maybeInitialiseFirebase()
+        // Bring FirebaseApp up from the last server config that worked, before
+        // any FCM delivery in this process needs it. The first sync with a
+        // server supplies (and saves) the config.
+        (firebase as? AndroidFirebaseInitializer)?.restore()
 
         // Process-wide foreground signal for the FCM service.
         ProcessLifecycleOwner.get().lifecycle.addObserver(
@@ -93,9 +93,13 @@ class PushController(
         ) { enabled, scopeChoice, attached, pinned, hints ->
             PushSyncRequest(enabled, scopeChoice, attached.toSet(), pinned.toSet(), hints, server = null)
         }
-        val server = combine(settings.baseUrl, settings.credential) { baseUrl, credential ->
-            PushServerIdentity.of(baseUrl, credential)
-        }
+        // The two flows are only the trigger. combine() collects them
+        // independently, so it can briefly pair a new URL with the old credential.
+        // The identity is read from session(), the store's untorn (URL,
+        // credential) snapshot, so a server switch yields one new identity.
+        val server = combine(settings.baseUrl, settings.credential) { _, _ -> }
+            .map { settings.session().let { PushServerIdentity.of(it.baseUrl, it.credential) } }
+            .distinctUntilChanged()
         combine(prefsRequest, server) { request, identity -> request.copy(server = identity) }
             .distinctUntilChanged()
             .onEach { coordinator.onRequest(it) }
@@ -111,12 +115,6 @@ class PushController(
      */
     suspend fun unregisterAfterLogout(baseUrl: String, credential: Credential) {
         coordinator.onLoggedOut(baseUrl, credential)
-    }
-
-    private fun maybeInitialiseFirebase() {
-        if (FirebaseApp.getApps(app).isNotEmpty()) return
-        val options = firebaseConfig.options(app) ?: return
-        FirebaseApp.initializeApp(app, options)
     }
 
     companion object {
@@ -280,27 +278,5 @@ fun interface SyncHintsSource {
 
     companion object Off : SyncHintsSource {
         override fun optedIn(): Flow<Boolean> = flowOf(false)
-    }
-}
-
-/**
- * Seam over the env-supplied FirebaseOptions values. The default reads from the
- * process environment (`TETHER_FIREBASE_*`); tests inject a stub to assert the
- * "absent → unconfigured" branch without needing the env vars.
- */
-fun interface FirebaseConfig {
-    fun options(context: Context): FirebaseOptions?
-
-    companion object FromEnv : FirebaseConfig {
-        override fun options(context: Context): FirebaseOptions? {
-            val projectId = System.getenv("TETHER_FIREBASE_PROJECT_ID") ?: return null
-            val appId = System.getenv("TETHER_FIREBASE_APP_ID") ?: return null
-            val apiKey = System.getenv("TETHER_FIREBASE_API_KEY") ?: return null
-            return FirebaseOptions.Builder()
-                .setProjectId(projectId)
-                .setApplicationId(appId)
-                .setApiKey(apiKey)
-                .build()
-        }
     }
 }
