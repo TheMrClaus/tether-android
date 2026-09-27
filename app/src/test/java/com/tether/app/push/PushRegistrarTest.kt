@@ -74,6 +74,27 @@ class PushRegistrarTest {
         assertTrue(body.contains("\"syncHints\":false"))
     }
 
+    /** Counts calls whose exchange completed; an unclosed response never gets here. */
+    private class CallEnds : okhttp3.EventListener() {
+        val ended = java.util.concurrent.atomic.AtomicInteger()
+        override fun callEnd(call: okhttp3.Call) {
+            ended.incrementAndGet()
+        }
+    }
+
+    @Test
+    fun everyResponseIsClosed() = runBlocking {
+        val ends = CallEnds()
+        val r = PushRegistrar(settings, OkHttpClient.Builder().eventListener(ends).build(), FirebaseTokenProvider { "fake-fcm-token" })
+        // Bodies the registrar never reads: only close() ends these calls.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true}"""))
+        server.enqueue(MockResponse().setResponseCode(201).setBody("unread register body"))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("unread update body"))
+        r.sync(PushScope.All, emptySet(), emptySet(), syncHints = false)
+        r.update(PushScope.All, emptySet(), emptySet(), syncHints = false)
+        assertEquals("config + register + update all ended", 3, ends.ended.get())
+    }
+
     @Test
     fun syncSendsTheStoredSyncHintsOptIn() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"configured":true}"""))

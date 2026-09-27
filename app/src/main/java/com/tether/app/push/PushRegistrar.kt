@@ -127,10 +127,13 @@ open class PushRegistrar(
                 path = "/api/push/fcm-register",
                 body = body,
             ) ?: return@withContext PushRegistrarResult.Error("Push register request failed.")
-            when (response.code) {
-                200, 201 -> PushRegistrarResult.Success
-                503 -> PushRegistrarResult.ServerUnconfigured
-                else -> PushRegistrarResult.Error("Push register returned HTTP ${response.code}.")
+            // Closed on every path, so the connection goes back to the pool.
+            response.use {
+                when (it.code) {
+                    200, 201 -> PushRegistrarResult.Success
+                    503 -> PushRegistrarResult.ServerUnconfigured
+                    else -> PushRegistrarResult.Error("Push register returned HTTP ${it.code}.")
+                }
             }
         }
 
@@ -167,11 +170,13 @@ open class PushRegistrar(
                 path = "/api/push/fcm-register",
                 body = body,
             ) ?: return@withContext PushRegistrarResult.Error("Push update request failed.")
-            when (response.code) {
-                200, 201 -> PushRegistrarResult.Success
-                404 -> PushRegistrarResult.Error("Not registered yet.")
-                503 -> PushRegistrarResult.ServerUnconfigured
-                else -> PushRegistrarResult.Error("Push update returned HTTP ${response.code}.")
+            response.use {
+                when (it.code) {
+                    200, 201 -> PushRegistrarResult.Success
+                    404 -> PushRegistrarResult.Error("Not registered yet.")
+                    503 -> PushRegistrarResult.ServerUnconfigured
+                    else -> PushRegistrarResult.Error("Push update returned HTTP ${it.code}.")
+                }
             }
         }
 
