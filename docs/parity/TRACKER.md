@@ -24,18 +24,14 @@
 
 ## ▶ RESUME HERE
 
-**Next action:** ⏸ **Paused for the owner-requested production deploy.** tether#197 (S1.1, protocol v129) is
-merged (`bde3cfa`); the restart is owned by the watcher unit `tether-deploy-20260927-091413.service`
-(waits for Tether idle → `safe-restart --abort-if-busy`; log `~/.local/state/tether-deploy/deploy-20260927-091413.log`).
-**First thing next session:** read that log — expect `safe-restart exit=0` and post-deploy healthz
-`protocolVersion 129, nativeProtocolFloor 129`; if not, diagnose from the log (never `--force`).
-Then resume, ≤4 agents: **S0.4** (run 3 + `--compare` runs 1–3 in /tmp/parity-s04-{1,2}; regenerate the
+**Next action:** ✅ **Production deployed** (2026-09-27 10:10 CEST): tether `bde3cfa` serves protocol **v129**,
+`nativeProtocolFloor 129` (`safe-restart exit=0`, protocol check passed). `main` of this repo speaks 129 → a
+new APK release is now possible when the owner wants one (release notes: Android 14 floor, Keystore-encrypted
+credentials, pre-T1.4 backups may hold the old plaintext credential file).
+Resume, ≤4 agents: **S0.4** (run 3 + `--compare` runs 1–3 in /tmp/parity-s04-{1,2}; regenerate the
 reference) → verifier → **S0.6** PR; **T3.3** (WIP `12398d9`, bead has next step) → verifier → **T3.4**;
 **T3.5** (WIP `5231b82`; may add `api(libs.lucide.icons)` to core/designsystem); **T1.5** nodes.
-Then a new APK release is possible (main speaks 129 and the server will too): release notes must mention
-the Android 14 floor (already), Keystore-encrypted credentials, and that pre-T1.4 backups may hold the
-old plaintext credential file.
-VERIFIED + merged so far: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.3, S0.5, S1.1.
+VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.3, S0.5, S1.1 (deployed).
 
 **In-flight state:** none uncommitted. Open branches: `parity/T3.3-primitives` (WIP `12398d9`), `parity/T3.5-icons` (WIP `5231b82`); tether `android-parity/S0.4` @ `3f69e4f` (+ S0.2/S0.3/S0.5 branches for S0.6). Unpushed tether branches (worktrees under `~/git/tether-wt/`): `android-parity/S0.2` (`157b87d`), `android-parity/S0.3` (`fdecbe9`), `android-parity/S0.5` (`356b456`). Tether S* work happens in the worktree
 `~/git/tether-wt/android-parity-S0` (branch `android-parity/S0`) — **never** switch branches in
@@ -224,7 +220,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 
 | Since (UTC) | Task | Blocker | Needed from | Status |
 |---|---|---|---|---|
-| 2026-09-27 | S1.1 → T1.x release | ~~PR [tether#197] waiting for the owner~~ **MERGED `bde3cfa`** on owner request; deploy via idle-waiting `safe-restart` watcher (`tether-deploy-20260927-091413.service`, log `~/.local/state/tether-deploy/`). Android work against v129 proceeds; **no Android release that speaks 129 may ship before the server is deployed** | owner: review + merge + `npm run safe-restart` | OPEN |
+| 2026-09-27 | S1.1 → T1.x release | ~~PR [tether#197] waiting for the owner~~ **MERGED `bde3cfa` + DEPLOYED 10:10 CEST** (v129 live, floor 129). Android work against v129 proceeds; **no Android release that speaks 129 may ship before the server is deployed** | owner: review + merge + `npm run safe-restart` | OPEN |
 | 2026-09-26 21:55 | S0.3 (→ S0.4, and every DoD "isolated fake-engine server" run) | An isolated server can't boot from an agent session: agents run inside `tether.service`'s cgroup, and `server.mjs`'s `findLiveUnitMainPeer()` guard (issue #155 — a second in-cgroup server once process-group-killed prod) refuses to start. Escaping via `systemd-run --user --scope` would bypass that production-safety guard. Capture script + tests are committed (`fdecbe9`, never run live). | owner: either OK agents running isolated servers in their own transient scope (`systemd-run --user --scope …`, separate port/state dir), or run the capture from a shell outside `tether.service` | RESOLVED 2026-09-27: owner OK'd `systemd-run --user --scope` |
 | 2026-09-26 21:10 | T0.2 | Emulator can't boot: user `operator` is not in group `kvm` (`/dev/kvm` root:kvm 0660) → no hardware acceleration | owner: `sudo usermod -aG kvm operator` + re-login (or OK the agent to run it) | RESOLVED 2026-09-27: owner chose *skip emulators for now* → T0.2 deferred |
 
