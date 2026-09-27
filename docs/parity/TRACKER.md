@@ -29,11 +29,11 @@ possible when the owner asks. Release notes must cover: the Android 14 floor, Ke
 that pre-T1.4 backups may still hold the old plaintext credential file.
 **Phase 0 CLOSED** (S0.4 + S0.6 verified; T0.2 owner-deferred). **Phase 2 CLOSED.** Tether PR
 **[#198](https://github.com/TheMrClaus/tether/pull/198)** (`android-parity/S0` @ `4442954`, verified) awaits the owner's merge.
-**T3.5 VERIFIED + merged** (`b9f03a4`; main gate 1350/0 failed/4 skipped). In flight (≤4 agents): **T3.3** executor,
-**T1.5** DONE → verifier + security-reviewer, **T13.0** executor (SYNC_DESIGN.md; doc-only gate exception).
-**Upstream security bead `ta-fsp`**: tether `/ws` lets paired-device sockets run node-add/remove/probe (the server comment assumes
-owner-only). Next: an S-task PR once the security review rates it; the owner merges and deploys.
-Next: T3.3 → verifier → **T3.4** gallery; T1.5 → verifier + security-reviewer; then Phase 4 (T4.1/T4.3).
+**T3.5 VERIFIED + merged** (`b9f03a4`; main gate 1350/0 failed/4 skipped). In flight (4 agents):
+**T3.3** DONE (`e3e5ec6`, 1467 tests, 90 Roborazzi goldens) → verifier; **T13.0** DONE (SYNC_DESIGN.md `056f79b`) →
+plan-verifier; **T1.5** fix round (detach the old socket on a new login + 3 test gaps from verifier/security review);
+**ta-fsp** server fix (security-executor, tether branch `android-parity/node-ws-guard`, PR after verification).
+Then: T3.4 gallery (after T3.3 merges), Phase 4 (T4.1 phone shell, T4.3 statusline), S13.1/T13.1 after the design is approved.
 VERIFIED + merged: T0.1, T0.3–T0.6, T1.1–T1.4, T2.1, T2.1D, T2.2, T2.3, T3.1, T3.2, S0.1–S0.5, S1.1 (deployed).
 
 **In-flight state:** Branches: `parity/T3.3-primitives` (wt T3.3), `parity/T3.5-icons` (wt T3.5, done: `e63ddf7`),
@@ -42,7 +42,7 @@ S0.2/S0.3/S0.4/S0.5 are merged into it. Tether S* work happens only in `~/git/te
 branches in `~/git/tether` (production `tether.service` runs from that checkout). Refresh this board's rows
 with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
-**Machine notes for this host:** `local.properties` needs `sdk.dir=/home/op/Android/Sdk`
+**Machine notes for this host:** `local.properties` needs `sdk.dir=<home>/Android/Sdk`
 (gitignored). JVM network tools (sdkmanager) need the sandbox proxy CA: build a temp truststore
 from JDK `cacerts` + `~/.config/jean-claude/ca/bundle.pem` and pass
 `-Djavax.net.ssl.trustStore=…` via `JAVA_OPTS`, plus `--proxy=http --proxy_host=127.0.0.1 --proxy_port=8000`.
@@ -92,7 +92,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | checkpoint 63ec706: done: unit tests (KeyStyleTest, MotionAndHapticsTest, PrimitiveBehaviourTest), tools/compare-screens (CompareScreens.ja… |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | DONE | claude-main @ 2026-09-27 04:16 |  |  |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
 | T3.5 | Icons, provider logos, adaptive app icon | VERIFIED | claude-main @ 2026-09-27 04:16 |  |  |
 
@@ -176,14 +176,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 13 — Proper sync
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | IN-PROGRESS | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  |  |
-| T13.2 | Offline mode + stale indicators | TODO |  |  |  |
-| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | From T1.3: PendingInput facade has no mention parameter; a queue item removed on another device can still be resent (web has the same gap);… |
-| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | TODO |  |  |  |
-| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  |  |
-| T13.5 | Cache policy, eviction, migrations | TODO |  |  |  |
-| T13.6 | Conflict rules doc + tests | TODO |  |  |  |
+| T13.0 | `SYNC_DESIGN.md` + plan-verifier review | DONE | claude-main @ 2026-09-27 09:10 |  |  |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement (T13.0 SYNC_DESIGN §2-3,§12): split into 3 commits: (a) shadow-write Room mirror, (b) cold-start hydration + CursorTracke… |
+| T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
+| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement (SYNC_DESIGN §5): PendingStore unchanged. A staged outbox (DataStore key tether:outbox.v1, same atomic edit as tether:pen… |
+| S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | TODO |  |  | design refinement (SYNC_DESIGN §6.1): (A) AgentSession.lastSeq replaces sessions-changed-since. (B) FCM data-only {kind:sync,v:1}: priority… |
+| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | design refinement (SYNC_DESIGN §6.2): FCM data kind=sync (no content, no session id) enqueues unique expedited work (RUN_AS_NON_EXPEDITED o… |
+| T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement (SYNC_DESIGN §7-8): 200 MB default. Evict turn_detail first, then gone sessions, then unpinned LRU. Never evict pinned, o… |
+| T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement (SYNC_DESIGN §10): rules C1-C9, one test each, plus the property tree == fold(DB.base, DB.tail). Debug-only divergence pr… |
 
 ### Phase 14 — Hardening & release 1.0.0
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -245,6 +245,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Closed epics P0 and P2** (`bd close --force`: the v1.3.0 guard counts `verified` children as open). P0 = 11/12 verified + T0.2 owner-deferred; P2 = 4/4 verified | Every child was verified by a separate actor (S0.4 and S0.6 today) | claude-main (owner delegation) |
 | 2026-09-27 | **Gate exception:** T13.0 (SYNC_DESIGN.md, doc only) started ahead of Phases 3–12 | It writes no code and touches no file another lane owns, so it fills the 4th slot without merge risk. T13.1+ stay gated on its plan-verifier review | claude-main (owner delegation) |
 | 2026-09-27 | Verifier finding F1 on T3.5 (logo path text not asserted) fixed by the coordinator before merge: a fixture test plus a mutation proof (edited path → red). It was a test-only hardening of already-verified, byte-identical paths | Keeps the merge clean without another verifier round for a test-only change | claude-main (owner delegation) |
+| 2026-09-27 | A security reviewer never reads a worktree while a verifier mutates it. When they overlap, reviewers read committed objects only (`git show <sha>:path`) | T1.5's review flagged a HIGH that was the verifier's in-flight mutation (f); the committed code was correct | claude-main (owner delegation) |
+| 2026-09-27 | **ta-fsp** (tether `/ws` lets paired-device sockets manage nodes) is fixed as a coordinator-initiated tether PR: a fail-closed owner-grade guard in front of node-add/remove/probe; wire shape unchanged | Security review rated it MEDIUM (blind SSRF oracle, peer re-point or removal, rows that persist past revocation), rising to HIGH with N1. The owner merges and deploys | claude-main (owner delegation) |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
