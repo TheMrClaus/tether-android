@@ -161,6 +161,12 @@ class RealTetherClient(
     private var inForeground = true
     private var backgroundTask: Cancellable? = null
     private var connecting = false
+    // Connect-attempt generation: bumped by every sign-in, stop() and logout(),
+    // which also free [connecting]. An attempt carries the generation it started
+    // in; once that is stale the attempt does NOTHING (no state, no socket, and
+    // it never owns or releases [connecting]), so neither an old credential nor
+    // an old attempt's bookkeeping can outlive the change.
+    private var connectGeneration = 0L
     private var socket: WebSocket? = null
     private var socketListener: SocketListener? = null
     private var socketOpen = false
@@ -422,9 +428,9 @@ class RealTetherClient(
             previous = detachSocketLocked()
             cancelTimersLocked()
             // An auth probe of the previous sign-in may still be in flight: it
-            // no longer owns the connect slot and gives up when it returns
-            // (supersededLocked), so this sign-in connects at once.
-            connecting = false
+            // is now stale (does nothing when it returns) and no longer owns
+            // the connect slot, so this sign-in connects at once.
+            endConnectAttemptsLocked()
             baseUrlValue = base
             credentialValue = credential
             stopped = false
@@ -499,6 +505,9 @@ class RealTetherClient(
             sweeperJob = null
             baseUrlValue = null
             credentialValue = null
+            // A probe in flight must not keep the slot: a start() before the
+            // async settings.clear() lands reloads the credential and connects.
+            endConnectAttemptsLocked()
             detachSocketLocked()
         }
         ws?.cancel()
@@ -524,7 +533,7 @@ class RealTetherClient(
             credential = credentialValue
             credentialValue = null
             ws = detachSocketLocked()
-            connecting = false
+            endConnectAttemptsLocked()
         }
         ws?.close(1000, "logout")
         clearNodeRegistry()
@@ -741,12 +750,16 @@ class RealTetherClient(
     // ------------------------------------------------------------------
 
     /**
-     * A connect attempt for [credential] was overtaken by a newer sign-in
-     * (adoptCredential). Null in force (logout / stop / rejection) is NOT
-     * superseded: those paths are handled as halts. Caller holds [lock].
+     * Every connect attempt in flight becomes stale and the connect slot is free
+     * (sign-in, stop, logout). Caller holds [lock].
      */
-    private fun supersededLocked(credential: Credential): Boolean =
-        credentialValue != null && credentialValue !== credential
+    private fun endConnectAttemptsLocked() {
+        connectGeneration++
+        connecting = false
+    }
+
+    /** The attempt started in [generation] was ended since: it must do nothing. Caller holds [lock]. */
+    private fun staleLocked(generation: Long): Boolean = generation != connectGeneration
 
     /** Anything that forbids connecting right now. Caller holds [lock]. */
     private fun haltedLocked(): Boolean = stopped || versionHalt != null || backgroundSuspended
@@ -790,6 +803,7 @@ class RealTetherClient(
     private fun connectNow() {
         val base: HttpUrl
         val credential: Credential
+        val generation: Long
         synchronized(lock) {
             if (haltedLocked() || connecting || socket != null) return
             val b = baseUrlValue
@@ -803,6 +817,7 @@ class RealTetherClient(
             connecting = true
             base = b
             credential = c
+            generation = connectGeneration
         }
         if (blockedBeforeConnect(base)) {
             // Check before any local-network access (the documented pattern).
@@ -821,8 +836,8 @@ class RealTetherClient(
                 val blocked = blockedAfterFailure(base, e)
                 val restricted = localNetworkAccess.isRestricted()
                 val (halted, suspect) = synchronized(lock) {
-                    // A newer sign-in owns the connect slot now: touch nothing.
-                    if (supersededLocked(credential)) return@launch
+                    // Ended since (sign-in / stop / logout): touch nothing.
+                    if (staleLocked(generation)) return@launch
                     connecting = false
                     // T0.6: while the OS restricts local-network traffic, a run of
                     // connect TIMEOUTS (the documented TCP signature of the block)
@@ -843,14 +858,14 @@ class RealTetherClient(
                 return@launch
             }
             synchronized(lock) {
-                // The verdict is about a credential that has been replaced since
-                // (login()/pair() while this probe was in flight): never act on
-                // it, and above all never open a socket with it.
-                if (supersededLocked(credential)) return@launch
+                // Ended since (login()/pair()/stop()/logout() while this probe
+                // was in flight): never act on the verdict, and above all never
+                // open a socket with a credential that is no longer in force.
+                if (staleLocked(generation)) return@launch
                 consecutiveTimeouts = 0
             }
             when (verdict) {
-                ProbeVerdict.Authenticated -> openSocket(base, credential)
+                ProbeVerdict.Authenticated -> openSocket(base, credential, generation)
                 ProbeVerdict.Rejected -> handleCredentialRejected(
                     credential,
                     if (credential is Credential.Cookie) SignedOutReason.SessionExpired else SignedOutReason.DeviceUnpaired,
@@ -944,7 +959,7 @@ class RealTetherClient(
         }
     }
 
-    private fun openSocket(base: HttpUrl, credential: Credential) {
+    private fun openSocket(base: HttpUrl, credential: Credential, generation: Long) {
         // Origin's host(+port) MUST equal the Host header or the server
         // destroys the upgrade with a raw 401. OkHttp never sets it itself.
         val origin = buildString {
@@ -963,10 +978,10 @@ class RealTetherClient(
         // client stuck in Connecting with an open socket).
         val listener = SocketListener()
         synchronized(lock) {
-            // Replaced since the probe (a sign-in landed in between): the new
-            // credential's own attempt owns the slot. After this point a sign-in
-            // retires [listener] (adoptCredential -> detachSocketLocked).
-            if (supersededLocked(credential)) return
+            // Ended since the probe (a sign-in / stop / logout in between): a
+            // newer attempt owns the slot. After this point those paths retire
+            // [listener] (detachSocketLocked).
+            if (staleLocked(generation)) return
             if (haltedLocked() || socket != null) {
                 connecting = false
                 return
@@ -1679,18 +1694,14 @@ class RealTetherClient(
     private suspend fun nodeRequest(build: (requestId: String) -> ClientMessage): NodeRequestOutcome {
         val requestId = "node-" + UUID.randomUUID()
         val waiter = CompletableDeferred<NodeRequestOutcome>()
-        val ws = synchronized(lock) {
-            val live = if (socketOpen && handshakeDone) socket else null
-            if (live != null) nodeRequests[requestId] = waiter
-            live
-        }
-        if (ws == null) {
+        val sent = transmitNodeRequest(requestId, waiter, build)
+        if (sent == null) {
             emitError(NodeRegistryRules.NOT_SENT_MESSAGE)
             return NodeRequestOutcome.NotSent
         }
         val timeout = scheduler.schedule(nodeRequestTimeoutMs) { waiter.complete(NodeRequestOutcome.TimedOut) }
         try {
-            if (!ws.send(build(requestId).encode())) {
+            if (!sent) {
                 // OkHttp refused it (the socket is closing): nothing went out, unless
                 // the link-loss path already settled this waiter.
                 if (waiter.complete(NodeRequestOutcome.NotSent)) emitError(NodeRegistryRules.NOT_SENT_MESSAGE)
@@ -1701,6 +1712,28 @@ class RealTetherClient(
         } finally {
             timeout.cancel()
             synchronized(lock) { nodeRequests.remove(requestId) }
+        }
+    }
+
+    /**
+     * Register [waiter] and enqueue the frame on the socket that is live RIGHT
+     * NOW, both under [lock], so a sign-in / drop cannot slip in between the
+     * check and the send (the frame would go to the old socket and the request
+     * be reported lost). OkHttp's send() only enqueues: it neither blocks nor
+     * calls back (probeLink sends under the lock the same way). Null = no live
+     * socket (nothing registered); false = OkHttp refused it. Not a suspend
+     * function: the encoded frame (node-add's credential) dies with this call.
+     */
+    private fun transmitNodeRequest(
+        requestId: String,
+        waiter: CompletableDeferred<NodeRequestOutcome>,
+        build: (requestId: String) -> ClientMessage,
+    ): Boolean? {
+        val text = build(requestId).encode()
+        synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone) socket else null) ?: return null
+            nodeRequests[requestId] = waiter
+            return ws.send(text)
         }
     }
 
@@ -1726,10 +1759,17 @@ class RealTetherClient(
         nodeResultState.value = null
     }
 
-    /** Ordinary frames go out only on a LIVE connection: open and past `ready` + `hello`. */
+    /**
+     * Ordinary frames go out only on a LIVE connection: open and past `ready` +
+     * `hello`. Encoded outside the lock; enqueued under it, on the socket that
+     * is live at that moment (see transmitNodeRequest).
+     */
     private fun sendFrame(message: ClientMessage): Boolean {
-        val ws = synchronized(lock) { if (socketOpen && handshakeDone) socket else null } ?: return false
-        return ws.send(message.encode())
+        val text = message.encode()
+        synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone) socket else null) ?: return false
+            return ws.send(text)
+        }
     }
 
     private fun emitError(message: String) {

@@ -197,22 +197,72 @@ class NodeRegistryTest {
         }
     }
 
+    private fun createdFrame(sessionId: String) =
+        """{"type":"created","session":{"id":"$sessionId","provider":"claude","name":"x","cwd":"/w","status":"ready",
+           "startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}}"""
+
     @Test
     fun signingInToAnotherServerDropsTheOldSocketAndItsRegistry() {
-        val a = connected()
-        a.send(nodesFrame("from-a"))
-        h.await(h.client.nodes) { it.map { n -> n.nodeId } == listOf("from-a") }
-        OtherServer().use { b ->
-            b.enqueueLoginAndConnect("parity-fake-cookie-b")
-            assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url(), "parity-fake-password") })
-            // Right after the new sign-in: nothing of A's registry is shown.
-            assertEquals(emptyList<Any>(), h.client.nodes.value)
-            assertNull(h.client.nodeResult.value)
-            // A's socket was closed by the client (a clean close, as on logout).
-            assertEquals(1000, h.serverCloses.poll(10, TimeUnit.SECONDS))
-            // A late frame from A never lands.
-            a.send(nodesFrame("late-from-a"))
+        // Server A answers the client's close by FIRST sending more frames and
+        // then holding its close reply: those frames reach the client while its
+        // close handshake is still open, i.e. before the socket is gone on its own.
+        val lateSent = java.util.concurrent.CountDownLatch(1)
+        val holdingA = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                h.sockets.put(webSocket)
+            }
 
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                h.received.put(text)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                h.serverCloses.put(code)
+                webSocket.send(nodesFrame("late-from-a"))
+                webSocket.send(createdFrame("late-session-from-a"))
+                lateSent.countDown()
+            }
+        }
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        h.server.enqueue(MockResponse().withWebSocketUpgrade(holdingA))
+        h.newClient()
+        h.client.start()
+        val a = h.nextSocket()
+        try {
+            h.handshake(a)
+            a.send(nodesFrame("from-a"))
+            h.await(h.client.nodes) { it.map { n -> n.nodeId } == listOf("from-a") }
+            val aRequests = h.server.requestCount
+            OtherServer().use { b ->
+                b.enqueueLoginAndConnect("parity-fake-cookie-b")
+                assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url(), "parity-fake-password") })
+                // Right after the new sign-in: nothing of A's registry is shown.
+                assertEquals(emptyList<Any>(), h.client.nodes.value)
+                assertNull(h.client.nodeResult.value)
+                // A's socket was closed by the client (a clean close, as on logout)...
+                assertEquals(1000, h.serverCloses.poll(10, TimeUnit.SECONDS))
+                // ...and what A sent after that, before its close reply, is dropped.
+                assertTrue(lateSent.await(10, TimeUnit.SECONDS))
+                val settle = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500)
+                while (System.nanoTime() < settle) {
+                    assertEquals("a frame from A landed", emptyList<Any>(), h.client.nodes.value)
+                    assertTrue("a frame from A landed", h.client.sessions.value.none { it.id == "late-session-from-a" })
+                    Thread.sleep(10)
+                }
+                assertSwitchedToB(b)
+                assertTrue("A received a node frame", h.received.none { it.contains("\"node-") })
+                assertTrue("a frame from A landed", h.client.sessions.value.none { it.id == "late-session-from-a" })
+                // A saw nothing more after the switch: no probe, no upgrade, with any credential.
+                assertEquals(aRequests, h.server.requestCount)
+            }
+        } finally {
+            runCatching { a.close(1000, null) }
+        }
+    }
+
+    /** B is the live server: its registry shows and the next node request (with its credential) goes to B. */
+    private fun assertSwitchedToB(b: OtherServer) {
+        run {
             val bws = b.sockets.poll(10, TimeUnit.SECONDS)
             assertNotNull("the client never connected to the new server", bws)
             bws!!.send(readyFrame())
@@ -230,7 +280,101 @@ class NodeRegistryTest {
             assertEquals("parity-fake-bundle", frame.s("credential"))
             bws.send(nodeResult(true, frame.s("requestId"), "peer-b", "Reachable."))
             assertTrue(add.get() is NodeRequestOutcome.Answered)
-            assertTrue("A received a node frame", h.received.none { it.contains("\"node-") })
+        }
+    }
+
+    @Test
+    fun aFailedProbeOfTheOldSignInDoesNothingAfterTheSwitch() {
+        // A's probe FAILS (HTTP 500) after 1.5 s, while B's probe (3 s) is in
+        // flight: that failure is not this connection's, so no Disconnected
+        // handling, no reconnect timer, no release of B's connect slot.
+        h.server.enqueue(MockResponse().setResponseCode(500).setBody("{}").setHeadersDelay(1_500, TimeUnit.MILLISECONDS))
+        h.newClient()
+        h.client.start()
+        assertNotNull("A's auth probe", h.server.takeRequest(10, TimeUnit.SECONDS))
+        OtherServer().use { b ->
+            b.enqueueLoginAndConnect("parity-fake-cookie-b", probeDelayMs = 3_000)
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url(), "parity-fake-password") })
+            val bws = b.sockets.poll(15, TimeUnit.SECONDS)
+            assertNotNull("the client never connected to the new server", bws)
+            bws!!.send(readyFrame())
+            assertEquals("hello", b.frame().type())
+            h.await(h.client.connection) { it == ConnectionState.Connected }
+            assertTrue(
+                "A's stale failure scheduled a reconnect: ${h.scheduler.history().map { it.delayMs }}",
+                h.scheduler.history().none { isReconnectDelay(it.delayMs) },
+            )
+            assertEquals(1, h.server.requestCount)
+        }
+    }
+
+    /** Delegates to [inner]; clear() waits for [release] (the async clear stop() launches). */
+    private class GatedClearSettings(private val inner: InMemorySettings) : SettingsStore by inner {
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        override suspend fun clear() {
+            release.await()
+            inner.clear()
+        }
+    }
+
+    @Test
+    fun stopThenStartWhileAProbeIsInFlightStillConnects() {
+        // stop() launches settings.clear() asynchronously; a start() that runs
+        // before it lands reloads the stored credential (a NEW object) and must
+        // connect, even though the probe of the stopped attempt is still out.
+        val probes = java.util.concurrent.atomic.AtomicInteger()
+        val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                h.sockets.put(webSocket)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                h.received.put(text)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+        }
+        h.server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = when (request.path) {
+                "/api/auth/session" -> MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
+                    .setHeadersDelay(if (probes.getAndIncrement() == 0) 1_500L else 0L, TimeUnit.MILLISECONDS)
+                "/ws" -> MockResponse().withWebSocketUpgrade(listener)
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        h.server.start()
+        val inner = InMemorySettings(initialBaseUrl = h.server.url("/").toString().trimEnd('/'), initialCookie = "parity-fake-cookie")
+        val gated = GatedClearSettings(inner)
+        h.settings = inner
+        h.client = RealTetherClient(
+            settings = gated,
+            httpClient = okhttp3.OkHttpClient(),
+            scope = h.scope,
+            clock = { h.now.get() },
+            backoff = testBackoff(),
+            sweepIntervalMs = 3_600_000,
+            scheduler = h.scheduler,
+        )
+        try {
+            h.client.start()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (probes.get() == 0 && System.nanoTime() < deadline) Thread.sleep(5)
+            assertEquals("the first probe is out", 1, probes.get())
+            h.client.stop()
+            h.client.start()
+            // Connected through a fresh attempt, well before the stopped one's
+            // probe (1.5 s) returns; and that stale probe changes nothing after.
+            val ws = h.sockets.poll(10, TimeUnit.SECONDS)
+            assertNotNull("self-lockout: the client never connected after stop() + start()", ws)
+            h.handshake(ws!!)
+            Thread.sleep(1_700)
+            assertEquals(ConnectionState.Connected, h.client.connection.value)
+            assertEquals(2, probes.get())
+            assertTrue("one socket only", h.sockets.isEmpty())
+        } finally {
+            gated.release.complete(Unit)
         }
     }
 
