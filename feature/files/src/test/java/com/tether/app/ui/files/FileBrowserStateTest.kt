@@ -80,6 +80,23 @@ class FileBrowserStateTest {
         assertEquals("the first (older) listing is dropped", "/other", s.listing!!.current)
     }
 
+    @Test fun aListingThatLandsAsItIsCancelledIsStillDropped() = runTest {
+        // The response is already in hand when the operator opens another folder.
+        files.gatesIgnoreCancellation = true
+        val gate = CompletableDeferred<Unit>()
+        files.gates["list"] = gate
+        files.listings["/other"] = FilesResult.Ok(listing("/other", emptyList()))
+        val s = browser()
+        s.open()
+        advanceUntilIdle()
+        s.loadDirectory("/other")
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("/other", s.listing!!.current)
+        assertEquals(0, s.listing!!.entries.size)
+    }
+
     @Test fun aFailedListingShowsTheServersCopyAndTryAgainRetriesThatPath() = runTest {
         val s = browser()
         s.open()
@@ -110,11 +127,11 @@ class FileBrowserStateTest {
         s.open()
         advanceUntilIdle()
         val before = files.calls.size
-        s.selectFile(FilesFixtures.file("huge.log", WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES + 1))
-        s.selectFile(FilesFixtures.file("archive.zip", 10))
-        s.selectFile(FilesFixtures.file("diagram.svg", 10))
-        s.selectFile(FilesFixtures.file("clip.mp4", 10))
-        advanceUntilIdle()
+        for (name in listOf("huge.log", "archive.zip", "diagram.svg", "clip.mp4")) {
+            val size = if (name == "huge.log") WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES + 1 else 10
+            s.selectFile(FilesFixtures.file(name, size))
+            advanceUntilIdle() // each one settles before the next replaces it
+        }
         assertEquals(before, files.calls.size)
         assertTrue(platform.calls.none { it.startsWith("loadImage") })
     }

@@ -13,6 +13,8 @@ import java.io.OutputStream
 import java.time.ZoneOffset
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /** The web's seeded scenario (parity-seed.mjs seedProject): `<ws>/parity-app`, all at FIXED_EPOCH. */
 object FilesFixtures {
@@ -59,9 +61,13 @@ class FakeFiles : WorkspaceFiles {
     val gates = mutableMapOf<String, CompletableDeferred<Unit>>()
     val uploaded = mutableListOf<Pair<String, ByteArray>>()
 
+    /** Gated calls finish even when cancelled (an HTTP response that lands as the call is cancelled). */
+    var gatesIgnoreCancellation = false
+
     private suspend fun enter(op: String, vararg args: String) {
         calls += (listOf(op) + args).joinToString(" ")
-        gates.remove(op)?.await()
+        val gate = gates.remove(op) ?: return
+        if (gatesIgnoreCancellation) withContext(NonCancellable) { gate.await() } else gate.await()
     }
 
     private fun mutation(op: String, parent: String): FilesResult<WorkspaceMutation> = failures[op] ?: FilesResult.Ok(WorkspaceMutation(parent))
