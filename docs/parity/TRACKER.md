@@ -69,7 +69,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | S1.1 | Server native compatibility window (`client`, `nativeProtocolFloor`, bump, CLAUDE.md rule) — PR | VERIFIED | claude-main @ 2026-09-27 00:09 |  |  |
 | T1.1 | Kotlin types for all v128 messages/events, tolerant decoder, WireConformanceTest green | VERIFIED | claude-main @ 2026-09-27 00:35 |  |  |
 | T1.2 | Connection manager (ready/hello/attach afterSeq/reset/bounded snapshots/ping/reconnect/lifecycle/4001/compat banner) | VERIFIED | claude-main @ 2026-09-27 00:57 |  |  |
-| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | IN-PROGRESS | claude-main @ 2026-09-27 03:55 |  | VERIFY-FAIL (test gap): persisted-write atomicity untested (half-then-full write and empty-then-real write both green). Invariant confirmed… |
+| T1.3 | Durable send (pending-input semantics, process-death safe, no auto-retry) | DONE | claude-main @ 2026-09-27 03:55 |  |  |
 | T1.4 | Auth: password, pairing, logout, expiry, Keystore-encrypted credentials | VERIFIED | claude-main @ 2026-09-27 02:41 |  |  |
 | T1.5 | Multi-host node registry awareness (v109) | TODO |  |  |  |
 
@@ -86,9 +86,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T3.1 | Generated tokens, 6 skins (3 families × light/dark/system), system bars | VERIFIED | claude-main @ 2026-09-27 03:14 |  |  |
 | T3.2 | Typography (Manrope, JetBrains Mono) | VERIFIED | claude-main @ 2026-09-27 03:55 |  |  |
-| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | executor-T3.3 resumed in ~/git/tether-android-wt/T3.3 (branch parity/T3.3-primitives @823d7d8). Plan: Roborazzi 1.75.0 (latest on Maven Cen… |
+| T3.3 | Primitives (keys, wells, seams, pills, select, sheets, expandable, spinners, ping, haptics, reduced motion) | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | Paused at WIP 12398d9 for the owner-requested production deploy; resume from the bead's 'next' note. |
 | T3.4 | Debug Component Gallery + screenshot tests | TODO |  |  |  |
-| T3.5 | Icons, provider logos, adaptive app icon | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | Executor died at session limit before any change (worktree clean at 823d7d8). Deferred to reduce concurrent agents; restart after T3.3. |
+| T3.5 | Icons, provider logos, adaptive app icon | IN-PROGRESS | claude-main @ 2026-09-27 04:16 |  | DECISION (claude-main): add api(libs.lucide.icons) to core/designsystem/build.gradle.kts (one line; T3.5 may make this build edit when resu… |
 
 ### Phase 4 — App shell & layout
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -218,7 +218,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 
 | Since (UTC) | Task | Blocker | Needed from | Status |
 |---|---|---|---|---|
-| 2026-09-27 | S1.1 → T1.x release | PR [tether#197](https://github.com/TheMrClaus/tether/pull/197) (protocol v129 native window) is VERIFIED and waiting for the owner to merge + deploy. Android work against v129 proceeds; **no Android release that speaks 129 may ship before the server is deployed** | owner: review + merge + `npm run safe-restart` | OPEN |
+| 2026-09-27 | S1.1 → T1.x release | ~~PR [tether#197] waiting for the owner~~ **MERGED `bde3cfa`** on owner request; deploy via idle-waiting `safe-restart` watcher (`tether-deploy-20260927-091413.service`, log `~/.local/state/tether-deploy/`). Android work against v129 proceeds; **no Android release that speaks 129 may ship before the server is deployed** | owner: review + merge + `npm run safe-restart` | OPEN |
 | 2026-09-26 21:55 | S0.3 (→ S0.4, and every DoD "isolated fake-engine server" run) | An isolated server can't boot from an agent session: agents run inside `tether.service`'s cgroup, and `server.mjs`'s `findLiveUnitMainPeer()` guard (issue #155 — a second in-cgroup server once process-group-killed prod) refuses to start. Escaping via `systemd-run --user --scope` would bypass that production-safety guard. Capture script + tests are committed (`fdecbe9`, never run live). | owner: either OK agents running isolated servers in their own transient scope (`systemd-run --user --scope …`, separate port/state dir), or run the capture from a shell outside `tether.service` | RESOLVED 2026-09-27: owner OK'd `systemd-run --user --scope` |
 | 2026-09-26 21:10 | T0.2 | Emulator can't boot: user `operator` is not in group `kvm` (`/dev/kvm` root:kvm 0660) → no hardware acceleration | owner: `sudo usermod -aG kvm operator` + re-login (or OK the agent to run it) | RESOLVED 2026-09-27: owner chose *skip emulators for now* → T0.2 deferred |
 
@@ -232,6 +232,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 | **Isolated test servers run in their own transient cgroup** via `systemd-run --user --scope` (ports 4290–4299, throwaway state dirs); the #155 guard is never modified or bypassed in code | Agents run inside `tether.service`'s cgroup, where `server.mjs` rightly refuses a second server; a scope is a separate cgroup (verified) | owner |
 | 2026-09-27 | Pushed commits with AI `Co-authored-by` trailers stay as they are (no force-push); all new commits are trailer-free | Owner answer | owner |
 | 2026-09-27 | Fix `android-release.yml` now (`setup-android` → `packages: platform-tools`), proven with a `dry_run` dispatch — overrides "keep the release workflow as is" for this one line | Owner answer | owner |
+| 2026-09-27 | **Owner asked: merge tether#197 + redeploy.** Merged `bde3cfa`; production restart delegated to a watcher OUTSIDE `tether.service` that waits for Tether to be idle (no active turns, no background work) and runs `safe-restart --abort-if-busy` (never `--force`) | This session and its agents run inside `tether.service`; a forced restart would kill them mid-work | owner request / claude-main |
 | 2026-09-27 | Run **≤ 4 concurrent agents** (was 5–7) | Two API/session-limit outages killed 5 agents each; fewer concurrent agents keeps the program under the limit, and every executor now WIP-commits so an interruption loses nothing | claude-main |
 | 2026-09-27 | T2.1 does **not** mimic 3 corpus-unexercised JS quirks (Object.prototype-named keys like `constructor` in mcpHealth/subagent maps; numeric `+` on non-string delta text) — flag the prototype-key issue upstream in tether | They're JS bugs / malformed-input artefacts, not intended behavior | claude-main (owner delegation) |
 | 2026-09-27 | T2.2 keeps helpers **faithful to the web** (story points 220/260); the Android UI keeps the owner's 0.5.0.1 wider-bubble override (270/320) as an explicit, logged divergence passed in by the timeline UI | Helper corpus must match the web; the owner chose the wider Android bubble deliberately | claude-main (owner delegation) |
