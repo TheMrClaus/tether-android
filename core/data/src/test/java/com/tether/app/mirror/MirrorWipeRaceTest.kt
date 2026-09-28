@@ -103,6 +103,48 @@ class MirrorWipeRaceTest {
     }
 
     @Test
+    fun theEpochMovesBeforeTheShredSoAKeyMintedWhileTheShredRunsIsNotKept() = runBlocking {
+        mirroredThenRestarted()
+        fx.keyFile.delete() // the next bind mints a key: Absent -> create()
+        val sealing = CountDownLatch(1)
+        val letSeal = CountDownLatch(1)
+        fx.beforeKekSeal = {
+            fx.beforeKekSeal = null
+            sealing.countDown()
+            letSeal.await(budgetS, TimeUnit.SECONDS)
+        }
+        val bindAnswered = CountDownLatch(1)
+        val atDeath = AtomicReference<MirrorKeyStore.Loaded>()
+        val bind = async(Dispatchers.Unconfined) {
+            val index = m.bind(origin)
+            atDeath.set(fx.keyStore().load()) // on the writer: a death right after the bind
+            bindAnswered.countDown()
+            index
+        }
+        assertTrue(sealing.await(budgetS, TimeUnit.SECONDS))
+        // The wiping thread is paused inside its Keystore delete (the key file is already
+        // gone) while the writer finishes minting and checks for a wipe.
+        val pausedOnce = AtomicBoolean()
+        fx.beforeKekDestroy = {
+            if (pausedOnce.compareAndSet(false, true)) {
+                letSeal.countDown()
+                bindAnswered.await(5, TimeUnit.SECONDS)
+            }
+        }
+        val wiped = AtomicReference<kotlinx.coroutines.CompletableDeferred<Unit>>()
+        val caller = Thread { wiped.set(m.wipe()) }
+        caller.start()
+        caller.join(budgetS * 1_000)
+        assertFalse(caller.isAlive)
+        withTimeout(budgetS * 1_000) {
+            assertNull("the bind saw no wipe: its epoch moved only after the shred", bind.await())
+            wiped.get().await()
+        }
+        assertFalse("a key minted during the shred was kept (${atDeath.get()})", atDeath.get() is MirrorKeyStore.Loaded.Present)
+        assertNothingReadableSurvives()
+    }
+
+    @Test
     fun opsQueuedBeforeTheWipeAreAnsweredAtOnceAndNeverRunSoNoRotationMintsAKeyForThem() = runBlocking {
         m.bind(origin)
         m.recordState(origin, "s1", 10, null, state("old-sign-in"), emptySet())
@@ -249,9 +291,14 @@ class MirrorWipeRaceTest {
         val thrown = AtomicBoolean()
         fx.beforeDbDelete = { if (thrown.compareAndSet(false, true)) throw StackOverflowError("simulated") }
         withTimeout(budgetS * 1_000) { m.wipe().await() }
-        assertTrue(thrown.get())
-        assertTrue(m.dead)
+        assertTrue("the injected Error fired", thrown.get())
         assertTrue("a wipe that failed half-way left files", fx.factory.existing().isEmpty())
+        // The reply precedes die() (handle() answers, then rethrows): wait for the writer to stop.
+        val deadline = System.currentTimeMillis() + budgetS * 1_000
+        while (!m.dead) {
+            assertTrue("the writer never stopped", System.currentTimeMillis() < deadline)
+            Thread.sleep(5)
+        }
         assertFalse(fx.keyFile.exists())
     }
 }
