@@ -338,6 +338,13 @@ class RealTetherClient(
     private val storedSettingsLoadedState = MutableStateFlow(false)
     override val storedSettingsLoaded: StateFlow<Boolean> = storedSettingsLoadedState
 
+    // T5.3 search (SearchSync.kt): both searches' state, on the current handshaken socket.
+    private val searchSync = SearchSync { message ->
+        sendFrame(message).also { sent -> if (!sent) emitError(NodeRegistryRules.NOT_SENT_MESSAGE) }
+    }
+    override val searchResults: StateFlow<SearchResults> = searchSync.searchResults
+    override val globalSearchResults: StateFlow<GlobalSearchResults> = searchSync.globalSearchResults
+
     init {
         // One writer for all three, in this order: whoever sees storedSettingsLoaded sees the stored
         // server URL and sign-in state with it (T4.4 cold-start deep links).
@@ -649,6 +656,7 @@ class RealTetherClient(
         trimmedBeforeState.value = emptyMap()
         sidebarSync.clear()
         createdState.value = null
+        searchSync.clear()
     }
 
     /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
@@ -1647,6 +1655,9 @@ class RealTetherClient(
             is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
+            // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
+            is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
+                ifCurrent(webSocket) { searchSync.onFrame(message) }
             is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
             is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
@@ -2262,6 +2273,15 @@ class RealTetherClient(
     override fun requestServerSettings(): Boolean = sendFrame(ClientMessage.ServerSettingsRequest)
 
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean = sendFrame(SidebarSync.setPinnedWorkspaces(pinned))
+
+    // T5.3 search (SearchSync.kt).
+    override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)
+
+    override fun clearSearchResults() = searchSync.clearSearchResults()
+
+    override fun runGlobalSearch(params: GlobalSearchParams): Boolean = searchSync.runGlobalSearch(params)
+
+    override fun clearGlobalSearch() = searchSync.clearGlobalSearch()
 
     // ------------------------------------------------------------------
     // v109 node registry

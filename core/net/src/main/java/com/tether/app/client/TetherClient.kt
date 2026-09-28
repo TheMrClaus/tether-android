@@ -342,7 +342,38 @@ interface TetherClient {
      * monotonic, so a resume dedup-hit returning the same session twice is still a fresh reply.
      */
     val createdSessions: StateFlow<CreatedReply?> get() = NO_CREATED
+
+    // ------------------------------------------------------------------
+    // T5.3 search (SearchSync.kt): defaults keep other implementations (test doubles) compiling.
+    // ------------------------------------------------------------------
+
+    /** The sidebar's workspace content search: the last `search-results` (use-tether.ts searchResults). */
+    val searchResults: StateFlow<SearchResults> get() = NO_SEARCH_RESULTS
+
+    /**
+     * use-tether.ts `search(cwd, query)`: `search {cwd, query}`, or a local clear for a query
+     * shorter than two characters. Returns whether a frame went out.
+     */
+    fun search(cwd: String, query: String): Boolean = false
+
+    /** use-tether.ts selectWorkspace: the previous workspace's content hits are dropped. */
+    fun clearSearchResults() {}
+
+    /** The cross-harness global search (use-tether.ts globalSearchResults). */
+    val globalSearchResults: StateFlow<GlobalSearchResults> get() = NO_GLOBAL_SEARCH_RESULTS
+
+    /**
+     * use-tether.ts runGlobalSearch: `global-search` under a new monotonic request id (a reply to
+     * an older one is dropped), or a clear for a too-short query. Returns whether a frame went out.
+     */
+    fun runGlobalSearch(params: GlobalSearchParams): Boolean = false
+
+    /** use-tether.ts clearGlobalSearch: empty the results and invalidate any in-flight reply. */
+    fun clearGlobalSearch() {}
 }
+
+private val NO_SEARCH_RESULTS: StateFlow<SearchResults> = MutableStateFlow(SearchResults())
+private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableStateFlow(GlobalSearchResults())
 
 /** One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`). */
 data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null)

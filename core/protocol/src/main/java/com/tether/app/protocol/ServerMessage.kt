@@ -336,7 +336,12 @@ sealed interface ServerMessage {
 // Nested server-side payload types
 // ---------------------------------------------------------------------------
 
-/** search-results / global-search-results hit: HistorySession & { snippet, matchCount }. */
+/**
+ * search-results / global-search-results hit: `SearchHit extends HistorySession` (lib/protocol.ts
+ * 1856-1862) — `snippet` is a trimmed context window around the first match, `matchCount` the
+ * bounded number of occurrences. T5.3: the HistorySession fields ride along, because a hit is
+ * resumed (v89 `profileId`) and merged into the sidebar as a history row (dashboard.tsx:874-889).
+ */
 @Serializable
 data class SearchHit(
     val historyId: String,
@@ -346,7 +351,28 @@ data class SearchHit(
     val updatedAt: Long = 0,
     val snippet: String = "",
     val matchCount: Int = 0,
-)
+    val createdAt: Long? = null,
+    val lastSeenAt: Long? = null,
+    val origin: String? = null,
+    val spawnedBy: com.tether.app.protocol.model.HistorySpawnLink? = null,
+    val profileId: String? = null,
+    val digest: com.tether.app.protocol.model.HistoryDigest? = null,
+) {
+    /** The hit as the HistorySession it extends (what `resume` and the sidebar row read). */
+    fun toHistory(): HistorySession = HistorySession(
+        historyId = historyId,
+        provider = provider,
+        name = name,
+        cwd = cwd,
+        updatedAt = updatedAt,
+        digest = digest,
+        createdAt = createdAt,
+        lastSeenAt = lastSeenAt,
+        origin = origin,
+        spawnedBy = spawnedBy,
+        profileId = profileId,
+    )
+}
 
 /** TS ModelOption (the fields the composer uses; `variants`, `legacy`, … ignored). */
 @Serializable

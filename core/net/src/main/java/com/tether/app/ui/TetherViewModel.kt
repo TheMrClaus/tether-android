@@ -264,6 +264,8 @@ class TetherViewModel(
     fun selectWorkspace(cwd: String) {
         if (cwd == _currentWorkspace.value) return
         _currentWorkspace.value = cwd
+        // T5.3: use-tether.ts:1351 — the previous workspace's content hits go with it.
+        client.clearSearchResults()
         client.discover(cwd)
     }
 
@@ -316,6 +318,10 @@ class TetherViewModel(
             _logoutNotice.value = logoutNoticeFor(client.logout())
             _selectedSessionId.value = null
             _openingHistoryId.value = null
+            // T5.3: the web's search state lives in the Dashboard, which /login unmounts.
+            _globalSearchOpen.value = false
+            _globalSearchForm.value = GlobalSearchForm()
+            _findRequest.value = null
         }
     }
 
@@ -350,7 +356,63 @@ class TetherViewModel(
         if (_selectedSessionId.value == reply.session.id) return
         selectSession(reply.session.id)
     }
+
+    // ------------------------------------------------------------------
+    // T5.3: the global search modal and the in-chat find request (dashboard.tsx:421-427,
+    // 1157-1194). Held here so both survive a rotation; the web's modal stays mounted while
+    // closed, so its query and filters survive a close and reopen too.
+    // ------------------------------------------------------------------
+
+    private val _globalSearchOpen = MutableStateFlow(false)
+    val globalSearchOpen: StateFlow<Boolean> = _globalSearchOpen.asStateFlow()
+
+    private val _globalSearchForm = MutableStateFlow(GlobalSearchForm())
+    val globalSearchForm: StateFlow<GlobalSearchForm> = _globalSearchForm.asStateFlow()
+
+    /**
+     * dashboard.tsx:426 `findRequest`: the query that surfaced a result, for the opened session's
+     * in-chat find bar — keyed by historyId so it fires only on that conversation, and by a nonce
+     * so opening the same conversation again re-triggers the jump.
+     */
+    private val _findRequest = MutableStateFlow<FindRequest?>(null)
+    val findRequest: StateFlow<FindRequest?> = _findRequest.asStateFlow()
+    private var findNonce = 0L
+
+    /** dashboard.tsx:1157 (the sidebar key) and 1186-1194 (Ctrl/Cmd+Shift+F). */
+    fun openGlobalSearch() {
+        _globalSearchOpen.value = true
+    }
+
+    /** dashboard.tsx:1158-1161: closing also clears the results and drops any in-flight reply. */
+    fun closeGlobalSearch() {
+        _globalSearchOpen.value = false
+        client.clearGlobalSearch()
+    }
+
+    fun updateGlobalSearchForm(form: GlobalSearchForm) {
+        _globalSearchForm.value = form
+    }
+
+    /** dashboard.tsx:1179-1180: arm the in-chat find for [historyId]'s conversation. */
+    fun requestFind(query: String, historyId: String) {
+        findNonce += 1
+        _findRequest.value = FindRequest(query, findNonce, historyId)
+    }
 }
+
+/**
+ * components/global-search.tsx's own state (57-60): the typed text, the harness chips, the time
+ * window (`any` | `1d` | `7d` | `30d`) and "This workspace only".
+ */
+data class GlobalSearchForm(
+    val text: String = "",
+    val providers: List<String> = emptyList(),
+    val timeWindow: String = "any",
+    val scopeToWorkspace: Boolean = false,
+)
+
+/** dashboard.tsx:426 — `{ query, nonce, historyId }`. */
+data class FindRequest(val query: String, val nonce: Long, val historyId: String)
 
 /** Login-screen copy for a finished logout (see [TetherClient.logout] for the semantics). */
 fun logoutNoticeFor(result: LogoutResult): String? = when (result) {

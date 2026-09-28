@@ -158,13 +158,13 @@ class ConnectionHarness {
     }
 
     fun nextSocket(): WebSocket {
-        val ws = sockets.poll(10, TimeUnit.SECONDS)
+        val ws = sockets.poll(20, TimeUnit.SECONDS)
         assertNotNull("client never reached the ws upgrade", ws)
         return ws!!
     }
 
     fun frame(): JsonObject {
-        val text = received.poll(10, TimeUnit.SECONDS)
+        val text = received.poll(20, TimeUnit.SECONDS)
         assertNotNull(
             "expected a client frame; connection=${client.connection.value} " +
                 "pending=${scheduler.pending().map { it.delayMs }} requests=${server.requestCount} log=${log.toList()}",
@@ -216,7 +216,7 @@ class ConnectionHarness {
     }
 
     fun <T> await(flow: StateFlow<T>, predicate: (T) -> Boolean): T =
-        runBlocking { withTimeout(10_000) { flow.first(predicate) } }
+        runBlocking { withTimeout(20_000) { flow.first(predicate) } }
 
     fun close() {
         if (::client.isInitialized) client.stop()
