@@ -34,6 +34,15 @@ class SoftwareKeySource : CredentialKeySource {
     }
 }
 
+/** An AES key with no RAW encoding: every software provider refuses it with InvalidKeyException. */
+class UnusableAesKey : SecretKey {
+    override fun getAlgorithm() = "AES"
+
+    override fun getFormat() = "RAW"
+
+    override fun getEncoded(): ByteArray? = null
+}
+
 class CredentialCipherTest {
     private val keys = SoftwareKeySource()
     private val cipher = AesGcmCredentialCipher(keys)
@@ -124,9 +133,23 @@ class CredentialCipherTest {
     @Test
     fun aGenericInvalidKeyIsTransientNotADestroy() {
         // Only a missing / permanently invalidated / unrecoverable key is dead.
+        // ta-js0: a key no provider can use (no RAW encoding, the shape of a hardware key)
+        // raises InvalidKeyException under SunJCE AND Conscrypt, so this holds whichever one
+        // the JVM's provider list starts with. (An HMAC key did not: Conscrypt uses its bytes
+        // as AES and fails the tag, see CredentialCipherProviderTest.)
         val blob = cipher.seal(secret, aad)
-        keys.key = KeyGenerator.getInstance("HmacSHA256").generateKey()
-        expectFailure(keyUnusable = false, transient = true) { cipher.open(blob, aad) }
+        val real = keys.key
+        keys.key = UnusableAesKey()
+        try {
+            cipher.open(blob, aad)
+            fail("expected CredentialCipherException")
+        } catch (e: CredentialCipherException) {
+            assertEquals(CipherFailure.Suspect, e.failure)
+        }
+        expectFailure(keyUnusable = false, transient = true) { cipher.seal(secret, aad) }
+        assertEquals(0, keys.destroyed)
+        keys.key = real
+        assertArrayEquals(secret, cipher.open(blob, aad)) // key and blob both survived
     }
 
     @Test

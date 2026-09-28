@@ -10,9 +10,11 @@ import com.tether.app.protocol.tree.JsObj
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -101,9 +103,20 @@ class MirrorFixture(
         maxOriginBytes = maxOriginBytes,
     )
 
-    /** Process death (nothing uncommitted survives), then a new process over the same files. */
-    fun restart(version: String = reducerVersion): JournalMirror {
-        runBlocking { mirror.abandon() }
+    /**
+     * Process death (nothing uncommitted survives), then a new process over the same files.
+     *
+     * [whileDying] runs once the death has dropped every queued write but before the old writer
+     * is closed. [JournalMirror.abandon] clears the queue before it first suspends, and it is
+     * started UNDISPATCHED, so this is the moment to release a writer a test holds (ta-epo):
+     * whatever was queued behind it is then provably lost, not committed by a lucky drain.
+     */
+    fun restart(version: String = reducerVersion, whileDying: () -> Unit = {}): JournalMirror {
+        runBlocking {
+            val dying = launch(start = CoroutineStart.UNDISPATCHED) { mirror.abandon() }
+            whileDying()
+            dying.join()
+        }
         mirror = newMirror(version)
         return mirror
     }

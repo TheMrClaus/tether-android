@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import java.security.Provider
 import java.security.UnrecoverableKeyException
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
@@ -84,12 +85,25 @@ interface CredentialKeySource {
  * The framing is identical for every [CredentialKeySource], which is what makes
  * it testable on the JVM with a software key while production uses a
  * non-exportable Keystore key.
+ *
+ * Production passes no [provider]: JCA's delayed provider selection hands a Keystore key
+ * to the Keystore's own cipher (Conscrypt's AES ciphers take RAW-encoded keys only, and a
+ * Keystore key has no encoding). [provider] exists so JVM tests can pin SunJCE or Conscrypt
+ * instead of inheriting whichever one a Robolectric sandbox installed first (ta-js0).
  */
-class AesGcmCredentialCipher(private val keys: CredentialKeySource) : CredentialCipher {
+class AesGcmCredentialCipher internal constructor(
+    private val keys: CredentialKeySource,
+    private val provider: Provider?,
+) : CredentialCipher {
+
+    constructor(keys: CredentialKeySource) : this(keys, null)
+
+    private fun newCipher(): Cipher =
+        if (provider == null) Cipher.getInstance(TRANSFORMATION) else Cipher.getInstance(TRANSFORMATION, provider)
 
     override fun seal(plaintext: ByteArray, aad: ByteArray): ByteArray {
         try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val cipher = newCipher()
             cipher.init(Cipher.ENCRYPT_MODE, keys.getOrCreateKey())
             cipher.updateAAD(aad)
             val iv = cipher.iv
@@ -112,7 +126,7 @@ class AesGcmCredentialCipher(private val keys: CredentialKeySource) : Credential
             throw classifyCipherFailure("key fetch", e)
         } ?: throw CredentialCipherException("no key", CipherFailure.KeyDead)
         try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val cipher = newCipher()
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BYTES * 8, blob, 1, IV_BYTES))
             cipher.updateAAD(aad)
             return cipher.doFinal(blob, 1 + IV_BYTES, blob.size - 1 - IV_BYTES)
@@ -156,6 +170,16 @@ private const val KEY_PERMANENTLY_INVALIDATED = "android.security.keystore.KeyPe
  * 4. AEADBadTagException (the GCM tag did not verify) → [CipherFailure.BadBlob]:
  *    the only proof that the blob, not the Keystore, is wrong.
  * 5. Anything else → [CipherFailure.Suspect].
+ *
+ * Providers (ta-js0). On a device the Keystore cipher throws the tag failure (KM error -30) as
+ * AEADBadTagException, and every other operation error as IllegalBlockSizeException or
+ * BadPaddingException caused by an android.security.KeyStoreException. A software provider
+ * (SunJCE or Conscrypt, in JVM tests) cannot tell "another key" from "a tampered blob": both are
+ * a tag mismatch, so both are BadBlob, which drops the blob and keeps the key. The
+ * providers differ on a key they cannot use: SunJCE rejects a non-AES algorithm name with
+ * InvalidKeyException (rule 5), but Conscrypt ignores the name and uses any 16- or 32-byte
+ * RAW key as AES, so the same key surfaces as a tag mismatch (rule 4). Neither case ever
+ * destroys the key.
  */
 internal fun classifyCipherFailure(what: String, e: Throwable): CredentialCipherException {
     val name = e.javaClass.simpleName

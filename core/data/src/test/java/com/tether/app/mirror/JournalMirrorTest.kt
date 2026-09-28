@@ -3,6 +3,8 @@ package com.tether.app.mirror
 import com.tether.app.mirror.MirrorFixture.Companion.obj
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -23,6 +25,7 @@ class JournalMirrorTest {
     private val origin = "https://tether.example:443"
     private var fx = MirrorFixture()
     private val m get() = fx.mirror
+    private val budgetS = 20L
 
     @After
     fun tearDown() = fx.close()
@@ -239,20 +242,42 @@ class JournalMirrorTest {
 
     @Test
     fun theCommittedCursorNeverClaimsMoreThanTheDbHolds() = runBlocking {
-        // Process death with a batch still in its window: whatever survives, cursor == coverage.
+        // Process death with writes not yet committed: whatever survives, cursor == coverage.
+        //
+        // ta-epo: the batch window alone does not keep 12 and 13 uncommitted. After answering
+        // the flush, drain() keeps draining, so a writer that is still in it when 12 lands
+        // commits 12 and 13 at once. That flaked once under a loaded full gate, as cursor 13
+        // with tail [11, 12, 13]: consistent, but not the lost-writes case this test is about.
+        // So the writer is HELD in a read while 12 and 13 queue behind it, and the process dies
+        // while it is held.
         fx.close()
         fx = MirrorFixture(batchWindowMs = 60_000)
         bind()
         m.recordState(origin, "s1", 10, null, state(), emptySet())
         m.recordEvent(origin, "s1", 11, "message_delta", 11, event(11))
         m.flush()
-        m.recordEvent(origin, "s1", 12, "message_delta", 12, event(12))
-        m.recordEvent(origin, "s1", 13, "message_delta", 13, event(13))
-        fx.restart() // 12 and 13 were never committed
+        val old = m
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        old.beforeHydrateRead = {
+            old.beforeHydrateRead = null
+            entered.countDown()
+            gate.await(budgetS, TimeUnit.SECONDS)
+        }
+        val heldRead = old.hydrateAsync(origin, "s1")
+        assertTrue("the writer never reached the held read", entered.await(budgetS, TimeUnit.SECONDS))
+        old.recordEvent(origin, "s1", 12, "message_delta", 12, event(12))
+        old.recordEvent(origin, "s1", 13, "message_delta", 13, event(13))
+        fx.restart(whileDying = { gate.countDown() }) // 12 and 13 were never committed
+        // The held read saw exactly what was committed before it.
+        assertEquals(11L, (heldRead.await() as Hydration.Loaded).session.cursor)
         m.bind(origin)
         val h = loaded()
         assertEquals(11L, h.cursor)
         assertEquals(listOf("11"), tailSeqs(h))
+        // The invariant itself: the cursor names the last event the DB holds.
+        assertEquals(h.cursor.toString(), tailSeqs(h).last())
+        assertEquals(mapOf("s1" to 11L), m.bind(origin)!!.cursors)
     }
 
     @Test

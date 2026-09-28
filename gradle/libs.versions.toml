@@ -25,6 +25,9 @@ lucideIcons = "1.1.0"
 # is ever checked in or generated).
 firebaseBom = "34.19.0"
 robolectric = "4.17"
+# ta-js0: the JCA provider Robolectric installs (its runtime dependency, same version), so the
+# credential-cipher tests can pin it deliberately instead of inheriting it from test order.
+conscrypt = "2.6.2"
 androidxTestCore = "1.7.0"
 androidxCore = "1.19.1"
 # Roborazzi screenshot tests (JVM, Robolectric native graphics). 1.75.0 is the latest
@@ -66,6 +69,7 @@ icu4j = { group = "com.ibm.icu", name = "icu4j", version.ref = "icu4j" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+conscrypt-openjdk-uber = { group = "org.conscrypt", name = "conscrypt-openjdk-uber", version.ref = "conscrypt" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
