@@ -501,7 +501,7 @@ class ToolSafetyTest {
         // The 5,000-character first line is cut at UNIFIED_LINE_MAX characters (it never wraps).
         val first = rule.onAllNodes(hasText("yyyy", substring = true)).fetchSemanticsNodes()
             .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }.maxByOrNull { it.length }!!
-        assertEquals(UNIFIED_LINE_MAX + 1, first.length)
+        assertEquals(501, first.length) // 500 characters and the ellipsis
         assertTrue(rule.onAllNodesWithTag("unified-diff").fetchSemanticsNodes().isNotEmpty())
     }
 
@@ -602,6 +602,19 @@ class ToolSafetyTest {
         assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))))
     }
 
+    @Test fun anUnwritableCacheFailsThePictureNotTheApp() = runBlocking {
+        val cache = this@ToolSafetyTest.cache
+        // The temp folder's path taken by a plain file: creating the temp file throws IOException.
+        val blocker = File(cache, ToolMediaRepository.TMP_DIR).apply { deleteRecursively(); writeText("x") }
+        try {
+            val b64 = android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP)
+            val repo = ToolMediaRepository(ToolMediaSource.Unavailable, cache, origin)
+            assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", "data:image/png;base64,$b64")))
+        } finally {
+            blocker.delete()
+        }
+    }
+
     @Test fun signInChangesAlsoSweepPictureDownloadsInFlight() {
         val tmp = File(cache, ToolMediaRepository.TMP_DIR).apply { mkdirs() }
         File(tmp, "img1.part").writeBytes(ByteArray(3))
@@ -612,9 +625,9 @@ class ToolSafetyTest {
     @Test fun anOversizeDataPictureIsRefusedBeforeItIsHashed() = runBlocking {
         val repo = ToolMediaRepository(ToolMediaSource.Unavailable, cache, origin)
         val huge = "data:image/png;base64," + "A".repeat(((MediaLimits.MAX_IMAGE_BYTES / 3) * 4 + 8).toInt())
-        val started = System.nanoTime()
+        val before = ToolMediaRepository.keysComputed.get()
         assertEquals(MediaImage.TooLarge, repo.image(ToolMediaItem("image", "image/png", huge)))
-        assertTrue((System.nanoTime() - started) / 1_000_000 < 200)
+        assertEquals("refused before its key is hashed", before, ToolMediaRepository.keysComputed.get())
     }
 
     @Test fun thePictureTimeoutStartsOnceALoadSlotIsHeld() = runBlocking {
@@ -647,7 +660,7 @@ class ToolSafetyTest {
     }
 
     @Test fun theGitChangesCardCapsItsHunksAndFileLists() {
-        val hunks = (1..3_000).joinToString("\n") { "+" + "z".repeat(if (it == 1) 2_000 else 2) }
+        val hunks = (1..3_000).joinToString("\n") { if (it == 1) "+" + "z".repeat(2_000) else "+zz$it" }
         val summary = WorktreeDiffSummaryView("origin/main", 0.0, (0 until 600).map { WorktreeDiffEntry("f$it", "M") }, emptyList())
         rule.setContent {
             ChatHost(TetherSkin.Machine) {
@@ -662,9 +675,11 @@ class ToolSafetyTest {
         rule.onNodeWithContentDescription("Modified f0").performClick()
         rule.waitForIdle()
         rule.onAllNodes(hasText("+1,000 more lines")).fetchSemanticsNodes().single()
+        assertEquals("line 2,001 is not drawn", 0, rule.onAllNodes(hasText("+zz2001")).fetchSemanticsNodes().size)
+        rule.onAllNodes(hasText("+zz2000")).fetchSemanticsNodes().single()
         val longest = rule.onAllNodes(hasText("zz", substring = true)).fetchSemanticsNodes()
             .maxOf { n -> n.config[SemanticsProperties.Text].joinToString("") { it.text }.length }
-        assertEquals(UNIFIED_LINE_MAX + 1, longest)
+        assertEquals(501, longest)
     }
 }
 

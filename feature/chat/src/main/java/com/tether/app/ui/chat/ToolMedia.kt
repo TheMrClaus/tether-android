@@ -524,7 +524,13 @@ class ToolMediaRepository(
         const val TMP_DIR = "tool-media-tmp"
 
         /** Memory-cache key: the sha256 of the source (a data: URI can be megabytes long). */
-        fun cacheKey(src: String, full: Boolean): String = sha256Hex(src.toByteArray(Charsets.UTF_8)) + if (full) ":full" else ":thumb"
+        fun cacheKey(src: String, full: Boolean): String {
+            keysComputed.incrementAndGet()
+            return sha256Hex(src.toByteArray(Charsets.UTF_8)) + if (full) ":full" else ":thumb"
+        }
+
+        /** How many keys were hashed (a test seam: an over-size data: picture must cost none). */
+        internal val keysComputed = java.util.concurrent.atomic.AtomicInteger()
     }
 }
 
