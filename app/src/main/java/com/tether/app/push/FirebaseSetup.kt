@@ -122,8 +122,9 @@ fun interface FirebaseInitializer {
  * origin it came from, and **first use wins**:
  * - Explicit [override] (dev/test only; [FirebaseConfig.FromEnv] works only
  *   where a process environment exists, never in an app process): used as is.
- * - The same server, same project: applied (a rotated key or app id is fine).
- * - The same server, a **different project**: not switched silently. The saved
+ * - The same server, same project: applied (a rotated API key is fine).
+ * - The same server, a **different project** (project id, sender id or app id,
+ *   see [sameProjectAs]): not switched silently. The saved
  *   project stays up and [FirebaseSetup.ProjectChanged] is reported. Re-pairing
  *   (logout, [forget]) accepts the new one.
  * - The same server, no client block: its saved config is reused.
@@ -131,8 +132,8 @@ fun interface FirebaseInitializer {
  * - Another server, **no client block**: the old config is not reused. The old
  *   project's token is deleted, the default app is deleted, the binding is
  *   cleared, and push is [FirebaseSetup.Unavailable].
- * - Before the default app switches to another project, the old project's token
- *   is deleted, so the server that held it prunes the row.
+ * - Before the default app switches to another project (same comparison), the
+ *   old project's token is deleted, so the server that held it prunes the row.
  *
  * [restore] brings the saved project up at app start, so a cold-start FCM
  * delivery finds FirebaseApp ready before any sync has run. (The SDK tolerates
@@ -164,7 +165,7 @@ class AndroidFirebaseInitializer(
                 if (saved != null) store.clear()
                 FirebaseSetup.Unavailable
             }
-            sameServer && saved!!.config.projectId != serverConfig.projectId -> {
+            sameServer && !saved!!.config.toOptions().sameProjectAs(serverConfig.toOptions()) -> {
                 // Keep what this device accepted; make sure it is the one running.
                 switchTo(saved.config.toOptions())
                 FirebaseSetup.ProjectChanged
@@ -199,7 +200,7 @@ class AndroidFirebaseInitializer(
             else -> {
                 // The old project's token must die while its app is still the
                 // default (FirebaseMessaging resolves through it).
-                if (existing.options.projectId != wanted.projectId) deleteCurrentToken()
+                if (!existing.options.sameProjectAs(wanted)) deleteCurrentToken()
                 existing.delete()
                 FirebaseApp.initializeApp(context, wanted)
             }
@@ -226,6 +227,16 @@ class AndroidFirebaseInitializer(
     private fun defaultApp(): FirebaseApp? =
         FirebaseApp.getApps(context).firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
 }
+
+/**
+ * The pinned identity: project id, sender id (the project number FCM tokens
+ * are issued for) and app id. A server that keeps its project id but names
+ * another sender or app would move this device's token to someone else's
+ * project, so any of the three changing is a project change. Only the API key
+ * may rotate silently.
+ */
+internal fun FirebaseOptions.sameProjectAs(other: FirebaseOptions): Boolean =
+    projectId == other.projectId && gcmSenderId == other.gcmSenderId && applicationId == other.applicationId
 
 /** A [FirebaseClientConfig] and the server origin it was first accepted from. */
 data class BoundFirebaseConfig(val origin: String, val config: FirebaseClientConfig)

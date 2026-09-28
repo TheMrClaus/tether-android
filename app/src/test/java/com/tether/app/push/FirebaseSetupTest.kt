@@ -165,6 +165,69 @@ class FirebaseSetupTest {
         assertNull("no fcm-register", server.takeRequest(500, TimeUnit.MILLISECONDS))
     }
 
+    /** [fakeClient] with one pinned field changed; built directly, so no parse rule hides a field. */
+    private val accepted get() = parse(fakeClient)!!
+    private val pinnedFieldChanges get() = mapOf(
+        "projectId" to accepted.copy(projectId = "fake-project-09"),
+        "senderId" to accepted.copy(senderId = "999999999999"),
+        "appId" to accepted.copy(appId = "1:123456789012:android:00000000000000ff"),
+        // A server keeping the project id but naming another project's number (a
+        // pair that parse accepts): its sender and app id both differ.
+        "senderId+appId" to parse(
+            fakeClient.replace("123456789012", "555555555555"),
+        )!!,
+    )
+
+    @Test
+    fun theSameServerChangingAnyPinnedFieldIsAProjectChange() = runBlocking {
+        for ((field, changed) in pinnedFieldChanges) {
+            FirebaseApp.clearInstancesForTest()
+            FirebaseClientConfigStore(context).clear()
+            deletedFor.clear()
+            val init = initializer()
+            assertEquals(FirebaseSetup.Ready, init.ensure(accepted, originA))
+
+            assertEquals(field, FirebaseSetup.ProjectChanged, init.ensure(changed, originA))
+
+            assertEquals(field, accepted.toOptions(), FirebaseApp.getInstance().options)
+            assertEquals(field, BoundFirebaseConfig(originA, accepted), FirebaseClientConfigStore(context).load())
+            assertEquals(field, emptyList<String?>(), deletedFor)
+        }
+    }
+
+    @Test
+    fun switchingToAnyChangedPinnedFieldDeletesTheOldTokenFirst() = runBlocking {
+        for ((field, changed) in pinnedFieldChanges) {
+            FirebaseApp.clearInstancesForTest()
+            FirebaseClientConfigStore(context).clear()
+            val deletedWhileRunning = mutableListOf<FirebaseOptions?>()
+            val init = AndroidFirebaseInitializer(
+                context,
+                deleteCurrentToken = { deletedWhileRunning += FirebaseApp.getApps(context).firstOrNull()?.options },
+            )
+            init.ensure(accepted, originA)
+
+            // Another server (no pin applies): the switch is allowed, the old token dies first.
+            assertEquals(field, FirebaseSetup.Ready, init.ensure(changed, originB))
+
+            assertEquals(field, listOf<FirebaseOptions?>(accepted.toOptions()), deletedWhileRunning)
+            assertEquals(field, changed.toOptions(), FirebaseApp.getInstance().options)
+        }
+    }
+
+    @Test
+    fun aRotatedApiKeyAloneIsAppliedWithoutATokenDelete() = runBlocking {
+        val init = initializer()
+        init.ensure(accepted, originA)
+        val rotated = accepted.copy(apiKey = "fake-api-key-not-a-real-key-2222")
+
+        assertEquals(FirebaseSetup.Ready, init.ensure(rotated, originA))
+
+        assertEquals("fake-api-key-not-a-real-key-2222", FirebaseApp.getInstance().options.apiKey)
+        assertEquals(BoundFirebaseConfig(originA, rotated), FirebaseClientConfigStore(context).load())
+        assertEquals(emptyList<String?>(), deletedFor)
+    }
+
     @Test
     fun afterLogoutARePairAcceptsTheNewProject() = runBlocking {
         val init = initializer()
