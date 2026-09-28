@@ -19,7 +19,7 @@ choices, permission grants or denials), so these are built from the reducer corp
   the reason, `Working directory · …` and `Network · https://…` lines, the input as pretty JSON.
 - `approval-grants`: the T6.3 permission paths. The "Requested permission expansion" fieldset, a checkbox per
   requested read and write path and for network access (all ticked at first, editable only when a `subset`
-  choice exists), the warning-coloured "Confirm the complete permission expansion shown above." box, Allow all
+  choice exists), the warning-coloured "Confirm these permissions: …" box (round 4: it names what is ticked), Allow all
   (exact, disabled until confirmed), Allow selected (subset: disabled with nothing ticked, and, with every box
   ticked, until confirmed, see below), Deny. Round 2 re-recorded these 8 goldens: with everything ticked at
   first, Allow selected now renders disabled.
@@ -54,26 +54,31 @@ Divergences from the web, on purpose:
   adds space around the link.
 - Provider and agent text on a card is cut at 4,000 characters for display (the answer keys keep the full
   question text). The web does not cut.
-- "Allow selected" with every requested box ticked IS the full expansion, so it needs the same confirmation as
-  "Allow all"; the confirmation box therefore shows for a `subset` choice too (the web: `exact` only).
+- Every permission-granting choice needs a confirmation (coordinator decision, round 4; the web asks only
+  for "exact"): the box reads "Confirm these permissions: read …; write …; network access." and names exactly
+  what is ticked. It is never saved and clears whenever the card is re-created or anything is ticked or
+  unticked, so it is always made on the card on screen, after the last change. "Allow all" also needs every
+  box ticked (it grants the full request, so the confirmation has to have named all of it). A path listed
+  twice in a request is one permission (unticking either row unticks it).
 - Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
   `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
   500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
-- Card state is bound to the exact request and kept per chat screen, not per row. Its identity is the
-  request's content fingerprint (the canonical request plus its turn, without the server origin); the lazy
-  row's key carries it, so a request re-raised under the same id with other content is a new card that starts
-  fully ticked, unconfirmed and on page 1, whether it changed on screen, off screen or across a restore.
-  The ticks, a question's page, picks, "Other" text and skips live in one saved store above the transcript
-  and the run tabs, by index (never the server's text), so they survive a scroll, a tab switch, a link drop
-  and reconnect to the same server, backgrounding and a configuration change. The "confirm the complete
-  expansion" tick is never saved: after any re-creation the operator confirms again. If a record is ever lost
-  (the store keeps the newest 64 per kind), the card comes back fully ticked, which needs the confirmation.
-  After process death a decision may be made again (the in-memory ledger died with the process); a decision
-  sent on a socket that then dropped says "Sent before the connection dropped — delivery unconfirmed" and is
-  never sent again. A question page change re-arms the 500 ms delay, and a touch refused because of an overlay
-  says so: "A screen overlay is blocking this card."
-- Question answers are validated like approval choices: every value is offered option labels (one at most on
-  a single-select question) and, optionally, the operator's own "Other" text, which must also be a line of
-  the response. An "Other" field drops line breaks, as an HTML text input does.
+- Card state is bound to the exact request and kept per app window, not per row. Its identity is the
+  request's card fingerprint (the canonical request, its turn and its session, without the server origin); the
+  lazy row's key carries it, so a request re-raised under the same id with other content is a new card that
+  starts fully ticked, unconfirmed and on page 1, whether it changed on screen, off screen or across a restore.
+  The ticks, a question's page, picks (by label), "Other" text (capped at 4,000 characters) and skips live in
+  one saved store held by the shell above the phone / expanded layout switch, by index (never the server's
+  text), so they survive a scroll, a tab switch, a rotation or window resize across 840dp, a session switch, a
+  link drop and reconnect to the same server, backgrounding and a configuration change. The confirmation is
+  never saved (above). If a record is lost (the store keeps the newest 64 per kind), the card comes back fully
+  ticked AND unconfirmed. After process death a decision may be made again (the in-memory ledger died with the
+  process); a decision sent on a socket that then dropped says "Sent before the connection dropped — delivery
+  unconfirmed" and is never sent again. A question page change re-arms the 500 ms delay, and a touch refused
+  because of an overlay says so: "A screen overlay is blocking this card."
+- Question answers are built by the client, not by the card: the card sends which options (by label) and
+  what "Other" text per question; the client checks every index against the request and builds the answer
+  strings exactly as the web's `buildQuestionAnswers` does (the conformance test compares them). An "Other"
+  field drops line breaks, as an HTML text input does.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.
