@@ -48,6 +48,9 @@ class ConnectionPolicyTest {
         assertNull(Compatibility.evaluate(129, 129))
         assertNull(Compatibility.evaluate(140, 100))
         assertNull(Compatibility.evaluate(serverProtocolVersion = null, nativeProtocolFloor = 129))
+        // ta-s4r: what the deployed server now advertises (lib/protocol.ts PROTOCOL_VERSION 131,
+        // NATIVE_PROTOCOL_FLOOR 129) is inside this app's window.
+        assertNull(Compatibility.evaluate(131, 129))
     }
 
     @Test

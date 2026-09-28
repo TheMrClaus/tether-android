@@ -124,7 +124,8 @@ class AuthFlowsTest {
     @Test
     fun loginSendsTheSameBytesAsTheWebFormWithNothingAltered() {
         newClient()
-        h.server.enqueue(health())
+        // The deployed server's /healthz (protocol 131, native floor 129): the pre-flight passes.
+        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":131,"nativeProtocolFloor":129,"pairing":true}"""))
         h.server.enqueue(MockResponse().setBody("""{"ok":true}""").addHeader("set-cookie", "tether_session=s; Path=/; HttpOnly"))
         val password = "  Pä\"ss\\wörd é "
         assertEquals(LoginResult.Success, runBlocking { h.client.login(base, password, "Operator") })
