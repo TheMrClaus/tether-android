@@ -59,7 +59,13 @@ Divergences from the web, on purpose:
   what is ticked. It is never saved and clears whenever the card is re-created or anything is ticked or
   unticked, so it is always made on the card on screen, after the last change. "Allow all" also needs every
   box ticked (it grants the full request, so the confirmation has to have named all of it). A path listed
-  twice in a request is one permission (unticking either row unticks it).
+  twice in a request is one permission (unticking either row unticks it). The confirmation is bound to the
+  exact state it was made in, and a grant key re-reads the ticks at the moment of the tap, so an untick
+  landing in the same instant as the tap (two fingers) sends nothing.
+- Paths on a grant card are shown quoted, cut at 160 characters with "…", with control, line-separator and
+  bidi characters written out as `\uXXXX`, so no path can pose as part of the sentence around it (the web
+  shows them raw). The grant itself carries the raw path. Round 5 re-recorded the 8 `approval-grants` goldens
+  for the quotes.
 - Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
   `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
   500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
