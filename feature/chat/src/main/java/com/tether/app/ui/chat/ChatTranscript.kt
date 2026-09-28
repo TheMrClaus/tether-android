@@ -126,24 +126,14 @@ internal fun ChatTranscript(
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
     val spacing = transcriptSpacing(t, phone)
     // T6.2: the reader's activity-group toggles, each remembered with the default it overrode
-    // (a `<details open={default}>` resets when its default changes, as React drives it).
-    var groupToggles by rememberSaveable(stateSaver = GroupTogglesSaver) { mutableStateOf(emptyMap<String, GroupToggle>()) }
-    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles) {
-        buildChatItems(projection, tree, showThinking, zone, richCodex) { key, default ->
-            groupToggles[key]?.takeIf { it.default == default }?.open ?: default
-        }
+    // (a `<details open={default}>` resets when its default changes, as React drives it). The
+    // reset is applied where the default is READ (GroupToggles.resolve, while the rows are built),
+    // so a toggle whose default changed is gone before any later build can see the default flip back.
+    val groupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() }
+    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version) {
+        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve)
     }
-    // A changed default resets the element (React re-sets `open`): the stale toggle is dropped for
-    // good, so the old choice cannot come back when the default flips back.
-    LaunchedEffect(items) {
-        val stale = items.filterIsInstance<ChatItem.ToolGroup>()
-            .filter { g -> groupToggles[g.key]?.let { it.default != g.defaultOpen } == true }
-            .map { it.key }
-        if (stale.isNotEmpty()) groupToggles = groupToggles - stale.toSet()
-    }
-    val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember {
-        { group -> groupToggles = groupToggles + (group.key to GroupToggle(group.defaultOpen, !group.open)) }
-    }
+    val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
 
@@ -404,13 +394,44 @@ internal fun ToolBlockView(block: JsObj, flags: ToolRenderFlags, nested: Boolean
 /** A reader's toggle of one activity group, and the default it overrode. */
 internal data class GroupToggle(val default: Boolean, val open: Boolean)
 
-internal val GroupTogglesSaver: Saver<Map<String, GroupToggle>, Any> = Saver(
-    save = { map -> ArrayList(map.map { (k, v) -> "${if (v.default) 1 else 0}${if (v.open) 1 else 0}$k" }) },
-    restore = { saved ->
-        @Suppress("UNCHECKED_CAST")
-        (saved as List<String>).associate { it.substring(2) to GroupToggle(it[0] == '1', it[1] == '1') }
-    },
-)
+/**
+ * The reader's group toggles. [resolve] is the only reader: a toggle recorded against another
+ * default is dropped there and then (React re-sets `open` when the prop changes), so it can never
+ * come back even if the default flips twice between two builds of the rows. [version] is the
+ * snapshot state a toggle bumps to rebuild the rows; a drop needs no rebuild (the row just built
+ * already shows the default).
+ */
+internal class GroupToggles(initial: Map<String, GroupToggle> = emptyMap()) {
+    private val map = HashMap(initial)
+    var version by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+
+    fun resolve(key: String, default: Boolean): Boolean {
+        val toggle = map[key] ?: return default
+        if (toggle.default != default) {
+            map.remove(key)
+            return default
+        }
+        return toggle.open
+    }
+
+    fun toggle(group: ChatItem.ToolGroup) {
+        map[group.key] = GroupToggle(group.defaultOpen, !group.open)
+        version++
+    }
+
+    fun snapshot(): Map<String, GroupToggle> = HashMap(map)
+
+    companion object {
+        val Saver: Saver<GroupToggles, Any> = Saver(
+            save = { store -> ArrayList(store.snapshot().map { (k, v) -> "${if (v.default) 1 else 0}${if (v.open) 1 else 0}$k" }) },
+            restore = { saved ->
+                @Suppress("UNCHECKED_CAST")
+                GroupToggles((saved as List<String>).associate { it.substring(2) to GroupToggle(it[0] == '1', it[1] == '1') })
+            },
+        )
+    }
+}
 
 /** The engine gates: `provider` + `engineGeneration` (chat-view.tsx:2122-2127). */
 fun isRichCodexSession(provider: String?, engineGeneration: String?): Boolean =

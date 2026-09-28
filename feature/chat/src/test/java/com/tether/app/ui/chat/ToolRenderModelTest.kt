@@ -173,6 +173,15 @@ class ToolRenderModelTest {
         assertEquals("196%", zoomLabel(1.96f))
     }
 
+    @Test fun aPreDropsOneTrailingNewlineLikeTheBrowser() {
+        // `<pre>a\n</pre>` lays out one line; "a\n\n" keeps its blank line.
+        assertEquals("# tests 4\n# pass 4", preText("# tests 4\n# pass 4\n"))
+        assertEquals("a\n", preText("a\n\n"))
+        assertEquals("a", preText("a"))
+        assertEquals("", preText("\n"))
+        assertEquals("", preText(""))
+    }
+
     @Test fun jsTrimMatchesStringPrototypeTrim() {
         assertEquals("a", jsTrim("\uFEFF  a \t"))
         assertEquals("\u0085a", jsTrim("\u0085a"))

@@ -292,44 +292,126 @@ class ToolCardBehaviourTest {
         assertEquals(listOf("src/config.ts", "gone.ts"), requested)
     }
 
-    @Test fun theRepositoryDecodesDataUrisFetchesMediaRefsAndCaches() = runBlocking {
+    private val png: ByteArray by lazy {
+        val out = java.io.ByteArrayOutputStream()
+        android.graphics.Bitmap.createBitmap(48, 32, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        out.toByteArray()
+    }
+    private val clipBytes = ByteArray(4096) { (it * 7).toByte() }
+    private val pngUrl by lazy { "/api/tool-media/${sha256Hex(png)}.png" }
+    private val clipUrl by lazy { "/api/tool-media/${sha256Hex(clipBytes)}.mp4" }
+
+    /** Serves [png] / [clipBytes] (or [swap] bytes: a server replacing content under a known name). */
+    private inner class Source(var swap: ByteArray? = null) : ToolMediaSource {
         val calls = mutableListOf<Pair<String, Long>>()
-        val png = run {
-            val out = java.io.ByteArrayOutputStream()
-            val bmp = android.graphics.Bitmap.createBitmap(48, 32, android.graphics.Bitmap.Config.ARGB_8888)
-            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-            out.toByteArray()
+        override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+            calls += url to maxBytes
+            if (url.endsWith("f.png")) return ToolMediaResult.TooLarge
+            val bytes = swap ?: if (url.endsWith(".mp4")) clipBytes else png
+            sink.write(bytes)
+            return ToolMediaResult.Ok(bytes.size.toLong(), if (url.endsWith(".mp4")) "video/mp4" else "image/png")
         }
-        val source = object : ToolMediaSource {
-            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
-                calls += url to maxBytes
-                if (url.endsWith("f.png")) return ToolMediaResult.TooLarge
-                sink.write(png)
-                return ToolMediaResult.Ok(png.size.toLong(), "image/png")
-            }
-        }
-        val repo = ToolMediaRepository(source, rule.activity.cacheDir)
+    }
+
+    private val origin = "https://tether.example"
+
+    @Test fun theRepositoryDecodesDataUrisFetchesMediaRefsAndCaches() = runBlocking {
+        val source = Source()
+        val calls = source.calls
+        val repo = ToolMediaRepository(source, rule.activity.cacheDir, origin)
         val b64 = android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP)
         val inline = repo.image(ToolMediaItem("image", "image/png", "data:image/png;base64,$b64")) as MediaImage.Ok
         assertEquals(48, inline.bitmap.width)
         assertTrue(calls.isEmpty())
-        val url = "/api/tool-media/${"ab".repeat(32)}.png"
-        assertTrue(repo.image(ToolMediaItem("image", "image/png", url)) is MediaImage.Ok)
-        assertTrue(repo.image(ToolMediaItem("image", "image/png", url)) is MediaImage.Ok)
-        assertEquals(listOf(url to MediaLimits.MAX_IMAGE_BYTES), calls)
+        assertTrue(repo.image(ToolMediaItem("image", "image/png", pngUrl)) is MediaImage.Ok)
+        assertTrue(repo.image(ToolMediaItem("image", "image/png", pngUrl)) is MediaImage.Ok)
+        assertEquals(listOf(pngUrl to MediaLimits.MAX_IMAGE_BYTES), calls)
         assertEquals(MediaImage.TooLarge, repo.image(ToolMediaItem("image", "image/png", "/api/tool-media/${"f".repeat(64)}.png")))
-        // Not a server path, a non-image data URI, garbage base64: refused locally.
+        // Not a server path, garbage base64: refused locally.
         assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", "https://evil.test/x.png")))
-        assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "text/html", "data:text/html;base64,PGI+")))
         assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", "data:image/png;base64,!!!")))
         assertEquals(2, calls.size)
-        // A clip downloads once to the content-addressed cache, bounded by the server's cap.
-        val clip = "/api/tool-media/${"cd".repeat(32)}.mp4"
-        assertTrue(repo.video(ToolMediaItem("video", "video/mp4", clip)) is MediaVideo.Ok)
-        assertTrue(repo.video(ToolMediaItem("video", "video/mp4", clip)) is MediaVideo.Ok)
-        assertEquals(clip to MediaLimits.MAX_VIDEO_BYTES, calls.last())
+        // A clip downloads once to the server's content-addressed cache, bounded by the server's cap.
+        val first = repo.video(ToolMediaItem("video", "video/mp4", clipUrl)) as MediaVideo.Ok
+        assertEquals(ToolMediaCache.dirFor(rule.activity.cacheDir, origin), first.file.parentFile)
+        assertTrue(first.file.readBytes().contentEquals(clipBytes))
+        assertTrue(repo.video(ToolMediaItem("video", "video/mp4", clipUrl)) is MediaVideo.Ok)
+        assertEquals(clipUrl to MediaLimits.MAX_VIDEO_BYTES, calls.last())
         assertEquals(3, calls.size)
         assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", "/api/tool-media/../../x.mp4")))
+        // Without a paired origin there is nowhere to keep a clip.
+        assertEquals(MediaVideo.Failed, ToolMediaRepository(source, rule.activity.cacheDir, null).video(ToolMediaItem("video", "video/mp4", clipUrl)))
+    }
+
+    @Test fun aDataUriIsDecodedOnlyForAnImageType() = runBlocking {
+        val repo = ToolMediaRepository(Source(), rule.activity.cacheDir, origin)
+        val b64 = android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP)
+        // The SAME valid PNG bytes: decoded as image/png, refused under any other declared type.
+        assertTrue(repo.image(ToolMediaItem("image", "image/png", "data:image/png;base64,$b64")) is MediaImage.Ok)
+        for (type in listOf("text/html", "image/svg+xml", "application/octet-stream", "image/PNG", "video/mp4")) {
+            assertEquals(type, MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", "data:$type;base64,$b64")))
+        }
+    }
+
+    @Test fun bytesThatDoNotHashToTheirNameAreNeverShownOrKept() = runBlocking {
+        val source = Source(swap = "not the named content".toByteArray())
+        val repo = ToolMediaRepository(source, rule.activity.cacheDir, origin)
+        assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", pngUrl)))
+        assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", clipUrl)))
+        val dir = ToolMediaCache.dirFor(rule.activity.cacheDir, origin)
+        assertTrue("nothing kept: ${dir.list()?.toList()}", dir.list().isNullOrEmpty())
+        // Even a real PNG under another image's name is refused.
+        source.swap = png
+        assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", "/api/tool-media/${"0".repeat(64)}.png")))
+    }
+
+    @Test fun theClipCacheIsScopedToOneSignInAndEvicted() {
+        val cache = rule.activity.cacheDir
+        val here = ToolMediaCache.dirFor(cache, origin).apply { mkdirs() }
+        val there = ToolMediaCache.dirFor(cache, "https://other.example").apply { mkdirs() }
+        java.io.File(here, "a.mp4").writeBytes(ByteArray(10))
+        java.io.File(there, "b.mp4").writeBytes(ByteArray(10))
+        assertTrue("the origin never lands on disk", here.name.matches(Regex("[0-9a-f]{16}")))
+        ToolMediaCache.sync(cache, signedIn = true, origin = origin)
+        assertTrue(java.io.File(here, "a.mp4").exists())
+        assertTrue("another server's clips go", !there.exists())
+        ToolMediaCache.sync(cache, signedIn = false, origin = origin)
+        assertTrue("a sign-out drops them all", !java.io.File(cache, ToolMediaCache.DIR).exists())
+
+        // Eviction: past the age, or oldest first past the size cap.
+        here.mkdirs()
+        val now = 1_000_000_000_000L
+        val old = java.io.File(here, "old.mp4").apply { writeBytes(ByteArray(10)); setLastModified(now - ToolMediaCache.MAX_AGE_MS - 1) }
+        val a = java.io.File(here, "a.mp4").apply { writeBytes(ByteArray(60)); setLastModified(now - 3_000) }
+        val b = java.io.File(here, "b.mp4").apply { writeBytes(ByteArray(60)); setLastModified(now - 2_000) }
+        val stuck = java.io.File(here, "c.mp4.part").apply { writeBytes(ByteArray(1)); setLastModified(now - 120_000) }
+        ToolMediaCache.evict(here, now, maxBytes = 100)
+        assertTrue(!old.exists() && !stuck.exists())
+        assertTrue("oldest goes first past the cap", !a.exists() && b.exists())
+    }
+
+    @Test fun groupTogglesDropWhereTheDefaultIsRead() {
+        val toggles = GroupToggles()
+        val group = ChatItem.ToolGroup("t1", "b1", "1 shell command", running = true, hasErrors = false, defaultOpen = true, open = true, startsGroup = true)
+        toggles.toggle(group) // closed while running
+        assertEquals(false, toggles.resolve(group.key, true))
+        // The default flips (the run finished) and flips back (a new call) before the next paint:
+        // the first read of the new default drops the toggle, so the old "closed" cannot return.
+        assertEquals(false, toggles.resolve(group.key, false))
+        assertEquals(true, toggles.resolve(group.key, true))
+        assertEquals(1, toggles.version)
+    }
+
+    @Test fun theEngineGatesNeedTheProviderAndItsGeneration() {
+        assertTrue(isRichCodexSession("codex", "codex-app-server-v2"))
+        assertTrue(!isRichCodexSession("codex", null))
+        assertTrue(!isRichCodexSession("codex", "codex-exec-v1"))
+        assertTrue(!isRichCodexSession("claude", "codex-app-server-v2"))
+        assertTrue(!isRichCodexSession(null, null))
+        assertTrue(isRichOpencodeSession("opencode", "opencode-serve-v2"))
+        assertTrue(!isRichOpencodeSession("opencode", null))
+        assertTrue(!isRichOpencodeSession("opencode", "opencode-run-v1"))
+        assertTrue(!isRichOpencodeSession("codex", "opencode-serve-v2"))
     }
 
     @Test fun aDecompressionBombIsRefusedBeforeItsPixelsAreDecoded() {

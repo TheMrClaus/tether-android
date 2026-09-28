@@ -238,6 +238,13 @@ internal fun ToolStateIcon(state: ToolState, size: Dp = 14.dp) {
 
 // --- Monospace payloads ------------------------------------------------------------------------
 
+/**
+ * A `<pre>`'s text as the browser lays it out: a single newline right at the end of the content
+ * starts no new line box (HTML drops it), while a Compose Text would draw an empty last line.
+ * Only that one newline goes; "a\n\n" still shows its blank line, as on the web.
+ */
+internal fun preText(text: String): String = if (text.endsWith("\n")) text.substring(0, text.length - 1) else text
+
 /** `.chat-tool-io` / `.chat-tool-output` text style (mono 0.76rem/1.65; Studio 0.75rem/1.7). */
 @Composable
 internal fun toolIoStyle(): TextStyle {
@@ -263,7 +270,7 @@ internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription
     val line = t.line
     val doubleRule = output && !studio
     TetherExpandablePre(
-        text = text,
+        text = preText(text),
         style = toolIoStyle(),
         color = t.ink,
         clamp = toolClamp(),

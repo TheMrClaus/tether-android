@@ -89,7 +89,8 @@ fun ChatScreen(
 
     // T6.2: tool / attachment / spawned-run media over the paired, no-redirect HTTP path.
     val context = LocalContext.current
-    val mediaLoader = remember(vm.client) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir) }
+    val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
+    val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl) }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val runs = remember(projection) { collectSubagentRuns(projection) }

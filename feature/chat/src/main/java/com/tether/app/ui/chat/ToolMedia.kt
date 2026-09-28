@@ -198,11 +198,62 @@ internal fun parseDataUri(src: String): Pair<String, String>? {
 }
 
 /**
- * The production [ToolMediaLoader]: `data:` pictures (legacy base64 tool results) decode locally,
- * `/api/tool-media/…` ones come over [source]; decoded pictures are cached by URL (the URL names
- * the content's sha256), clips under [cacheDir] by the same content address.
+ * The on-disk clip cache (`<cacheDir>/tool-media/<origin key>/<sha256>.mp4`), one directory per
+ * paired server. [sync] runs whenever the sign-in changes: signed out, everything goes; signed in,
+ * every other server's directory goes. [evict] keeps a directory under [MAX_BYTES] and drops files
+ * older than [MAX_AGE_MS], oldest first. Content-addressed files are only kept after their bytes
+ * hash to their own name (see [ToolMediaRepository]).
  */
-class ToolMediaRepository(private val source: ToolMediaSource, private val cacheDir: File) : ToolMediaLoader {
+object ToolMediaCache {
+    const val DIR = "tool-media"
+    const val MAX_BYTES: Long = 256L * 1024L * 1024L
+    const val MAX_AGE_MS: Long = 7L * 24 * 60 * 60 * 1000
+
+    /** The directory name for one server: a hash of its origin (the URL itself never lands on disk). */
+    fun originKey(origin: String): String = sha256Hex(origin.toByteArray(Charsets.UTF_8)).substring(0, 16)
+
+    fun dirFor(cacheDir: File, origin: String): File = File(File(cacheDir, DIR), originKey(origin))
+
+    fun sync(cacheDir: File, signedIn: Boolean, origin: String?) {
+        val root = File(cacheDir, DIR)
+        if (!signedIn || origin == null) {
+            root.deleteRecursively()
+            return
+        }
+        val keep = originKey(origin)
+        root.listFiles()?.forEach { if (it.name != keep) it.deleteRecursively() }
+    }
+
+    fun evict(dir: File, now: Long = System.currentTimeMillis(), maxBytes: Long = MAX_BYTES, maxAgeMs: Long = MAX_AGE_MS) {
+        val files = dir.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (file in files) {
+            val stale = now - file.lastModified() > maxAgeMs || file.name.endsWith(".part") && now - file.lastModified() > 60_000
+            if (stale || total > maxBytes) {
+                total -= file.length()
+                file.delete()
+            }
+        }
+    }
+}
+
+internal fun sha256Hex(bytes: ByteArray): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+/** The sha256 a `/api/tool-media/<sha256>.<ext>` path names (the server content-addresses by it). */
+internal fun namedSha256(src: String): String? = if (ToolMediaSource.extensionOf(src) != null) src.substringAfterLast('/').substringBefore('.') else null
+
+/**
+ * The production [ToolMediaLoader]: `data:` pictures (legacy base64 tool results) decode locally,
+ * `/api/tool-media/…` ones come over [source]; decoded pictures are cached by URL, clips under the
+ * server's [ToolMediaCache] directory. Fetched bytes must hash to the sha256 their path names,
+ * else they are dropped: a server cannot swap content under a name the transcript already holds.
+ */
+class ToolMediaRepository(
+    private val source: ToolMediaSource,
+    private val cacheDir: File,
+    private val origin: String? = null,
+) : ToolMediaLoader {
     private val cache = object : LruCache<String, ImageBitmap>(MediaLimits.CACHE_BYTES) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
@@ -232,7 +283,10 @@ class ToolMediaRepository(private val source: ToolMediaSource, private val cache
         if (ext == "mp4") return MediaImage.Failed
         val sink = ByteArrayOutputStream()
         return when (source.fetch(src, MediaLimits.MAX_IMAGE_BYTES, sink)) {
-            is ToolMediaResult.Ok -> BoundedMediaDecoder.decode(sink.toByteArray())
+            is ToolMediaResult.Ok -> {
+                val bytes = sink.toByteArray()
+                if (sha256Hex(bytes) != namedSha256(src)) MediaImage.Failed else BoundedMediaDecoder.decode(bytes)
+            }
             ToolMediaResult.TooLarge -> MediaImage.TooLarge
             else -> MediaImage.Failed
         }
@@ -240,20 +294,26 @@ class ToolMediaRepository(private val source: ToolMediaSource, private val cache
 
     override suspend fun video(item: ToolMediaItem): MediaVideo = withContext(Dispatchers.IO) {
         val ext = ToolMediaSource.extensionOf(item.src)
-        if (ext != "mp4") return@withContext MediaVideo.Failed
-        val dir = File(cacheDir, "tool-media").apply { mkdirs() }
-        val name = item.src.substringAfterLast('/')
-        val file = File(dir, name)
-        if (file.isFile && file.length() > 0) return@withContext MediaVideo.Ok(file)
-        val part = File(dir, "$name.part")
+        if (ext != "mp4" || origin == null) return@withContext MediaVideo.Failed
+        val expected = namedSha256(item.src) ?: return@withContext MediaVideo.Failed
+        val dir = ToolMediaCache.dirFor(cacheDir, origin).apply { mkdirs() }
+        ToolMediaCache.evict(dir)
+        val file = File(dir, "$expected.mp4")
+        if (file.isFile && file.length() > 0) {
+            file.setLastModified(System.currentTimeMillis())
+            return@withContext MediaVideo.Ok(file)
+        }
+        val part = File(dir, "$expected.mp4.part")
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
         val result = try {
-            FileOutputStream(part).use { out -> source.fetch(item.src, MediaLimits.MAX_VIDEO_BYTES, out) }
+            java.security.DigestOutputStream(FileOutputStream(part), digest).use { out -> source.fetch(item.src, MediaLimits.MAX_VIDEO_BYTES, out) }
         } catch (_: java.io.IOException) {
             ToolMediaResult.Failed()
         }
-        when (result) {
-            is ToolMediaResult.Ok -> if (part.renameTo(file)) MediaVideo.Ok(file) else MediaVideo.Failed.also { part.delete() }
-            ToolMediaResult.TooLarge -> MediaVideo.TooLarge.also { part.delete() }
+        val hashed = digest.digest().joinToString("") { "%02x".format(it) }
+        when {
+            result is ToolMediaResult.Ok && hashed == expected && part.renameTo(file) -> MediaVideo.Ok(file).also { ToolMediaCache.evict(dir) }
+            result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge.also { part.delete() }
             else -> MediaVideo.Failed.also { part.delete() }
         }
     }

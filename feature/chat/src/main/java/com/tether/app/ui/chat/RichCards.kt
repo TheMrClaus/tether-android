@@ -189,7 +189,7 @@ private fun RichPre(text: String, background: Color, contentDescription: String?
     val type = LocalTetherTypography.current
     val line = t.line
     TetherExpandablePre(
-        text = text,
+        text = preText(text),
         style = type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.55.em),
         color = t.ink,
         clamp = toolClamp(),
