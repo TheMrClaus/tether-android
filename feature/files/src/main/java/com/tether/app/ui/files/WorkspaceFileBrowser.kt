@@ -11,14 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,30 +31,34 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.tether.app.client.WorkspaceFileEntry
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tether.app.client.TetherClient
 import com.tether.app.client.WorkspaceFiles
+import kotlinx.coroutines.flow.Flow
 import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 
 /**
- * The browser's state for the signed-in shell, on [files] (the client's `/api/files` routes).
- * Leaving composition (sign-out, a server switch) empties the scratch cache, shared copies
- * included: nothing a session downloaded outlives it on the device.
+ * The browser for the signed-in shell, on the client's `/api/files` routes. It lives in a
+ * [FileBrowserViewModel], so a configuration change (rotation) keeps it — open, in its folder,
+ * with any save or upload still running — and its teardown follows the client's signed-in
+ * identity, not composition: sign-out or another server empties the scratch cache, shared copies
+ * included, so nothing a session downloaded outlives it on the device.
  */
 @Composable
-fun rememberFileBrowserState(files: WorkspaceFiles): FileBrowserState {
+fun rememberFileBrowserState(client: TetherClient): FileBrowserState =
+    rememberFileBrowserState(client.files, remember(client) { FileBrowserViewModel.identityOf(client) })
+
+/** [rememberFileBrowserState] on [files], torn down when [identity] changes from its first signed-in value. */
+@Composable
+fun rememberFileBrowserState(files: WorkspaceFiles, identity: Flow<String?>): FileBrowserState {
     val context = LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
-    val platform = remember(context) { AndroidBrowserPlatform(context) }
-    val state = remember(files, platform) { FileBrowserState(files, platform, scope) }
-    DisposableEffect(state) {
-        onDispose {
-            state.close()
-            platform.sweep(SweepMode.All)
-        }
-    }
-    return state
+    val model = viewModel(key = VIEW_MODEL_KEY) { FileBrowserViewModel(files, AndroidBrowserPlatform(context), identity) }
+    return model.state
 }
+
+private const val VIEW_MODEL_KEY = "workspace-file-browser"
 
 /**
  * components/workspace-file-browser.tsx as a native modal: shown while [FileBrowserState.isOpen]
@@ -71,13 +73,18 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
 
     // Registered whether or not the browser is showing: a picker result can arrive in a new
     // activity (rotation while the system picker is up), where the browser starts closed.
+    // The folder the Upload key was pressed in, kept like the pending save target.
+    var uploadInto by rememberSaveable { mutableStateOf<String?>(null) }
     val pickUploads = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val destination = uploadInto
+        uploadInto = null
         state.upload(
             uris.map { uri ->
                 val (name, size) = ContentUploadSource.describe(resolver, uri)
                 // UploadNames checks the display name in the state before anything is sent.
                 PickedUpload(name, ContentUploadSource(resolver, uri, size))
             },
+            destination,
         )
     }
     var saving by rememberPendingSave()
@@ -102,6 +109,9 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
                 true
             } catch (_: ActivityNotFoundException) {
                 false
+            } catch (_: SecurityException) {
+                // A chooser the platform refuses to start for us: the copy goes, the app stays.
+                false
             }
             // Started: the copy lives out its window for the receiving app. Not: it goes now.
             state.shareHandled(started)
@@ -114,7 +124,10 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
         FileBrowserFrame(
             state = state,
             onClose = state::close,
-            onUpload = { pickUploads.launch(arrayOf("*/*")) },
+            onUpload = {
+                uploadInto = state.currentDir
+                pickUploads.launch(arrayOf("*/*"))
+            },
             modifier = Modifier.graphicsLayer {
                 val p = progress.value
                 alpha = p

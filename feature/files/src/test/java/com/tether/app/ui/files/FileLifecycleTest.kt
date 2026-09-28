@@ -57,7 +57,9 @@ class FileLifecycleTest {
     private val files = FakeFiles()
     private val docs = FakeDocs()
     private val target: Uri = Uri.parse("content://docs.example/document/7")
-    private val platform = AndroidBrowserPlatform(context, docs, cache, background = { it() })
+    // FileProvider caches its paths per authority for the process; Robolectric gives each test
+    // class its own cache dir, so the grant URI is stubbed here (FileBrowserRecreationTest runs the real one).
+    private val platform = AndroidBrowserPlatform(context, docs, cache, background = { it() }, uriFor = { Uri.fromFile(it) })
     private val entry = FilesFixtures.file("report.pdf", 5)
 
     @After fun tearDown() {
@@ -174,11 +176,12 @@ class FileLifecycleTest {
     // --- state: L2 (nothing escapes) and L3 (share after close) ---
 
     private val escaped = CopyOnWriteArrayList<Throwable>()
+    private val logged = CopyOnWriteArrayList<String>()
 
     private fun TestScope.browser(p: BrowserPlatform, f: FakeFiles = files): FileBrowserState {
         // The parent's handler would see anything the browser let escape.
         val parent = CoroutineScope(StandardTestDispatcher(testScheduler) + CoroutineExceptionHandler { _, e -> escaped += e })
-        return FileBrowserState(f, p, parent).apply {
+        return FileBrowserState(f, p, parent, log = { logged += it }).apply {
             cwd = ROOT
             f.listings[ROOT] = FilesResult.Ok(FilesFixtures.listing())
         }
@@ -198,6 +201,12 @@ class FileLifecycleTest {
         assertEquals(FilesCopy.ACTION_FALLBACK, s.mutationError)
         assertNull("the upload line is cleared", s.uploading)
         assertTrue("nothing reached the parent: $escaped", escaped.isEmpty())
+        // Logged by class name only: a message can carry a path or file content.
+        assertEquals(
+            listOf("file browser job failed: java.lang.IllegalStateException", "file browser job failed: java.lang.SecurityException"),
+            logged.toList(),
+        )
+        assertTrue(logged.none { "exploded" in it || "revoked" in it })
         // Still usable afterwards.
         s.loadDirectory(ROOT)
         advanceUntilIdle()

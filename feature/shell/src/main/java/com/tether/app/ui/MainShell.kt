@@ -118,7 +118,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val scope = rememberCoroutineScope()
     val refreshStats: () -> Unit = { scope.launch { logState.onStats(vm.client.fetchStats()) } }
     // T11.1: the workspace file browser (topbar Files key), on the selected session's cwd.
-    val fileBrowser = rememberFileBrowserState(vm.client.files)
+    val fileBrowser = rememberFileBrowserState(vm.client)
     SideEffect {
         fileBrowser.cwd = session?.cwd.orEmpty()
         fileBrowser.sessionName = session?.name.orEmpty()

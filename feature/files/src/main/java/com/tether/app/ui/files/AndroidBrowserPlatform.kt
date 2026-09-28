@@ -57,6 +57,8 @@ class AndroidBrowserPlatform(
     private val cache: FileCache = FileCache(context.cacheDir),
     /** Runs a sweep off the main thread (tests run it inline). */
     private val background: (() -> Unit) -> Unit = FileCache::sweepInBackground,
+    /** The content URI the share sheet gets (the provider's grant); a seam only for tests. */
+    private val uriFor: (File) -> Uri = { file -> FileProvider.getUriForFile(context, FileCache.authority(context), file) },
 ) : BrowserPlatform {
 
     /** Shared copies made but not yet handed to the share sheet, by id (their directory). */
@@ -148,7 +150,7 @@ class AndroidBrowserPlatform(
             when (result) {
                 is FilesResult.Failed -> result
                 is FilesResult.Ok -> {
-                    val uri = FileProvider.getUriForFile(context, FileCache.authority(context), file)
+                    val uri = uriFor(file)
                     handedOver = true
                     FilesResult.Ok(ShareReady(uri, mimeFor(file), file.name, parent.path))
                 }

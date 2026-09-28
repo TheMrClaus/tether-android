@@ -38,6 +38,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.activity.compose)
+    // The browser outlives a configuration change in a ViewModel (ta-u2n).
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     // FileProvider (sharing a downloaded copy out of the app cache).
     implementation(libs.androidx.core)
     implementation(libs.lucide.icons)

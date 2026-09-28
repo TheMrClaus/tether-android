@@ -1,6 +1,7 @@
 package com.tether.app.ui.files
 
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /** workspace-file-browser.tsx NamePromptMode. */
@@ -89,6 +91,8 @@ class FileBrowserState(
     private val files: WorkspaceFiles,
     private val platform: BrowserPlatform,
     parent: CoroutineScope,
+    /** Where an unexpected failure is reported: its exception CLASS name only, never a message (it may carry a path or content). */
+    private val log: (String) -> Unit = { line -> runCatching { Log.w(LOG_TAG, line) } },
 ) {
     /**
      * The browser's jobs: a child of [parent] that one failure cannot take down, with a handler so
@@ -96,7 +100,10 @@ class FileBrowserState(
      * uncaught-exception handler and kills the app. It lands as the web's generic copy instead.
      */
     private val scope = CoroutineScope(
-        parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineExceptionHandler { _, _ -> onUnexpectedFailure() },
+        parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineExceptionHandler { _, error ->
+            log("file browser job failed: ${error.javaClass.name}")
+            onUnexpectedFailure()
+        },
     )
 
     private fun onUnexpectedFailure() {
@@ -259,6 +266,15 @@ class FileBrowserState(
         pendingSelectPath = null
         val match = listing.entries.firstOrNull { it.path == target }
         if (match != null && !match.isDirectory) selectFile(match)
+    }
+
+    /**
+     * The session this browser belonged to is over (sign-out, another server): stop every job,
+     * in-flight saves and uploads included, and drop the state. The owner makes a fresh browser.
+     */
+    fun dispose() {
+        close()
+        scope.cancel()
     }
 
     /** "Try again" after a failed listing. */
@@ -466,12 +482,13 @@ class FileBrowserState(
      * One PUT per document, in order; the last failure is shown; then the folder re-lists. A name
      * a browser's File.name could never be (a control character) is refused without a request.
      */
-    fun upload(picked: List<PickedUpload>) {
+    fun upload(picked: List<PickedUpload>, destination: String? = null) {
         if (picked.isEmpty()) return
         mutationError = ""
         notice = ""
         scope.launch {
-            val dir = currentDir
+            // The folder the Upload key was pressed in (kept across a configuration change by the host).
+            val dir = destination ?: currentDir
             for (item in picked) {
                 val name = UploadNames.fromDisplayName(item.displayName)
                 if (name == null) {
@@ -536,6 +553,7 @@ class FileBrowserState(
 
     companion object {
         const val IMAGE_ERROR = "This image could not be displayed."
+        const val LOG_TAG = "TetherFiles"
         const val NAME_MAX_LENGTH = 200
         private val PARENT_TAIL = Regex("/+[^/]+/?$")
     }

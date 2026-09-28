@@ -66,6 +66,7 @@ class FileBrowserBehaviourTest {
     private val seen = ConcurrentLinkedQueue<RecordedRequest>()
     private val context: Context = ApplicationProvider.getApplicationContext()
     private lateinit var state: FileBrowserState
+    private val identity = kotlinx.coroutines.flow.MutableStateFlow<String?>("paired-server")
     private val png by lazy {
         val bitmap = Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(AColor.rgb(92, 110, 230)) }
         ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
@@ -106,7 +107,7 @@ class FileBrowserBehaviourTest {
             TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     if (show()) {
-                        state = rememberFileBrowserState(files)
+                        state = rememberFileBrowserState(files, identity)
                         state.cwd = ROOT
                         state.sessionName = FilesFixtures.SESSION
                         WorkspaceFileBrowser(state)
@@ -115,12 +116,19 @@ class FileBrowserBehaviourTest {
             }
         }
         rule.runOnIdle { state.open() }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("README.md").fetchSemanticsNodes().isNotEmpty() }
+        waitFor { rule.onAllNodesWithText("README.md").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun requests(method: String) = seen.filter { it.method == method }
 
-    private fun waitFor(timeout: Long = 5_000, condition: () -> Boolean) = rule.waitUntil(timeout, condition)
+    /**
+     * The browser's jobs run on the main looper (viewModelScope), which compose's waitUntil does
+     * not always drain under Robolectric's paused looper: run it on every poll, as a device would.
+     */
+    private fun waitFor(timeout: Long = 5_000, condition: () -> Boolean) = rule.waitUntil(timeout) {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        condition()
+    }
 
     @Test fun theListingComesFromThePairedServerWithTheCredential() {
         launch()
@@ -217,15 +225,18 @@ class FileBrowserBehaviourTest {
         assertEquals("GUIDE.md", body["name"]!!.jsonPrimitive.content)
     }
 
-    @Test fun leavingCompositionEmptiesTheCacheIncludingSharedCopies() {
+    @Test fun leavingCompositionKeepsSharedCopiesAndSignOutSweepsThem() {
         var shown by mutableStateOf(true)
         launch { shown }
         val share = FileCache(context.cacheDir).newShareFile("secret.txt").apply { writeText("workspace content") }
-        assertTrue(share.exists())
+        // Composition going away (a rotation does this) is not the end of the session…
         shown = false
         rule.waitForIdle()
-        // The sweep runs off the main thread.
-        rule.waitUntil(5_000) { !share.exists() }
+        Thread.sleep(300)
+        assertTrue("a copy inside its window survives", share.exists())
+        // …signing out is: nothing that session downloaded outlives it.
+        identity.value = null
+        waitFor { !share.exists() }
         assertFalse("sign-out leaves nothing a session downloaded", share.exists())
     }
 }
