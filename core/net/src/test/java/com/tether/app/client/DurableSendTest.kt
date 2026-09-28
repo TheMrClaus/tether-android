@@ -479,20 +479,27 @@ class DurableSendTest {
 
     @Test
     fun approvalsAndAnswersAreNeverReplayed() {
-        val (client, ws) = connectedProcess()
-        client.approval("s1", "req-1", choiceId = "allow")
-        client.answerQuestion("s1", "q-1", mapOf("a" to "b"))
+        val client = process()
+        val ws = startConnected(client)
+        client.attach("s1")
+        h.expectFrame("attach")
+        // T6.3: real pending requests (a decision is refused for anything else).
+        ws.send(snapshotFrame("s1", 5, consentStateJson()))
+        h.await(client.liveSessions) { "s1" in it }
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "Postgres")))
         assertEquals(listOf("approval", "question"), h.framesUntilBarrier().map { it.type() })
 
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
-        // Filed while the link is down: dropped, not stored for later.
-        client.approval("s1", "req-2", decision = "deny")
+        // Filed while the link is down: refused, not stored for later.
+        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-plain", decision = "deny"))
         h.enqueueConnect()
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2)
-        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        // The same requests are still pending in the new snapshot: nothing is sent again.
+        ws2.send(snapshotFrame("s1", 5, consentStateJson()))
         h.serverBarrier(ws2)
         assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
         assertTrue("approvals/questions never enter the durable store", persisted().records.isEmpty())
