@@ -133,6 +133,14 @@ internal fun ChatTranscript(
             groupToggles[key]?.takeIf { it.default == default }?.open ?: default
         }
     }
+    // A changed default resets the element (React re-sets `open`): the stale toggle is dropped for
+    // good, so the old choice cannot come back when the default flips back.
+    LaunchedEffect(items) {
+        val stale = items.filterIsInstance<ChatItem.ToolGroup>()
+            .filter { g -> groupToggles[g.key]?.let { it.default != g.defaultOpen } == true }
+            .map { it.key }
+        if (stale.isNotEmpty()) groupToggles = groupToggles - stale.toSet()
+    }
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember {
         { group -> groupToggles = groupToggles + (group.key to GroupToggle(group.defaultOpen, !group.open)) }
     }

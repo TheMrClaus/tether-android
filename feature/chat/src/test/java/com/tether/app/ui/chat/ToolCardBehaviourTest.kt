@@ -137,15 +137,21 @@ class ToolCardBehaviourTest {
         }
         rule.waitForIdle()
         group().assert(collapsed)
-        group().performClick()
-        rule.waitForIdle()
-        group().assert(expanded)
         rule.runOnIdle {
             val more = foldTree(fixture.tree, ev("tool_start", "t1", ts = ToolFixtures.T_RUNNING) { put("toolId", "again"); put("name", "Read"); put("input", kotlinx.serialization.json.buildJsonObject { put("file_path", "a") }) })
             fixture = ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(more)!!, more)
         }
         rule.waitForIdle()
-        // Running again: the default is open once more, and a changed default wins over the old toggle.
+        // Running again: the default is open once more; the reader's old "closed" does not come back.
+        group().assert(expanded)
+        // A finished run the reader opens stays open.
+        rule.runOnIdle {
+            val done = foldTree(fixture.tree, ev("tool_end", "t1", ts = ToolFixtures.T_RUNNING) { put("toolId", "again"); put("output", "ok") })
+            fixture = ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(done)!!, done)
+        }
+        rule.waitForIdle()
+        group().assert(collapsed).performClick()
+        rule.waitForIdle()
         group().assert(expanded)
     }
 

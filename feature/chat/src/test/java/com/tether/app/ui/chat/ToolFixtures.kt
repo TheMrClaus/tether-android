@@ -127,6 +127,8 @@ object ToolFixtures {
         s.tool("command_execution", """{"command":"npm test -- --watch=false","cwd":"~/parity-app"}""", done = false, id = "cmd-live")
         s.events += ev("tool_output_delta", "t1", ts = T_RUNNING) { put("toolId", "cmd-live"); put("chunk", "# Subtest: retry\nok 1 - backs off\n") }
         s.tool("Bash", """{"command":"npm run e2e","description":"End-to-end"}""", done = false, id = "bash-live")
+        // Live output on a generic card: the web shows it only once the call is done.
+        s.events += ev("tool_output_delta", "t1", ts = T_RUNNING) { put("toolId", "bash-live"); put("chunk", "Starting 12 specs\n") }
         s.events += ev("tool_progress", "t1", ts = T_RUNNING) { put("toolId", "bash-live"); put("elapsedSeconds", 12) }
         ChatFixtures.fold(*s.events.toTypedArray())
     }
