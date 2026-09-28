@@ -23,6 +23,12 @@ class MirrorFixture(
     val reducerVersion: String = "test-reducer",
     val rotateAfterWrites: Long = 1L shl 28,
     val batchWindowMs: Long = 100,
+    val maxBlobPlaintextBytes: Int = 8 * 1024 * 1024,
+    val maxStoredBlobBytes: Int = 1536 * 1024,
+    val maxSessions: Int = 500,
+    val maxOriginBytes: Long = 200L * 1024 * 1024,
+    /** Extra log observer (it may throw, to inject a failure into the writer). */
+    val onLog: (String) -> Unit = {},
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val kekKeys = SoftwareKeySource()
@@ -44,7 +50,14 @@ class MirrorFixture(
         clock = { now.get() },
         batchWindowMs = batchWindowMs,
         rotateAfterWrites = rotateAfterWrites,
-        log = { logs.add(it) },
+        log = {
+            logs.add(it)
+            onLog(it)
+        },
+        maxBlobPlaintextBytes = maxBlobPlaintextBytes,
+        maxStoredBlobBytes = maxStoredBlobBytes,
+        maxSessions = maxSessions,
+        maxOriginBytes = maxOriginBytes,
     )
 
     /** Process death (nothing uncommitted survives), then a new process over the same files. */

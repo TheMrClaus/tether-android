@@ -9,6 +9,9 @@ import java.security.SecureRandom
 
 /** The mirror's data key: [bytes] seal every blob; [id] names it in the DB's `meta` (key check). */
 class MirrorDataKey(val id: String, val bytes: ByteArray) {
+    /** Zero the key bytes once a [MirrorCipher] holds them (best effort: the JVM may have copied them). */
+    fun wipe() = bytes.fill(0)
+
     override fun toString(): String = "MirrorDataKey($id)" // never the key bytes
 }
 
@@ -56,9 +59,13 @@ class MirrorKeyStore(
                 CipherFailure.Transient, CipherFailure.Suspect -> Loaded.Unavailable
             }
         }
-        if (plain.size != ID_BYTES + MirrorCipher.KEY_BYTES) return Loaded.Lost
-        val id = plain.copyOfRange(0, ID_BYTES).toHex()
-        return Loaded.Present(MirrorDataKey(id, plain.copyOfRange(ID_BYTES, plain.size)))
+        try {
+            if (plain.size != ID_BYTES + MirrorCipher.KEY_BYTES) return Loaded.Lost
+            val id = plain.copyOfRange(0, ID_BYTES).toHex()
+            return Loaded.Present(MirrorDataKey(id, plain.copyOfRange(ID_BYTES, plain.size)))
+        } finally {
+            plain.fill(0)
+        }
     }
 
     /** Mint and wrap a NEW data key, replacing any previous one (atomic rename). */
@@ -66,7 +73,12 @@ class MirrorKeyStore(
     fun create(): MirrorDataKey {
         val id = ByteArray(ID_BYTES).also(random::nextBytes)
         val key = ByteArray(MirrorCipher.KEY_BYTES).also(random::nextBytes)
-        val sealed = kek.seal(id + key, AAD)
+        val plain = id + key
+        val sealed = try {
+            kek.seal(plain, AAD)
+        } finally {
+            plain.fill(0)
+        }
         file.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         tmp.writeBytes(sealed)

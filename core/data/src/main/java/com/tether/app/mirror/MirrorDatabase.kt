@@ -54,7 +54,7 @@ class AndroidMirrorDbFactory(private val context: Context) : MirrorDbFactory {
 
     override fun existing(): List<String> {
         val dir = context.getDatabasePath(PROBE_NAME).parentFile ?: return emptyList()
-        return dir.listFiles { f -> f.isFile && MirrorFiles.isMirrorDb(f.name) }?.map { it.name }.orEmpty()
+        return MirrorFiles.dbNames(dir.listFiles()?.filter { it.isFile }?.map { it.name }.orEmpty())
     }
 
     override fun delete(name: String) {
@@ -69,11 +69,23 @@ class AndroidMirrorDbFactory(private val context: Context) : MirrorDbFactory {
 
 object MirrorFiles {
     private val DB_NAME = Regex("^mirror-[0-9a-f]{16}\\.db$")
+    private val SIBLINGS = listOf("-wal", "-shm", "-journal")
 
     fun isMirrorDb(name: String): Boolean = DB_NAME.matches(name)
 
+    /**
+     * The mirror DBs [fileNames] hold, INCLUDING ones of which only a `-wal` / `-shm` /
+     * `-journal` sibling is left (an interrupted delete): the WAL alone can hold transcript
+     * pages, so it must be listed to be deleted.
+     */
+    fun dbNames(fileNames: Collection<String>): List<String> = fileNames.mapNotNull { name ->
+        val base = SIBLINGS.firstOrNull { name.endsWith(it) }?.let { name.removeSuffix(it) } ?: name
+        base.takeIf(::isMirrorDb)
+    }.distinct()
+
+    /** Siblings first, the main file last: an interrupted delete leaves no WAL without its DB unlisted. */
     fun deleteWithSiblings(file: File) {
-        for (suffix in listOf("", "-wal", "-shm", "-journal")) {
+        for (suffix in SIBLINGS + "") {
             val f = File(file.path + suffix)
             if (f.exists()) f.delete()
         }

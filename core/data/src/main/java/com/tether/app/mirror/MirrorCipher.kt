@@ -29,6 +29,7 @@ class MirrorCipher(key: ByteArray, private val random: SecureRandom = SecureRand
 
     init {
         require(key.size == KEY_BYTES) { "mirror data key must be $KEY_BYTES bytes" }
+        // SecretKeySpec keeps its own copy: the caller may zero [key] after this.
         secretKey = SecretKeySpec(key, "AES")
     }
 
@@ -81,17 +82,33 @@ class MirrorCipher(key: ByteArray, private val random: SecureRandom = SecureRand
 
     companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val VERSION: Byte = 1
+        /** v2: the length-prefixed AAD below. A v1 blob is rejected (and the mirror wiped at bind). */
+        const val VERSION: Byte = 2
         const val KEY_BYTES = 32
         const val IV_BYTES = 12
         const val TAG_BYTES = 16
 
         /**
-         * `tether.mirror.v1 ‖ origin ‖ table ‖ session ‖ row key`, NUL-separated. Ids never
-         * contain NUL (they are server UUID-like strings), so the encoding is unambiguous.
+         * `tether.mirror.v2`, then each of origin, table, session and row key as a 4-byte
+         * big-endian length followed by its UTF-8 bytes. Session ids and turn ids come from the
+         * server and may contain any character, so a separator could be forged; a length prefix
+         * cannot (security review L4).
          */
-        fun aad(originKey: String, table: String, sessionId: String, rowKey: String): ByteArray =
-            "tether.mirror.v1\u0000$originKey\u0000$table\u0000$sessionId\u0000$rowKey".toByteArray(Charsets.UTF_8)
+        fun aad(originKey: String, table: String, sessionId: String, rowKey: String): ByteArray {
+            val out = ByteArrayOutputStream()
+            out.write(AAD_LABEL)
+            for (field in arrayOf(originKey, table, sessionId, rowKey)) {
+                val bytes = field.toByteArray(Charsets.UTF_8)
+                out.write(bytes.size ushr 24)
+                out.write(bytes.size ushr 16)
+                out.write(bytes.size ushr 8)
+                out.write(bytes.size)
+                out.write(bytes)
+            }
+            return out.toByteArray()
+        }
+
+        private val AAD_LABEL = "tether.mirror.v2".toByteArray(Charsets.UTF_8)
     }
 }
 

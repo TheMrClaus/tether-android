@@ -99,6 +99,13 @@ interface MirrorDao {
     @Query("DELETE FROM sync_state WHERE session_id = :sessionId")
     fun deleteSyncState(sessionId: String)
 
+    /** Sessions holding a base (a sync_state row exists iff a base does). */
+    @Query("SELECT COUNT(*) FROM sync_state")
+    fun sessionCount(): Int
+
+    @Query("SELECT COALESCE(SUM(bytes), 0) FROM sync_state")
+    fun totalBytes(): Long
+
     // --- meta ---
     @Query("SELECT value FROM meta WHERE `key` = :key")
     fun meta(key: String): String?

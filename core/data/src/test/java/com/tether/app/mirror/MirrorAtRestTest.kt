@@ -9,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.ConscryptMode
 
 /**
  * T13.1 (SYNC_DESIGN §8, §11 `MirrorCipherTest` DB half): what an attacker holding the DB
@@ -16,6 +17,10 @@ import org.robolectric.RobolectricTestRunner
  * losing the data key or its KEK wipes the mirror instead of leaving unreadable (or
  * mis-keyed) rows behind.
  */
+// Robolectric's default Conscrypt mode installs Conscrypt as a JVM-GLOBAL provider, which then
+// changes how the plain-JVM CredentialCipherTest in this same test JVM fails (order-dependent).
+// The core:net mirror tests keep Conscrypt on, so the mirror cipher runs under both providers.
+@ConscryptMode(ConscryptMode.Mode.OFF)
 @RunWith(RobolectricTestRunner::class)
 class MirrorAtRestTest {
     private val origin = "https://tether.example:443"

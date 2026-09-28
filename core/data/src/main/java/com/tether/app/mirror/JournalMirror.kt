@@ -3,6 +3,7 @@ package com.tether.app.mirror
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -101,12 +102,32 @@ class JournalMirror(
     val checkpointAtTurnEnd: Int = 500,
     private val log: (String) -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
+    /**
+     * Interim caps until T13.5's eviction (security review M2 / L3). A blob whose plaintext is
+     * larger than [maxBlobPlaintextBytes], or whose sealed form is larger than
+     * [maxStoredBlobBytes] (Android's CursorWindow cannot read a row much above 2 MB), is never
+     * stored: its session's copy is dropped instead, so the mirror never claims to cover it.
+     */
+    val maxBlobPlaintextBytes: Int = 8 * 1024 * 1024,
+    val maxStoredBlobBytes: Int = 1536 * 1024,
+    /** At most this many sessions hold a base per origin... */
+    val maxSessions: Int = 500,
+    /** ...and at most this many bytes of base + tail blobs in total (SYNC_DESIGN §7's 200 MB default). */
+    val maxOriginBytes: Long = 200L * 1024 * 1024,
 ) {
     // ---- the queue (any thread) ----
     private val queue = ArrayDeque<Op>()
     private var controlsQueued = 0
     private val signal = Channel<Unit>(Channel.CONFLATED)
     private val job: Job
+
+    /**
+     * The writer died of an Error (e.g. an OutOfMemoryError on a huge state). Everything after
+     * is a no-op that answers at once: bind() -> null, hydrate -> None. Set under [queue].
+     */
+    @Volatile
+    var dead: Boolean = false
+        private set
 
     // ---- actor state (actor thread only) ----
     private var db: MirrorDatabase? = null
@@ -117,8 +138,8 @@ class JournalMirror(
     private var writes = 0L
 
     /**
-     * Test seam: runs on the actor right before a hydration read, so a test can hold the read
-     * while live events arrive. Null in production.
+     * Test seam: runs on the actor right before a hydration reads the base, so a test can hold
+     * the writer (or fail the read) while live events arrive. Null in production.
      */
     @Volatile
     var beforeHydrateRead: (() -> Unit)? = null
@@ -137,8 +158,37 @@ class JournalMirror(
      */
     suspend fun bind(origin: String): MirrorIndex? = control { Op.Bind(origin, it) }
 
-    /** Logout / revocation (§8.3): close, delete every mirror DB, destroy the data key and its KEK. */
-    fun wipe(): CompletableDeferred<Unit> = CompletableDeferred<Unit>().also { enqueue(Op.Wipe(it)) }
+    /**
+     * Logout / revocation (§8.3): the data key and its KEK are destroyed NOW, on the calling
+     * thread ([shredKeys]), so a process death before the writer gets to it still leaves nothing
+     * readable (security review M1); the writer then closes and deletes every mirror DB file.
+     * If the writer is dead, the files are deleted here too.
+     */
+    fun wipe(): CompletableDeferred<Unit> {
+        shredKeys()
+        val done = CompletableDeferred<Unit>()
+        enqueue(Op.Wipe(done))
+        if (dead) {
+            try {
+                for (name in dbFactory.existing()) dbFactory.delete(name)
+            } catch (e: Exception) {
+                log("mirror delete failed (${e.javaClass.simpleName})")
+            }
+        }
+        return done
+    }
+
+    /**
+     * Destroy the wrapped data key and the Keystore key-encryption key, synchronously. Every
+     * blob on disk becomes unreadable at once; the next bind finds no key and deletes the DB.
+     */
+    fun shredKeys() {
+        try {
+            keyStore.destroy()
+        } catch (e: Exception) {
+            log("mirror key destroy failed (${e.javaClass.simpleName})")
+        }
+    }
 
     /**
      * Clear cache (§7, §8.1; T13.5 wires the setting): delete the DB and rotate the data key.
@@ -209,7 +259,8 @@ class JournalMirror(
             queue.clear()
             controlsQueued = 0
         }
-        control<Unit> { Op.Close(it) }
+        // Bounded: a writer that never ran (or is stuck) must not hang the test's "death".
+        withTimeoutOrNull(5_000) { control<Unit> { Op.Close(it) } }
         job.cancel()
     }
 
@@ -266,13 +317,60 @@ class JournalMirror(
 
     private fun enqueue(op: Op) {
         synchronized(queue) {
+            if (dead) {
+                answer(op)
+                return
+            }
             queue.addLast(op)
             if (op !is Op.Write) controlsQueued++
         }
         signal.trySend(Unit)
     }
 
+    /** Complete [op]'s reply with its fallback (the mirror answers "nothing"). */
+    private fun answer(op: Op) {
+        when (op) {
+            is Op.Bind -> op.reply.complete(null)
+            is Op.Wipe -> op.reply.complete(Unit)
+            is Op.Rotate -> op.reply.complete(Unit)
+            is Op.Flush -> op.reply.complete(Unit)
+            is Op.Hydrate -> op.reply.complete(Hydration.None)
+            is Op.Close -> op.reply.complete(Unit)
+            is Op.Write -> Unit
+        }
+    }
+
+    /**
+     * The writer caught an Error (an Exception is a cache miss, handled where it happens): close
+     * the DB, answer every waiting caller, and refuse everything after (security review M2).
+     */
+    private fun die(t: Throwable) {
+        log("mirror writer stopped (${t.javaClass.simpleName})")
+        val waiting = synchronized(queue) {
+            dead = true
+            controlsQueued = 0
+            queue.toList().also { queue.clear() }
+        }
+        waiting.forEach(::answer)
+        try {
+            closeDb()
+        } catch (_: Throwable) {
+            // Nothing more to do for a cache.
+        }
+        boundOrigin = null
+    }
+
     private suspend fun loop() {
+        try {
+            run()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            die(t)
+        }
+    }
+
+    private suspend fun run() {
         while (true) {
             signal.receive()
             // The batch window: let writes accumulate, unless a control op or a full batch waits.
@@ -314,6 +412,18 @@ class JournalMirror(
     }
 
     private fun handle(op: Op) {
+        try {
+            handleNow(op)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // An Error (guarded() turns every Exception into a fallback): answer this caller, then die.
+            answer(op)
+            throw t
+        }
+    }
+
+    private fun handleNow(op: Op) {
         when (op) {
             is Op.Bind -> op.reply.complete(guarded(null) { bindNow(op.origin) })
             is Op.Wipe -> {
@@ -367,7 +477,11 @@ class JournalMirror(
             }
             MirrorKeyStore.Loaded.Unavailable -> return null
         }
-        openDb(name, key, dataKey)
+        try {
+            openDb(name, key, dataKey)
+        } finally {
+            dataKey.wipe() // the cipher holds its own copy
+        }
         boundOrigin = origin
         val d = dao!!
         val previousReducer = d.meta(META_REDUCER)
@@ -399,8 +513,10 @@ class JournalMirror(
             d = database.dao()
             null
         }
-        if (storedKeyId != dataKey.id) {
-            // Sealed under another key (or a fresh file): nothing in it is readable. Start over.
+        val storedBlobVersion = if (storedKeyId == null) null else d.meta(META_BLOB_VERSION)
+        if (storedKeyId != dataKey.id || storedBlobVersion != MirrorCipher.VERSION.toString()) {
+            // Sealed under another key or another blob format (or a fresh file): nothing in it
+            // is readable. Start over.
             if (storedKeyId != null) {
                 database.close()
                 dbFactory.delete(name)
@@ -408,6 +524,7 @@ class JournalMirror(
                 d = database.dao()
             }
             d.putMeta(MetaEntity(META_KEY_ID, dataKey.id))
+            d.putMeta(MetaEntity(META_BLOB_VERSION, MirrorCipher.VERSION.toString()))
             d.putMeta(MetaEntity(META_WRITES, "0"))
             d.putMeta(MetaEntity(META_SCHEMA, SCHEMA_VERSION.toString()))
         }
@@ -461,16 +578,23 @@ class JournalMirror(
         val key = originKeyOf(origin)
         dbFactory.delete(dbName(key))
         keyStore.deleteDataKey()
-        openDb(dbName(key), key, keyStore.create())
+        val fresh = keyStore.create()
+        try {
+            openDb(dbName(key), key, fresh)
+        } finally {
+            fresh.wipe()
+        }
     }
 
     private fun hydrateNow(origin: String, sessionId: String): Hydration {
-        beforeHydrateRead?.invoke()
         if (origin != boundOrigin) return Hydration.None
         val d = dao ?: return Hydration.None
         val c = cipher ?: return Hydration.None
-        val base = d.base(sessionId) ?: return Hydration.None
         return try {
+            // Inside the try (verifier F3): a row that cannot even be read (e.g. a blob too big
+            // for the cursor window) is Corrupt, not "no copy", so the restored cursor goes too.
+            beforeHydrateRead?.invoke()
+            val base = d.base(sessionId) ?: return Hydration.None
             val state = JsCodec.parse(c.openCompressed(base.state, baseAad(sessionId, base.throughSeq, base.origin))) as JsObj
             val details = LinkedHashMap<String, JsObj>()
             for (row in d.turnDetails(sessionId)) {
@@ -496,7 +620,7 @@ class JournalMirror(
         } catch (e: Exception) {
             // MirrorBlobException (tamper, wrong key), a parse error, a non-object: drop it.
             log("mirror session unreadable (${e.javaClass.simpleName})")
-            db!!.runInTransaction { dropNow(d, sessionId) }
+            guarded(Unit) { db!!.runInTransaction { dropNow(d, sessionId) } }
             Hydration.Corrupt
         }
     }
@@ -528,7 +652,14 @@ class JournalMirror(
     /** Apply one write inside the batch transaction. Returns the number of blobs sealed. */
     private fun apply(d: MirrorDao, c: MirrorCipher, op: Op.Write): Int = when (op) {
         is Op.State -> {
-            val blob = c.sealCompressed(JsCodec.stringify(op.state), baseAad(op.sessionId, op.throughSeq, SessionBaseEntity.ORIGIN_SERVER))
+            val blob = sealWithinCaps(JsCodec.stringify(op.state), compressed = true) { c.sealCompressed(it, baseAad(op.sessionId, op.throughSeq, SessionBaseEntity.ORIGIN_SERVER)) }
+            val previous = d.syncState(op.sessionId)
+            if (blob == null || !roomFor(d, previous, blob.size)) {
+                // Too big for one row, or the origin is full: keep no copy of this session at
+                // all rather than an older one that looks current.
+                dropNow(d, op.sessionId)
+                return 0
+            }
             d.upsertBase(
                 SessionBaseEntity(
                     op.sessionId, op.throughSeq, op.trimmedBefore, SessionBaseEntity.ORIGIN_SERVER, reducerVersion, blob, op.at,
@@ -541,6 +672,9 @@ class JournalMirror(
             1
         }
         is Op.Verified -> {
+            // Deviation from §2.3's "cursor := throughSeq" (verifier F4): a stateless reply only
+            // VERIFIES a persisted cursor it equals and never moves one, because a DB cursor that
+            // differs (cleared by a seqless event or a gap, or absent) does not cover throughSeq.
             val state = d.syncState(op.sessionId)
             if (state?.cursor == op.throughSeq) d.setVerified(op.sessionId, op.at)
             0
@@ -554,16 +688,14 @@ class JournalMirror(
             if (d.syncState(op.sessionId) == null) {
                 0
             } else {
-                d.upsertTurnDetails(
-                    op.turns.map { (turnId, entry) ->
-                        TurnDetailEntity(
-                            op.sessionId, turnId, entry.first,
-                            c.sealText(JsCodec.stringify(entry.second), aad(TABLE_TURN_DETAIL, op.sessionId, turnId)),
-                            op.at,
-                        )
-                    },
-                )
-                op.turns.size
+                val rows = op.turns.mapNotNull { (turnId, entry) ->
+                    val payload = sealWithinCaps(JsCodec.stringify(entry.second), compressed = false) {
+                        c.sealText(it, aad(TABLE_TURN_DETAIL, op.sessionId, turnId))
+                    } ?: return@mapNotNull null // re-fetchable: simply not kept
+                    TurnDetailEntity(op.sessionId, turnId, entry.first, payload, op.at)
+                }
+                d.upsertTurnDetails(rows)
+                rows.size
             }
         }
         is Op.Sessions -> {
@@ -572,11 +704,14 @@ class JournalMirror(
                 for (row in d.sessionRowsById(chunk)) lastOpened[row.sessionId] = row.lastOpenedAt
             }
             if (op.full) d.markAllGone()
+            val kept = op.rows.mapNotNull { row ->
+                sealWithinCaps(row.json, compressed = false) { c.sealText(it, aad(TABLE_SESSION_ROW, row.sessionId, "")) }?.let { row to it }
+            }
             d.upsertSessionRows(
-                op.rows.map { row ->
+                kept.map { (row, blob) ->
                     SessionRowEntity(
                         sessionId = row.sessionId,
-                        blob = c.sealText(row.json, aad(TABLE_SESSION_ROW, row.sessionId, "")),
+                        blob = blob,
                         updatedAt = row.updatedAt,
                         lastMessageAt = row.lastMessageAt,
                         pinned = row.pinned,
@@ -587,7 +722,7 @@ class JournalMirror(
                     )
                 },
             )
-            op.rows.size
+            kept.size
         }
         is Op.Opened -> {
             d.markOpened(op.sessionId, op.at)
@@ -599,10 +734,16 @@ class JournalMirror(
         }
         is Op.Checkpoint -> {
             val state = d.syncState(op.sessionId)
-            if (state?.cursor != op.throughSeq) {
-                0 // the DB does not cover exactly this fold: keep what it has
+            val blob = if (state?.cursor != op.throughSeq) {
+                null
             } else {
-                val blob = c.sealCompressed(JsCodec.stringify(op.state), baseAad(op.sessionId, op.throughSeq, SessionBaseEntity.ORIGIN_LOCAL))
+                sealWithinCaps(JsCodec.stringify(op.state), compressed = true) {
+                    c.sealCompressed(it, baseAad(op.sessionId, op.throughSeq, SessionBaseEntity.ORIGIN_LOCAL))
+                }
+            }
+            if (state == null || blob == null) {
+                0 // the DB does not cover exactly this fold (or it is too big): keep the tail
+            } else {
                 val previous = d.base(op.sessionId)
                 d.upsertBase(
                     SessionBaseEntity(
@@ -626,10 +767,35 @@ class JournalMirror(
             d.clearCursor(op.sessionId)
             return 0
         }
-        val payload = c.sealText(op.json, aad(TABLE_JOURNAL_EVENT, op.sessionId, op.seq.toString()))
+        val payload = sealWithinCaps(op.json, compressed = false) { c.sealText(it, aad(TABLE_JOURNAL_EVENT, op.sessionId, op.seq.toString())) }
+        if (payload == null || d.totalBytes() + payload.size > maxOriginBytes) {
+            // Cannot be covered (too big, or the origin is full): stop claiming coverage.
+            d.clearCursor(op.sessionId)
+            return 0
+        }
         if (d.insertEvent(JournalEventEntity(op.sessionId, op.seq, op.type, op.ts, payload)) == -1L) return 0
         d.upsertSyncState(SyncStateEntity(op.sessionId, op.seq, state.lastVerifiedAt, state.level, state.bytes + payload.size))
         return 1
+    }
+
+    /** Seal [plaintext] unless it (or its sealed form) is over the per-blob caps. Null = refused. */
+    private inline fun sealWithinCaps(plaintext: String, compressed: Boolean, seal: (String) -> ByteArray): ByteArray? {
+        // UTF-8 is at least one byte per char: a string longer than the cap is over it.
+        if (plaintext.length > maxBlobPlaintextBytes) return refused()
+        if (!compressed && plaintext.toByteArray(Charsets.UTF_8).size > maxBlobPlaintextBytes) return refused()
+        val blob = seal(plaintext)
+        return if (blob.size > maxStoredBlobBytes) refused() else blob
+    }
+
+    private fun refused(): ByteArray? {
+        log("mirror blob over the size cap: not stored")
+        return null
+    }
+
+    /** May [sessionId]'s base (re)become [bytes] big under the per-origin caps? */
+    private fun roomFor(d: MirrorDao, previous: SyncStateEntity?, bytes: Int): Boolean {
+        if (previous == null && d.sessionCount() >= maxSessions) return false
+        return d.totalBytes() - (previous?.bytes ?: 0L) + bytes <= maxOriginBytes
     }
 
     private fun dropNow(d: MirrorDao, sessionId: String) {
@@ -652,6 +818,7 @@ class JournalMirror(
         const val META_WRITES = "writes"
         const val META_REDUCER = "reducer_version"
         const val META_SCHEMA = "schema_version"
+        const val META_BLOB_VERSION = "blob_version"
         const val TABLE_SESSION_ROW = "session_row"
         const val TABLE_SESSION_BASE = "session_base"
         const val TABLE_JOURNAL_EVENT = "journal_event"
@@ -669,8 +836,8 @@ class JournalMirror(
          * deleted with its keys, so turning the mirror off never strands transcripts on disk.
          */
         fun purge(dbFactory: MirrorDbFactory, keyStore: MirrorKeyStore) {
+            keyStore.destroy() // first: whatever is left of the files is unreadable from here on
             for (name in dbFactory.existing()) dbFactory.delete(name)
-            keyStore.destroy()
         }
     }
 }
