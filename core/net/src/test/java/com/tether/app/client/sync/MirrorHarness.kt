@@ -71,6 +71,10 @@ class MirrorHarness(
     private val withMirror: Boolean = true,
     var checkpointEvery: Int = 2_000,
     var checkpointAtTurnEnd: Int = 500,
+    /** The writer's dispatcher (a test may pass one that never runs: a stuck writer). */
+    var mirrorDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null,
+    /** The client's bound on a mirror bind: generous here, so a loaded CI box does not turn the mirror off. */
+    var bindTimeoutMs: Long = 30_000,
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val server = MockWebServer()
@@ -109,6 +113,7 @@ class MirrorHarness(
             rotateAfterWrites = rotateAfterWrites,
             checkpointEvery = checkpointEvery,
             checkpointAtTurnEnd = checkpointAtTurnEnd,
+            dispatcher = mirrorDispatcher ?: Dispatchers.IO.limitedParallelism(1),
         )
         val mirror: JournalMirror get() = mirrorOrNull!!
         val client = RealTetherClient(
@@ -120,7 +125,7 @@ class MirrorHarness(
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
             mirror = mirrorOrNull,
-        )
+        ).also { it.mirrorBindTimeoutMs = bindTimeoutMs }
         var ws: WebSocket? = null
     }
 
@@ -170,6 +175,15 @@ class MirrorHarness(
     }
 
     /** A new process: start(), connect, and (unless [handshake] is false) ready -> hello. */
+    /** A new process with no credential stored: start() only, nothing connects. */
+    fun bootSignedOut(): Process {
+        check(process == null) { "kill the running process first" }
+        val p = Process()
+        process = p
+        p.client.start()
+        return p
+    }
+
     fun boot(ready: String = readyFrame(), handshake: Boolean = true, beforeStart: (Process) -> Unit = {}): Process {
         check(process == null) { "kill the running process first" }
         enqueueConnect()

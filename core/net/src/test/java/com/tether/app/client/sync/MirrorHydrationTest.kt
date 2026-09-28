@@ -108,8 +108,15 @@ class MirrorHydrationTest {
         h.ws.send(snapshotFrame("s1", 3, state()))
         h.serverBarrier()
         h.dbSession("s1") // flushed: cursor 3
+        // Hold the writer (a saved-copy read of another session blocks it), so event 4's write
+        // is still queued, deterministically, when the process dies (verifier F1: without the
+        // hold, the writer may drain it right after an earlier control op).
+        val gate = CountDownLatch(1)
+        h.mirror.beforeHydrateRead = { gate.await(10, TimeUnit.SECONDS) }
+        h.client.attach("s2")
         h.ws.send(event(4, """"type":"turn_started","turnId":"t1""""))
         h.serverBarrier()
+        Thread { Thread.sleep(300); gate.countDown() }.start() // after abandon() emptied the queue
         h.kill(flushFirst = false) // event 4 never reached the disk
         h.boot(ready = ready(sessionJson("s1")))
         h.client.attach("s1")
