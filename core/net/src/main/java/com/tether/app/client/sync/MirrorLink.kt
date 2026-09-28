@@ -13,6 +13,7 @@ import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.str
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * The reducer the mirror's LOCAL bases depend on (SYNC_DESIGN §2.4): the vendored reducer
@@ -47,14 +48,15 @@ class MirrorLink(val mirror: JournalMirror) {
         }
     }
 
-    /** An event the cursor folded. A seqless one is never persisted and clears the cursor (§2.3). */
-    fun event(origin: String, sessionId: String, event: AgentEvent) {
-        val seq = event.seq
-        if (seq == null) {
-            mirror.recordSeqless(origin, sessionId)
-        } else {
-            mirror.recordEvent(origin, sessionId, seq, event.type, event.ts, event.raw.toString())
-        }
+    /**
+     * An event the cursor folded. A seqless one is never persisted and clears the cursor (§2.3);
+     * the returned deferred completes once that clear is committed (the caller waits for it
+     * before folding). Null for an ordinary event.
+     */
+    fun event(origin: String, sessionId: String, event: AgentEvent): CompletableDeferred<Unit>? {
+        val seq = event.seq ?: return mirror.recordSeqless(origin, sessionId)
+        mirror.recordEvent(origin, sessionId, seq, event.type, event.ts, event.raw.toString())
+        return null
     }
 
     /** `turns-detail`: [tree] (the session's current projection, if any) gives each turn's index. */

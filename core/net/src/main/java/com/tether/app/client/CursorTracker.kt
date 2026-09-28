@@ -66,6 +66,14 @@ class CursorTracker {
         return Decision.Fold
     }
 
+    /**
+     * T13.1: a cursor persisted by the journal mirror (SYNC_DESIGN §2.4), restored on a cold
+     * start: the same state [onSnapshot] leaves. Seeding never authorises redelivery of unsent
+     * input (only a snapshot WITH state does, §3.1 rule 1a); it only makes the next attach a
+     * delta attach and lets live events fold onto the mirrored copy.
+     */
+    fun seed(sessionId: String, cursor: Long) = onSnapshot(sessionId, cursor)
+
     fun cursorFor(sessionId: String): Long? = cursors[sessionId]
 
     fun attachedSessions(): Set<String> = cursors.keys.toSet()

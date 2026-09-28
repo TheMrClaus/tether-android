@@ -67,6 +67,10 @@ class SoftwareKek : CredentialKeySource {
 class MirrorHarness(
     private val batchWindowMs: Long = 100,
     val rotateAfterWrites: Long = 1L shl 28,
+    /** false = today's client with no mirror (the reference run of the conformance gate). */
+    private val withMirror: Boolean = true,
+    var checkpointEvery: Int = 2_000,
+    var checkpointAtTurnEnd: Int = 500,
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val server = MockWebServer()
@@ -79,10 +83,23 @@ class MirrorHarness(
     lateinit var settings: InMemorySettings
     lateinit var origin: String
 
+    private val noDelayHttp: OkHttpClient = OkHttpClient.Builder().socketFactory(
+        object : javax.net.SocketFactory() {
+            private val base = javax.net.SocketFactory.getDefault()
+            override fun createSocket(): java.net.Socket = base.createSocket().apply { tcpNoDelay = true }
+            override fun createSocket(host: String?, port: Int): java.net.Socket = base.createSocket(host, port).apply { tcpNoDelay = true }
+            override fun createSocket(host: String?, port: Int, local: java.net.InetAddress?, localPort: Int): java.net.Socket =
+                base.createSocket(host, port, local, localPort).apply { tcpNoDelay = true }
+            override fun createSocket(host: java.net.InetAddress?, port: Int): java.net.Socket = base.createSocket(host, port).apply { tcpNoDelay = true }
+            override fun createSocket(address: java.net.InetAddress?, port: Int, local: java.net.InetAddress?, localPort: Int): java.net.Socket =
+                base.createSocket(address, port, local, localPort).apply { tcpNoDelay = true }
+        },
+    ).build()
+
     inner class Process {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val scheduler = ManualScheduler()
-        val mirror = JournalMirror(
+        val mirrorOrNull: JournalMirror? = if (!withMirror) null else JournalMirror(
             dbFactory = dbFactory,
             keyStore = MirrorKeyStore(keyFile, AesGcmCredentialCipher(kek)),
             reducerVersion = REDUCER_VERSION,
@@ -90,16 +107,19 @@ class MirrorHarness(
             clock = { now.get() },
             batchWindowMs = batchWindowMs,
             rotateAfterWrites = rotateAfterWrites,
+            checkpointEvery = checkpointEvery,
+            checkpointAtTurnEnd = checkpointAtTurnEnd,
         )
+        val mirror: JournalMirror get() = mirrorOrNull!!
         val client = RealTetherClient(
             settings = settings,
-            httpClient = OkHttpClient(),
+            httpClient = noDelayHttp,
             scope = scope,
             clock = { now.get() },
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
-            mirror = mirror,
+            mirror = mirrorOrNull,
         )
         var ws: WebSocket? = null
     }
@@ -125,6 +145,19 @@ class MirrorHarness(
     }
 
     fun startServer(cookie: String = "cookie") {
+        // Loopback + Nagle + delayed ACK costs ~40 ms per tiny frame round trip; the gate
+        // makes thousands of them. TCP_NODELAY on both ends (test transport only).
+        server.serverSocketFactory = object : javax.net.ServerSocketFactory() {
+            private fun noDelay() = object : java.net.ServerSocket() {
+                override fun accept(): java.net.Socket = super.accept().apply { tcpNoDelay = true }
+            }
+            override fun createServerSocket(): java.net.ServerSocket = noDelay()
+            override fun createServerSocket(port: Int): java.net.ServerSocket = noDelay().apply { bind(java.net.InetSocketAddress(port)) }
+            override fun createServerSocket(port: Int, backlog: Int): java.net.ServerSocket =
+                noDelay().apply { bind(java.net.InetSocketAddress(port), backlog) }
+            override fun createServerSocket(port: Int, backlog: Int, address: java.net.InetAddress?): java.net.ServerSocket =
+                noDelay().apply { bind(java.net.InetSocketAddress(address, port), backlog) }
+        }
         server.start()
         val base = server.url("/").toString().trimEnd('/')
         settings = InMemorySettings(initialBaseUrl = base, initialCookie = cookie)
@@ -137,11 +170,12 @@ class MirrorHarness(
     }
 
     /** A new process: start(), connect, and (unless [handshake] is false) ready -> hello. */
-    fun boot(ready: String = readyFrame(), handshake: Boolean = true): Process {
+    fun boot(ready: String = readyFrame(), handshake: Boolean = true, beforeStart: (Process) -> Unit = {}): Process {
         check(process == null) { "kill the running process first" }
         enqueueConnect()
         val p = Process()
         process = p
+        beforeStart(p)
         p.client.start()
         p.ws = sockets.poll(10, TimeUnit.SECONDS).also { assertNotNull("client never reached the ws upgrade", it) }
         if (handshake) {
@@ -159,8 +193,10 @@ class MirrorHarness(
     fun kill(flushFirst: Boolean) {
         val p = process ?: return
         runBlocking {
-            if (flushFirst) p.mirror.flush()
-            p.mirror.abandon()
+            p.mirrorOrNull?.let { m ->
+                if (flushFirst) m.flush()
+                m.abandon()
+            }
         }
         p.scope.cancel()
         runCatching { p.ws?.close(1000, null) }

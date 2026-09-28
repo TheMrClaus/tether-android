@@ -95,6 +95,10 @@ class JournalMirror(
     private val batchMaxOps: Int = 64,
     /** Blobs sealed under one data key before it is rotated (§8.1: far below 2^32). */
     val rotateAfterWrites: Long = 1L shl 28,
+    /** Local checkpoint (§2.4): a tail this long becomes the new base... */
+    val checkpointEvery: Int = 2_000,
+    /** ...or this long at a `turn_end`. */
+    val checkpointAtTurnEnd: Int = 500,
     private val log: (String) -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
 ) {
@@ -111,6 +115,13 @@ class JournalMirror(
     private var boundOrigin: String? = null
     private var originKey: String = ""
     private var writes = 0L
+
+    /**
+     * Test seam: runs on the actor right before a hydration read, so a test can hold the read
+     * while live events arrive. Null in production.
+     */
+    @Volatile
+    var beforeHydrateRead: (() -> Unit)? = null
 
     init {
         job = scope.launch(dispatcher) { loop() }
@@ -139,7 +150,14 @@ class JournalMirror(
     suspend fun flush(): Unit = control { Op.Flush(it) }
 
     /** The persisted base + details + tail of [sessionId], read after every write enqueued before. */
-    suspend fun hydrate(origin: String, sessionId: String): Hydration = control { Op.Hydrate(origin, sessionId, it) }
+    suspend fun hydrate(origin: String, sessionId: String): Hydration = hydrateAsync(origin, sessionId).await()
+
+    /**
+     * [hydrate], enqueued NOW (non-suspending), so a caller can order it against its own writes:
+     * the read sees every write enqueued before this call and none enqueued after.
+     */
+    fun hydrateAsync(origin: String, sessionId: String): CompletableDeferred<Hydration> =
+        CompletableDeferred<Hydration>().also { enqueue(Op.Hydrate(origin, sessionId, it)) }
 
     /** A snapshot WITH state: replace the base, clear the tail, cursor := [throughSeq] (§2.3). */
     fun recordState(origin: String, sessionId: String, throughSeq: Long, trimmedBefore: Int?, state: JsObj, keepTurnIds: Set<String>) =
@@ -153,8 +171,17 @@ class JournalMirror(
     fun recordEvent(origin: String, sessionId: String, seq: Long, type: String, ts: Long?, json: String) =
         enqueue(Op.Event(origin, sessionId, seq, type, ts, json))
 
-    /** A folded event with no seq: never persisted; the persisted cursor is cleared (§2.3). */
-    fun recordSeqless(origin: String, sessionId: String) = enqueue(Op.Seqless(origin, sessionId))
+    /**
+     * A folded event with no seq: never persisted; the persisted cursor is cleared (§2.3).
+     * Returns when the clear is COMMITTED (it ends the batch at once): the caller folds the event
+     * only after that, so a process death can never leave a cursor that claims to cover a view
+     * the UI already showed with the seqless fold. (A lost batch of seq'd events is harmless:
+     * the cursor is then behind and the server answers with state.)
+     */
+    fun recordSeqless(origin: String, sessionId: String): CompletableDeferred<Unit> {
+        enqueue(Op.Seqless(origin, sessionId))
+        return CompletableDeferred<Unit>().also { enqueue(Op.Flush(it)) }
+    }
 
     fun recordTurnDetails(origin: String, sessionId: String, turns: Map<String, Pair<Int?, JsObj>>) =
         enqueue(Op.TurnDetails(origin, sessionId, turns, clock()))
@@ -438,6 +465,7 @@ class JournalMirror(
     }
 
     private fun hydrateNow(origin: String, sessionId: String): Hydration {
+        beforeHydrateRead?.invoke()
         if (origin != boundOrigin) return Hydration.None
         val d = dao ?: return Hydration.None
         val c = cipher ?: return Hydration.None
