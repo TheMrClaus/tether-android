@@ -24,14 +24,16 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-28 ~18:00 CEST, clean handover - no agents running, no open worktrees):** `main` @ `3a75f45`.
+**Resume point (2026-09-28 ~18:05 CEST, taken over from the clean handover):** `main` @ `4a41c8a`.
 **Merged + verified since the overnight run began (17):** T6.1 chat/markdown, T4.5 log dialog, T5.1 sidebar, ta-cdh, T11.1 file
 browser, ta-ouu push security, T5.2 resume, ta-u2n, T4.4 deep links, T5.3 search, ta-g04 (file-browser launch race - fixed the red
 CI), T7.1 composer, T13.1 encrypted journal mirror (3 verify + 2 security rounds), ta-s4r sign-in (P0), **T6.2 tool cards** (6 rounds;
 security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rewrite, media hash/magic-byte checks).
-**CI:** green on `391de70`; the run for `3a75f45` (T6.2) was pending at handover - check it first.
-**Drafts (unpublished, same cert as 0.6.0):** 0.7.0 (`b60b0d4`), 0.7.1 (`dc9200d`, +composer +mirror), 0.7.2 (`391de70`, +sign-in fix).
-T6.2 is not in any draft yet: build **0.7.3 (code 20)** from green `main` with the release workflow in `draft` mode.
+**CI:** green on `4a41c8a` (T6.2 included).
+**Drafts (unpublished, same cert as 0.6.0):** 0.7.0 (`b60b0d4`), 0.7.1 (`dc9200d`, +composer +mirror), 0.7.2 (`391de70`, +sign-in fix),
+**0.7.3 (code 20, `4a41c8a`, +T6.2 tool cards)** - built 2026-09-28 18:03 CEST; apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's; versionCode 20.
+**In flight (coordinator takeover 2026-09-28 ~18:00):** T6.3 (security-executor, `parity/T6.3-approvals`), ta-hra (security-executor,
+`parity/ta-hra-wipe-residuals`), S10.1 assetlinks (executor, tether PR `android-parity/S10.1`) - lanes under the `-wt` worktree dirs.
 **ta-s4r (owner sign-in):** owner sees the app fallback "That password is not correct." (a 401 without Tether JSON); the most likely
 cause is an SSO/auth gateway in front of `/api/auth/login` (Tether's README advises exactly that). 0.7.2 now names such a refusal
 and points to pairing. **Waiting on the owner's result with 0.7.2.**
@@ -121,7 +123,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | VERIFIED | TheMrClaus @ 2026-09-28 04:21 |  |  |
-| T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
+| T6.3 | Approvals, questions, permission denials/paths | IN-PROGRESS | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | TODO |  |  |  |
@@ -159,7 +161,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T10.2 | Session settings sheet | TODO |  |  |  |
 | T10.3 | Nodes settings | TODO |  |  |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
-| S10.1 | Server `/.well-known/assetlinks.json` — PR | TODO |  |  |  |
+| S10.1 | Server `/.well-known/assetlinks.json` — PR | IN-PROGRESS | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T10.5 | Passkeys via Credential Manager | TODO |  |  |  |
 | T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
 
