@@ -86,6 +86,7 @@ class MirrorWipeRaceTest {
         }
         assertTrue(entered.await(budgetS, TimeUnit.SECONDS))
         m.recordState(origin, "s2", 5, null, state("queued-before-wipe"), emptySet())
+        val keksBefore = fx.kekKeys.created
         val wiped = m.wipe()
         assertFalse("shredded on the calling thread", fx.keyFile.exists())
         gate.countDown()
@@ -93,6 +94,8 @@ class MirrorWipeRaceTest {
             assertNull("a bind the wipe overtook answers null", bind.await())
             wiped.await()
         }
+        // L-1: a writer that already lost the race never even asks the Keystore for a key.
+        assertEquals("the overtaken bind generated a Keystore key", keksBefore, fx.kekKeys.created)
         assertNotNull(deathThread.get())
         assertNotSame("the death point is on the writer", Thread.currentThread(), deathThread.get())
         assertFalse(
