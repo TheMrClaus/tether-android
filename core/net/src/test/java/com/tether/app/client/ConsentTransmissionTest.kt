@@ -373,6 +373,20 @@ class ConsentTransmissionTest {
     }
 
     @Test
+    fun logoutClearsTheLiveAndDecidedStateAndNothingCanBeSent() {
+        val (client, _) = connected()
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertTrue(client.decidedRequests.value.isNotEmpty())
+        h.server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}"))
+        kotlinx.coroutines.runBlocking { client.logout() }
+        assertTrue(client.liveSessions.value.isEmpty())
+        assertEquals(null, client.consentOrigin.value)
+        assertTrue(client.decidedRequests.value.isEmpty())
+        assertTrue(client.unconfirmedRequests.value.isEmpty())
+        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-plain", "x", decision = "allow"))
+    }
+
+    @Test
     fun aForgedOrStaleFingerprintIsRefused() {
         val (client, _) = connected()
         assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", "0".repeat(64), choiceId = "accept"))

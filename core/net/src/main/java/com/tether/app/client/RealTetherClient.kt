@@ -1295,6 +1295,11 @@ class RealTetherClient(
             credentialValue = null
             ws = detachSocketLocked()
             endConnectAttemptsLocked()
+            // T6.3: nothing is live and nothing is shown as decided once signed out (the detach
+            // cleared the live set and consentOrigin). The in-memory ledger itself is kept: a
+            // re-sign-in in this process must still never send a decision twice (at most once).
+            decidedState.value = emptySet()
+            unconfirmedState.value = emptySet()
         }
         ws?.close(1000, "logout")
         clearSignInViews()
