@@ -250,8 +250,14 @@ data class SessionNotice(
     val seq: Long? = null,
 )
 
+/**
+ * lib/protocol.ts QueuedMessage. [flushMode] `"next-call"` (issue #47/#183): the message is
+ * delivered at the agent's next safe tool boundary; absent for the default end-of-turn flush.
+ */
 @Serializable
-data class QueuedMessage(val queueId: String, val text: String)
+data class QueuedMessage(val queueId: String, val text: String, val flushMode: String? = null) {
+    val atToolBoundary: Boolean get() = flushMode == "next-call"
+}
 
 @Serializable
 data class TurnUsage(

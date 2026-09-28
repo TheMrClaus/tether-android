@@ -305,8 +305,9 @@ class TetherViewModel(
 
     /**
      * Busy turns queue; idle sessions send. Attachments ride the idle send
-     * only (the server never queues them) — the composer disables attaching
-     * while a turn is busy, so a non-empty list here always means idle.
+     * only (the server never queues them) — the composer refuses a busy send
+     * that carries attachments before it gets here (chat-view.tsx:3171-3175),
+     * so a non-empty list here always means idle.
      *
      * Returns false when the message was refused (attachments while
      * disconnected — §5.6: roll back and tell the user, draft kept by the

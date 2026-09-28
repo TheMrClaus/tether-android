@@ -209,7 +209,7 @@ fun ChatScreen(
             }
         }
 
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+        // The composer deck draws its own top seam (`.chat-composer` border-top + lip, T7.1).
         Composer(
             session = session,
             projection = projection,
