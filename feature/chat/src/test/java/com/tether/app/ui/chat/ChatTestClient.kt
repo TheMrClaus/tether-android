@@ -32,6 +32,13 @@ class ChatTestClient : TetherClient {
     override val configured: StateFlow<Boolean> = MutableStateFlow(true)
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
 
+    /** T7.1: the configured server (drafts are kept per its origin); null = none, as before. */
+    val server = MutableStateFlow<String?>(null)
+    override val serverUrl: StateFlow<String?> get() = server
+
+    /** T7.1: what the composer put on the wire path: `send:<text>`, `queue-add:<text>`, … */
+    val outbox = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     /** Publish [session] with [folded]'s projection and tree. */
     fun show(session: AgentSession, folded: ChatFixtures.Folded) {
         sessions.value = listOf(session) + sessions.value.filter { it.id != session.id }
@@ -44,10 +51,18 @@ class ChatTestClient : TetherClient {
     override fun start() = Unit
     override fun stop() = Unit
     override fun attach(sessionId: String) = Unit
-    override fun send(sessionId: String, text: String, attachments: List<Attachment>) = Unit
-    override fun queueAdd(sessionId: String, text: String) = Unit
-    override fun queueEdit(sessionId: String, queueId: String, text: String) = Unit
-    override fun queueRemove(sessionId: String, queueId: String) = Unit
+    override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
+        outbox += "send:$text"
+    }
+    override fun queueAdd(sessionId: String, text: String) {
+        outbox += "queue-add:$text"
+    }
+    override fun queueEdit(sessionId: String, queueId: String, text: String) {
+        outbox += "queue-edit:$queueId:$text"
+    }
+    override fun queueRemove(sessionId: String, queueId: String) {
+        outbox += "queue-remove:$queueId"
+    }
     override fun interrupt(sessionId: String) = Unit
     override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) = Unit
     override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) = Unit
