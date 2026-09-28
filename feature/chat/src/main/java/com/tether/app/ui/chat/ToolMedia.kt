@@ -9,6 +9,7 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -541,5 +542,47 @@ private fun ViewerVideo(item: ToolMediaItem) {
         )
         null -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp, contentDescription = "Loading video")
         else -> MediaUnavailable(if (v == MediaVideo.TooLarge) "Video too large to play" else "Video unavailable", Modifier)
+    }
+}
+
+// --- v122 spawned-run media ---------------------------------------------------------------------
+
+/**
+ * One source's pictures on a spawned run (subagent-runs.tsx `SpawnedRunMedia`, issue #190):
+ * `SpawnedRunProjection.media` filtered to [source] ("input" = handed to the child at spawn,
+ * "viewed" = recovered from its rollout), as tool-media items, plus their non-empty labels.
+ */
+internal fun spawnedRunMedia(media: com.tether.app.protocol.tree.JsValue?, source: String): Pair<List<ToolMediaItem>, List<String>> {
+    val items = (media as? com.tether.app.protocol.tree.JsArr)
+        ?.filter { asString((it as? com.tether.app.protocol.tree.JsObj)?.get("source")) == source }
+        ?: emptyList()
+    val labels = items.mapNotNull { asString((it as com.tether.app.protocol.tree.JsObj)["label"])?.takeIf(String::isNotEmpty) }
+    return extractToolMedia(com.tether.app.protocol.tree.JsArr.of(items)) to labels
+}
+
+/**
+ * `.subrun-media`: a "<heading> · N" chip (its labels — the file names — as the accessible name,
+ * the web's `title`) over the same [ToolMediaRow] and viewer tool results use. Nothing for no
+ * pictures. The spawned-run panel that hosts it is T6.4's.
+ */
+@Composable
+fun SpawnedRunMedia(media: com.tether.app.protocol.tree.JsValue?, source: String, heading: String, modifier: Modifier = Modifier) {
+    val (items, labels) = remember(media, source) { spawnedRunMedia(media, source) }
+    if (items.isEmpty()) return
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val pill = RoundedCornerShape(999.dp)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+        Text(
+            "$heading · ${items.size}",
+            style = TextStyle(fontFamily = type.ui, fontSize = 10.88.sp),
+            color = t.muted,
+            modifier = Modifier
+                .background(t.tintXs, pill)
+                .border(1.dp, t.line, pill)
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .semantics { contentDescription = (listOf("$heading · ${items.size}") + labels).joinToString("\n") },
+        )
+        ToolMediaRow(items, bare = true)
     }
 }

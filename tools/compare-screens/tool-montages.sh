@@ -4,7 +4,7 @@
 #
 #   tools/compare-screens/tool-montages.sh [web-reference-dir]
 #
-# web-reference-dir defaults to $PARITY_WEB_SCREENS, then the main checkout's synced corpus
+# web-reference-dir defaults to $PARITY_WEB_SCREENS, then this checkout's synced corpus
 # (parity-corpus/screens/web, tools/parity/sync-corpus.sh).
 #
 # Wells as in chat-montages.sh (phone 412dp × 678dp at 2.625 px/dp; tablet 950dp × 530dp at 1 px/dp).
@@ -13,7 +13,7 @@
 # codex-tool-cards-top is TOP-aligned (the harness scrolled to the top; the golden scrolls to row 0).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-WEB="${1:-${PARITY_WEB_SCREENS:-$HOME/git/tether-android/parity-corpus/screens/web}}"
+WEB="${1:-${PARITY_WEB_SCREENS:-parity-corpus/screens/web}}"
 G=feature/chat/src/test/screenshots
 OUT=docs/parity/screens/tool-cards
 TOOL=tools/compare-screens/CompareScreens.java

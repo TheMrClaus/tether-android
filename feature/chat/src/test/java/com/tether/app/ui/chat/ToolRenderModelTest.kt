@@ -183,3 +183,20 @@ class ToolRenderModelTest {
 
 internal fun JsObj.obj(key: String) = this[key] as JsObj
 internal fun JsObj.array(key: String) = (this[key] as com.tether.app.protocol.tree.JsArr).map { (it as com.tether.app.protocol.tree.JsStr).value }
+
+class SpawnedRunMediaTest {
+    @Test fun picturesSplitBySourceWithTheirLabels() {
+        val media = JsCodec.parse(
+            """[{"type":"media_ref","mediaKind":"image","mediaType":"image/png","url":"/api/tool-media/${"a".repeat(64)}.png","bytes":9,"source":"input","label":"shot.png"},
+               {"type":"media_ref","mediaKind":"image","mediaType":"image/png","url":"/api/tool-media/${"b".repeat(64)}.png","bytes":9,"source":"viewed","label":null},
+               {"type":"media_ref","mediaKind":"image","mediaType":"image/png","url":"/api/tool-media/${"c".repeat(64)}.png","bytes":9,"source":"input","label":""}]""",
+        )
+        val (input, labels) = spawnedRunMedia(media, "input")
+        assertEquals(2, input.size)
+        assertEquals(listOf("shot.png"), labels)
+        val (viewed, none) = spawnedRunMedia(media, "viewed")
+        assertEquals(listOf("/api/tool-media/${"b".repeat(64)}.png"), viewed.map { it.src })
+        assertTrue(none.isEmpty())
+        assertTrue(spawnedRunMedia(null, "input").first.isEmpty())
+    }
+}
