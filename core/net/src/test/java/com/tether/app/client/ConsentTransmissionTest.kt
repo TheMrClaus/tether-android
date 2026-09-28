@@ -81,7 +81,7 @@ internal fun readyWithSessions(vararg ids: String, extra: String = ""): String {
         """{"id":"$id","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,""" +
             """"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"$extra}"""
     }
-    return """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"sessions":[$rows],"providers":[],"workspaceRoot":null}"""
+    return """{"type":"ready","protocolVersion":${com.tether.app.protocol.PROTOCOL_VERSION},"nativeProtocolFloor":129,"sessions":[$rows],"providers":[],"workspaceRoot":null}"""
 }
 
 /** The fingerprint a card would render for [requestId] now ("" when it is not pending). */
@@ -415,6 +415,36 @@ class ConsentTransmissionTest {
         assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all"))
     }
 
+    /** [consentStateJson] with every pending request's `createdAt` stamp removed (a v129/v130 server's snapshot). */
+    private fun unstampedStateJson(): String {
+        var tree = JsCodec.parse(consentStateJson()) as com.tether.app.protocol.tree.JsObj
+        val turns = tree["turnsById"] as com.tether.app.protocol.tree.JsObj
+        var t1 = turns["t1"] as com.tether.app.protocol.tree.JsObj
+        for (key in listOf("pendingApprovals", "pendingQuestions")) {
+            val map = t1[key] as com.tether.app.protocol.tree.JsObj
+            var next = map
+            for ((id, v) in map) next = next.put(id, (v as com.tether.app.protocol.tree.JsObj).remove("createdAt"))
+            t1 = t1.put(key, next)
+        }
+        tree = tree.put("turnsById", turns.put("t1", t1)).put("lastError", com.tether.app.protocol.tree.JsStr("unstamped"))
+        return JsCodec.toJson(tree).toString()
+    }
+
+    @Test
+    fun aStampedAndAnUnstampedCopyOfOneRequestAreOneDecision() {
+        // B2, the verifier's repro: the v132 fold stamps createdAt; a snapshot from an older server in
+        // the window (or across an upgrade) carries the same request without it.
+        val (client, ws) = connected()
+        val stamped = ConsentGuard.pendingApproval(client.projectionTrees.value["s1"], "r-choice")!!
+        assertTrue("the v132 fold stamps pending requests", stamped.has("createdAt"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        ws.send(snapshotFrame("s1", 5, unstampedStateJson()))
+        h.await(client.projectionTrees) { (it["s1"]?.get("lastError") as? com.tether.app.protocol.tree.JsStr)?.value == "unstamped" }
+        assertTrue(!ConsentGuard.pendingApproval(client.projectionTrees.value["s1"], "r-choice")!!.has("createdAt"))
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals("exactly one decision on the wire", 1, consentFrames().size)
+    }
+
     @Test
     fun aForgedOrStaleFingerprintIsRefused() {
         val (client, _) = connected()
@@ -563,6 +593,26 @@ class ConsentGuardUnitTest {
         bad(emptyList(), setOf(2)) // skipping a non-slot
         bad(listOf(pick(0, other = "two\nlines"))) // I-3: an Other text is one line
         bad(listOf(pick(0, other = "cr\r")))
+    }
+
+    @Test fun theHashesCoverTheConsentFieldsOnly() {
+        val base = request
+            .put("choices", com.tether.app.protocol.tree.JsArr.of(com.tether.app.protocol.tree.JsObj.of("choiceId" to com.tether.app.protocol.tree.JsStr("a"), "label" to com.tether.app.protocol.tree.JsStr("A"))))
+            .put("metadata", com.tether.app.protocol.tree.JsObj.of("paths" to com.tether.app.protocol.tree.JsArr.of(com.tether.app.protocol.tree.JsStr("/a"))))
+        fun both(r: com.tether.app.protocol.tree.JsObj) = ConsentGuard.fingerprint("o", "t1", r) to ConsentGuard.cardIdentity("s1", "t1", r)
+        val ref = both(base)
+        // Bookkeeping stamps and future additive fields: the same request.
+        assertEquals(ref, both(base.put("createdAt", com.tether.app.protocol.tree.JsNum(6.0))))
+        assertEquals(ref, both(base.put("createdAt", com.tether.app.protocol.tree.JsNum(7.0)).put("somethingNew", com.tether.app.protocol.tree.JsStr("x"))))
+        // What the operator consents to: a different request.
+        assertTrue(ref != both(base.put("input", com.tether.app.protocol.tree.JsObj.of("command" to com.tether.app.protocol.tree.JsStr("rm -rf /")))))
+        assertTrue(ref != both(base.put("choices", com.tether.app.protocol.tree.JsArr.EMPTY)))
+        assertTrue(ref != both(base.put("metadata", com.tether.app.protocol.tree.JsObj.of("paths" to com.tether.app.protocol.tree.JsArr.of(com.tether.app.protocol.tree.JsStr("/b"))))))
+        assertTrue(ref != both(base.put("name", com.tether.app.protocol.tree.JsStr("Write"))))
+        assertTrue(ref != both(base.put("toolId", com.tether.app.protocol.tree.JsStr("other"))))
+        val q = com.tether.app.protocol.tree.JsObj.of("requestId" to com.tether.app.protocol.tree.JsStr("q"), "questions" to com.tether.app.protocol.tree.JsArr.EMPTY)
+        assertEquals(both(q), both(q.put("createdAt", com.tether.app.protocol.tree.JsNum(1.0))))
+        assertTrue(both(q) != both(q.put("questions", com.tether.app.protocol.tree.JsArr.of(com.tether.app.protocol.tree.JsObj.EMPTY))))
     }
 
     @Test fun theOtherCutNeverSplitsASurrogatePair() {

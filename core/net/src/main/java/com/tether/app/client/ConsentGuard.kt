@@ -70,17 +70,36 @@ object ConsentGuard {
     /**
      * SYNC_DESIGN §5.4: the identity of the exact request a card shows. SHA-256 (lower-case hex) of
      * the UTF-8 bytes of the canonical JSON of `{"activeTurnId": …, "origin": …, "request": …}`,
-     * where `request` is the pending object as the v128 reducer holds it
-     * (`pendingApprovals[requestId]` / `pendingQuestions[requestId]`) and `origin` is the server
+     * where `request` is [consentProjection] of the pending object the reducer holds
+     * (`pendingApprovals[requestId]` / `pendingQuestions[requestId]`: only [CONSENT_FIELDS], so a
+     * stamp like v131's `createdAt` never changes it, round 6) and `origin` is the server
      * origin of the live socket. Canonical JSON = [JsCodec.canonical]: object keys sorted by UTF-16
      * code units at every depth, no whitespace, strings JSON-escaped, numbers as JS
      * `Number.prototype.toString` (`JSON.stringify`), non-finite numbers as `null`.
      */
     fun fingerprint(origin: String, activeTurnId: String, request: JsObj): String {
-        val canonical = JsCodec.canonical(JsObj.of("activeTurnId" to JsStr(activeTurnId), "origin" to JsStr(origin), "request" to request))
+        val canonical = JsCodec.canonical(JsObj.of("activeTurnId" to JsStr(activeTurnId), "origin" to JsStr(origin), "request" to consentProjection(request)))
         val digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
+
+    /**
+     * Round 6 (B2): the fields of a pending request that decide WHAT the operator consents to, and
+     * the only ones [fingerprint] and [cardIdentity] hash. An explicit allowlist, not "everything":
+     * - approval (`pendingApprovals[id]`): `requestId`, `toolId`, `name`, `input`, `choices`,
+     *   `metadata` (the normalized reason / command / cwd / paths / network / requestedPermissions /
+     *   permission patterns, whole);
+     * - question (`pendingQuestions[id]`): `requestId`, `toolId`, `questions` (whole).
+     * Anything the server or the reducer stamps as bookkeeping is left out: v131's `createdAt`, and any
+     * later additive field. So a v129/v130 snapshot of a request the v132 fold stamped (or the other
+     * way round) is the SAME request (at most once holds across a server upgrade), while a change to
+     * any listed field (input, choices, paths, the questions) is a different request.
+     */
+    val CONSENT_FIELDS: List<String> = listOf("requestId", "toolId", "name", "input", "choices", "metadata", "questions")
+
+    /** [request] reduced to [CONSENT_FIELDS] (a field absent from the request stays absent). */
+    fun consentProjection(request: JsObj): JsObj =
+        JsObj.of(*CONSENT_FIELDS.mapNotNull { key -> request[key]?.let { key to it } }.toTypedArray())
 
     /**
      * True when the active turn already records an answer to [requestId] (`question_answered`, from
@@ -125,7 +144,7 @@ object ConsentGuard {
                 "kind" to JsStr("card"),
                 "sessionId" to JsStr(sessionId),
                 "activeTurnId" to JsStr(activeTurnId),
-                "request" to request,
+                "request" to consentProjection(request),
             ),
         )
         val digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
