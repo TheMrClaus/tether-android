@@ -54,3 +54,10 @@ dependencies {
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)
 }
+
+// T6.2: tool-card fixtures fold the vendored reducer corpus (parity-corpus/reducer).
+tasks.withType<Test>().configureEach {
+    val corpusDir = rootProject.layout.projectDirectory.dir("parity-corpus")
+    systemProperty("parity.corpus", corpusDir.asFile.absolutePath)
+    inputs.dir(corpusDir.dir("reducer")).withPropertyName("parityReducerCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
+}
