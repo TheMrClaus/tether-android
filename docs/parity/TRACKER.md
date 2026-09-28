@@ -40,7 +40,7 @@ service-account key, (3) set all six values - sender `TETHER_FCM_PROJECT_ID`, `T
 and client `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` - in a root-owned `EnvironmentFile`
 (or the unit's `Environment=`), never a repo `.env.local` agents can read, (4) rebuild + restart, (5) restrict the API key to the
 app package + signing fingerprints. Optional tether private-history scrub. **Drafts built (unpublished, same signing certificate as 0.6.0):** 0.7.0 (code 17, `b60b0d4`) and **0.7.1 (code 18, `dc9200d`:
-adds T7.1 composer + T13.1 encrypted journal mirror)**. Publishing is the owner's call. T6.2 tool cards (round 3) not yet in.
+adds T7.1 composer + T13.1 encrypted journal mirror)** and **0.7.2 (code 19, `391de70`: adds the ta-s4r sign-in fix)**. Publishing is the owner's call. T6.2 tool cards not yet in.
 **Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
 line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
