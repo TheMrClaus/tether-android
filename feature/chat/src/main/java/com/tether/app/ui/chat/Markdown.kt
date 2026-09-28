@@ -46,6 +46,7 @@ import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -98,6 +99,55 @@ import kotlin.math.max
 /** Tag for the inline-code ranges whose rounded `--tint-md` background [MdText] paints. */
 private const val CODE_TAG = "md-code"
 
+/**
+ * T5.3: tags for the in-chat find marks (`<mark className="find-mark">`, `find-mark--active`),
+ * painted by [MdText] as `--find-match-bg` / `--find-match-active-bg` rounded 2px boxes behind
+ * `--find-match-ink` text (globals.css 5747-5754).
+ */
+internal const val FIND_TAG = "find-mark"
+internal const val FIND_ACTIVE = "active"
+private const val FIND_PLAIN = "mark"
+
+/** Manrope hhea metrics (ascender 1066, descender 300 per 1000): a mark's inline box. */
+private const val UI_ASCENT = 1.066f
+private const val UI_DESCENT = 0.30f
+
+/**
+ * T5.3: the running occurrence counter of one text run (the web's `FindHighlighter`): [next] is
+ * the ordinal of the next mark, so a run that starts mid-message starts at its block's base.
+ */
+internal class FindCursor(val needle: String, val active: Int, start: Int) {
+    var next: Int = start
+}
+
+/**
+ * Where the transcript wants the active mark's bounds (root coordinates), to centre it
+ * (`scrollIntoView({ block: "center" })`). Null outside a transcript.
+ */
+internal val LocalFindActiveMark = androidx.compose.runtime.staticCompositionLocalOf<((androidx.compose.ui.geometry.Rect) -> Unit)?> { null }
+
+/** Append [text] with every occurrence of the cursor's needle marked (markdown.tsx `emit`). */
+internal fun AnnotatedString.Builder.appendMarked(text: String, cursor: FindCursor?, t: TetherTokens) {
+    if (cursor == null) {
+        append(text)
+        return
+    }
+    var last = 0
+    for (range in findRanges(text, cursor.needle)) {
+        if (range.first > last) append(text.substring(last, range.first))
+        val ordinal = cursor.next++
+        val start = length
+        withStyle(SpanStyle(color = t.css.findMatchInk)) { append(text.substring(range.first, range.last + 1)) }
+        addStringAnnotation(FIND_TAG, if (ordinal == cursor.active) FIND_ACTIVE else FIND_PLAIN, start, length)
+        last = range.last + 1
+    }
+    if (last < text.length) append(text.substring(last))
+}
+
+/** [text] as a plain run with its marks (a user bubble, a streaming reply): `HighlightedText`. */
+internal fun markedPlain(text: String, marks: FindMarks, t: TetherTokens): AnnotatedString =
+    buildAnnotatedString { appendMarked(text, FindCursor(marks.needle, marks.active, 0), t) }
+
 /** `.md-code { padding: 0.05rem 0.35rem }`. */
 private const val CODE_PAD_X_REM = 0.35f
 private const val CODE_PAD_Y_REM = 0.05f
@@ -130,7 +180,8 @@ internal fun inlineAnnotated(
     type: TetherTypography,
     baseWeight: Int,
     onLink: (String) -> Unit,
-): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink) }
+    cursor: FindCursor? = null,
+): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor) }
 
 private fun AnnotatedString.Builder.appendInline(
     nodes: List<MdInline>,
@@ -138,14 +189,15 @@ private fun AnnotatedString.Builder.appendInline(
     type: TetherTypography,
     weight: Int,
     onLink: (String) -> Unit,
+    cursor: FindCursor? = null,
 ) {
     for (node in nodes) {
         when (node) {
-            is MdInline.Text -> append(node.text)
+            is MdInline.Text -> appendMarked(node.text, cursor, t)
             is MdInline.Code -> {
                 val start = length
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
-                withStyle(type.codeInline) { append(node.text) }
+                withStyle(type.codeInline) { appendMarked(node.text, cursor, t) }
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
                 addStringAnnotation(CODE_TAG, node.text, start, length)
             }
@@ -155,14 +207,14 @@ private fun AnnotatedString.Builder.appendInline(
                     styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
                     linkInteractionListener = { onLink(node.href) },
                 ),
-            ) { appendInline(node.children, t, type, weight, onLink) }
-            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink)
+            ) { appendInline(node.children, t, type, weight, onLink, cursor) }
+            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor)
             is MdInline.Strong -> {
                 val w = bolder(weight)
-                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink) }
+                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink, cursor) }
             }
             is MdInline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                appendInline(node.children, t, type, weight, onLink)
+                appendInline(node.children, t, type, weight, onLink, cursor)
             }
         }
     }
@@ -182,6 +234,8 @@ internal fun MdText(
     val density = LocalDensity.current
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val codeRanges = remember(text) { text.getStringAnnotations(CODE_TAG, 0, text.length) }
+    val findRanges = remember(text) { text.getStringAnnotations(FIND_TAG, 0, text.length) }
+    val marks = if (findRanges.isEmpty()) Modifier else findMarkModifier(findRanges, style, { layout })
     val paint = if (codeRanges.isEmpty()) {
         Modifier
     } else {
@@ -217,8 +271,75 @@ internal fun MdText(
         textAlign = textAlign ?: TextAlign.Unspecified,
         softWrap = softWrap,
         onTextLayout = { layout = it },
-        modifier = modifier.then(paint),
+        modifier = modifier.then(paint).then(marks),
     )
+}
+
+/**
+ * T5.3: paint the find marks (after the code-span backgrounds, so a mark inside a code span shows)
+ * and report the active one's bounds to the transcript ([LocalFindActiveMark]).
+ */
+@Composable
+private fun findMarkModifier(
+    ranges: List<AnnotatedString.Range<String>>,
+    style: TextStyle,
+    layout: () -> TextLayoutResult?,
+): Modifier {
+    val t = LocalTetherTokens.current
+    val density = LocalDensity.current
+    val report = LocalFindActiveMark.current
+    val active = ranges.firstOrNull { it.item == FIND_ACTIVE }
+    val draw = Modifier.drawBehind {
+        val r = layout() ?: return@drawBehind
+        val px = with(density) { style.fontSize.toPx() }
+        val radius = CornerRadius(2.dp.toPx())
+        for (range in ranges) {
+            val color = if (range.item == FIND_ACTIVE) t.css.findMatchActiveBg else t.css.findMatchBg
+            forEachLineBox(r, range.start, range.end) { left, right, baseline ->
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(left, baseline - px * UI_ASCENT),
+                    size = Size(right - left, px * (UI_ASCENT + UI_DESCENT)),
+                    cornerRadius = radius,
+                )
+            }
+        }
+    }
+    if (active == null || report == null) return draw
+    val coordinates = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    fun tryReport() {
+        val coords = coordinates[0]?.takeIf { it.isAttached } ?: return
+        val r = layout() ?: return
+        if (active.start >= r.layoutInput.text.length) return
+        val box = r.getBoundingBox(active.start)
+        val end = r.getBoundingBox(maxOf(active.start, active.end - 1))
+        val topLeft = coords.localToRoot(Offset(box.left, box.top))
+        report(androidx.compose.ui.geometry.Rect(topLeft, Size(maxOf(1f, end.right - box.left), end.bottom - box.top)))
+    }
+    // A mark that became active in text already on screen reports after the next layout.
+    LaunchedEffect(active.start, active.end) {
+        androidx.compose.runtime.withFrameNanos { }
+        tryReport()
+    }
+    return draw.then(
+        Modifier.onGloballyPositioned { coords ->
+            coordinates[0] = coords
+            tryReport()
+        },
+    )
+}
+
+/** Each line's slice of [start, end): its left and right edge and baseline (`box-decoration-break: clone`). */
+private inline fun forEachLineBox(r: TextLayoutResult, start: Int, end: Int, block: (Float, Float, Float) -> Unit) {
+    if (end <= start || start >= r.layoutInput.text.length) return
+    val first = r.getLineForOffset(start)
+    val last = r.getLineForOffset(max(start, end - 1))
+    for (line in first..last) {
+        val s = max(start, r.getLineStart(line))
+        val e = minOf(end, r.getLineEnd(line, visibleEnd = true))
+        if (e <= s) continue
+        block(r.getBoundingBox(s).left, r.getBoundingBox(e - 1).right, r.getLineBaseline(line))
+    }
 }
 
 /** One block's collapsed-margin contribution, in dp. */
@@ -234,6 +355,8 @@ fun MarkdownBody(
     style: TextStyle,
     color: Color,
     modifier: Modifier = Modifier,
+    /** T5.3: the in-chat find's marks for this message (null: none — the pre-T5.3 paths). */
+    find: FindMarks? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -244,6 +367,10 @@ fun MarkdownBody(
     fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
     val body = style.fontSize
     val baseWeight = style.fontWeight?.weight ?: 400
+    // Each block's first ordinal: the marks every earlier block paints (document order).
+    val starts = remember(blocks, find?.needle) {
+        find?.let { f -> blocks.runningFold(0) { acc, b -> acc + countBlockMatches(b, f.needle) } }
+    }
 
     Column(modifier) {
         var previousBottom: Dp? = null
@@ -263,19 +390,20 @@ fun MarkdownBody(
                 else -> maxOf(previousBottom ?: 0.dp, m.top)
             }
             if (top > 0.dp) Spacer(Modifier.height(top))
+            val mark = if (find != null && starts != null && starts[index + 1] > starts[index]) BlockMarks(find, starts[index]) else null
             when (block) {
-                is MdBlock.Paragraph -> MdParagraph(block, style, color, t, type, baseWeight, onLink)
+                is MdBlock.Paragraph -> MdParagraph(block, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.Heading -> MdText(
-                    inlineAnnotated(block.inlines, t, type, headingStyle!!.fontWeight!!.weight, onLink),
-                    style = headingStyle,
+                    remember(block, t, type, mark) { inlineAnnotated(block.inlines, t, type, headingStyle!!.fontWeight!!.weight, onLink, mark?.cursor()) },
+                    style = headingStyle!!,
                     color = color,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink)
-                is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink)
-                is MdBlock.Quote -> MdQuote(block, style, t, type, baseWeight, onLink)
-                is MdBlock.Table -> MdTable(block, style, t, type, onLink)
-                is MdBlock.Code -> MdCodeBlock(block)
+                is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink, mark)
+                is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink, mark)
+                is MdBlock.Quote -> MdQuote(block, style, t, type, baseWeight, onLink, mark)
+                is MdBlock.Table -> MdTable(block, style, t, type, onLink, mark)
+                is MdBlock.Code -> MdCodeBlock(block, mark)
                 MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             }
             previousBottom = m.bottom
@@ -285,6 +413,11 @@ fun MarkdownBody(
             }
         }
     }
+}
+
+/** T5.3: one block's marks — the message's needle and active ordinal, from [base] on. */
+internal data class BlockMarks(val find: FindMarks, val base: Int) {
+    fun cursor(offset: Int = 0): FindCursor = FindCursor(find.needle, find.active, base + offset)
 }
 
 /** `h3.md-h` 1.05rem, `h4` 0.98rem, `h5`/`h6` 0.92rem; 680, line-height 1.3 (globals.css:4915-4918). */
@@ -303,12 +436,14 @@ private fun MdParagraph(
     type: TetherTypography,
     weight: Int,
     onLink: (String) -> Unit,
+    mark: BlockMarks? = null,
 ) {
-    val text = remember(block, t, type) {
+    val text = remember(block, t, type, mark) {
+        val cursor = mark?.cursor()
         buildAnnotatedString {
             block.lines.forEachIndexed { i, line ->
                 if (i > 0) append('\n') // <br/>
-                append(inlineAnnotated(line, t, type, weight, onLink))
+                append(inlineAnnotated(line, t, type, weight, onLink, cursor))
             }
         }
     }
@@ -331,9 +466,11 @@ private fun MdList(
     type: TetherTypography,
     weight: Int,
     onLink: (String) -> Unit,
+    mark: BlockMarks? = null,
 ) {
     val density = LocalDensity.current
     fun em(f: Float): Dp = with(density) { (style.fontSize.value * f).sp.toDp() }
+    val itemStarts = remember(items, mark) { mark?.let { m -> items.runningFold(0) { acc, item -> acc + countInlineMatches(item, m.find.needle) } } }
     val indent = em(1.35f)
     val gap = em(0.15f)
     val disc = em(0.355f)
@@ -347,7 +484,7 @@ private fun MdList(
                     } else {
                         Box(Modifier.size(disc).background(color, CircleShape))
                     }
-                    MdText(inlineAnnotated(item, t, type, weight, onLink), style, color)
+                    MdText(inlineAnnotated(item, t, type, weight, onLink, itemStarts?.let { mark?.cursor(it[n]) }), style, color)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 measurePolicy = remember(ordered, indent) { ListItemPolicy(ordered, indent, em(1f), em(0.36f)) },
@@ -407,6 +544,7 @@ private fun MdQuote(
     type: TetherTypography,
     weight: Int,
     onLink: (String) -> Unit,
+    mark: BlockMarks? = null,
 ) {
     val density = LocalDensity.current
     fun em(f: Float): Dp = with(density) { (style.fontSize.value * f).sp.toDp() }
@@ -417,7 +555,7 @@ private fun MdQuote(
             .drawBehind { drawRect(rule, size = Size(2.dp.toPx(), size.height)) }
             .padding(start = 2.dp + em(0.85f), top = em(0.1f), bottom = em(0.1f) + em(0.5f)),
     ) {
-        MdParagraph(block.paragraph, style, t.muted, t, type, weight, onLink)
+        MdParagraph(block.paragraph, style, t.muted, t, type, weight, onLink, mark)
     }
 }
 
@@ -434,8 +572,13 @@ private fun MdTable(
     t: TetherTokens,
     type: TetherTypography,
     onLink: (String) -> Unit,
+    mark: BlockMarks? = null,
 ) {
     val cellStyle = style.copy(lineHeight = 1.45.em)
+    // Header cells, then each row's cells, in document order (thead before tbody).
+    val cellStarts = remember(block, mark) {
+        mark?.let { m -> (block.headers + block.rows.flatten()).runningFold(0) { acc, cell -> acc + countInlineMatches(cell, m.find.needle) } }
+    }
     val headStyle = cellStyle.copy(fontWeight = FontWeight(680))
     val padX = t.css.spaceMd
     val padY = t.css.spaceXs
@@ -454,7 +597,7 @@ private fun MdTable(
         content = {
             block.headers.forEachIndexed { n, cell ->
                 MdText(
-                    inlineAnnotated(cell, t, type, 680, onLink),
+                    inlineAnnotated(cell, t, type, 680, onLink, cellStarts?.let { mark?.cursor(it[n]) }),
                     headStyle,
                     t.ink,
                     Modifier.padding(horizontal = padX, vertical = padY),
@@ -462,10 +605,10 @@ private fun MdTable(
                     softWrap = false,
                 )
             }
-            block.rows.forEach { row ->
+            block.rows.forEachIndexed { r, row ->
                 row.forEachIndexed { n, cell ->
                     MdText(
-                        inlineAnnotated(cell, t, type, baseWeight, onLink),
+                        inlineAnnotated(cell, t, type, baseWeight, onLink, cellStarts?.let { mark?.cursor(it[block.headers.size + r * block.headers.size + n]) }),
                         cellStyle,
                         t.ink,
                         Modifier.padding(horizontal = padX, vertical = padY),
@@ -574,7 +717,7 @@ private class TablePolicy(private val cols: Int, private val geo: TableGeometry)
  * a check ("Copied") for 1.5s. No syntax highlighting: the web renders fences as plain text.
  */
 @Composable
-internal fun MdCodeBlock(block: MdBlock.Code) {
+internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val context = LocalContext.current
@@ -595,15 +738,18 @@ internal fun MdCodeBlock(block: MdBlock.Code) {
                 .clip(shape)
                 .cssSurface(shape, background = t.mineralDeep, border = CssBorder(1.dp, t.line)),
         ) {
-            TetherExpandableBlock(clamp = clamp) {
+            // T5.3 markdown.tsx:290-296: the active match inside this fence lifts the clamp.
+            val count = if (mark != null) countPlainMatches(block.code, mark.find.needle) else 0
+            val reveal = mark != null && mark.find.active >= mark.base && mark.find.active < mark.base + count
+            TetherExpandableBlock(clamp = clamp, reveal = reveal) {
                 Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    Text(
-                        block.code,
-                        style = type.codeBlock,
-                        color = t.ink,
-                        softWrap = false,
-                        modifier = Modifier.padding(horizontal = t.css.spaceMd + 1.dp, vertical = t.css.spaceSm + 1.dp),
-                    )
+                    val padding = Modifier.padding(horizontal = t.css.spaceMd + 1.dp, vertical = t.css.spaceSm + 1.dp)
+                    if (mark == null) {
+                        Text(block.code, style = type.codeBlock, color = t.ink, softWrap = false, modifier = padding)
+                    } else {
+                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t) } }
+                        MdText(marked, type.codeBlock, t.ink, padding, softWrap = false)
+                    }
                 }
             }
         }

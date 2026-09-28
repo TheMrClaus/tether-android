@@ -24,6 +24,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -86,7 +96,39 @@ fun ChatScreen(
         if (s != null && s.provider == "claude") vm.client.requestSessionControls(s.id)
     }
 
-    Column(modifier.background(t.mineralDeep)) {
+    // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.
+    val find = rememberChatFindState(session?.id)
+    val findFocus = remember { FocusRequester() }
+    val counter = remember(session?.id) { FindCounter() }
+    val needle = findNeedle(find.query.text)
+    val results = remember(projection, needle, find.open) { findResults(projection, needle, find.open, counter) }
+    val active = activeHitIndex(results, find.index)
+    val transcriptFind = if (find.open) TranscriptFind(results, needle, results.hits.getOrNull(active)) else null
+    // dashboard.tsx:1459 — a global-search result arms the find bar of ITS conversation only.
+    val findRequest by vm.findRequest.collectAsStateWithLifecycle()
+    val request = findRequest?.takeIf { session?.historyId != null && it.historyId == session.historyId }
+    LaunchedEffect(request?.nonce, session?.id) {
+        // The web also focuses the box here; a phone's soft keyboard would cover the match the
+        // bar just jumped to, so the query waits for a tap (Ctrl+F still focuses it).
+        request?.let { find.apply(it.query, it.nonce) }
+    }
+    var focusFind by remember { mutableStateOf(0) }
+    LaunchedEffect(focusFind) { if (focusFind > 0) runCatching { findFocus.requestFocus() } }
+
+    Box(
+        modifier.onPreviewKeyEvent { event ->
+            // chat-view.tsx:2092-2098: Ctrl/Cmd+F (not Shift, not Alt) opens or refocuses the bar.
+            val ctrl = event.isCtrlPressed || event.isMetaPressed
+            if (event.type == KeyEventType.KeyDown && event.key == Key.F && ctrl && !event.isShiftPressed && !event.isAltPressed && session != null) {
+                find.openSelected()
+                focusFind++
+                true
+            } else {
+                false
+            }
+        },
+    ) {
+    Column(Modifier.fillMaxSize().background(t.mineralDeep)) {
         if (session != null && showWorkspaceHeader) {
             WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot)
         }
@@ -140,6 +182,7 @@ fun ChatScreen(
                 )
 
                 else -> ChatTranscript(
+                    find = transcriptFind,
                     projection = projection,
                     tree = trees[session.id],
                     showThinking = showThinking,
@@ -185,6 +228,22 @@ fun ChatScreen(
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
         )
+    }
+    if (find.open && session != null) {
+        ChatFindBar(
+            query = find.query,
+            onQueryChange = { value ->
+                if (value.text != find.query.text) find.index = 0
+                find.query = value
+            },
+            count = findCount(needle, results, find.index),
+            canStep = results.hits.isNotEmpty(),
+            onStep = { delta -> find.index = stepMatch(results, find.index, delta) },
+            onClose = find::close,
+            focusRequester = findFocus,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = t.css.spaceSm, end = t.css.spaceMd),
+        )
+    }
     }
 }
 

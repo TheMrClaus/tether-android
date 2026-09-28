@@ -1,6 +1,12 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.tether.app.ui.theme.LocalReducedMotion
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -108,6 +114,8 @@ internal fun ChatTranscript(
     zone: ZoneId = ZoneId.systemDefault(),
     listState: LazyListState = rememberLazyListState(),
     showTimeline: Boolean = true,
+    /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
+    find: TranscriptFind? = null,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -155,6 +163,33 @@ internal fun ChatTranscript(
         if (sticky && lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
     }
 
+    // T5.3 chat-view.tsx:2066-2074: land on the active OCCURRENCE, centred. The row holding it is
+    // brought on screen first (a lazy row far away is not composed); its text then reports the
+    // mark's bounds once ([LocalFindActiveMark]) and the list centres them. A jump stops the
+    // follow mode, so the next streamed delta does not pull the view away from the match.
+    val activeHit = find?.activeHit
+    val activeKey = activeHit?.let { "${it.turnId}/${it.blockId}#${it.ordinal}" }
+    val center = remember(activeKey) { FindCenterRequest() }
+    var viewport by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val reduced = LocalReducedMotion.current
+    val findScope = rememberCoroutineScope()
+    LaunchedEffect(activeKey) {
+        val hit = activeHit ?: return@LaunchedEffect
+        sticky = false
+        val row = items.indexOfFirst { it is ChatItem.Block && it.turnId == hit.turnId && it.block.blockId == hit.blockId }
+        if (row < 0) return@LaunchedEffect
+        val index = row + leading
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
+    }
+    val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark ->
+        val box = viewport
+        if (box != null && !center.done) {
+            center.done = true
+            val delta = mark.center.y - box.center.y
+            findScope.launch { if (reduced) listState.scrollBy(delta) else listState.animateScrollBy(delta) }
+        }
+    }
+
     val layoutPadding = PaddingValues(
         start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr),
         end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr) + if (hasTimeline) TimelineRailWidth else 0.dp,
@@ -163,9 +198,14 @@ internal fun ChatTranscript(
     )
 
     Box(modifier.fillMaxSize().background(chatWellColor(t))) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().nestedScroll(followGuard).testTag("chat-transcript"),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(followGuard)
+                .onGloballyPositioned { viewport = it.boundsInRoot() }
+                .testTag("chat-transcript"),
             contentPadding = layoutPadding,
         ) {
             if (roster != null) {
@@ -177,14 +217,21 @@ internal fun ChatTranscript(
                     item.startsGroup -> spacing.scrollGap
                     else -> spacing.turnGap
                 }
+                val marks = if (find != null && item is ChatItem.Block) {
+                    findMarksFor(find.results, find.needle, find.activeHit, item.turnId, item.block.blockId)
+                } else {
+                    null
+                }
                 ChatRow(
                     item = item,
                     onFetchTurns = onFetchTurns,
                     onApproval = onApproval,
                     onAnswer = onAnswer,
                     modifier = Modifier.padding(top = gap),
+                    find = marks,
                 )
             }
+        }
         }
 
         if (hasTimeline) {
@@ -232,6 +279,7 @@ private fun ChatRow(
     onApproval: (String, String?, String?) -> Unit,
     onAnswer: (String, Map<String, String>, String?) -> Unit,
     modifier: Modifier = Modifier,
+    find: FindMarks? = null,
 ) {
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
@@ -243,8 +291,8 @@ private fun ChatRow(
             }
             is ChatItem.Continuation -> ContinuationMarker()
             is ChatItem.Block -> when (item.block.kind) {
-                Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel)
-                Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel)
+                Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find)
+                Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_THINKING -> ThinkingCard(item.block)
                 Vocab.BLOCK_TOOL -> ToolCard(item.block)
                 else -> {}
@@ -288,4 +336,13 @@ private fun LoadEarlierKey(count: Int, onClick: () -> Unit) {
             Text(loadEarlierLabel(count), style = type.body.copy(fontSize = 12.48.sp), color = t.muted)
         }
     }
+}
+
+/** T5.3: what the transcript needs from the find bar (chat-view.tsx findResults + the active hit). */
+@androidx.compose.runtime.Immutable
+internal class TranscriptFind(val results: FindResults, val needle: String, val activeHit: FindHit?)
+
+/** One centring per active occurrence: the first report of its bounds wins. */
+private class FindCenterRequest {
+    var done = false
 }

@@ -183,13 +183,16 @@ private fun MessageTime(label: String, ink: Color) {
  * turn.startedAt)`; "" hides it.
  */
 @Composable
-fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "") {
+fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "", find: FindMarks? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val look = bubbleLook(t, type, user = true, phone = currentLayoutClass() == TetherLayoutClass.Phone)
     BubbleBox(look, alignEnd = true, modifier) {
         val text = block.text
-        if (!text.isNullOrEmpty()) Text(text, style = look.style, color = look.ink)
+        if (!text.isNullOrEmpty()) {
+            // T5.3: `HighlightedText` — the find marks over the plain text, when it has any.
+            if (find != null) MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink) else Text(text, style = look.style, color = look.ink)
+        }
         val attachments = block.attachments
         if (!attachments.isNullOrEmpty()) {
             // `.chat-bubble-attachments` chips; image thumbnails (v112 mediaRef) are T7.4's.
@@ -224,7 +227,7 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
  * with neither text nor the interrupted mark.
  */
 @Composable
-fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "") {
+fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "", find: FindMarks? = null) {
     val text = block.text.orEmpty()
     if (text.isEmpty() && block.aborted != true) return
     val t = LocalTetherTokens.current
@@ -235,7 +238,9 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Stri
         if (text.isNotEmpty()) {
             if (done) {
                 val blocks = remember(text) { parseMarkdown(text) }
-                MarkdownBody(blocks, look.style, look.ink)
+                MarkdownBody(blocks, look.style, look.ink, find = find)
+            } else if (find != null) {
+                MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink)
             } else {
                 Text(text, style = look.style, color = look.ink)
             }

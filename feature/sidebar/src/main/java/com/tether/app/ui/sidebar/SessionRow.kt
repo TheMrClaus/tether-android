@@ -438,6 +438,7 @@ internal fun SessionRow(
                         }
                     }
                     location?.let { Text(it, style = css(type.ui, if (studio) 0.64f else 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    entry.snippet?.let { SnippetLine(it, entry.matchCount) }
                 }
                 // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
                 SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
@@ -551,5 +552,31 @@ private fun rowDescription(
         append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
     }
     location?.let { append(", $it") }
+    // T5.3: a content-search hit says where it matched.
+    entry.snippet?.let { snippet ->
+        append(", matched: $snippet")
+        if (entry.matchCount > 1) append(", ${entry.matchCount} matches")
+    }
+}
+
+/**
+ * T5.3 `.session-item-snippet` (globals.css 1514-1532): a single faint 0.7rem line under the
+ * title — the Search glyph at 11px, the context window, and "· N matches" at 0.8 opacity when
+ * the hit counted more than one (session-sidebar.tsx:384-389). The row's description carries it.
+ */
+@Composable
+private fun SnippetLine(snippet: String, matchCount: Int) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val style = css(type.ui, 0.7f, 400)
+    Row(
+        Modifier.padding(top = 0.1f.rem),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(0.25f.rem),
+    ) {
+        SmallIcon(TetherIcons.Search, t.faint, 11.dp)
+        Text(snippet, style = style, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (matchCount > 1) Text("·\u00A0$matchCount matches", style = style, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
+    }
 }
 

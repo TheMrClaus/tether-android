@@ -51,6 +51,8 @@ fun SessionDrawer(
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val providers by client.providers.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
+    // T5.3: the debounced workspace content search (use-tether.ts searchResults).
+    val contentHits by client.searchResults.collectAsStateWithLifecycle()
     val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
 
@@ -105,7 +107,7 @@ fun SessionDrawer(
         collapsed = preferences.collapsedWorkspaces,
         activity = SidebarModel.projectActivity(sessions, workspaces),
         sidebarSessions = rows,
-        filteredSessions = SidebarModel.filteredSessions(rows, query, harness),
+        filteredSessions = SidebarModel.filteredSessions(rows, query, harness, contentHits, workspaces, current, preferences.sidebarSort, collator),
         query = query,
         harness = harness,
         activeOnly = preferences.sidebarActiveOnly,
@@ -118,6 +120,13 @@ fun SessionDrawer(
         now = now,
     )
 
+    // T5.3 dashboard.tsx:835-844 — debounce the typed filter into a server-side content search;
+    // the instant title filter above stays live on every keystroke and the hits merge in later.
+    LaunchedEffect(query, current) {
+        val cwd = current?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        delay(SEARCH_DEBOUNCE_MS)
+        client.search(cwd, query.trim())
+    }
     // dashboard.tsx:142-144 — the server settings (pinned workspaces) on every connection.
     LaunchedEffect(connected) { if (connected) client.requestServerSettings() }
     // dashboard.tsx:354-367 — adopt the server's kept list, or seed it once from this device.
@@ -169,6 +178,7 @@ fun SessionDrawer(
                 client.browse(current ?: workspaceRoot)
             },
             onOpenSettings = { settingsOpen = true },
+            onOpenGlobalSearch = vm::openGlobalSearch,
         ),
     )
 
@@ -193,3 +203,6 @@ fun SessionDrawer(
     }
     if (settingsOpen) InterimSettingsDialog(prefs, onDismiss = { settingsOpen = false })
 }
+
+/** dashboard.tsx:842 — the sidebar filter's content search waits this long after the last keystroke. */
+internal const val SEARCH_DEBOUNCE_MS = 250L

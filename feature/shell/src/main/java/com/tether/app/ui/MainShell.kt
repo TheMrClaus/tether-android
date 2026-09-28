@@ -32,6 +32,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import com.tether.app.ui.search.GlobalSearchHost
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -146,7 +156,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val metrics = TelemetryMetrics.from(session?.metrics)
     val sessionView = session?.let { s -> projectionTrees[s.id]?.let(::SessionView) }
 
-    Box(Modifier.fillMaxSize()) {
+    // T5.3 dashboard.tsx:1186-1194: Ctrl/Cmd+Shift+F opens the global search from anywhere.
+    Box(Modifier.fillMaxSize().onPreviewKeyEvent { event -> openGlobalSearchOnShortcut(event, vm) }) {
         val topbarActions = TopbarActions(
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
@@ -268,6 +279,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     WorkspaceFileBrowser(fileBrowser)
+
+    // T5.3: the cross-harness global search modal (dashboard.tsx:1701-1711).
+    GlobalSearchHost(vm = vm, prefs = prefs, sessions = sessions, workspaceRoot = workspaceRoot, onCloseDrawer = shell::closeDrawer)
 
     if (showLog) {
         LogDialog(
@@ -444,4 +458,12 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             Icon(TetherIcons.X, contentDescription = "Dismiss", tint = t.muted, modifier = Modifier.size(16.dp))
         }
     }
+}
+
+/** T5.3 dashboard.tsx:1186-1194 — Ctrl/Cmd+Shift+F (not Alt) opens the global search. */
+internal fun openGlobalSearchOnShortcut(event: androidx.compose.ui.input.key.KeyEvent, vm: TetherViewModel): Boolean {
+    val ctrl = event.isCtrlPressed || event.isMetaPressed
+    if (event.type != KeyEventType.KeyDown || event.key != Key.F || !ctrl || !event.isShiftPressed || event.isAltPressed) return false
+    vm.openGlobalSearch()
+    return true
 }

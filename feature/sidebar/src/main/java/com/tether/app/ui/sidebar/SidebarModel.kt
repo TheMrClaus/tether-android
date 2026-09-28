@@ -8,6 +8,9 @@ import com.tether.app.protocol.helpers.SidebarWorkspaces
 import com.tether.app.protocol.helpers.get
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.HistorySession
+import com.tether.app.protocol.SearchHit
+import com.tether.app.client.SearchResults
+import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
@@ -27,6 +30,12 @@ data class SidebarEntry(val js: JsObj, val live: AgentSession?, val history: His
     val key: String get() = (js["key"] as JsStr).value
     val workspace: String? get() = (js["workspace"] as? JsStr)?.value
     val unread: Boolean get() = truthy(js["unread"])
+
+    /** T5.3: the content-search context window when the row surfaced by a full-text hit. */
+    val snippet: String? get() = (js["snippet"] as? JsStr)?.value?.takeIf { it.isNotEmpty() }
+
+    /** T5.3: the hit's bounded occurrence count (0 when not a hit). */
+    val matchCount: Int get() = (js["matchCount"] as? JsNum)?.value?.toInt() ?: 0
 }
 
 /** Live `waiting` / `active` counts per workspace block (dashboard.tsx:897-910). */
@@ -168,18 +177,62 @@ object SidebarModel {
     }
 
     /**
-     * dashboard.tsx:846-893 — the harness narrowing plus the instant title filter. Content hits
-     * (the debounced `search`) are T5.3's; rows keep their per-block order.
+     * dashboard.tsx:846-893 — the harness narrowing, the instant title filter, and (T5.3) the
+     * debounced workspace content search merged in: a row already listed keeps its place and
+     * gains the hit's snippet; a hit outside the listed rows (beyond the discovery cap) becomes a
+     * history-only row under the block that owns its folder, sorted among the other extras. The
+     * hits count only while [hits] answers the query typed now (a reply for the previous query
+     * would flash stale rows). Rows keep their per-block order: the filter only removes.
      */
-    fun filteredSessions(rows: List<SidebarEntry>, query: String, harness: String?): List<SidebarEntry> {
+    fun filteredSessions(
+        rows: List<SidebarEntry>,
+        query: String,
+        harness: String?,
+        hits: SearchResults = SearchResults(),
+        workspaces: List<String> = emptyList(),
+        currentWorkspace: String? = null,
+        sort: SidebarSort = SidebarSort.Created,
+        collator: JsCollator? = null,
+    ): List<SidebarEntry> {
         val byHarness = if (harness != null) rows.filter { (it.live?.provider ?: it.history?.provider) == harness } else rows
         val q = query.trim().lowercase(Locale.ROOT)
         if (q.isEmpty()) return byHarness
-        return byHarness.filter { entry ->
+        val contentHits = if (hits.query.trim().lowercase(Locale.ROOT) == q) hits.hits else emptyList()
+        val hitByHistory = contentHits.associateBy { it.historyId }
+        val merged = ArrayList<SidebarEntry>()
+        val seen = HashSet<String>()
+        for (entry in byHarness) {
             val name = (entry.live?.name?.takeIf { it.isNotEmpty() } ?: entry.history?.name ?: "").lowercase(Locale.ROOT)
-            name.contains(q)
+            val hit = entry.history?.let { hitByHistory[it.historyId] }
+            if (name.contains(q) || hit != null) {
+                merged += if (hit != null) entry.withSnippet(hit) else entry
+                entry.history?.let { seen += it.historyId }
+            }
         }
+        val extra = ArrayList<SidebarEntry>()
+        for (hit in contentHits) {
+            if (hit.historyId in seen) continue
+            // Still gated by the harness filter: another harness's hit must not leak back in.
+            if (harness != null && hit.provider != harness) continue
+            val history = hit.toHistory()
+            val js = JsObj.of(
+                "key" to js("history:${hit.historyId}"),
+                "workspace" to (workspaceGroupFor(hit.cwd, workspaces) ?: currentWorkspace)?.let(::js),
+                "createdAt" to js(hit.createdAt ?: hit.updatedAt),
+                "updatedAt" to js(hit.updatedAt),
+                "history" to historyJs(history),
+            )
+            extra += SidebarEntry(js, null, history).withSnippet(hit)
+        }
+        if (extra.isEmpty() || collator == null) return merged + extra
+        val byKey = extra.associateBy { it.key }
+        val sorted = SidebarOrder.sortSidebarEntries(JsArr.of(extra.map { it.js }), js(sort.id), collator)
+        return merged + sorted.map { byKey.getValue((it["key"] as JsStr).value) }
     }
+
+    /** dashboard.tsx:866 — `{ ...entry, snippet: hit.snippet, matchCount: hit.matchCount }`. */
+    private fun SidebarEntry.withSnippet(hit: SearchHit): SidebarEntry =
+        copy(js = js.with("snippet" to js(hit.snippet), "matchCount" to js(hit.matchCount)))
 
     /** dashboard.tsx:897-910 — from the FULL session list, so a folded block still flags "needs you". */
     fun projectActivity(sessions: List<AgentSession>, workspaces: List<String>): Map<String, WorkspaceActivity> {

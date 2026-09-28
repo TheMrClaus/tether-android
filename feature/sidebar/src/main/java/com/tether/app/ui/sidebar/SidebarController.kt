@@ -203,6 +203,8 @@ class SidebarController(
         onNewSession: () -> Unit,
         onBrowseWorkspace: () -> Unit,
         onOpenSettings: () -> Unit,
+        /** T5.3: dashboard.tsx:1157 openGlobalSearch (TetherViewModel.openGlobalSearch). */
+        onOpenGlobalSearch: (() -> Unit)? = null,
     ): SidebarActions = SidebarActions(
         onCloseDrawer = onClose,
         onNewSession = onNewSession,
@@ -242,6 +244,7 @@ class SidebarController(
         onResetSessionOrder = { workspace -> client.setSessionOrder(workspace, emptyList()) },
         onOpenSettings = onOpenSettings,
         onCollapse = { updatePreferences { it.copy(sidebarCollapsed = true) } },
+        onOpenGlobalSearch = onOpenGlobalSearch,
     )
 
     companion object {
