@@ -490,7 +490,7 @@ class DurableSendTest {
         ws.send(snapshotFrame("s1", 5, consentStateJson()))
         h.await(client.liveSessions) { "s1" in it }
         assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         assertEquals(listOf("approval", "question"), h.framesUntilBarrier().map { it.type() })
 
         ws.close(1001, null)

@@ -203,9 +203,9 @@ class ConsentTransmissionTest {
     @Test
     fun aQuestionIsAnsweredOnceOnlyWithItsOwnQuestionsAndNeverAfterAnAnswerIsOnRecord() {
         val (client, ws) = connected()
-        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Something else?" to "x")))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres, please"), "Postgres, please"))
-        assertEquals(ConsentResult.AlreadyDecided, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(5, listOf(0), ""))))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, emptyList(), "Postgres, please"))))
+        assertEquals(ConsentResult.AlreadyDecided, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         val frame = consentFrames().single()
         assertEquals("q1", frame.str("requestId"))
         assertEquals("""{"answers":{"Which DB?":"Postgres, please"},"response":"Postgres, please"}""", frame["answers"].toString())
@@ -218,10 +218,10 @@ class ConsentTransmissionTest {
         // Another device answered first: question_answered lands before question_resolved.
         ws.send(eventFrame("s1", 6, "question_answered", "t1", ""","requestId":"q1","toolId":"ask-1","items":[]"""))
         h.serverBarrier(ws)
-        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         ws.send(eventFrame("s1", 7, "question_resolved", "t1", ""","requestId":"q1""""))
         h.serverBarrier(ws)
-        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         assertTrue(consentFrames().isEmpty())
     }
 
@@ -305,7 +305,7 @@ class ConsentTransmissionTest {
         assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(ConsentResult.Locked, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Locked, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         assertTrue(consentFrames().isEmpty())
         assertTrue(client.decidedRequests.value.isEmpty())
     }
@@ -322,7 +322,7 @@ class ConsentTransmissionTest {
     fun decisionsAreNeverPersisted() {
         val (client, _) = connected()
         assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         // A prompt IS persisted (T1.3): wait for that write, then read every slot on the "disk".
         client.send("s1", "persist me")
         val slots = kotlinx.coroutines.runBlocking {
@@ -366,10 +366,10 @@ class ConsentTransmissionTest {
     fun anAnswerValueTheRequestDidNotOfferIsRefused() {
         val (client, _) = connected()
         val fp = consentFp(client, "s1", "q1", question = true)
-        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "DROP TABLE users")))
-        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "Postgres"), "extra instructions"))
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, listOf(ConsentGuard.QuestionPick(0, listOf(7), ""))))
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, listOf(ConsentGuard.QuestionPick(0, listOf(0, 0), ""))))
         assertTrue(consentFrames().isEmpty())
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", fp, listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
     }
 
     @Test
@@ -387,10 +387,39 @@ class ConsentTransmissionTest {
     }
 
     @Test
+    fun theCardIdentitySurvivesADropAndASnapshotThatReplacesTheTree() {
+        val (client, ws) = connected()
+        fun identity(): Pair<String, Any> {
+            val tree = client.projectionTrees.value.getValue("s1")
+            val request = ConsentGuard.pendingApproval(tree, "r-grant")!!
+            return ConsentGuard.cardIdentity("s1", ConsentGuard.activeTurnId(tree)!!, request) to request
+        }
+        val (before, requestBefore) = identity()
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        h.scheduler.await(::isReconnectDelay).fire()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, readyWithSessions("s1"))
+        h.expectFrame("attach")
+        // A state that differs elsewhere (the server's newer view): the tree is replaced wholesale.
+        val newer = consentStateJson().replace("\"lastError\":null", "\"lastError\":\"elsewhere\"")
+        assertTrue(newer != consentStateJson())
+        ws2.send(snapshotFrame("s1", 5, newer))
+        h.await(client.projectionTrees) { (it["s1"]?.get("lastError") as? com.tether.app.protocol.tree.JsStr)?.value == "elsewhere" }
+        h.await(client.liveSessions) { "s1" in it }
+        val (after, requestAfter) = identity()
+        assertTrue("the snapshot replaced the request object", requestBefore !== requestAfter)
+        assertEquals(before, after)
+        // The WIRE fingerprint also matches (same server): the card's decision still goes out.
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all"))
+    }
+
+    @Test
     fun aForgedOrStaleFingerprintIsRefused() {
         val (client, _) = connected()
         assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", "0".repeat(64), choiceId = "accept"))
-        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", "", mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", "", listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
         assertTrue(consentFrames().isEmpty())
     }
 
@@ -494,29 +523,51 @@ class ConsentGuardUnitTest {
         "questions" to com.tether.app.protocol.tree.JsArr.of(
             q("DB?", false, "Postgres", "SQLite"),
             q("Env?", true, "staging", "production", "eu, us"),
+            // The same text again, options reordered plus one: one slot, labels unioned (L1).
+            q("DB?", false, "SQLite", "Postgres", "DynamoDB"),
         ),
     )
 
-    private fun ok(answers: Map<String, String>, response: String? = null) =
-        assertEquals("$answers / $response", null, ConsentGuard.checkQuestion(questionRequest, answers, response))
+    private fun pick(slot: Int, vararg idx: Int, other: String = "") = ConsentGuard.QuestionPick(slot, idx.toList(), other)
 
-    private fun bad(answers: Map<String, String>, response: String? = null) =
-        assertEquals("$answers / $response", ConsentResult.InvalidChoice, ConsentGuard.checkQuestion(questionRequest, answers, response))
+    @Test fun answersAreBuiltFromIndicesAsTheWebBuildsThem() {
+        val slots = ConsentGuard.questionSlots(questionRequest)
+        assertEquals(listOf(0, 1, 0), slots.slotOf)
+        assertEquals(listOf("Postgres", "SQLite", "DynamoDB"), slots.labels[0])
+        // A label is the same label whichever page picked it: index 2 of slot 0 is DynamoDB.
+        assertEquals(ConsentGuard.QuestionReply(mapOf("DB?" to "DynamoDB"), null), ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, 2)), emptySet()))
+        assertEquals(
+            ConsentGuard.QuestionReply(mapOf("DB?" to "SQLite", "Env?" to "production, eu, us, canary"), "canary"),
+            ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, 1), pick(1, 1, 2, other = "  canary ")), emptySet()),
+        )
+        // The web iterates every prompt, a repeated text included: its Other text lands in response twice.
+        assertEquals(
+            ConsentGuard.QuestionReply(mapOf("DB?" to "Mongo"), "Mongo\nMongo"),
+            ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, other = "Mongo")), emptySet()),
+        )
+        assertEquals(ConsentGuard.QuestionReply(emptyMap(), null), ConsentGuard.buildAnswers(questionRequest, emptyList(), setOf(0, 1)))
+        assertEquals(ConsentGuard.QuestionReply(mapOf("Env?" to "staging"), null), ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, 0), pick(1, 0)), setOf(0)))
+    }
 
-    @Test fun answerValuesAreOfferedLabelsOrTheOperatorsOwnOtherText() {
-        ok(emptyMap())
-        ok(mapOf("DB?" to "Postgres"))
-        ok(mapOf("Env?" to "production, staging"))
-        ok(mapOf("Env?" to "eu, us, staging")) // a label that itself contains ", "
-        ok(mapOf("DB?" to "Mongo"), "Mongo") // "Other" text, echoed in response
-        ok(mapOf("DB?" to "SQLite, with WAL", "Env?" to "staging, canary"), "with WAL\ncanary")
-        bad(mapOf("DB?" to "Mongo")) // free text that is not in response
-        bad(mapOf("DB?" to "Postgres, SQLite")) // two picks on a single-select question
-        bad(mapOf("Env?" to "staging, staging")) // a label twice
-        bad(mapOf("Env?" to "prod")) // not offered, not Other
-        bad(mapOf("DB?" to "")) // an empty answer (the web leaves the key out)
-        bad(mapOf("DB?" to "Postgres"), "smuggled") // response lines nobody typed into an answer
-        bad(mapOf("DB?" to "Mongo", "Env?" to "x"), "x\nMongo") // Other texts out of question order
-        bad(mapOf("Nope?" to "Postgres"))
+    @Test fun indicesTheRequestDidNotOfferAreRefused() {
+        fun bad(picks: List<ConsentGuard.QuestionPick>, skipped: Set<Int> = emptySet()) =
+            assertEquals("$picks / $skipped", null, ConsentGuard.buildAnswers(questionRequest, picks, skipped))
+        bad(listOf(pick(0, 3))) // out of the slot's labels
+        bad(listOf(pick(0, 0, 1))) // two picks on a single-select slot
+        bad(listOf(pick(1, 0, 0))) // a label twice
+        bad(listOf(pick(2, 0))) // prompt 2 is not a slot (it shares slot 0)
+        bad(listOf(pick(9, 0))) // no such slot
+        bad(listOf(pick(0, 0), pick(0, 1))) // a slot twice
+        bad(listOf(pick(0, -1)))
+        bad(listOf(pick(0, other = "x".repeat(ConsentGuard.MAX_OTHER_CHARS + 1))))
+        bad(emptyList(), setOf(2)) // skipping a non-slot
+    }
+
+    @Test fun theCardIdentityCarriesTheSessionButNotTheServer() {
+        val a = ConsentGuard.cardIdentity("s1", "t1", request)
+        assertEquals(a, ConsentGuard.cardIdentity("s1", "t1", request))
+        assertTrue(a != ConsentGuard.cardIdentity("s2", "t1", request))
+        assertTrue(a != ConsentGuard.cardIdentity("s1", "t2", request))
+        assertTrue(a != ConsentGuard.fingerprint("", "t1", request))
     }
 }
