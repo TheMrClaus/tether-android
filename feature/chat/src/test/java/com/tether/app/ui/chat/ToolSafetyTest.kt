@@ -658,6 +658,7 @@ class ToolSafetyTest {
         }
         rule.waitForIdle()
         rule.onAllNodes(hasText("+100 more files")).fetchSemanticsNodes().single()
+        assertEquals("only the first 500 file rows are drawn", 0, rule.onAllNodes(hasContentDescription("Modified f599")).fetchSemanticsNodes().size)
         rule.onNodeWithContentDescription("Modified f0").performClick()
         rule.waitForIdle()
         rule.onAllNodes(hasText("+1,000 more lines")).fetchSemanticsNodes().single()

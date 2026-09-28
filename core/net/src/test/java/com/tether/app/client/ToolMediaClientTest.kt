@@ -172,6 +172,13 @@ class ToolMediaClientTest {
         assertEquals(ConnectionState.Connected, h.client.connection.value)
     }
 
+    @Test fun aDeeplyNestedReleaseAnswerIsNoAnswerNotAStackOverflow() {
+        other.start()
+        other.enqueue(MockResponse().setBody("[".repeat(200_000)))
+        val latest = runBlocking { ReleaseCheck.fetchLatest(OkHttpClient(), other.url("/latest").toString()) }
+        assertNull(latest)
+    }
+
     @Test fun beforeTheHandshakeNothingIsSent() {
         h.newClient(configured = false)
         assertEquals(false, h.client.requestGitFileDiff("s1", "a.ts"))
