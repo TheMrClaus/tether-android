@@ -255,14 +255,16 @@ private fun GroupLabel(text: String) {
  * changes."; a truncated diff says so.
  */
 @Composable
-private fun FileRow(path: String, word: String, open: Boolean, fileDiff: ServerMessage.GitDiffFile?, onToggle: (String) -> Unit) {
+private fun FileRow(fullPath: String, word: String, open: Boolean, fileDiff: ServerMessage.GitDiffFile?, onToggle: (String) -> Unit) {
+    // R4-L1: drawn and announced cut at PATH_MAX; the request still names the full path.
+    val path = cutLine(fullPath, PATH_MAX)
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(role = Role.Button) { onToggle(path) }
+                .clickable(role = Role.Button) { onToggle(fullPath) }
                 .semantics(mergeDescendants = true) {
                     contentDescription = "$word $path"
                     stateDescription = if (open) "Expanded" else "Collapsed"
@@ -333,8 +335,9 @@ private fun HunkPre(hunks: String) {
         Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)) {
             // Round 4: the same caps as the transcript's diffs, so the host (T8.3) cannot ship it
             // uncapped — DIFF_CARD_MAX_ROWS lines, each cut at UNIFIED_LINE_MAX, then "+N more lines".
-            val lines = remember(hunks) { hunks.split("\n") }
-            lines.take(DIFF_CARD_MAX_ROWS).forEach { raw ->
+            // R4-M2: walked with indexOf, at most DIFF_CARD_MAX_ROWS lines built, the rest only counted.
+            val (lines, totalLines) = remember(hunks) { boundedLines(hunks, DIFF_CARD_MAX_ROWS) }
+            lines.forEach { raw ->
                 val line = cutLine(raw, UNIFIED_LINE_MAX)
                 val (bg, ink) = when (hunkLineKind(line)) {
                     "add" -> t.diffAddBg to t.diffAddInk
@@ -344,8 +347,8 @@ private fun HunkPre(hunks: String) {
                 }
                 Text(line.ifEmpty { " " }, style = style, color = ink, softWrap = false, modifier = Modifier.fillMaxWidth().background(bg))
             }
-            if (lines.size > DIFF_CARD_MAX_ROWS) {
-                Text(moreLinesLabel(lines.size - DIFF_CARD_MAX_ROWS), style = style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = t.faint, softWrap = false)
+            if (totalLines > lines.size) {
+                Text(moreLinesLabel(totalLines - lines.size), style = style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = t.faint, softWrap = false)
             }
         }
     }

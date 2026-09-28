@@ -279,7 +279,7 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                         ) {
-                            Text(change.path.breakAnywhere(), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, modifier = Modifier.weight(1f))
+                            Text(cutLine(change.path, PATH_MAX).breakAnywhere(), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, modifier = Modifier.weight(1f))
                             // `.tag`: 0.64rem/0.04em uppercase muted on `--graphite-raised`.
                             Text(
                                 change.kind.uppercase(Locale.ROOT),
@@ -395,7 +395,7 @@ private fun CodexSubagentActivityCard(block: JsObj, nested: Boolean) {
 internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int = DIFF_CARD_MAX_ROWS) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val label = file.newPath ?: file.oldPath ?: fallbackLabel
+    val label = cutLine(file.newPath ?: file.oldPath ?: fallbackLabel, PATH_MAX)
     Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).semantics { contentDescription = "Changes in $label" }) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),

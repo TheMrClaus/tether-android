@@ -58,6 +58,24 @@ internal fun capTail(text: String, max: Int = DISPLAY_MAX): String {
     return "… ${localeCount(cut)} earlier characters\n${text.substring(cut)}"
 }
 
+/** The first [max] lines of [text] (a `split("\n")` prefix, walked with indexOf) and how many lines it has. */
+internal fun boundedLines(text: String, max: Int): Pair<List<String>, Int> {
+    val out = ArrayList<String>(minOf(max, 64))
+    var total = 0
+    var start = 0
+    while (true) {
+        val nl = text.indexOf('\n', start)
+        total++
+        if (out.size < max) out.add(text.substring(start, if (nl < 0) text.length else nl))
+        if (nl < 0) break
+        start = nl + 1
+    }
+    return out to total
+}
+
+/** A path or label is cut at this many characters before it is drawn (R4-L1). */
+internal const val PATH_MAX = 4_096
+
 /** One diff line cut at [max] characters (a minified bundle is one 2 MB line). */
 internal const val DIFF_LINE_MAX = 2_000
 

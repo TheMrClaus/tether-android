@@ -314,7 +314,7 @@ private fun FileEditView(model: ToolInputModel.Edit) {
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
             Text(
-                model.filePath.breakAnywhere(),
+                cutLine(model.filePath, PATH_MAX).breakAnywhere(),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.76f)),
                 color = t.ink,
                 modifier = Modifier.weight(1f, fill = false),
@@ -333,7 +333,7 @@ private fun FileEditView(model: ToolInputModel.Edit) {
         }
         // The 200-row cap spans the whole card, so a 50-edit MultiEdit cannot draw 10,000 rows
         // (divergence, noted: the web caps each edit's DiffBlock at 200 on its own).
-        val capped = remember(model) { capEdits(model.diffs) }
+        val capped = remember(model) { capEdits(model.diffs, model.totals) }
         capped.forEachIndexed { index, diff -> EditDiffBlock(diff, heavyRule = index > 0) }
     }
 }

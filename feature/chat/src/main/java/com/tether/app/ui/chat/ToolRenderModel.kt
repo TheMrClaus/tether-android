@@ -202,7 +202,13 @@ data class EditDiffRow(val t: String, val text: String) {
 }
 
 /** `lineDiff` (chat-tool-render.tsx:381-401): trim the shared prefix/suffix, keep 2 context lines. */
-internal fun lineDiff(oldStr: String, newStr: String): List<EditDiffRow> {
+internal fun lineDiff(oldStr: String, newStr: String): List<EditDiffRow> = lineDiffBounded(oldStr, newStr, Int.MAX_VALUE).first
+
+/**
+ * [lineDiff] building at most [max] rows; the second value is how many rows the full diff has.
+ * Callers keep the inputs under [EDIT_DIFF_MAX_CHARS] (R4-M2), so the two splits stay bounded.
+ */
+internal fun lineDiffBounded(oldStr: String, newStr: String, max: Int): Pair<List<EditDiffRow>, Int> {
     val o = oldStr.split("\n")
     val n = newStr.split("\n")
     var start = 0
@@ -215,11 +221,38 @@ internal fun lineDiff(oldStr: String, newStr: String): List<EditDiffRow> {
     }
     val ctx = 2
     val rows = ArrayList<EditDiffRow>()
-    for (i in maxOf(0, start - ctx) until start) rows.add(EditDiffRow(EditDiffRow.CTX, o[i]))
-    for (i in start until endO) rows.add(EditDiffRow(EditDiffRow.DEL, o[i]))
-    for (i in start until endN) rows.add(EditDiffRow(EditDiffRow.ADD, n[i]))
-    for (i in endO until minOf(o.size, endO + ctx)) rows.add(EditDiffRow(EditDiffRow.CTX, o[i]))
-    return rows
+    var total = 0
+    fun add(t: String, text: String) {
+        total++
+        if (rows.size < max) rows.add(EditDiffRow(t, text))
+    }
+    for (i in maxOf(0, start - ctx) until start) add(EditDiffRow.CTX, o[i])
+    for (i in start until endO) add(EditDiffRow.DEL, o[i])
+    for (i in start until endN) add(EditDiffRow.ADD, n[i])
+    for (i in endO until minOf(o.size, endO + ctx)) add(EditDiffRow.CTX, o[i])
+    return rows to total
+}
+
+/**
+ * An Edit / MultiEdit whose strings together pass this many characters is shown as its raw
+ * input, not diffed (R4-M2: diffing splits both strings whole; divergence, noted: the web diffs
+ * any size and shows the first 200 rows).
+ */
+internal const val EDIT_DIFF_MAX_CHARS: Int = 256 * 1024
+
+/** The lines of [text] as ADD rows, at most [max] built (walked with indexOf, never a whole split), and how many there are. */
+internal fun addedLines(text: String, max: Int): Pair<List<EditDiffRow>, Int> {
+    val rows = ArrayList<EditDiffRow>(minOf(max, 64))
+    var total = 0
+    var start = 0
+    while (true) {
+        val nl = text.indexOf('\n', start)
+        total++
+        if (rows.size < max) rows.add(EditDiffRow(EditDiffRow.ADD, text.substring(start, if (nl < 0) text.length else nl)))
+        if (nl < 0) break
+        start = nl + 1
+    }
+    return rows to total
 }
 
 /** `MAX_DIFF_ROWS`: a 5,000-line Write renders 200 rows and a "+N more lines" tail. */
@@ -237,10 +270,10 @@ internal fun capDiff(rows: List<EditDiffRow>): CappedDiff {
  * [MAX_DIFF_ROWS] across every edit of one card: edits past the budget are not drawn, and the last
  * drawn block counts every row left out ("+N more lines").
  */
-internal fun capEdits(diffs: List<List<EditDiffRow>>): List<CappedDiff> {
+internal fun capEdits(diffs: List<List<EditDiffRow>>, totals: List<Int> = diffs.map { it.size }): List<CappedDiff> {
     val out = ArrayList<CappedDiff>()
     var budget = MAX_DIFF_ROWS
-    val total = diffs.sumOf { it.size }
+    val total = totals.sum()
     var drawn = 0
     for (rows in diffs) {
         if (budget <= 0) break
@@ -261,7 +294,7 @@ internal fun moreLinesLabel(hidden: Int): String = "+${localeCount(hidden)} more
 @Immutable
 sealed interface ToolInputModel {
     /** A file edit: the path, its tag (null = none) and one diff per edit. */
-    data class Edit(val filePath: String, val tag: String?, val diffs: List<List<EditDiffRow>>) : ToolInputModel
+    data class Edit(val filePath: String, val tag: String?, val diffs: List<List<EditDiffRow>>, val totals: List<Int> = diffs.map { it.size }) : ToolInputModel
 
     /** Everything else: `summarize(input)` in an expandable pre. */
     data class Raw(val text: String) : ToolInputModel
@@ -273,13 +306,15 @@ internal fun toolInputModel(name: String?, input: JsValue?): ToolInputModel {
     if (record != null && !filePath.isNullOrEmpty()) {
         if (name == "Write") {
             val content = asString(record["content"]) ?: ""
-            return ToolInputModel.Edit(filePath, "new / overwrite", listOf(content.split("\n").map { EditDiffRow(EditDiffRow.ADD, it) }))
+            val (rows, total) = addedLines(content, MAX_DIFF_ROWS)
+            return ToolInputModel.Edit(filePath, "new / overwrite", listOf(rows), listOf(total))
         }
         if (name == "Edit") {
             val oldStr = asString(record["old_string"])
             val newStr = asString(record["new_string"])
-            if (oldStr != null && newStr != null) {
-                return ToolInputModel.Edit(filePath, if (record["replace_all"].jsTruthy()) "all matches" else null, listOf(lineDiff(oldStr, newStr)))
+            if (oldStr != null && newStr != null && oldStr.length.toLong() + newStr.length <= EDIT_DIFF_MAX_CHARS) {
+                val (rows, total) = lineDiffBounded(oldStr, newStr, MAX_DIFF_ROWS)
+                return ToolInputModel.Edit(filePath, if (record["replace_all"].jsTruthy()) "all matches" else null, listOf(rows), listOf(total))
             }
         }
         val edits = record["edits"]
@@ -287,11 +322,13 @@ internal fun toolInputModel(name: String?, input: JsValue?): ToolInputModel {
             val valid = edits.mapNotNull(::asRecord)
                 .map { asString(it["old_string"]) to asString(it["new_string"]) }
                 .filter { (o, n) -> o != null && n != null }
-            if (valid.isNotEmpty()) {
+            if (valid.isNotEmpty() && valid.sumOf { (o, n) -> o!!.length.toLong() + n!!.length } <= EDIT_DIFF_MAX_CHARS) {
+                val diffs = valid.map { (o, n) -> lineDiffBounded(o!!, n!!, MAX_DIFF_ROWS) }
                 return ToolInputModel.Edit(
                     filePath,
                     "${valid.size} edit${if (valid.size > 1) "s" else ""}",
-                    valid.map { (o, n) -> lineDiff(o!!, n!!) },
+                    diffs.map { it.first },
+                    diffs.map { it.second },
                 )
             }
         }
