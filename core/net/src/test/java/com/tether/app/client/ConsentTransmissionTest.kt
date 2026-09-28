@@ -565,6 +565,14 @@ class ConsentGuardUnitTest {
         bad(listOf(pick(0, other = "cr\r")))
     }
 
+    @Test fun theOtherCutNeverSplitsASurrogatePair() {
+        val s = "a".repeat(ConsentGuard.MAX_OTHER_CHARS - 1) + "😀"
+        val cut = ConsentGuard.cutCodePoints(s, ConsentGuard.MAX_OTHER_CHARS)
+        assertEquals(ConsentGuard.MAX_OTHER_CHARS - 1, cut.length)
+        assertEquals("ab", ConsentGuard.cutCodePoints("ab", 4))
+        assertEquals("😀", ConsentGuard.cutCodePoints("😀x", 2))
+    }
+
     @Test fun theCardIdentityCarriesTheSessionButNotTheServer() {
         val a = ConsentGuard.cardIdentity("s1", "t1", request)
         assertEquals(a, ConsentGuard.cardIdentity("s1", "t1", request))
