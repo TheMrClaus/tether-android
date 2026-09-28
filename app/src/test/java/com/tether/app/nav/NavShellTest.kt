@@ -117,6 +117,18 @@ class NavShellTest {
     }
 
     @Test
+    fun aLinkMakesTheSessionsWorkspaceCurrent() {
+        // dashboard.tsx focusWorkspaceFor(pendingSession.cwd): the linked session lives outside the
+        // current workspace, so its folder becomes current and its block is listed.
+        val cwd = client.sessions.value.single { it.id == LISTED }.cwd
+        assertFalse(cwd == vm.currentWorkspace.value)
+        link("tether://session/$LISTED")
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
+        rule.waitForIdle()
+        assertEquals(cwd, vm.currentWorkspace.value)
+    }
+
+    @Test
     fun noGuardWithoutASwitch() {
         link("https://evil.example/?session=$LISTED")
         rule.waitForIdle()
