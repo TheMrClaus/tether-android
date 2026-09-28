@@ -39,8 +39,8 @@ all. The owner must (1) create/select a Firebase project and register the Androi
 service-account key, (3) set all six values - sender `TETHER_FCM_PROJECT_ID`, `TETHER_FCM_CLIENT_EMAIL`, `TETHER_FCM_PRIVATE_KEY`
 and client `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` - in a root-owned `EnvironmentFile`
 (or the unit's `Environment=`), never a repo `.env.local` agents can read, (4) rebuild + restart, (5) restrict the API key to the
-app package + signing fingerprints. Optional tether private-history scrub. **0.7.0 DRAFT built** (unpublished GitHub draft, code 17, same signing certificate as 0.6.0, from `b60b0d4` = everything through
-ta-g04; T7.1 composer merged after it). Publishing is the owner's call.
+app package + signing fingerprints. Optional tether private-history scrub. **Drafts built (unpublished, same signing certificate as 0.6.0):** 0.7.0 (code 17, `b60b0d4`) and **0.7.1 (code 18, `dc9200d`:
+adds T7.1 composer + T13.1 encrypted journal mirror)**. Publishing is the owner's call. T6.2 tool cards (round 3) not yet in.
 **Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
 line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
@@ -121,7 +121,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
-| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:21 |  | checkpoint (executor-T6.2) a5e098b: done: ToolRenderModel (summarize/pretty JSON/media extract/lineDiff/ToolInput/grouping), RichRenderMode… |
+| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:21 |  | round 3 (executor-T6.2): rebasing onto main, fixing security review M1-M3, L1-L5, verifier lows |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
@@ -131,7 +131,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T7.1 | Draft composer, persisted drafts, queue UI | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:59 |  | checkpoint (executor-T7.1): resumed after usage-limit cut; reading done (web chat-view composer + QueuedMessageRow, DraftStore, Composer.kt… |
+| T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | TODO |  |  |  |
 | T7.3 | Slash commands, run/background command, mentions | TODO |  |  |  |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
@@ -139,7 +139,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  |  |
+| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | Owns M.cmp.draft-composer, M.lib.hooks-use-draft-composer-ts and M.lib.hooks-use-keyboard-inset-ts (reassigned from T7.1: the web's draft-c… |
 | T8.2 | Folder picker, workspaces | TODO |  |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | TODO |  |  |  |
@@ -181,12 +181,12 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | coordinator: verifier CONFIRMED correctness, but the security review is NOT clear to merge (M1 wipe not durable across process death / star… |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | VERIFIED | TheMrClaus @ 2026-09-27 23:48 |  |  |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
 | T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | Gate update: S13.1 deployed (v130: AgentSession.lastSeq + {kind:sync} FCM hint + syncHints opt-in). Remaining gates: T13.1 (and T12.1 prefe… |
-| T13.5 | Cache policy, eviction, migrations | TODO |  |  | design refinement r2: Clear cache also rotates the mirror data key (and rotation after 2^28 writes). |
+| T13.5 | Cache policy, eviction, migrations | TODO |  |  | From the T13.1 security re-review (R2, Low): the interim per-origin caps count only sync_state rows/bytes - turn_detail (no count/byte cap)… |
 | T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement r2: the debug probe strips removedQueueIds until T13.3b lands, then demands exact equality; test both modes. |
 
 ### Phase 14 — Hardening & release 1.0.0
