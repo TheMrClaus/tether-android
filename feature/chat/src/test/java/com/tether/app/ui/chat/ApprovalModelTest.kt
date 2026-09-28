@@ -116,17 +116,24 @@ class ApprovalModelTest {
         assertEquals(listOf("/srv/fixtures", "/srv/schema.sql"), requested.read)
         assertEquals(listOf("/w/report"), requested.write)
         assertTrue(requested.network)
-        assertNull("exact needs the confirmation", pickFor(view, all, exactConfirmed = false, subset = null))
-        assertEquals(ApprovalPick("all", requested.exact), pickFor(view, all, exactConfirmed = true, subset = null))
-        assertNull("a subset needs something ticked", pickFor(view, some, exactConfirmed = true, subset = subsetGrant(emptySet(), emptySet(), false)))
+        val full = subsetGrant(linkedSetOf("/srv/schema.sql", "/srv/fixtures"), setOf("/w/report"), true)!!
         val subset = subsetGrant(setOf("/srv/schema.sql"), emptySet(), true)
         assertEquals(GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = null, networkEnabled = true), subset)
-        assertEquals(ApprovalPick("some", subset), pickFor(view, some, exactConfirmed = false, subset = subset))
-        assertEquals(ApprovalPick("deny", null), pickFor(view, deny, exactConfirmed = false, subset = subset))
-        // I5: a subset that ticks EVERYTHING (in any order) is the full expansion: it needs the confirmation.
-        val full = subsetGrant(linkedSetOf("/srv/schema.sql", "/srv/fixtures"), setOf("/w/report"), true)!!
-        assertNull(pickFor(view, some, exactConfirmed = false, subset = full))
-        assertEquals(ApprovalPick("some", full), pickFor(view, some, exactConfirmed = true, subset = full))
+        // Round 4: EVERY grant needs the confirmation, full or partial.
+        assertNull(pickFor(view, all, confirmed = false, subset = full))
+        assertNull(pickFor(view, some, confirmed = false, subset = full))
+        assertNull(pickFor(view, some, confirmed = false, subset = subset))
+        assertEquals(ApprovalPick("some", subset), pickFor(view, some, confirmed = true, subset = subset))
+        assertEquals(ApprovalPick("some", full), pickFor(view, some, confirmed = true, subset = full))
+        // "Allow all" grants what was confirmed only when everything is ticked.
+        assertEquals(ApprovalPick("all", requested.exact), pickFor(view, all, confirmed = true, subset = full))
+        assertNull(pickFor(view, all, confirmed = true, subset = subset))
+        assertNull("a subset needs something ticked", pickFor(view, some, confirmed = true, subset = subsetGrant(emptySet(), emptySet(), false)))
+        assertEquals(ApprovalPick("deny", null), pickFor(view, deny, confirmed = false, subset = subset))
+        assertEquals(
+            "Confirm these permissions: read /srv/schema.sql; network access.",
+            grantSummary(listOf("/srv/schema.sql"), emptyList(), true),
+        )
         assertTrue(view.needsConfirm)
     }
 
@@ -163,7 +170,7 @@ class ApprovalModelTest {
 
     @Test fun theCardIdentityIgnoresTheServerButTheWireFingerprintDoesNot() {
         val v = pendingApprovals(ApprovalFixtures.write.tree).single()
-        assertEquals(com.tether.app.client.ConsentGuard.fingerprint("", v.activeTurnId, v.request), v.contentFp)
+        assertEquals(com.tether.app.client.ConsentGuard.cardIdentity("s1", v.activeTurnId, v.request), v.contentFp)
         assertTrue(wireFingerprint(TEST_ORIGIN, v.activeTurnId, v.request) != wireFingerprint("http://other:1", v.activeTurnId, v.request))
         assertEquals(v.contentFp, pendingApprovals(ApprovalFixtures.write.tree).single().contentFp)
         val wider = foldTree(ApprovalFixtures.write.tree, ev("approval_request", "t1", ts = 1) {

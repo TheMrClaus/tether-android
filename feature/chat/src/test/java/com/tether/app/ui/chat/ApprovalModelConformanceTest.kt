@@ -94,17 +94,29 @@ class ApprovalModelConformanceTest {
         }
     }
 
-    @Test fun buildQuestionAnswersMatchesTheWeb() {
+    /**
+     * Round 4: the answer is built by the GUARD (ConsentGuard.buildAnswers) from slot and label
+     * indices; the web's buildQuestionAnswers (by text and label) is the oracle.
+     */
+    @Test fun theGuardsAnswerBuilderMatchesTheWeb() {
         for (entry in doc["questionAnswers"].arr()) {
             val row = entry.obj()
-            val prompts = row["prompts"].arr().map { p ->
-                val o = p.obj()
-                QuestionPromptView(o["question"].str(), null, o["multiSelect"] == com.tether.app.protocol.tree.JsBool.TRUE, emptyList())
+            val promptsJs = row["prompts"].arr()
+            val request = JsObj.of("questions" to promptsJs)
+            val slots = com.tether.app.client.ConsentGuard.questionSlots(request)
+            fun slotOf(text: String) = slots.slotOf[promptsJs.indexOfFirst { it.obj()["question"].str() == text }]
+            val picks = row["picks"].obj()
+            val other = row["other"].obj()
+            val bySlot = (picks.keys + other.keys).distinct().map { text ->
+                val slot = slotOf(text)
+                com.tether.app.client.ConsentGuard.QuestionPick(
+                    slot,
+                    (picks[text] as? JsArr).orEmpty().map { slots.labels.getValue(slot).indexOf(it.str()) },
+                    (other[text] as? JsStr)?.value.orEmpty(),
+                )
             }
-            val picks = row["picks"].obj().mapValues { (_, v) -> v.arr().map { it.str() } }
-            val other = row["other"].obj().mapValues { (_, v) -> v.str() }
-            val skipped = row["skipped"].arr().map { it.str() }.toSet()
-            val result = buildQuestionAnswers(prompts, picks, other, skipped)
+            val skipped = row["skipped"].arr().map { slotOf(it.str()) }.toSet()
+            val result = checkNotNull(com.tether.app.client.ConsentGuard.buildAnswers(request, bySlot, skipped)) { "$row refused" }
             val actual = JsObj.of(
                 "answers" to JsObj.from(result.answers.mapValues { JsStr(it.value) }),
                 "response" to result.response?.let(::JsStr),

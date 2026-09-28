@@ -85,8 +85,11 @@ class ApprovalCardBehaviourTest {
             fingerprints += fingerprint
             verdict
         },
-        onAnswer = { requestId, fingerprint, answers, response ->
-            calls += "question:$requestId:$answers" + (response?.let { ":$it" } ?: "")
+        onAnswer = { requestId, fingerprint, picks, skipped ->
+            // The guard builds the answer from the request; record what it would send.
+            val request = com.tether.app.client.ConsentGuard.pendingQuestion(fixture.tree, requestId)
+            val reply = request?.let { com.tether.app.client.ConsentGuard.buildAnswers(it, picks, skipped) }
+            calls += "question:$requestId:" + (reply?.let { "${it.answers}" + (it.response?.let { r -> ":$r" } ?: "") } ?: "<invalid $picks>")
             fingerprints += fingerprint
             verdict
         },
@@ -288,6 +291,10 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-network").assertIsOff()
         some.assertIsNotEnabled()
         rule.onAllNodesWithTag("grant-read")[1].performClick()
+        // Round 4: every grant needs the confirmation, made after the last change.
+        some.assertIsNotEnabled()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
         some.performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql")).toJsonObject()), calls)
@@ -405,6 +412,15 @@ class ApprovalCardBehaviourTest {
 
     private val narrowed = "approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()
 
+    /** Round 4: tick "Confirm these permissions" (after the last change), then Allow selected. */
+    private fun confirmAndAllowSelected() {
+        scrollTo("grant-confirm")
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+    }
+
     private fun narrowTheGrant() {
         scrollTo("grant-network")
         rule.onAllNodesWithTag("grant-read")[0].performClick() // untick /srv/fixtures
@@ -422,8 +438,7 @@ class ApprovalCardBehaviourTest {
         arm()
         rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
         rule.onNodeWithTag("grant-network").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
-        rule.waitForIdle()
+        confirmAndAllowSelected()
         assertEquals(listOf(narrowed), calls)
     }
 
@@ -443,8 +458,7 @@ class ApprovalCardBehaviourTest {
         arm()
         scrollTo("approval-choice")
         rule.onNodeWithTag("grant-network").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
-        rule.waitForIdle()
+        confirmAndAllowSelected()
         assertEquals(listOf(narrowed), calls)
     }
 
@@ -690,10 +704,14 @@ class ApprovalCardBehaviourTest {
         // which is the full expansion, so neither grant key works without the confirmation (I5).
         show(ApprovalFixtures.grants)
         narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
         rule.runOnIdle { store.clear() }
         rule.waitForIdle()
         rule.onNodeWithTag("grant-network").assertIsOn()
+        // L3: the lost record took the confirmation with it.
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
@@ -719,6 +737,7 @@ class ApprovalCardBehaviourTest {
     }
 
     @Test fun aQuestionsPicksAndPageSurviveStateRestoration() {
+        fixture = ApprovalFixtures.question // the recorder builds the answer from it
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
         val c = actions()
         tester.setContent {
@@ -982,6 +1001,9 @@ class ApprovalScreenBehaviourTest {
         blip(client)
         scrollTo("grant-network")
         rule.onAllNodesWithTag("grant-read")[0].performClick() // /srv/fixtures off
+        scrollTo("grant-confirm")
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithTag("grant-confirm").performClick()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
         rule.waitForIdle()
         assertEquals(
