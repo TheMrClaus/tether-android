@@ -34,7 +34,6 @@ import com.tether.app.nav.SessionLinkOpener
 import com.tether.app.ui.chat.CustomTabLinkOpener
 import com.tether.app.ui.chat.LocalLinkOpener
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
@@ -108,18 +107,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
         merge(client.configured, client.connection, client.serverUrl, client.sessions)
             .collect { applyNav(navigator.step(navContextOf(client))) }
     }
-    // T6.2: downloaded tool-media clips belong to one sign-in on one server: a sign-out drops them
-    // all, a sign-in to another server drops the previous server's.
-    LaunchedEffect(client) {
-        client.storedSettingsLoaded.first { it }
-        kotlinx.coroutines.flow.combine(client.configured, client.serverUrl) { signedIn, origin -> signedIn to origin }
-            .distinctUntilChanged()
-            .collect { (signedIn, origin) ->
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.tether.app.ui.chat.ToolMediaCache.sync(context.cacheDir, signedIn, origin)
-                }
-            }
-    }
+    // T6.2: downloaded tool-media clips belong to one sign-in on one server (ToolMediaCache).
+    LaunchedEffect(client) { com.tether.app.ui.chat.syncToolMediaCache(client, context.cacheDir) }
     // dashboard.tsx selectActiveId: an explicit selection retires a waiting link.
     LaunchedEffect(vm, navigator) {
         vm.selectedSessionId.drop(1).collect { if (it != null) navigator.onUserSelection() }

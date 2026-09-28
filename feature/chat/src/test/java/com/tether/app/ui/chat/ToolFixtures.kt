@@ -197,7 +197,7 @@ object ToolFixtures {
     /** Resolves every picture to [checker]; clips never load. Counts loads per URL. */
     class FakeLoader(private val image: MediaImage = MediaImage.Ok(checker())) : ToolMediaLoader {
         val loads = mutableListOf<String>()
-        override suspend fun image(item: ToolMediaItem): MediaImage {
+        override suspend fun image(item: ToolMediaItem, full: Boolean): MediaImage {
             loads += item.src
             return image
         }

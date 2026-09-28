@@ -45,10 +45,26 @@ internal fun asString(value: JsValue?): String? = (value as? JsStr)?.value
 /**
  * `JSON.stringify(value, null, 2)`: two-space indent, `": "` between key and value, JS property
  * order, `{}` / `[]` for empty containers. Non-finite numbers print `null`, as in JS.
+ *
+ * Bounded (security review M2): writing stops once more than [limit] characters exist (callers
+ * only ever show a prefix, and a prefix of this output is a prefix of the web's), so a huge or
+ * deeply nested value costs O(limit), not O(size) or O(depth²) of indentation. A container nested
+ * past [PRETTY_MAX_DEPTH] prints `…` (divergence, noted: the web prints it, then truncates).
  */
-internal fun jsonStringifyPretty(value: JsValue): String = StringBuilder().also { writePretty(it, value, "") }.toString()
+internal fun jsonStringifyPretty(value: JsValue, limit: Int = Int.MAX_VALUE): String {
+    val out = StringBuilder()
+    writePretty(out, value, 0, limit)
+    return if (out.length > limit) out.substring(0, limit) else out.toString()
+}
 
-private fun writePretty(out: StringBuilder, value: JsValue, indent: String) {
+internal const val PRETTY_MAX_DEPTH = 64
+
+private fun indent(out: StringBuilder, depth: Int) {
+    repeat(depth) { out.append("  ") }
+}
+
+private fun writePretty(out: StringBuilder, value: JsValue, depth: Int, limit: Int) {
+    if (out.length > limit) return
     when (value) {
         is JsNull -> out.append("null")
         is JsBool -> out.append(if (value.value) "true" else "false")
@@ -56,36 +72,49 @@ private fun writePretty(out: StringBuilder, value: JsValue, indent: String) {
             val d = value.value
             out.append(if (d.isNaN() || d.isInfinite()) "null" else JsNumberFormat.toJsString(d))
         }
-        is JsStr -> JsCodec.quote(out, value.value)
+        // Only a prefix can ever show: quote no more than could fit (escapes only lengthen).
+        is JsStr -> JsCodec.quote(out, if (value.value.length > limit) value.value.substring(0, limit) else value.value)
         is JsArr -> {
             if (value.isEmpty()) {
                 out.append("[]")
                 return
             }
-            val inner = "$indent  "
-            out.append("[\n")
-            value.forEachIndexed { i, item ->
-                if (i > 0) out.append(",\n")
-                out.append(inner)
-                writePretty(out, item, inner)
+            if (depth >= PRETTY_MAX_DEPTH) {
+                out.append('…')
+                return
             }
-            out.append('\n').append(indent).append(']')
+            out.append("[\n")
+            for ((i, item) in value.withIndex()) {
+                if (out.length > limit) return
+                if (i > 0) out.append(",\n")
+                indent(out, depth + 1)
+                writePretty(out, item, depth + 1, limit)
+            }
+            out.append("\n")
+            indent(out, depth)
+            out.append(']')
         }
         is JsObj -> {
             if (value.isEmpty()) {
                 out.append("{}")
                 return
             }
-            val inner = "$indent  "
+            if (depth >= PRETTY_MAX_DEPTH) {
+                out.append('…')
+                return
+            }
             out.append("{\n")
-            JsCodec.jsPropertyOrder(value.keys).forEachIndexed { i, key ->
+            for ((i, key) in JsCodec.jsPropertyOrder(value.keys).withIndex()) {
+                if (out.length > limit) return
                 if (i > 0) out.append(",\n")
-                out.append(inner)
+                indent(out, depth + 1)
                 JsCodec.quote(out, key)
                 out.append(": ")
-                writePretty(out, value.getValue(key), inner)
+                writePretty(out, value.getValue(key), depth + 1, limit)
             }
-            out.append('\n').append(indent).append('}')
+            out.append("\n")
+            indent(out, depth)
+            out.append('}')
         }
     }
 }
@@ -93,7 +122,7 @@ private fun writePretty(out: StringBuilder, value: JsValue, indent: String) {
 /** `summarize(value, max = 600)` (chat-tool-render.tsx:21): pretty JSON (or the string), capped with "…". */
 internal fun summarize(value: JsValue?, max: Int = 600): String {
     if (value.isNullish()) return ""
-    val text = if (value is JsStr) value.value else jsonStringifyPretty(value!!)
+    val text = if (value is JsStr) value.value else jsonStringifyPretty(value!!, max + 1)
     return if (text.length > max) "${text.substring(0, max)}…" else text
 }
 
@@ -202,6 +231,27 @@ internal class CappedDiff(val shown: List<EditDiffRow>, val hidden: Int)
 internal fun capDiff(rows: List<EditDiffRow>): CappedDiff {
     val shown = if (rows.size > MAX_DIFF_ROWS) rows.subList(0, MAX_DIFF_ROWS) else rows
     return CappedDiff(shown, rows.size - shown.size)
+}
+
+/**
+ * [MAX_DIFF_ROWS] across every edit of one card: edits past the budget are not drawn, and the last
+ * drawn block counts every row left out ("+N more lines").
+ */
+internal fun capEdits(diffs: List<List<EditDiffRow>>): List<CappedDiff> {
+    val out = ArrayList<CappedDiff>()
+    var budget = MAX_DIFF_ROWS
+    val total = diffs.sumOf { it.size }
+    var drawn = 0
+    for (rows in diffs) {
+        if (budget <= 0) break
+        val shown = if (rows.size > budget) rows.subList(0, budget) else rows
+        budget -= shown.size
+        drawn += shown.size
+        out.add(CappedDiff(shown, 0))
+    }
+    val hidden = total - drawn
+    if (hidden > 0 && out.isNotEmpty()) out[out.lastIndex] = CappedDiff(out.last().shown, hidden)
+    return out
 }
 
 /** "+1,204 more lines" / "+1 more line". */

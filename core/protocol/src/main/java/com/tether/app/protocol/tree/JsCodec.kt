@@ -22,7 +22,19 @@ object JsCodec {
 
     fun parse(text: String): JsValue = fromJson(Json.parseToJsonElement(text))
 
-    fun fromJson(element: JsonElement): JsValue = when (element) {
+    /**
+     * T6.2 (security review M2): how deep a value from the wire may nest. Every tree walker on this
+     * side (the fold, [toJson], [canonical]/[stringify], structural equality, the renderers) recurses,
+     * and a hostile server could send a 100k-deep array that overflows the reader thread's stack on
+     * every reconnect. A container past this depth is replaced by `null`. Divergence, noted: the web
+     * keeps any depth V8 can parse, but its own server journals events with JSON.stringify, which
+     * throws long before such a depth, so no real session gets near it.
+     */
+    const val MAX_DEPTH: Int = 512
+
+    fun fromJson(element: JsonElement): JsValue = fromJson(element, 0)
+
+    private fun fromJson(element: JsonElement, depth: Int): JsValue = when (element) {
         is JsonNull -> JsNull
         is JsonPrimitive -> when {
             element.isString -> JsStr(element.content)
@@ -30,10 +42,10 @@ object JsCodec {
             element.content == "false" -> JsBool.FALSE
             else -> JsNum(element.content.toDouble())
         }
-        is JsonObject -> JsObj.from(LinkedHashMap<String, JsValue>(element.size).also { out ->
-            for ((key, value) in element) out[key] = fromJson(value)
+        is JsonObject -> if (depth >= MAX_DEPTH) JsNull else JsObj.from(LinkedHashMap<String, JsValue>(element.size).also { out ->
+            for ((key, value) in element) out[key] = fromJson(value, depth + 1)
         })
-        is JsonArray -> JsArr.of(element.map { fromJson(it) })
+        is JsonArray -> if (depth >= MAX_DEPTH) JsNull else JsArr.of(element.map { fromJson(it, depth + 1) })
     }
 
     @OptIn(ExperimentalSerializationApi::class)

@@ -133,6 +133,8 @@ fun TetherExpandableBlock(
     initiallyOpen: Boolean = false,
     hiddenRows: ((cutPx: Float, hiddenPx: Float) -> Int)? = null,
     onCollapseShift: ((deltaPx: Float) -> Unit)? = null,
+    onOpenChange: ((Boolean) -> Unit)? = null,
+    forceOverflow: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -147,7 +149,8 @@ fun TetherExpandableBlock(
     var bottomPx by remember { mutableFloatStateOf(Float.NaN) }
     var anchor by remember { mutableStateOf<Float?>(null) }
     val slopPx = with(LocalDensity.current) { ExpandOverflowSlop.dp.toPx() }
-    val overflowing = !open && expandOverflows(contentPx, clampPx, slopPx)
+    val overflowing = !open && (forceOverflow || expandOverflows(contentPx, clampPx, slopPx))
+    androidx.compose.runtime.LaunchedEffect(open) { onOpenChange?.invoke(open) }
     val hidden: Int? = if (overflowing) hiddenRows?.invoke(clampPx.toFloat(), (contentPx - clampPx).toFloat()) else null
 
     Column(
@@ -230,14 +233,22 @@ fun TetherExpandablePre(
     // text's inset (e.g. a padding in [textModifier]) is subtracted from the cut.
     var outerTop by remember { mutableFloatStateOf(0f) }
     var textTop by remember { mutableFloatStateOf(0f) }
+    var opened by remember { mutableStateOf(initiallyOpen) }
+    // T6.2 (security review M3): while clamped, only a peek is laid out — enough to overfill any
+    // clamp — so a 64K payload costs its first few K per frame, not all of it. A peek that is not
+    // the whole text says "Show more" unnumbered (the web's own fallback when it cannot count).
+    val peek = remember(text) { expandPeek(text) }
+    val truncated = peek.length < text.length
     TetherExpandableBlock(
         modifier = modifier,
         initiallyOpen = initiallyOpen,
         clamp = clamp,
         onCollapseShift = onCollapseShift,
+        onOpenChange = { opened = it },
+        forceOverflow = truncated,
         hiddenRows = { cut, hiddenPx ->
             val r = layoutResult
-            if (r == null) {
+            if (r == null || truncated) {
                 0
             } else {
                 val tops = List(r.lineCount) { r.getLineTop(it) }
@@ -247,7 +258,7 @@ fun TetherExpandablePre(
         },
     ) {
         Text(
-            text,
+            if (opened || !truncated) text else peek,
             style = style,
             color = color,
             onTextLayout = { layoutResult = it },
@@ -260,6 +271,23 @@ fun TetherExpandablePre(
             ),
         )
     }
+}
+
+/** How much of a clamped text is laid out: the first 64 lines, at most 4,096 characters. */
+const val ExpandPeekLines: Int = 64
+const val ExpandPeekChars: Int = 4096
+
+fun expandPeek(text: String): String {
+    var end = minOf(text.length, ExpandPeekChars)
+    var lines = 0
+    for (i in 0 until end) {
+        if (text[i] == '\n' && ++lines == ExpandPeekLines) {
+            end = i
+            break
+        }
+    }
+    if (end in 1 until text.length && text[end - 1].isHighSurrogate()) end--
+    return text.substring(0, end)
 }
 
 /**

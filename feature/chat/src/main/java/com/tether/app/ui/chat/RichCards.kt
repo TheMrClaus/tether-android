@@ -153,7 +153,7 @@ private fun RichCopy(text: String, color: Color? = null, background: Color = Col
                 modifier = Modifier.padding(bottom = t.css.spaceXs).semantics { contentDescription = label },
             )
         }
-        Text(text, style = type.body.copy(fontSize = rem(0.82f), lineHeight = 1.5.em), color = color ?: t.ink)
+        Text(remember(text) { capHead(text) }, style = type.body.copy(fontSize = rem(0.82f), lineHeight = 1.5.em), color = color ?: t.ink)
     }
 }
 
@@ -184,12 +184,13 @@ private fun RichMeta(items: List<Pair<androidx.compose.ui.graphics.vector.ImageV
 
 /** `.command` / `.input` / `.output`: mono 0.76rem/1.55 ink pre-wrap under a rule, clamped. */
 @Composable
-private fun RichPre(text: String, background: Color, contentDescription: String? = null) {
+private fun RichPre(text: String, background: Color, contentDescription: String? = null, live: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
+    val shown = remember(text, live) { preText(if (live) capTail(text) else capHead(text)) }
     TetherExpandablePre(
-        text = preText(text),
+        text = shown,
         style = type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.55.em),
         color = t.ink,
         clamp = toolClamp(),
@@ -235,7 +236,7 @@ private fun CodexCommandCard(block: JsObj, nested: Boolean) {
         RichPre(command.command, t.graphite)
         if (meta.isNotEmpty()) RichMeta(meta.map { null to it })
         if (command.output.isNotEmpty() || command.running) {
-            RichPre(command.output.ifEmpty { "Waiting for output…" }, t.tintXs, contentDescription = "Command output")
+            RichPre(command.output.ifEmpty { "Waiting for output…" }, t.tintXs, contentDescription = "Command output", live = command.running)
         }
         command.exitCode?.let { code -> ExitLine("Exit code $code") }
     }
@@ -299,7 +300,7 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
         } else if (view.streamingOutput.isEmpty()) {
             RichCopy("No file details were reported.")
         }
-        if (view.streamingOutput.isNotEmpty()) RichPre(view.streamingOutput, t.tintXs, contentDescription = "Streaming file changes")
+        if (view.streamingOutput.isNotEmpty()) RichPre(view.streamingOutput, t.tintXs, contentDescription = "Streaming file changes", live = true)
     }
 }
 
@@ -324,7 +325,7 @@ private fun CodexMcpCallCard(block: JsObj, nested: Boolean) {
             )
         }
         if (mcp.arguments.isNotEmpty()) RichPre(mcp.arguments, Color.Transparent, contentDescription = "MCP arguments")
-        if (mcp.progress.isNotEmpty()) RichPre(mcp.progress, t.tintXs, contentDescription = "MCP progress")
+        if (mcp.progress.isNotEmpty()) RichPre(mcp.progress, t.tintXs, contentDescription = "MCP progress", live = true)
         if (mcp.result.isNotEmpty()) RichPre(mcp.result, t.tintXs, contentDescription = "MCP result")
         mcp.error?.let { RichCopy(it, color = t.danger) }
         duration?.let { RichMeta(listOf(null to it)) }
@@ -407,7 +408,14 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String) {
 }
 
 @Composable
-private fun UnifiedDiffRows(rows: List<UnifiedDiffRow>, label: String) {
+private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String) {
+    // Security review M3: at most DIFF_FILE_MAX_ROWS rows, each cut at DIFF_LINE_MAX characters,
+    // then a "+N more lines" row (the web draws every row in full).
+    val rows = remember(allRows) {
+        val shown = allRows.take(DIFF_FILE_MAX_ROWS).map { if (it.text.length > DIFF_LINE_MAX) it.copy(text = cutLine(it.text)) else it }
+        val hidden = allRows.size - shown.size
+        if (hidden > 0) shown + UnifiedDiffRow("more", "…", moreLinesLabel(hidden)) else shown
+    }
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val style = type.codeBlock.copy(fontSize = rem(0.72f), lineHeight = 1.5.em)
@@ -450,8 +458,8 @@ private fun UnifiedDiffRows(rows: List<UnifiedDiffRow>, label: String) {
                         val (bg, ink) = colors(row.kind)
                         Text(
                             row.text.ifEmpty { " " },
-                            style = style,
-                            color = ink,
+                            style = if (row.kind == "more") style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) else style,
+                            color = if (row.kind == "more") t.faint else ink,
                             softWrap = false,
                             modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = t.css.spaceSm),
                         )
@@ -583,6 +591,7 @@ private fun OpencodeTaskCard(block: JsObj, nested: Boolean) {
                 task.output.ifEmpty { if (task.running) "Waiting for the subagent…" else "No error detail from the subagent." },
                 t.tintXs,
                 contentDescription = "Subagent result",
+                live = task.running,
             )
         }
     }

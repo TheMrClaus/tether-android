@@ -106,6 +106,9 @@ class HttpToolMedia(
             ToolMediaResult.Failed()
         } catch (_: RuntimeException) {
             ToolMediaResult.Failed()
+        } catch (_: OutOfMemoryError) {
+            // Security review M1: a sink or a response buffer that runs the heap out is "too large".
+            ToolMediaResult.TooLarge
         }
     }
 

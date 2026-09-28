@@ -331,7 +331,10 @@ private fun FileEditView(model: ToolInputModel.Edit) {
                 )
             }
         }
-        model.diffs.forEachIndexed { index, rows -> EditDiffBlock(rows, heavyRule = index > 0) }
+        // The 200-row cap spans the whole card, so a 50-edit MultiEdit cannot draw 10,000 rows
+        // (divergence, noted: the web caps each edit's DiffBlock at 200 on its own).
+        val capped = remember(model) { capEdits(model.diffs) }
+        capped.forEachIndexed { index, diff -> EditDiffBlock(diff, heavyRule = index > 0) }
     }
 }
 
@@ -349,9 +352,8 @@ internal fun String.breakAnywhere(): String = if (length < 2) this else buildStr
  * pre-wrap text padded `space-sm`; context muted, deletions/additions on the diff tints.
  */
 @Composable
-internal fun EditDiffBlock(rows: List<EditDiffRow>, heavyRule: Boolean = false) {
+internal fun EditDiffBlock(capped: CappedDiff, heavyRule: Boolean = false) {
     val t = LocalTetherTokens.current
-    val capped = remember(rows) { capDiff(rows) }
     val style = LocalTetherTypography.current.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.5.em)
     TetherExpandableBlock(clamp = toolClamp()) {
         Column(
@@ -373,7 +375,7 @@ internal fun EditDiffBlock(rows: List<EditDiffRow>, heavyRule: Boolean = false) 
                     EditDiffRow.ADD -> "+"
                     else -> " "
                 }
-                DiffLine(gutter, row.text.ifEmpty { " " }, bg, gutterInk = if (row.t == EditDiffRow.CTX) t.faint else ink, ink = ink, style = style)
+                DiffLine(gutter, cutLine(row.text).ifEmpty { " " }, bg, gutterInk = if (row.t == EditDiffRow.CTX) t.faint else ink, ink = ink, style = style)
             }
             if (capped.hidden > 0) {
                 DiffLine("…", moreLinesLabel(capped.hidden), Color.Transparent, t.faint, t.faint, style.copy(fontStyle = FontStyle.Italic))

@@ -47,7 +47,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -68,13 +71,14 @@ import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /*
@@ -103,7 +107,8 @@ sealed interface MediaVideo {
 
 /** The seam the transcript loads media through (a fake in tests and goldens). */
 interface ToolMediaLoader {
-    suspend fun image(item: ToolMediaItem): MediaImage
+    /** [full]: the viewer's larger decode; otherwise the in-row thumbnail. */
+    suspend fun image(item: ToolMediaItem, full: Boolean = false): MediaImage
     suspend fun video(item: ToolMediaItem): MediaVideo
 }
 
@@ -111,19 +116,23 @@ interface ToolMediaLoader {
 val LocalToolMediaLoader = staticCompositionLocalOf<ToolMediaLoader?> { null }
 
 /**
- * Bounds for an in-transcript picture. Native-only: the web's <img> has no cap, but a phone must
- * never let one tool result exhaust memory. Same three-way bound as T11.1's BoundedImages, sized
- * for a transcript that can hold many pictures (the preview shows at most 320dp tall).
+ * Bounds for in-transcript media. Native-only: the web's <img> has no cap, but a hostile or broken
+ * server must never be able to exhaust a phone's memory with pictures (security review M1). Every
+ * picture streams to a temporary file (never a byte array), at most [CONCURRENT_IMAGE_LOADS] at a
+ * time app-wide, and decodes under the T11.1 three-way bound — tighter for a row thumbnail than
+ * for the viewer, since a transcript can hold many.
  */
 object MediaLimits {
     /** Encoded bytes fetched for one picture (declared and streamed). */
     const val MAX_IMAGE_BYTES: Long = 32L * 1024L * 1024L
 
-    /** Decoded pictures are sampled down to at most this many pixels a side… */
-    const val MAX_IMAGE_SIDE: Int = 2048
+    /** A row thumbnail: at most this many pixels a side and bytes decoded (it shows ≤ 320dp tall). */
+    const val THUMB_SIDE: Int = 1024
+    const val THUMB_DECODED_BYTES: Long = 4L * 1024L * 1024L
 
-    /** …and at most this many bytes. */
-    const val MAX_DECODED_BYTES: Long = 16L * 1024L * 1024L
+    /** The viewer's decode. */
+    const val FULL_SIDE: Int = 2048
+    const val FULL_DECODED_BYTES: Long = 16L * 1024L * 1024L
 
     /** A header claiming more pixels than this is refused outright (a decompression bomb). */
     const val MAX_IMAGE_PIXELS: Long = 100_000_000L
@@ -131,35 +140,83 @@ object MediaLimits {
     /** A clip is downloaded before it plays: the server's own cap. */
     const val MAX_VIDEO_BYTES: Long = ToolMediaSource.MAX_MEDIA_BYTES
 
-    /** Decoded pictures kept in memory across scrolling (content-addressed, so never stale). */
+    /** Decoded pictures kept in memory across scrolling, by the bitmaps' own allocation size. */
     const val CACHE_BYTES: Int = 24 * 1024 * 1024
+
+    /** Picture loads in flight at once, across the whole app. */
+    const val CONCURRENT_IMAGE_LOADS: Int = 2
+
+    /** Tiles one row draws before a "+N more" tile (the rest open in the viewer). */
+    const val MAX_TILES: Int = 12
+
+    /** One picture / one clip may take this long end to end, then it fails. */
+    const val IMAGE_TIMEOUT_MS: Long = 60_000
+    const val VIDEO_TIMEOUT_MS: Long = 10 * 60_000
 
     /** The image types a `data:` URI may carry (lib/tool-media-store.mjs IMAGE_MEDIA_TYPES). */
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
 
-/** Bounded bitmap decoding from bytes (the T11.1 BoundedImages plan, applied to a byte array). */
+/** The app-wide gates: picture loads share one semaphore, clip downloads one lock per content hash. */
+internal object MediaGates {
+    val images = kotlinx.coroutines.sync.Semaphore(MediaLimits.CONCURRENT_IMAGE_LOADS)
+    private val clips = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+    fun clip(sha: String): kotlinx.coroutines.sync.Mutex = clips.getOrPut(sha) { kotlinx.coroutines.sync.Mutex() }
+}
+
+/**
+ * L3: the file's first bytes must be the format its extension / declared type names — PNG
+ * `89 50 4E 47`, JPEG `FF D8 FF`, GIF `GIF8`, WebP `RIFF….WEBP`, MP4 `ftyp` at offset 4 — before
+ * anything decodes or plays it.
+ */
+object MediaMagic {
+    fun matches(file: File, mediaType: String): Boolean {
+        val head = ByteArray(12)
+        val n = try {
+            java.io.FileInputStream(file).use { input -> input.read(head) }
+        } catch (_: java.io.IOException) {
+            return false
+        }
+        return matches(head.copyOf(maxOf(n, 0)), mediaType)
+    }
+
+    fun matches(head: ByteArray, mediaType: String): Boolean {
+        fun at(offset: Int, vararg bytes: Int) = head.size >= offset + bytes.size && bytes.indices.all { head[offset + it] == bytes[it].toByte() }
+        return when (mediaType) {
+            "image/png" -> at(0, 0x89, 0x50, 0x4E, 0x47)
+            "image/jpeg" -> at(0, 0xFF, 0xD8, 0xFF)
+            "image/gif" -> at(0, 'G'.code, 'I'.code, 'F'.code, '8'.code)
+            "image/webp" -> at(0, 'R'.code, 'I'.code, 'F'.code, 'F'.code) && at(8, 'W'.code, 'E'.code, 'B'.code, 'P'.code)
+            "video/mp4" -> at(4, 'f'.code, 't'.code, 'y'.code, 'p'.code)
+            else -> false
+        }
+    }
+}
+
+/** Bounded bitmap decoding from a FILE (the T11.1 BoundedImages plan, with the transcript's bounds). */
 object BoundedMediaDecoder {
     fun decode(
-        bytes: ByteArray,
-        decode: (ByteArray, BitmapFactory.Options) -> Bitmap? = { b, o -> BitmapFactory.decodeByteArray(b, 0, b.size, o) },
+        file: File,
+        maxSide: Int = MediaLimits.FULL_SIDE,
+        maxBytes: Long = MediaLimits.FULL_DECODED_BYTES,
+        decodeFile: (String, BitmapFactory.Options) -> Bitmap? = { path, o -> BitmapFactory.decodeFile(path, o) },
     ): MediaImage = try {
         val options = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        decode(bytes, options)
-        val sample = plan(options.outWidth, options.outHeight, if (options.outConfig == Bitmap.Config.RGBA_F16) 8 else 4)
+        decodeFile(file.path, options)
+        val sample = plan(options.outWidth, options.outHeight, if (options.outConfig == Bitmap.Config.RGBA_F16) 8 else 4, maxSide, maxBytes)
         when {
             options.outWidth <= 0 || options.outHeight <= 0 -> MediaImage.Failed
             sample == null -> MediaImage.TooLarge
             else -> {
                 options.inJustDecodeBounds = false
                 options.inSampleSize = sample
-                val bitmap = decode(bytes, options)
+                val bitmap = decodeFile(file.path, options)
                 when {
                     bitmap == null -> MediaImage.Failed
-                    bitmap.allocationByteCount > MediaLimits.MAX_DECODED_BYTES -> {
+                    bitmap.allocationByteCount > maxBytes -> {
                         bitmap.recycle()
                         MediaImage.TooLarge
                     }
@@ -174,27 +231,56 @@ object BoundedMediaDecoder {
     }
 
     /** The power-of-two sample that fits both caps, or null past [MediaLimits.MAX_IMAGE_PIXELS]. */
-    fun plan(width: Int, height: Int, bytesPerPixel: Int): Int? {
+    fun plan(width: Int, height: Int, bytesPerPixel: Int, maxSide: Int = MediaLimits.FULL_SIDE, maxBytes: Long = MediaLimits.FULL_DECODED_BYTES): Int? {
         if (width <= 0 || height <= 0) return 1
         if (width.toLong() * height > MediaLimits.MAX_IMAGE_PIXELS) return null
         var sample = 1
         while (true) {
             val w = (width / sample).toLong()
             val h = (height / sample).toLong()
-            if (w <= MediaLimits.MAX_IMAGE_SIDE && h <= MediaLimits.MAX_IMAGE_SIDE && w * h * bytesPerPixel <= MediaLimits.MAX_DECODED_BYTES) return sample
+            if (w <= maxSide && h <= maxSide && w * h * bytesPerPixel <= maxBytes) return sample
             sample *= 2
         }
     }
 }
 
-/** `data:<type>;base64,<data>` → (type, base64 payload), or null. */
-internal fun parseDataUri(src: String): Pair<String, String>? {
+/** A string's characters as bytes (base64 is ASCII), read in place: the payload is never copied. */
+internal class AsciiInputStream(private val text: String, private var index: Int = 0) : java.io.InputStream() {
+    override fun read(): Int = if (index < text.length) text[index++].code and 0xFF else -1
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (len == 0) return 0
+        if (index >= text.length) return -1
+        val n = minOf(len, text.length - index)
+        for (i in 0 until n) b[off + i] = text[index + i].code.toByte()
+        index += n
+        return n
+    }
+}
+
+/** Copies at most [max] bytes; false when the source has more (the copy is then useless). */
+internal fun copyBounded(input: java.io.InputStream, out: java.io.OutputStream, max: Long): Boolean {
+    val chunk = ByteArray(64 * 1024)
+    var total = 0L
+    while (true) {
+        val n = input.read(chunk)
+        if (n == -1) return true
+        total += n
+        if (total > max) return false
+        out.write(chunk, 0, n)
+    }
+}
+
+/** A `data:<type>;base64,<payload>` URI: its declared type and where the payload starts (never copied out). */
+internal data class DataUri(val mediaType: String, val payloadStart: Int, val payloadLength: Int)
+
+internal fun parseDataUri(src: String): DataUri? {
     if (!src.startsWith("data:")) return null
     val comma = src.indexOf(',')
     if (comma < 0) return null
     val meta = src.substring(5, comma)
     if (!meta.endsWith(";base64")) return null
-    return meta.removeSuffix(";base64") to src.substring(comma + 1)
+    return DataUri(meta.removeSuffix(";base64"), comma + 1, src.length - comma - 1)
 }
 
 /**
@@ -237,85 +323,175 @@ object ToolMediaCache {
     }
 }
 
+/**
+ * Keeps the clip cache to the sign-in in force, for as long as the caller's scope lives (UiRoot):
+ * once the stored settings are read, every change of (signed in, server) applies
+ * [ToolMediaCache.sync] — a sign-out drops every clip, a sign-in to another server drops the
+ * previous server's. An unchanged pair (a re-launch after a rotation) is applied again, which
+ * keeps the current server's clips.
+ */
+suspend fun syncToolMediaCache(client: com.tether.app.client.TetherClient, cacheDir: File) {
+    client.storedSettingsLoaded.first { it }
+    kotlinx.coroutines.flow.combine(client.configured, client.serverUrl) { signedIn, origin -> signedIn to origin }
+        .distinctUntilChanged()
+        .collect { (signedIn, origin) -> withContext(Dispatchers.IO) { ToolMediaCache.sync(cacheDir, signedIn, origin) } }
+}
+
 internal fun sha256Hex(bytes: ByteArray): String =
     java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
 /** The sha256 a `/api/tool-media/<sha256>.<ext>` path names (the server content-addresses by it). */
 internal fun namedSha256(src: String): String? = if (ToolMediaSource.extensionOf(src) != null) src.substringAfterLast('/').substringBefore('.') else null
 
+/** sha256 of a closed file, streamed. */
+internal fun sha256OfFile(file: File): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    java.io.FileInputStream(file).use { input ->
+        val chunk = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(chunk)
+            if (n == -1) break
+            digest.update(chunk, 0, n)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
 /**
  * The production [ToolMediaLoader]: `data:` pictures (legacy base64 tool results) decode locally,
- * `/api/tool-media/…` ones come over [source]; decoded pictures are cached by URL, clips under the
- * server's [ToolMediaCache] directory. Fetched bytes must hash to the sha256 their path names,
- * else they are dropped: a server cannot swap content under a name the transcript already holds.
+ * `/api/tool-media/…` ones come over [source]; decoded pictures are cached (keyed by the sha256 of
+ * their source), clips under the server's [ToolMediaCache] directory. Fetched bytes must hash to
+ * the sha256 their path names, and every file's magic bytes must be its format, else it is
+ * dropped: a server cannot swap content under a name the transcript already holds. Pictures stream
+ * to a temporary file (no in-memory copy), two at a time app-wide, each within a timeout; any
+ * OutOfMemoryError on the way is "too large", never a crash.
  */
 class ToolMediaRepository(
     private val source: ToolMediaSource,
     private val cacheDir: File,
     private val origin: String? = null,
+    // L4: end-to-end timeouts (parameters only so tests need not wait a minute).
+    private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
+    private val videoTimeoutMs: Long = MediaLimits.VIDEO_TIMEOUT_MS,
 ) : ToolMediaLoader {
     private val cache = object : LruCache<String, ImageBitmap>(MediaLimits.CACHE_BYTES) {
-        override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().allocationByteCount
     }
 
-    override suspend fun image(item: ToolMediaItem): MediaImage {
+    private val tmpDir: File get() = File(cacheDir, TMP_DIR).apply { mkdirs() }
+
+    override suspend fun image(item: ToolMediaItem, full: Boolean): MediaImage {
         if (item.isVideo) return MediaImage.Failed
-        cache.get(item.src)?.let { return MediaImage.Ok(it) }
-        val result = withContext(Dispatchers.IO) { loadImage(item.src) }
-        if (result is MediaImage.Ok) cache.put(item.src, result.bitmap)
+        val key = cacheKey(item.src, full)
+        cache.get(key)?.let { return MediaImage.Ok(it) }
+        val result = try {
+            kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) {
+                MediaGates.images.withPermit { withContext(Dispatchers.IO) { loadImage(item.src, full) } }
+            } ?: MediaImage.Failed
+        } catch (_: OutOfMemoryError) {
+            MediaImage.TooLarge
+        }
+        if (result is MediaImage.Ok) cache.put(key, result.bitmap)
         return result
     }
 
-    private suspend fun loadImage(src: String): MediaImage {
-        val data = parseDataUri(src)
-        if (data != null) {
-            if (data.first !in MediaLimits.IMAGE_TYPES) return MediaImage.Failed
-            // Base64 is 4 characters per 3 bytes: refuse before decoding what could not fit.
-            if (data.second.length.toLong() / 4 * 3 > MediaLimits.MAX_IMAGE_BYTES) return MediaImage.TooLarge
-            val bytes = try {
-                Base64.decode(data.second, Base64.DEFAULT)
-            } catch (_: IllegalArgumentException) {
-                return MediaImage.Failed
+    private suspend fun loadImage(src: String, full: Boolean): MediaImage {
+        val side = if (full) MediaLimits.FULL_SIDE else MediaLimits.THUMB_SIDE
+        val bytes = if (full) MediaLimits.FULL_DECODED_BYTES else MediaLimits.THUMB_DECODED_BYTES
+        val tmp = File.createTempFile("img", ".part", tmpDir)
+        try {
+            val data = parseDataUri(src)
+            if (data != null) {
+                val type = data.mediaType
+                if (type !in MediaLimits.IMAGE_TYPES) return MediaImage.Failed
+                // Base64 is 4 characters per 3 bytes: refuse before decoding what could not fit.
+                if (data.payloadLength.toLong() / 4 * 3 > MediaLimits.MAX_IMAGE_BYTES) return MediaImage.TooLarge
+                val fits = try {
+                    android.util.Base64InputStream(AsciiInputStream(src, data.payloadStart), Base64.DEFAULT).use { input ->
+                        FileOutputStream(tmp).use { out -> copyBounded(input, out, MediaLimits.MAX_IMAGE_BYTES) }
+                    }
+                } catch (_: java.io.IOException) {
+                    return MediaImage.Failed
+                } catch (_: IllegalArgumentException) {
+                    return MediaImage.Failed
+                }
+                if (!fits) return MediaImage.TooLarge
+                if (!MediaMagic.matches(tmp, type)) return MediaImage.Failed
+                return BoundedMediaDecoder.decode(tmp, side, bytes)
             }
-            return BoundedMediaDecoder.decode(bytes)
-        }
-        val ext = ToolMediaSource.extensionOf(src) ?: return MediaImage.Failed
-        if (ext == "mp4") return MediaImage.Failed
-        val sink = ByteArrayOutputStream()
-        return when (source.fetch(src, MediaLimits.MAX_IMAGE_BYTES, sink)) {
-            is ToolMediaResult.Ok -> {
-                val bytes = sink.toByteArray()
-                if (sha256Hex(bytes) != namedSha256(src)) MediaImage.Failed else BoundedMediaDecoder.decode(bytes)
+            val ext = ToolMediaSource.extensionOf(src) ?: return MediaImage.Failed
+            if (ext == "mp4") return MediaImage.Failed
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val result = java.security.DigestOutputStream(FileOutputStream(tmp), digest).use { out ->
+                source.fetch(src, MediaLimits.MAX_IMAGE_BYTES, out)
             }
-            ToolMediaResult.TooLarge -> MediaImage.TooLarge
-            else -> MediaImage.Failed
+            return when (result) {
+                is ToolMediaResult.Ok -> {
+                    val hashed = digest.digest().joinToString("") { "%02x".format(it) }
+                    when {
+                        hashed != namedSha256(src) -> MediaImage.Failed
+                        !MediaMagic.matches(tmp, ToolMediaSource.CONTENT_TYPE_BY_EXT.getValue(ext)) -> MediaImage.Failed
+                        else -> BoundedMediaDecoder.decode(tmp, side, bytes)
+                    }
+                }
+                ToolMediaResult.TooLarge -> MediaImage.TooLarge
+                else -> MediaImage.Failed
+            }
+        } catch (_: java.io.IOException) {
+            return MediaImage.Failed
+        } finally {
+            tmp.delete()
         }
     }
 
-    override suspend fun video(item: ToolMediaItem): MediaVideo = withContext(Dispatchers.IO) {
+    override suspend fun video(item: ToolMediaItem): MediaVideo {
         val ext = ToolMediaSource.extensionOf(item.src)
-        if (ext != "mp4" || origin == null) return@withContext MediaVideo.Failed
-        val expected = namedSha256(item.src) ?: return@withContext MediaVideo.Failed
-        val dir = ToolMediaCache.dirFor(cacheDir, origin).apply { mkdirs() }
+        if (ext != "mp4" || origin == null) return MediaVideo.Failed
+        val expected = namedSha256(item.src) ?: return MediaVideo.Failed
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(videoTimeoutMs) {
+                MediaGates.clip(expected).withLock { withContext(Dispatchers.IO) { downloadClip(item.src, expected) } }
+            } ?: MediaVideo.Failed
+        } catch (_: OutOfMemoryError) {
+            MediaVideo.TooLarge
+        }
+    }
+
+    private suspend fun downloadClip(src: String, expected: String): MediaVideo {
+        val dir = ToolMediaCache.dirFor(cacheDir, origin!!).apply { mkdirs() }
         ToolMediaCache.evict(dir)
         val file = File(dir, "$expected.mp4")
         if (file.isFile && file.length() > 0) {
             file.setLastModified(System.currentTimeMillis())
-            return@withContext MediaVideo.Ok(file)
+            return MediaVideo.Ok(file)
         }
-        val part = File(dir, "$expected.mp4.part")
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val result = try {
-            java.security.DigestOutputStream(FileOutputStream(part), digest).use { out -> source.fetch(item.src, MediaLimits.MAX_VIDEO_BYTES, out) }
-        } catch (_: java.io.IOException) {
-            ToolMediaResult.Failed()
+        // L2: a temp file of its own (never a shared name), removed however this ends (cancellation
+        // included), and the CLOSED file re-hashed before it takes the content address.
+        val part = File.createTempFile(expected, ".part", dir)
+        try {
+            val result = try {
+                FileOutputStream(part).use { out -> source.fetch(src, MediaLimits.MAX_VIDEO_BYTES, out) }
+            } catch (_: java.io.IOException) {
+                ToolMediaResult.Failed()
+            }
+            return when {
+                result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge
+                result !is ToolMediaResult.Ok -> MediaVideo.Failed
+                sha256OfFile(part) != expected -> MediaVideo.Failed
+                !MediaMagic.matches(part, "video/mp4") -> MediaVideo.Failed
+                !part.renameTo(file) -> MediaVideo.Failed
+                else -> MediaVideo.Ok(file).also { ToolMediaCache.evict(dir) }
+            }
+        } finally {
+            if (part.exists()) part.delete()
         }
-        val hashed = digest.digest().joinToString("") { "%02x".format(it) }
-        when {
-            result is ToolMediaResult.Ok && hashed == expected && part.renameTo(file) -> MediaVideo.Ok(file).also { ToolMediaCache.evict(dir) }
-            result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge.also { part.delete() }
-            else -> MediaVideo.Failed.also { part.delete() }
-        }
+    }
+
+    internal companion object {
+        const val TMP_DIR = "tool-media-tmp"
+
+        /** Memory-cache key: the sha256 of the source (a data: URI can be megabytes long). */
+        fun cacheKey(src: String, full: Boolean): String = sha256Hex(src.toByteArray(Charsets.UTF_8)) + if (full) ":full" else ":thumb"
     }
 }
 
@@ -352,14 +528,37 @@ fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        items.forEachIndexed { index, item ->
+        items.take(MediaLimits.MAX_TILES).forEachIndexed { index, item ->
             MediaTile(item, onOpen = { openIndex = index })
         }
+        // Security review M1: at most MAX_TILES load in the row; the rest open in the viewer.
+        if (items.size > MediaLimits.MAX_TILES) MoreTile(items.size - MediaLimits.MAX_TILES) { openIndex = MediaLimits.MAX_TILES }
     }
     openIndex?.let { index ->
         if (index in items.indices) {
             MediaLightbox(items, index, onIndexChange = { openIndex = it }, onClose = { openIndex = null })
         }
+    }
+}
+
+/** "+N more": the pictures past the row's tiles, opened in the viewer at the first of them. */
+@Composable
+private fun MoreTile(count: Int, onOpen: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val shape = RoundedCornerShape(t.radiusMd)
+    val label = "+${localeCount(count)} more"
+    Box(
+        Modifier
+            .clip(shape)
+            .clickable(role = Role.Button, onClickLabel = "View $count more", onClick = onOpen)
+            .semantics { contentDescription = "$label pictures" }
+            .size(44.dp)
+            .background(t.tintMd)
+            .testTag("tool-media-more"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.ink)
     }
 }
 
@@ -426,10 +625,10 @@ private fun MediaUnavailable(text: String, clickable: Modifier) {
 
 /** Null while loading; the loader's answer after. No loader (a preview) stays null. */
 @Composable
-private fun rememberMediaImage(item: ToolMediaItem): MediaImage? {
+private fun rememberMediaImage(item: ToolMediaItem, full: Boolean = false): MediaImage? {
     val loader = LocalToolMediaLoader.current
-    val state by produceState<MediaImage?>(initialValue = null, item.src, loader) {
-        value = loader?.image(item)
+    val state by produceState<MediaImage?>(initialValue = null, item.src, loader, full) {
+        value = loader?.image(item, full)
     }
     return state
 }
@@ -507,7 +706,7 @@ internal fun MediaLightbox(items: List<ToolMediaItem>, index: Int, onIndexChange
                 if (item.isVideo) {
                     ViewerVideo(item)
                 } else {
-                    val image = rememberMediaImage(item)
+                    val image = rememberMediaImage(item, full = true)
                     when (image) {
                         is MediaImage.Ok -> Image(
                             bitmap = image.bitmap,

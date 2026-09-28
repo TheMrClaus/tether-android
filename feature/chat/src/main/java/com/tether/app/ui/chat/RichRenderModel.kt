@@ -21,12 +21,51 @@ private fun text(value: JsValue?): String = (value as? JsStr)?.value ?: ""
 private fun optionalText(value: JsValue?): String? = text(value).ifEmpty { null }
 private fun finiteNumber(value: JsValue?): Double? = (value as? JsNum)?.value?.takeIf { it.isFinite() }
 
-/** `displayValue`: "" for nullish, the string itself, else `JSON.stringify(value, null, 2)`. */
-internal fun displayValue(value: JsValue?): String = when {
-    value.isNullish() -> ""
-    value is JsStr -> value.value
-    else -> jsonStringifyPretty(value!!)
+/**
+ * `displayValue`: "" for nullish, the string itself, else `JSON.stringify(value, null, 2)` —
+ * bounded at [max] characters then "…" (security review M2; the web has no cap).
+ */
+internal fun displayValue(value: JsValue?, max: Int = DISPLAY_MAX): String {
+    val text = when {
+        value.isNullish() -> return ""
+        value is JsStr -> value.value
+        else -> jsonStringifyPretty(value!!, max + 1)
+    }
+    return if (text.length > max) "${text.substring(0, max)}…" else text
 }
+
+/** The most text any one rich-card section lays out (64K characters). */
+internal const val DISPLAY_MAX = 64 * 1024
+
+/** A cut index that never splits a surrogate pair. */
+private fun safeCut(text: String, index: Int): Int =
+    if (index in 1 until text.length && text[index - 1].isHighSurrogate() && text[index].isLowSurrogate()) index - 1 else index
+
+/**
+ * Security review M3 (divergence, noted: the web lays out any length): a finished payload shows
+ * its first [max] characters and says how many more there are.
+ */
+internal fun capHead(text: String, max: Int = DISPLAY_MAX): String {
+    if (text.length <= max) return text
+    val cut = safeCut(text, max)
+    return "${text.substring(0, cut)}\n… ${localeCount(text.length - cut)} more characters"
+}
+
+/** While a payload streams, only its newest [max] characters are laid out (each delta re-lays it out). */
+internal fun capTail(text: String, max: Int = DISPLAY_MAX): String {
+    if (text.length <= max) return text
+    val cut = safeCut(text, text.length - max)
+    return "… ${localeCount(cut)} earlier characters\n${text.substring(cut)}"
+}
+
+/** One diff line cut at [max] characters (a minified bundle is one 2 MB line). */
+internal const val DIFF_LINE_MAX = 2_000
+
+internal fun cutLine(text: String, max: Int = DIFF_LINE_MAX): String =
+    if (text.length <= max) text else "${text.substring(0, safeCut(text, max))}…"
+
+/** Rows a unified diff file draws before "+N more lines" (the web draws them all). */
+internal const val DIFF_FILE_MAX_ROWS = 2_000
 
 // --- Codex (codex-app-server-v2) ----------------------------------------------------------------
 
@@ -376,14 +415,32 @@ internal fun turnUnifiedDiff(turn: JsObj): String? = ((turn["diff"] as? JsObj)?.
 
 // --- opencode (opencode-serve-v2) --------------------------------------------------------------
 
-/** `TASK_RESULT_PATTERN`: bounded, non-greedy; `[\s\S]` crosses lines as in JS. */
-private val TASK_RESULT_PATTERN = Regex("<task_result>\\r?\\n?([\\s\\S]*?)\\r?\\n?</task_result>")
-
-/** `taskResultText`: the `<task_result>` payload, else the output verbatim. */
+/**
+ * `taskResultText` (opencode-rich-render-model.mjs): the `<task_result>` payload, else the output
+ * verbatim — `/<task_result>\r?\n?([\s\S]*?)\r?\n?<\/task_result>/` without a regex (L1: a lazy
+ * group over a long unterminated output is quadratic). The first open tag, one optional CR and
+ * one optional LF after it, the first close tag after that, and the lazy capture's end: the
+ * earliest point where only "\r\n", "\r", "\n" or nothing stands before the close tag.
+ */
 internal fun taskResultText(output: String): String {
     if (output.isEmpty()) return output
-    return TASK_RESULT_PATTERN.find(output)?.groupValues?.get(1) ?: output
+    val open = output.indexOf(TASK_OPEN)
+    if (open < 0) return output
+    var start = open + TASK_OPEN.length
+    if (start < output.length && output[start] == '\r') start++
+    if (start < output.length && output[start] == '\n') start++
+    val close = output.indexOf(TASK_CLOSE, start)
+    if (close < 0) return output
+    val end = when {
+        close - 2 >= start && output[close - 2] == '\r' && output[close - 1] == '\n' -> close - 2
+        close - 1 >= start && (output[close - 1] == '\r' || output[close - 1] == '\n') -> close - 1
+        else -> close
+    }
+    return output.substring(start, end)
 }
+
+private const val TASK_OPEN = "<task_result>"
+private const val TASK_CLOSE = "</task_result>"
 
 /** `opencodeRichToolKind`: only opencode's `task` tool gets its own card. */
 internal fun opencodeRichToolKind(block: JsObj?): String? {

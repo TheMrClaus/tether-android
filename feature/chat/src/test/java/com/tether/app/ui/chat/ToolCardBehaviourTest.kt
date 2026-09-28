@@ -297,7 +297,8 @@ class ToolCardBehaviourTest {
         android.graphics.Bitmap.createBitmap(48, 32, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
         out.toByteArray()
     }
-    private val clipBytes = ByteArray(4096) { (it * 7).toByte() }
+    /** An MP4-shaped clip: `ftyp` at offset 4 (L3 checks the magic before anything plays). */
+    private val clipBytes = ByteArray(4096) { (it * 7).toByte() }.also { b -> "\u0000\u0000\u0000\u0018ftypmp42".forEachIndexed { i, c -> b[i] = c.code.toByte() } }
     private val pngUrl by lazy { "/api/tool-media/${sha256Hex(png)}.png" }
     private val clipUrl by lazy { "/api/tool-media/${sha256Hex(clipBytes)}.mp4" }
 
@@ -415,8 +416,9 @@ class ToolCardBehaviourTest {
     }
 
     @Test fun aDecompressionBombIsRefusedBeforeItsPixelsAreDecoded() {
+        val file = java.io.File.createTempFile("bomb", ".png", rule.activity.cacheDir)
         var decodes = 0
-        val result = BoundedMediaDecoder.decode(ByteArray(8)) { _, options ->
+        val result = BoundedMediaDecoder.decode(file) { _, options ->
             if (options.inJustDecodeBounds) {
                 options.outWidth = 50_000
                 options.outHeight = 50_000
@@ -427,7 +429,11 @@ class ToolCardBehaviourTest {
         }
         assertEquals(MediaImage.TooLarge, result)
         assertEquals(0, decodes)
-        assertEquals(MediaImage.TooLarge, BoundedMediaDecoder.decode(ByteArray(8)) { _, _ -> throw OutOfMemoryError("x") })
-        assertEquals(MediaImage.Failed, BoundedMediaDecoder.decode("not an image".toByteArray()))
+        assertEquals(MediaImage.TooLarge, BoundedMediaDecoder.decode(file) { _, _ -> throw OutOfMemoryError("x") })
+        file.writeText("not an image")
+        assertEquals(MediaImage.Failed, BoundedMediaDecoder.decode(file))
+        // A thumbnail decodes under the tighter bound: 4096² samples to 1024² (4 MB).
+        assertEquals(4, BoundedMediaDecoder.plan(4096, 4096, 4, MediaLimits.THUMB_SIDE, MediaLimits.THUMB_DECODED_BYTES))
+        file.delete()
     }
 }

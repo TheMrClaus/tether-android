@@ -166,7 +166,7 @@ class ToolRenderModelTest {
         assertEquals(2, BoundedMediaDecoder.plan(4096, 100, 4))
         assertEquals(2, BoundedMediaDecoder.plan(2048, 2048, 8)) // 32 MB at F16 > 16 MB
         assertEquals(null, BoundedMediaDecoder.plan(20_000, 20_000, 4))
-        assertEquals("image/png" to "AAAA", parseDataUri("data:image/png;base64,AAAA"))
+        assertEquals(DataUri("image/png", 22, 4), parseDataUri("data:image/png;base64,AAAA"))
         assertNull(parseDataUri("data:image/png,AAAA"))
         assertNull(parseDataUri("/api/tool-media/x.png"))
         assertEquals("100%", zoomLabel(1f))

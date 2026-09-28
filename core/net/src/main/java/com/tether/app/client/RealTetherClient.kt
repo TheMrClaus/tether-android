@@ -347,6 +347,9 @@ class RealTetherClient(
     // T6.2: per-file git hunks (git-diff-file) and diff summaries (worktree-diff), per session.
     private val gitFileDiffsState = MutableStateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>>(emptyMap())
     private val worktreeDiffsState = MutableStateFlow<Map<String, JsonObject?>>(emptyMap())
+    // L5: the (sessionId, path) pairs this client asked for; a git-diff-file reply for anything
+    // else is dropped (a server cannot fill the card with hunks nobody requested).
+    private val requestedGitFileDiffs = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
     private val errorsFlow = MutableSharedFlow<String>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -737,6 +740,7 @@ class RealTetherClient(
         sessionControlsState.value = emptyMap()
         gitFileDiffsState.value = emptyMap()
         worktreeDiffsState.value = emptyMap()
+        requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
         searchSync.clear()
@@ -1964,6 +1968,7 @@ class RealTetherClient(
                 }
             }
             is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
+                if (!requestedGitFileDiffs.remove(message.sessionId to message.path)) return@ifCurrent
                 val current = gitFileDiffsState.value
                 gitFileDiffsState.value = current + (message.sessionId to ((current[message.sessionId] ?: emptyMap()) + (message.path to message)))
             }
@@ -2603,8 +2608,12 @@ class RealTetherClient(
     override fun setModel(sessionId: String, model: String): Boolean =
         sendFrame(ClientMessage.SetModel(sessionId, model))
 
-    override fun requestGitFileDiff(sessionId: String, path: String): Boolean =
-        sendFrame(ClientMessage.GitDiffFileRequest(sessionId, path))
+    override fun requestGitFileDiff(sessionId: String, path: String): Boolean {
+        requestedGitFileDiffs.add(sessionId to path)
+        return sendFrame(ClientMessage.GitDiffFileRequest(sessionId, path)).also { sent ->
+            if (!sent) requestedGitFileDiffs.remove(sessionId to path)
+        }
+    }
 
     override fun requestWorktreeDiff(sessionId: String): Boolean =
         sendFrame(ClientMessage.WorktreeDiffRequest(sessionId))
