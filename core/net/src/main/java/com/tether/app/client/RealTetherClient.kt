@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.client.sync.MirrorLink
+import com.tether.app.client.sync.SessionStore
 import com.tether.app.mirror.Hydration
 import com.tether.app.mirror.JournalMirror
 import com.tether.app.mirror.MirrorIndex
@@ -16,7 +17,6 @@ import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.fold.reduce
-import com.tether.app.protocol.model.LegacyProjectionAdapter
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.str
 import com.tether.app.protocol.tree.JsCodec
@@ -211,22 +211,12 @@ class RealTetherClient(
     // The origin the mirror is bound to (or being bound to); null = unbound. Guarded by lock.
     private var mirrorOrigin: String? = null
 
-    // --- T13.1 (b) hydration state (guarded by lock; all empty while the mirror is off) ---
-    // Sessions whose mirrored copy is being read, with the events folded meanwhile (applied on
-    // top of the read, in order: the read sees every mirror write enqueued before it).
-    private val hydrating = HashMap<String, MutableList<JsObj>>()
-    // Hydration attempted in this binding (at most once per session).
-    private val hydrationTried = HashSet<String>()
+    // --- T13.1 attach policy for mirror-restored cursors (guarded by lock; empty while off) ---
     // Cursors restored from the mirror and not yet refreshed by a snapshot in this process:
     // the only ones the ready re-attach caps (§3.1 rule 5).
     private val seededFromMirror = HashSet<String>()
     // Last time the UI opened (attached) a session: orders the capped re-attach.
     private val lastOpenedAt = HashMap<String, Long>()
-    // Events folded since the session's base, for the local checkpoint rule (§2.4).
-    private val tailSinceBase = HashMap<String, Int>()
-    // Fetched `turns-detail` turns per session; a new state keeps those still trimmed (§2.3),
-    // so the tree stays equal to fold(splice(DB.base, DB.details), DB.tail).
-    private val fetchedDetails = HashMap<String, Map<String, JsObj>>()
 
     /**
      * Every request that carries (or obtains) a credential goes through this
@@ -322,16 +312,14 @@ class RealTetherClient(
     private val sessionsState = MutableStateFlow<List<AgentSession>>(emptyList())
     private val providersState = MutableStateFlow<List<ProviderInfo>>(emptyList())
     private val workspaceRootState = MutableStateFlow<String?>(null)
-    private val projectionsState = MutableStateFlow<Map<String, SessionProjection>>(emptyMap())
 
     // T2.1D: the v128 trees are the source of truth; the typed projections are adapted from
-    // them by one memoized adapter per session (frame thread only).
-    private val projectionTreesState = MutableStateFlow<Map<String, JsObj>>(emptyMap())
-    private val adapters = HashMap<String, LegacyProjectionAdapter>()
+    // them by one memoized adapter per session. T13.1 (c): owned by [sessionStore] (SYNC_DESIGN §2.6
+    // step 3), which the mirror hydrates and the connection feeds. Guarded by [lock].
+    private val sessionStore = SessionStore()
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
-    private val trimmedBeforeState = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val errorsFlow = MutableSharedFlow<String>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -352,14 +340,14 @@ class RealTetherClient(
     override val sessions: StateFlow<List<AgentSession>> = sessionsState
     override val providers: StateFlow<List<ProviderInfo>> = providersState
     override val workspaceRoot: StateFlow<String?> = workspaceRootState
-    override val projections: StateFlow<Map<String, SessionProjection>> = projectionsState
-    override val projectionTrees: StateFlow<Map<String, JsObj>> = projectionTreesState
+    override val projections: StateFlow<Map<String, SessionProjection>> = sessionStore.projections
+    override val projectionTrees: StateFlow<Map<String, JsObj>> = sessionStore.trees
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
     override val errors: SharedFlow<String> = errorsFlow
     override val configured: StateFlow<Boolean> = configuredState
-    override val trimmedBefore: StateFlow<Map<String, Int>> = trimmedBeforeState
+    override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
 
     // T5.1 sidebar sync (SidebarSync.kt).
     private val sidebarSync = SidebarSync()
@@ -684,12 +672,9 @@ class RealTetherClient(
 
     /** The in-memory T13.1 hydration state: per server, like the cursors. Caller holds [lock]. */
     private fun clearMirrorStateLocked() {
-        hydrating.clear()
-        hydrationTried.clear()
         seededFromMirror.clear()
         lastOpenedAt.clear()
-        tailSinceBase.clear()
-        fetchedDetails.clear()
+        sessionStore.clearMirrorState()
     }
 
     /** The published per-server views: another server's sessions must never show. */
@@ -697,12 +682,10 @@ class RealTetherClient(
         sessionsState.value = emptyList()
         providersState.value = emptyList()
         workspaceRootState.value = null
-        projectionTreesState.value = emptyMap()
-        projectionsState.value = emptyMap()
+        synchronized(lock) { sessionStore.clearViews() }
         historiesState.value = emptyList()
         directoriesState.value = null
         sessionControlsState.value = emptyMap()
-        trimmedBeforeState.value = emptyMap()
         sidebarSync.clear()
         createdState.value = null
         searchSync.clear()
@@ -948,8 +931,7 @@ class RealTetherClient(
         val link = mirrorLink ?: return
         val (origin, read) = synchronized(lock) {
             val origin = mirrorOrigin ?: return
-            if (projectionTreesState.value.containsKey(sessionId) || !hydrationTried.add(sessionId)) return
-            hydrating[sessionId] = ArrayList()
+            if (!sessionStore.beginHydration(sessionId)) return
             origin to link.mirror.hydrateAsync(origin, sessionId)
         }
         scope.launch {
@@ -974,35 +956,25 @@ class RealTetherClient(
     ) {
         var fullAttachOn: WebSocket? = null
         synchronized(lock) {
-            // Cancelled by a snapshot with state (it wins), a sign-out or an origin switch.
-            val buffered = hydrating.remove(sessionId) ?: return
-            if (mirrorOrigin != origin || projectionTreesState.value.containsKey(sessionId)) return
-            var tree = rebuilt
-            if (tree != null) {
-                try {
-                    for (event in buffered) tree = reduce(tree!!, event)
-                } catch (_: RuntimeException) {
-                    tree = null
+            // A sign-out or origin switch since: its bookkeeping is gone already.
+            if (mirrorOrigin != origin) return
+            when (val outcome = sessionStore.completeHydration(sessionId, session, rebuilt)) {
+                // A snapshot with state won, or a projection exists already.
+                SessionStore.HydrationOutcome.Cancelled -> return
+                SessionStore.HydrationOutcome.Failed -> {
+                    if (result is Hydration.None) return // no saved copy: nothing to drop
+                    // Unreadable or unfoldable (Corrupt, or a fold throw): the saved copy goes, and
+                    // the restored cursor with it, so the attach is a FULL one.
+                    mirrorLink?.drop(origin, sessionId)
+                    tracker.forget(sessionId)
+                    seededFromMirror.remove(sessionId)
+                    sessionStore.forgetMirrored(sessionId)
+                    if (sessionId in attachedThisEpoch && socketOpen && handshakeDone && socketOrigin == origin) fullAttachOn = socket
                 }
-            }
-            if (tree == null || session == null) {
-                if (result is Hydration.None) return
-                // Unreadable or unfoldable (Corrupt, or a fold throw): the saved copy goes, and the
-                // restored cursor with it, so the attach is a FULL one.
-                mirrorLink?.drop(origin, sessionId)
-                tracker.forget(sessionId)
-                seededFromMirror.remove(sessionId)
-                tailSinceBase.remove(sessionId)
-                fetchedDetails.remove(sessionId)
-                if (sessionId in attachedThisEpoch && socketOpen && handshakeDone && socketOrigin == origin) fullAttachOn = socket
-            } else {
-                val published = tree
-                fetchedDetails[sessionId] = session.details
-                tailSinceBase[sessionId] = session.tail.size + buffered.count { it["seq"] != null }
-                trimmedBeforeState.value = session.trimmedBefore
-                    ?.let { trimmedBeforeState.value + (sessionId to it) }
-                    ?: (trimmedBeforeState.value - sessionId)
-                publishLocked(sessionId, published, adapt(sessionId, published))
+                is SessionStore.HydrationOutcome.Ready -> {
+                    sessionStore.setTrimmedBefore(sessionId, session?.trimmedBefore)
+                    sessionStore.publish(sessionId, outcome.tree, sessionStore.adapt(sessionId, outcome.tree))
+                }
             }
         }
         fullAttachOn?.let { sendFrameOn(it, ClientMessage.Attach(sessionId, null)) }
@@ -1982,24 +1954,16 @@ class RealTetherClient(
     private fun onSnapshot(webSocket: WebSocket, message: ServerMessage.Snapshot) {
         // A frame of a socket let go meanwhile (a sign-in to another server)
         // must not seed a cursor or authorise redelivery on the next one.
-        var kept: Map<String, JsObj>? = null
+        var shown: JsObj? = message.state
         val current = synchronized(lock) {
             if (socket !== webSocket) return@synchronized false
             tracker.onSnapshot(message.sessionId, message.throughSeq)
             mirrorOriginLocked()?.let { mirrorLink?.snapshot(it, message) }
             seededFromMirror.remove(message.sessionId)
             val state = message.state
-            if (state != null && mirrorLink != null) {
-                // A state wins over a saved copy still being read, and re-bases the tail.
-                hydrating.remove(message.sessionId)
-                hydrationTried.add(message.sessionId)
-                tailSinceBase[message.sessionId] = 0
-                // Details of turns the new state still trims stay spliced, exactly as the
-                // mirror keeps them (MirrorLink.keptDetailIds); the rest are superseded.
-                val keep = MirrorLink.keptDetailIds(state, message.trimmedBefore)
-                kept = fetchedDetails[message.sessionId]?.filterKeys { it in keep }?.takeIf { it.isNotEmpty() }
-                if (kept == null) fetchedDetails.remove(message.sessionId) else fetchedDetails[message.sessionId] = kept
-            }
+            // A state wins over a saved copy still being read and re-bases the tail; details of
+            // turns it still trims stay spliced, exactly as the mirror keeps them.
+            if (state != null && mirrorLink != null) shown = sessionStore.rebase(message.sessionId, state, message.trimmedBefore)
             true
         }
         if (!current) return
@@ -2009,15 +1973,13 @@ class RealTetherClient(
         // leaves no typed projection (the screens show nothing rather than a diverged
         // base); pending input still reconciles against the tree, as on the web.
         val tree = message.state
-        val shown = tree?.let { state -> kept?.let { MirrorLink.splice(state, it) } ?: state }
-        val typed = shown?.let { adapt(message.sessionId, it) }
-        val published = ifCurrent(webSocket) {
-            trimmedBeforeState.value = message.trimmedBefore
-                ?.let { trimmedBeforeState.value + (message.sessionId to it) }
-                ?: (trimmedBeforeState.value - message.sessionId)
-            if (shown != null) publishLocked(message.sessionId, shown, typed)
+        val published = shown
+        val typed = published?.let { sessionStore.adapt(message.sessionId, it) }
+        val wrote = ifCurrent(webSocket) {
+            sessionStore.setTrimmedBefore(message.sessionId, message.trimmedBefore)
+            if (published != null) sessionStore.publish(message.sessionId, published, typed)
         }
-        if (!published || tree == null) return
+        if (!wrote || tree == null) return
         // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
         // journal-folded state exactly as the web does (not the typed view): a key it
         // contains was accepted, whatever it lacks was not and is redelivered below.
@@ -2052,14 +2014,9 @@ class RealTetherClient(
                 // Only what the cursor folds is mirrored, in frame order (§2.3).
                 if (decision == CursorTracker.Decision.Fold) {
                     seqlessCleared = mirrorOriginLocked()?.let { mirrorLink?.event(it, message.sessionId, event) }
-                    if (event.seq != null && mirrorLink != null) {
-                        tailSinceBase[message.sessionId] = (tailSinceBase[message.sessionId] ?: 0) + 1
-                    }
+                    if (event.seq != null && mirrorLink != null) sessionStore.countTail(message.sessionId)
                     // Its saved copy is being read: fold this on top of it when it lands.
-                    hydrating[message.sessionId]?.let { pending ->
-                        pending += JsCodec.fromJson(event.raw) as JsObj
-                        buffered = true
-                    }
+                    if (mirrorLink != null) buffered = sessionStore.bufferIfHydrating(message.sessionId, JsCodec.fromJson(event.raw) as JsObj)
                 }
                 // §3.1 rule 1a applies to the gap resync too.
                 if (decision is CursorTracker.Decision.Resync) {
@@ -2103,7 +2060,7 @@ class RealTetherClient(
             if (removed) persistPending()
         }
         if (buffered) return
-        val tree = projectionTreesState.value[message.sessionId] ?: return
+        val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
         val next = try {
             reduce(tree, JsCodec.fromJson(event.raw) as JsObj)
         } catch (e: RuntimeException) {
@@ -2112,20 +2069,17 @@ class RealTetherClient(
             // take down the socket thread: drop the diverged base and ask for a FULL snapshot
             // (no afterSeq — a cursor-at-head attach would come back stateless).
             val current = ifCurrent(webSocket) {
-                projectionTreesState.value = projectionTreesState.value - message.sessionId
-                projectionsState.value = projectionsState.value - message.sessionId
+                sessionStore.drop(message.sessionId)
                 // The reducer is the arbiter (§10 C5): the mirrored base goes too.
                 mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
-                tailSinceBase.remove(message.sessionId)
-                fetchedDetails.remove(message.sessionId)
             }
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
         if (next !== tree) {
-            val typed = adapt(message.sessionId, next)
-            ifCurrent(webSocket) { publishLocked(message.sessionId, next, typed) }
+            val typed = sessionStore.adapt(message.sessionId, next)
+            ifCurrent(webSocket) { sessionStore.publish(message.sessionId, next, typed) }
         }
         event.seq?.let { seq -> maybeCheckpoint(webSocket, message.sessionId, seq, event.type, next) }
     }
@@ -2140,11 +2094,8 @@ class RealTetherClient(
         val link = mirrorLink ?: return
         ifCurrent(webSocket) {
             val origin = mirrorOriginLocked() ?: return@ifCurrent
-            val tail = tailSinceBase[sessionId] ?: return@ifCurrent
-            val due = tail >= link.mirror.checkpointEvery || (type == "turn_end" && tail >= link.mirror.checkpointAtTurnEnd)
-            if (!due || projectionTreesState.value[sessionId] !== tree) return@ifCurrent
+            if (!sessionStore.checkpointDue(sessionId, type, tree, link.mirror.checkpointEvery, link.mirror.checkpointAtTurnEnd)) return@ifCurrent
             link.mirror.checkpoint(origin, sessionId, seq, tree)
-            tailSinceBase[sessionId] = 0
         }
     }
 
@@ -2154,28 +2105,15 @@ class RealTetherClient(
      * session with no projection yet.
      */
     private fun onTurnsDetail(webSocket: WebSocket, message: ServerMessage.TurnsDetail) {
-        val tree = projectionTreesState.value[message.sessionId] ?: return
+        val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
         val turnsById = tree["turnsById"] as? JsObj ?: JsObj.EMPTY
         val next = tree.put("turnsById", turnsById.spread(message.turns))
-        val typed = adapt(message.sessionId, next)
+        val typed = sessionStore.adapt(message.sessionId, next)
         ifCurrent(webSocket) {
-            publishLocked(message.sessionId, next, typed)
+            sessionStore.publish(message.sessionId, next, typed)
             mirrorOriginLocked()?.let { mirrorLink?.turnsDetail(it, message.sessionId, message.turns, tree) }
-            if (mirrorLink != null) {
-                val turns = message.turns.entries.mapNotNull { (id, turn) -> (turn as? JsObj)?.let { id to it } }
-                if (turns.isNotEmpty()) fetchedDetails[message.sessionId] = (fetchedDetails[message.sessionId] ?: emptyMap()) + turns
-            }
+            if (mirrorLink != null) sessionStore.addDetails(message.sessionId, message.turns)
         }
-    }
-
-    /**
-     * [tree]'s typed view through [sessionId]'s memoized adapter: null when the tree's
-     * required session fields do not fit the typed model.
-     */
-    private fun adapt(sessionId: String, tree: JsObj): SessionProjection? {
-        // The frame thread and a mirror hydration (T13.1) may both adapt: one at a time per adapter.
-        val adapter = synchronized(adapters) { adapters.getOrPut(sessionId) { LegacyProjectionAdapter() } }
-        return synchronized(adapter) { adapter.adapt(tree) }
     }
 
     /**
@@ -2188,16 +2126,6 @@ class RealTetherClient(
         if (socket !== webSocket) return@synchronized false
         write()
         true
-    }
-
-    /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). Caller holds [lock]. */
-    private fun publishLocked(sessionId: String, tree: JsObj, typed: SessionProjection?) {
-        projectionTreesState.value = projectionTreesState.value + (sessionId to tree)
-        projectionsState.value = if (typed != null) {
-            projectionsState.value + (sessionId to typed)
-        } else {
-            projectionsState.value - sessionId
-        }
     }
 
     /** Caller holds [lock] (see [ifCurrent]). */
