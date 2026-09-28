@@ -397,4 +397,23 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         // The server URL is not a credential: no hint an autofill service could fill a username into.
         assertEquals(null, field("Server URL").fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentType))
     }
+
+    @Test fun aProbeThatFailsOnceIsAskedAgainBeforeTheSubmitGivesUp() {
+        // The clock is held so the screen's own debounced probe never starts: the only probes
+        // are the submit's, and the first of them fails (a proxy hiccup, a network change).
+        rule.mainClock.autoAdvance = false
+        console.failProbes.set(1)
+        launch()
+        typeUrl()
+        submitPassword(console.password)
+        val deadline = System.currentTimeMillis() + 10_000
+        while (!shows("Enter your username.") && System.currentTimeMillis() < deadline) {
+            rule.mainClock.advanceTimeBy(50)
+            Thread.sleep(10)
+        }
+        rule.mainClock.autoAdvance = true
+        assertTrue(shows("Enter your username."))
+        assertTrue("sent before the retried probe answered: ${console.logins}", console.logins.isEmpty())
+        assertTrue(console.probes.get() >= 2)
+    }
 }
