@@ -919,13 +919,14 @@ class ApprovalScreenBehaviourTest {
     // ---- round 3: the card state survives a link blip and a tab switch (B1) -------------------
 
     /** The link drops (as a background grace-period close does) and comes back to the same server. */
-    private fun blip(client: ChatTestClient) {
+    private fun blip(client: ChatTestClient, whileDown: () -> Unit = {}) {
         rule.runOnIdle {
             client.link.value = ConnectionState.Disconnected
             client.origin.value = null
             client.live.value = emptySet()
         }
         rule.waitForIdle()
+        whileDown()
         rule.runOnIdle {
             client.link.value = ConnectionState.Connected
             client.origin.value = TEST_ORIGIN
@@ -942,7 +943,11 @@ class ApprovalScreenBehaviourTest {
         scrollTo("grant-network")
         rule.onNodeWithTag("grant-network").performClick()
         rule.onNodeWithTag("grant-network").assertIsOff()
-        blip(client)
+        blip(client) {
+            // While the link is down the card is locked, and still shows what the operator chose.
+            rule.onNodeWithText(ConsentLock.Offline.copy).assertIsDisplayed()
+            rule.onNodeWithTag("grant-network").assertIsOff()
+        }
         scrollTo("grant-network")
         rule.onNodeWithTag("grant-network").assertIsOff()
         rule.onAllNodesWithTag("grant-read")[0].assertIsOn()
@@ -958,7 +963,7 @@ class ApprovalScreenBehaviourTest {
         rule.waitForIdle()
         arm()
         rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
-        blip(client)
+        blip(client) { rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2")) }
         scrollTo("question-submit")
         rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
         rule.onNodeWithText("staging").performClick()
