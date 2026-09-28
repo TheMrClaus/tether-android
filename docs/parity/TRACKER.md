@@ -24,25 +24,24 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-28 ~10:00 CEST, end of the overnight autonomous run):** `main` @ `8515afe`.
-**Merged + verified overnight (10):** T6.1 chat/markdown (`19abfbc`), T4.5 log dialog (`61f868a`), T5.1 sidebar (`a41178a`),
-ta-cdh sign-in ping race (`fc3f820`), T11.1 file browser (`d39d5d5`), ta-ouu push security follow-ups (`80e9651`),
-T5.2 resume (`d31fbce`), ta-u2n file-browser rotation (`e425af4`), T4.4 deep links (`fb66759`), T5.3 search (`8515afe`).
-**⚠ main CI is red** on `8515afe`: an intermittent `FileBrowserRecreationTest` timeout (not only host load) - **ta-g04** (P1) in
-flight. No release/draft until CI is green again.
-**In flight:** T13.1 Room mirror round 2 (security review M1/M2 fixes: durable wipe, worker can't die silently, origin lag;
-verifier already CONFIRMED correctness), T6.2 tool cards, T7.1 composer, ta-g04.
-**Owner queue (report, not act):** tether PR #204 (S12.2) is **MERGED** (tether `main` `2287777`, verified by the owner's ops
-agent) but **not deployed** (the live bundle is pre-#204; rebuild + `safe-restart` is the owner's, and a rebuild must never happen
-without the matching restart). **Push is blocked on Firebase provisioning, not on code:** production has no FCM configuration at
-all. The owner must (1) create/select a Firebase project and register the Android app `com.tether.app`, (2) generate a
-service-account key, (3) set all six values - sender `TETHER_FCM_PROJECT_ID`, `TETHER_FCM_CLIENT_EMAIL`, `TETHER_FCM_PRIVATE_KEY`
-and client `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` - in a root-owned `EnvironmentFile`
-(or the unit's `Environment=`), never a repo `.env.local` agents can read, (4) rebuild + restart, (5) restrict the API key to the
-app package + signing fingerprints. Optional tether private-history scrub. **Drafts built (unpublished, same signing certificate as 0.6.0):** 0.7.0 (code 17, `b60b0d4`) and **0.7.1 (code 18, `dc9200d`:
-adds T7.1 composer + T13.1 encrypted journal mirror)** and **0.7.2 (code 19, `391de70`: adds the ta-s4r sign-in fix)**. Publishing is the owner's call. T6.2 tool cards not yet in.
-**Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
-line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
+**Resume point (2026-09-28 ~18:00 CEST, clean handover - no agents running, no open worktrees):** `main` @ `3a75f45`.
+**Merged + verified since the overnight run began (17):** T6.1 chat/markdown, T4.5 log dialog, T5.1 sidebar, ta-cdh, T11.1 file
+browser, ta-ouu push security, T5.2 resume, ta-u2n, T4.4 deep links, T5.3 search, ta-g04 (file-browser launch race - fixed the red
+CI), T7.1 composer, T13.1 encrypted journal mirror (3 verify + 2 security rounds), ta-s4r sign-in (P0), **T6.2 tool cards** (6 rounds;
+security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rewrite, media hash/magic-byte checks).
+**CI:** green on `391de70`; the run for `3a75f45` (T6.2) was pending at handover - check it first.
+**Drafts (unpublished, same cert as 0.6.0):** 0.7.0 (`b60b0d4`), 0.7.1 (`dc9200d`, +composer +mirror), 0.7.2 (`391de70`, +sign-in fix).
+T6.2 is not in any draft yet: build **0.7.3 (code 20)** from green `main` with the release workflow in `draft` mode.
+**ta-s4r (owner sign-in):** owner sees the app fallback "That password is not correct." (a 401 without Tether JSON); the most likely
+cause is an SSO/auth gateway in front of `/api/auth/login` (Tether's README advises exactly that). 0.7.2 now names such a refusal
+and points to pairing. **Waiting on the owner's result with 0.7.2.**
+**Owner queue (report, not act):** push is blocked on Firebase provisioning (production has no FCM config at all: create the
+Firebase project + register `com.tether.app`, service-account key, set all six `TETHER_FCM_*` values in a root-owned
+EnvironmentFile, rebuild + restart, restrict the API key). tether#204 is merged. Publishing any draft is the owner's call.
+Optional tether private-history scrub.
+**Next frontier (`bd ready`):** T6.3 approvals/questions, T6.4 subagents/background, T6.5-T6.7, T7.2-T7.4, T8.x, T10.x settings,
+T13.2+ offline/outbox, plus the filed follow-ups (ta-hra wipe residuals before T14.3, ta-js0 Conscrypt classifier, ta-epo mirror
+flake, ta-dhu/ta-cqf T6.2 lows, ta-854 login lows, ta-705, ta-w6z, ta-55u, ta-0lv, ta-3pf, ta-6z4, ta-hcj, ta-5wx).
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -121,7 +120,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
-| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:21 |  | round 3 (executor-T6.2): rebasing onto main, fixing security review M1-M3, L1-L5, verifier lows |
+| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | VERIFIED | TheMrClaus @ 2026-09-28 04:21 |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
@@ -312,3 +311,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 09:25 | claude-main / Opus 5.5 | S1.1 deploy, T1.3, T2.3, T3.2, S0.4, T3.3, T3.5 | Owner: merge + redeploy tether → tether#197 merged `bde3cfa` (8 port tests 44/44 first), idle-waiting safe-restart watcher launched; T1.3 (real OkHttp onOpen race fixed), T2.3, T3.2 VERIFIED+merged; S0.4/T3.3/T3.5 checkpointed + paused for the restart | read deploy log; resume S0.4, T3.3, T3.5, T1.5 |
 | 2026-09-27 19:15 | claude-main / Opus 5.5 (new coordinator session) | T5.1, T6.1 | Took over after the previous coordinator hit its 5-hour usage limit; RESUME HERE rewritten from disk (T12.1 r3 merged `98bf8ac`; T5.1 DONE unverified; T6.1 blocked P1) | T5.1 verifier; T6.1 allowlist fix → re-verify → merge |
 | 2026-09-28 04:55 | claude-main / Opus 5.5 | T6.1, T4.5, T5.1, ta-cdh, T11.1, ta-ouu; T4.4, T13.1, ta-u2n, T5.2 | Overnight: 6 verified + merged (T6.1 `19abfbc`, T4.5 `61f868a`, T5.1 `a41178a`, ta-cdh `fc3f820`, T11.1 `d39d5d5`, ta-ouu `80e9651`). All 4 lanes interrupted by an account usage limit ~04:00; T13.1 checkpointed as WIP `bf42bc4`, all 4 agents resumed in context | verify T4.4, T13.1, ta-u2n, T5.2 as they finish |
+| 2026-09-28 18:00 | claude-main / Opus 5.5 | T6.2, T7.1, T13.1, ta-g04, ta-s4r | Daytime: CI red→green (ta-g04), T7.1, T13.1, ta-s4r (P0 sign-in), T6.2 merged; drafts 0.7.0-0.7.2 built; three usage-limit interruptions and one server restart recovered by WIP checkpoints | build 0.7.3 draft; owner sign-in result; next frontier |
