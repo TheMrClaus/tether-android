@@ -46,6 +46,12 @@ class ChatTestClient : TetherClient {
     val decided = MutableStateFlow<Set<String>>(emptySet())
     override val liveSessions: StateFlow<Set<String>> get() = live
     override val decidedRequests: StateFlow<Set<String>> get() = decided
+    val unconfirmed = MutableStateFlow<Set<String>>(emptySet())
+    override val unconfirmedRequests: StateFlow<Set<String>> get() = unconfirmed
+
+    /** The test "server" origin the cards fingerprint for. */
+    val origin = MutableStateFlow<String?>(TEST_ORIGIN)
+    override val consentOrigin: StateFlow<String?> get() = origin
 
     /**
      * T6.3: every consent call the UI made, in order, NOT de-duplicated (the UI's own send-once
@@ -86,22 +92,23 @@ class ChatTestClient : TetherClient {
     override fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String?,
         decision: String?,
         grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
     ): com.tether.app.client.ConsentResult {
         consentCalls += "approval:$sessionId:$requestId:${choiceId ?: decision}" + (grantedPermissions?.let { ":" + it.toJsonObject() } ?: "")
-        return settle(sessionId, requestId)
+        return settle(sessionId, requestId, expectedFingerprint)
     }
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
+    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
         consentCalls += "question:$sessionId:$requestId:$answers" + (response?.let { ":$it" } ?: "")
-        return settle(sessionId, requestId)
+        return settle(sessionId, requestId, expectedFingerprint)
     }
 
     /** Like the real client: a sent decision is published in [decided]. */
-    private fun settle(sessionId: String, requestId: String): com.tether.app.client.ConsentResult {
+    private fun settle(sessionId: String, requestId: String, fingerprint: String): com.tether.app.client.ConsentResult {
         val result = consentResult
-        if (result == com.tether.app.client.ConsentResult.Sent) decided.value = decided.value + com.tether.app.client.consentKey(sessionId, requestId)
+        if (result == com.tether.app.client.ConsentResult.Sent) decided.value = decided.value + com.tether.app.client.consentKey(sessionId, requestId, fingerprint)
         return result
     }
     override fun createSession(provider: String, cwd: String?, name: String?) = Unit
@@ -124,3 +131,6 @@ fun chatSession(id: String, historyId: String?, name: String = id) = AgentSessio
     id = id, provider = "claude", name = name, cwd = "/w", status = "ready",
     startedAt = 1, updatedAt = 1, historyId = historyId,
 )
+
+/** T6.3: the origin ChatTestClient reports for its live socket. */
+const val TEST_ORIGIN = "http://127.0.0.1:4290"

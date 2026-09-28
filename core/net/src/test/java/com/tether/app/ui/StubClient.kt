@@ -48,12 +48,14 @@ internal open class StubClient : TetherClient {
     override fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String?,
         decision: String?,
         grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
     ) = com.tether.app.client.ConsentResult.NotConnected
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) =
+    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, answers: Map<String, String>, response: String?) =
         com.tether.app.client.ConsentResult.NotConnected
+    override val consentOrigin: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override val liveSessions: StateFlow<Set<String>> = MutableStateFlow(emptySet())
     override val decidedRequests: StateFlow<Set<String>> = MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) = Unit

@@ -165,15 +165,18 @@ interface TetherClient {
     /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
      * received may ever produce one). Exactly one of [choiceId] or [decision] ("allow"|"deny");
-     * [grantedPermissions] only with a permission-granting [choiceId].
+     * [grantedPermissions] only with a permission-granting [choiceId]. [expectedFingerprint] is the
+     * [ConsentGuard.fingerprint] of the request as the card rendered it.
      *
-     * Sent at most once per (session, request) in this process, only on a live connection, only
-     * while the request is pending in the session's current state, and only with a choice the
-     * request offered ([ConsentGuard]). Anything else is refused: nothing is transmitted or held.
+     * Sent at most once per (server, session, turn, request, fingerprint) in this process, only on a
+     * live connection, only while that exact request is pending in the session's current state, and
+     * only with a choice the request offered ([ConsentGuard]). Anything else is refused: nothing is
+     * transmitted or held.
      */
     fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String? = null,
         decision: String? = null,
         grantedPermissions: GrantedPermissions? = null,
@@ -184,17 +187,33 @@ interface TetherClient {
      * [answers] maps the EXACT question text to the chosen option label(s) (comma-joined for
      * multi-select, the "Other" text appended); [response] is the joined free text.
      */
-    fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String? = null): ConsentResult
+    fun answerQuestion(
+        sessionId: String,
+        requestId: String,
+        expectedFingerprint: String,
+        answers: Map<String, String>,
+        response: String? = null,
+    ): ConsentResult
 
     /**
-     * T6.3: sessions whose projection a snapshot has confirmed on the CURRENT connection
-     * (SYNC_DESIGN §4.1 "Live"). Outside it a session is shown from a saved copy or is catching
-     * up: its approval and question cards render but are not actionable.
+     * T6.3: sessions attached on the CURRENT connection whose projection a snapshot on it has
+     * confirmed (SYNC_DESIGN §4.1 "Live"). Outside it a session is shown from a saved copy or is
+     * catching up: its approval and question cards render but are not actionable.
      */
     val liveSessions: StateFlow<Set<String>>
 
+    /** T6.3: the server origin of the live, handshaken socket (the fingerprints' origin); null when there is none. */
+    val consentOrigin: StateFlow<String?>
+
     /** T6.3: [consentKey]s of the requests this process already decided on the current server. */
     val decidedRequests: StateFlow<Set<String>>
+
+    /**
+     * T6.3: the subset of [decidedRequests] sent on an EARLIER socket: the socket accepted the frame,
+     * but the link dropped before the request was seen resolved. Shown as "delivery unconfirmed";
+     * never re-sent.
+     */
+    val unconfirmedRequests: StateFlow<Set<String>> get() = NO_UNCONFIRMED
 
     fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)
@@ -468,6 +487,7 @@ sealed interface ConnectionState {
 
 private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow(null)
 private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
+private val NO_UNCONFIRMED: StateFlow<Set<String>> = MutableStateFlow(emptySet())
 private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)
 
 /** Why the server ended the sign-in; the login screen explains it. */

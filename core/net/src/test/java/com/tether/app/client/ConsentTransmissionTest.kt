@@ -75,6 +75,24 @@ internal fun consentStateJson(): String {
     return JsCodec.toJson(tree).toString()
 }
 
+/** A `ready` that lists [ids] (a decision is refused for an unlisted session, L2). */
+internal fun readyWithSessions(vararg ids: String, extra: String = ""): String {
+    val rows = ids.joinToString(",") { id ->
+        """{"id":"$id","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,""" +
+            """"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"$extra}"""
+    }
+    return """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"sessions":[$rows],"providers":[],"workspaceRoot":null}"""
+}
+
+/** The fingerprint a card would render for [requestId] now ("" when it is not pending). */
+internal fun consentFp(client: TetherClient, sessionId: String, requestId: String, question: Boolean = false): String {
+    val tree = client.projectionTrees.value[sessionId]
+    val origin = client.consentOrigin.value ?: return ""
+    val turnId = ConsentGuard.activeTurnId(tree) ?: return ""
+    val request = (if (question) ConsentGuard.pendingQuestion(tree, requestId) else ConsentGuard.pendingApproval(tree, requestId)) ?: return ""
+    return ConsentGuard.fingerprint(origin, turnId, request)
+}
+
 internal fun eventFrame(sessionId: String, seq: Long, type: String, turnId: String?, fields: String = ""): String =
     """{"type":"event","sessionId":"$sessionId","event":{"type":"$type","turnId":${if (turnId == null) "null" else "\"$turnId\""},"seq":$seq,"ts":$seq$fields}}"""
 
@@ -91,7 +109,7 @@ class ConsentTransmissionTest {
     @After
     fun tearDown() = h.close()
 
-    private fun connected(ready: String = readyFrame()): Pair<RealTetherClient, WebSocket> {
+    private fun connected(ready: String = readyWithSessions("s1")): Pair<RealTetherClient, WebSocket> {
         val client = h.newClient()
         h.enqueueConnect()
         client.start()
@@ -111,31 +129,31 @@ class ConsentTransmissionTest {
     @Test
     fun aTapSendsOneApprovalBoundToItsRequestAndNeverASecond() {
         val (client, _) = connected()
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         // A double tap, the same card on a second tab, a recomposition: refused, nothing on the wire.
-        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", choiceId = "accept"))
-        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", choiceId = "decline"))
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "decline"))
         val frames = consentFrames()
         assertEquals(1, frames.size)
         assertEquals("s1", frames[0].str("sessionId"))
         assertEquals("r-choice", frames[0].str("requestId"))
         assertEquals("accept", frames[0].str("choiceId"))
-        assertTrue(consentKey("s1", "r-choice") in client.decidedRequests.value)
+        assertTrue(consentKey("s1", "r-choice", consentFp(client, "s1", "r-choice")) in client.decidedRequests.value)
     }
 
     @Test
     fun onlyChoicesTheRequestOfferedGoOut() {
         val (client, _) = connected()
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-choice", choiceId = "yolo"))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "yolo"))
         // The Approve / Deny fallback exists only for a request without provider choices.
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-choice", decision = "allow"))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", decision = "always"))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", choiceId = "accept"))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain"))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", choiceId = "a", decision = "allow"))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), decision = "allow"))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), decision = "always"))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), choiceId = "accept"))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain")))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), choiceId = "a", decision = "allow"))
         assertTrue("a refused decision claims nothing", consentFrames().isEmpty())
         // ...so the operator's real decision still goes out.
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-plain", decision = "deny"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), decision = "deny"))
         assertEquals(listOf("deny"), consentFrames().map { it.str("decision") })
     }
 
@@ -144,15 +162,15 @@ class ConsentTransmissionTest {
         val (client, _) = connected()
         val exact = GrantedPermissions(fileSystemRead = listOf("/a", "/b"), fileSystemWrite = listOf("/c"), networkEnabled = true)
         val wider = GrantedPermissions(fileSystemRead = listOf("/a", "/etc"), networkEnabled = null)
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "all", grantedPermissions = null))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "all", grantedPermissions = exact.copy(networkEnabled = null)))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "some", grantedPermissions = wider))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "some", grantedPermissions = GrantedPermissions(networkEnabled = false)))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "some", grantedPermissions = null))
-        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", choiceId = "none", grantedPermissions = exact))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all", grantedPermissions = null))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all", grantedPermissions = exact.copy(networkEnabled = null)))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "some", grantedPermissions = wider))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "some", grantedPermissions = GrantedPermissions(networkEnabled = false)))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "some", grantedPermissions = null))
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "none", grantedPermissions = exact))
         assertTrue(consentFrames().isEmpty())
         val subset = GrantedPermissions(fileSystemRead = listOf("/b"), networkEnabled = true)
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-grant", choiceId = "some", grantedPermissions = subset))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "some", grantedPermissions = subset))
         val frame = consentFrames().single()
         assertEquals("some", frame.str("choiceId"))
         val granted = frame["grantedPermissions"]!!.jsonObject
@@ -163,7 +181,7 @@ class ConsentTransmissionTest {
     fun theExactGrantIsTheRequestedObjectAsTheWebSendsIt() {
         val (client, _) = connected()
         val exact = GrantedPermissions(fileSystemRead = listOf("/a", "/b"), fileSystemWrite = listOf("/c"), networkEnabled = true)
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-grant", choiceId = "all", grantedPermissions = exact))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all", grantedPermissions = exact))
         assertEquals(
             """{"fileSystem":{"read":["/a","/b"],"write":["/c"]},"network":{"enabled":true}}""",
             consentFrames().single()["grantedPermissions"].toString(),
@@ -173,21 +191,21 @@ class ConsentTransmissionTest {
     @Test
     fun aResolvedExpiredOrUnknownRequestIsNotActionable() {
         val (client, ws) = connected()
-        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-unknown", choiceId = "accept"))
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-unknown", consentFp(client, "s1", "r-unknown"), choiceId = "accept"))
         ws.send(eventFrame("s1", 6, "approval_expired", "t1", ""","requestId":"r-plain""""))
         ws.send(eventFrame("s1", 7, "approval_resolved", "t1", ""","requestId":"r-choice","choiceId":"decline""""))
         h.serverBarrier(ws)
-        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-plain", decision = "allow"))
-        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), decision = "allow"))
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertTrue(consentFrames().isEmpty())
     }
 
     @Test
     fun aQuestionIsAnsweredOnceOnlyWithItsOwnQuestionsAndNeverAfterAnAnswerIsOnRecord() {
         val (client, ws) = connected()
-        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", mapOf("Something else?" to "x")))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "Postgres"), "Postgres, please"))
-        assertEquals(ConsentResult.AlreadyDecided, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Something else?" to "x")))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres"), "Postgres, please"))
+        assertEquals(ConsentResult.AlreadyDecided, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
         val frame = consentFrames().single()
         assertEquals("q1", frame.str("requestId"))
         assertEquals("""{"answers":{"Which DB?":"Postgres"},"response":"Postgres, please"}""", frame["answers"].toString())
@@ -200,10 +218,10 @@ class ConsentTransmissionTest {
         // Another device answered first: question_answered lands before question_resolved.
         ws.send(eventFrame("s1", 6, "question_answered", "t1", ""","requestId":"q1","toolId":"ask-1","items":[]"""))
         h.serverBarrier(ws)
-        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
         ws.send(eventFrame("s1", 7, "question_resolved", "t1", ""","requestId":"q1""""))
         h.serverBarrier(ws)
-        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "SQLite")))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
         assertTrue(consentFrames().isEmpty())
     }
 
@@ -215,41 +233,41 @@ class ConsentTransmissionTest {
         h.await(client.connection) { it == ConnectionState.Disconnected }
         assertTrue("nothing is live without a socket", client.liveSessions.value.isEmpty())
         // Disconnected: refused, and nothing is kept to be sent later.
-        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
-        h.handshake(ws2)
+        h.handshake(ws2, readyWithSessions("s1"))
         assertEquals("s1", h.expectFrame("attach").str("sessionId"))
         // Connected again, the saved tree still shows r-choice pending: not live yet, refused.
         assertTrue(client.projectionTrees.value.containsKey("s1"))
-        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertTrue("the refused tap was not held for the new link", consentFrames().isEmpty())
 
         ws2.send(snapshotFrame("s1", 5, consentStateJson()))
         h.await(client.liveSessions) { "s1" in it }
         assertTrue("the snapshot sends nothing by itself (no replay)", consentFrames().isEmpty())
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertEquals(1, consentFrames().size)
     }
 
     @Test
     fun aDecisionSentBeforeADropIsNeverSentAgainAfterTheReconnect() {
         val (client, ws) = connected()
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertEquals(1, consentFrames().size)
         h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
-        h.handshake(ws2)
+        h.handshake(ws2, readyWithSessions("s1"))
         h.expectFrame("attach")
         // The request is still pending in the new snapshot (the first frame may have been lost).
         ws2.send(snapshotFrame("s1", 5, consentStateJson()))
         h.await(client.liveSessions) { "s1" in it }
-        assertTrue(consentKey("s1", "r-choice") in client.decidedRequests.value)
-        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertTrue(consentKey("s1", "r-choice", consentFp(client, "s1", "r-choice")) in client.decidedRequests.value)
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertTrue(consentFrames().isEmpty())
     }
 
@@ -260,10 +278,10 @@ class ConsentTransmissionTest {
         ws.send(eventFrame("s1", 9, "tool_start", "t1", ""","toolId":"x","name":"Bash","input":{}"""))
         assertEquals("attach", h.frame().type())
         h.await(client.liveSessions) { "s1" !in it }
-        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         ws.send(snapshotFrame("s1", 9, consentStateJson()))
         h.await(client.liveSessions) { "s1" in it }
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
     }
 
     @Test
@@ -282,27 +300,29 @@ class ConsentTransmissionTest {
     }
 
     @Test
-    fun aReadOnlyOrHandedOffSessionIsLocked() {
-        val session = { id: String, extra: String ->
-            """{"id":"$id","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,
-               "exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"$extra}"""
-        }
-        val ready = """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"sessions":[${session("s1", ""","readOnly":true""")}],
-                        "providers":[],"workspaceRoot":null}"""
-        val (client, ws) = connected(ready)
-        assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", choiceId = "accept"))
-        ws.send("""{"type":"session","session":${session("s1", ""","handedOffTo":"s2"""")}}""")
+    fun aReadOnlyHandedOffOrUnlistedSessionIsLocked() {
+        val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+        assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(ConsentResult.Locked, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Locked, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
         assertTrue(consentFrames().isEmpty())
-        assertFalse(client.decidedRequests.value.contains(consentKey("s1", "q1")))
+        assertTrue(client.decidedRequests.value.isEmpty())
+    }
+
+    @Test
+    fun anUnlistedSessionFailsClosed() {
+        // L2: a live, pending request whose session the server never listed is refused.
+        val (client, _) = connected(readyFrame())
+        assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertTrue(consentFrames().isEmpty())
     }
 
     @Test
     fun decisionsAreNeverPersisted() {
         val (client, _) = connected()
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
         // A prompt IS persisted (T1.3): wait for that write, then read every slot on the "disk".
         client.send("s1", "persist me")
         val slots = kotlinx.coroutines.runBlocking {
@@ -316,5 +336,125 @@ class ConsentTransmissionTest {
             }
         }
         assertFalse("no approval or answer is written to disk", slots.any { it.contains("r-choice") || it.contains("q1") || it.contains("Postgres") })
+    }
+
+    // ---- round 2: fingerprint binding, wire form, liveness, ledger ------------------------------
+
+    @Test
+    fun aReRaisedRequestIsANewDecisionAndTheStaleRenderIsRefused() {
+        val (client, ws) = connected()
+        val first = consentFp(client, "s1", "r-choice")
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", first, choiceId = "accept"))
+        assertEquals(1, consentFrames().size)
+        // The engine re-raises the SAME id with a wider request (the reducer overwrites the entry).
+        ws.send(eventFrame("s1", 6, "approval_request", "t1", ""","requestId":"r-choice","toolId":"tool-1","name":"command_execution","input":{"command":"rm -rf /"},"choices":[{"choiceId":"accept","label":"Yes"}]"""))
+        h.serverBarrier(ws)
+        val second = consentFp(client, "s1", "r-choice")
+        assertTrue(first != second)
+        // A tap on what was rendered before the re-raise is not a decision on what is pending now.
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", first, choiceId = "accept"))
+        assertTrue(consentFrames().isEmpty())
+        // The new request is decidable, once.
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", second, choiceId = "accept"))
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", second, choiceId = "accept"))
+        assertEquals(1, consentFrames().size)
+        assertTrue(consentKey("s1", "r-choice", first) in client.decidedRequests.value)
+        assertTrue(consentKey("s1", "r-choice", second) in client.decidedRequests.value)
+    }
+
+    @Test
+    fun aForgedOrStaleFingerprintIsRefused() {
+        val (client, _) = connected()
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", "0".repeat(64), choiceId = "accept"))
+        assertEquals(ConsentResult.NotPending, client.answerQuestion("s1", "q1", "", mapOf("Which DB?" to "Postgres")))
+        assertTrue(consentFrames().isEmpty())
+    }
+
+    @Test
+    fun aGrantThatDoesNotSurviveTheWireIsRefused() {
+        val (client, _) = connected()
+        // L1: paths with hasFileSystem = false would encode as {} (a different grant from the one checked).
+        val lying = GrantedPermissions(fileSystemRead = listOf("/b"), hasFileSystem = false)
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "some", grantedPermissions = lying))
+        val lyingExact = GrantedPermissions(fileSystemRead = listOf("/a", "/b"), fileSystemWrite = listOf("/c"), hasFileSystem = false, networkEnabled = true)
+        assertEquals(ConsentResult.InvalidChoice, client.approval("s1", "r-grant", consentFp(client, "s1", "r-grant"), choiceId = "all", grantedPermissions = lyingExact))
+        assertTrue(consentFrames().isEmpty())
+    }
+
+    @Test
+    fun aSnapshotNobodyAttachedDoesNotMakeASessionLive() {
+        val (client, ws) = connected(readyWithSessions("s1", "s9"))
+        // SYNC_DESIGN §4.1: s9 was never attached on this socket.
+        ws.send(snapshotFrame("s9", 5, consentStateJson().replace("\"s1\"", "\"s9\"")))
+        ws.send(snapshotFrame("s9", 5, state = null))
+        h.serverBarrier(ws)
+        assertFalse("s9" in client.liveSessions.value)
+        assertEquals(ConsentResult.NotLive, client.approval("s9", "r-choice", "x", choiceId = "accept"))
+        assertTrue(consentFrames().isEmpty())
+    }
+
+    @Test
+    fun aDecisionFromAnEarlierSocketIsReportedUnconfirmedAndNeverResent() {
+        val (client, ws) = connected()
+        val fp = consentFp(client, "s1", "r-choice")
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", fp, choiceId = "accept"))
+        assertTrue(client.unconfirmedRequests.value.isEmpty())
+        consentFrames()
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        h.scheduler.await(::isReconnectDelay).fire()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, readyWithSessions("s1"))
+        h.expectFrame("attach")
+        ws2.send(snapshotFrame("s1", 5, consentStateJson()))
+        h.await(client.liveSessions) { "s1" in it }
+        assertTrue(consentKey("s1", "r-choice", fp) in client.unconfirmedRequests.value)
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertTrue(consentFrames().isEmpty())
+    }
+}
+
+/** T6.3 round 2: the fingerprint's canonical form and the ledger's eviction rule, directly. */
+class ConsentGuardUnitTest {
+    private val request = com.tether.app.protocol.tree.JsObj.of(
+        "requestId" to com.tether.app.protocol.tree.JsStr("r1"),
+        "name" to com.tether.app.protocol.tree.JsStr("Bash"),
+        "input" to com.tether.app.protocol.tree.JsObj.of("command" to com.tether.app.protocol.tree.JsStr("ls"), "cwd" to com.tether.app.protocol.tree.JsNum(1.0)),
+    )
+
+    @Test fun theFingerprintIsSha256OfTheCanonicalJson() {
+        val canonical = """{"activeTurnId":"t1","origin":"http://h:1","request":{"input":{"command":"ls","cwd":1},"name":"Bash","requestId":"r1"}}"""
+        val expected = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray()).joinToString("") { "%02x".format(it) }
+        assertEquals(expected, ConsentGuard.fingerprint("http://h:1", "t1", request))
+    }
+
+    @Test fun keyOrderDoesNotMatterButContentTurnAndServerDo() {
+        val reordered = com.tether.app.protocol.tree.JsObj.of(
+            "input" to com.tether.app.protocol.tree.JsObj.of("cwd" to com.tether.app.protocol.tree.JsNum(1.0), "command" to com.tether.app.protocol.tree.JsStr("ls")),
+            "name" to com.tether.app.protocol.tree.JsStr("Bash"),
+            "requestId" to com.tether.app.protocol.tree.JsStr("r1"),
+        )
+        val base = ConsentGuard.fingerprint("o", "t1", request)
+        assertEquals(base, ConsentGuard.fingerprint("o", "t1", reordered))
+        assertTrue(base != ConsentGuard.fingerprint("o2", "t1", request))
+        assertTrue(base != ConsentGuard.fingerprint("o", "t2", request))
+        assertTrue(base != ConsentGuard.fingerprint("o", "t1", request.put("name", com.tether.app.protocol.tree.JsStr("Write"))))
+    }
+
+    @Test fun evictionOnlyTakesRequestsNoLongerPending() {
+        val ledger = ConsentLedger(capacity = 2)
+        fun e(id: String) = ConsentLedger.Entry("o", "s", "t", id, "fp-$id", 1)
+        val pending = mutableSetOf("a", "b", "c")
+        val still: (ConsentLedger.Entry) -> Boolean = { it.requestId in pending }
+        assertTrue(ledger.claim(e("a"), still))
+        assertTrue(ledger.claim(e("b"), still))
+        assertTrue(ledger.claim(e("c"), still))
+        assertEquals("nothing evicted while every claim may still be pending", 3, ledger.size)
+        pending.remove("b")
+        assertTrue(ledger.claim(e("d"), still))
+        assertTrue("a still pending: kept", ledger.contains(e("a")))
+        assertFalse("b resolved: evicted", ledger.contains(e("b")))
+        assertFalse("a second claim of a kept request is refused", ledger.claim(e("a"), still))
     }
 }

@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -49,15 +50,37 @@ enum class ConsentResult {
  * - question: every answered key is one of the request's question texts (buildQuestionAnswers
  *   keys the map by `q.question`). Values are the operator's own picks and "Other" text.
  *
+ * A decision is also bound to the exact request it was shown for (SYNC_DESIGN §5.4): the card sends
+ * the [fingerprint] of what it rendered, the client recomputes it under its lock, and a re-raised
+ * request (same id, different content or turn) or another server never matches.
+ *
  * No content from the request or the decision is logged or stored here.
  */
 object ConsentGuard {
 
-    /** `turnsById[activeTurnId].pendingApprovals[requestId]`, or null. */
+    /** `turnsById[activeTurnId].pendingApprovals[requestId]` (the map key is the id), or null. */
     fun pendingApproval(tree: JsObj?, requestId: String): JsObj? = activeTurn(tree)?.let { pendingIn(it, "pendingApprovals", requestId) }
 
     /** `turnsById[activeTurnId].pendingQuestions[requestId]`, or null. */
     fun pendingQuestion(tree: JsObj?, requestId: String): JsObj? = activeTurn(tree)?.let { pendingIn(it, "pendingQuestions", requestId) }
+
+    /** The tree's `activeTurnId`, or null. */
+    fun activeTurnId(tree: JsObj?): String? = (tree?.get("activeTurnId") as? JsStr)?.value
+
+    /**
+     * SYNC_DESIGN §5.4: the identity of the exact request a card shows. SHA-256 (lower-case hex) of
+     * the UTF-8 bytes of the canonical JSON of `{"activeTurnId": …, "origin": …, "request": …}`,
+     * where `request` is the pending object as the v128 reducer holds it
+     * (`pendingApprovals[requestId]` / `pendingQuestions[requestId]`) and `origin` is the server
+     * origin of the live socket. Canonical JSON = [JsCodec.canonical]: object keys sorted by UTF-16
+     * code units at every depth, no whitespace, strings JSON-escaped, numbers as JS
+     * `Number.prototype.toString` (`JSON.stringify`), non-finite numbers as `null`.
+     */
+    fun fingerprint(origin: String, activeTurnId: String, request: JsObj): String {
+        val canonical = JsCodec.canonical(JsObj.of("activeTurnId" to JsStr(activeTurnId), "origin" to JsStr(origin), "request" to request))
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 
     /**
      * True when the active turn already records an answer to [requestId] (`question_answered`, from
@@ -66,20 +89,27 @@ object ConsentGuard {
     fun isAnswered(tree: JsObj?, requestId: String): Boolean =
         (activeTurn(tree)?.get("answeredQuestions") as? JsArr).orEmpty().any { ((it as? JsObj)?.get("requestId") as? JsStr)?.value == requestId }
 
-    /** Null when [choiceId] / [decision] / [granted] is a valid decision on [request]. */
+    /**
+     * Null when [choiceId] / [decision] / [granted] is a valid decision on [request]. The grant is
+     * judged in its WIRE form: a value that does not survive encode → decode unchanged (for example
+     * paths with `hasFileSystem = false`, which would encode to `{}`) is refused, and an exact grant
+     * must encode to exactly the requested object.
+     */
     fun checkApproval(request: JsObj, choiceId: String?, decision: String?, granted: GrantedPermissions?): ConsentResult? {
         if ((choiceId == null) == (decision == null)) return ConsentResult.InvalidChoice
+        val wire = granted?.let { GrantedPermissions.from(it.toJsonObject()) }
+        if (wire != granted) return ConsentResult.InvalidChoice
         val choices = (request["choices"] as? JsArr).orEmpty().mapNotNull { it as? JsObj }
         if (decision != null) {
-            if (granted != null || choices.isNotEmpty()) return ConsentResult.InvalidChoice
+            if (wire != null || choices.isNotEmpty()) return ConsentResult.InvalidChoice
             return if (decision == "allow" || decision == "deny") null else ConsentResult.InvalidChoice
         }
         val choice = choices.firstOrNull { (it["choiceId"] as? JsStr)?.value == choiceId } ?: return ConsentResult.InvalidChoice
         val requested = requestedPermissions(request)
         return when ((choice["permissionGrant"] as? JsStr)?.value) {
-            "exact" -> if (requested != null && granted == requested) null else ConsentResult.InvalidChoice
-            "subset" -> if (requested != null && granted != null && isNonEmptySubset(granted, requested)) null else ConsentResult.InvalidChoice
-            else -> if (granted == null) null else ConsentResult.InvalidChoice
+            "exact" -> if (requested != null && wire != null && wire.toJsonObject() == requested.toJsonObject()) null else ConsentResult.InvalidChoice
+            "subset" -> if (requested != null && wire != null && isNonEmptySubset(wire, requested)) null else ConsentResult.InvalidChoice
+            else -> if (wire == null) null else ConsentResult.InvalidChoice
         }
     }
 
@@ -124,8 +154,8 @@ object ConsentGuard {
     }
 
     private fun activeTurn(tree: JsObj?): JsObj? {
-        val active = (tree?.get("activeTurnId") as? JsStr)?.value ?: return null
-        return (tree["turnsById"] as? JsObj)?.get(active) as? JsObj
+        val active = activeTurnId(tree) ?: return null
+        return (tree!!["turnsById"] as? JsObj)?.get(active) as? JsObj
     }
 
     private fun pendingIn(turn: JsObj, key: String, requestId: String): JsObj? = (turn[key] as? JsObj)?.get(requestId) as? JsObj
@@ -136,43 +166,61 @@ object ConsentGuard {
 }
 
 /**
- * The requests this process has decided, per server origin: each (origin, session, request) is
- * claimed at most once, so a double tap, a second card for the same request (the session tab and a
- * sub-agent tab), a recomposition or a reconnect can never put a second decision on the wire.
- * In memory only (a decision must not outlive the process that witnessed it, SYNC_DESIGN §5.4),
- * bounded to the newest [capacity] claims. Not thread-safe: the caller holds its lock.
+ * The decisions this process has sent, each bound to (origin, session, active turn, request,
+ * fingerprint): claimed at most once, so a double tap, a second card for the same request (the
+ * session tab and a sub-agent tab), a recomposition or a reconnect can never put a second decision
+ * for the same request on the wire, while a re-raised request (new fingerprint) is decidable once.
+ * In memory only (a decision must not outlive the process that witnessed it, SYNC_DESIGN §5.4).
+ *
+ * Soft-bounded to [capacity]: past it, the oldest claims whose request is no longer pending
+ * ([stillPending] false) are evicted; a claim that may still be pending (or whose server cannot be
+ * checked) is never evicted. Not thread-safe: the caller holds its lock.
  */
 internal class ConsentLedger(private val capacity: Int = DEFAULT_CAPACITY) {
-    private val claimed = LinkedHashSet<String>()
 
-    /** True when [key] was not claimed yet (and now is). */
-    fun claim(key: String): Boolean {
-        if (!claimed.add(key)) return false
-        while (claimed.size > capacity) claimed.remove(claimed.first())
+    /** One sent decision; [epoch] = the socket epoch it went out on. */
+    data class Entry(val origin: String, val sessionId: String, val activeTurnId: String, val requestId: String, val fingerprint: String, val epoch: Long) {
+        val key: String get() = listOf(origin, sessionId, activeTurnId, requestId, fingerprint).joinToString(SEP)
+    }
+
+    private val claimed = LinkedHashMap<String, Entry>()
+
+    fun contains(entry: Entry): Boolean = entry.key in claimed
+
+    /** True when [entry] was not claimed yet (and now is). */
+    fun claim(entry: Entry, stillPending: (Entry) -> Boolean): Boolean {
+        if (claimed.containsKey(entry.key)) return false
+        claimed[entry.key] = entry
+        if (claimed.size > capacity) {
+            val it = claimed.values.iterator()
+            while (claimed.size > capacity && it.hasNext()) {
+                val old = it.next()
+                if (old !== entry && !stillPending(old)) it.remove()
+            }
+        }
         return true
     }
 
-    fun contains(key: String): Boolean = key in claimed
-
     /** Undo a claim whose frame never reached the socket (nothing was transmitted). */
-    fun release(key: String) {
-        claimed.remove(key)
+    fun release(entry: Entry) {
+        claimed.remove(entry.key)
     }
 
-    /** The claimed (session, request) keys of [origin], as [consentKey]s. */
-    fun keysFor(origin: String?): Set<String> {
-        if (origin == null) return emptySet()
-        val prefix = "$origin$SEP"
-        return claimed.asSequence().filter { it.startsWith(prefix) }.map { it.substring(prefix.length) }.toSet()
-    }
+    val size: Int get() = claimed.size
+
+    /** The [consentKey]s decided on [origin]. */
+    fun keysFor(origin: String?): Set<String> =
+        if (origin == null) emptySet() else claimed.values.filter { it.origin == origin }.mapTo(HashSet()) { consentKey(it.sessionId, it.requestId, it.fingerprint) }
+
+    /** The [consentKey]s decided on [origin] on an EARLIER socket than [epoch] (delivery unconfirmed). */
+    fun unconfirmedFor(origin: String?, epoch: Long): Set<String> =
+        if (origin == null) emptySet() else claimed.values.filter { it.origin == origin && it.epoch < epoch }.mapTo(HashSet()) { consentKey(it.sessionId, it.requestId, it.fingerprint) }
 
     companion object {
         const val DEFAULT_CAPACITY = 1024
-        private const val SEP = '\u0000'
-
-        fun key(origin: String, sessionId: String, requestId: String): String = "$origin$SEP${consentKey(sessionId, requestId)}"
+        private const val SEP = "\u0000"
     }
 }
 
-/** The key [TetherClient.decidedRequests] carries for a (session, request) pair. */
-fun consentKey(sessionId: String, requestId: String): String = "$sessionId\u0000$requestId"
+/** The key [TetherClient.decidedRequests] carries for a (session, request, fingerprint). */
+fun consentKey(sessionId: String, requestId: String, fingerprint: String): String = "$sessionId\u0000$requestId\u0000$fingerprint"

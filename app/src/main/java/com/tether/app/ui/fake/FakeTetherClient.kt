@@ -1,6 +1,7 @@
 package com.tether.app.ui.fake
 
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.ConsentGuard
 import com.tether.app.client.ConsentResult
 import com.tether.app.client.consentKey
 import com.tether.app.client.LoginResult
@@ -46,6 +47,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -468,33 +472,42 @@ class FakeTetherClient : TetherClient {
         touchSession(sessionId, status = "ready")
     }
 
-    // T6.3: the demo keeps the real client's contract: each request decided once, only while pending.
+    // T6.3: the demo keeps the real client's contract, with the real ConsentGuard: always
+    // "connected", every listed session live, read-only / handed-off sessions locked, a decision
+    // only for the exact pending request (fingerprint) with an offered choice, and each at most once.
     private val decided = MutableStateFlow<Set<String>>(emptySet())
     override val decidedRequests: StateFlow<Set<String>> = decided.asStateFlow()
-    override val liveSessions: StateFlow<Set<String>> = MutableStateFlow(_projections.value.keys.toSet()).asStateFlow()
+    override val consentOrigin: StateFlow<String?> = MutableStateFlow<String?>(DEMO_ORIGIN).asStateFlow()
+    override val liveSessions: StateFlow<Set<String>> = _sessions
+        .map { list -> list.mapTo(HashSet()) { it.id } }
+        .stateIn(scope, SharingStarted.Eagerly, _sessions.value.mapTo(HashSet()) { it.id })
 
-    private fun claimDecision(sessionId: String, requestId: String, pending: Boolean): ConsentResult {
-        val key = consentKey(sessionId, requestId)
+    private fun decide(sessionId: String, requestId: String, expectedFingerprint: String, question: Boolean, check: (JsObj) -> ConsentResult?): ConsentResult {
+        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return ConsentResult.Locked
+        if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return ConsentResult.Locked
+        val tree = _projectionTrees.value[sessionId]
+        val turnId = ConsentGuard.activeTurnId(tree) ?: return ConsentResult.NotPending
+        val request = (if (question) ConsentGuard.pendingQuestion(tree, requestId) else ConsentGuard.pendingApproval(tree, requestId))
+            ?: return ConsentResult.NotPending
+        if (ConsentGuard.fingerprint(DEMO_ORIGIN, turnId, request) != expectedFingerprint) return ConsentResult.NotPending
+        val key = consentKey(sessionId, requestId, expectedFingerprint)
         if (key in decided.value) return ConsentResult.AlreadyDecided
-        if (!pending) return ConsentResult.NotPending
+        check(request)?.let { return it }
         decided.update { it + key }
         return ConsentResult.Sent
     }
 
-    private fun activeTurnOf(sessionId: String): TurnProjection? =
-        _projections.value[sessionId]?.let { p -> p.activeTurnId?.let { p.turnsById[it] } }
-
     override fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String?,
         decision: String?,
         grantedPermissions: GrantedPermissions?,
     ): ConsentResult {
         if ((choiceId == null) == (decision == null)) return ConsentResult.InvalidChoice
-        val result = claimDecision(sessionId, requestId, activeTurnOf(sessionId)?.pendingApprovals?.containsKey(requestId) == true)
-        if (result != ConsentResult.Sent) return result
-        approve(sessionId, requestId, decision)
+        val result = decide(sessionId, requestId, expectedFingerprint, question = false) { ConsentGuard.checkApproval(it, choiceId, decision, grantedPermissions) }
+        if (result == ConsentResult.Sent) approve(sessionId, requestId, decision)
         return result
     }
 
@@ -536,10 +549,15 @@ class FakeTetherClient : TetherClient {
         }
     }
 
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): ConsentResult {
-        val result = claimDecision(sessionId, requestId, activeTurnOf(sessionId)?.pendingQuestions?.containsKey(requestId) == true)
-        if (result != ConsentResult.Sent) return result
-        answer(sessionId, requestId, answers)
+    override fun answerQuestion(
+        sessionId: String,
+        requestId: String,
+        expectedFingerprint: String,
+        answers: Map<String, String>,
+        response: String?,
+    ): ConsentResult {
+        val result = decide(sessionId, requestId, expectedFingerprint, question = true) { ConsentGuard.checkQuestion(it, answers) }
+        if (result == ConsentResult.Sent) answer(sessionId, requestId, answers)
         return result
     }
 
@@ -647,3 +665,6 @@ class FakeTetherClient : TetherClient {
         }
     }
 }
+
+/** T6.3: the demo's stand-in server origin (its fingerprints' origin). */
+private const val DEMO_ORIGIN = "demo://local"

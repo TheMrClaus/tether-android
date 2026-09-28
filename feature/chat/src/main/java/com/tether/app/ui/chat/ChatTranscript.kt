@@ -128,7 +128,7 @@ internal fun ChatTranscript(
     showApprovals: Boolean = true,
 ) {
     CompositionLocalProvider(LocalConsent provides consent) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.origin)
     }
 }
 
@@ -147,6 +147,7 @@ private fun ChatTranscriptBody(
     richCodex: Boolean,
     richOpencode: Boolean,
     showApprovals: Boolean,
+    consentOrigin: String?,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -156,8 +157,8 @@ private fun ChatTranscriptBody(
     // reset is applied where the default is READ (GroupToggles.resolve, while the rows are built),
     // so a toggle whose default changed is gone before any later build can see the default flip back.
     val groupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() }
-    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals) {
-        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve, showApprovals)
+    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentOrigin) {
+        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve, showApprovals, consentOrigin)
     }
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }

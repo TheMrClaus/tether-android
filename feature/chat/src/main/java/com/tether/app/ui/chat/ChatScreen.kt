@@ -102,8 +102,12 @@ fun ChatScreen(
     val connection by vm.client.connection.collectAsStateWithLifecycle()
     val liveSessions by vm.client.liveSessions.collectAsStateWithLifecycle()
     val decided by vm.client.decidedRequests.collectAsStateWithLifecycle()
+    val unconfirmed by vm.client.unconfirmedRequests.collectAsStateWithLifecycle()
+    val consentOrigin by vm.client.consentOrigin.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
-    val consent = remember(session, connection, liveSessions, decided, vm) { consentActionsFor(vm, session, connection, liveSessions, decided) }
+    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm) {
+        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed)
+    }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
 
     LaunchedEffect(session?.id, session?.provider) {
@@ -279,8 +283,8 @@ private fun RunTab(
 ) {
     val listState = rememberLazyListState()
     val state = remember(projection, tree) { cardTree(projection, tree) }
-    val pending = remember(state, showApprovals) { if (showApprovals) pendingApprovals(state) else emptyList() }
-    val pendingQ = remember(state) { pendingQuestions(state) }
+    val pending = remember(state, showApprovals, consent.origin) { if (showApprovals) pendingApprovals(state, consent.origin) else emptyList() }
+    val pendingQ = remember(state, consent.origin) { pendingQuestions(state, consent.origin) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
 
     // Web parity: a running run follows the newest activity as its thread
@@ -326,17 +330,22 @@ internal fun consentActionsFor(
     vm: TetherViewModel,
     session: AgentSession?,
     connection: com.tether.app.client.ConnectionState,
+    origin: String?,
     liveSessions: Set<String>,
     decided: Set<String>,
+    unconfirmed: Set<String> = emptySet(),
 ): ConsentActions {
     val s = session ?: return ConsentActions.Unavailable
     return ConsentActions(
         sessionId = s.id,
-        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected, s.id in liveSessions, s),
+        origin = origin,
+        // No live socket origin = no live socket: the fingerprints would name no server.
+        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, s.id in liveSessions, s),
         decided = decided,
+        unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
-        onApproval = { requestId, choiceId, decision, granted -> vm.client.approval(s.id, requestId, choiceId, decision, granted) },
-        onAnswer = { requestId, answers, response -> vm.client.answerQuestion(s.id, requestId, answers, response) },
+        onApproval = { requestId, fingerprint, choiceId, decision, granted -> vm.client.approval(s.id, requestId, fingerprint, choiceId, decision, granted) },
+        onAnswer = { requestId, fingerprint, answers, response -> vm.client.answerQuestion(s.id, requestId, fingerprint, answers, response) },
         onOpenRun = { runId -> vm.selectRun(s.id, runId) },
     )
 }

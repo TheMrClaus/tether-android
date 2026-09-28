@@ -390,6 +390,10 @@ class RealTetherClient(
 
     private val liveSessionsState = MutableStateFlow<Set<String>>(emptySet())
     private val decidedState = MutableStateFlow<Set<String>>(emptySet())
+    private val unconfirmedState = MutableStateFlow<Set<String>>(emptySet())
+    private val consentOriginState = MutableStateFlow<String?>(null)
+    override val unconfirmedRequests: StateFlow<Set<String>> = unconfirmedState
+    override val consentOrigin: StateFlow<String?> = consentOriginState
     override val liveSessions: StateFlow<Set<String>> = liveSessionsState
     override val decidedRequests: StateFlow<Set<String>> = decidedState
 
@@ -732,6 +736,8 @@ class RealTetherClient(
         attachedThisEpoch.clear()
         clearLiveLocked()
         decidedState.value = emptySet()
+        unconfirmedState.value = emptySet()
+        consentOriginState.value = null
         clearMirrorStateLocked()
     }
 
@@ -1575,6 +1581,7 @@ class RealTetherClient(
         socketOpen = false
         handshakeDone = false
         clearLiveLocked()
+        consentOriginState.value = null
         pingTask?.cancel()
         pingTask = null
         // Replies to node requests can only come on the socket that carried them:
@@ -2065,7 +2072,8 @@ class RealTetherClient(
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
             handshakeDone = true
-            decidedState.value = consentLedger.keysFor(socketOrigin)
+            consentOriginState.value = socketOrigin
+            publishConsentLocked()
             // A handshake the server accepted is the success that resets backoff.
             backoff.reset()
             val ids = LinkedHashSet<String>()
@@ -2150,7 +2158,7 @@ class RealTetherClient(
             if (state != null && mirrorLink != null) shown = sessionStore.rebase(message.sessionId, state, message.trimmedBefore)
             // T6.3: a stateless reply proves the copy held here is at head, so it is live now; a
             // state is live once it is published below (never the copy it replaces).
-            if (!message.hasState) setLiveLocked(message.sessionId, true)
+            if (!message.hasState && message.sessionId in attachedThisEpoch) setLiveLocked(message.sessionId, true)
             true
         }
         if (!current) return
@@ -2165,7 +2173,9 @@ class RealTetherClient(
         val wrote = ifCurrent(webSocket) {
             sessionStore.setTrimmedBefore(message.sessionId, message.trimmedBefore)
             if (published != null) sessionStore.publish(message.sessionId, published, typed)
-            setLiveLocked(message.sessionId, true)
+            // SYNC_DESIGN §4.1: only a session attached on THIS socket becomes live (never one the
+            // server pushed a snapshot for unasked).
+            if (message.sessionId in attachedThisEpoch) setLiveLocked(message.sessionId, true)
         }
         if (!wrote || tree == null) return
         // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
@@ -2639,6 +2649,7 @@ class RealTetherClient(
     override fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String?,
         decision: String?,
         grantedPermissions: GrantedPermissions?,
@@ -2648,8 +2659,7 @@ class RealTetherClient(
             return ConsentResult.InvalidChoice
         }
         val message = ClientMessage.Approval(sessionId, requestId, choiceId, decision, grantedPermissions)
-        return transmitConsent(sessionId, requestId, message) { tree ->
-            val request = ConsentGuard.pendingApproval(tree, requestId) ?: return@transmitConsent ConsentResult.NotPending
+        return transmitConsent(sessionId, requestId, expectedFingerprint, message, ConsentGuard::pendingApproval) { _, request ->
             ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions)
         }
     }
@@ -2657,31 +2667,34 @@ class RealTetherClient(
     override fun answerQuestion(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         answers: Map<String, String>,
         response: String?,
     ): ConsentResult {
         val message = ClientMessage.Question(sessionId, requestId, answers, response)
-        return transmitConsent(sessionId, requestId, message) { tree ->
-            val request = ConsentGuard.pendingQuestion(tree, requestId) ?: return@transmitConsent ConsentResult.NotPending
+        return transmitConsent(sessionId, requestId, expectedFingerprint, message, ConsentGuard::pendingQuestion) { tree, request ->
             // An answer already on record (question_answered, from this or another device) closes it.
-            if (ConsentGuard.isAnswered(tree, requestId)) return@transmitConsent ConsentResult.NotPending
-            ConsentGuard.checkQuestion(request, answers)
+            if (ConsentGuard.isAnswered(tree, requestId)) ConsentResult.NotPending else ConsentGuard.checkQuestion(request, answers)
         }
     }
 
     /**
-     * T6.3 (SYNC_DESIGN §5.1 I2/I3): the one path an operator decision takes to the wire. Under
-     * the lock, in order: a live, handshaken socket; the session confirmed on it ([liveThisEpoch]);
-     * not read-only or handed off; not already decided here; pending in the current state with an
-     * offered choice ([check]); then claimed in the ledger and enqueued on that socket. A frame the
-     * socket refuses releases its claim (nothing left the device). Nothing is retried, held or
-     * persisted, and nothing about the decision is logged.
+     * T6.3 (SYNC_DESIGN §5.1 I2/I3, §5.4): the one path an operator decision takes to the wire.
+     * Under the lock, in order: a live, handshaken socket; the session listed, attached and
+     * confirmed on it ([liveThisEpoch]); not read-only or handed off (an unlisted session is refused
+     * too: fail closed); the request pending in the active turn with the SAME fingerprint the card
+     * rendered (a re-raised or replaced request never matches); not already decided here; an offered
+     * choice ([check]); then claimed in the ledger and enqueued on that socket. A frame the socket
+     * refuses releases its claim (nothing left the device). Nothing is retried, held or persisted,
+     * and nothing about the decision is logged.
      */
     private inline fun transmitConsent(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         message: ClientMessage,
-        check: (JsObj?) -> ConsentResult?,
+        pending: (JsObj?, String) -> JsObj?,
+        check: (JsObj?, JsObj) -> ConsentResult?,
     ): ConsentResult {
         val text = message.encode()
         val result = synchronized(lock) {
@@ -2689,22 +2702,46 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone) return@synchronized ConsentResult.NotConnected
             if (sessionId !in liveThisEpoch) return@synchronized ConsentResult.NotLive
-            val session = sessionsState.value.firstOrNull { it.id == sessionId }
-            if (session != null && (session.readOnly || !session.handedOffTo.isNullOrEmpty())) return@synchronized ConsentResult.Locked
-            val key = ConsentLedger.key(origin, sessionId, requestId)
-            if (consentLedger.contains(key)) return@synchronized ConsentResult.AlreadyDecided
-            check(sessionStore.tree(sessionId))?.let { return@synchronized it }
-            if (!consentLedger.claim(key)) return@synchronized ConsentResult.AlreadyDecided
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ConsentResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized ConsentResult.Locked
+            val tree = sessionStore.tree(sessionId)
+            val turnId = ConsentGuard.activeTurnId(tree) ?: return@synchronized ConsentResult.NotPending
+            val request = pending(tree, requestId) ?: return@synchronized ConsentResult.NotPending
+            val fingerprint = ConsentGuard.fingerprint(origin, turnId, request)
+            if (fingerprint != expectedFingerprint) return@synchronized ConsentResult.NotPending
+            val entry = ConsentLedger.Entry(origin, sessionId, turnId, requestId, fingerprint, epoch)
+            if (consentLedger.contains(entry)) return@synchronized ConsentResult.AlreadyDecided
+            check(tree, request)?.let { return@synchronized it }
+            if (!consentLedger.claim(entry, ::stillPendingLocked)) return@synchronized ConsentResult.AlreadyDecided
             if (!ws.send(text)) {
-                consentLedger.release(key)
+                consentLedger.release(entry)
                 return@synchronized ConsentResult.NotConnected
             }
-            decidedState.value = consentLedger.keysFor(origin)
+            publishConsentLocked()
             ConsentResult.Sent
         }
         // use-tether.ts:325-328: the web's words when the link is down; the decision is not kept.
         if (result == ConsentResult.NotConnected) emitError("The secure link is reconnecting. Your input was not sent.")
         return result
+    }
+
+    /**
+     * I1: may a ledger entry still be pending? Only entries of the current server can be checked
+     * against a projection; any other server's are kept (treated as pending). Caller holds [lock].
+     */
+    private fun stillPendingLocked(entry: ConsentLedger.Entry): Boolean {
+        if (entry.origin != socketOrigin) return true
+        val tree = sessionStore.tree(entry.sessionId) ?: return true
+        if (ConsentGuard.activeTurnId(tree) != entry.activeTurnId) return false
+        val request = ConsentGuard.pendingApproval(tree, entry.requestId) ?: ConsentGuard.pendingQuestion(tree, entry.requestId) ?: return false
+        return ConsentGuard.fingerprint(entry.origin, entry.activeTurnId, request) == entry.fingerprint
+    }
+
+    /** Publish the decided / unconfirmed keys of the current socket's server. Caller holds [lock]. */
+    private fun publishConsentLocked() {
+        val origin = if (handshakeDone) socketOrigin else null
+        decidedState.value = consentLedger.keysFor(origin)
+        unconfirmedState.value = consentLedger.unconfirmedFor(origin, epoch)
     }
 
     override fun createSession(provider: String, cwd: String?, name: String?) {

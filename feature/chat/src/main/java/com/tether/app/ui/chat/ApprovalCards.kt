@@ -24,7 +24,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -125,26 +130,33 @@ fun consentLock(connected: Boolean, live: Boolean, session: AgentSession?): Cons
 @Immutable
 class ConsentActions(
     val sessionId: String?,
+    /** The live socket's server origin: the cards' fingerprints are computed for it (null: none). */
+    val origin: String?,
     val lock: ConsentLock?,
     /** [consentKey]s this process already decided (the client's ledger). */
     val decided: Set<String>,
     /** chat-view.tsx:3658 unavailableReason (a legacy OpenCode session), or null. */
     val questionUnavailable: String?,
-    internal val onApproval: (requestId: String, choiceId: String?, decision: String?, granted: GrantedPermissions?) -> ConsentResult,
-    internal val onAnswer: (requestId: String, answers: Map<String, String>, response: String?) -> ConsentResult,
+    internal val onApproval: (requestId: String, fingerprint: String, choiceId: String?, decision: String?, granted: GrantedPermissions?) -> ConsentResult,
+    internal val onAnswer: (requestId: String, fingerprint: String, answers: Map<String, String>, response: String?) -> ConsentResult,
     val onOpenRun: (runId: String) -> Unit,
+    /** L4: decided keys sent on an earlier socket (delivery unconfirmed). */
+    val unconfirmed: Set<String> = emptySet(),
 ) {
-    fun isDecided(requestId: String): Boolean = sessionId != null && consentKey(sessionId, requestId) in decided
+    fun isDecided(requestId: String, fingerprint: String): Boolean = sessionId != null && consentKey(sessionId, requestId, fingerprint) in decided
+
+    fun isUnconfirmed(requestId: String, fingerprint: String): Boolean = sessionId != null && consentKey(sessionId, requestId, fingerprint) in unconfirmed
 
     companion object {
         /** The fail-closed default: nothing is actionable and nothing is sent. */
         val Unavailable = ConsentActions(
             sessionId = null,
+            origin = null,
             lock = ConsentLock.Offline,
             decided = emptySet(),
             questionUnavailable = null,
-            onApproval = { _, _, _, _ -> ConsentResult.NotConnected },
-            onAnswer = { _, _, _ -> ConsentResult.NotConnected },
+            onApproval = { _, _, _, _, _ -> ConsentResult.NotConnected },
+            onAnswer = { _, _, _, _ -> ConsentResult.NotConnected },
             onOpenRun = {},
         )
 
@@ -154,11 +166,82 @@ class ConsentActions(
     }
 }
 
+/** L4: a decision this process sent on a socket that dropped before the request was seen resolved. */
+internal const val UNCONFIRMED_COPY = "Sent before the connection dropped — delivery unconfirmed. It will not be sent again."
+
 /** The cards read their session's consent state here (only the cards recompose when it changes). */
 val LocalConsent = compositionLocalOf { ConsentActions.Unavailable }
 
 /** A decision the client took or already had: the card stays in its sent state either way. */
 private fun ConsentResult.settles(): Boolean = this == ConsentResult.Sent || this == ConsentResult.AlreadyDecided
+
+/** I3: how long a card's controls stay disabled after it becomes answerable or its request changes. */
+internal const val CONSENT_ARM_DELAY_MS = 500L
+
+/**
+ * I3: true [CONSENT_ARM_DELAY_MS] after the card became [actionable] for this [fingerprint] (a
+ * fresh request, a changed one, a lock lifted), so a tap aimed at what was on screen a moment ago
+ * cannot land on a decision that just appeared. Not saved: a re-created card waits again.
+ */
+@Composable
+internal fun rememberArmed(fingerprint: String, actionable: Boolean): Boolean {
+    var armed by remember(fingerprint) { mutableStateOf(false) }
+    LaunchedEffect(fingerprint, actionable) {
+        armed = false
+        if (actionable) {
+            kotlinx.coroutines.delay(CONSENT_ARM_DELAY_MS)
+            armed = true
+        }
+    }
+    return armed && actionable
+}
+
+/**
+ * I3 (tapjacking): a touch that reached us through another window drawn over ours
+ * (`FLAG_WINDOW_IS_OBSCURED` / `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is consumed before the control
+ * sees it, so an overlay cannot trick the operator into a decision. Accessibility actions are not
+ * touches and are unaffected. Stricter than the web (a browser has no such signal).
+ */
+@android.annotation.SuppressLint("InlinedApi") // the flag is simply never set below API 29
+internal fun Modifier.refuseObscuredTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (isObscured(event.motionEvent?.flags ?: 0)) event.changes.forEach { it.consume() }
+        }
+    }
+}
+
+/** The two "a window covered this touch" flags. */
+internal fun isObscured(flags: Int): Boolean =
+    flags and (android.view.MotionEvent.FLAG_WINDOW_IS_OBSCURED or FLAG_PARTIALLY_OBSCURED) != 0
+
+/** `MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED` (API 29), by value: minSdk is 26. */
+internal const val FLAG_PARTIALLY_OBSCURED = 0x2
+
+/** A set as its ordered list (a LinkedHashSet keeps the tick order). */
+private val StringSetSaver: Saver<Set<String>, Any> = listSaver(save = { it.toList() }, restore = { it.toCollection(LinkedHashSet()) })
+
+/** Question text → picked labels, flattened as [key, n, label1..labeln, …]. */
+private val PicksSaver: Saver<Map<String, List<String>>, Any> = listSaver(
+    save = { map -> map.flatMap { (k, v) -> listOf(k, v.size.toString()) + v } },
+    restore = { flat ->
+        val out = LinkedHashMap<String, List<String>>()
+        var i = 0
+        while (i + 1 < flat.size) {
+            val n = flat[i + 1].toInt()
+            out[flat[i]] = flat.subList(i + 2, i + 2 + n).toList()
+            i += 2 + n
+        }
+        out
+    },
+)
+
+/** Question text → "Other" text, flattened as [key, value, …]. */
+private val OtherSaver: Saver<Map<String, String>, Any> = listSaver(
+    save = { map -> map.flatMap { (k, v) -> listOf(k, v) } },
+    restore = { flat -> flat.chunked(2).filter { it.size == 2 }.associate { it[0] to it[1] } },
+)
 
 @Composable
 private fun cardShape(t: TetherTokens): RoundedCornerShape = RoundedCornerShape(if (isStudio(t)) 14.dp else t.radiusMd)
@@ -192,21 +275,29 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val studio = isStudio(t)
     val shape = cardShape(t)
     val requested = view.requested
-    // Keyed by requestId at the render site (a new request is a new card, as on the web).
-    var submitted by rememberSaveable(view.requestId) { mutableStateOf(false) }
-    var exactConfirmed by rememberSaveable(view.requestId) { mutableStateOf(false) }
-    var readPaths by remember(view.requestId) { mutableStateOf(requested?.read.orEmpty().toCollection(LinkedHashSet())) }
-    var writePaths by remember(view.requestId) { mutableStateOf(requested?.write.orEmpty().toCollection(LinkedHashSet())) }
-    var network by remember(view.requestId) { mutableStateOf(requested?.network == true) }
-    val sent = submitted || consent.isDecided(view.requestId)
+    // M1/M2: every piece of card state survives scrolling and re-creation (saveable) and belongs to
+    // THIS request: keyed on (requestId, fingerprint), a re-raised or replaced request starts over.
+    val id = view.requestId
+    val fp = view.fingerprint
+    var exactConfirmed by rememberSaveable(id, fp) { mutableStateOf(false) }
+    var readPaths by rememberSaveable(id, fp, stateSaver = StringSetSaver) { mutableStateOf<Set<String>>(requested?.read.orEmpty().toCollection(LinkedHashSet())) }
+    var writePaths by rememberSaveable(id, fp, stateSaver = StringSetSaver) { mutableStateOf<Set<String>>(requested?.write.orEmpty().toCollection(LinkedHashSet())) }
+    var network by rememberSaveable(id, fp) { mutableStateOf(requested?.network == true) }
+    // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
+    // never saved (after process death the ledger is gone, so the operator may tap again).
+    var latched by remember(id, fp) { mutableStateOf(false) }
+    val sent = latched || consent.isDecided(id, fp)
     val lock = consent.lock
-    val frozen = sent || lock != null
+    val actionable = !sent && lock == null
+    val armed = rememberArmed(fp, actionable)
+    val frozen = !armed
     val subset = subsetGrant(readPaths, writePaths, network)
 
     fun choose(choiceId: String?, decision: String?, granted: GrantedPermissions?) {
-        // One decision per card: a second tap (or a tap after a lock) never reaches the client.
-        if (submitted || consent.lock != null || consent.isDecided(view.requestId)) return
-        if (consent.onApproval(view.requestId, choiceId, decision, granted).settles()) submitted = true
+        // One decision per card: a second tap (or a tap after a lock, or before arming) never reaches the client.
+        if (latched || !armed || consent.lock != null || consent.isDecided(id, fp)) return
+        latched = true
+        if (!consent.onApproval(id, fp, choiceId, decision, granted).settles()) latched = false
     }
 
     Column(
@@ -272,7 +363,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         Text("Network access", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)), color = t.muted)
                     }
                 }
-                if (view.hasExact) {
+                if (view.needsConfirm) {
                     Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
                         GrantCheckbox(checked = exactConfirmed, enabled = !frozen, onChange = { exactConfirmed = !exactConfirmed }, tag = "grant-confirm") {
                             Text(
@@ -288,6 +379,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
 
         when {
             lock != null && !sent -> StatusLine(lock.copy, t.muted, "consent-lock")
+            sent && consent.isUnconfirmed(id, fp) -> StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed")
             sent -> StatusLine("Decision sent. Waiting for the agent.", t.muted, "consent-sent")
         }
 
@@ -304,10 +396,10 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         classes = if (choice.permissionGrant != null) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
                         label = choice.label,
                         icon = if (choice.permissionGrant != null) TetherIcons.Check else TetherIcons.Ban,
-                        enabled = !frozen && pick != null,
+                        enabled = armed && pick != null,
                         // The web's `title` hover text; spoken with the label here.
                         contentDescription = choice.description?.let { "${choice.label}. $it" },
-                        modifier = Modifier.testTag("approval-choice"),
+                        modifier = Modifier.refuseObscuredTouches().testTag("approval-choice"),
                     )
                 }
             } else {
@@ -316,16 +408,16 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     classes = KeyClasses.ButtonPrimary,
                     label = "Approve",
                     icon = TetherIcons.Check,
-                    enabled = !frozen,
-                    modifier = Modifier.testTag("approval-allow"),
+                    enabled = armed,
+                    modifier = Modifier.refuseObscuredTouches().testTag("approval-allow"),
                 )
                 TetherKey(
                     onClick = { choose(null, "deny", null) },
                     classes = KeyClasses.ApprovalDeny,
                     label = "Deny",
                     icon = TetherIcons.Ban,
-                    enabled = !frozen,
-                    modifier = Modifier.testTag("approval-deny"),
+                    enabled = armed,
+                    modifier = Modifier.refuseObscuredTouches().testTag("approval-deny"),
                 )
             }
         }
@@ -408,6 +500,7 @@ private fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> Un
         Modifier
             .fillMaxWidth()
             .heightIn(min = TetherDimens.touchTargetDp)
+            .refuseObscuredTouches()
             .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
             .alpha(if (enabled) 1f else 0.65f)
             .testTag(tag),
@@ -443,14 +536,17 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     val type = LocalTetherTypography.current
     val consent = LocalConsent.current
     val studio = isStudio(t)
-    var picks by remember(view.requestId) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
-    var other by remember(view.requestId) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var submitted by rememberSaveable(view.requestId) { mutableStateOf(false) }
-    var submitAttempted by remember(view.requestId) { mutableStateOf(false) }
-    var pageIndex by rememberSaveable(view.requestId) { mutableIntStateOf(0) }
-    var skipped by remember(view.requestId) { mutableStateOf<Set<String>>(emptySet()) }
+    // As the approval card: saveable, keyed on (requestId, fingerprint); only the latch is not saved.
+    val id = view.requestId
+    val fp = view.fingerprint
+    var picks by rememberSaveable(id, fp, stateSaver = PicksSaver) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    var other by rememberSaveable(id, fp, stateSaver = OtherSaver) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var latched by remember(id, fp) { mutableStateOf(false) }
+    var submitAttempted by rememberSaveable(id, fp) { mutableStateOf(false) }
+    var pageIndex by rememberSaveable(id, fp) { mutableIntStateOf(0) }
+    var skipped by rememberSaveable(id, fp, stateSaver = StringSetSaver) { mutableStateOf<Set<String>>(emptySet()) }
 
-    val sent = submitted || consent.isDecided(view.requestId)
+    val sent = latched || consent.isDecided(id, fp)
     // Not answerable here, in words: the session's lock, the web's legacy-OpenCode reason, or an
     // answer already on record (question_answered landed before question_resolved).
     val unavailable: String? = when {
@@ -466,27 +562,30 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     fun isAnswered(q: QuestionPromptView) = isPromptAnswered(q, picks, other)
     val allAnswered = view.prompts.all { it.question in skipped || isAnswered(it) }
 
+    val armed = rememberArmed(fp, !sent && unavailable == null)
+
     fun submit(effectiveSkipped: Set<String> = skipped) {
-        if (submitted || unavailable != null || consent.isDecided(view.requestId)) return
+        if (latched || !armed || unavailable != null || consent.isDecided(id, fp)) return
         submitAttempted = true
         if (!view.prompts.all { it.question in effectiveSkipped || isAnswered(it) }) return
         val payload = buildQuestionAnswers(view.prompts, picks, other, effectiveSkipped)
-        if (consent.onAnswer(view.requestId, payload.answers, payload.response).settles()) submitted = true
+        latched = true
+        if (!consent.onAnswer(id, fp, payload.answers, payload.response).settles()) latched = false
     }
 
     fun next() {
-        if (sent || unavailable != null || question == null || !isAnswered(question)) return
+        if (!armed || question == null || !isAnswered(question)) return
         pageIndex += 1
     }
 
     fun skip() {
-        if (sent || unavailable != null || question == null) return
+        if (!armed || question == null) return
         val nextSkipped = skipped + question.question
         skipped = nextSkipped
         if (isLastPage) submit(nextSkipped) else pageIndex += 1
     }
 
-    val frozen = sent || unavailable != null
+    val frozen = !armed
     Column(
         modifier
             .fillMaxWidth()
@@ -574,6 +673,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
         ) {
             when {
                 unavailable != null -> Box(Modifier.fillMaxWidth()) { StatusLine(unavailable, t.ink, "consent-lock") }
+                sent && consent.isUnconfirmed(id, fp) -> Box(Modifier.fillMaxWidth()) { StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed") }
                 sent -> Box(Modifier.fillMaxWidth()) { StatusLine("Answer sent. Waiting for the agent.", t.muted, "consent-sent") }
                 submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth().padding(vertical = pMargin(0.78f))) {
                     StatusLine("Answer each highlighted question, or choose Skip to leave it unanswered.", t.ink, "question-validation")
@@ -583,8 +683,9 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                 Box(
                     Modifier
                         .heightIn(min = TetherDimens.touchTargetDp)
-                        .clickable(enabled = !sent, role = Role.Button, onClick = ::skip)
-                        .alpha(if (sent) 0.65f else 1f)
+                        .refuseObscuredTouches()
+                        .clickable(enabled = armed, role = Role.Button, onClick = ::skip)
+                        .alpha(if (armed) 1f else 0.65f)
                         .padding(horizontal = t.css.spaceSm)
                         .testTag("question-skip"),
                     contentAlignment = Alignment.Center,
@@ -602,16 +703,16 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         else -> "Submit answer"
                     },
                     icon = TetherIcons.Check,
-                    enabled = !frozen,
-                    modifier = Modifier.testTag("question-submit"),
+                    enabled = armed,
+                    modifier = Modifier.refuseObscuredTouches().testTag("question-submit"),
                 )
             } else {
                 TetherKey(
                     onClick = ::next,
                     classes = KeyClasses.ButtonPrimary,
                     label = "Next",
-                    enabled = !frozen && question != null && isAnswered(question),
-                    modifier = Modifier.testTag("question-next"),
+                    enabled = armed && question != null && isAnswered(question),
+                    modifier = Modifier.refuseObscuredTouches().testTag("question-next"),
                 )
             }
         }
@@ -647,6 +748,7 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
             .heightIn(min = TetherDimens.touchTargetDp)
             .alpha(if (enabled) 1f else 0.65f)
             .cssSurface(shape, background = if (active) t.violetWash else t.keyFace, border = CssBorder(1.dp, border), shadows = shadows)
+            .refuseObscuredTouches()
             .toggleable(value = active, enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton, onValueChange = { onToggle() })
             .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)
             .testTag("question-option"),

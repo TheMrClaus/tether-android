@@ -480,24 +480,27 @@ class DurableSendTest {
     @Test
     fun approvalsAndAnswersAreNeverReplayed() {
         val client = process()
-        val ws = startConnected(client)
+        h.enqueueConnect()
+        client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws, readyWithSessions("s1"))
         client.attach("s1")
         h.expectFrame("attach")
         // T6.3: real pending requests (a decision is refused for anything else).
         ws.send(snapshotFrame("s1", 5, consentStateJson()))
         h.await(client.liveSessions) { "s1" in it }
-        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", choiceId = "accept"))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", mapOf("Which DB?" to "Postgres")))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres")))
         assertEquals(listOf("approval", "question"), h.framesUntilBarrier().map { it.type() })
 
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
         // Filed while the link is down: refused, not stored for later.
-        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-plain", decision = "deny"))
+        assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-plain", consentFp(client, "s1", "r-plain"), decision = "deny"))
         h.enqueueConnect()
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
-        h.handshake(ws2)
+        h.handshake(ws2, readyWithSessions("s1"))
         // The same requests are still pending in the new snapshot: nothing is sent again.
         ws2.send(snapshotFrame("s1", 5, consentStateJson()))
         h.serverBarrier(ws2)

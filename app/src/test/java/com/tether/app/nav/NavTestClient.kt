@@ -59,6 +59,7 @@ class NavTestClient(
     override fun approval(
         sessionId: String,
         requestId: String,
+        expectedFingerprint: String,
         choiceId: String?,
         decision: String?,
         grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
@@ -66,11 +67,12 @@ class NavTestClient(
         stateChanges += "approval"
         return com.tether.app.client.ConsentResult.NotConnected
     }
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
+    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
         stateChanges += "answerQuestion"
         return com.tether.app.client.ConsentResult.NotConnected
     }
     override val liveSessions: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
+    override val consentOrigin: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) { stateChanges += "createSession" }
     override fun resumeHistory(historyId: String, cwd: String) { stateChanges += "resumeHistory" }

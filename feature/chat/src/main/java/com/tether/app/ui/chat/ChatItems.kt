@@ -207,6 +207,8 @@ internal fun buildChatItems(
     richCodex: Boolean = false,
     groupOpen: (key: String, default: Boolean) -> Boolean = { _, default -> default },
     showApprovals: Boolean = true,
+    /** T6.3: the live socket's server origin, for the cards' fingerprints (null: none). */
+    consentOrigin: String? = null,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     val trimmed = trimmedTurnCount(projection)
@@ -314,8 +316,8 @@ internal fun buildChatItems(
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
     }
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
-    if (showApprovals) pendingApprovals(state).forEach { items.add(ChatItem.Approval(it)) }
+    if (showApprovals) pendingApprovals(state, consentOrigin).forEach { items.add(ChatItem.Approval(it)) }
     val answeredIds = answeredRequestIds(state)
-    pendingQuestions(state).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
+    pendingQuestions(state, consentOrigin).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items
 }
