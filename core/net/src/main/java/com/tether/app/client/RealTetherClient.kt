@@ -335,13 +335,21 @@ class RealTetherClient(
     private var createdSeq = 0L
     override val createdSessions: StateFlow<CreatedReply?> = createdState
 
+    private val storedSettingsLoadedState = MutableStateFlow(false)
+    override val storedSettingsLoaded: StateFlow<Boolean> = storedSettingsLoadedState
+
     init {
+        // One writer for all three, in this order: whoever sees storedSettingsLoaded sees the stored
+        // server URL and sign-in state with it (T4.4 cold-start deep links).
         scope.launch {
             combine(settings.baseUrl, settings.credential) { base, credential ->
-                !base.isNullOrEmpty() && credential != null
-            }.collect { configuredState.value = it }
+                base to (!base.isNullOrEmpty() && credential != null)
+            }.collect { (base, configured) ->
+                serverUrlState.value = base
+                configuredState.value = configured
+                storedSettingsLoadedState.value = true
+            }
         }
-        scope.launch { settings.baseUrl.collect { serverUrlState.value = it } }
     }
 
     // ------------------------------------------------------------------

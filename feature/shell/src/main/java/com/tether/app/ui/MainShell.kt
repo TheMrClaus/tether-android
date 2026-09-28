@@ -131,6 +131,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var copiedTetherId by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
     LaunchedEffect(copiedTetherId) { if (copiedTetherId) { delay(CopiedFeedbackMs); copiedTetherId = false } }
+    // T4.4: a session opened by a link reads like a sidebar pick: the drawer and the previous
+    // session's popover close, so the session is on screen and Back leaves the app.
+    LaunchedEffect(vm) { vm.openRequests.collect { shell.onSessionSelected() } }
 
     // issue #189: a remembered session whose snapshot has not arrived yet reads as "reopening",
     // never as the welcome stage.

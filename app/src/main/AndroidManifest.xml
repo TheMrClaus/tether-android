@@ -31,9 +31,14 @@
         android:theme="@style/Theme.Tether"
         android:supportsRtl="true">
 
+        <!-- singleTask (T4.4): a link from another app reaches the one existing
+             instance through onNewIntent instead of stacking a second copy of
+             the app in the caller's task; Back then leaves Tether, as the web's
+             replaceState keeps Back meaning "leave the console". -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -49,6 +54,19 @@
             <intent-filter>
                 <action android:name="OPEN_TETHER" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- T4.4: tether://session/<id> opens that session. Navigation only;
+                 nav/DeepLinks validates the id and nav/DeepLinkNavigator routes it.
+                 There is deliberately NO http(s) filter and so no autoVerify: the
+                 paired server's origin differs per install, and a manifest host
+                 cannot name it (verified App Links would also need S10.1's
+                 assetlinks.json on that host). An explicit http(s) intent is still
+                 honoured for the paired origin only. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tether" android:host="session" />
             </intent-filter>
         </activity>
 

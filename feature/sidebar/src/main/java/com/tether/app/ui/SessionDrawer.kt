@@ -138,6 +138,17 @@ fun SessionDrawer(
     LaunchedEffect(active?.historyId, active?.status, active?.updatedAt) {
         active?.let { controller.onActiveSettled(it) }
     }
+    // T4.4, dashboard.tsx:1058-1066: a session opened by a link may live in a project no block
+    // owns; its block (or its own folder) becomes the current workspace, so it is listed.
+    val latestSessions by rememberUpdatedState(sessions)
+    val latestWorkspaces by rememberUpdatedState(workspaces)
+    val latestCurrent by rememberUpdatedState(current)
+    LaunchedEffect(controller) {
+        vm.openRequests.collect { id ->
+            latestSessions.firstOrNull { it.id == id }?.let { controller.focusWorkspaceFor(it.cwd, latestWorkspaces, latestCurrent) }
+        }
+    }
+
     SessionSidebar(
         state = state,
         modifier = modifier,

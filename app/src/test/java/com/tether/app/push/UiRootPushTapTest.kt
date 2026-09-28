@@ -47,7 +47,7 @@ class UiRootPushTapTest {
         Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         val client = RecordingClient()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-        activity.setContent { UiRoot(client = client, pushIntent = pushIntent) }
+        activity.setContent { UiRoot(client = client, launchIntent = pushIntent) }
         repeat(5) { shadowOf(Looper.getMainLooper()).idle() }
         return client
     }

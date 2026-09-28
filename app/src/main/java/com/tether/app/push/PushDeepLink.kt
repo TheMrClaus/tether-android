@@ -13,9 +13,9 @@ import com.tether.app.MainActivity
 data class PushOpen(val kind: PushKind)
 
 /**
- * The notification tap → app route (T12.1). This is the one hook the UI
- * consumes. T4.4 owns full deep-link routing and can build on [parse] without
- * touching the push code.
+ * The notification tap → app route (T12.1). Since T4.4 the UI does not call
+ * this directly: nav/DeepLinkIntents does, and routes every tap to the app's
+ * current screen (Destination.Home) through the one navigator.
  *
  * Two intents reach [MainActivity] from a notification:
  * - [ACTION_OPEN]: built by [intentFor] for notifications the app posts. It is
@@ -30,8 +30,9 @@ data class PushOpen(val kind: PushKind)
  * action with any extras. [parse] therefore reads only the kind. It ignores
  * every other extra, including any session id or url. A tap only opens the app:
  * it selects no session, attaches nothing, and never answers an approval or a
- * question (T12.3 is deferred and needs an explicit owner opt-in). T4.4 re-adds
- * routing to a session only with a verified sender.
+ * question (T12.3 is deferred and needs an explicit owner opt-in). Routing a
+ * tap to a session still needs a verified sender, which does not exist yet: the
+ * server's FCM payload is id-free by design.
  */
 object PushDeepLink {
     const val ACTION_OPEN = "com.tether.app.action.OPEN_FROM_PUSH"

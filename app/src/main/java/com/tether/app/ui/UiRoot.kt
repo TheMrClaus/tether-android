@@ -17,6 +17,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import com.tether.app.nav.DeepLinkIntents
+import com.tether.app.nav.NavContext
+import com.tether.app.nav.NavEffect
+import com.tether.app.nav.NavigationViewModel
+import com.tether.app.nav.SessionLinkOpener
+import com.tether.app.ui.chat.CustomTabLinkOpener
+import com.tether.app.ui.chat.LocalLinkOpener
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.merge
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,7 +61,7 @@ import com.tether.app.ui.theme.ThemeChoice
  * Single UI entry point. MainActivity calls UiRoot(ClientLocator.obtain(this)).
  */
 @Composable
-fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
+fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     val context = LocalContext.current
     val prefs = remember { UiPrefs(context) }
     val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
@@ -56,11 +73,51 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
     val configured by client.configured.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
 
-    // Push: a notification tap (PushDeepLink.parse(pushIntent)) only opens the app.
-    // It selects no session and attaches nothing: the server's FCM payload is
-    // id-free, so a session in the intent could only come from another app
-    // (T12.1 security review H1). T4.4 owns routing a tap to a session and
-    // re-adds it with a verified sender; this parameter is its hook.
+    // T4.4: every link (the tether:// filter, an http(s) link to the paired server, a
+    // notification tap, a session link in a chat) goes through one navigator. A
+    // notification tap only opens the app: the server's FCM payload is id-free, so a
+    // session in a push intent could only come from another app (T12.1 H1).
+    val navigator = viewModel<NavigationViewModel>().navigator
+    var inputGuard by remember { mutableStateOf(false) }
+    val applyNav: (NavEffect?) -> Unit = { effect ->
+        when (effect) {
+            is NavEffect.Open -> {
+                vm.openSession(effect.sessionId)
+                inputGuard = true
+            }
+            is NavEffect.Notice -> vm.reportLocalError(effect.text)
+            null -> Unit
+        }
+    }
+    LaunchedEffect(launchIntent) {
+        launchIntent ?: return@LaunchedEffect
+        client.storedSettingsLoaded.first { it }
+        applyNav(navigator.offer(DeepLinkIntents.parse(launchIntent, client.serverUrl.value), navContextOf(client)))
+    }
+    LaunchedEffect(client, navigator) {
+        client.storedSettingsLoaded.first { it }
+        merge(client.configured, client.connection, client.serverUrl, client.sessions)
+            .collect { applyNav(navigator.step(navContextOf(client))) }
+    }
+    // dashboard.tsx selectActiveId: an explicit selection retires a waiting link.
+    LaunchedEffect(vm, navigator) {
+        vm.selectedSessionId.drop(1).collect { if (it != null) navigator.onUserSelection() }
+    }
+    // A switch made by a link swallows touches briefly, so a tap aimed at the previous
+    // session cannot land on the new one's controls (another window can fire a link).
+    LaunchedEffect(inputGuard) {
+        if (inputGuard) {
+            delay(NAV_INPUT_GUARD_MS)
+            inputGuard = false
+        }
+    }
+    val linkOpener = remember(client, navigator) {
+        SessionLinkOpener(
+            delegate = CustomTabLinkOpener,
+            pairedBaseUrl = { client.serverUrl.value },
+            openInApp = { link -> applyNav(navigator.offer(link, navContextOf(client))) },
+        )
+    }
 
     // Android 13+ POST_NOTIFICATIONS: asked once, automatically, after sign-in
     // while notifications are on (UiPrefs default). A denial is never re-asked
@@ -176,7 +233,10 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
                     )
                 } else {
-                    MainShell(vm = vm, prefs = prefs)
+                    CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
+                        MainShell(vm = vm, prefs = prefs)
+                    }
+                    if (inputGuard) NavInputGuard(Modifier.matchParentSize())
                 }
             }
         }
@@ -187,4 +247,40 @@ fun UiRoot(client: TetherClient, pushIntent: Intent? = null) {
             )
         }
     }
+}
+
+/** How long touches are swallowed after a link switched the session (see [NavInputGuard]). */
+internal const val NAV_INPUT_GUARD_MS = 500L
+
+internal const val NAV_INPUT_GUARD_TAG = "nav-input-guard"
+
+/**
+ * The client's state as the navigator reads it. The connection is read BEFORE the session list:
+ * the client publishes the `ready` list before it reports Connected, so "connected and absent"
+ * really means the server does not list the session.
+ */
+internal fun navContextOf(client: TetherClient): NavContext {
+    val connection = client.connection.value
+    return NavContext(
+        signedIn = client.configured.value && connection !is ConnectionState.AuthRequired,
+        serverUrl = client.serverUrl.value,
+        connected = connection == ConnectionState.Connected,
+        sessionIds = client.sessions.value.mapTo(HashSet()) { it.id },
+    )
+}
+
+/** Consumes every pointer event over the shell while it is composed. Invisible, not focusable. */
+@Composable
+private fun NavInputGuard(modifier: Modifier) {
+    Box(
+        modifier
+            .testTag(NAV_INPUT_GUARD_TAG)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                    }
+                }
+            },
+    )
 }

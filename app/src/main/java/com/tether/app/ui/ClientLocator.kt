@@ -23,4 +23,10 @@ object ClientLocator {
         cached ?: synchronized(this) {
             cached ?: factory(context.applicationContext).also { cached = it }
         }
+
+    /** Tests only: the client MainActivity will obtain next (null forgets it). */
+    @androidx.annotation.VisibleForTesting
+    internal fun installForTest(client: TetherClient?) {
+        synchronized(this) { cached = client }
+    }
 }

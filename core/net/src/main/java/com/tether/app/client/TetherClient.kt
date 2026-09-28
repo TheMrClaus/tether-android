@@ -104,6 +104,13 @@ interface TetherClient {
     val serverUrl: StateFlow<String?> get() = NO_SERVER_URL
 
     /**
+     * True once [configured] and [serverUrl] reflect the stored settings. Before the store is
+     * first read they say "signed out, no server", which a cold-start deep link (T4.4) must not
+     * mistake for the truth.
+     */
+    val storedSettingsLoaded: StateFlow<Boolean> get() = SETTINGS_LOADED
+
+    /**
      * Sign-in security (`GET /api/auth/sessions`): the owner's browser/passkey
      * sessions. Owner-grade only — a device token gets
      * [SignInSessionsResult.OwnerGradeRequired] without a request being made
@@ -379,6 +386,7 @@ sealed interface ConnectionState {
 
 private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow(null)
 private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
+private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)
 
 /** Why the server ended the sign-in; the login screen explains it. */
 enum class SignedOutReason {

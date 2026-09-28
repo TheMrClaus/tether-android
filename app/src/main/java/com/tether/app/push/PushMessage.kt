@@ -1,7 +1,8 @@
 package com.tether.app.push
 
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
+import com.tether.app.nav.DeepLinks
+import com.tether.app.nav.Destination
+import com.tether.app.nav.ParsedLink
 
 /**
  * The push kinds the server raises (tether `lib/push-notifications.mjs`,
@@ -73,9 +74,9 @@ sealed interface PushMessage {
  *    back to one shared tag) rather than used as is.
  * 4. `data.url` is not read. The server keeps it id-free (`/`, the FCM privacy
  *    floor), so a session named there could only come from someone else. A tap
- *    just opens the app. T4.4 may route taps to a session, but only with a
- *    verified sender; [sessionIdFromUrl] and [SessionIds] are kept, unwired, for
- *    that.
+ *    just opens the app (T4.4 routes it to nav/DeepLinkIntents as Home). A tap
+ *    may only name a session once it has a verified sender; [sessionIdFromUrl]
+ *    is kept, unwired, for that, and [SessionIds] is the id rule every link uses.
  */
 object PushMessageParser {
     const val SYNC_KIND = "sync"
@@ -106,33 +107,18 @@ object PushMessageParser {
 
     /**
      * NOT WIRED (T12.1 round 2, security review H1): nothing calls this on the
-     * notification path. It is kept, tested, for T4.4 to reuse once a tap's
-     * sender can be verified.
+     * notification path. It stays unwired until a tap's sender can be verified.
      *
-     * The session named by a same-origin `/?session=<id>` url, or null. Mirrors
-     * the web: the service worker keeps only same-origin paths (`public/sw.js`,
-     * `safeTarget`) and the dashboard reads only the `session` parameter
-     * (`components/dashboard.tsx`). Anything else (another path, a scheme, `//`,
-     * an invalid id) means "open the app on its current screen".
+     * The session named by a same-origin `/?session=<id>` url, or null. Since
+     * T4.4 it is the one web-target parser ([DeepLinks.parseWebTarget]), so the
+     * notification rule and every other link can never disagree. Anything else
+     * (another path, a scheme, `//`, an invalid id) means "open the app on its
+     * current screen".
      */
     fun sessionIdFromUrl(url: String?): String? {
         if (url == null || url.length > MAX_URL) return null
-        if (!url.startsWith("/") || url.startsWith("//")) return null
-        val withoutFragment = url.substringBefore('#')
-        val path = withoutFragment.substringBefore('?')
-        if (path != "/") return null
-        val query = withoutFragment.substringAfter('?', missingDelimiterValue = "")
-        if (query.isEmpty()) return null
-        val raw = query.split('&')
-            .firstOrNull { it.substringBefore('=') == "session" }
-            ?.substringAfter('=', missingDelimiterValue = "")
-            ?: return null
-        val decoded = try {
-            URLDecoder.decode(raw, StandardCharsets.UTF_8)
-        } catch (_: IllegalArgumentException) {
-            return null
-        }
-        return decoded.takeIf(SessionIds::isValid)
+        val parsed = DeepLinks.parseWebTarget(url) as? ParsedLink.Open ?: return null
+        return (parsed.destination as? Destination.Session)?.id
     }
 
     private fun firstNonBlank(vararg values: String?): String? =

@@ -16,9 +16,12 @@ import com.tether.app.protocol.model.HistorySession
 import com.tether.app.ui.prefs.DraftStore
 import com.tether.app.ui.prefs.InMemoryDraftStore
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -234,6 +237,22 @@ class TetherViewModel(
         _selectedSessionId.value = id
         loadDraft(id)
         client.attach(id)
+    }
+
+    private val _openRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /**
+     * T4.4: sessions opened from outside the shell (a deep link, a notification, a session link in
+     * a chat). No replay, so a recreated shell never re-runs an old one. The phone shell closes its
+     * drawer and popover for each, as a sidebar pick does; the sidebar makes the session's workspace
+     * block current (dashboard.tsx focusWorkspaceFor on `pendingSessionId`).
+     */
+    val openRequests: SharedFlow<String> = _openRequests.asSharedFlow()
+
+    /** Select [id] on behalf of a link: [selectSession] plus an [openRequests] event. Navigation only. */
+    fun openSession(id: String) {
+        selectSession(id)
+        _openRequests.tryEmit(id)
     }
 
     /**
