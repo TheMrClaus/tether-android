@@ -62,10 +62,16 @@ Divergences from the web, on purpose:
   twice in a request is one permission (unticking either row unticks it). The confirmation is bound to the
   exact state it was made in, and a grant key re-reads the ticks at the moment of the tap, so an untick
   landing in the same instant as the tap (two fingers) sends nothing.
-- Paths on a grant card are shown quoted, cut at 160 characters with "…", with control, line-separator and
-  bidi characters written out as `\uXXXX`, so no path can pose as part of the sentence around it (the web
-  shows them raw). The grant itself carries the raw path. Round 5 re-recorded the 8 `approval-grants` goldens
-  for the quotes.
+- Paths on a grant card are shown quoted; cut in the middle (the first 60 and the last 99 characters stay, so
+  a trailing `/../..` that decides the scope is always visible); and with every character that could hide,
+  reorder, fake a space or fake the quotes written out as `\uXXXX`. That covers the control, format,
+  separator, surrogate, private-use and unassigned categories, spaces other than U+0020, variation
+  selectors, Hangul fillers, the curly quotes and the backslash. So no path can pose as part of the sentence
+  around it (the web shows them raw). The grant itself carries the raw path. Round 5 re-recorded the 8
+  `approval-grants` goldens for the quotes.
+- A question card's Submit, Next and Skip decide only on the selection that was drawn: a pick or text change
+  in the same instant (a second finger) makes the tap do nothing, and an option or Other field of a page that
+  is no longer shown ignores input. The operator sees the change and taps again.
 - Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
   `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
   500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
