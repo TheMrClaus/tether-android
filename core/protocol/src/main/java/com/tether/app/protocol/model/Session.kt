@@ -39,6 +39,8 @@ data class AgentSession(
     val nameIsCustom: Boolean = false,
     val parentSessionId: String? = null,
     val handedOffTo: String? = null,
+    // T6.3: lib/protocol.ts:1723 — an imported replay (or replay-only provider) Tether does not drive.
+    val readOnly: Boolean = false,
 )
 
 @Serializable

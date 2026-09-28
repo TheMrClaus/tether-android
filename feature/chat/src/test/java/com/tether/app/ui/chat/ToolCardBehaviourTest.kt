@@ -69,8 +69,6 @@ class ToolCardBehaviourTest {
                         tree = fixture.tree,
                         showThinking = false,
                         onFetchTurns = { _, _ -> },
-                        onApproval = { _, _, _ -> },
-                        onAnswer = { _, _, _ -> },
                         zone = ChatFixtures.zone,
                         listState = listState,
                         showTimeline = false,
@@ -112,8 +110,6 @@ class ToolCardBehaviourTest {
                     tree = fixture.tree,
                     showThinking = false,
                     onFetchTurns = { _, _ -> },
-                    onApproval = { _, _, _ -> },
-                    onAnswer = { _, _, _ -> },
                     zone = ChatFixtures.zone,
                     showTimeline = false,
                 )

@@ -1,10 +1,13 @@
 package com.tether.app.ui.fake
 
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.ConsentResult
+import com.tether.app.client.consentKey
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.protocol.SessionModelOption
@@ -465,7 +468,37 @@ class FakeTetherClient : TetherClient {
         touchSession(sessionId, status = "ready")
     }
 
-    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) {
+    // T6.3: the demo keeps the real client's contract: each request decided once, only while pending.
+    private val decided = MutableStateFlow<Set<String>>(emptySet())
+    override val decidedRequests: StateFlow<Set<String>> = decided.asStateFlow()
+    override val liveSessions: StateFlow<Set<String>> = MutableStateFlow(_projections.value.keys.toSet()).asStateFlow()
+
+    private fun claimDecision(sessionId: String, requestId: String, pending: Boolean): ConsentResult {
+        val key = consentKey(sessionId, requestId)
+        if (key in decided.value) return ConsentResult.AlreadyDecided
+        if (!pending) return ConsentResult.NotPending
+        decided.update { it + key }
+        return ConsentResult.Sent
+    }
+
+    private fun activeTurnOf(sessionId: String): TurnProjection? =
+        _projections.value[sessionId]?.let { p -> p.activeTurnId?.let { p.turnsById[it] } }
+
+    override fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String?,
+        decision: String?,
+        grantedPermissions: GrantedPermissions?,
+    ): ConsentResult {
+        if ((choiceId == null) == (decision == null)) return ConsentResult.InvalidChoice
+        val result = claimDecision(sessionId, requestId, activeTurnOf(sessionId)?.pendingApprovals?.containsKey(requestId) == true)
+        if (result != ConsentResult.Sent) return result
+        approve(sessionId, requestId, decision)
+        return result
+    }
+
+    private fun approve(sessionId: String, requestId: String, decision: String?) {
         updateProjection(sessionId) { p ->
             val turnId = p.activeTurnId ?: return@updateProjection p
             val turn = p.turnsById[turnId] ?: return@updateProjection p
@@ -503,7 +536,14 @@ class FakeTetherClient : TetherClient {
         }
     }
 
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) {
+    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): ConsentResult {
+        val result = claimDecision(sessionId, requestId, activeTurnOf(sessionId)?.pendingQuestions?.containsKey(requestId) == true)
+        if (result != ConsentResult.Sent) return result
+        answer(sessionId, requestId, answers)
+        return result
+    }
+
+    private fun answer(sessionId: String, requestId: String, answers: Map<String, String>) {
         updateProjection(sessionId) { p ->
             val turnId = p.activeTurnId ?: return@updateProjection p
             val turn = p.turnsById[turnId] ?: return@updateProjection p

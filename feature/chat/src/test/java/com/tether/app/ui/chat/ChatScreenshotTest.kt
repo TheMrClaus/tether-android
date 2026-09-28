@@ -62,8 +62,6 @@ fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: Stri
                 tree = fixture.tree,
                 showThinking = shot == ChatShot.ThinkingClosed || shot == ChatShot.ThinkingOpen,
                 onFetchTurns = { _, _ -> },
-                onApproval = { _, _, _ -> },
-                onAnswer = { _, _, _ -> },
                 zone = ChatFixtures.zone,
                 listState = listState,
             )

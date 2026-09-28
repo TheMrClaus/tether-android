@@ -8,21 +8,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.model.AgentSession
-import com.tether.app.protocol.model.ApprovalChoice
-import com.tether.app.protocol.model.ApprovalRequestMetadata
-import com.tether.app.protocol.model.PendingApproval
-import com.tether.app.protocol.model.PendingQuestion
-import com.tether.app.protocol.model.QuestionOption
-import com.tether.app.protocol.model.QuestionPrompt
 import com.tether.app.protocol.model.QueuedMessage
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.TurnRun
 import com.tether.app.protocol.model.Vocab
-import com.tether.app.ui.chat.ApprovalCard
 import com.tether.app.ui.chat.Composer
-import com.tether.app.ui.chat.QuestionCard
 import com.tether.app.ui.chat.ToolCard
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
@@ -57,67 +49,7 @@ private fun previewSession(status: String, name: String = "tether-ui polish") = 
     updatedAt = previewNow - 90_000,
 )
 
-@Preview(name = "Approval card", showBackground = true, backgroundColor = 0xFF070A0B)
-@Composable
-private fun ApprovalCardPreview() {
-    PreviewSurface {
-        ApprovalCard(
-            approval = PendingApproval(
-                requestId = "req-1",
-                toolId = "tool-1",
-                name = "Bash",
-                input = buildJsonObject { put("command", "./scripts/publish.sh --tag v1.4.0") },
-                choices = listOf(
-                    ApprovalChoice("once", "Allow once"),
-                    ApprovalChoice("always", "Always allow publish.sh", permissionGrant = "exact"),
-                ),
-                metadata = ApprovalRequestMetadata(
-                    provider = "codex",
-                    kind = "exec",
-                    reason = "Command is outside the sandbox policy",
-                    command = "./scripts/publish.sh --tag v1.4.0",
-                    cwd = "/home/operator/git/pipeline",
-                ),
-            ),
-            onChoice = { _, _ -> },
-        )
-    }
-}
-
-@Preview(name = "Approval fallback", showBackground = true, backgroundColor = 0xFF070A0B)
-@Composable
-private fun ApprovalFallbackPreview() {
-    PreviewSurface {
-        ApprovalCard(
-            approval = PendingApproval(requestId = "req-2", toolId = "tool-2", name = "WebFetch"),
-            onChoice = { _, _ -> },
-        )
-    }
-}
-
-@Preview(name = "Question card", showBackground = true, backgroundColor = 0xFF070A0B)
-@Composable
-private fun QuestionCardPreview() {
-    PreviewSurface {
-        QuestionCard(
-            question = PendingQuestion(
-                requestId = "req-q",
-                toolId = "tool-q",
-                questions = listOf(
-                    QuestionPrompt(
-                        question = "Which migration strategy should I use?",
-                        header = "Strategy",
-                        options = listOf(
-                            QuestionOption("Expand-contract", "Dual-write, zero downtime"),
-                            QuestionOption("Locked rewrite", "Short maintenance window"),
-                        ),
-                    ),
-                ),
-            ),
-            onSubmit = { _, _ -> },
-        )
-    }
-}
+// T6.3: the approval / question / denial cards are covered by ApprovalCardsScreenshotTest goldens.
 
 @Preview(name = "Tool card done", showBackground = true, backgroundColor = 0xFF070A0B)
 @Composable

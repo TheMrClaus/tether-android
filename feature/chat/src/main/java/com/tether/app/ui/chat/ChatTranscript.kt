@@ -110,8 +110,6 @@ internal fun ChatTranscript(
     tree: JsObj?,
     showThinking: Boolean,
     onFetchTurns: (fromIndex: Int, toIndex: Int) -> Unit,
-    onApproval: (requestId: String, choiceId: String?, decision: String?) -> Unit,
-    onAnswer: (requestId: String, answers: Map<String, String>, response: String?) -> Unit,
     modifier: Modifier = Modifier,
     roster: (@Composable () -> Unit)? = null,
     zone: ZoneId = ZoneId.systemDefault(),
@@ -121,6 +119,34 @@ internal fun ChatTranscript(
     find: TranscriptFind? = null,
     richCodex: Boolean = false,
     richOpencode: Boolean = false,
+    /**
+     * T6.3: what the approval and question cards may do (read through [LocalConsent]). The default
+     * is fail-closed: every card renders disabled with "Connect to answer" and nothing is sent.
+     */
+    consent: ConsentActions = ConsentActions.Unavailable,
+    /** T6.3: `capabilities?.interactiveApprovals !== false` (chat-view.tsx:1929). */
+    showApprovals: Boolean = true,
+) {
+    CompositionLocalProvider(LocalConsent provides consent) {
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals)
+    }
+}
+
+@Composable
+private fun ChatTranscriptBody(
+    projection: SessionProjection,
+    tree: JsObj?,
+    showThinking: Boolean,
+    onFetchTurns: (fromIndex: Int, toIndex: Int) -> Unit,
+    modifier: Modifier,
+    roster: (@Composable () -> Unit)?,
+    zone: ZoneId,
+    listState: LazyListState,
+    showTimeline: Boolean,
+    find: TranscriptFind?,
+    richCodex: Boolean,
+    richOpencode: Boolean,
+    showApprovals: Boolean,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -130,8 +156,8 @@ internal fun ChatTranscript(
     // reset is applied where the default is READ (GroupToggles.resolve, while the rows are built),
     // so a toggle whose default changed is gone before any later build can see the default flip back.
     val groupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() }
-    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version) {
-        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve)
+    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals) {
+        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve, showApprovals)
     }
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
@@ -239,8 +265,6 @@ internal fun ChatTranscript(
                 ChatRow(
                     item = item,
                     onFetchTurns = onFetchTurns,
-                    onApproval = onApproval,
-                    onAnswer = onAnswer,
                     modifier = Modifier.padding(top = gap),
                     find = marks,
                     toolRender = toolRender,
@@ -292,8 +316,6 @@ private fun ChatItem.contentType(): String = when (this) {
 private fun ChatRow(
     item: ChatItem,
     onFetchTurns: (Int, Int) -> Unit,
-    onApproval: (String, String?, String?) -> Unit,
-    onAnswer: (String, Map<String, String>, String?) -> Unit,
     modifier: Modifier = Modifier,
     find: FindMarks? = null,
     toolRender: ToolRenderFlags = ToolRenderFlags.Default,
@@ -315,16 +337,11 @@ private fun ChatRow(
                 Vocab.BLOCK_TOOL -> ToolBlockView(item.raw ?: remember(item.block) { item.block.asTree() }, toolRender, nested = item.grouped)
                 else -> {}
             }
-            is ChatItem.Denial -> DenialCard(item.denial)
+            is ChatItem.Denial -> PermissionDenialCard(item.denial, item.target, item.run, nested = item.nested)
+            is ChatItem.Answered -> AnsweredQuestionCard(item.answered)
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
-            is ChatItem.Approval -> ApprovalCard(
-                approval = item.approval,
-                onChoice = { choiceId, decision -> onApproval(item.approval.requestId, choiceId, decision) },
-            )
-            is ChatItem.Question -> QuestionCard(
-                question = item.question,
-                onSubmit = { answers, response -> onAnswer(item.question.requestId, answers, response) },
-            )
+            is ChatItem.Approval -> ApprovalCard(item.approval)
+            is ChatItem.Question -> QuestionCard(item.question, answered = item.answered)
             is ChatItem.Outcome -> OutcomeBadge(item.turn)
             is ChatItem.ToolGroup -> ToolActivityHeader(
                 summary = item.summary,

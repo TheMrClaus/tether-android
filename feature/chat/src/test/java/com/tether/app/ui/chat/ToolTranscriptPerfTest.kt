@@ -93,8 +93,6 @@ class ToolTranscriptPerfTest {
                         tree = state.first,
                         showThinking = false,
                         onFetchTurns = { _, _ -> },
-                        onApproval = { _, _, _ -> },
-                        onAnswer = { _, _, _ -> },
                         zone = ChatFixtures.zone,
                         listState = listState,
                         showTimeline = false,

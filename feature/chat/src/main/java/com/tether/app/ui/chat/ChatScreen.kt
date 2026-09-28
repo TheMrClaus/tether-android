@@ -98,6 +98,14 @@ fun ChatScreen(
     // from a re-snapshot degrades to the Session tab on its own.
     val activeRun = session?.let { selectedRunIds[it.id] }?.let { id -> runs.firstOrNull { it.runId == id } }
 
+    // T6.3: the consent state of this session's cards (SYNC_DESIGN §4.2, §5.1 I2/I3).
+    val connection by vm.client.connection.collectAsStateWithLifecycle()
+    val liveSessions by vm.client.liveSessions.collectAsStateWithLifecycle()
+    val decided by vm.client.decidedRequests.collectAsStateWithLifecycle()
+    val providers by vm.client.providers.collectAsStateWithLifecycle()
+    val consent = remember(session, connection, liveSessions, decided, vm) { consentActionsFor(vm, session, connection, liveSessions, decided) }
+    val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
+
     LaunchedEffect(session?.id, session?.provider) {
         val s = session
         if (s != null && s.provider == "claude") vm.client.requestSessionControls(s.id)
@@ -182,11 +190,12 @@ fun ChatScreen(
                 )
 
                 activeRun != null -> RunTab(
-                    vm = vm,
-                    sessionId = session.id,
                     projection = projection,
+                    tree = trees[session.id],
                     run = activeRun,
                     showThinking = showThinking,
+                    consent = consent,
+                    showApprovals = showApprovals,
                 )
 
                 else -> ChatTranscript(
@@ -195,12 +204,8 @@ fun ChatScreen(
                     tree = trees[session.id],
                     showThinking = showThinking,
                     onFetchTurns = { from, to -> vm.client.fetchTurns(session.id, from, to) },
-                    onApproval = { requestId, choiceId, decision ->
-                        vm.client.approval(session.id, requestId, choiceId, decision)
-                    },
-                    onAnswer = { requestId, answers, response ->
-                        vm.client.answerQuestion(session.id, requestId, answers, response)
-                    },
+                    consent = consent,
+                    showApprovals = showApprovals,
                     roster = if (runs.isNotEmpty()) {
                         {
                             SubagentRoster(
@@ -265,16 +270,18 @@ fun ChatScreen(
  */
 @Composable
 private fun RunTab(
-    vm: TetherViewModel,
-    sessionId: String,
     projection: SessionProjection,
+    tree: com.tether.app.protocol.tree.JsObj?,
     run: com.tether.app.protocol.reduce.SubagentRun,
     showThinking: Boolean,
+    consent: ConsentActions,
+    showApprovals: Boolean,
 ) {
     val listState = rememberLazyListState()
-    val activeTurn = projection.activeTurnId?.let { projection.turnsById[it] }
-    val pending = activeTurn?.pendingApprovals?.values?.toList().orEmpty()
-    val pendingQ = activeTurn?.pendingQuestions?.values?.toList().orEmpty()
+    val state = remember(projection, tree) { cardTree(projection, tree) }
+    val pending = remember(state, showApprovals) { if (showApprovals) pendingApprovals(state) else emptyList() }
+    val pendingQ = remember(state) { pendingQuestions(state) }
+    val answeredIds = remember(state) { answeredRequestIds(state) }
 
     // Web parity: a running run follows the newest activity as its thread
     // grows (steps stream in, pending cards arrive); a finished run parks at
@@ -289,6 +296,7 @@ private fun RunTab(
         }
     }
 
+    CompositionLocalProvider(LocalConsent provides consent) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -301,26 +309,36 @@ private fun RunTab(
             SubagentRunPanel(run = run, showThinking = showThinking)
         }
         pending.forEach { approval ->
-            item(key = "approval/${approval.requestId}") {
-                ApprovalCard(
-                    approval = approval,
-                    onChoice = { choiceId, decision ->
-                        vm.client.approval(sessionId, approval.requestId, choiceId, decision)
-                    },
-                )
-            }
+            item(key = "approval/${approval.requestId}") { ApprovalCard(approval) }
         }
         pendingQ.forEach { question ->
-            item(key = "question/${question.requestId}") {
-                QuestionCard(
-                    question = question,
-                    onSubmit = { answers, response ->
-                        vm.client.answerQuestion(sessionId, question.requestId, answers, response)
-                    },
-                )
-            }
+            item(key = "question/${question.requestId}") { QuestionCard(question, answered = question.requestId in answeredIds) }
         }
     }
+    }
+}
+
+/**
+ * T6.3: the consent actions of [session]'s cards. The ONLY place a card's tap becomes a client
+ * call; the client re-checks everything (ConsentGuard) before a frame leaves.
+ */
+internal fun consentActionsFor(
+    vm: TetherViewModel,
+    session: AgentSession?,
+    connection: com.tether.app.client.ConnectionState,
+    liveSessions: Set<String>,
+    decided: Set<String>,
+): ConsentActions {
+    val s = session ?: return ConsentActions.Unavailable
+    return ConsentActions(
+        sessionId = s.id,
+        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected, s.id in liveSessions, s),
+        decided = decided,
+        questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
+        onApproval = { requestId, choiceId, decision, granted -> vm.client.approval(s.id, requestId, choiceId, decision, granted) },
+        onAnswer = { requestId, answers, response -> vm.client.answerQuestion(s.id, requestId, answers, response) },
+        onOpenRun = { runId -> vm.selectRun(s.id, runId) },
+    )
 }
 
 @Composable

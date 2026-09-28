@@ -45,8 +45,17 @@ internal open class StubClient : TetherClient {
     override fun queueEdit(sessionId: String, queueId: String, text: String) = Unit
     override fun queueRemove(sessionId: String, queueId: String) = Unit
     override fun interrupt(sessionId: String) = Unit
-    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) = Unit
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) = Unit
+    override fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String?,
+        decision: String?,
+        grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
+    ) = com.tether.app.client.ConsentResult.NotConnected
+    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) =
+        com.tether.app.client.ConsentResult.NotConnected
+    override val liveSessions: StateFlow<Set<String>> = MutableStateFlow(emptySet())
+    override val decidedRequests: StateFlow<Set<String>> = MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) = Unit
     override fun resumeHistory(historyId: String, cwd: String) = Unit
     override fun discover(cwd: String) = Unit

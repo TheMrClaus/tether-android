@@ -56,8 +56,6 @@ fun ComposeContentTestRule.snapFind(shot: FindShot, skin: TetherSkin, name: Stri
                     tree = fixture.tree,
                     showThinking = false,
                     onFetchTurns = { _, _ -> },
-                    onApproval = { _, _, _ -> },
-                    onAnswer = { _, _, _ -> },
                     zone = ChatFixtures.zone,
                     listState = LazyListState(),
                     find = TranscriptFind(results, needle, results.hits.getOrNull(active)),

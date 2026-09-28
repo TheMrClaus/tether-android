@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.NodeSummary
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
@@ -161,14 +162,39 @@ interface TetherClient {
 
     fun interrupt(sessionId: String)
 
-    /** Exactly one of [choiceId] or [decision] ("allow"|"deny") must be non-null. */
-    fun approval(sessionId: String, requestId: String, choiceId: String? = null, decision: String? = null)
+    /**
+     * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
+     * received may ever produce one). Exactly one of [choiceId] or [decision] ("allow"|"deny");
+     * [grantedPermissions] only with a permission-granting [choiceId].
+     *
+     * Sent at most once per (session, request) in this process, only on a live connection, only
+     * while the request is pending in the session's current state, and only with a choice the
+     * request offered ([ConsentGuard]). Anything else is refused: nothing is transmitted or held.
+     */
+    fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String? = null,
+        decision: String? = null,
+        grantedPermissions: GrantedPermissions? = null,
+    ): ConsentResult
 
     /**
-     * [answers] maps the EXACT question text to the chosen option label
-     * (comma-separated for multi-select); [response] is optional free text.
+     * T6.3: the operator's answer to a pending question, under the same rules as [approval].
+     * [answers] maps the EXACT question text to the chosen option label(s) (comma-joined for
+     * multi-select, the "Other" text appended); [response] is the joined free text.
      */
-    fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String? = null)
+    fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String? = null): ConsentResult
+
+    /**
+     * T6.3: sessions whose projection a snapshot has confirmed on the CURRENT connection
+     * (SYNC_DESIGN §4.1 "Live"). Outside it a session is shown from a saved copy or is catching
+     * up: its approval and question cards render but are not actionable.
+     */
+    val liveSessions: StateFlow<Set<String>>
+
+    /** T6.3: [consentKey]s of the requests this process already decided on the current server. */
+    val decidedRequests: StateFlow<Set<String>>
 
     fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)

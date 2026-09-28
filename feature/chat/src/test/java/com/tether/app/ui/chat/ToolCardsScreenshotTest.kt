@@ -95,8 +95,6 @@ fun ComposeContentTestRule.snapTools(shot: ToolShot, skin: TetherSkin, name: Str
                         tree = fixture.tree,
                         showThinking = false,
                         onFetchTurns = { _, _ -> },
-                        onApproval = { _, _, _ -> },
-                        onAnswer = { _, _, _ -> },
                         zone = ChatFixtures.zone,
                         listState = listState,
                         richCodex = shot == ToolShot.Codex || shot == ToolShot.CodexDetails || shot == ToolShot.Running,

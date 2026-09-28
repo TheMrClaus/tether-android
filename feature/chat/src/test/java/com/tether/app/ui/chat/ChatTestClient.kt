@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** T5.3: an inert [TetherClient] for ChatScreen behaviour tests: sessions + projections only. */
 class ChatTestClient : TetherClient {
-    override val connection: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.Connected)
+    /** T6.3: the link state the consent cards read. */
+    val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
+    override val connection: StateFlow<ConnectionState> get() = link
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
     override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(emptyList())
     override val workspaceRoot: StateFlow<String?> = MutableStateFlow("/w")
@@ -39,8 +41,25 @@ class ChatTestClient : TetherClient {
     /** T7.1: what the composer put on the wire path: `send:<text>`, `queue-add:<text>`, … */
     val outbox = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    /** Publish [session] with [folded]'s projection and tree. */
-    fun show(session: AgentSession, folded: ChatFixtures.Folded) {
+    /** T6.3: sessions confirmed live, and the ledger's decided keys (tests drive both). */
+    val live = MutableStateFlow<Set<String>>(emptySet())
+    val decided = MutableStateFlow<Set<String>>(emptySet())
+    override val liveSessions: StateFlow<Set<String>> get() = live
+    override val decidedRequests: StateFlow<Set<String>> get() = decided
+
+    /**
+     * T6.3: every consent call the UI made, in order, NOT de-duplicated (the UI's own send-once
+     * guard is what the behaviour tests prove): `approval:<session>:<request>:<choiceId|decision>[:<grant>]`,
+     * `question:<session>:<request>:<answers>[:<response>]`.
+     */
+    val consentCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    /** What the next consent call returns (the real client's verdict). */
+    var consentResult: com.tether.app.client.ConsentResult = com.tether.app.client.ConsentResult.Sent
+
+    /** Publish [session] with [folded]'s projection and tree ([live]: confirmed on this connection). */
+    fun show(session: AgentSession, folded: ChatFixtures.Folded, live: Boolean = true) {
+        if (live) this.live.value = this.live.value + session.id
         sessions.value = listOf(session) + sessions.value.filter { it.id != session.id }
         projections.value = projections.value + (session.id to folded.projection)
         projectionTrees.value = projectionTrees.value + (session.id to folded.tree)
@@ -64,8 +83,20 @@ class ChatTestClient : TetherClient {
         outbox += "queue-remove:$queueId"
     }
     override fun interrupt(sessionId: String) = Unit
-    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) = Unit
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) = Unit
+    override fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String?,
+        decision: String?,
+        grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
+    ): com.tether.app.client.ConsentResult {
+        consentCalls += "approval:$sessionId:$requestId:${choiceId ?: decision}" + (grantedPermissions?.let { ":" + it.toJsonObject() } ?: "")
+        return consentResult
+    }
+    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
+        consentCalls += "question:$sessionId:$requestId:$answers" + (response?.let { ":$it" } ?: "")
+        return consentResult
+    }
     override fun createSession(provider: String, cwd: String?, name: String?) = Unit
     override fun resumeHistory(historyId: String, cwd: String) = Unit
     override fun discover(cwd: String) = Unit

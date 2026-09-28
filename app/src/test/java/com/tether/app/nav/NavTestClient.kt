@@ -56,10 +56,22 @@ class NavTestClient(
     override fun queueEdit(sessionId: String, queueId: String, text: String) { stateChanges += "queueEdit" }
     override fun queueRemove(sessionId: String, queueId: String) { stateChanges += "queueRemove" }
     override fun interrupt(sessionId: String) { stateChanges += "interrupt" }
-    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) { stateChanges += "approval" }
-    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?) {
-        stateChanges += "answerQuestion"
+    override fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String?,
+        decision: String?,
+        grantedPermissions: com.tether.app.protocol.GrantedPermissions?,
+    ): com.tether.app.client.ConsentResult {
+        stateChanges += "approval"
+        return com.tether.app.client.ConsentResult.NotConnected
     }
+    override fun answerQuestion(sessionId: String, requestId: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
+        stateChanges += "answerQuestion"
+        return com.tether.app.client.ConsentResult.NotConnected
+    }
+    override val liveSessions: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
+    override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) { stateChanges += "createSession" }
     override fun resumeHistory(historyId: String, cwd: String) { stateChanges += "resumeHistory" }
     override fun setMode(sessionId: String, permissionMode: String) { stateChanges += "setMode" }

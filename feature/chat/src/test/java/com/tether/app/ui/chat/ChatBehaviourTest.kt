@@ -61,8 +61,6 @@ class ChatBehaviourTest {
                         tree = fixture.tree,
                         showThinking = showThinking,
                         onFetchTurns = onFetchTurns,
-                        onApproval = { _, _, _ -> },
-                        onAnswer = { _, _, _ -> },
                         zone = ChatFixtures.zone,
                         listState = listState,
                     )

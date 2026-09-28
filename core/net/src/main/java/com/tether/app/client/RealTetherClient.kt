@@ -8,6 +8,7 @@ import com.tether.app.mirror.MirrorIndex
 import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.HELLO_CLIENT_ANDROID
 import com.tether.app.protocol.NodeSummary
 import com.tether.app.protocol.PROTOCOL_VERSION
@@ -331,6 +332,11 @@ class RealTetherClient(
     // requestId and the waiter live here, never the frame (node-add's credential
     // is not retained past the send). Emptied (LinkLost) whenever the socket goes.
     private val nodeRequests = HashMap<String, CompletableDeferred<NodeRequestOutcome>>()
+    // T6.3: sessions a snapshot confirmed on the CURRENT socket (SYNC_DESIGN §4.1 "Live"); a
+    // decision is transmitted only for one of them. Emptied with the socket, the epoch, the server.
+    private val liveThisEpoch = HashSet<String>()
+    // T6.3: every (origin, session, request) this process decided, so none is ever sent twice.
+    private val consentLedger = ConsentLedger()
 
     // --- flows ---
     private val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -381,6 +387,11 @@ class RealTetherClient(
     override val errors: SharedFlow<String> = errorsFlow
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
+
+    private val liveSessionsState = MutableStateFlow<Set<String>>(emptySet())
+    private val decidedState = MutableStateFlow<Set<String>>(emptySet())
+    override val liveSessions: StateFlow<Set<String>> = liveSessionsState
+    override val decidedRequests: StateFlow<Set<String>> = decidedState
 
     // T5.1 sidebar sync (SidebarSync.kt).
     private val sidebarSync = SidebarSync()
@@ -719,7 +730,22 @@ class RealTetherClient(
         tracker.clear()
         reconciledSessions.clear()
         attachedThisEpoch.clear()
+        clearLiveLocked()
+        decidedState.value = emptySet()
         clearMirrorStateLocked()
+    }
+
+    /** T6.3: [sessionId] is (or is no longer) confirmed on the current socket. Caller holds [lock]. */
+    private fun setLiveLocked(sessionId: String, live: Boolean) {
+        val changed = if (live) liveThisEpoch.add(sessionId) else liveThisEpoch.remove(sessionId)
+        if (changed) liveSessionsState.value = liveThisEpoch.toSet()
+    }
+
+    /** T6.3: nothing is live (the socket, its epoch or the server went). Caller holds [lock]. */
+    private fun clearLiveLocked() {
+        if (liveThisEpoch.isEmpty()) return
+        liveThisEpoch.clear()
+        liveSessionsState.value = emptySet()
     }
 
     /** The in-memory T13.1 hydration state: per server, like the cursors. Caller holds [lock]. */
@@ -1053,6 +1079,7 @@ class RealTetherClient(
                 if (!sessionStore.has(sessionId) && !sessionStore.isHydrating(sessionId) && tracker.cursorFor(sessionId) != null) {
                     tracker.forget(sessionId)
                     seededFromMirror.remove(sessionId)
+                    setLiveLocked(sessionId, false)
                     if (sessionId in attachedThisEpoch && socketOpen && handshakeDone) fullAttachOn = socket
                 }
                 return@synchronized
@@ -1074,6 +1101,7 @@ class RealTetherClient(
                     tracker.forget(sessionId)
                     seededFromMirror.remove(sessionId)
                     sessionStore.forgetMirrored(sessionId)
+                    setLiveLocked(sessionId, false)
                     if (sessionId in attachedThisEpoch && socketOpen && handshakeDone && socketOrigin == origin) fullAttachOn = socket
                 }
                 is SessionStore.HydrationOutcome.Ready -> {
@@ -1546,6 +1574,7 @@ class RealTetherClient(
         socketOrigin = null
         socketOpen = false
         handshakeDone = false
+        clearLiveLocked()
         pingTask?.cancel()
         pingTask = null
         // Replies to node requests can only come on the socket that carried them:
@@ -1845,6 +1874,7 @@ class RealTetherClient(
                 // A new epoch: nothing is attached on this socket yet.
                 epoch++
                 attachedThisEpoch.clear()
+                clearLiveLocked()
                 // A probe from the previous socket must not judge this one.
                 pingTask?.cancel()
                 pingTask = null
@@ -2035,6 +2065,7 @@ class RealTetherClient(
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
             handshakeDone = true
+            decidedState.value = consentLedger.keysFor(socketOrigin)
             // A handshake the server accepted is the success that resets backoff.
             backoff.reset()
             val ids = LinkedHashSet<String>()
@@ -2117,6 +2148,9 @@ class RealTetherClient(
             // A state wins over a saved copy still being read and re-bases the tail; details of
             // turns it still trims stay spliced, exactly as the mirror keeps them.
             if (state != null && mirrorLink != null) shown = sessionStore.rebase(message.sessionId, state, message.trimmedBefore)
+            // T6.3: a stateless reply proves the copy held here is at head, so it is live now; a
+            // state is live once it is published below (never the copy it replaces).
+            if (!message.hasState) setLiveLocked(message.sessionId, true)
             true
         }
         if (!current) return
@@ -2131,6 +2165,7 @@ class RealTetherClient(
         val wrote = ifCurrent(webSocket) {
             sessionStore.setTrimmedBefore(message.sessionId, message.trimmedBefore)
             if (published != null) sessionStore.publish(message.sessionId, published, typed)
+            setLiveLocked(message.sessionId, true)
         }
         if (!wrote || tree == null) return
         // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
@@ -2172,7 +2207,11 @@ class RealTetherClient(
                     if (mirrorLink != null) buffered = sessionStore.bufferIfHydrating(message.sessionId, JsCodec.fromJson(event.raw) as JsObj)
                 }
                 // §3.1 rule 1a applies to the gap resync too (on a gap the cursor is decision.afterSeq).
-                if (decision is CursorTracker.Decision.Resync) resyncAfter = afterSeqForLocked(message.sessionId)
+                if (decision is CursorTracker.Decision.Resync) {
+                    resyncAfter = afterSeqForLocked(message.sessionId)
+                    // T6.3: events are missing until the resync snapshot lands.
+                    setLiveLocked(message.sessionId, false)
+                }
             }
         }
         when (decision) {
@@ -2221,6 +2260,7 @@ class RealTetherClient(
             // (no afterSeq — a cursor-at-head attach would come back stateless).
             val current = ifCurrent(webSocket) {
                 sessionStore.drop(message.sessionId)
+                setLiveLocked(message.sessionId, false)
                 // The reducer is the arbiter (§10 C5): the mirrored base goes too.
                 mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
             }
@@ -2596,8 +2636,22 @@ class RealTetherClient(
         sendFrame(ClientMessage.FetchTurns(sessionId, fromIndex, toIndex))
     }
 
-    override fun approval(sessionId: String, requestId: String, choiceId: String?, decision: String?) {
-        sendFrame(ClientMessage.Approval(sessionId, requestId, choiceId, decision))
+    override fun approval(
+        sessionId: String,
+        requestId: String,
+        choiceId: String?,
+        decision: String?,
+        grantedPermissions: GrantedPermissions?,
+    ): ConsentResult {
+        // The wire type refuses both-or-neither and a grant without a choice; refuse before it throws.
+        if ((choiceId == null) == (decision == null) || (grantedPermissions != null && choiceId == null)) {
+            return ConsentResult.InvalidChoice
+        }
+        val message = ClientMessage.Approval(sessionId, requestId, choiceId, decision, grantedPermissions)
+        return transmitConsent(sessionId, requestId, message) { tree ->
+            val request = ConsentGuard.pendingApproval(tree, requestId) ?: return@transmitConsent ConsentResult.NotPending
+            ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions)
+        }
     }
 
     override fun answerQuestion(
@@ -2605,8 +2659,52 @@ class RealTetherClient(
         requestId: String,
         answers: Map<String, String>,
         response: String?,
-    ) {
-        sendFrame(ClientMessage.Question(sessionId, requestId, answers, response))
+    ): ConsentResult {
+        val message = ClientMessage.Question(sessionId, requestId, answers, response)
+        return transmitConsent(sessionId, requestId, message) { tree ->
+            val request = ConsentGuard.pendingQuestion(tree, requestId) ?: return@transmitConsent ConsentResult.NotPending
+            // An answer already on record (question_answered, from this or another device) closes it.
+            if (ConsentGuard.isAnswered(tree, requestId)) return@transmitConsent ConsentResult.NotPending
+            ConsentGuard.checkQuestion(request, answers)
+        }
+    }
+
+    /**
+     * T6.3 (SYNC_DESIGN §5.1 I2/I3): the one path an operator decision takes to the wire. Under
+     * the lock, in order: a live, handshaken socket; the session confirmed on it ([liveThisEpoch]);
+     * not read-only or handed off; not already decided here; pending in the current state with an
+     * offered choice ([check]); then claimed in the ledger and enqueued on that socket. A frame the
+     * socket refuses releases its claim (nothing left the device). Nothing is retried, held or
+     * persisted, and nothing about the decision is logged.
+     */
+    private inline fun transmitConsent(
+        sessionId: String,
+        requestId: String,
+        message: ClientMessage,
+        check: (JsObj?) -> ConsentResult?,
+    ): ConsentResult {
+        val text = message.encode()
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone) return@synchronized ConsentResult.NotConnected
+            if (sessionId !in liveThisEpoch) return@synchronized ConsentResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId }
+            if (session != null && (session.readOnly || !session.handedOffTo.isNullOrEmpty())) return@synchronized ConsentResult.Locked
+            val key = ConsentLedger.key(origin, sessionId, requestId)
+            if (consentLedger.contains(key)) return@synchronized ConsentResult.AlreadyDecided
+            check(sessionStore.tree(sessionId))?.let { return@synchronized it }
+            if (!consentLedger.claim(key)) return@synchronized ConsentResult.AlreadyDecided
+            if (!ws.send(text)) {
+                consentLedger.release(key)
+                return@synchronized ConsentResult.NotConnected
+            }
+            decidedState.value = consentLedger.keysFor(origin)
+            ConsentResult.Sent
+        }
+        // use-tether.ts:325-328: the web's words when the link is down; the decision is not kept.
+        if (result == ConsentResult.NotConnected) emitError("The secure link is reconnecting. Your input was not sent.")
+        return result
     }
 
     override fun createSession(provider: String, cwd: String?, name: String?) {

@@ -2,13 +2,12 @@ package com.tether.app.ui.chat
 
 import androidx.compose.runtime.Immutable
 import com.tether.app.protocol.helpers.MessageTime
-import com.tether.app.protocol.model.PendingApproval
-import com.tether.app.protocol.model.PendingQuestion
-import com.tether.app.protocol.model.PermissionDenialProjection
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.reduce.collectSubagentRuns
+import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
@@ -92,20 +91,44 @@ internal sealed interface ChatItem {
         override val key: String get() = "$turnId/review/${review.reviewId}"
     }
 
-    data class Denial(val turnId: String, val index: Int, val denial: PermissionDenialProjection, override val startsGroup: Boolean) : ChatItem {
-        override val key: String get() = "$turnId/denial/$index"
+    /**
+     * T6.3: a permission denial, placed after the call it refused (denial-target-model.mjs
+     * placeDenials): [nested] inside an open activity group, else in its turn; [turnId] null for a
+     * homeless one below the transcript. [ordinal] keeps a repeated toolId's key unique.
+     */
+    data class Denial(
+        val turnId: String?,
+        val denial: DenialView,
+        val target: DenialTarget?,
+        val run: RunRef?,
+        val nested: Boolean,
+        override val startsGroup: Boolean,
+        override val tight: Boolean = false,
+        val ordinal: Int = 0,
+    ) : ChatItem {
+        override val key: String
+            get() = (if (turnId != null) "$turnId/denial/" else "late-denial/") + denial.toolId + (if (ordinal > 0) "#$ordinal" else "")
+    }
+
+    /** T6.3: a v104 answered-question record, in its AskUserQuestion slot or at its turn's tail. */
+    data class Answered(val turnId: String, val answered: AnsweredView, override val startsGroup: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/answered/${answered.requestId}"
     }
 
     data class Retry(val turn: TurnProjection, override val startsGroup: Boolean) : ChatItem {
         override val key: String get() = "${turn.turnId}/retry"
     }
 
-    data class Approval(val turnId: String, val approval: PendingApproval, override val startsGroup: Boolean) : ChatItem {
-        override val key: String get() = "$turnId/approval/${approval.requestId}"
+    /** T6.3: the active turn's pending approval, below the transcript (a `.chat-scroll` child). */
+    data class Approval(val approval: ApprovalView) : ChatItem {
+        override val key: String get() = "approval/${approval.requestId}"
+        override val startsGroup: Boolean get() = true
     }
 
-    data class Question(val turnId: String, val question: PendingQuestion, override val startsGroup: Boolean) : ChatItem {
-        override val key: String get() = "$turnId/question/${question.requestId}"
+    /** T6.3: the active turn's pending question; [answered] when an answer is already on record. */
+    data class Question(val question: QuestionRequestView, val answered: Boolean) : ChatItem {
+        override val key: String get() = "question/${question.requestId}"
+        override val startsGroup: Boolean get() = true
     }
 
     data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean) : ChatItem {
@@ -168,7 +191,13 @@ internal fun blockTimeLabel(tree: JsObj?, turn: TurnProjection, blockId: String,
  * [showThinking] and non-empty; a message only with text or the interrupted mark; AskUserQuestion's
  * card suppressed — the question card stands in). A hidden block still breaks a run, as on the web.
  * Then, for a rich Codex session ([richCodex]), the turn's plan, aggregate diff and reviews;
- * denials, the api-retry marker, pending approval/question cards (T6.3) and a non-ok outcome.
+ * denials, the api-retry marker and a non-ok outcome.
+ *
+ * T6.3: a permission denial follows the call it refused (placeDenials; inside an open group, after
+ * its block), else trails its turn; an answered AskUserQuestion shows its record in the tool's slot
+ * (or at the turn's tail when the block is gone). Below every turn: the homeless denials, then the
+ * ACTIVE turn's pending approvals (unless [showApprovals] is off: `interactiveApprovals === false`)
+ * and questions, as chat-view.tsx:3544-3662 orders them.
  */
 internal fun buildChatItems(
     projection: SessionProjection,
@@ -177,11 +206,26 @@ internal fun buildChatItems(
     zone: ZoneId = ZoneId.systemDefault(),
     richCodex: Boolean = false,
     groupOpen: (key: String, default: Boolean) -> Boolean = { _, default -> default },
+    showApprovals: Boolean = true,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     val trimmed = trimmedTurnCount(projection)
     if (trimmed > 0) items.add(ChatItem.LoadEarlier(trimmed))
+    // T6.3: the cards read the tree (the typed projection's when there is none).
+    val state = cardTree(projection, tree)
+    val placement = placeDenials(state)
+    val runs by lazy(LazyThreadSafetyMode.NONE) { collectSubagentRuns(projection) }
+    val denialKeys = HashMap<String, Int>()
+    fun runFor(d: DenialView): RunRef? =
+        if (!d.subagent) null else runs.firstOrNull { it.thread?.entries?.containsKey(d.toolId) == true }?.let { RunRef(it.runId, it.title) }
+    fun denialItem(turnId: String?, turnObj: JsObj?, d: DenialView, nested: Boolean, startsGroup: Boolean, tight: Boolean): ChatItem.Denial {
+        val base = (if (turnId != null) "$turnId/denial/" else "late-denial/") + d.toolId
+        val ordinal = denialKeys.getOrDefault(base, 0).also { denialKeys[base] = it + 1 }
+        val input = if (turnId != null) deniedToolInput(turnObj, d.toolId) else lateDenialToolInput(state, d.toolId)
+        return ChatItem.Denial(turnId, d, denialTarget(input), runFor(d), nested, startsGroup, tight, ordinal)
+    }
     val treeTurns = tree?.get("turnsById") as? JsObj
+    val stateTurns = state["turnsById"] as? JsObj
     projection.turnOrder.forEachIndexed { turnIndex, turnId ->
         if (turnIndex < trimmed) return@forEachIndexed
         val turn = projection.turnsById[turnId] ?: return@forEachIndexed
@@ -191,6 +235,9 @@ internal fun buildChatItems(
             treeBlocks?.get(blockId) as? JsObj ?: turn.blocksById[blockId]?.asTree()
         var first = true
         fun opens(): Boolean = first.also { first = false }
+        val cardTurn = stateTurns?.get(turnId) as? JsObj
+        val turnDenials = placement.byTurn[turnId]
+        val answeredList = (cardTurn?.get("answeredQuestions") as? JsArr)?.mapNotNull { (it as? JsObj)?.let(::answeredView) }.orEmpty()
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
         for (segment in segmentBlocks(turn.blocks, ::rawFor)) {
             when (segment) {
@@ -216,19 +263,29 @@ internal fun buildChatItems(
                         segment.blockIds.forEach { blockId ->
                             val block = turn.blocksById[blockId] ?: return@forEach
                             items.add(ChatItem.Block(turnId, block, "", startsGroup = false, raw = rawFor(blockId), grouped = true))
+                            turnDenials?.byBlock?.get(blockId)?.forEach { d ->
+                                items.add(denialItem(turnId, cardTurn, d, nested = true, startsGroup = false, tight = true))
+                            }
                         }
                     }
                 }
                 is ActivitySegment.Single -> {
                     val blockId = segment.blockId
                     val block = turn.blocksById[blockId] ?: continue
+                    if (block.kind == Vocab.BLOCK_TOOL && block.name == "AskUserQuestion") {
+                        // chat-view.tsx:3383-3393: the answer record takes the suppressed card's slot.
+                        answeredList.firstOrNull { it.toolId == blockId }?.let { items.add(ChatItem.Answered(turnId, it, opens())) }
+                        continue
+                    }
                     val keep = when (block.kind) {
                         Vocab.BLOCK_THINKING -> showThinking && !block.text.isNullOrEmpty()
                         Vocab.BLOCK_MESSAGE -> !block.text.isNullOrEmpty() || block.aborted == true
-                        Vocab.BLOCK_TOOL -> block.name != "AskUserQuestion"
                         else -> true
                     }
-                    if (!keep) continue
+                    if (!keep) {
+                        turnDenials?.byBlock?.get(blockId)?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
+                        continue
+                    }
                     val time = when (block.kind) {
                         Vocab.BLOCK_USER_MESSAGE -> blockTimeLabel(tree, turn, blockId, zone)
                         Vocab.BLOCK_MESSAGE -> if (block.done == true) blockTimeLabel(tree, turn, blockId, zone) else ""
@@ -236,6 +293,7 @@ internal fun buildChatItems(
                     }
                     val raw = if (block.kind == Vocab.BLOCK_TOOL) rawFor(blockId) else null
                     items.add(ChatItem.Block(turnId, block, time, opens(), raw = raw))
+                    turnDenials?.byBlock?.get(blockId)?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
                 }
             }
         }
@@ -249,11 +307,15 @@ internal fun buildChatItems(
             }
             reviews(turnObj).forEach { items.add(ChatItem.TurnReview(turnId, it, opens(), tight())) }
         }
-        turn.permissionDenials.forEachIndexed { index, denial -> items.add(ChatItem.Denial(turnId, index, denial, opens())) }
+        turnDenials?.trailing?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
+        val blocksById = cardTurn?.get("blocksById") as? JsObj
+        answeredList.filter { blocksById?.has(it.toolId) != true }.forEach { items.add(ChatItem.Answered(turnId, it, opens())) }
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))
-        turn.pendingApprovals.values.forEach { items.add(ChatItem.Approval(turnId, it, opens())) }
-        turn.pendingQuestions.values.forEach { items.add(ChatItem.Question(turnId, it, opens())) }
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
     }
+    placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
+    if (showApprovals) pendingApprovals(state).forEach { items.add(ChatItem.Approval(it)) }
+    val answeredIds = answeredRequestIds(state)
+    pendingQuestions(state).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items
 }

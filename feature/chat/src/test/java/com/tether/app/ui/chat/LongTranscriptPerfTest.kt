@@ -98,8 +98,6 @@ class LongTranscriptPerfTest {
                         tree = state.first,
                         showThinking = false,
                         onFetchTurns = NoFetch,
-                        onApproval = NoApproval,
-                        onAnswer = NoAnswer,
                         zone = ChatFixtures.zone,
                         listState = listState,
                         showTimeline = false,
@@ -137,7 +135,5 @@ class LongTranscriptPerfTest {
 
     private companion object {
         val NoFetch: (Int, Int) -> Unit = { _, _ -> }
-        val NoApproval: (String, String?, String?) -> Unit = { _, _, _ -> }
-        val NoAnswer: (String, Map<String, String>, String?) -> Unit = { _, _, _ -> }
     }
 }
