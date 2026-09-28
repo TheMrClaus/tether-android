@@ -4,6 +4,7 @@ import com.tether.app.client.snapshotFrame
 import com.tether.app.client.type
 import com.tether.app.mirror.JournalMirror
 import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsStr
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -116,6 +117,51 @@ class MirrorHydrationTest {
         assertEquals("the cursor never claims more than the DB holds", 3L, attach["afterSeq"]!!.jsonPrimitive.longOrNull)
         h.ws.send(snapshotFrame("s1", 4, state(""","marker":"server"""")))
         h.await(h.client.projectionTrees) { it["s1"]?.get("marker") == JsStr("server") }
+    }
+
+    @Test
+    fun aSeqlessFoldIsNeverRestoredAsCoveredAfterADeath() {
+        // Regression (found by the conformance gate): the seqless event's cursor clear must be
+        // durable BEFORE the fold is shown. With a batch that never commits by itself, a death
+        // right after the fold must still leave no cursor, so the restart re-fetches state
+        // instead of restoring a copy without the fold under a stateless at-head reply.
+        h.close()
+        h = MirrorHarness(batchWindowMs = 60_000)
+        h.startServer()
+        h.boot(ready = ready(sessionJson("s1")))
+        h.client.attach("s1")
+        h.expectFrame("attach")
+        h.ws.send(snapshotFrame("s1", 3, state()))
+        h.serverBarrier()
+        h.dbSession("s1") // flushed: cursor 3
+        h.ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_started","turnId":"t1"}}""")
+        h.serverBarrier()
+        assertEquals(JsStr("t1"), h.client.projectionTrees.value.getValue("s1")["activeTurnId"])
+        h.kill(flushFirst = false)
+        h.boot(ready = ready(sessionJson("s1")))
+        h.client.attach("s1")
+        val attach = attachesFor(h.framesUntilBarrier(), "s1").single()
+        assertNull("the restored copy must not claim to cover the seqless fold", attach["afterSeq"])
+    }
+
+    @Test
+    fun aSeqlessFoldIsShownOnlyOnceItsCursorClearIsCommitted() {
+        h.boot(ready = ready(sessionJson("s1"), sessionJson("s2")))
+        h.client.attach("s1")
+        h.expectFrame("attach")
+        h.ws.send(snapshotFrame("s1", 3, state()))
+        h.serverBarrier()
+        h.dbSession("s1")
+        // Hold the mirror's writer (a saved-copy read of another session blocks it).
+        val gate = CountDownLatch(1)
+        h.mirror.beforeHydrateRead = { gate.await(10, TimeUnit.SECONDS) }
+        h.client.attach("s2")
+        h.ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_started","turnId":"t1"}}""")
+        Thread.sleep(300) // well under the frame thread's bounded wait
+        assertEquals("not shown before the clear is durable", JsNull, h.client.projectionTrees.value.getValue("s1")["activeTurnId"])
+        gate.countDown()
+        h.await(h.client.projectionTrees) { it["s1"]?.get("activeTurnId") == JsStr("t1") }
+        assertNull(h.dbSession("s1")!!.cursor)
     }
 
     @Test

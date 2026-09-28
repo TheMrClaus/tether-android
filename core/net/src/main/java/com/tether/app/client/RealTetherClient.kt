@@ -2018,10 +2018,8 @@ class RealTetherClient(
                     // Its saved copy is being read: fold this on top of it when it lands.
                     if (mirrorLink != null) buffered = sessionStore.bufferIfHydrating(message.sessionId, JsCodec.fromJson(event.raw) as JsObj)
                 }
-                // §3.1 rule 1a applies to the gap resync too.
-                if (decision is CursorTracker.Decision.Resync) {
-                    resyncAfter = if (pendingStore.records.any { it.sessionId == message.sessionId && it.tries > 0 }) null else decision.afterSeq
-                }
+                // §3.1 rule 1a applies to the gap resync too (on a gap the cursor is decision.afterSeq).
+                if (decision is CursorTracker.Decision.Resync) resyncAfter = afterSeqForLocked(message.sessionId)
             }
         }
         when (decision) {
