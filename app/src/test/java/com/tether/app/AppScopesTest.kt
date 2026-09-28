@@ -57,13 +57,13 @@ class AppScopesTest {
 
         // runTest fails on anything uncaught, so returning normally means contained.
         pushScope.launch { throw IllegalStateException("fake-server-content-must-not-be-logged") }.join()
-        // A sibling push job and the app scope carry on.
+        // The push scope and the app scope carry on, and so does a sibling push job.
+        assertTrue(appScope.isActive)
+        assertTrue(pushScope.isActive)
         val sibling = CompletableDeferred<Unit>()
         pushScope.launch { sibling.complete(Unit) }
         sibling.await()
 
-        assertTrue(appScope.isActive)
-        assertTrue(pushScope.isActive)
         val logs = ShadowLog.getLogsForTag(AppScopes.TAG).map { it.msg }
         assertEquals(listOf("Background push job failed: IllegalStateException"), logs)
         assertFalse(logs.any { it.contains("fake-server-content") })
