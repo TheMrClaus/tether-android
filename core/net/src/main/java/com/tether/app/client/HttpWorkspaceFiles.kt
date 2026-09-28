@@ -287,9 +287,8 @@ class HttpWorkspaceFiles(
             val stream = try {
                 source.open()
             } catch (e: IOException) {
-                throw UploadSourceFailed(e)
-            } catch (e: RuntimeException) {
-                // A revoked grant: a failure of this upload (OkHttp only carries IOException).
+                // An unreadable document: this upload's failure, not the server's. (Anything else a
+                // provider throws, a revoked grant's SecurityException, lands in call()'s catch.)
                 throw UploadSourceFailed(e)
             }
             stream.source().use { input ->
