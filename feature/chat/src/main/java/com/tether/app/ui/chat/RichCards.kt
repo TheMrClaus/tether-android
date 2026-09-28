@@ -263,7 +263,7 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val view = remember(block) { fileChangeView(block) }
-    val plan = remember(view) { planDiffCard(view.changes.map { if (it.diff.isEmpty()) emptyList() else parseUnifiedDiff(it.diff) }, headerCost = 1) }
+    val plan = remember(view) { planDiffCard(view.changes.map { it.diff }, headerCost = 1) }
     RichCard(view.failed, "Codex file changes", nested = nested) {
         RichHead("File changes", richStatusText(view.running, view.failed, view.status), view.failed) {
             RichStatusIcon(view.running, view.failed)
@@ -408,8 +408,9 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int =
         // Collapsed, only a peek of rows is built (the clamp shows a few); open, up to [rowLimit].
         var open by remember { mutableStateOf(false) }
         val limit = minOf(rowLimit, file.rows.size)
+        val total = file.totalRows
         TetherExpandableBlock(clamp = toolClamp(), onOpenChange = { open = it }, forceOverflow = limit > DIFF_PEEK_ROWS) {
-            val more = if (open && file.rows.size > limit) moreLinesLabel(file.rows.size - limit) else null
+            val more = if (open && total > limit) moreLinesLabel(total - limit) else null
             UnifiedDiffRows(file.rows, label, if (open) limit else minOf(limit, DIFF_PEEK_ROWS), more)
         }
     }
@@ -500,19 +501,20 @@ private fun DiffMore(text: String) {
 @Composable
 internal fun CodexUnifiedDiff(unifiedDiff: String, label: String = "Turn changes") {
     val t = LocalTetherTokens.current
-    val files = remember(unifiedDiff) { parseUnifiedDiff(unifiedDiff) }
-    if (files.isEmpty()) return
+    // Parsed once, bounded by the card's row budget (R4-M2).
+    val plan = remember(unifiedDiff) { planDiffCard(listOf(unifiedDiff)) }
+    val fileCount = plan.totalFiles
+    if (fileCount == 0) return
     val open = rememberDetailsOpen(true)
     RichCard(false, label) {
-        RichHead(label, "${files.size} file${if (files.size == 1) "" else "s"}", false, Modifier
+        RichHead(label, "${localeCount(fileCount)} file${if (fileCount == 1) "" else "s"}", false, Modifier
             .clickable(role = Role.Button) { open.toggle() }
             .semantics { stateDescription = if (open.value) "Expanded" else "Collapsed" }) {
             HeadIcon(TetherIcons.FileDiff, t.muted, 15.dp)
         }
         if (open.value) {
-            val plan = remember(files) { planDiffCard(listOf(files)) }
             Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                plan.files.single().forEach { planned -> DiffFile(planned.file, "Patch ${files.indexOf(planned.file) + 1}", planned.rows) }
+                plan.files.single().forEach { planned -> DiffFile(planned.file, planned.label, planned.rows) }
                 plan.more?.let { DiffMore(it) }
             }
         }

@@ -560,18 +560,17 @@ class ToolSafetyTest {
     }
 
     @Test fun oneRowBudgetSpansAWholeDiffCard() {
-        val files = parseUnifiedDiff(diffOf(100, 2_000))
-        val plan = planDiffCard(listOf(files))
+        val plan = planDiffCard(listOf(diffOf(100, 2_000)))
         assertEquals(1, plan.files.single().size) // 2,004 rows: the first file takes the whole budget
         assertEquals(DIFF_CARD_MAX_ROWS, plan.files.single().sumOf { it.rows })
         assertEquals(99, plan.hiddenFiles)
         assertEquals("+${"%,d".format(99 * 2_004)} more lines · +99 more files", plan.more)
         // A file-change card: each change's path row costs one, and a change past the budget is not drawn.
-        val changes = (0 until 10).map { parseUnifiedDiff(diffOf(1, 500)) } + List(3) { emptyList() }
+        val changes = (0 until 10).map { diffOf(1, 500) } + List(3) { "" }
         val cards = planDiffCard(changes, headerCost = 1)
         assertTrue(cards.groupsDrawn < changes.size)
         assertEquals(changes.size - cards.groupsDrawn, cards.hiddenFiles)
-        assertEquals(null, planDiffCard(listOf(parseUnifiedDiff(diffOf(2, 10)))).more)
+        assertEquals(null, planDiffCard(listOf(diffOf(2, 10))).more)
     }
 
     @Test fun aHundredFileTurnDiffBuildsAtMostItsBudgetAndOnlyAPeekWhileCollapsed() {

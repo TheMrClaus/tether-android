@@ -79,9 +79,11 @@ internal class PlannedFile(val file: DiffFileView, val label: String, val rows: 
 
 /**
  * A card's diff: per change (a turn diff is one group), the files it draws; [groupsDrawn] leading
- * groups are drawn at all; what the budget left out ([hiddenRows] of [hiddenFiles] undrawn files).
+ * groups are drawn at all; what the budget left out ([hiddenRows] of [hiddenFiles] undrawn files);
+ * [totalFiles] every file the card's diffs hold.
  */
 internal class DiffCardPlan(val files: List<List<PlannedFile>>, val groupsDrawn: Int, val hiddenRows: Int, val hiddenFiles: Int) {
+    val totalFiles: Int get() = files.sumOf { it.size } + hiddenFiles
     val more: String? get() = when {
         hiddenFiles <= 0 -> null
         else -> "${moreLinesLabel(hiddenRows)} · +${localeCount(hiddenFiles)} more file${if (hiddenFiles == 1) "" else "s"}"
@@ -89,36 +91,31 @@ internal class DiffCardPlan(val files: List<List<PlannedFile>>, val groupsDrawn:
 }
 
 /**
- * [DIFF_CARD_MAX_ROWS] handed out in order over [groups] (one per change of a file-change card,
- * whose path row costs [headerCost]; a turn diff is one group with no header): a file gets what
- * is left (a partial file shows its own "+N more lines"); a file or a whole change past the budget
- * is not drawn, and the card-level line counts it (a change with no diff counts as one file).
+ * [DIFF_CARD_MAX_ROWS] handed out in order over [diffs] (one per change of a file-change card,
+ * whose path row costs [headerCost]; a turn diff is one diff with no header), parsed with
+ * [parseUnifiedDiffBounded] so rows past the budget are never built: a file cut short shows its
+ * own "+N more lines"; a file or a whole change past the budget is only counted (a change with no
+ * diff counts as one file).
  */
-internal fun planDiffCard(groups: List<List<DiffFileView>>, budget: Int = DIFF_CARD_MAX_ROWS, headerCost: Int = 0): DiffCardPlan {
+internal fun planDiffCard(diffs: List<String>, budget: Int = DIFF_CARD_MAX_ROWS, headerCost: Int = 0): DiffCardPlan {
     var left = budget
     var hiddenRows = 0
     var hiddenFiles = 0
     var groupsDrawn = 0
-    val out = groups.map { files ->
+    val out = diffs.map { diff ->
         if (left <= 0) {
-            hiddenFiles += maxOf(1, files.size)
-            hiddenRows += files.sumOf { it.rows.size }
+            val counted = parseUnifiedDiffBounded(diff, 0)
+            hiddenFiles += maxOf(1, counted.hiddenFiles)
+            hiddenRows += counted.hiddenRows
             return@map emptyList()
         }
         groupsDrawn++
         left -= headerCost
-        files.mapIndexedNotNull { index, file ->
-            val label = file.newPath ?: file.oldPath ?: "Patch ${index + 1}"
-            if (left <= 0) {
-                hiddenFiles++
-                hiddenRows += file.rows.size
-                null
-            } else {
-                val take = minOf(left, file.rows.size)
-                left -= take
-                PlannedFile(file, label, take)
-            }
-        }
+        val parse = parseUnifiedDiffBounded(diff, maxOf(left, 0))
+        hiddenRows += parse.hiddenRows
+        hiddenFiles += parse.hiddenFiles
+        left -= parse.files.sumOf { it.rows.size }
+        parse.files.mapIndexed { index, file -> PlannedFile(file, file.newPath ?: file.oldPath ?: "Patch ${index + 1}", file.rows.size) }
     }
     return DiffCardPlan(out, groupsDrawn, hiddenRows, hiddenFiles)
 }
@@ -236,62 +233,122 @@ internal fun jsTrim(s: String): String {
 @Immutable
 data class UnifiedDiffRow(val kind: String, val marker: String, val text: String)
 
+/**
+ * One diff file. [totalRows]: every row the file has, [rows] only those built (a bounded parse stops
+ * building at the card's budget and only counts the rest).
+ */
 @Immutable
-data class DiffFileView(val key: String, val oldPath: String?, val newPath: String?, val rows: List<UnifiedDiffRow>)
+data class DiffFileView(val key: String, val oldPath: String?, val newPath: String?, val rows: List<UnifiedDiffRow>, val totalRows: Int = rows.size)
+
+private const val DIFF_GIT_PREFIX = "diff --git a/"
 
 /**
- * `/^diff --git a\/(.+) b\/(.+)$/` with JS semantics: JS `.` excludes only \n \r U+2028 U+2029
- * (Java's also excludes U+0085), and JS `$` is the end of input (Java's also matches before a
- * final line terminator, so a CRLF line would match here and not on the web).
+ * `/^diff --git a\/(.+) b\/(.+)$/` with JS semantics (JS `.` excludes only \n \r U+2028 U+2029;
+ * JS `$` is the end of input), matched in LINEAR time (R4-M1: the regex backtracked quadratically
+ * on `diff --git a/` + N × ` b/` + `\r`, an ANR on the main thread). Equivalent: the greedy first
+ * group ends at the LAST ` b/` that still leaves a non-empty second group, and neither group may
+ * hold a JS line terminator.
  */
-private val DIFF_GIT_HEADER = Regex("^diff --git a/([^\\n\\r\\u2028\\u2029]+) b/([^\\n\\r\\u2028\\u2029]+)\\z")
+internal fun diffGitPaths(line: String): Pair<String, String>? {
+    if (!line.startsWith(DIFF_GIT_PREFIX)) return null
+    for (i in DIFF_GIT_PREFIX.length until line.length) {
+        val c = line[i]
+        if (c == '\n' || c == '\r' || c == '\u2028' || c == '\u2029') return null
+    }
+    val idx = line.lastIndexOf(" b/", line.length - 4)
+    if (idx < DIFF_GIT_PREFIX.length + 1) return null
+    return line.substring(DIFF_GIT_PREFIX.length, idx) to line.substring(idx + 3)
+}
 
 private fun diffPath(line: String): String? {
     val path = jsTrim(line.substring(4).split("\t", limit = 2)[0])
     return if (path == "/dev/null") null else path.replaceFirst(Regex("^[ab]/"), "")
 }
 
+/** A bounded parse: the files begun within the budget, and what was only counted past it. */
+internal class DiffParse(val files: List<DiffFileView>, val hiddenRows: Int, val hiddenFiles: Int)
+
 /** `parseUnifiedDiff`: files → rows, as the web draws them (no highlighting, markers only). */
-internal fun parseUnifiedDiff(unifiedDiff: String?): List<DiffFileView> {
-    if (unifiedDiff.isNullOrEmpty()) return emptyList()
-    class Builder(val key: String, var oldPath: String?, var newPath: String?, val rows: MutableList<UnifiedDiffRow>)
+internal fun parseUnifiedDiff(unifiedDiff: String?): List<DiffFileView> = parseUnifiedDiffBounded(unifiedDiff, Int.MAX_VALUE).files
+
+/**
+ * [parseUnifiedDiff] building at most [rowBudget] rows (R4-M2: 10 MB of `a\n` built five million
+ * row objects on the main thread before any cap applied). Lines are walked with indexOf — never a
+ * split of the whole text. Past the budget, a file already begun keeps counting into its
+ * [DiffFileView.totalRows] (its own "+N more lines"); a file begun past the budget is not built at
+ * all: its rows go to [DiffParse.hiddenRows] and itself to [DiffParse.hiddenFiles].
+ */
+internal fun parseUnifiedDiffBounded(unifiedDiff: String?, rowBudget: Int): DiffParse {
+    if (unifiedDiff.isNullOrEmpty()) return DiffParse(emptyList(), 0, 0)
+    class Builder(val key: String, var oldPath: String?, var newPath: String?, val rows: MutableList<UnifiedDiffRow>, var total: Int)
     val files = ArrayList<Builder>()
     var current: Builder? = null
-    fun openFile(): Builder = current ?: Builder("diff:${files.size}", null, null, ArrayList()).also {
-        current = it
-        files.add(it)
-    }
-    for (line in unifiedDiff.split("\n")) {
-        if (line.startsWith("diff --git ")) {
-            val match = DIFF_GIT_HEADER.find(line)
-            val file = Builder(
-                "diff:${files.size}",
-                match?.groupValues?.get(1),
-                match?.groupValues?.get(2),
-                mutableListOf(UnifiedDiffRow("meta", "·", line)),
-            )
-            current = file
-            files.add(file)
-            continue
-        }
-        val file = openFile()
-        when {
-            line.startsWith("--- ") -> {
-                file.oldPath = diffPath(line)
-                file.rows.add(UnifiedDiffRow("file", "−", line))
+    var skipping = false // the current file was begun past the budget: counted, never built
+    var left = rowBudget
+    var hiddenRows = 0
+    var hiddenFiles = 0
+    val text = unifiedDiff
+    var start = 0
+    while (true) {
+        val nl = text.indexOf('\n', start)
+        val end = if (nl < 0) text.length else nl
+        val header = text.startsWith("diff --git ", start)
+        if (header) {
+            if (left <= 0) {
+                hiddenFiles++
+                hiddenRows++
+                skipping = true
+                current = null
+            } else {
+                val line = text.substring(start, end)
+                val paths = diffGitPaths(line)
+                val file = Builder("diff:${files.size}", paths?.first, paths?.second, mutableListOf(UnifiedDiffRow("meta", "·", line)), 1)
+                left--
+                current = file
+                skipping = false
+                files.add(file)
             }
-            line.startsWith("+++ ") -> {
-                file.newPath = diffPath(line)
-                file.rows.add(UnifiedDiffRow("file", "+", line))
+        } else {
+            if (current == null && !skipping) {
+                if (left <= 0) {
+                    hiddenFiles++
+                    skipping = true
+                } else {
+                    current = Builder("diff:${files.size}", null, null, ArrayList(), 0).also { files.add(it) }
+                }
             }
-            line.startsWith("@@") -> file.rows.add(UnifiedDiffRow("hunk", "·", line))
-            line.startsWith("+") -> file.rows.add(UnifiedDiffRow("add", "+", line.substring(1)))
-            line.startsWith("-") -> file.rows.add(UnifiedDiffRow("delete", "−", line.substring(1)))
-            line.startsWith("\\") -> file.rows.add(UnifiedDiffRow("meta", "·", line))
-            else -> file.rows.add(UnifiedDiffRow("context", " ", if (line.startsWith(" ")) line.substring(1) else line))
+            val file = current
+            if (skipping || file == null) {
+                hiddenRows++
+            } else {
+                file.total++
+                val build = left > 0
+                if (build) left--
+                // Paths still follow a file's own `---` / `+++` lines, built or not.
+                if (build || text.startsWith("--- ", start) || text.startsWith("+++ ", start)) {
+                    val line = text.substring(start, end)
+                    when {
+                        line.startsWith("--- ") -> {
+                            file.oldPath = diffPath(line)
+                            if (build) file.rows.add(UnifiedDiffRow("file", "−", line))
+                        }
+                        line.startsWith("+++ ") -> {
+                            file.newPath = diffPath(line)
+                            if (build) file.rows.add(UnifiedDiffRow("file", "+", line))
+                        }
+                        line.startsWith("@@") -> file.rows.add(UnifiedDiffRow("hunk", "·", line))
+                        line.startsWith("+") -> file.rows.add(UnifiedDiffRow("add", "+", line.substring(1)))
+                        line.startsWith("-") -> file.rows.add(UnifiedDiffRow("delete", "−", line.substring(1)))
+                        line.startsWith("\\") -> file.rows.add(UnifiedDiffRow("meta", "·", line))
+                        else -> file.rows.add(UnifiedDiffRow("context", " ", if (line.startsWith(" ")) line.substring(1) else line))
+                    }
+                }
+            }
         }
+        if (nl < 0) break
+        start = nl + 1
     }
-    return files.map { DiffFileView(it.key, it.oldPath, it.newPath, it.rows.toList()) }
+    return DiffParse(files.map { DiffFileView(it.key, it.oldPath, it.newPath, it.rows.toList(), it.total) }, hiddenRows, hiddenFiles)
 }
 
 @Immutable
