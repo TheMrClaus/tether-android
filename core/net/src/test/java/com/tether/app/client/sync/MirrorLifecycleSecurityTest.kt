@@ -1,7 +1,7 @@
 package com.tether.app.client.sync
 
 import com.tether.app.client.ConnectionState
-import com.tether.app.client.HEALTH_129
+import com.tether.app.client.HEALTH_132
 import com.tether.app.client.LoginResult
 import com.tether.app.client.snapshotFrame
 import java.util.concurrent.CountDownLatch
@@ -47,7 +47,7 @@ class MirrorLifecycleSecurityTest {
             "pinned":false,"runtimeArchived":false,"mode":"headless"}"""
 
     private fun ready(vararg ids: String) =
-        """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[${ids.joinToString(",") { sessionJson(it) }}]}"""
 
     /** A process that leaves s1 mirrored with a cursor, then dies cleanly. */
@@ -166,7 +166,7 @@ class MirrorLifecycleSecurityTest {
         h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // logout
         runBlocking { h.client.logout() }
         // Sign in again to the SAME server while the old read is still held.
-        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_129))
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
         h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=again; Path=/").setBody("{}"))
         h.enqueueConnect()
         val login = Thread { assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") }) }
@@ -194,7 +194,7 @@ class MirrorLifecycleSecurityTest {
         val b = okhttp3.mockwebserver.MockWebServer()
         try {
             b.start()
-            b.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_129))
+            b.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
             b.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=b; Path=/").setBody("{}"))
             b.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
             // In the window after the switch to B and before the mirror re-binds, the UI opens s1.

@@ -44,7 +44,7 @@ class MirrorHydrationTest {
             "pinned":$pinned,"runtimeArchived":false,"mode":"headless"}"""
 
     private fun ready(vararg sessions: String) =
-        """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[${sessions.joinToString(",")}]}"""
 
     private fun event(seq: Long, body: String) = """{"type":"event","sessionId":"s1","event":{$body,"seq":$seq,"ts":$seq}}"""

@@ -81,7 +81,7 @@ class OriginKeyedPendingTest {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     paths += request.path.orEmpty()
                     return when (request.path) {
-                        "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_129)
+                        "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_132)
                         "/api/auth/login" -> MockResponse().setResponseCode(200).setBody("{}")
                             .addHeader("Set-Cookie", "tether_session=parity-fake-cookie-${server.port}; Path=/; HttpOnly")
                         "/api/auth/session" -> {
@@ -967,7 +967,7 @@ class OriginKeyedPendingTest {
         client.start()
         val aws = a.nextSocket()
         aws.send(
-            """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"sessions":[${
+            """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[${
                 createdFrame("a-only-session").substringAfter("\"session\":").removeSuffix("}")
             }],"providers":[{"id":"a-provider","label":"A"}],"workspaceRoot":"/a-root"}""",
         )

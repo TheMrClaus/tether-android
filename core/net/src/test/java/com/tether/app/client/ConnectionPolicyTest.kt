@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.PROTOCOL_VERSION
 import com.tether.app.protocol.ServerMessage
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -45,17 +46,37 @@ class ConnectionPolicyTest {
 
     @Test
     fun windowAcceptsFloorToServerVersionInclusive() {
-        assertNull(Compatibility.evaluate(129, 129))
+        assertNull(Compatibility.evaluate(132, 132))
         assertNull(Compatibility.evaluate(140, 100))
         assertNull(Compatibility.evaluate(serverProtocolVersion = null, nativeProtocolFloor = 129))
-        // ta-s4r: what the deployed server now advertises (lib/protocol.ts PROTOCOL_VERSION 131,
-        // NATIVE_PROTOCOL_FLOOR 129) is inside this app's window.
-        assertNull(Compatibility.evaluate(131, 129))
+        // The window is inclusive at both ends, for any client version.
+        assertNull(Compatibility.evaluate(129, 129, clientVersion = 129))
+    }
+
+    /**
+     * ta-koy: the hello-compat window (lib/hello-compat.mjs) for this app at v132: served when
+     * `floor <= 132 <= server`. What production advertises (tether 79c3d37: PROTOCOL_VERSION 132,
+     * NATIVE_PROTOCOL_FLOOR 129) is inside it, with three versions of floor headroom; a server
+     * still at 129..131 now refuses it (server_too_old), and a floor raised past 132 needs an app
+     * update (client_too_old).
+     */
+    @Test
+    fun helloCompatWindowFor132() {
+        assertEquals(132, PROTOCOL_VERSION)
+        assertNull(Compatibility.evaluate(serverProtocolVersion = 132, nativeProtocolFloor = 129))
+        for (floor in 129..132) assertNull("floor $floor", Compatibility.evaluate(132, floor))
+        for (server in 132..140) assertNull("server $server", Compatibility.evaluate(server, 129))
+        for (server in 129..131) {
+            assertEquals("server $server", IncompatibleReason.ServerTooOld, Compatibility.evaluate(server, 129)!!.reason)
+        }
+        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(133, 133)!!.reason)
+        // The previous app (v129) against the same server is still served: only the app moved.
+        assertNull(Compatibility.evaluate(132, 129, clientVersion = 129))
     }
 
     @Test
     fun windowNamesTheSideThatIsBehind() {
-        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(131, 130)!!.reason)
+        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(134, 133)!!.reason)
         assertEquals(IncompatibleReason.ServerTooOld, Compatibility.evaluate(128, 120, clientVersion = 129)!!.reason)
         // v128 and older servers have no native window at all.
         assertEquals(

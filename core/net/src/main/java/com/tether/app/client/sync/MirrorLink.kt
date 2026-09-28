@@ -21,7 +21,7 @@ import kotlinx.coroutines.CompletableDeferred
  * reducer port changes it, which clears the cursors of local checkpoints. MirrorVersionTest
  * pins the SHA to `parity-corpus/corpus-manifest.json`, so a corpus re-sync must bump it.
  */
-const val REDUCER_CORPUS_SHA = "157b87d99a26b9f7e220c892ca53537ee5775923"
+const val REDUCER_CORPUS_SHA = "79c3d377d2f1e650286092b3387392c15512a843"
 val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$PROTOCOL_VERSION"
 
 /**

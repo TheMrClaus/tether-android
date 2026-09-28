@@ -72,7 +72,7 @@ class RealTetherClientConnectionTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun handshakeIsReadyThenHelloThenAttachAndHelloCarriesAndroid129() {
+    fun handshakeIsReadyThenHelloThenAttachAndHelloCarriesAndroid132() {
         h.enqueueConnect()
         h.newClient()
         h.client.attach("s1") // before any socket: subscribe only
@@ -83,7 +83,7 @@ class RealTetherClientConnectionTest {
 
         // Wire order proves nothing left the client before `ready`: hello is first.
         val hello = h.expectFrame("hello")
-        assertEquals(129L, hello["protocolVersion"]!!.jsonPrimitive.longOrNull)
+        assertEquals(132L, hello["protocolVersion"]!!.jsonPrimitive.longOrNull)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         val a1 = h.expectFrame("attach")
         val a2 = h.expectFrame("attach")

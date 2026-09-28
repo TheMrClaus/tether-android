@@ -84,7 +84,7 @@ class TolerantDecodingTest {
     @Test
     fun malformedListElementIsDroppedNotTheFrame() {
         val ready = parseAs<ServerMessage.Ready>(
-            """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,
+            """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,
                 "sessions":[$SESSION,{"id":"broken"}],"providers":[],"workspaceRoot":"/w"}""",
         )
         assertEquals(listOf("s1"), ready.sessions.map { it.id })

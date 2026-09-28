@@ -33,7 +33,7 @@ class RestoredRecordAtHeadTest {
     private val state = """{"tetherSessionId":"s1","provider":"claude","cwd":"/w","turnOrder":[],"turnsById":{},"queuedMessages":[]}"""
 
     private fun ready(pinned: Boolean = false) =
-        """{"type":"ready","protocolVersion":129,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[{"id":"s1","provider":"claude","name":"one","cwd":"/w","status":"ready","startedAt":1,"updatedAt":1,
             "pinned":$pinned,"runtimeArchived":false,"mode":"headless"}]}"""
 

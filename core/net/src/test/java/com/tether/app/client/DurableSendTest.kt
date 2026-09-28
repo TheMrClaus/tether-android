@@ -421,6 +421,46 @@ class DurableSendTest {
         assertTrue(h.framesUntilBarrier().isEmpty())
     }
 
+    /** [turnState] with a v130 (S13.1-C) `removedQueueIds` list. */
+    private fun stateWithRemovedQueueIds(sessionId: String, vararg removed: String): String =
+        turnState(sessionId).trimEnd().removeSuffix("}") +
+            ""","removedQueueIds":[${removed.joinToString(",") { "\"$it\"" }}]}"""
+
+    /**
+     * ta-srn (T13.3b, SYNC_DESIGN §5.5 / §11 "with S13.1-C"): a queue-add is accepted, its ack is
+     * lost, and it is removed on another device while this one is away. The reconnect snapshot
+     * no longer queues it, but its `removedQueueIds` proves it was accepted: no resend.
+     */
+    @Test
+    fun aQueueAddWithdrawnElsewhereIsNotResentWhenTheSnapshotCarriesRemovedQueueIds() {
+        val (client, ws) = connectedProcess()
+        client.queueAdd("s1", "withdrawn on another device")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        // The ack (queued_message_added) never arrives; the link drops.
+        val ws2 = reconnectAfterDrop(ws, h.scheduler)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 3, stateWithRemovedQueueIds("s1", "other-device-q", queued)))
+        h.serverBarrier(ws2)
+        assertTrue("re-sent a withdrawn queue item", h.framesUntilBarrier().isEmpty())
+        persistedMatches { it.records.isEmpty() }
+    }
+
+    /**
+     * The documented residual on a pre-v130 server (no `removedQueueIds`): the snapshot cannot tell
+     * "withdrawn elsewhere" from "never accepted", so the record is re-sent — once, same key.
+     */
+    @Test
+    fun withoutRemovedQueueIdsAWithdrawnQueueAddIsTheDocumentedResidual() {
+        val (client, ws) = connectedProcess()
+        client.queueAdd("s1", "withdrawn on another device")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        val ws2 = reconnectAfterDrop(ws, h.scheduler)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 3, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertEquals(listOf(queued), h.framesUntilBarrier().map { key(it, "queueId") })
+    }
+
     @Test
     fun aStatelessSnapshotDoesNotAuthoriseRedelivery() {
         val (client, ws) = connectedProcess()
