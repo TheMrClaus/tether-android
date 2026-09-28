@@ -110,9 +110,9 @@ fun ChatScreen(
         consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed)
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
-    // Round 3: ONE saved store for every card of this screen (transcript and run tabs alike), above
-    // the lazy lists and the tab switch, so a narrowed grant outlives a scroll, a tab and a drop.
-    val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
+    // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
+    // H1: above the layout switch), or one saved here when nobody provides it.
+    val cardStates = rememberCardStates()
 
     LaunchedEffect(session?.id, session?.provider) {
         val s = session

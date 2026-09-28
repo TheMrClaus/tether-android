@@ -80,6 +80,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.chat.LocalCardStates
+import com.tether.app.ui.chat.CardStateStore
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.CompositionLocalProvider
 import com.tether.app.ui.shell.ExpandedShell
 import com.tether.app.ui.shell.LinkReadout
 import com.tether.app.ui.shell.rememberPersistedPanels
@@ -103,6 +107,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     val shell = rememberPhoneShellState()
+    // T6.3 round 4 (H1): ONE store for every attention card, here above the phone / expanded switch
+    // and the no-session branch, so a rotation, a window resize across 840dp or a session switch
+    // never drops what the operator ticked (ChatScreen falls back to its own only when unprovided).
+    val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
     val persisted = rememberPersistedPanels(prefs)
@@ -210,16 +218,18 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     )
                 },
                 chat = {
-                    ChatScreen(
-                        vm = vm,
-                        session = session,
-                        projection = projection,
-                        workspaceRoot = workspaceRoot,
-                        prefs = prefs,
-                        modifier = Modifier.fillMaxSize(),
-                        onOpenDrawer = shell::openDrawer,
-                        showWorkspaceHeader = false,
-                    )
+                    CompositionLocalProvider(LocalCardStates provides cardStates) {
+                        ChatScreen(
+                            vm = vm,
+                            session = session,
+                            projection = projection,
+                            workspaceRoot = workspaceRoot,
+                            prefs = prefs,
+                            modifier = Modifier.fillMaxSize(),
+                            onOpenDrawer = shell::openDrawer,
+                            showWorkspaceHeader = false,
+                        )
+                    }
                 },
                 inspector = { session?.let { InterimTelemetry(it) } },
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
