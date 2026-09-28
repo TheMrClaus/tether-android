@@ -139,6 +139,7 @@ object SidebarFixtures {
         activeOnly: Boolean = false,
         unreadOnly: Boolean = false,
         connected: Boolean = true,
+        openingHistoryId: String? = null,
     ): SidebarState {
         val workspaces = SidebarModel.sidebarWorkspaces(pinned, current)
         val rows = SidebarModel.sidebarSessions(
@@ -149,7 +150,7 @@ object SidebarFixtures {
             sessionOrders = orders,
             sort = SidebarSort.Created,
             activeId = activeId,
-            openingHistoryId = null,
+            openingHistoryId = openingHistoryId,
             collator = collator,
         )
         return SidebarState(
@@ -168,6 +169,7 @@ object SidebarFixtures {
             unreadOnly = unreadOnly,
             sessionOrders = orders,
             activeSessionId = activeId,
+            openingHistoryId = openingHistoryId,
             now = NOW,
         )
     }
