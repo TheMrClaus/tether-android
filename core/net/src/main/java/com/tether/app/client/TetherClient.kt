@@ -314,7 +314,33 @@ interface TetherClient {
 
     /** v128 `set-server-settings {pinnedWorkspaces}`: the owner-level kept sidebar workspaces. */
     fun setPinnedWorkspaces(pinned: List<String>): Boolean = false
+
+    // ------------------------------------------------------------------
+    // T5.2 resume: defaults keep other implementations (test doubles) compiling.
+    // ------------------------------------------------------------------
+
+    /**
+     * v89 `resume {historyId, cwd, profileId?}` for a discovered conversation (use-tether.ts
+     * resumeHistory: the profile rides along only when the history names one). Returns whether
+     * the frame was sent; the web's reopen applies its opening state only then.
+     */
+    fun resume(history: HistorySession): Boolean {
+        resumeHistory(history.historyId, history.cwd)
+        return true
+    }
+
+    /**
+     * The server's unicast `created` reply to THIS socket's own create/resume (use-tether.ts
+     * createdSession): the session the operator just deliberately opened. [CreatedReply.seq] is
+     * monotonic, so a resume dedup-hit returning the same session twice is still a fresh reply.
+     */
+    val createdSessions: StateFlow<CreatedReply?> get() = NO_CREATED
 }
+
+/** One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`). */
+data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null)
+
+private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)
 
 private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
 private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = MutableStateFlow(emptyMap())

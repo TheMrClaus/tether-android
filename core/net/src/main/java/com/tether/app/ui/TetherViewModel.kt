@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.CreatedReply
 import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
 import com.tether.app.client.TetherClient
 import com.tether.app.client.isWarning
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.model.HistorySession
 import com.tether.app.ui.prefs.DraftStore
 import com.tether.app.ui.prefs.InMemoryDraftStore
 import kotlinx.coroutines.channels.Channel
@@ -38,6 +40,17 @@ class TetherViewModel(
 
     private val _selectedSessionId = MutableStateFlow<String?>(null)
     val selectedSessionId: StateFlow<String?> = _selectedSessionId.asStateFlow()
+
+    // T5.2 (declared before init: the created collector may run during it).
+    /**
+     * dashboard.tsx:202-206 — the history row the operator just opened, highlighted before the
+     * server has created its live session, so nothing snaps back to the previous chat meanwhile.
+     */
+    private val _openingHistoryId = MutableStateFlow<String?>(null)
+    val openingHistoryId: StateFlow<String?> = _openingHistoryId.asStateFlow()
+
+    /** The newest `created` seq already acted on (a reply that arrived before this VM is not a new one). */
+    private var followedCreatedSeq = 0L
 
     /**
      * Operator-chosen project folder (the folder picker's result). Null means
@@ -163,6 +176,11 @@ class TetherViewModel(
                 _activeToast.value = message
             }
         }
+        // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
+        viewModelScope.launch {
+            val seenSeq = client.createdSessions.value?.seq ?: 0L
+            client.createdSessions.collect { reply -> onCreated(reply, seenSeq) }
+        }
     }
 
     private fun onSessions(list: List<AgentSession>) {
@@ -211,6 +229,8 @@ class TetherViewModel(
     }
 
     fun selectSession(id: String) {
+        // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
+        _openingHistoryId.value = null
         _selectedSessionId.value = id
         loadDraft(id)
         client.attach(id)
@@ -276,11 +296,40 @@ class TetherViewModel(
         viewModelScope.launch {
             _logoutNotice.value = logoutNoticeFor(client.logout())
             _selectedSessionId.value = null
+            _openingHistoryId.value = null
         }
     }
 
     fun dismissLogoutNotice() {
         _logoutNotice.value = null
+    }
+
+    // ------------------------------------------------------------------
+    // T5.2: resume a discovered conversation (dashboard.tsx reopen, use-tether.ts resumeHistory).
+    // ------------------------------------------------------------------
+
+    /**
+     * dashboard.tsx:394-409: send `resume`; only if it went out, the row becomes the opening one
+     * and the current selection clears (the transcript waits for the server's `created`). A
+     * refusal (history gone, recoverable work elsewhere) arrives as an `error` toast and leaves
+     * the row opening, as on the web. Returns whether the frame was sent.
+     */
+    fun resumeHistory(history: HistorySession): Boolean {
+        if (!client.resume(history)) return false
+        _openingHistoryId.value = history.historyId
+        _selectedSessionId.value = null
+        return true
+    }
+
+    /** dashboard.tsx:708-722: the unicast reply is a deliberate target; it outranks the rest. */
+    private fun onCreated(reply: CreatedReply?, seenAtStart: Long) {
+        if (reply == null || reply.seq <= maxOf(seenAtStart, followedCreatedSeq)) return
+        followedCreatedSeq = reply.seq
+        _openingHistoryId.value = null
+        // The provider picker's create-then-select may already have landed on it.
+        if (knownIdsBeforeCreate != null && client.sessions.value.any { it.id == reply.session.id }) knownIdsBeforeCreate = null
+        if (_selectedSessionId.value == reply.session.id) return
+        selectSession(reply.session.id)
     }
 }
 

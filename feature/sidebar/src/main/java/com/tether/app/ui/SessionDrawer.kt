@@ -64,7 +64,8 @@ fun SessionDrawer(
         )
     }
 
-    var openingHistoryId by remember { mutableStateOf<String?>(null) }
+    // T5.2: the resumed row stays highlighted until its `created` reply (TetherViewModel).
+    val openingHistoryId by vm.openingHistoryId.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
     var harness by remember { mutableStateOf<String?>(null) }
     var providerPicker by remember { mutableStateOf(false) }
@@ -137,15 +138,6 @@ fun SessionDrawer(
     LaunchedEffect(active?.historyId, active?.status, active?.updatedAt) {
         active?.let { controller.onActiveSettled(it) }
     }
-    // A resumed history opens once its live session arrives (the web's openingHistoryId).
-    LaunchedEffect(sessions, openingHistoryId) {
-        val opening = openingHistoryId ?: return@LaunchedEffect
-        sessions.firstOrNull { it.historyId == opening }?.let {
-            openingHistoryId = null
-            onSelect(it.id)
-        }
-    }
-
     SessionSidebar(
         state = state,
         modifier = modifier,
@@ -157,7 +149,7 @@ fun SessionDrawer(
             sessionOrders = sessionOrders,
             onClose = onClose,
             onSelect = onSelect,
-            onOpening = { openingHistoryId = it },
+            onResume = vm::resumeHistory,
             onQuery = { query = it },
             onHarness = { harness = it },
             onNewSession = { providerPicker = true },

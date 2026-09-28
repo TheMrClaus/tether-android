@@ -112,6 +112,9 @@ data class HistorySession(
     val lastSeenAt: Long? = null,
     val origin: String? = null,
     val spawnedBy: HistorySpawnLink? = null,
+    // T5.2: v89 (issue #105) the profile the transcript was written under; absent for the
+    // implicit default profile. Sent back on `resume` (use-tether.ts resumeHistory).
+    val profileId: String? = null,
 )
 
 /** v122 HistorySession.spawnedBy (lib/protocol.ts HistorySpawnLink). */

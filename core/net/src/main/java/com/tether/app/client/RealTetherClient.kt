@@ -330,6 +330,11 @@ class RealTetherClient(
     override val remoteSeen: StateFlow<Map<String, Long>> = sidebarSync.remoteSeen
     override val serverSettings: StateFlow<ServerMessage.ServerSettings?> = sidebarSync.serverSettings
 
+    // T5.2: the unicast `created` reply to this socket's own create/resume (use-tether.ts:291).
+    private val createdState = MutableStateFlow<CreatedReply?>(null)
+    private var createdSeq = 0L
+    override val createdSessions: StateFlow<CreatedReply?> = createdState
+
     init {
         scope.launch {
             combine(settings.baseUrl, settings.credential) { base, credential ->
@@ -635,6 +640,7 @@ class RealTetherClient(
         sessionControlsState.value = emptyMap()
         trimmedBeforeState.value = emptyMap()
         sidebarSync.clear()
+        createdState.value = null
     }
 
     /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
@@ -1605,7 +1611,11 @@ class RealTetherClient(
             // Liveness confirmed: lastInboundAt was stamped for this frame already,
             // so an outstanding probe sees the link alive. Nothing else to do.
             is ServerMessage.Pong -> Unit
-            is ServerMessage.Created -> ifCurrent(webSocket) { upsertSessionLocked(message.session) }
+            is ServerMessage.Created -> ifCurrent(webSocket) {
+                upsertSessionLocked(message.session)
+                createdSeq += 1
+                createdState.value = CreatedReply(message.session, createdSeq, message.requestId)
+            }
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {
                     // use-tether.ts:827 — an archived session refuses every send: drop its records.
@@ -2192,6 +2202,10 @@ class RealTetherClient(
     override fun resumeHistory(historyId: String, cwd: String) {
         sendFrame(ClientMessage.Resume(historyId, cwd))
     }
+
+    /** T5.2: use-tether.ts:1489-1495 — the profile rides along only when the history names one. */
+    override fun resume(history: HistorySession): Boolean =
+        sendFrame(ClientMessage.Resume(history.historyId, history.cwd, history.profileId?.takeIf { it.isNotEmpty() }))
 
     override fun discover(cwd: String) {
         sendFrame(ClientMessage.Discover(cwd))

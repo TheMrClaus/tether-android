@@ -154,7 +154,7 @@ class SidebarControllerTest {
         sessionOrders = orders,
         onClose = { closed += "close" },
         onSelect = { closed += "select:$it" },
-        onOpening = { closed += "opening:$it" },
+        onResume = { history -> client.resume(history).also { sent -> if (sent) closed += "opening:${history.historyId}" } },
         onQuery = {},
         onHarness = {},
         onNewSession = { closed += "new" },
@@ -202,6 +202,30 @@ class SidebarControllerTest {
         assertEquals(listOf("resume", "mark-seen"), client.types())
         assertEquals(frame("""{"type":"resume","historyId":"hist-9","cwd":"${F.APP}"}"""), client.frames.first())
         assertEquals(listOf("opening:hist-9", "close"), log)
+    }
+
+    @Test fun aResumeThatWasNotSentIsNotMarkedSeenAndKeepsTheDrawerOpen() {
+        // dashboard.tsx:400 `if (resumeHistory(history))` — the rest only when the frame went out.
+        client.resumeSends = false
+        val log = mutableListOf<String>()
+        actions(closed = log).onReopenHistory(F.history("hist-9", "old", cwd = F.DOCS, ago = 60))
+        assertEquals("its block still becomes current", listOf(F.DOCS), selected)
+        assertTrue(client.types().toString(), client.types().none { it == "resume" || it == "mark-seen" })
+        assertTrue(log.toString(), log.isEmpty())
+        assertEquals(null, prefs.lastSeenSessions["hist-9"])
+    }
+
+    @Test fun aProfilePinnedHistoryResumesOntoItsProfile() {
+        // v89 use-tether.ts:1494: profileId rides along only when the history names one.
+        actions().onReopenHistory(F.history("hist-p", "on a profile", cwd = F.APP, ago = 60).copy(profileId = "work"))
+        actions().onReopenHistory(F.history("hist-d", "default profile", cwd = F.APP, ago = 60).copy(profileId = ""))
+        assertEquals(
+            listOf(
+                frame("""{"type":"resume","historyId":"hist-p","cwd":"${F.APP}","profileId":"work"}"""),
+                frame("""{"type":"resume","historyId":"hist-d","cwd":"${F.APP}"}"""),
+            ),
+            client.frames.filter { (it["type"] as JsonPrimitive).content == "resume" },
+        )
     }
 
     @Test fun plusOnABlockMakesItCurrentThenOpensTheComposer() {

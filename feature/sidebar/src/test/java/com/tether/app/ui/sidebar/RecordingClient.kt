@@ -1,6 +1,7 @@
 package com.tether.app.ui.sidebar
 
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.CreatedReply
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.TetherClient
@@ -101,6 +102,23 @@ class RecordingClient(
     override fun requestServerSettings(): Boolean {
         record(ClientMessage.ServerSettingsRequest)
         return true
+    }
+
+    /** T5.2: false models a socket that refused the frame (nothing recorded). */
+    var resumeSends = true
+
+    override fun resume(history: HistorySession): Boolean {
+        if (!resumeSends) return false
+        record(ClientMessage.Resume(history.historyId, history.cwd, history.profileId?.takeIf { it.isNotEmpty() }))
+        return true
+    }
+
+    override val createdSessions = MutableStateFlow<CreatedReply?>(null)
+
+    /** The server's unicast `created` reply: the session joins the list, then the reply lands (RealTetherClient order). */
+    fun created(session: AgentSession) {
+        sessions.value = listOf(session) + sessions.value.filter { it.id != session.id }
+        createdSessions.value = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1)
     }
 
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean {

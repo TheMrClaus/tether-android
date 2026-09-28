@@ -7,6 +7,7 @@ import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.helpers.JsCollator
 import com.tether.app.protocol.helpers.SidebarWorkspaces
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.prefs.TetherPreferences
@@ -195,7 +196,8 @@ class SidebarController(
         sessionOrders: Map<String, List<String>>,
         onClose: () -> Unit,
         onSelect: (String) -> Unit,
-        onOpening: (String) -> Unit,
+        /** T5.2: TetherViewModel.resumeHistory — sends `resume`; true when it went out. */
+        onResume: (HistorySession) -> Boolean,
         onQuery: (String) -> Unit,
         onHarness: (String?) -> Unit,
         onNewSession: () -> Unit,
@@ -225,13 +227,14 @@ class SidebarController(
             if (target != null) focusWorkspaceFor(target.cwd, workspaces, current)
             markSeen(target?.historyId)
         },
-        // dashboard.tsx:396-409 — resume a history row into a live session.
+        // dashboard.tsx:394-409 — resume a history row into a live session: the block that owns
+        // it becomes current; only a sent `resume` marks it seen, opens it and closes the drawer.
         onReopenHistory = { history ->
             focusWorkspaceFor(history.cwd, workspaces, current)
-            client.resumeHistory(history.historyId, history.cwd)
-            markSeen(history.historyId)
-            onOpening(history.historyId)
-            onClose()
+            if (onResume(history)) {
+                markSeen(history.historyId)
+                onClose()
+            }
         },
         // dashboard.tsx:1311-1314 — the row's own two-tap arm (or the swipe) IS the confirmation.
         onEndSession = { id -> client.kill(id) },
