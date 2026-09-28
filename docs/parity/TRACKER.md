@@ -300,6 +300,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 | Full matrix lives in `MATRIX.md`/`matrix.json` (generated) + one bead per row under epic `MATRIX`, rows parked `deferred`; TRACKER keeps only the summary | 291 rows don't fit a hand-kept table; bd v1.3.0 leaked `open`+blocks rows into `bd ready` | claude-main (T0.5) |
 | 2026-09-26 | Generated corpora (`parity-corpus/`) are **gitignored in tether** and vendored into the Android repo; the tether PR carries only the scripts + tests | Keeps the tether PR reviewable; Android pins the corpus by manifest SHA | claude-main |
 | 2026-09-26 | T0.1 baseline keeps Android timeline story-point limits 270/320 (owner bump in 0.5.0.1) and fixes the stale test; the web's 220/260 is flagged on T6.5 | T0.1 is "build as-is"; parity decisions belong to the surface task | claude-main |
+| 2026-09-28 | S10.1 (tether#208): a passkey sign-in from the **Android app origin** (`android:apk-key-hash:`) yields a **device-grade** session (refused by owner-only routes: pairing mint, passkey register, sign-in methods, session revoke, nodes); web/browser passkey sessions unchanged. Owner may overturn | Security review M1: an owner-grade cookie stored in app data would break tether's documented "phones are device-grade" invariant | claude-main (coordinator default) |
 
 ## Session log (append-only)
 
