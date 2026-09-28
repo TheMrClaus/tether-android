@@ -194,7 +194,9 @@ mapping, the status vocabulary, CAS guards and the worktree/sync rules are in
    `main` when the task is DONE and CI is green (fast-forward or squash). The TRACKER on
    `main` is canonical. Server-side (tether repo) tasks go on `android-parity/<task-id>` in
    `~/git/tether` and ship as a PR — **never commit straight to tether `main`**, never
-   restart the production service; the owner merges/deploys.
+   restart the production service. Since 2026-09-29 the coordinator merges a tether PR once
+   it is VERIFIED (different-actor verifier + security review where relevant), pinned to the
+   verified head; **deploying/restarting production stays the owner's**.
 10. **Parity matrix is part of the tracker:** when a web feature is ported, flip its matrix
     row and link the task.
 

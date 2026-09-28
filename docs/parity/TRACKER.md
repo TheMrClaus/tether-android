@@ -36,8 +36,7 @@ security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rew
 (server now protocol **132**, `NATIVE_PROTOCOL_FLOOR = 129` = exactly what the app speaks - no headroom, see ta-koy). `/.well-known/assetlinks.json`
 serves 200 on the box; the **public URL still redirects to the SSO gateway** until the owner adds the one-path bypass rule.
 **v0.7.3 is PUBLISHED** (owner). Drafts 0.7.0-0.7.2 superseded.
-**Merged since takeover:** ta-hra (`6f587f7`). **Verified + open for the owner:** none on tether yet - tether#209 (ta-4sx/ta-06a/ta-eh2 auth hardening,
-SECURITY-CLEAR) re-verifying after the restart. **In flight:** T6.3 round 4 (every grant now needs an unsaved confirmation - Decision log;
+**Merged since takeover:** ta-hra (`6f587f7`). **tether#209 MERGED** (`9fe90ce`, coordinator, owner-authorised) - ta-4sx/ta-06a/ta-eh2 auth hardening; deploy is the owner's. **In flight:** T6.3 round 4 (every grant now needs an unsaved confirmation - Decision log;
 store hoisted above the layout switch), ta-js0 + ta-epo (SECURITY-CLEAR; re-verifying after the restart).
 Filed today: ta-jt9, ta-dto, ta-8m1 + ta-ej3 (P1, tether service-origin isolation; ta-ej3 needs an owner decision), ta-9qt.
 **Owner queue (report, not act):** (0) SSO gateway bypass for exactly `/.well-known/assetlinks.json` (rule prepared by Ops). Push is blocked on Firebase provisioning (production has no FCM config at all: create the
@@ -305,6 +304,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 | T0.1 baseline keeps Android timeline story-point limits 270/320 (owner bump in 0.5.0.1) and fixes the stale test; the web's 220/260 is flagged on T6.5 | T0.1 is "build as-is"; parity decisions belong to the surface task | claude-main |
 | 2026-09-28 | S10.1 (tether#208): a passkey sign-in from the **Android app origin** (`android:apk-key-hash:`) yields a **device-grade** session (refused by owner-only routes: pairing mint, passkey register, sign-in methods, session revoke, nodes); web/browser passkey sessions unchanged. Owner may overturn | Security review M1: an owner-grade cookie stored in app data would break tether's documented "phones are device-grade" invariant | claude-main (coordinator default) |
 | 2026-09-28 | T6.3: **every permission-granting choice needs an unsaved confirmation** (full request or subset), reset whenever the card's state is recreated or lost - stricter than the web (web asks only for the full expansion) | Four review rounds found the same class: any loss of card state resets to all-ticked and a further untick made a partial grant that skipped confirmation; this closes the class structurally | claude-main (coordinator default) |
+| 2026-09-29 | Owner authorises the coordinator to **merge verified tether PRs** itself (pinned to the verified head, merge commit); deploying/restarting production remains the owner's. PLAN §3.9 edited | Owner: "From now on you can merge yourself" | owner |
 
 ## Session log (append-only)
 
