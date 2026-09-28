@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -84,6 +86,10 @@ fun ChatScreen(
     val controlsMap by vm.client.sessionControls.collectAsStateWithLifecycle()
     // The v128 projection trees: block `ts` stamps for the bubbles' send times.
     val trees by vm.client.projectionTrees.collectAsStateWithLifecycle()
+
+    // T6.2: tool / attachment / spawned-run media over the paired, no-redirect HTTP path.
+    val context = LocalContext.current
+    val mediaLoader = remember(vm.client) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir) }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val runs = remember(projection) { collectSubagentRuns(projection) }
@@ -143,6 +149,7 @@ fun ChatScreen(
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader) {
             when {
                 session == null -> EmptyCentered(
                     title = "No session selected",
@@ -205,7 +212,10 @@ fun ChatScreen(
                     } else {
                         null
                     },
+                    richCodex = isRichCodexSession(session.provider, session.engineGeneration),
+                    richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                 )
+            }
             }
         }
 

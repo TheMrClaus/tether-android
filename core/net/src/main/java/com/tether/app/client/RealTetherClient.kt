@@ -344,6 +344,9 @@ class RealTetherClient(
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
+    // T6.2: per-file git hunks (git-diff-file) and diff summaries (worktree-diff), per session.
+    private val gitFileDiffsState = MutableStateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>>(emptyMap())
+    private val worktreeDiffsState = MutableStateFlow<Map<String, JsonObject?>>(emptyMap())
     private val errorsFlow = MutableSharedFlow<String>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -369,6 +372,8 @@ class RealTetherClient(
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
+    override val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = gitFileDiffsState
+    override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val errors: SharedFlow<String> = errorsFlow
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
@@ -730,6 +735,8 @@ class RealTetherClient(
         historiesState.value = emptyList()
         directoriesState.value = null
         sessionControlsState.value = emptyMap()
+        gitFileDiffsState.value = emptyMap()
+        worktreeDiffsState.value = emptyMap()
         sidebarSync.clear()
         createdState.value = null
         searchSync.clear()
@@ -1949,6 +1956,17 @@ class RealTetherClient(
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             }
+            // T6.2: use-tether.ts:909-921. A fresh summary drops the session's cached hunks.
+            is ServerMessage.WorktreeDiff -> ifCurrent(webSocket) {
+                worktreeDiffsState.value = worktreeDiffsState.value + (message.sessionId to message.diff)
+                if (gitFileDiffsState.value.containsKey(message.sessionId)) {
+                    gitFileDiffsState.value = gitFileDiffsState.value + (message.sessionId to emptyMap())
+                }
+            }
+            is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
+                val current = gitFileDiffsState.value
+                gitFileDiffsState.value = current + (message.sessionId to ((current[message.sessionId] ?: emptyMap()) + (message.path to message)))
+            }
             // T1.1 modeled the full v129 union; frames this client does not act on
             // yet (and Unknown) stay inert, exactly as before.
             else -> Unit
@@ -2497,6 +2515,16 @@ class RealTetherClient(
         }
     })
 
+    /** T6.2: `/api/tool-media/…`, over [authHttp] with the same per-call (server, credential) read as [files]. */
+    override val toolMedia: ToolMediaSource = HttpToolMedia(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential) }
+        }
+    })
+
     // ------------------------------------------------------------------
     // Fire-and-forget commands
     // ------------------------------------------------------------------
@@ -2574,6 +2602,12 @@ class RealTetherClient(
 
     override fun setModel(sessionId: String, model: String): Boolean =
         sendFrame(ClientMessage.SetModel(sessionId, model))
+
+    override fun requestGitFileDiff(sessionId: String, path: String): Boolean =
+        sendFrame(ClientMessage.GitDiffFileRequest(sessionId, path))
+
+    override fun requestWorktreeDiff(sessionId: String): Boolean =
+        sendFrame(ClientMessage.WorktreeDiffRequest(sessionId))
 
     override fun requestSessionControls(sessionId: String) {
         sendFrame(ClientMessage.SessionControlsRequest(sessionId))

@@ -30,6 +30,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -117,11 +119,24 @@ internal fun ChatTranscript(
     showTimeline: Boolean = true,
     /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
     find: TranscriptFind? = null,
+    richCodex: Boolean = false,
+    richOpencode: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
     val spacing = transcriptSpacing(t, phone)
-    val items = remember(projection, tree, showThinking, zone) { buildChatItems(projection, tree, showThinking, zone) }
+    // T6.2: the reader's activity-group toggles, each remembered with the default it overrode
+    // (a `<details open={default}>` resets when its default changes, as React drives it).
+    var groupToggles by rememberSaveable(stateSaver = GroupTogglesSaver) { mutableStateOf(emptyMap<String, GroupToggle>()) }
+    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles) {
+        buildChatItems(projection, tree, showThinking, zone, richCodex) { key, default ->
+            groupToggles[key]?.takeIf { it.default == default }?.open ?: default
+        }
+    }
+    val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember {
+        { group -> groupToggles = groupToggles + (group.key to GroupToggle(group.defaultOpen, !group.open)) }
+    }
+    val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
 
     // Story points: the conversation timeline rail (T6.5) indexes operator prompts.
@@ -215,6 +230,7 @@ internal fun ChatTranscript(
                 val gap = when {
                     index + leading == 0 -> 0.dp
                     item.startsGroup -> spacing.scrollGap
+                    item.tight -> t.css.spaceSm
                     else -> spacing.turnGap
                 }
                 val marks = if (find != null && item is ChatItem.Block) {
@@ -229,6 +245,8 @@ internal fun ChatTranscript(
                     onAnswer = onAnswer,
                     modifier = Modifier.padding(top = gap),
                     find = marks,
+                    toolRender = toolRender,
+                    onToggleGroup = onToggleGroup,
                 )
             }
         }
@@ -280,6 +298,8 @@ private fun ChatRow(
     onAnswer: (String, Map<String, String>, String?) -> Unit,
     modifier: Modifier = Modifier,
     find: FindMarks? = null,
+    toolRender: ToolRenderFlags = ToolRenderFlags.Default,
+    onToggleGroup: (ChatItem.ToolGroup) -> Unit = {},
 ) {
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
@@ -294,7 +314,7 @@ private fun ChatRow(
                 Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_THINKING -> ThinkingCard(item.block)
-                Vocab.BLOCK_TOOL -> ToolCard(item.block)
+                Vocab.BLOCK_TOOL -> ToolBlockView(item.raw ?: remember(item.block) { item.block.asTree() }, toolRender, nested = item.grouped)
                 else -> {}
             }
             is ChatItem.Denial -> DenialCard(item.denial)
@@ -308,6 +328,16 @@ private fun ChatRow(
                 onSubmit = { answers, response -> onAnswer(item.question.requestId, answers, response) },
             )
             is ChatItem.Outcome -> OutcomeBadge(item.turn)
+            is ChatItem.ToolGroup -> ToolActivityHeader(
+                summary = item.summary,
+                running = item.running,
+                hasErrors = item.hasErrors,
+                open = item.open,
+                onToggle = { onToggleGroup(item) },
+            )
+            is ChatItem.TurnPlan -> CodexPlanCard(item.plan)
+            is ChatItem.TurnDiff -> CodexUnifiedDiff(item.unifiedDiff)
+            is ChatItem.TurnReview -> CodexReviewCard(item.review)
         }
     }
 }
@@ -344,3 +374,39 @@ internal class TranscriptFind(val results: FindResults, val needle: String, val 
 
 /** How many frames the jump waits for the active mark's text to lay out and report. */
 private const val FIND_REPORT_FRAMES = 10
+
+/** T6.2: which renderer a tool block gets (chat-view.tsx `richCodex` / `richOpencode` gates). */
+@androidx.compose.runtime.Immutable
+internal data class ToolRenderFlags(val richCodex: Boolean, val richOpencode: Boolean, val showThinking: Boolean) {
+    companion object {
+        val Default = ToolRenderFlags(richCodex = false, richOpencode = false, showThinking = false)
+    }
+}
+
+/** `BlockView` for a tool (chat-view.tsx:707-724): the engine's rich card when it has one, else the generic card. */
+@Composable
+internal fun ToolBlockView(block: JsObj, flags: ToolRenderFlags, nested: Boolean = false) {
+    when {
+        flags.richCodex && codexRichToolKind(block) != null -> CodexRichToolCard(block, nested)
+        flags.richOpencode && opencodeRichToolKind(block) != null -> OpencodeRichToolCard(block, nested)
+        else -> ToolCard(block, flags.showThinking, nested = nested)
+    }
+}
+
+/** A reader's toggle of one activity group, and the default it overrode. */
+internal data class GroupToggle(val default: Boolean, val open: Boolean)
+
+internal val GroupTogglesSaver: Saver<Map<String, GroupToggle>, Any> = Saver(
+    save = { map -> ArrayList(map.map { (k, v) -> "${if (v.default) 1 else 0}${if (v.open) 1 else 0}$k" }) },
+    restore = { saved ->
+        @Suppress("UNCHECKED_CAST")
+        (saved as List<String>).associate { it.substring(2) to GroupToggle(it[0] == '1', it[1] == '1') }
+    },
+)
+
+/** The engine gates: `provider` + `engineGeneration` (chat-view.tsx:2122-2127). */
+fun isRichCodexSession(provider: String?, engineGeneration: String?): Boolean =
+    provider == "codex" && engineGeneration == "codex-app-server-v2"
+
+fun isRichOpencodeSession(provider: String?, engineGeneration: String?): Boolean =
+    provider == "opencode" && engineGeneration == "opencode-serve-v2"

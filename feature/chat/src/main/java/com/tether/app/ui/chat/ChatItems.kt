@@ -29,6 +29,9 @@ internal sealed interface ChatItem {
     val key: String
     val startsGroup: Boolean
 
+    /** T6.2: spaced by `space-sm` (inside an activity group or a turn's rich details), not the turn gap. */
+    val tight: Boolean get() = false
+
     /** v115: the "Load N earlier turns" key standing in for the trimmed leading turns. */
     data class LoadEarlier(val count: Int) : ChatItem {
         override val key: String get() = LOAD_EARLIER_KEY
@@ -39,14 +42,54 @@ internal sealed interface ChatItem {
         override val key: String get() = "$turnId/continuation"
     }
 
-    /** A user / agent / thinking / tool block; [timeLabel] is the bubble's `HH:MM` ("" = none). */
+    /**
+     * A user / agent / thinking / tool block; [timeLabel] is the bubble's `HH:MM` ("" = none).
+     * T6.2: [raw] is the block's projection-tree object (tool cards read it with JS semantics);
+     * [grouped] = a tool card inside an open activity group (`.chat-activity-body`).
+     */
     data class Block(
         val turnId: String,
         val block: TurnBlock,
         val timeLabel: String,
         override val startsGroup: Boolean,
+        val raw: JsObj? = null,
+        val grouped: Boolean = false,
     ) : ChatItem {
         override val key: String get() = "$turnId/${block.blockId}"
+        override val tight: Boolean get() = grouped
+    }
+
+    /**
+     * T6.2: a run of consecutive tool calls collapsed into one summary line (chat-view.tsx
+     * `ToolActivityGroup`). Open, its cards follow as [Block] rows with `grouped = true`, so a
+     * long run stays lazy row by row. [defaultOpen]: running, or it holds a Codex file change.
+     */
+    data class ToolGroup(
+        val turnId: String,
+        val firstBlockId: String,
+        val summary: String,
+        val running: Boolean,
+        val hasErrors: Boolean,
+        val defaultOpen: Boolean,
+        val open: Boolean,
+        override val startsGroup: Boolean,
+    ) : ChatItem {
+        override val key: String get() = groupKey(turnId, firstBlockId)
+    }
+
+    /** T6.2: a Codex turn's plan card (`CodexRichTurnDetails`). */
+    data class TurnPlan(val turnId: String, val plan: PlanView, override val startsGroup: Boolean, override val tight: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/plan"
+    }
+
+    /** T6.2: a Codex turn's aggregate "Turn changes" diff (`turn/diff/updated`). */
+    data class TurnDiff(val turnId: String, val unifiedDiff: String, override val startsGroup: Boolean, override val tight: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/diff"
+    }
+
+    /** T6.2: one Codex review (`review_started` / `review_completed`). */
+    data class TurnReview(val turnId: String, val review: ReviewView, override val startsGroup: Boolean, override val tight: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/review/${review.reviewId}"
     }
 
     data class Denial(val turnId: String, val index: Int, val denial: PermissionDenialProjection, override val startsGroup: Boolean) : ChatItem {
@@ -71,6 +114,9 @@ internal sealed interface ChatItem {
 
     companion object {
         const val LOAD_EARLIER_KEY = "load-earlier"
+
+        /** The web's React key `group-<first block id>`, scoped to its turn. */
+        fun groupKey(turnId: String, firstBlockId: String): String = "$turnId/group/$firstBlockId"
     }
 }
 
@@ -116,41 +162,92 @@ internal fun blockTimeLabel(tree: JsObj?, turn: TurnProjection, blockId: String,
 /**
  * The transcript rows for [projection], turn by turn in `turnOrder` (chat-view.tsx:3351-3527):
  * trimmed leading turns collapse into one [ChatItem.LoadEarlier]; each turn yields its
- * continuation marker, its blocks (thinking only when [showThinking] and non-empty; a message only
- * with text or the interrupted mark; AskUserQuestion's tool card suppressed — the question card
- * stands in), denials, the api-retry marker, pending approval/question cards (T6.3) and a non-ok
- * outcome. Tool rows render through T6.2's card; grouping them into activity summaries is T6.2's.
+ * continuation marker, then its blocks segmented like the web's `segmentBlocks` — every run of
+ * consecutive tool calls without media becomes one [ChatItem.ToolGroup] (its cards follow only
+ * while [groupOpen] says it is open), every other block its own row (thinking only when
+ * [showThinking] and non-empty; a message only with text or the interrupted mark; AskUserQuestion's
+ * card suppressed — the question card stands in). A hidden block still breaks a run, as on the web.
+ * Then, for a rich Codex session ([richCodex]), the turn's plan, aggregate diff and reviews;
+ * denials, the api-retry marker, pending approval/question cards (T6.3) and a non-ok outcome.
  */
 internal fun buildChatItems(
     projection: SessionProjection,
     tree: JsObj?,
     showThinking: Boolean,
     zone: ZoneId = ZoneId.systemDefault(),
+    richCodex: Boolean = false,
+    groupOpen: (key: String, default: Boolean) -> Boolean = { _, default -> default },
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     val trimmed = trimmedTurnCount(projection)
     if (trimmed > 0) items.add(ChatItem.LoadEarlier(trimmed))
+    val treeTurns = tree?.get("turnsById") as? JsObj
     projection.turnOrder.forEachIndexed { turnIndex, turnId ->
         if (turnIndex < trimmed) return@forEachIndexed
         val turn = projection.turnsById[turnId] ?: return@forEachIndexed
+        val turnObj = treeTurns?.get(turnId) as? JsObj
+        val treeBlocks = turnObj?.get("blocksById") as? JsObj
+        fun rawFor(blockId: String): JsObj? =
+            treeBlocks?.get(blockId) as? JsObj ?: turn.blocksById[blockId]?.asTree()
         var first = true
         fun opens(): Boolean = first.also { first = false }
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
-        for (blockId in turn.blocks) {
-            val block = turn.blocksById[blockId] ?: continue
-            val keep = when (block.kind) {
-                Vocab.BLOCK_THINKING -> showThinking && !block.text.isNullOrEmpty()
-                Vocab.BLOCK_MESSAGE -> !block.text.isNullOrEmpty() || block.aborted == true
-                Vocab.BLOCK_TOOL -> block.name != "AskUserQuestion"
-                else -> true
+        for (segment in segmentBlocks(turn.blocks, ::rawFor)) {
+            when (segment) {
+                is ActivitySegment.Group -> {
+                    val raws = segment.blockIds.mapNotNull(::rawFor)
+                    if (raws.isEmpty()) continue
+                    val firstId = segment.blockIds.first()
+                    val default = groupOpenByDefault(raws)
+                    val open = groupOpen(ChatItem.groupKey(turnId, firstId), default)
+                    items.add(
+                        ChatItem.ToolGroup(
+                            turnId = turnId,
+                            firstBlockId = firstId,
+                            summary = activitySummary(raws),
+                            running = groupHasRunning(raws),
+                            hasErrors = groupHasErrors(raws),
+                            defaultOpen = default,
+                            open = open,
+                            startsGroup = opens(),
+                        ),
+                    )
+                    if (open) {
+                        segment.blockIds.forEach { blockId ->
+                            val block = turn.blocksById[blockId] ?: return@forEach
+                            items.add(ChatItem.Block(turnId, block, "", startsGroup = false, raw = rawFor(blockId), grouped = true))
+                        }
+                    }
+                }
+                is ActivitySegment.Single -> {
+                    val blockId = segment.blockId
+                    val block = turn.blocksById[blockId] ?: continue
+                    val keep = when (block.kind) {
+                        Vocab.BLOCK_THINKING -> showThinking && !block.text.isNullOrEmpty()
+                        Vocab.BLOCK_MESSAGE -> !block.text.isNullOrEmpty() || block.aborted == true
+                        Vocab.BLOCK_TOOL -> block.name != "AskUserQuestion"
+                        else -> true
+                    }
+                    if (!keep) continue
+                    val time = when (block.kind) {
+                        Vocab.BLOCK_USER_MESSAGE -> blockTimeLabel(tree, turn, blockId, zone)
+                        Vocab.BLOCK_MESSAGE -> if (block.done == true) blockTimeLabel(tree, turn, blockId, zone) else ""
+                        else -> ""
+                    }
+                    val raw = if (block.kind == Vocab.BLOCK_TOOL) rawFor(blockId) else null
+                    items.add(ChatItem.Block(turnId, block, time, opens(), raw = raw))
+                }
             }
-            if (!keep) continue
-            val time = when (block.kind) {
-                Vocab.BLOCK_USER_MESSAGE -> blockTimeLabel(tree, turn, blockId, zone)
-                Vocab.BLOCK_MESSAGE -> if (block.done == true) blockTimeLabel(tree, turn, blockId, zone) else ""
-                else -> ""
+        }
+        if (richCodex && turnObj != null) {
+            // `CodexRichTurnDetails`: one `.turnDetails` stack (space-sm apart) after the blocks.
+            var inDetails = false
+            fun tight(): Boolean = inDetails.also { inDetails = true }
+            transcriptPlan(turnObj)?.takeIf(::planShows)?.let { items.add(ChatItem.TurnPlan(turnId, it, opens(), tight())) }
+            turnUnifiedDiff(turnObj)?.takeIf { it.isNotEmpty() && !hasInlineFileChangeDiffs(turnObj) }?.let {
+                items.add(ChatItem.TurnDiff(turnId, it, opens(), tight()))
             }
-            items.add(ChatItem.Block(turnId, block, time, opens()))
+            reviews(turnObj).forEach { items.add(ChatItem.TurnReview(turnId, it, opens(), tight())) }
         }
         turn.permissionDenials.forEachIndexed { index, denial -> items.add(ChatItem.Denial(turnId, index, denial, opens())) }
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))

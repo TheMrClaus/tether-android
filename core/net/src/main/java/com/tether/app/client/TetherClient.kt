@@ -236,6 +236,29 @@ interface TetherClient {
      */
     val files: WorkspaceFiles get() = WorkspaceFiles.Unavailable
 
+    /**
+     * T6.2: `/api/tool-media/<sha256>.<ext>` (v94 tool results, v112 attachments, v122 spawned
+     * runs) on the paired server, with the credential in force and never following a redirect
+     * (see [HttpToolMedia]). The default refuses every call without touching the network.
+     */
+    val toolMedia: ToolMediaSource get() = ToolMediaSource.Unavailable
+
+    /**
+     * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
+     * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
+     * session's cached hunks, so an expanded file refetches. Emptied with the other server views.
+     */
+    val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> get() = NO_GIT_FILE_DIFFS
+
+    /** T6.2: the latest `worktree-diff` summary per session (raw `WorktreeDiffSummary | null`). */
+    val worktreeDiffs: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> get() = NO_WORKTREE_DIFFS
+
+    /** `git-diff-file` (use-tether.ts:1478): ask for one path's hunks. False when not sent. */
+    fun requestGitFileDiff(sessionId: String, path: String): Boolean = false
+
+    /** `worktree-diff`: ask for the session's diff summary (the host panel is T8.3's). False when not sent. */
+    fun requestWorktreeDiff(sessionId: String): Boolean = false
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------
@@ -388,6 +411,8 @@ private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = Mutab
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
+private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
+private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())
 
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState
