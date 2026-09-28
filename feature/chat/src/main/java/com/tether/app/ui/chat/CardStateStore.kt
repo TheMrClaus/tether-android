@@ -2,6 +2,8 @@ package com.tether.app.ui.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -20,8 +22,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
+/** [s] cut to at most [max] UTF-16 units without splitting a surrogate pair (I-3). */
+internal fun cutCodePoints(s: String, max: Int): String = ConsentGuard.cutCodePoints(s, max)
+
 /*
- * T6.3 round 3: where an attention card's state lives, and under which identity.
+ * T6.3: where an attention card's state lives, and under which identity.
  *
  * Identity. A card's state belongs to ONE request of ONE session: ConsentGuard.cardIdentity =
  * sha256(canonical {"kind":"card", sessionId, activeTurnId, request}), WITHOUT the server origin. A socket drop and a reconnect to the same server keep it (the
@@ -30,13 +35,16 @@ import kotlinx.serialization.json.put
  * carries it too (ChatItem.Approval / Question), so a new request never reuses a row's saved slot.
  *
  * Storage. Not in the lazy row (a row scrolled off screen, or off screen when the app is
- * backgrounded, loses its saved state: LazySaveableStateHolder.performSave) but here, one store per
- * chat screen, saved with the screen, keyed by that identity. Only indices and the operator's own
+ * backgrounded, loses its saved state: LazySaveableStateHolder.performSave) but here: ONE store per
+ * app window, created and saved by MainShell above the phone / expanded layout switch (round 4, H1)
+ * and bound to the configured server (round 5, I-2), keyed by that identity; ChatScreen falls back to
+ * its own only when nobody provides one. Only indices and the operator's own
  * "Other" text are saved, never server text (a huge question cannot overflow the Bundle). What is NOT
  * stored: the "Confirm these permissions" tick and the send latch (see ApprovalCard).
  *
- * Round 4: every grant needs that unsaved confirmation, keyed on the record's generation, so a lost,
- * evicted, created or changed record always also clears it: no state loss can become a silent grant.
+ * Every grant needs that unsaved confirmation (round 4), bound to the record's generation at the
+ * moment it was ticked, and the card re-reads the store at tap time (round 5, F1): a lost, evicted,
+ * created or changed record, even one changed in the same frame as the tap, never sends.
  */
 
 /**
@@ -64,88 +72,138 @@ internal data class QuestionSelection(
 class CardStateStore internal constructor(
     grants: Map<String, GrantSelection> = emptyMap(),
     questions: Map<String, QuestionSelection> = emptyMap(),
+    boundTo: String? = null,
 ) {
     constructor() : this(emptyMap(), emptyMap())
+
+    // Write order, oldest first (a snapshot map iterates in hash order, not insertion order). Seeded
+    // from the constructor's ordered maps (a decoded store keeps its saved order, L-2); declared
+    // before the maps so it exists when they are filled.
+    private val grantOrder = LinkedHashSet(grants.keys)
+    private val questionOrder = LinkedHashSet(questions.keys)
 
     private val grantStates = mutableStateMapOf<String, GrantSelection>().apply { putAll(grants) }
     private val questionStates = mutableStateMapOf<String, QuestionSelection>().apply { putAll(questions) }
 
-    // Round 4: every write, creation or loss of a grant record gets a new generation; the card keys
-    // its (unsaved) confirmation on it, so no change to what is ticked can keep an old confirmation.
+    /** The configured server this store's records belong to (I-2); a different one empties it. */
+    internal var boundTo: String? = boundTo
+        private set
+
+    // Every write, creation or loss of a grant record gets a new generation; the card binds its
+    // (unsaved) confirmation to the generation it was made at. Monotonic, never reused (I-6): a
+    // record's generation is a fresh positive number per write, and "no record" is the NEGATIVE
+    // eviction epoch, which moves on every eviction or clear, so a lost record never looks like the
+    // state a confirmation was made in.
     private var counter = 0L
     private val generations = mutableStateMapOf<String, Long>().apply { grants.keys.forEach { put(it, ++counter) } }
+    private var absentEpoch by androidx.compose.runtime.mutableLongStateOf(0L)
 
     internal fun grant(contentFp: String): GrantSelection = grantStates[contentFp] ?: GrantSelection()
 
-    /** The record's generation; 0 = no record (never written, or lost). */
-    internal fun grantGeneration(contentFp: String): Long = generations[contentFp] ?: 0L
+    /** The record's generation: > 0 for a record, the (<= 0) eviction epoch when there is none. */
+    internal fun grantGeneration(contentFp: String): Long = generations[contentFp] ?: -absentEpoch
 
     internal fun setGrant(contentFp: String, value: GrantSelection) {
-        put(grantStates, contentFp, value)
+        val evicted = put(grantStates, grantOrder, contentFp, value)
         generations[contentFp] = ++counter
-        // An evicted record's generation goes too (0: "no record"), so its card's confirmation resets.
-        generations.keys.filter { it !in grantStates }.forEach { generations.remove(it) }
+        if (evicted.isNotEmpty()) {
+            evicted.forEach { generations.remove(it) }
+            absentEpoch += 1
+        }
     }
 
     internal fun question(contentFp: String): QuestionSelection = questionStates[contentFp] ?: QuestionSelection()
 
-    internal fun setQuestion(contentFp: String, value: QuestionSelection) =
-        put(questionStates, contentFp, value.copy(other = value.other.mapValues { it.value.take(ConsentGuard.MAX_OTHER_CHARS) }))
+    internal fun setQuestion(contentFp: String, value: QuestionSelection) {
+        put(questionStates, questionOrder, contentFp, value.copy(other = value.other.mapValues { cutCodePoints(it.value, ConsentGuard.MAX_OTHER_CHARS) }))
+        trimOtherBudget(keep = contentFp)
+    }
 
-    /** Test seam: forget everything (what an eviction does to a record). */
+    /**
+     * I-5: the saved "Other" text across the store stays under [MAX_OTHER_TOTAL] characters; past it,
+     * the OLDEST records' text goes first (never the card being typed in).
+     */
+    private fun trimOtherBudget(keep: String) {
+        var total = questionStates.values.sumOf { q -> q.other.values.sumOf { it.length } }
+        for (key in questionOrder.toList()) {
+            if (total <= MAX_OTHER_TOTAL) break
+            if (key == keep) continue
+            val q = questionStates[key] ?: continue
+            val size = q.other.values.sumOf { it.length }
+            if (size == 0) continue
+            questionStates[key] = q.copy(other = emptyMap())
+            total -= size
+        }
+    }
+
+    /**
+     * I-2: the records belong to [serverUrl] (the CONFIGURED server, not the socket's origin, so a drop
+     * keeps them); switching to another server empties the store.
+     */
+    fun bindTo(serverUrl: String?) {
+        if (serverUrl == boundTo) return
+        if (boundTo != null) clear()
+        boundTo = serverUrl
+    }
+
+    /** Forget everything (a server switch; and what an eviction does to one record). */
     internal fun clear() {
         grantStates.clear()
         questionStates.clear()
         generations.clear()
-        order.clear()
+        grantOrder.clear()
+        questionOrder.clear()
+        absentEpoch += 1
     }
 
-    // Write order per map (a snapshot map is NOT insertion-ordered): the eviction is oldest first.
-    private val order = HashMap<MutableMap<*, *>, LinkedHashSet<String>>()
-
-    private fun <T> put(map: MutableMap<String, T>, key: String, value: T) {
-        val keys = order.getOrPut(map) { LinkedHashSet(map.keys) }
-        keys.remove(key)
-        keys.add(key) // newest last
+    /** Write [value] as the newest record of [map]; returns the keys evicted past [MAX_RECORDS]. */
+    private fun <T> put(map: MutableMap<String, T>, order: LinkedHashSet<String>, key: String, value: T): List<String> {
+        order.remove(key)
+        order.add(key) // newest last
         map[key] = value
-        while (keys.size > MAX_RECORDS) {
-            val oldest = keys.first()
-            keys.remove(oldest)
+        val evicted = ArrayList<String>()
+        while (order.size > MAX_RECORDS) {
+            val oldest = order.first()
+            order.remove(oldest)
             map.remove(oldest)
+            evicted.add(oldest)
         }
+        return evicted
     }
 
     /** [map]'s records oldest first (so a restored store evicts in the same order). */
-    private fun <T> ordered(map: Map<String, T>): List<Pair<String, T>> {
-        val keys: Collection<String> = order[map as MutableMap<*, *>] ?: map.keys
-        return keys.mapNotNull { k -> map[k]?.let { v -> k to v } }
-    }
+    private fun <T> ordered(map: Map<String, T>, order: Collection<String>): List<Pair<String, T>> =
+        order.mapNotNull { k -> map[k]?.let { v -> k to v } }
 
     internal fun encode(): String = buildJsonObject {
         put("g", buildJsonArray {
-            ordered(grantStates).forEach { (fp, g) ->
+            ordered(grantStates, grantOrder).forEach { (fp, g) ->
                 add(buildJsonArray { add(JsonPrimitive(fp)); add(ints(g.offRead)); add(ints(g.offWrite)); add(JsonPrimitive(g.networkOff)) })
             }
         })
         put("q", buildJsonArray {
-            ordered(questionStates).forEach { (fp, q) ->
+            ordered(questionStates, questionOrder).forEach { (fp, q) ->
                 add(
                     buildJsonArray {
                         add(JsonPrimitive(fp))
                         add(JsonPrimitive(q.page))
                         add(buildJsonObject { q.picks.forEach { (i, l) -> put(i.toString(), ints(l)) } })
-                        add(buildJsonObject { q.other.forEach { (i, t) -> put(i.toString(), JsonPrimitive(t.take(ConsentGuard.MAX_OTHER_CHARS))) } })
+                        add(buildJsonObject { q.other.forEach { (i, t) -> put(i.toString(), JsonPrimitive(cutCodePoints(t, ConsentGuard.MAX_OTHER_CHARS))) } })
                         add(ints(q.skipped))
                         add(JsonPrimitive(q.attempted))
                     },
                 )
             }
         })
+        boundTo?.let { put("b", JsonPrimitive(it)) }
     }.toString()
 
     companion object {
         /** Bound on remembered cards per kind (oldest first out; see the eviction note above). */
         const val MAX_RECORDS = 64
+
+        /** I-5: the saved "Other" text across every question record, in characters. */
+        const val MAX_OTHER_TOTAL = 64_000
 
         private fun ints(values: Collection<Int>) = JsonArray(values.map { JsonPrimitive(it) })
 
@@ -167,7 +225,7 @@ class CardStateStore internal constructor(
                     attempted = a[5].jsonPrimitive.content == "true",
                 )
             }
-            CardStateStore(grants, questions)
+            CardStateStore(grants, questions, (o["b"] as? JsonPrimitive)?.content)
         }.getOrElse { CardStateStore() } // an unreadable record is a fresh (fully ticked, confirm-needing) card
 
         val Saver: Saver<CardStateStore, String> = Saver(save = { it.encode() }, restore = { decode(it) })

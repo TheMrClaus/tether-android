@@ -135,6 +135,13 @@ object ConsentGuard {
     /** Longest "Other" text an answer may carry (the card cuts its field there). */
     const val MAX_OTHER_CHARS = 4_000
 
+    /** [s] cut to at most [max] UTF-16 units, never splitting a surrogate pair (I-3). */
+    fun cutCodePoints(s: String, max: Int): String {
+        if (s.length <= max) return s
+        val end = if (max > 0 && Character.isHighSurrogate(s[max - 1])) max - 1 else max
+        return s.substring(0, end)
+    }
+
     /**
      * How a question request's prompts map to answer SLOTS, as the web keys its state (by question
      * text, chat-view.tsx:965-1128): prompts repeating a text share one slot (its first prompt's
@@ -187,7 +194,8 @@ object ConsentGuard {
             if (slots.slotOf.getOrNull(p.slot) != p.slot || bySlot.put(p.slot, p) != null) return null
             if (p.picks.any { it !in labels.indices } || p.picks.toSet().size != p.picks.size) return null
             if (slots.single[p.slot] == true && p.picks.size > 1) return null
-            if (p.other.length > MAX_OTHER_CHARS) return null
+            // I-3: an "Other" text is one line (an HTML text input holds no line break) and bounded.
+            if (p.other.length > MAX_OTHER_CHARS || p.other.any { it == '\r' || it == '\n' }) return null
         }
         if (skipped.any { slots.slotOf.getOrNull(it) != it }) return null
         val answers = LinkedHashMap<String, String>()

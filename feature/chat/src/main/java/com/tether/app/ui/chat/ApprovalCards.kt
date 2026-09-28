@@ -689,7 +689,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     value = sel.other[slotOf(question)].orEmpty(),
                     // An HTML text input drops line breaks; so does this one. Capped at the guard's limit.
                     onValueChange = { text ->
-                        val clean = text.replace("\r", "").replace("\n", "").take(com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
+                        val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
                         update { it.copy(other = it.other + (slotOf(question) to clean)) }
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
