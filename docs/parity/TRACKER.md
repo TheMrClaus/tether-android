@@ -39,8 +39,8 @@ all. The owner must (1) create/select a Firebase project and register the Androi
 service-account key, (3) set all six values - sender `TETHER_FCM_PROJECT_ID`, `TETHER_FCM_CLIENT_EMAIL`, `TETHER_FCM_PRIVATE_KEY`
 and client `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` - in a root-owned `EnvironmentFile`
 (or the unit's `Environment=`), never a repo `.env.local` agents can read, (4) rebuild + restart, (5) restrict the API key to the
-app package + signing fingerprints. Optional tether private-history scrub. A 0.7.0 **draft** release (signed, unpublished) is
-prepared once CI is green; publishing is the owner's call.
+app package + signing fingerprints. Optional tether private-history scrub. **0.7.0 DRAFT built** (unpublished GitHub draft, code 17, same signing certificate as 0.6.0, from `b60b0d4` = everything through
+ta-g04; T7.1 composer merged after it). Publishing is the owner's call.
 **Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
 line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
@@ -245,6 +245,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-28 | tether#204 (S12.2) merged by the owner's ops agent (tether `2287777`); deploy deferred (a restart would orphan in-flight agent work and buys nothing until Firebase is provisioned). FCM secrets belong in a root-owned EnvironmentFile, not a repo .env.local | Operator-side status report | owner (via ops agent) |
 | 2026-09-28 | T7.1: Escape on a queue row **reverts** the edit. The web intends a revert but actually saves (its blur reads a stale value, chat-view.tsx:1464-1467 at 7d65611; reproduced under React 19 + jsdom by the verifier) | Same rule as T2.1: port the web's intent, not its JS bugs; flag upstream | claude-main (owner delegation) |
 | 2026-09-28 | T7.1: the web's `draft-composer.tsx` / `use-draft-composer.ts` / `use-keyboard-inset.ts` are the **new-session** composer - their matrix rows move to T8.1; T7.1 is the in-session composer from chat-view.tsx | Verified by reading the web at 7d65611 | claude-main (owner delegation) |
+| 2026-09-28 | Built a **0.7.0 DRAFT** release (workflow `draft` mode, version stamped 0.7.0/17 at dispatch, not committed) from green `main` `b60b0d4` so the owner can test overnight work on a device; not published | Owner asked for a live-deployment test list; nothing on main was installable otherwise (a debug APK cannot upgrade the signed 0.6.0) | claude-main (owner delegation) |
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
 | 2026-09-27 | **Emulators skipped for now**: T0.2 deferred (SDK emulator + both AVDs stay installed); behavior checks run on JVM/Robolectric; Phase 0 closes without T0.2 | Owner answer (question card) | owner |
