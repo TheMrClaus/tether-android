@@ -121,6 +121,46 @@ class RecordingClient(
         createdSessions.value = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1)
     }
 
+    // T5.3 search: the frames are recorded; replies are pushed by the test (request ids as use-tether.ts).
+    override val searchResults = MutableStateFlow(com.tether.app.client.SearchResults())
+    override val globalSearchResults = MutableStateFlow(com.tether.app.client.GlobalSearchResults())
+    private var globalSearchId = 0L
+
+    override fun search(cwd: String, query: String): Boolean {
+        if (query.trim().length < 2) {
+            searchResults.value = com.tether.app.client.SearchResults()
+            return false
+        }
+        record(ClientMessage.Search(cwd, query))
+        return true
+    }
+
+    override fun clearSearchResults() {
+        searchResults.value = com.tether.app.client.SearchResults()
+    }
+
+    override fun runGlobalSearch(params: com.tether.app.client.GlobalSearchParams): Boolean {
+        val query = params.query.trim()
+        if (query.length < 2) {
+            clearGlobalSearch()
+            return false
+        }
+        val id = ++globalSearchId
+        globalSearchResults.value = globalSearchResults.value.copy(requestId = id, query = query, pending = true)
+        record(ClientMessage.GlobalSearch(id, query, params.providers?.takeIf { it.isNotEmpty() }, params.since, params.until, params.cwd?.takeIf { it.isNotEmpty() }))
+        return true
+    }
+
+    override fun clearGlobalSearch() {
+        globalSearchId += 1
+        globalSearchResults.value = com.tether.app.client.GlobalSearchResults(requestId = globalSearchId)
+    }
+
+    /** The server's `global-search-results`; a reply to a superseded request is dropped. */
+    fun globalReply(requestId: Long, query: String, hits: List<com.tether.app.protocol.SearchHit>) {
+        if (requestId == globalSearchId) globalSearchResults.value = com.tether.app.client.GlobalSearchResults(requestId, query, hits, pending = false)
+    }
+
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean {
         record(ClientMessage.SetServerSettings(buildJsonObject { put("pinnedWorkspaces", JsonArray(pinned.map(::JsonPrimitive))) }))
         return true

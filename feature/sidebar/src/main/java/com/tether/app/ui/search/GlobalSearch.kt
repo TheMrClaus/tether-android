@@ -7,7 +7,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -246,7 +247,9 @@ fun GlobalSearchFrame(
         Modifier
             .fillMaxSize()
             .background(scrim)
-            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClose),
+            // The overlay's own onMouseDown: a tap on the backdrop closes. A tap detector, not a
+            // clickable — a clickable would merge the whole modal into one TalkBack node.
+            .pointerInput(onClose) { detectTapGestures { onClose() } },
     ) {
         val narrow = maxWidth <= StudioNarrow
         val pad = when {
@@ -276,8 +279,8 @@ fun GlobalSearchFrame(
                         if (studio) listOf(softShadow(24.dp, 80.dp, Color(16, 30, 58).copy(alpha = 0.2f))) else t.css.edgeHighlight + t.css.shadowModal,
                     )
                     .clip(shape)
-                    // The panel swallows its own taps: only the backdrop closes.
-                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {}),
+                    // The panel swallows its own taps: only the backdrop closes (`target === currentTarget`).
+                    .pointerInput(Unit) { detectTapGestures { } },
             ) {
                 SearchHead(form, onFormChange, results.pending, narrow, autoFocus, onClose)
                 Filters(form, onFormChange, narrow)

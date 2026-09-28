@@ -157,7 +157,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val sessionView = session?.let { s -> projectionTrees[s.id]?.let(::SessionView) }
 
     // T5.3 dashboard.tsx:1186-1194: Ctrl/Cmd+Shift+F opens the global search from anywhere.
-    Box(Modifier.fillMaxSize().onPreviewKeyEvent { event -> openGlobalSearchOnShortcut(event, vm) }) {
+    Box(
+        Modifier.fillMaxSize().onPreviewKeyEvent { event ->
+            isGlobalSearchShortcut(event).also { if (it) vm.openGlobalSearch() }
+        },
+    ) {
         val topbarActions = TopbarActions(
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
@@ -461,9 +465,7 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
 }
 
 /** T5.3 dashboard.tsx:1186-1194 — Ctrl/Cmd+Shift+F (not Alt) opens the global search. */
-internal fun openGlobalSearchOnShortcut(event: androidx.compose.ui.input.key.KeyEvent, vm: TetherViewModel): Boolean {
+internal fun isGlobalSearchShortcut(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
     val ctrl = event.isCtrlPressed || event.isMetaPressed
-    if (event.type != KeyEventType.KeyDown || event.key != Key.F || !ctrl || !event.isShiftPressed || event.isAltPressed) return false
-    vm.openGlobalSearch()
-    return true
+    return event.type == KeyEventType.KeyDown && event.key == Key.F && ctrl && event.isShiftPressed && !event.isAltPressed
 }
