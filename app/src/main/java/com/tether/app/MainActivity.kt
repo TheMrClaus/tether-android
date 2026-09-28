@@ -54,8 +54,13 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!isTaskRoot) {
-            startActivity(forwardIntent(this, intent))
+            // finish() FIRST. The start below resolves synchronously, and CLEAR_TOP | SINGLE_TOP
+            // delivers to the topmost MainActivity that is not finishing. Started first, this copy
+            // would be that activity: it would take the link in its own onNewIntent, finish, and
+            // leave the root (and whatever sat above it) untouched. A finishing copy is skipped,
+            // so the link reaches the root.
             finish()
+            forward(forwardIntent(this, intent))
             return
         }
         live = WeakReference(this)
@@ -81,6 +86,11 @@ class MainActivity : ComponentActivity() {
         launchIntent = intent
     }
 
+    private fun forward(intent: Intent) {
+        forwardObserver?.invoke(this, intent)
+        startActivity(intent)
+    }
+
     private fun bringToFront(taskId: Int) {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
         try {
@@ -93,6 +103,13 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** The instance that owns the UI (the task root), if one is alive. Main thread only. */
         private var live: WeakReference<MainActivity>? = null
+
+        /**
+         * Tests only: sees each forward at the instant it is started, so a test can check the copy
+         * is already finishing then (Robolectric's instrumentation does not run activity monitors).
+         */
+        @androidx.annotation.VisibleForTesting
+        internal var forwardObserver: ((MainActivity, Intent) -> Unit)? = null
 
         /** Extras a duplicate carries over: the notification kind and tag, read as strings only. */
         private val FORWARDED_EXTRAS = listOf(PushDeepLink.EXTRA_KIND, PushDeepLink.EXTRA_TAG, "kind")

@@ -59,6 +59,7 @@ class MainActivityInstanceTest {
     fun tearDown() {
         for (controller in launched) if (!controller.get().isDestroyed) controller.pause().stop().destroy()
         idle()
+        MainActivity.forwardObserver = null
         ClientLocator.factory = savedFactory
         ClientLocator.installForTest(null)
         assertEquals("a link changed server state", emptyList<String>(), client.stateChanges.toList())
@@ -113,6 +114,17 @@ class MainActivityInstanceTest {
         assertEquals(LISTED, main.vm.selectedSessionId.value)
         assertEquals(1, client.attached.count { it == LISTED })
         assertEquals("one client for the process", 1, obtained)
+    }
+
+    @Test
+    fun theCopyIsAlreadyFinishingWhenItsForwardStarts() {
+        // CLEAR_TOP | SINGLE_TOP delivers to the topmost MainActivity that is not finishing. A copy
+        // still alive at that instant would receive its own link; the root would never see it.
+        val finishingAtStart = mutableListOf<Boolean>()
+        MainActivity.forwardObserver = { copy, _ -> finishingAtStart += copy.isFinishing }
+        root(launcher())
+        duplicate(view("tether://session/$LISTED"), isTaskRoot = false)
+        assertEquals(listOf(true), finishingAtStart)
     }
 
     @Test
