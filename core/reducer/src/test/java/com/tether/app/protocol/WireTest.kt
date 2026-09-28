@@ -252,7 +252,7 @@ class WireTest {
         assertEquals(setOf("type", "sessionId"), ClientMessage.Attach("s1").toJsonObject().keys)
 
         val hello = ClientMessage.Hello().toJsonObject()
-        assertEquals(129, hello["protocolVersion"]!!.jsonPrimitive.content.toInt())
+        assertEquals(132, hello["protocolVersion"]!!.jsonPrimitive.content.toInt())
 
         val queueAdd = ClientMessage.QueueAdd("s1", "q-1", "text").toJsonObject()
         assertEquals(setOf("type", "sessionId", "queueId", "text"), queueAdd.keys)
