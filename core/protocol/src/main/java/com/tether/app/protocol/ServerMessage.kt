@@ -307,8 +307,36 @@ sealed interface ServerMessage {
         /** Every `type` discriminator of the v129 ServerMessage union this module decodes. */
         val TYPES: Set<String> get() = ServerDecoders.decoders.keys
 
+        /**
+         * How deep a frame may nest. kotlinx's tree reader recurses per nested array, so a
+         * hostile 100k-deep frame overflowed the socket reader's stack (a crash on every
+         * reconnect). Such a frame is refused unread; values inside a frame are further capped at
+         * [com.tether.app.protocol.tree.JsCodec.MAX_DEPTH] when they enter the fold.
+         */
+        const val MAX_FRAME_DEPTH: Int = 1024
+
+        /** Whether [text] nests brackets deeper than [limit] (strings and escapes skipped; linear, no allocation). */
+        fun nestsDeeperThan(text: String, limit: Int): Boolean {
+            var depth = 0
+            var inString = false
+            var i = 0
+            while (i < text.length) {
+                val c = text[i]
+                if (inString) {
+                    if (c == '\\') i++ else if (c == '"') inString = false
+                } else when (c) {
+                    '"' -> inString = true
+                    '[', '{' -> if (++depth > limit) return true
+                    ']', '}' -> depth--
+                }
+                i++
+            }
+            return false
+        }
+
         /** Parse one text frame. Never throws. */
         fun parse(text: String): ServerMessage {
+            if (nestsDeeperThan(text, MAX_FRAME_DEPTH)) return Unknown(null, reason = "nested too deep")
             val root = try {
                 TetherJson.parseToJsonElement(text) as? JsonObject
             } catch (_: Exception) {

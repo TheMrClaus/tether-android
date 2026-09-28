@@ -127,10 +127,21 @@ class ToolMediaClientTest {
         val ws = h.nextSocket()
         h.handshake(ws)
 
+        // L5: only replies to requests this client sent are kept; an unsolicited one is dropped.
+        ws.send("""{"type":"git-diff-file","sessionId":"s9","path":"unasked.ts","hunks":"+x","truncated":false,"binary":false}""")
+        for ((sid, path) in listOf("s1" to "a.ts", "s1" to "b.png", "s2" to "c.ts")) {
+            h.client.requestGitFileDiff(sid, path)
+            h.expectFrame("git-diff-file")
+        }
         ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"a.ts","hunks":"@@ -1 +1 @@\n-a\n+b","truncated":false,"binary":false}""")
         ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"b.png","hunks":"","truncated":false,"binary":true}""")
         ws.send("""{"type":"git-diff-file","sessionId":"s2","path":"c.ts","hunks":"","truncated":true,"binary":false,"error":"Path is outside the repository."}""")
         val diffs = await(h.client.gitFileDiffs) { it["s1"]?.size == 2 && it["s2"] != null }
+        assertEquals("an unsolicited reply never lands", null, diffs["s9"])
+        // A second reply for an answered request is unsolicited too.
+        ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"a.ts","hunks":"FORGED","truncated":false,"binary":false}""")
+        h.serverBarrier(ws)
+        assertEquals("@@ -1 +1 @@\n-a\n+b", h.client.gitFileDiffs.value["s1"]!!["a.ts"]!!.hunks)
         assertEquals("@@ -1 +1 @@\n-a\n+b", diffs["s1"]!!["a.ts"]!!.hunks)
         assertEquals(true, diffs["s1"]!!["b.png"]!!.binary)
         assertEquals("Path is outside the repository.", diffs["s2"]!!["c.ts"]!!.error)
@@ -144,6 +155,17 @@ class ToolMediaClientTest {
         ws.send("""{"type":"worktree-diff","sessionId":"s3","diff":null}""")
         await(h.client.worktreeDiffs) { it.containsKey("s3") }
         assertEquals(false, h.client.gitFileDiffs.value.containsKey("s3"))
+    }
+
+    @Test fun aHundredThousandDeepFrameIsDroppedAndTheConnectionLives() {
+        h.enqueueConnect()
+        h.newClient()
+        h.client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws)
+        ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"a","hunks":""" + "[".repeat(100_000) + "]".repeat(100_000) + ""","truncated":false,"binary":false}""")
+        h.serverBarrier(ws)
+        assertEquals(ConnectionState.Connected, h.client.connection.value)
     }
 
     @Test fun beforeTheHandshakeNothingIsSent() {

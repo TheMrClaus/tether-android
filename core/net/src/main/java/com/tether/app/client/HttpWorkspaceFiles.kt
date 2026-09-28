@@ -335,6 +335,8 @@ class HttpWorkspaceFiles(
         private const val HEX = "0123456789ABCDEF"
 
         private fun parseObject(text: String): JsonObject? = try {
+            // T6.2: a deeply nested body would overflow the parser's stack (ServerMessage.MAX_FRAME_DEPTH).
+            if (com.tether.app.protocol.ServerMessage.nestsDeeperThan(text, com.tether.app.protocol.ServerMessage.MAX_FRAME_DEPTH)) return null
             TetherJson.parseToJsonElement(text) as? JsonObject
         } catch (_: Exception) {
             null

@@ -2898,7 +2898,10 @@ class RealTetherClient(
         a.scheme == b.scheme && a.host == b.host && a.port == b.port
 
     private fun parseJsonObject(response: Response): JsonObject? = try {
-        com.tether.app.protocol.TetherJson.parseToJsonElement(response.body.string()) as? JsonObject
+        val text = response.body.string()
+        // T6.2: a deeply nested body would overflow the parser's stack (ServerMessage.MAX_FRAME_DEPTH).
+        if (ServerMessage.nestsDeeperThan(text, ServerMessage.MAX_FRAME_DEPTH)) null
+        else com.tether.app.protocol.TetherJson.parseToJsonElement(text) as? JsonObject
     } catch (_: Exception) {
         null
     }
