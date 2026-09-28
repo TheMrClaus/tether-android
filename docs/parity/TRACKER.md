@@ -32,10 +32,15 @@ T5.2 resume (`d31fbce`), ta-u2n file-browser rotation (`e425af4`), T4.4 deep lin
 flight. No release/draft until CI is green again.
 **In flight:** T13.1 Room mirror round 2 (security review M1/M2 fixes: durable wipe, worker can't die silently, origin lag;
 verifier already CONFIRMED correctness), T6.2 tool cards, T7.1 composer, ta-g04.
-**Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2) awaits merge, then the
-three production FCM values (`TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID`) + deploy + restrict
-the API key to the app package + signing fingerprints. Optional tether private-history scrub. A 0.7.0 **draft** release (signed,
-unpublished) is prepared once CI is green; publishing is the owner's call.
+**Owner queue (report, not act):** tether PR #204 (S12.2) is **MERGED** (tether `main` `2287777`, verified by the owner's ops
+agent) but **not deployed** (the live bundle is pre-#204; rebuild + `safe-restart` is the owner's, and a rebuild must never happen
+without the matching restart). **Push is blocked on Firebase provisioning, not on code:** production has no FCM configuration at
+all. The owner must (1) create/select a Firebase project and register the Android app `com.tether.app`, (2) generate a
+service-account key, (3) set all six values - sender `TETHER_FCM_PROJECT_ID`, `TETHER_FCM_CLIENT_EMAIL`, `TETHER_FCM_PRIVATE_KEY`
+and client `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` - in a root-owned `EnvironmentFile`
+(or the unit's `Environment=`), never a repo `.env.local` agents can read, (4) rebuild + restart, (5) restrict the API key to the
+app package + signing fingerprints. Optional tether private-history scrub. A 0.7.0 **draft** release (signed, unpublished) is
+prepared once CI is green; publishing is the owner's call.
 **Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
 line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
@@ -237,6 +242,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-28 | T4.5: the unseen-warnings mark is scoped to a **sign-in generation** carried by `EventLog`, not reset by observing an empty log | StateFlow conflation can skip the empty state (reproduced by the verifier) | claude-main (owner delegation) |
 | 2026-09-28 | T13.1: SYNC_DESIGN rule 1a (a tries>0 unsent record forces a full attach, no afterSeq) applies **with the mirror off too**; the mirror is wiped on **any** credential rejection (incl. an expired cookie), not only on revocation | Rule 1a closes the same in-process gap either way; a rejected credential can't prove the same owner, so dropping the cache is the conservative choice (it refills on the next sign-in) | claude-main (owner delegation) |
 | 2026-09-28 | T4.4: MainActivity uses **singleTop**, not singleTask | A launcher relaunch of a singleTask root clears activities above it (Custom Tabs, permission dialogs, SAF pickers) - documented platform behaviour, decided without a device while emulators are owner-deferred | claude-main (owner delegation) |
+| 2026-09-28 | tether#204 (S12.2) merged by the owner's ops agent (tether `2287777`); deploy deferred (a restart would orphan in-flight agent work and buys nothing until Firebase is provisioned). FCM secrets belong in a root-owned EnvironmentFile, not a repo .env.local | Operator-side status report | owner (via ops agent) |
 | 2026-09-26 | Adopt PLAN.md D1–D13 defaults; PARITY_BASE = tether `7d65611` (v128) | Initial plan | planning session |
 | 2026-09-26 | All tether-side (S*) work happens in git worktrees under `~/git/tether-wt/<branch>`, never by switching branches in `~/git/tether` | `tether.service` (production) runs with `WorkingDirectory=~/git/tether`; a checkout there changes what prod runs on restart | claude-main |
 | 2026-09-27 | **Emulators skipped for now**: T0.2 deferred (SDK emulator + both AVDs stay installed); behavior checks run on JVM/Robolectric; Phase 0 closes without T0.2 | Owner answer (question card) | owner |
