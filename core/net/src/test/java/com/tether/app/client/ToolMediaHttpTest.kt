@@ -118,6 +118,15 @@ class ToolMediaHttpTest {
         assertEquals(0, sink.size())
     }
 
+    @Test fun aSinkThatRunsTheHeapOutIsTooLargeNotACrash() = runBlocking {
+        server.enqueue(image())
+        val sink = object : java.io.OutputStream() {
+            override fun write(b: Int) = throw OutOfMemoryError("heap")
+            override fun write(b: ByteArray, off: Int, len: Int) = throw OutOfMemoryError("heap")
+        }
+        assertEquals(ToolMediaResult.TooLarge, media.fetch(png, 1024, sink))
+    }
+
     @Test fun aStreamedBodyPastTheCapIsCutOff() = runBlocking {
         // Chunked: no Content-Length to refuse up front, so the stream count stops it.
         server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setChunkedBody(Buffer().write(ByteArray(4096)), 256))

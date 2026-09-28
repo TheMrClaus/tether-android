@@ -224,6 +224,20 @@ class ToolSafetyTest {
         assertTrue(File(cache, ToolMediaRepository.TMP_DIR).list().isNullOrEmpty())
     }
 
+    @Test fun aValidLookingClipUnderAnotherClipsNameIsDropped() = runBlocking {
+        // Real MP4 magic, wrong content: only the re-hash of the closed file can refuse it.
+        val impostor = clip.copyOf().also { it[100] = (it[100] + 1).toByte() }
+        val source = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                sink.write(impostor)
+                return ToolMediaResult.Ok(impostor.size.toLong(), "video/mp4")
+            }
+        }
+        val repo = ToolMediaRepository(source, cache, origin)
+        assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))))
+        assertTrue(ToolMediaCache.dirFor(cache, origin).list().isNullOrEmpty())
+    }
+
     @Test fun partialDownloadsAreSweptAfterSixtySeconds() {
         val dir = ToolMediaCache.dirFor(cache, origin).apply { mkdirs() }
         val now = 1_000_000_000_000L
@@ -356,6 +370,40 @@ class ToolSafetyTest {
         rule.waitForIdle()
         assertTrue("the newest line shows", texts().any { it.contains("line 700 ") })
         assertTrue("…and the oldest does not", texts().none { it.contains("line 1 .") })
+    }
+
+    @Test fun aFinishedCommandLaysOutItsHeadAndCountsTheRest() {
+        val output = (1..700).joinToString("\n") { "line $it ".padEnd(99, '.') }
+        val tree = foldTree(
+            freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k") },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "c"); put("name", "command_execution"); put("input", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"command":"yes"}""")) },
+            ev("tool_end", "t1", ts = 1) { put("toolId", "c"); put("output", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"text":${JsonPrimitive(output)},"exitCode":0,"status":"completed"}""")) },
+        )
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                ChatTranscript(
+                    projection = LegacyProjectionAdapter.adaptOnce(tree)!!,
+                    tree = tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    onApproval = { _, _, _ -> },
+                    onAnswer = { _, _, _ -> },
+                    zone = ChatFixtures.zone,
+                    showTimeline = false,
+                    richCodex = true,
+                )
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("tool-activity-group").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Show more").performClick()
+        rule.waitForIdle()
+        val texts = rule.onAllNodes(hasText("line", substring = true)).fetchSemanticsNodes()
+            .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }
+        assertTrue(texts.any { it.startsWith("line 1 ") && it.endsWith("more characters") })
+        assertTrue(texts.none { it.contains("line 700 ") })
     }
 
     @Test fun aHugeStringOrObjectStopsAtTheLimit() {
