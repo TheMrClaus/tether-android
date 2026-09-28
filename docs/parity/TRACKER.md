@@ -40,9 +40,12 @@ beads Dolt history flattened and re-pushed. Branches cut before the scrub are **
   generation on `EventLog` (a StateFlow-conflation race made the first reset unreliable). Rebased gate 2208/0 failed/4 skipped.
 - **T5.1** sidebar: **VERIFIED + MERGED** (`a41178a`) after a wiring-test deadlock fix and a keep-both rebase over T4.5/T6.1;
   gate 2348/0 failed/4 skipped.
-- **In flight:** **T11.1** file browser (verify + security review done: 1 Medium image-decode crash + 4 Lows to fix before
-  merge), **ta-cdh** (diagnosed: a real low-severity sign-in ping-before-hello race; fix `91ed0f9` in verification),
-  **T4.4** deep links (security-executor).
+- **T11.1** file browser: **VERIFIED + MERGED** (`d39d5d5`) after two rounds (rebase over T4.5; security review M1 image-decode
+  crash + 4 Lows fixed); security re-review clear; gate 2552/0 failed/4 skipped. Rotation follow-up **ta-u2n** in flight.
+- **ta-cdh** (sign-in ping-before-hello race, low severity) **VERIFIED + MERGED** (`fc3f820`); the load-sensitive
+  `OriginKeyedPendingTest` failures are gone.
+- **In flight:** **ta-ouu** (push security follow-ups, release-relevant; in verification), **T4.4** deep links,
+  **T13.1** Room mirror, **ta-u2n**.
 - Follow-ups filed tonight: ta-cdh, two design-system parity bugs (line-height:1 text, dialog top light line), error-toast
   auto-dismiss vs the web's persistent toast.
 
@@ -115,7 +118,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  |  |
+| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  | checkpoint: 888c620 WIP nav/ (DeepLinks parser, DeepLinkIntents, DeepLinkNavigator, SessionLinkOpener), UiRoot wiring, singleTask + tether:… |
 | T4.5 | Log dialog | VERIFIED | TheMrClaus @ 2026-09-27 21:58 |  |  |
 
 ### Phase 5 — Sidebar & sessions
@@ -176,7 +179,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 11 — Files
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T11.1 | Workspace file browser (all /api/files ops) | TODO | TheMrClaus @ 2026-09-27 22:25 |  | VERIFY-FAIL (medium, integration): branch c3a52b6 itself holds but does not rebase cleanly onto current main 14c7243. git rebase --onto 14c… |
+| T11.1 | Workspace file browser (all /api/files ops) | VERIFIED | TheMrClaus @ 2026-09-27 22:25 |  |  |
 | T11.2 | Android share target → session | TODO |  |  |  |
 
 ### Phase 12 — Notifications
@@ -190,7 +193,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | TODO |  |  | design refinement r2 (SYNC_DESIGN §3.1 rule 1a): afterSeqFor(sessionId) returns null when the session holds a PendingStore record with trie… |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | checkpoint (executor-T13.1): (a) committed 1c43e52 on parity/T13.1-room-mirror: shadow-write mirror (core/data mirror/*, core/net client/sy… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
