@@ -32,17 +32,15 @@ security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rew
 **CI:** green on `4a41c8a` (T6.2 included).
 **Drafts (unpublished, same cert as 0.6.0):** 0.7.0 (`b60b0d4`), 0.7.1 (`dc9200d`, +composer +mirror), 0.7.2 (`391de70`, +sign-in fix),
 **0.7.3 (code 20, `4a41c8a`, +T6.2 tool cards)** - built 2026-09-28 18:03 CEST; apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's; versionCode 20.
-**S10.1 VERIFIED -> owner merge + deploy:** [tether#208](https://github.com/TheMrClaus/tether/pull/208) @ `e5555c5` (4 rounds; 3 verifier
-passes + 3x SECURITY-CLEAR). Serves `/.well-known/assetlinks.json` unauthenticated, accepts the app's passkey origin; an app passkey
-session is **device-grade** (Decision log); owner grade is now an allowlist; revoke-all-devices also ends app passkey sessions.
-After deploy: `curl -si https://<host>/.well-known/assetlinks.json` -> 200 `application/json`, no redirect; any SSO gateway must pass that path.
-**In flight:** T6.3 (round 3 pending: N1 card state restored across a same-id re-raise), ta-hra (round 2 SECURITY-CLEAR, re-verify running;
-follow-up ta-jt9 filed), tether auth-hardening PR (ta-4sx GitHub routes owner-grade, ta-06a revoke closes /ws-browser + event streams,
-ta-eh2 orphaned service handoff; branched from #208, merges after it).
-**ta-s4r (owner sign-in):** owner sees the app fallback "That password is not correct." (a 401 without Tether JSON); the most likely
-cause is an SSO/auth gateway in front of `/api/auth/login` (Tether's README advises exactly that). 0.7.2 now names such a refusal
-and points to pairing. **Waiting on the owner's result with 0.7.2.**
-**Owner queue (report, not act):** push is blocked on Firebase provisioning (production has no FCM config at all: create the
+**S10.1 MERGED + DEPLOYED (2026-09-28):** [tether#208](https://github.com/TheMrClaus/tether/pull/208) merged as `d69b4e5`, deployed ~20:42 CEST
+(server now protocol **132**, `NATIVE_PROTOCOL_FLOOR = 129` = exactly what the app speaks - no headroom, see ta-koy). `/.well-known/assetlinks.json`
+serves 200 on the box; the **public URL still redirects to the SSO gateway** until the owner adds the one-path bypass rule.
+**v0.7.3 is PUBLISHED** (owner). Drafts 0.7.0-0.7.2 superseded.
+**Merged since takeover:** ta-hra (`6f587f7`). **Verified + open for the owner:** none on tether yet - tether#209 (ta-4sx/ta-06a/ta-eh2 auth hardening,
+SECURITY-CLEAR) re-verifying after the restart. **In flight:** T6.3 round 4 (every grant now needs an unsaved confirmation - Decision log;
+store hoisted above the layout switch), ta-js0 + ta-epo (SECURITY-CLEAR; re-verifying after the restart).
+Filed today: ta-jt9, ta-dto, ta-8m1 + ta-ej3 (P1, tether service-origin isolation; ta-ej3 needs an owner decision), ta-9qt.
+**Owner queue (report, not act):** (0) SSO gateway bypass for exactly `/.well-known/assetlinks.json` (rule prepared by Ops). Push is blocked on Firebase provisioning (production has no FCM config at all: create the
 Firebase project + register `com.tether.app`, service-account key, set all six `TETHER_FCM_*` values in a root-owned
 EnvironmentFile, rebuild + restart, restrict the API key). tether#204 is merged. Publishing any draft is the owner's call.
 Optional tether private-history scrub.
@@ -167,7 +165,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T10.3 | Nodes settings | TODO |  |  |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
-| T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator, from S10.1 r2 (@162698d): app-origin passkey login = session method 'app-passkey', device-grade (requireOwnerGrade refuses; /w… |
+| T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator: S10.1 (tether#208) merged to tether main d69b4e5 on 2026-09-28; the server side of passkeys is in main (deployment not confirm… |
 | T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
 
 ### Phase 11 — Files
@@ -306,6 +304,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-26 | Generated corpora (`parity-corpus/`) are **gitignored in tether** and vendored into the Android repo; the tether PR carries only the scripts + tests | Keeps the tether PR reviewable; Android pins the corpus by manifest SHA | claude-main |
 | 2026-09-26 | T0.1 baseline keeps Android timeline story-point limits 270/320 (owner bump in 0.5.0.1) and fixes the stale test; the web's 220/260 is flagged on T6.5 | T0.1 is "build as-is"; parity decisions belong to the surface task | claude-main |
 | 2026-09-28 | S10.1 (tether#208): a passkey sign-in from the **Android app origin** (`android:apk-key-hash:`) yields a **device-grade** session (refused by owner-only routes: pairing mint, passkey register, sign-in methods, session revoke, nodes); web/browser passkey sessions unchanged. Owner may overturn | Security review M1: an owner-grade cookie stored in app data would break tether's documented "phones are device-grade" invariant | claude-main (coordinator default) |
+| 2026-09-28 | T6.3: **every permission-granting choice needs an unsaved confirmation** (full request or subset), reset whenever the card's state is recreated or lost - stricter than the web (web asks only for the full expansion) | Four review rounds found the same class: any loss of card state resets to all-ticked and a further untick made a partial grant that skipped confirmation; this closes the class structurally | claude-main (coordinator default) |
 
 ## Session log (append-only)
 
