@@ -84,6 +84,13 @@ import com.tether.app.ui.theme.TetherTypography
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
+/**
+ * A `<p>`'s UA block margin (1em of its own font size): globals.css resets it only where a rule says
+ * `margin: 0` (the approval reason/context lines, the denial's paragraphs), so the card spacing the
+ * web shows includes it. In a flex column, sibling margins do not collapse.
+ */
+private fun pMargin(r: Float) = (r * TetherTypography.SP_PER_REM).dp
+
 /** Why no card of this session can be answered right now; the copy is the visible reason. */
 enum class ConsentLock(val copy: String) {
     /** SYNC_DESIGN §4.2: a saved copy (no connection) is shown but never answered. */
@@ -233,6 +240,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
             },
             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.85f)),
             color = t.ink,
+            modifier = Modifier.padding(vertical = pMargin(0.85f)),
         )
         view.reason?.let { ContextLine(null, it) }
         view.cwd?.let { ContextLine("Working directory", it) }
@@ -499,10 +507,10 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                 "The agent needs your input",
                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
                 color = t.white,
-                modifier = Modifier.weight(1f, fill = false).semantics { heading(); liveRegion = LiveRegionMode.Polite },
+                modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
             )
             if (total > 1) {
-                Spacer(Modifier.weight(1f))
+                // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
                 Text(
                     "Question ${pageIndex + 1} of $total",
                     style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
@@ -524,9 +532,15 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         it.uppercase(),
                         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
                         color = t.muted,
+                        modifier = Modifier.padding(vertical = pMargin(0.72f)),
                     )
                 }
-                Text(cut4k(question.question), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink)
+                Text(
+                    cut4k(question.question),
+                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
+                    color = t.ink,
+                    modifier = Modifier.padding(vertical = pMargin(0.9f)),
+                )
                 Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                     question.options.forEach { option ->
                         val active = option.label in picks[question.question].orEmpty()
@@ -561,7 +575,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
             when {
                 unavailable != null -> Box(Modifier.fillMaxWidth()) { StatusLine(unavailable, t.ink, "consent-lock") }
                 sent -> Box(Modifier.fillMaxWidth()) { StatusLine("Answer sent. Waiting for the agent.", t.muted, "consent-sent") }
-                submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth()) {
+                submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth().padding(vertical = pMargin(0.78f))) {
                     StatusLine("Answer each highlighted question, or choose Skip to leave it unanswered.", t.ink, "question-validation")
                 }
             }
@@ -680,18 +694,29 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
             view.items.forEach { item ->
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     item.header?.let {
-                        Text(it.uppercase(), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em), color = t.muted)
+                        Text(
+                            it.uppercase(),
+                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
+                            color = t.muted,
+                            modifier = Modifier.padding(vertical = pMargin(0.72f)),
+                        )
                     }
-                    Text(item.question, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink)
+                    Text(item.question, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink, modifier = Modifier.padding(vertical = pMargin(0.9f)))
+                    val value = Modifier.padding(vertical = pMargin(0.9f))
                     if (item.answer != null) {
-                        Text(item.answer, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)), color = t.white)
+                        Text(item.answer, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)), color = t.white, modifier = value)
                     } else {
-                        Text("(no selection)", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontStyle = FontStyle.Italic), color = t.muted)
+                        Text("(no selection)", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontStyle = FontStyle.Italic), color = t.muted, modifier = value)
                     }
                 }
             }
             view.response?.let {
-                Text(it, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)), color = t.white)
+                Text(
+                    it,
+                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)),
+                    color = t.white,
+                    modifier = Modifier.padding(vertical = pMargin(0.9f)),
+                )
             }
         }
     }
