@@ -131,7 +131,7 @@ class ApprovalModelTest {
         assertNull("a subset needs something ticked", pickFor(view, some, confirmed = true, subset = subsetGrant(emptySet(), emptySet(), false)))
         assertEquals(ApprovalPick("deny", null), pickFor(view, deny, confirmed = false, subset = subset))
         assertEquals(
-            "Confirm these permissions: read “/srv/schema.sql”; network access.",
+            "Confirm these permissions: read ${iso("“/srv/schema.sql”")}; network access.",
             grantSummary(listOf("/srv/schema.sql"), emptyList(), true),
         )
         assertTrue(view.needsConfirm)
@@ -243,25 +243,56 @@ class ApprovalModelTest {
     }
 
     @Test fun displayPathEscapesCutsAndQuotes() {
-        assertEquals("“/a\\u000Ab”", displayPath("/a\nb"))
-        assertEquals("“\\u202Egnp.exe”", displayPath("\u202Egnp.exe"))
-        assertEquals("“\\u2028\\u2066\\u0085”", displayPath("\u2028\u2066\u0085"))
+        assertEquals(iso("“/a\\u000Ab”"), displayPath("/a\nb"))
+        assertEquals(iso("“\\u202Egnp.exe”"), displayPath("\u202Egnp.exe"))
+        assertEquals(iso("“\\u2028\\u2066\\u0085”"), displayPath("\u2028\u2066\u0085"))
         // L-B: the middle goes; the head AND the scope-deciding tail stay.
-        val long = displayPath("/srv/" + "p".repeat(500) + "/../../etc")
-        assertTrue(long, long.startsWith("“/srv/ppp"))
-        assertTrue(long, long.endsWith("pp/../../etc”"))
+        val long = displayPath("/srv/" + "p".repeat(500) + "/tail/etc")
+        assertTrue(long, long.startsWith(FSI + "“/srv/ppp"))
+        assertTrue(long, long.endsWith("pp/tail/etc”" + PDI))
         assertTrue(long, long.contains("…"))
-        assertEquals(DISPLAY_PATH_MAX + 2, long.length) // + the two quotes
-        assertEquals("“/x; no network access”", displayPath("/x; no network access"))
+        assertEquals(DISPLAY_PATH_MAX + 4, long.length) // + the two quotes and FSI / PDI
+        assertEquals(iso("“/x; no network access”"), displayPath("/x; no network access"))
         // L-C: by category, plus the listed look-alikes.
-        assertEquals("“data\\u200B”", displayPath("data\u200B")) // FORMAT (zero-width space)
-        assertEquals("“a\\u{E0041}b”", displayPath("a\uDB40\uDC41b")) // a tag character (FORMAT, astral)
-        assertEquals("“a\\u00A0b”", displayPath("a\u00A0b")) // a space that is not U+0020
-        assertEquals("“a b”", displayPath("a b"))
-        assertEquals("“/fake\\u201D; network access; read \\u201C/y”", displayPath("/fake\u201D; network access; read \u201C/y"))
-        assertEquals("“a\\u005Cu0041”", displayPath("a\\u0041")) // a literal backslash cannot fake an escape
-        assertEquals("“\\u3164x\\uFE0F\\uE000”", displayPath("\u3164x\uFE0F\uE000")) // Hangul filler, variation selector, private use
-        assertEquals("“\\uD800”", displayPath("\uD800")) // a lone surrogate
+        assertEquals(iso("“data\\u200B”"), displayPath("data\u200B")) // FORMAT (zero-width space)
+        assertEquals(iso("“a\\u{E0041}b”"), displayPath("a\uDB40\uDC41b")) // a tag character (FORMAT, astral)
+        assertEquals(iso("“a\\u00A0b”"), displayPath("a\u00A0b")) // a space that is not U+0020
+        assertEquals(iso("“a b”"), displayPath("a b"))
+        assertEquals(iso("“/fake\\u201D; network access; read \\u201C/y”"), displayPath("/fake\u201D; network access; read \u201C/y"))
+        assertEquals(iso("“a\\u005Cu0041”"), displayPath("a\\u0041")) // a literal backslash cannot fake an escape
+        assertEquals(iso("“\\u3164x\\uFE0F\\uE000”"), displayPath("\u3164x\uFE0F\uE000")) // Hangul filler, variation selector, private use
+        assertEquals(iso("“\\uD800”"), displayPath("\uD800")) // a lone surrogate
+    }
+
+    private fun iso(s: String) = "$FSI$s$PDI"
+
+    @Test fun aPathWithRelativeSegmentsIsShownWholeAndMarked() {
+        // Round 7: elided, this would read as a deep directory under /work/proj/src.
+        val path = "/work/proj/src/" + "d/".repeat(23) + "../".repeat(26) + "home/op/.ssh/authorized_keys"
+        val shown = displayPath(path)
+        assertTrue(shown, !shown.contains("…"))
+        assertTrue(shown, shown.contains("../".repeat(26) + "home/op/.ssh/authorized_keys"))
+        assertTrue(shown, shown.endsWith(RELATIVE_MARKER))
+        assertTrue(displayPath("./x").endsWith(RELATIVE_MARKER))
+        assertTrue(displayPath("a\\..\\b").endsWith(RELATIVE_MARKER))
+        assertTrue(!displayPath("/a/..b/c.d/...").endsWith(RELATIVE_MARKER)) // not a . or .. segment
+    }
+
+    @Test fun roundSevenEscapeClasses() {
+        for (cp in listOf(0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F)) assertTrue("U+%04X default-ignorable".format(cp), needsEscape(cp))
+        assertTrue(needsEscape(0x2800)) // braille blank
+        assertTrue(needsEscape(0x00AB) && needsEscape(0x00BB) && needsEscape(0x2039)) // Pi / Pf quotes
+        for (cp in listOf(0x02EE, 0x2033, 0x201E, 0x201F, 0xFF02)) assertTrue("U+%04X quote look-alike".format(cp), needsEscape(cp))
+        assertTrue(needsEscape(0x2026)) // a fake elision mark
+        assertEquals(iso("“a\\u2026b”"), displayPath("a…b"))
+        assertTrue(!needsEscape('a'.code) && !needsEscape('/'.code) && !needsEscape(' '.code) && !needsEscape('é'.code))
+    }
+
+    @Test fun eachPathIsItsOwnBidiIsland() {
+        // RTL letters inside a path cannot reorder the separators around it.
+        val shown = grantSummary(listOf("/\u05D0\u05D1/x", "/y"), emptyList(), true)
+        assertEquals("Confirm these permissions: read ${iso("“/\u05D0\u05D1/x”")}, ${iso("“/y”")}; network access.", shown)
+        assertEquals(iso("host\\u202E.example"), displayText("host\u202E.example"))
     }
 
     private companion object {

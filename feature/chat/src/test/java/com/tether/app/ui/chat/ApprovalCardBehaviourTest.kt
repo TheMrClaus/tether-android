@@ -872,7 +872,7 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-confirm").assertIsOff()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
         // The label names what the confirmation would now grant.
-        rule.onNodeWithText("Confirm these permissions: read “/srv/fixtures”, “/srv/schema.sql”; write “/w/report”.").assertExists()
+        rule.onNodeWithText(grantSummary(listOf("/srv/fixtures", "/srv/schema.sql"), listOf("/w/report"), false)).assertExists()
         assertTrue(calls.isEmpty())
     }
 
@@ -1225,6 +1225,81 @@ class ApprovalCardBehaviourTest {
         assertTrue(label, label.contains("…d"))
         assertTrue("no raw control reaches the screen", label.none { it == '\n' || it == '\u202E' })
         assertTrue(label, label.endsWith("; network access."))
+    }
+    // ---- round 7: a confirmation refers to the words that were on screen -----------------------
+
+    private fun tickConfirmAllowInOneFrame(tickTag: String, index: Int = 0) {
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        val tick = rule.onAllNodesWithTag(tickTag)[index].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            tick()
+            confirm()
+            allow()
+        }
+        rule.waitForIdle()
+    }
+
+    @Test fun anUntickAConfirmAndAGrantInOneFrameSendNothing() {
+        tickConfirmAllowInOneFrame("grant-network")
+        assertTrue("sent $calls", calls.isEmpty())
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+    }
+
+    @Test fun aTickAConfirmAndAGrantInOneFrameSendNothing() {
+        // First untick /srv/fixtures (drawn), then: re-tick it + confirm + grant in one frame.
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-read")[0].performClick()
+        rule.waitForIdle()
+        val tick = rule.onAllNodesWithTag("grant-read")[0].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            tick()
+            confirm()
+            allow()
+        }
+        rule.waitForIdle()
+        assertTrue("sent $calls", calls.isEmpty())
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+    }
+
+    @Test fun afterTheRedrawAConfirmationSendsExactlyTheDrawnSet() {
+        tickConfirmAllowInOneFrame("grant-network")
+        assertTrue(calls.isEmpty())
+        // Frame 2: the summary now names the narrowed set; confirming it grants exactly that.
+        rule.onNodeWithText(grantSummary(listOf("/srv/fixtures", "/srv/schema.sql"), listOf("/w/report"), false)).assertExists()
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        rule.waitForIdle()
+        assertEquals(
+            listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),
+            calls,
+        )
+    }
+
+    @Test fun contextLinesAreEscapedAndIsolated() {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-c"); put("toolId", "c1"); put("name", "command_execution")
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "command")
+                    put("reason", "Harmless\u202E; approve")
+                    put("cwd", "/w/\u200Bproj")
+                    putJsonObject("network") { put("host", "evil\u2066.example"); put("protocol", "https") }
+                }
+            },
+        )
+        show(ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
+        scrollTo("approval-card")
+        rule.onNodeWithText(displayText("Harmless\u202E; approve"), substring = true).assertExists()
+        // Labelled values are also given line-break points (breakAnywhere), after the escaping.
+        rule.onNodeWithText(displayPath("/w/\u200Bproj").breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(displayText("https://evil\u2066.example").breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
     }
 }
 

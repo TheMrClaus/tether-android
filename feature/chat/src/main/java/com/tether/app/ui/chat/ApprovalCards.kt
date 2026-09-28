@@ -276,6 +276,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     // the same frame as the tap (two fingers, two queued clicks) can never send the old set.
     var confirmedAt by remember(store, cfp, generation) { mutableStateOf<Long?>(null) }
     val confirmed = confirmedAt != null && confirmedAt == generation
+    // The generation the summary on screen was drawn at.
+    val drawnGeneration = generation
     val fp = remember(view.request, view.activeTurnId, consent.origin) { wireFingerprint(consent.origin, view.activeTurnId, view.request) }
     // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
     // never saved (after process death the ledger is gone, so the operator may tap again).
@@ -356,9 +358,10 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
             color = t.ink,
             modifier = Modifier.padding(vertical = pMargin(0.85f)),
         )
-        view.reason?.let { ContextLine(null, it) }
-        view.cwd?.let { ContextLine("Working directory", it) }
-        view.network?.let { ContextLine("Network", it) }
+        // Round 7: server text on the card goes through the same display escaping as the paths.
+        view.reason?.let { ContextLine(null, displayText(it)) }
+        view.cwd?.let { ContextLine("Working directory", displayPath(it)) }
+        view.network?.let { ContextLine("Network", displayText(it)) }
         if (view.input != null) {
             Column(Modifier.fillMaxWidth()) { ToolInputView(view.name, view.input) }
         }
@@ -400,9 +403,11 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                             checked = confirmed,
                             enabled = !frozen,
                             // I-A: toggled against the LIVE generation (never the drawn `confirmed`).
+                            // Round 7: and only when the live generation is still the DRAWN one, so a
+                            // confirmation always refers to the words that were on screen when it was made.
                             onChange = {
                                 val g = store.grantGeneration(cfp)
-                                confirmedAt = if (confirmedAt == g) null else g
+                                confirmedAt = if (confirmedAt == g || g != drawnGeneration) null else g
                             },
                             tag = "grant-confirm",
                             onBlocked = blocked,

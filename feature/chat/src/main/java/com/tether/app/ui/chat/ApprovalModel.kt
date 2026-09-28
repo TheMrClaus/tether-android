@@ -149,25 +149,44 @@ internal const val DISPLAY_PATH_HEAD = 60
 internal const val DISPLAY_PATH_TAIL = 99
 internal const val DISPLAY_PATH_MAX = DISPLAY_PATH_HEAD + 1 + DISPLAY_PATH_TAIL
 
+/** FSI / PDI: each shown path is its own bidi island (round 7), so RTL text cannot reorder what is around it. */
+internal const val FSI = '\u2068'
+internal const val PDI = '\u2069'
+
+/** Round 7: the marker a path with a `.` or `..` segment carries (such a path is never elided). */
+internal const val RELATIVE_MARKER = " (contains relative segments (..))"
+
 /**
  * A server path as the card SHOWS it (never as it is granted: the grant carries the raw path).
- * - Escaped BY CATEGORY (L-C): every code point that could hide, reorder, fake a space or fake the
- *   quotes around it is written out as a visible `\uXXXX` (`\u{XXXXX}` above the BMP), see
- *   [needsEscape]; so is the backslash itself, so an escape cannot be faked.
- * - Cut in the MIDDLE (L-B): the head and the TAIL (which decides the scope: a trailing `/../..`)
- *   both stay, with "…" between them.
- * - Quoted with curly quotes, which themselves are always escaped inside, so a path cannot pose as
- *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`).
+ * - Escaped BY CATEGORY (L-C, round 7): every code point that could hide, reorder, fake a space, fake
+ *   the quotes or fake the elision mark is written out as a visible `\uXXXX` (`\u{XXXXX}` above
+ *   the BMP), see [needsEscape]; so is the backslash itself, so an escape cannot be faked.
+ * - Cut in the MIDDLE (L-B): the head and the TAIL (which decides the scope) both stay, with "…"
+ *   between them; but a path with a `.` or `..` segment is NEVER cut (the segments decide where it
+ *   really points) and says so: [RELATIVE_MARKER].
+ * - Quoted with curly quotes (always escaped inside), and isolated FSI…PDI, so a path cannot pose as
+ *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`) nor let RTL
+ *   letters reorder the separators around it.
  */
 internal fun displayPath(path: String): String {
     val cps = path.codePoints().toArray()
-    val shown = if (cps.size <= DISPLAY_PATH_MAX) {
+    val relative = hasRelativeSegment(path)
+    val shown = if (relative || cps.size <= DISPLAY_PATH_MAX) {
         render(cps, 0, cps.size)
     } else {
         render(cps, 0, DISPLAY_PATH_HEAD) + "…" + render(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
     }
-    return "\u201C$shown\u201D"
+    return "$FSI\u201C$shown\u201D$PDI" + if (relative) RELATIVE_MARKER else ""
 }
+
+/** Round 7 (context lines): server text shown as is, but escaped like a path and isolated FSI…PDI (no quotes, no cut). */
+internal fun displayText(text: String): String {
+    val cps = text.codePoints().toArray()
+    return "$FSI${render(cps, 0, cps.size)}$PDI"
+}
+
+/** A `.` or `..` segment, with `/` or `\` as the separator. */
+internal fun hasRelativeSegment(path: String): Boolean = path.split('/', '\\').any { it == "." || it == ".." }
 
 private fun render(cps: IntArray, from: Int, to: Int): String {
     val out = StringBuilder()
@@ -183,22 +202,34 @@ private fun render(cps: IntArray, from: Int, to: Int): String {
 }
 
 /**
- * L-C: escape when the code point's general category is CONTROL, FORMAT, LINE_SEPARATOR,
- * PARAGRAPH_SEPARATOR, SURROGATE, PRIVATE_USE or UNASSIGNED, or a SPACE_SEPARATOR other than U+0020;
- * plus the variation selectors (U+FE00-FE0F, U+E0100-E01EF), the Hangul fillers (U+115F, U+1160,
- * U+3164, U+FFA0), the curly quotes U+201C / U+201D and the backslash.
+ * Escape when the code point's general category is CONTROL, FORMAT, LINE_SEPARATOR,
+ * PARAGRAPH_SEPARATOR, SURROGATE, PRIVATE_USE, UNASSIGNED or a quote punctuation (Pi / Pf), or a
+ * SPACE_SEPARATOR other than U+0020; any DEFAULT_IGNORABLE_CODE_POINT (ICU; [IGNORABLE_FALLBACK] if
+ * ICU cannot answer); the variation selectors (U+FE00-FE0F, U+E0100-E01EF); the Hangul fillers
+ * (U+115F, U+1160, U+3164, U+FFA0); the braille blank U+2800; the quote look-alikes U+201C, U+201D,
+ * U+201E, U+201F, U+02EE, U+2033, U+FF02; the ellipsis U+2026 (so a fake elision mark cannot
+ * appear); and the backslash.
  */
 internal fun needsEscape(cp: Int): Boolean {
     when (Character.getType(cp)) {
         Character.CONTROL.toInt(), Character.FORMAT.toInt(), Character.LINE_SEPARATOR.toInt(),
         Character.PARAGRAPH_SEPARATOR.toInt(), Character.SURROGATE.toInt(), Character.PRIVATE_USE.toInt(),
-        Character.UNASSIGNED.toInt(),
+        Character.UNASSIGNED.toInt(), Character.INITIAL_QUOTE_PUNCTUATION.toInt(), Character.FINAL_QUOTE_PUNCTUATION.toInt(),
         -> return true
         Character.SPACE_SEPARATOR.toInt() -> return cp != 0x20
     }
+    if (isDefaultIgnorable(cp)) return true
     return cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF || cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 ||
-        cp == 0x201C || cp == 0x201D || cp == 0x5C
+        cp == 0x2800 || cp == 0x201C || cp == 0x201D || cp == 0x201E || cp == 0x201F || cp == 0x02EE || cp == 0x2033 || cp == 0xFF02 ||
+        cp == 0x2026 || cp == 0x5C
 }
+
+/** Default-ignorable code points ICU might not be asked about: combining grapheme joiner, Khmer / Mongolian ignorables. */
+internal val IGNORABLE_FALLBACK: Set<Int> = setOf(0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F)
+
+private fun isDefaultIgnorable(cp: Int): Boolean =
+    cp in IGNORABLE_FALLBACK ||
+        runCatching { android.icu.lang.UCharacter.hasBinaryProperty(cp, android.icu.lang.UProperty.DEFAULT_IGNORABLE_CODE_POINT) }.getOrDefault(false)
 
 /** What one choice key sends: its id and (for a permission-granting choice) the grant, or null when it is disabled. */
 internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermissions?)
