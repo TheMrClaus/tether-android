@@ -25,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
@@ -871,7 +872,7 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-confirm").assertIsOff()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
         // The label names what the confirmation would now grant.
-        rule.onNodeWithText("Confirm these permissions: read /srv/fixtures, /srv/schema.sql; write /w/report.").assertExists()
+        rule.onNodeWithText("Confirm these permissions: read “/srv/fixtures”, “/srv/schema.sql”; write “/w/report”.").assertExists()
         assertTrue(calls.isEmpty())
     }
 
@@ -955,6 +956,133 @@ class ApprovalCardBehaviourTest {
     @Test fun identicalContentInTwoSessionsIsTwoCards() {
         val other = foldTree(ApprovalFixtures.grants.tree.put("tetherSessionId", com.tether.app.protocol.tree.JsStr("s2")))
         assertTrue(pendingApprovals(ApprovalFixtures.grants.tree).single().contentFp != pendingApprovals(other).single().contentFp)
+    }
+    // ---- round 5: the tap reads the store (F1) -------------------------------------------------
+
+    private fun armedAndConfirmed() {
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
+    }
+
+    @Test fun anUntickAndAGrantTapInTheSameGestureSendNothing() {
+        // The verifier's repro: finger 0 lands on Network access, finger 1 on Allow selected, both
+        // lift before any frame. The untick moves the record; the tap must not send the old set.
+        armedAndConfirmed()
+        val net = rule.onNodeWithTag("grant-network").fetchSemanticsNode().boundsInRoot
+        val sel = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().boundsInRoot
+        rule.onNodeWithTag("grant-network").performTouchInput {
+            down(0, center)
+            down(1, sel.center - net.topLeft)
+            up(0)
+            up(1)
+        }
+        rule.waitForIdle()
+        assertTrue("a grant left with the pre-untick set: $calls", calls.isEmpty())
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+    }
+
+    @Test fun anUntickAndAGrantClickQueuedInOneFrameSendNothing() {
+        armedAndConfirmed()
+        val untick = rule.onNodeWithTag("grant-network").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            untick()
+            allow()
+        }
+        rule.waitForIdle()
+        assertTrue("a grant left with the pre-untick set: $calls", calls.isEmpty())
+    }
+
+    @Test fun aConfirmationMadeOnAnExistingRecordDiesWithTheNextChange() {
+        // The record exists first (one untick), THEN the operator confirms, then changes a tick: the
+        // confirmation belonged to the earlier state (kills "generation bumped only on creation").
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-read")[0].performClick()
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.onNodeWithTag("grant-network").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true)
+        allow.assertIsNotEnabled()
+        allow.performClick()
+        assertTrue(calls.isEmpty())
+        // Confirmed again, the grant is what is ticked NOW.
+        rule.onNodeWithTag("grant-confirm").performClick()
+        allow.performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()), calls)
+    }
+
+    @Test fun aQuestionSubmitReadsThePicksAtTapTime() {
+        fixture = ApprovalFixtures.question
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle(); arm()
+        scrollTo("question-submit")
+        rule.onNodeWithText("staging").performClick()
+        // A pick and the submit in one frame: the submit sends the pick made just before it.
+        val production = rule.onNodeWithText("production").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            production()
+            submit()
+        }
+        rule.waitForIdle()
+        assertEquals(listOf("question:q-1:{${ApprovalFixtures.Q_DB}=Postgres, ${ApprovalFixtures.Q_ENV}=staging, production}"), calls)
+    }
+
+    @Test fun twoNextTapsInOneFrameMoveOnePage() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            next()
+            next()
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+    }
+
+    /** Paths that try to read as something else. */
+    private val trickyPaths: ChatFixtures.Folded by lazy {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-t"); put("toolId", "perm-t"); put("name", "permissions")
+                putJsonArray("choices") { addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") } }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    putJsonObject("requestedPermissions") {
+                        putJsonObject("fileSystem") {
+                            putJsonArray("read") { add("/x\n/etc/shadow"); add("/safe\u202Etxt.exe") }
+                            putJsonArray("write") { add("/x; no network access"); add("/" + "d".repeat(300)) }
+                        }
+                        putJsonObject("network") { put("enabled", true) }
+                    }
+                }
+            },
+        )
+        ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    @Test fun pathsAreShownEscapedCutAndQuoted() {
+        show(trickyPaths)
+        scrollTo("grant-confirm")
+        val label = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+        assertTrue(label, label.contains("“/x\\u000A/etc/shadow”"))
+        assertTrue(label, label.contains("“/safe\\u202Etxt.exe”"))
+        assertTrue(label, label.contains("“/x; no network access”"))
+        assertTrue(label, label.contains("…”"))
+        assertTrue("no raw control reaches the screen", label.none { it == '\n' || it == '\u202E' })
+        assertTrue(label, label.endsWith("; network access."))
     }
 }
 

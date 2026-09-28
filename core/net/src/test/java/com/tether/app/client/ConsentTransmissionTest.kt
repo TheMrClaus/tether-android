@@ -561,6 +561,8 @@ class ConsentGuardUnitTest {
         bad(listOf(pick(0, -1)))
         bad(listOf(pick(0, other = "x".repeat(ConsentGuard.MAX_OTHER_CHARS + 1))))
         bad(emptyList(), setOf(2)) // skipping a non-slot
+        bad(listOf(pick(0, other = "two\nlines"))) // I-3: an Other text is one line
+        bad(listOf(pick(0, other = "cr\r")))
     }
 
     @Test fun theCardIdentityCarriesTheSessionButNotTheServer() {

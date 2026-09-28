@@ -164,4 +164,36 @@ class MainShellCardStateTest {
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
         assertTrue(client.consentCalls.isEmpty())
     }
+
+    @Test fun signingInToAnotherServerForgetsTheCardsButADropDoesNot() {
+        val client = ShellConsentClient()
+        client.server.value = "https://one.example.test"
+        client.show(session, grants)
+        val vm = TetherViewModel(client)
+        vm.selectSession("s1")
+        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        rule.setContent {
+            TetherTheme {
+                CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) }
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").performClick()
+        // A drop: the socket's origin goes, the configured server stays.
+        rule.runOnIdle { client.origin.value = null }
+        rule.waitForIdle()
+        rule.runOnIdle { client.origin.value = SHELL_TEST_ORIGIN }
+        rule.waitForIdle()
+        arm()
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        // Another server (I-2): nothing of the first one's cards is kept.
+        rule.runOnIdle { client.server.value = "https://two.example.test" }
+        rule.waitForIdle()
+        arm()
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").assertIsOn()
+    }
 }

@@ -112,7 +112,8 @@ class ApprovalModelConformanceTest {
                 com.tether.app.client.ConsentGuard.QuestionPick(
                     slot,
                     (picks[text] as? JsArr).orEmpty().map { slots.labels.getValue(slot).indexOf(it.str()) },
-                    (other[text] as? JsStr)?.value.orEmpty(),
+                    // Through the card's field first: like an HTML text input it holds no line break.
+                    (other[text] as? JsStr)?.value.orEmpty().replace("\r", "").replace("\n", ""),
                 )
             }
             val skipped = row["skipped"].arr().map { slotOf(it.str()) }.toSet()

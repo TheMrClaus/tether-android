@@ -131,7 +131,7 @@ class ApprovalModelTest {
         assertNull("a subset needs something ticked", pickFor(view, some, confirmed = true, subset = subsetGrant(emptySet(), emptySet(), false)))
         assertEquals(ApprovalPick("deny", null), pickFor(view, deny, confirmed = false, subset = subset))
         assertEquals(
-            "Confirm these permissions: read /srv/schema.sql; network access.",
+            "Confirm these permissions: read “/srv/schema.sql”; network access.",
             grantSummary(listOf("/srv/schema.sql"), emptyList(), true),
         )
         assertTrue(view.needsConfirm)
@@ -181,6 +181,75 @@ class ApprovalModelTest {
         assertTrue(v.contentFp != w.contentFp)
         // The lazy key carries it: the re-raised request is a different row.
         assertTrue(ChatItem.Approval(v).key != ChatItem.Approval(w).key)
+    }
+
+    @Test fun aRestoredStoreEvictsItsOldestRecordFirst() {
+        // L-2: encode, decode, write once more: the first record written is the one that goes.
+        val store = CardStateStore()
+        repeat(CardStateStore.MAX_RECORDS) { store.setGrant("r$it", GrantSelection(networkOff = true)) }
+        val back = CardStateStore.decode(store.encode())
+        back.setGrant("new", GrantSelection(networkOff = true))
+        assertEquals(GrantSelection(), back.grant("r0"))
+        assertEquals(GrantSelection(networkOff = true), back.grant("r1"))
+        assertEquals(GrantSelection(networkOff = true), back.grant("new"))
+    }
+
+    @Test fun generationsAreNeverReused() {
+        // I-6: "no record" after an eviction is not the "no record" a confirmation was made at.
+        val store = CardStateStore()
+        val before = store.grantGeneration("a")
+        store.setGrant("a", GrantSelection(networkOff = true))
+        val written = store.grantGeneration("a")
+        assertTrue(written != before)
+        repeat(CardStateStore.MAX_RECORDS) { store.setGrant("o$it", GrantSelection()) } // evicts "a"
+        val evicted = store.grantGeneration("a")
+        assertTrue(evicted != before && evicted != written)
+        store.clear()
+        assertTrue(store.grantGeneration("a") != evicted)
+    }
+
+    @Test fun theStoreBelongsToTheConfiguredServer() {
+        // I-2: another server empties it; the same one (a drop, a reconnect) keeps it; a restore keeps the binding.
+        val store = CardStateStore()
+        store.bindTo("https://a")
+        store.setGrant("g", GrantSelection(networkOff = true))
+        store.bindTo("https://a")
+        assertEquals(GrantSelection(networkOff = true), store.grant("g"))
+        val back = CardStateStore.decode(store.encode())
+        back.bindTo("https://a")
+        assertEquals(GrantSelection(networkOff = true), back.grant("g"))
+        back.bindTo("https://b")
+        assertEquals(GrantSelection(), back.grant("g"))
+    }
+
+    @Test fun savedOtherTextHasATotalBudgetOldestFirst() {
+        // I-5: past the budget the OLDEST records' text goes, never the card being typed in.
+        val store = CardStateStore()
+        val chunk = "x".repeat(3_900)
+        repeat(20) { store.setQuestion("q$it", QuestionSelection(other = mapOf(0 to chunk))) }
+        val total = (0 until 20).sumOf { store.question("q$it").other.values.sumOf { v -> v.length } }
+        assertTrue("total $total", total <= CardStateStore.MAX_OTHER_TOTAL)
+        assertTrue(store.question("q0").other.isEmpty())
+        assertEquals(chunk, store.question("q19").other[0])
+    }
+
+    @Test fun cutsNeverSplitACodePoint() {
+        // I-3: a 4000 cut that lands inside a surrogate pair keeps the pair out whole.
+        val s = "a".repeat(3_999) + "😀" + "b"
+        val cut = cutCodePoints(s, 4_000)
+        assertEquals(3_999, cut.length)
+        assertTrue(!Character.isHighSurrogate(cut.last()))
+        assertEquals("abc", cutCodePoints("abc", 4_000))
+    }
+
+    @Test fun displayPathEscapesCutsAndQuotes() {
+        assertEquals("“/a\\u000Ab”", displayPath("/a\nb"))
+        assertEquals("“\\u202Egnp.exe”", displayPath("\u202Egnp.exe"))
+        assertEquals("“\\u2028\\u2066\\u0085”", displayPath("\u2028\u2066\u0085"))
+        val long = displayPath("/" + "p".repeat(500))
+        assertTrue(long.endsWith("…”"))
+        assertEquals(DISPLAY_PATH_MAX + 3, long.length) // quotes + ellipsis
+        assertEquals("“/x; no network access”", displayPath("/x; no network access"))
     }
 
     private companion object {
