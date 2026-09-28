@@ -50,6 +50,9 @@ class SoftwareKek : CredentialKeySource {
     /** Test seam (ta-hra R3): runs before every key lookup, e.g. to hold a "stuck Keystore". */
     @Volatile var beforeExistingKey: (() -> Unit)? = null
 
+    /** Test seam (ta-hra M-1): runs before every key delete, e.g. to hold the wipe inside the Keystore. */
+    @Volatile var beforeDestroyKey: (() -> Unit)? = null
+
     /** The thread of every [destroyKey], in order. */
     val destroyThreads = java.util.concurrent.ConcurrentLinkedQueue<Thread>()
 
@@ -63,6 +66,7 @@ class SoftwareKek : CredentialKeySource {
 
     override fun destroyKey() {
         destroyThreads.add(Thread.currentThread())
+        beforeDestroyKey?.invoke()
         key = null
         destroyed++
     }
@@ -88,6 +92,9 @@ class MirrorHarness(
     /** The client's bound on a hydration read (generous by default, for the same reason). */
     var hydrateTimeoutMs: Long = 30_000,
 ) {
+    /** The client's logout hook (push unregister in production), for every process. */
+    @Volatile var onLogout: suspend (String, com.tether.app.client.Credential) -> Unit = { _, _ -> }
+
     val context: Context = ApplicationProvider.getApplicationContext()
     val server = MockWebServer()
     val kek = SoftwareKek()
@@ -136,6 +143,7 @@ class MirrorHarness(
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
+            onLogout = { url, credential -> onLogout(url, credential) },
             mirror = mirrorOrNull,
         ).also {
             it.mirrorBindTimeoutMs = bindTimeoutMs

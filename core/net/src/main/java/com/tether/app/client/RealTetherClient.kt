@@ -31,6 +31,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -932,6 +933,7 @@ class RealTetherClient(
      */
     private suspend fun bindMirrorToCurrentServer() {
         val link = mirrorLink ?: return
+        var generation = 0L
         val origin = synchronized(lock) {
             val current = currentOriginLocked() ?: return
             // No credential (signed out, revoked, or a cold start after either): the saved copy
@@ -939,7 +941,7 @@ class RealTetherClient(
             if (credentialValue == null) null else {
                 if (current == mirrorOrigin) return
                 mirrorOrigin = current
-                mirrorGeneration++
+                generation = ++mirrorGeneration
                 current
             }
         }
@@ -950,15 +952,18 @@ class RealTetherClient(
         // Bounded (M2): a writer that is stuck or dead must never hang a start or a sign-in.
         val index = withTimeoutOrNull(mirrorBindTimeoutMs) { link.mirror.bind(origin) }
         if (index == null) {
-            // Unavailable (Keystore) or no answer in time: no mirror for this process.
+            // Unavailable (Keystore) or no answer in time: no mirror for this process. Unless a
+            // wipe or a switch already superseded this bind (ta-hra L-2): its null says nothing
+            // about the binding in force now.
             synchronized(lock) {
+                if (mirrorGeneration != generation) return
                 if (mirrorOrigin == origin) mirrorOrigin = null
                 mirrorGeneration++
             }
             mirrorLink = null
             return
         }
-        applyMirrorIndex(origin, index)
+        applyMirrorIndex(origin, generation, index)
     }
 
     /**
@@ -967,10 +972,12 @@ class RealTetherClient(
      * and a mirror at head gets the stateless reply. Projections are hydrated lazily
      * ([requestHydration]).
      */
-    private fun applyMirrorIndex(origin: String, index: MirrorIndex) {
+    private fun applyMirrorIndex(origin: String, generation: Long, index: MirrorIndex) {
         val sessions = index.sessions.filter { !it.goneFromServer }.mapNotNull { MirrorLink.decodeSession(it.json) }
         synchronized(lock) {
-            if (mirrorOrigin != origin || currentOriginLocked() != origin) return
+            // Only into the binding that asked (ta-hra L-2): a late pre-wipe bind never publishes
+            // the old sign-in's list or cursors into a new binding of the same origin.
+            if (mirrorOrigin != origin || currentOriginLocked() != origin || mirrorGeneration != generation) return
             for ((sessionId, cursor) in index.cursors) {
                 if (tracker.cursorFor(sessionId) != null) continue
                 tracker.seed(sessionId, cursor)
@@ -1230,7 +1237,16 @@ class RealTetherClient(
         }
     }
 
-    override suspend fun logout(): LogoutResult {
+    /**
+     * ta-hra M-1: once begun, a logout runs to the end even if its caller is cancelled (the UI
+     * calls it from viewModelScope, which may be cleared mid-wipe): otherwise the saved
+     * credential, the push unregister and the server revoke could be skipped and the next
+     * start() would sign back in. Every step is bounded (the wipe never waits for the writer;
+     * the hook and the revoke have [LOGOUT_CALL_TIMEOUT_MS]).
+     */
+    override suspend fun logout(): LogoutResult = withContext(NonCancellable) { logoutNow() }
+
+    private suspend fun logoutNow(): LogoutResult {
         val base: HttpUrl?
         val credential: Credential?
         val ws: WebSocket?
@@ -1248,21 +1264,25 @@ class RealTetherClient(
         }
         ws?.close(1000, "logout")
         clearSignInViews()
-        // The shred runs off the caller's thread (ta-hra R3: the UI calls logout from
-        // viewModelScope, on main; the Keystore delete is an IPC), but it is awaited: logout
-        // still returns only after the keys are gone (M1).
-        unbindMirrorForWipe()?.let { mirror -> withContext(Dispatchers.IO) { mirror.wipe() } }
-        // A user logout is not a server verdict: no "session expired" copy.
-        signedOutReasonState.value = null
-        connectionState.value = ConnectionState.AuthRequired
+        val mirror = unbindMirrorForWipe()
 
         // 1. Forget locally FIRST: whatever happens next, this phone is signed out.
-        //    The server URL stays (login-screen prefill).
+        //    The server URL stays (login-screen prefill). Before the mirror's shred too
+        //    (ta-hra I-9): a death between the two must not leave a credential that re-signs
+        //    in; with no credential, the next start purges whatever of the mirror is left.
         // The store retries its own delete and falls back to a tombstone; one
         // more attempt here covers a store that threw before getting that far.
         if (runCatching { settings.clearCredential() }.isFailure) {
             runCatching { settings.clearCredential() }
         }
+        // The shred runs off the caller's thread (ta-hra R3: the UI calls logout from
+        // viewModelScope, on main; the Keystore delete is an IPC), but it is awaited: logout
+        // still returns only after the keys are gone (M1).
+        mirror?.let { withContext(Dispatchers.IO) { it.wipe() } }
+        // A user logout is not a server verdict: no "session expired" copy.
+        signedOutReasonState.value = null
+        connectionState.value = ConnectionState.AuthRequired
+
         if (base == null || credential == null) return LogoutResult.LocalOnly
 
         // 2. Integrator hook (push unregister for a device token), bounded.

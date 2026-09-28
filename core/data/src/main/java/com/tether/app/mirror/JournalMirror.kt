@@ -1,5 +1,6 @@
 package com.tether.app.mirror
 
+import androidx.annotation.VisibleForTesting
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
 import java.security.MessageDigest
@@ -150,8 +151,10 @@ class JournalMirror(
 
     /**
      * Test seam: runs on the actor right before a hydration reads the base, so a test can hold
-     * the writer (or fail the read) while live events arrive. Null in production.
+     * the writer (or fail the read) while live events arrive. Null in production. Public, not
+     * internal, because core:net's client tests set it too (ta-hra I-6).
      */
+    @VisibleForTesting
     @Volatile
     var beforeHydrateRead: (() -> Unit)? = null
 
@@ -187,6 +190,7 @@ class JournalMirror(
     fun wipe(): CompletableDeferred<Unit> {
         val done = CompletableDeferred<Unit>()
         val cancelled = ArrayList<Op>()
+        val earlierWipes = ArrayList<Op.Wipe>()
         val writerDead = synchronized(queue) {
             wipeEpoch++
             if (!dead) {
@@ -195,7 +199,11 @@ class JournalMirror(
                     val op = it.next()
                     if (op is Op.Close) continue // a test's process death stays queued
                     it.remove()
-                    if (op !is Op.Write) {
+                    if (op is Op.Wipe) {
+                        // Merged into this one (I-2): answered only when this one is.
+                        controlsQueued--
+                        earlierWipes += op
+                    } else if (op !is Op.Write) {
                         controlsQueued--
                         cancelled += op
                     }
@@ -205,6 +213,7 @@ class JournalMirror(
             }
             dead
         }
+        for (earlier in earlierWipes) done.invokeOnCompletion { earlier.reply.complete(Unit) }
         shredKeys()
         // Answered after the shred: whoever waited sees the wipe's effect.
         cancelled.forEach(::answer)
@@ -568,6 +577,8 @@ class JournalMirror(
      * shreds that file itself.
      */
     private fun createKey(): MirrorDataKey? {
+        // Already overtaken (L-1): do not even ask the Keystore for a key.
+        if (wipeEpoch != opEpoch) return null
         val fresh = keyStore.create()
         if (wipeEpoch == opEpoch) return fresh
         fresh.wipe()

@@ -120,11 +120,11 @@ class MirrorKeyStore(
      * wrapped it is destroyed, best effort (it wraps nothing on disk any more).
      */
     fun destroy() {
-        deleteDataKey()
         try {
-            kek.destroyKey()
-        } catch (_: Exception) {
-            // Best effort: the file it could have opened is already gone.
+            deleteDataKey()
+        } finally {
+            // Best effort, and attempted even if the delete threw (I-3).
+            runCatching { kek.destroyKey() }
         }
     }
 

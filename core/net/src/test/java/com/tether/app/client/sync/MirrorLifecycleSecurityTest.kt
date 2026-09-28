@@ -8,6 +8,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -15,6 +17,7 @@ import okhttp3.mockwebserver.MockResponse
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -74,10 +77,17 @@ class MirrorLifecycleSecurityTest {
         h.ws.send(snapshotFrame("s1", 5, state))
         h.serverBarrier()
         h.dbSession("s1")
-        // Hold the writer so the Wipe op cannot run before the "death".
+        // Hold the writer so the Wipe op cannot run before the "death". The held read is queued
+        // asynchronously: wait until the writer is inside it, or the wipe's queue drop (ta-hra
+        // R1) would cancel it before it ran and nothing would be held (verifier F1).
         val gate = CountDownLatch(1)
-        h.mirror.beforeHydrateRead = { gate.await(10, TimeUnit.SECONDS) }
+        val entered = CountDownLatch(1)
+        h.mirror.beforeHydrateRead = {
+            entered.countDown()
+            gate.await(20, TimeUnit.SECONDS)
+        }
         h.client.attach("held")
+        assertTrue("the writer is held", entered.await(20, TimeUnit.SECONDS))
         h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
         runBlocking { h.client.logout() }
         // The keys went on logout's own thread, the writer still held.
@@ -314,5 +324,60 @@ class MirrorLifecycleSecurityTest {
         }
         awaitTrue("mirror files deleted once the writer is back") { h.dbFactory.existing().isEmpty() }
         assertFalse("the writer minted no key after the wipe", h.keyFile.exists())
+    }
+
+    /**
+     * ta-hra M-1: the UI's scope is cancelled while logout waits for the mirror's Keystore
+     * delete. The logout still runs to the end: the credential was forgotten BEFORE the shred
+     * (I-9), the push hook runs, the cookie is revoked, and the next start does not sign in.
+     */
+    @Test
+    fun aLogoutWhoseCallerIsCancelledMidWipeStillForgetsTheCredentialAndFinishes() {
+        h.boot(ready = ready("s1"))
+        h.client.attach("s1")
+        h.expectFrame("attach")
+        h.ws.send(snapshotFrame("s1", 5, state))
+        h.serverBarrier()
+        h.dbSession("s1")
+        val inKeystore = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val credentialAtShred = java.util.concurrent.atomic.AtomicReference<Any?>("unset")
+        // Every Keystore delete (the logout's shred, and the writer's own) is held until release.
+        h.kek.beforeDestroyKey = {
+            credentialAtShred.compareAndSet("unset", runBlocking { h.settings.session().credential })
+            inKeystore.countDown()
+            release.await(20, TimeUnit.SECONDS)
+        }
+        val hookRan = CountDownLatch(1)
+        h.onLogout = { _, _ -> hookRan.countDown() }
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
+        val uiScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        try {
+            val job = uiScope.launch { h.client.logout() }
+            assertTrue("the wipe is inside the Keystore", inKeystore.await(20, TimeUnit.SECONDS))
+            job.cancel() // viewModelScope cleared mid-wipe
+        } finally {
+            release.countDown()
+            h.kek.beforeDestroyKey = null
+        }
+        assertEquals("the credential was forgotten before the shred", null, credentialAtShred.get())
+        assertTrue("the push hook still ran", hookRan.await(20, TimeUnit.SECONDS))
+        var revoke: okhttp3.mockwebserver.RecordedRequest? = null
+        val deadline = System.currentTimeMillis() + 20_000
+        while (revoke == null && System.currentTimeMillis() < deadline) {
+            val r = h.server.takeRequest(1, TimeUnit.SECONDS) ?: continue
+            if (r.path == "/api/auth/logout") revoke = r
+        }
+        assertNotNull("the cookie was still revoked server-side", revoke)
+        assertFalse(h.keyFile.exists())
+        assertNull(runBlocking { h.settings.session().credential })
+        uiScope.cancel()
+
+        // The next process does not sign back in.
+        h.kill(flushFirst = false)
+        h.bootSignedOut()
+        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
+        awaitTrue("mirror files deleted") { h.dbFactory.existing().isEmpty() }
+        assertNull("no socket was opened", h.sockets.poll(500, TimeUnit.MILLISECONDS))
     }
 }

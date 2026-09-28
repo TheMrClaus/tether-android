@@ -301,4 +301,87 @@ class MirrorWipeRaceTest {
         }
         assertFalse(fx.keyFile.exists())
     }
+
+    // ---- round 2 (F2, F3, I-2) ----
+
+    @Test
+    fun aBindAfterAWipeInTheSameProcessGetsAWorkingKey() = runBlocking {
+        m.bind(origin)
+        m.recordState(origin, "s1", 10, null, state("old-sign-in"), emptySet())
+        m.flush()
+        withTimeout(budgetS * 1_000) { m.wipe().await() }
+        // The next sign-in, same process: the wipe is over, so its bind is not overtaken.
+        val index = withTimeout(budgetS * 1_000) { m.bind(origin) }
+        assertNotNull("a bind after the wipe got no mirror", index)
+        assertTrue(index!!.sessions.isEmpty() && index.cursors.isEmpty())
+        assertTrue(fx.keyStore().load() is MirrorKeyStore.Loaded.Present)
+        m.recordState(origin, "s2", 3, null, state("new-sign-in"), emptySet())
+        m.flush()
+        assertEquals(state("new-sign-in"), (m.hydrate(origin, "s2") as Hydration.Loaded).session.base)
+        assertEquals(Hydration.None, m.hydrate(origin, "s1"))
+    }
+
+    @Test
+    fun aDyingWriterDeletesTheFilesBeforeItAnswersTheWipe() = runBlocking {
+        m.bind(origin)
+        m.recordState(origin, "s1", 10, null, state("old-sign-in"), emptySet())
+        m.flush()
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        m.beforeHydrateRead = {
+            entered.countDown()
+            gate.await(budgetS, TimeUnit.SECONDS)
+            throw OutOfMemoryError("simulated")
+        }
+        m.hydrateAsync(origin, "s1")
+        assertTrue(entered.await(budgetS, TimeUnit.SECONDS))
+        val wiped = m.wipe()
+        val deleting = CountDownLatch(1)
+        val letDelete = CountDownLatch(1)
+        fx.beforeDbDelete = {
+            fx.beforeDbDelete = null
+            deleting.countDown()
+            letDelete.await(budgetS, TimeUnit.SECONDS)
+        }
+        gate.countDown()
+        try {
+            assertTrue("die() never deleted", deleting.await(budgetS, TimeUnit.SECONDS))
+            assertFalse("the wipe was answered before its files were deleted", wiped.isCompleted)
+        } finally {
+            letDelete.countDown()
+        }
+        withTimeout(budgetS * 1_000) { wiped.await() }
+        assertTrue(fx.factory.existing().isEmpty())
+    }
+
+    @Test
+    fun aSecondWipeNeverAnswersAQueuedOneBeforeTheFilesAreGone() = runBlocking {
+        m.bind(origin)
+        m.recordState(origin, "s1", 10, null, state("old-sign-in"), emptySet())
+        m.flush()
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        m.beforeHydrateRead = {
+            m.beforeHydrateRead = null
+            entered.countDown()
+            gate.await(budgetS, TimeUnit.SECONDS)
+        }
+        val held = m.hydrateAsync(origin, "s1")
+        assertTrue(entered.await(budgetS, TimeUnit.SECONDS))
+        val first = m.wipe()
+        val second = m.wipe()
+        try {
+            assertFalse("the first wipe was answered with its files still there", first.isCompleted)
+            assertFalse(second.isCompleted)
+            assertTrue(fx.dbFile(origin).isFile)
+        } finally {
+            gate.countDown()
+        }
+        withTimeout(budgetS * 1_000) {
+            held.await()
+            first.await()
+            second.await()
+        }
+        assertNothingReadableSurvives()
+    }
 }
