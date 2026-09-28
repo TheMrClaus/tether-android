@@ -83,7 +83,8 @@ class CardStateStore internal constructor(
     internal fun setGrant(contentFp: String, value: GrantSelection) {
         put(grantStates, contentFp, value)
         generations[contentFp] = ++counter
-        generations.keys.retainAll(grantStates.keys) // an evicted record's generation goes too (0)
+        // An evicted record's generation goes too (0: "no record"), so its card's confirmation resets.
+        generations.keys.filter { it !in grantStates }.forEach { generations.remove(it) }
     }
 
     internal fun question(contentFp: String): QuestionSelection = questionStates[contentFp] ?: QuestionSelection()
@@ -96,22 +97,38 @@ class CardStateStore internal constructor(
         grantStates.clear()
         questionStates.clear()
         generations.clear()
+        order.clear()
     }
 
+    // Write order per map (a snapshot map is NOT insertion-ordered): the eviction is oldest first.
+    private val order = HashMap<MutableMap<*, *>, LinkedHashSet<String>>()
+
     private fun <T> put(map: MutableMap<String, T>, key: String, value: T) {
-        map.remove(key)
-        map[key] = value // newest last
-        while (map.size > MAX_RECORDS) map.remove(map.keys.first())
+        val keys = order.getOrPut(map) { LinkedHashSet(map.keys) }
+        keys.remove(key)
+        keys.add(key) // newest last
+        map[key] = value
+        while (keys.size > MAX_RECORDS) {
+            val oldest = keys.first()
+            keys.remove(oldest)
+            map.remove(oldest)
+        }
+    }
+
+    /** [map]'s records oldest first (so a restored store evicts in the same order). */
+    private fun <T> ordered(map: Map<String, T>): List<Pair<String, T>> {
+        val keys: Collection<String> = order[map as MutableMap<*, *>] ?: map.keys
+        return keys.mapNotNull { k -> map[k]?.let { v -> k to v } }
     }
 
     internal fun encode(): String = buildJsonObject {
         put("g", buildJsonArray {
-            grantStates.forEach { (fp, g) ->
+            ordered(grantStates).forEach { (fp, g) ->
                 add(buildJsonArray { add(JsonPrimitive(fp)); add(ints(g.offRead)); add(ints(g.offWrite)); add(JsonPrimitive(g.networkOff)) })
             }
         })
         put("q", buildJsonArray {
-            questionStates.forEach { (fp, q) ->
+            ordered(questionStates).forEach { (fp, q) ->
                 add(
                     buildJsonArray {
                         add(JsonPrimitive(fp))

@@ -832,6 +832,125 @@ class ApprovalCardBehaviourTest {
         val back = CardStateStore.decode(saved)
         assertEquals(store.encode(), back.encode())
     }
+    // ---- round 4 -------------------------------------------------------------------------------
+
+    /** A grants request whose read list repeats a path: `["/a","/b","/a"]` (the reducer does not dedupe). */
+    private val duplicatePaths: ChatFixtures.Folded by lazy {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-d"); put("toolId", "perm-d"); put("name", "permissions")
+                putJsonArray("choices") { addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") } }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    putJsonObject("requestedPermissions") { putJsonObject("fileSystem") { putJsonArray("read") { add("/a"); add("/b"); add("/a") } } }
+                }
+            },
+        )
+        ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    @Test fun unTickingOneRowOfADuplicatedPathUnTicksThePath() {
+        show(duplicatePaths)
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-read")[2].performClick() // the second "/a" row
+        // Both "/a" rows are one permission: both off.
+        rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
+        rule.onAllNodesWithTag("grant-read")[2].assertIsOff()
+        rule.onAllNodesWithTag("grant-read")[1].assertIsOn()
+        confirmAndAllowSelected()
+        assertEquals(listOf("approval:req-d:some:" + GrantedPermissions(fileSystemRead = listOf("/b")).toJsonObject()), calls)
+    }
+
+    @Test fun anyChangeAfterTheConfirmationClearsIt() {
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.onNodeWithTag("grant-network").performClick() // the selection changes
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        // The label names what the confirmation would now grant.
+        rule.onNodeWithText("Confirm these permissions: read /srv/fixtures, /srv/schema.sql; write /w/report.").assertExists()
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun allowAllNeedsEveryBoxTickedAsWellAsTheConfirmation() {
+        show(ApprovalFixtures.grants)
+        narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        // What would be confirmed is the narrowed set; "Allow all" would grant more: disabled.
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
+    }
+
+    @Test fun aRecordEvictedWhileOnScreenTakesTheConfirmationWithIt() {
+        // L3: the store keeps the newest MAX_RECORDS; others' writes evict this card's record.
+        show(ApprovalFixtures.grants)
+        narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.runOnIdle { repeat(CardStateStore.MAX_RECORDS) { store.setGrant("other-$it", GrantSelection(networkOff = true)) } }
+        rule.waitForIdle()
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithTag("grant-network").assertIsOn() // back to the full request
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        assertTrue(calls.isEmpty())
+    }
+
+    /** One question text on pages 1 and 3, the options reordered on page 3 (and one more). */
+    private val repeatedQuestion: ChatFixtures.Folded by lazy {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(), ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") }, ev("question_request", "t1", ts = 2) {
+            put("requestId", "q-r"); put("toolId", "ask-r")
+            putJsonArray("questions") {
+                addJsonObject {
+                    put("question", "DB?"); put("header", "A"); put("multiSelect", false)
+                    putJsonArray("options") { addJsonObject { put("label", "Postgres"); put("description", "") }; addJsonObject { put("label", "SQLite"); put("description", "") } }
+                }
+                addJsonObject {
+                    put("question", "Env?"); put("header", "B"); put("multiSelect", false)
+                    putJsonArray("options") { addJsonObject { put("label", "staging"); put("description", "") } }
+                }
+                addJsonObject {
+                    put("question", "DB?"); put("header", "C"); put("multiSelect", false)
+                    putJsonArray("options") { addJsonObject { put("label", "DynamoDB"); put("description", "") }; addJsonObject { put("label", "SQLite"); put("description", "") }; addJsonObject { put("label", "Postgres"); put("description", "") } }
+                }
+            }
+        })
+        ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    @Test fun aRepeatedQuestionWithReorderedOptionsSendsTheLabelTapped() {
+        // L1: page 1 picks "SQLite"; page 3 (same text, options reordered) shows SQLite picked, and
+        // the answer says SQLite (the web keys picks by LABEL).
+        fixture = repeatedQuestion
+        show(repeatedQuestion)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("question-card"))
+        rule.onAllNodesWithTag("question-card").assertCountEquals(1)
+        val sqlite = androidx.compose.ui.test.hasTestTag("question-option") and hasText("SQLite")
+        rule.onNode(sqlite).performClick()
+        scrollTo("question-next")
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle(); arm()
+        scrollTo("question-skip")
+        rule.onNodeWithTag("question-skip").performClick() // skip page 2 ("Env?")
+        rule.waitForIdle(); arm()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 3 of 3"))
+        rule.onNode(sqlite).assertIsOn() // the same label, picked on page 1
+        rule.onAllNodesWithTag("question-option")[0].assertIsOff() // DynamoDB, first on this page
+        scrollTo("question-submit")
+        rule.onNodeWithTag("question-submit").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("question:q-r:{DB?=SQLite}"), calls)
+    }
+
+    @Test fun identicalContentInTwoSessionsIsTwoCards() {
+        val other = foldTree(ApprovalFixtures.grants.tree.put("tetherSessionId", com.tether.app.protocol.tree.JsStr("s2")))
+        assertTrue(pendingApprovals(ApprovalFixtures.grants.tree).single().contentFp != pendingApprovals(other).single().contentFp)
+    }
 }
 
 /**
