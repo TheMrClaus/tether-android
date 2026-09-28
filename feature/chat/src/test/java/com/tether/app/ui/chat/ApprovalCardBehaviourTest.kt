@@ -941,10 +941,15 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("question-page").assert(hasText("Question 3 of 3"))
         rule.onNode(sqlite).assertIsOn() // the same label, picked on page 1
         rule.onAllNodesWithTag("question-option")[0].assertIsOff() // DynamoDB, first on this page
+        // Now pick Postgres HERE: third on this page, first on page 1; the answer names Postgres.
+        val postgres = androidx.compose.ui.test.hasTestTag("question-option") and hasText("Postgres")
+        rule.onNode(postgres).performClick()
+        rule.onNode(postgres).assertIsOn()
+        rule.onNode(sqlite).assertIsOff() // single-select: the pick moved
         scrollTo("question-submit")
         rule.onNodeWithTag("question-submit").performClick()
         rule.waitForIdle()
-        assertEquals(listOf("question:q-r:{DB?=SQLite}"), calls)
+        assertEquals(listOf("question:q-r:{DB?=Postgres}"), calls)
     }
 
     @Test fun identicalContentInTwoSessionsIsTwoCards() {
