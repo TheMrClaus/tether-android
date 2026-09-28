@@ -44,8 +44,10 @@ beads Dolt history flattened and re-pushed. Branches cut before the scrub are **
   crash + 4 Lows fixed); security re-review clear; gate 2552/0 failed/4 skipped. Rotation follow-up **ta-u2n** in flight.
 - **ta-cdh** (sign-in ping-before-hello race, low severity) **VERIFIED + MERGED** (`fc3f820`); the load-sensitive
   `OriginKeyedPendingTest` failures are gone.
-- **In flight:** **ta-ouu** (push security follow-ups, release-relevant; in verification), **T4.4** deep links,
-  **T13.1** Room mirror, **ta-u2n**.
+- **ta-ouu** push security follow-ups **VERIFIED + MERGED** (`80e9651`); **T5.2** resume **VERIFIED + MERGED** (`d31fbce`);
+  **ta-u2n** file-browser rotation **VERIFIED + MERGED** (`e425af4`, gate 2618/0 failed/4 skipped).
+- **In flight:** **T4.4** deep links round 2 (singleTask → singleTop: a launcher relaunch of a singleTask root clears Custom
+  Tabs, permission dialogs and SAF pickers above it), **T13.1** Room mirror, **T5.3** search.
 - Follow-ups filed tonight: ta-cdh, two design-system parity bugs (line-height:1 text, dialog top light line), error-toast
   auto-dismiss vs the web's persistent toast.
 
@@ -118,15 +120,15 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  | checkpoint: 888c620 WIP nav/ (DeepLinks parser, DeepLinkIntents, DeepLinkNavigator, SessionLinkOpener), UiRoot wiring, singleTask + tether:… |
+| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  | round 2 (executor-T4.4): rebased onto main d31fbce; next: launch-mode rework, SessionLinkOpener + AuthRequired test gaps, key/IME guard |
 | T4.5 | Log dialog | VERIFIED | TheMrClaus @ 2026-09-27 21:58 |  |  |
 
 ### Phase 5 — Sidebar & sessions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | VERIFIED | claude-main @ 2026-09-27 13:53 |  |  |
-| T5.2 | History/resume picker | TODO |  |  |  |
-| T5.3 | Global + in-session search | TODO |  |  |  |
+| T5.2 | History/resume picker | VERIFIED | TheMrClaus @ 2026-09-28 00:37 |  |  |
+| T5.3 | Global + in-session search | IN-PROGRESS | TheMrClaus @ 2026-09-28 03:33 |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
 
 ### Phase 6 — Chat view
@@ -193,7 +195,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | checkpoint (executor-T13.1): (a) committed 1c43e52 on parity/T13.1-room-mirror: shadow-write mirror (core/data mirror/*, core/net client/sy… |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | checkpoint (executor-T13.1): (c) committed 3d9e37a: client/sync/SessionStore.kt owns projectionTrees/projections/trimmedBefore/adapters + m… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
