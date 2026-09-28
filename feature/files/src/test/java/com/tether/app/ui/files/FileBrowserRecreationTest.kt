@@ -123,8 +123,12 @@ class FileBrowserRecreationTest {
         host()
     }
 
-    /** Polls with the main looper drained each time (see FileBrowserBehaviourTest.waitFor). */
-    private fun waitFor(condition: () -> Boolean) = compose.waitUntil(5_000) {
+    /**
+     * Polls with the main looper drained each time (see FileBrowserBehaviourTest.waitFor). The budget is
+     * generous because the fake server is real sockets on a shared, often heavily loaded host; a passing
+     * wait returns as soon as its condition holds, so this costs nothing when green (ta-u2n verifier, low 1).
+     */
+    private fun waitFor(condition: () -> Boolean) = compose.waitUntil(WAIT_MS) {
         shadowOf(android.os.Looper.getMainLooper()).idle()
         condition()
     }
@@ -223,3 +227,5 @@ class FileBrowserRecreationTest {
         waitFor { shareDirs().isEmpty() }
     }
 }
+
+private const val WAIT_MS = 20_000L

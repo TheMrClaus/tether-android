@@ -271,9 +271,9 @@ class FileLifecycleTest {
             }
         }
         rule.runOnIdle { s.open() }
-        rule.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); s.listing != null }
+        rule.waitUntil(20_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); s.listing != null }
         rule.runOnIdle { s.share(entry) }
-        rule.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); fake.calls.contains("discard share-3") }
+        rule.waitUntil(20_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); fake.calls.contains("discard share-3") }
         assertNull(s.pendingShare)
         assertFalse("never claimed", fake.calls.contains("claim share-3"))
     }
