@@ -38,3 +38,11 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
 }
+
+// T13.1: Robolectric installs a JVM-GLOBAL security provider (Conscrypt, or BouncyCastle with
+// Conscrypt off) when its sandbox starts. That changes how the plain-JVM CredentialCipherTest's
+// provider failures surface, so a mirror test running first in the same JVM made it
+// order-dependent. One JVM per test class keeps every class on the providers it was written for.
+tasks.withType<Test>().configureEach {
+    forkEvery = 1
+}

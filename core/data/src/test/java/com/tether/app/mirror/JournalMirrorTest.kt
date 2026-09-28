@@ -13,16 +13,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.ConscryptMode
 
 /**
  * T13.1: the mirror's write path (SYNC_DESIGN §2.3), hydration reads (§2.4), key checks (§8.2),
  * wipe (§8.3) and rotation (§8.1), against Robolectric's real SQLite in temp files.
  */
-// Robolectric's default Conscrypt mode installs Conscrypt as a JVM-GLOBAL provider, which then
-// changes how the plain-JVM CredentialCipherTest in this same test JVM fails (order-dependent).
-// The core:net mirror tests keep Conscrypt on, so the mirror cipher runs under both providers.
-@ConscryptMode(ConscryptMode.Mode.OFF)
 @RunWith(RobolectricTestRunner::class)
 class JournalMirrorTest {
     private val origin = "https://tether.example:443"

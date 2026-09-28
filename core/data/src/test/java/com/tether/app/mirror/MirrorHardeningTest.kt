@@ -15,16 +15,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.ConscryptMode
 
 /**
  * T13.1 round 2 (security review M1, M2, L3, L4; verifier F3, F5): a wipe that cannot be lost,
  * a writer that cannot die silently, bounded blobs and origins, the v2 AAD, and delete order.
  */
-// Robolectric's default Conscrypt mode installs Conscrypt as a JVM-GLOBAL provider, which then
-// changes how the plain-JVM CredentialCipherTest in this same test JVM fails (order-dependent).
-// The core:net mirror tests keep Conscrypt on, so the mirror cipher runs under both providers.
-@ConscryptMode(ConscryptMode.Mode.OFF)
 @RunWith(RobolectricTestRunner::class)
 class MirrorHardeningTest {
     private val origin = "https://tether.example:443"
@@ -50,11 +45,16 @@ class MirrorHardeningTest {
         m.bind(origin)
         m.recordState(origin, "s1", 10, null, state(), emptySet())
         m.flush()
-        // Hold the writer: the Wipe op cannot run.
+        // Hold the writer: the Wipe op cannot run. hydrateAsync enqueues at once, and the
+        // writer is known to be inside the hold before wipe() is called.
         val gate = CountDownLatch(1)
-        m.beforeHydrateRead = { gate.await(10, TimeUnit.SECONDS) }
-        val held = async { m.hydrate(origin, "s1") }
-        Thread.sleep(100)
+        val entered = CountDownLatch(1)
+        m.beforeHydrateRead = {
+            entered.countDown()
+            gate.await(10, TimeUnit.SECONDS)
+        }
+        val held = m.hydrateAsync(origin, "s1")
+        assertTrue(entered.await(10, TimeUnit.SECONDS))
         m.wipe()
         // Already gone, with the writer still held.
         assertFalse(fx.keyFile.exists())
@@ -114,15 +114,18 @@ class MirrorHardeningTest {
         m.recordState(origin, "s1", 10, null, state(), emptySet())
         m.flush()
         val gate = CountDownLatch(1)
+        val entered = CountDownLatch(1)
         m.beforeHydrateRead = {
+            entered.countDown()
             gate.await(10, TimeUnit.SECONDS)
             throw OutOfMemoryError("simulated")
         }
-        val read = async { m.hydrate(origin, "s1") }
-        Thread.sleep(100)
+        val read = m.hydrateAsync(origin, "s1")
+        assertTrue(entered.await(10, TimeUnit.SECONDS))
         // Callers queued behind the failing op are answered too, not left hanging.
-        val flush = async { m.flush() }
-        val rebind = async { m.bind(origin) }
+        val flush = async(kotlinx.coroutines.Dispatchers.Default) { m.flush() }
+        val rebind = async(kotlinx.coroutines.Dispatchers.Default) { m.bind(origin) }
+        Thread.sleep(200) // both are queued behind the held op
         gate.countDown()
         withTimeout(5_000) {
             assertEquals(Hydration.None, read.await())
