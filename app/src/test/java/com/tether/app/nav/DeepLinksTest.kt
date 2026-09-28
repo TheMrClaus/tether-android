@@ -8,6 +8,7 @@ import com.tether.app.nav.LinkRejection.UnknownRoute
 import com.tether.app.nav.LinkRejection.UnsupportedScheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -203,6 +204,20 @@ class DeepLinksTest {
                 "https://[fd00::5/?session=abc",
             ),
         )
+    }
+
+    @Test
+    fun hostSpellingsTheTwoParsersCouldReadDifferentlyAreRefused() {
+        // OkHttp canonicalises these hosts; the raw authority keeps the spelling. Any disagreement
+        // is refused, even when the canonical origin would match the paired one.
+        for ((server, link) in listOf(
+            paired to "https://tether.example.com./?session=abc",
+            "http://[fd00::5]:3000" to "http://[FD00:0:0::5]:3000/?session=abc",
+            "http://[fd00::5]:3000" to "http://[fd00:0000::5]:3000/?session=abc",
+            "http://127.0.0.1:4173" to "http://2130706433:4173/?session=abc",
+            "http://127.0.0.1:4173" to "http://0x7f.0.0.1:4173/?session=abc",
+            "http://127.0.0.1:4173" to "http://127.1:4173/?session=abc",
+        )) assertTrue(link, parse(link, server) is ParsedLink.Rejected)
     }
 
     @Test
