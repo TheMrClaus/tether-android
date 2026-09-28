@@ -186,7 +186,14 @@ class MirrorLifecycleSecurityTest {
             b.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=b; Path=/").setBody("{}"))
             b.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
             // In the window after the switch to B and before the mirror re-binds, the UI opens s1.
-            h.client.raceHook = { point, _ -> if (point == com.tether.app.client.RacePoint.OriginSwitched) h.client.attach("s1") }
+            h.client.raceHook = { point, _ ->
+                if (point == com.tether.app.client.RacePoint.OriginSwitched) {
+                    h.client.attach("s1")
+                    // Let a read (if one was wrongly started) land INSIDE the window, before the re-bind.
+                    val until = System.currentTimeMillis() + 1_500
+                    while (System.currentTimeMillis() < until && !h.client.projectionTrees.value.containsKey("s1")) Thread.sleep(10)
+                }
+            }
             assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url("/").toString(), "pw") })
             h.client.raceHook = null
             runBlocking { h.mirror.flush() }
