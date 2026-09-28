@@ -24,39 +24,20 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-27 ~21:20 CEST, coordinator handover after a 5-hour usage limit):** `main` @ `98bf8ac`.
-Phases 0-3 CLOSED; Phase 4 T4.1-T4.3 merged; **T12.1 r3 VERIFIED + merged** (`98bf8ac`); **ta-s8q** (release blocker)
-merged `9b6a8d7`. **No release blocker is open.** Production: tether `0e6e862`, PROTOCOL 130, floor 129; `main` speaks 129.
-**History:** this repo's history was scrubbed of the operator account name (owner force-push, `main` f388137 + tag v0.6.0);
-beads Dolt history flattened and re-pushed. Branches cut before the scrub are **transplanted** (`git rebase --onto`), never merged.
-
-**Unfinished lanes (worktrees under `tether-android-wt/`):**
-- **T5.1** sidebar: `parity/T5.1-sidebar` @ `c86219d` (base `9b6a8d7`), DONE on the bead (gate 1885/0 failed/4 skipped),
-  **awaiting its verifier**, then rebase onto `main` + merge.
-- **T6.1** chat turns: **VERIFIED + MERGED** (`19abfbc`). The P1 link-allowlist bypass (JVM `IGNORE_CASE` folds
-  Unicode, so `httpſ://` / `maılto:` linked) was fixed with ASCII-only folding; exhaustive U+0000-U+FFFF comparison against the
-  web's JS regex is identical; transplanted onto `main`, gate 2101/0 failed/4 skipped.
-- **T4.5** log dialog: **VERIFIED + MERGED** (`61f868a`). Two verify rounds: the unseen-warnings mark now belongs to a sign-in
-  generation on `EventLog` (a StateFlow-conflation race made the first reset unreliable). Rebased gate 2208/0 failed/4 skipped.
-- **T5.1** sidebar: **VERIFIED + MERGED** (`a41178a`) after a wiring-test deadlock fix and a keep-both rebase over T4.5/T6.1;
-  gate 2348/0 failed/4 skipped.
-- **T11.1** file browser: **VERIFIED + MERGED** (`d39d5d5`) after two rounds (rebase over T4.5; security review M1 image-decode
-  crash + 4 Lows fixed); security re-review clear; gate 2552/0 failed/4 skipped. Rotation follow-up **ta-u2n** in flight.
-- **ta-cdh** (sign-in ping-before-hello race, low severity) **VERIFIED + MERGED** (`fc3f820`); the load-sensitive
-  `OriginKeyedPendingTest` failures are gone.
-- **ta-ouu** push security follow-ups **VERIFIED + MERGED** (`80e9651`); **T5.2** resume **VERIFIED + MERGED** (`d31fbce`);
-  **ta-u2n** file-browser rotation **VERIFIED + MERGED** (`e425af4`, gate 2618/0 failed/4 skipped).
-- **In flight:** **T4.4** deep links round 2 (singleTask → singleTop: a launcher relaunch of a singleTask root clears Custom
-  Tabs, permission dialogs and SAF pickers above it), **T13.1** Room mirror, **T5.3** search.
-- Follow-ups filed tonight: ta-cdh, two design-system parity bugs (line-height:1 text, dialog top light line), error-toast
-  auto-dismiss vs the web's persistent toast.
-
-**Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2, verified) awaits
-merge; then the owner sets `TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID` in production,
-deploys, and restricts that API key to the app's package + signing fingerprints. **Push cannot work end to end until then.**
-Optional: tether private-history scrub (needs a production checkout reset + restart).
-**Follow-ups filed:** ta-ouu (T12.1 security Lows), ta-dtb, ta-gxp, ta-yhu, ta-srn.
-**Next frontier (`bd ready` is authoritative):** T4.4 deep links, T4.5 log dialog, T13.1 Room mirror, Phase 10 settings.
+**Resume point (2026-09-28 ~10:00 CEST, end of the overnight autonomous run):** `main` @ `8515afe`.
+**Merged + verified overnight (10):** T6.1 chat/markdown (`19abfbc`), T4.5 log dialog (`61f868a`), T5.1 sidebar (`a41178a`),
+ta-cdh sign-in ping race (`fc3f820`), T11.1 file browser (`d39d5d5`), ta-ouu push security follow-ups (`80e9651`),
+T5.2 resume (`d31fbce`), ta-u2n file-browser rotation (`e425af4`), T4.4 deep links (`fb66759`), T5.3 search (`8515afe`).
+**⚠ main CI is red** on `8515afe`: an intermittent `FileBrowserRecreationTest` timeout (not only host load) - **ta-g04** (P1) in
+flight. No release/draft until CI is green again.
+**In flight:** T13.1 Room mirror round 2 (security review M1/M2 fixes: durable wipe, worker can't die silently, origin lag;
+verifier already CONFIRMED correctness), T6.2 tool cards, T7.1 composer, ta-g04.
+**Owner queue (report, not act):** tether PR [#204](https://github.com/TheMrClaus/tether/pull/204) (S12.2) awaits merge, then the
+three production FCM values (`TETHER_FCM_ANDROID_APP_ID`, `TETHER_FCM_ANDROID_API_KEY`, `TETHER_FCM_SENDER_ID`) + deploy + restrict
+the API key to the app package + signing fingerprints. Optional tether private-history scrub. A 0.7.0 **draft** release (signed,
+unpublished) is prepared once CI is green; publishing is the owner's call.
+**Follow-ups filed overnight:** ta-cdh (done), ta-6z4, ta-3pf, ta-hcj, ta-0lv, ta-5wx, ta-705, ta-u2n (done), ta-g04, design-system
+line-height + dialog top line, error-toast persistence, ta-1u4, ta-5tb.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -120,7 +101,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T4.1 | Phone shell (web mobile layout) | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
 | T4.2 | Expanded shell (web desktop layout, resizable panels) | VERIFIED | claude-main @ 2026-09-27 13:32 |  |  |
 | T4.3 | Statusline, dial, context gauge, telemetry readings, wrap-up badge | VERIFIED | claude-main @ 2026-09-27 11:53 |  |  |
-| T4.4 | Navigation + deep links | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:46 |  | round 2 (executor-T4.4): rebased onto main d31fbce; next: launch-mode rework, SessionLinkOpener + AuthRequired test gaps, key/IME guard |
+| T4.4 | Navigation + deep links | VERIFIED | TheMrClaus @ 2026-09-27 23:46 |  |  |
 | T4.5 | Log dialog | VERIFIED | TheMrClaus @ 2026-09-27 21:58 |  |  |
 
 ### Phase 5 — Sidebar & sessions
@@ -128,14 +109,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | VERIFIED | claude-main @ 2026-09-27 13:53 |  |  |
 | T5.2 | History/resume picker | VERIFIED | TheMrClaus @ 2026-09-28 00:37 |  |  |
-| T5.3 | Global + in-session search | IN-PROGRESS | TheMrClaus @ 2026-09-28 03:33 |  |  |
+| T5.3 | Global + in-session search | VERIFIED | TheMrClaus @ 2026-09-28 03:33 |  |  |
 | T5.4 | Away digests (if on web) | TODO |  |  |  |
 
 ### Phase 6 — Chat view
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
-| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | TODO |  |  |  |
+| T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:21 |  | checkpoint (executor-T6.2) a5e098b: done: ToolRenderModel (summarize/pretty JSON/media extract/lineDiff/ToolInput/grouping), RichRenderMode… |
 | T6.3 | Approvals, questions, permission denials/paths | TODO |  |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
@@ -145,7 +126,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T7.1 | Draft composer, persisted drafts, queue UI | TODO |  |  | From T1.3: pending-status rows via helpers.PendingInput.describePending(PendingStore.tree); no failed-send list/retract yet (abandoned reco… |
+| T7.1 | Draft composer, persisted drafts, queue UI | IN-PROGRESS | TheMrClaus @ 2026-09-28 04:59 |  | checkpoint (executor-T7.1): resumed after usage-limit cut; reading done (web chat-view composer + QueuedMessageRow, DraftStore, Composer.kt… |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | TODO |  |  |  |
 | T7.3 | Slash commands, run/background command, mentions | TODO |  |  |  |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
@@ -195,7 +176,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
-| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | checkpoint (executor-T13.1): (c) committed 3d9e37a: client/sync/SessionStore.kt owns projectionTrees/projections/trimmedBefore/adapters + m… |
+| T13.1 | Room journal mirror; UI reads Room; delta attach | IN-PROGRESS | TheMrClaus @ 2026-09-27 23:48 |  | coordinator: verifier CONFIRMED correctness, but the security review is NOT clear to merge (M1 wipe not durable across process death / star… |
 | T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
