@@ -34,8 +34,14 @@ sealed interface PushRegistrarResult {
 
     /**
      * This server now names a different Firebase project than the one the
-     * device accepted from it. Nothing was registered. The UI should say "Push
-     * project changed; re-pair to accept."
+     * device accepted from it. Nothing was registered, and re-pairing (logout,
+     * then sign in again) accepts the new project.
+     *
+     * No screen shows this yet: no push result reaches the UI today (the
+     * coordinator only uses it to decide whether to retry), so a user sees push
+     * go quiet without a reason.
+     * TODO(T12.2): surface it in the push settings as "Push project changed;
+     * re-pair to accept."
      */
     data object ProjectChanged : PushRegistrarResult
 }
