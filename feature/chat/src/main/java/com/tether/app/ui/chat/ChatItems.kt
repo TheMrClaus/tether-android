@@ -209,6 +209,8 @@ internal fun buildChatItems(
     richCodex: Boolean = false,
     groupOpen: (key: String, default: Boolean) -> Boolean = { _, default -> default },
     showApprovals: Boolean = true,
+    /** I-1: the client's key for this session (the cards' identity); null = the tree's own id (tests). */
+    consentSessionId: String? = null,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     val trimmed = trimmedTurnCount(projection)
@@ -316,8 +318,8 @@ internal fun buildChatItems(
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
     }
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
-    if (showApprovals) pendingApprovals(state).forEach { items.add(ChatItem.Approval(it)) }
+    if (showApprovals) pendingApprovals(state, consentSessionId).forEach { items.add(ChatItem.Approval(it)) }
     val answeredIds = answeredRequestIds(state)
-    pendingQuestions(state).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
+    pendingQuestions(state, consentSessionId).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items
 }

@@ -144,6 +144,36 @@ internal fun isFullGrant(grant: GrantedPermissions, requested: RequestedPermissi
         (grant.networkEnabled == true) == requested.network
 }
 
+/** L-3: longest path (in code points) a card shows before "…". */
+internal const val DISPLAY_PATH_MAX = 160
+
+/**
+ * L-3: a server path as the card SHOWS it (never as it is granted: the grant carries the raw path):
+ * C0/C1 controls, DEL, the line / paragraph separators and every bidi control (U+200E/200F, U+061C,
+ * U+202A-202E, U+2066-2069) as visible `\uXXXX`; cut to [DISPLAY_PATH_MAX] code points with "…"; and
+ * quoted, so a path cannot pose as the sentence around it ("/x; no network access").
+ */
+internal fun displayPath(path: String): String {
+    val out = StringBuilder("\u201C")
+    var shown = 0
+    var i = 0
+    while (i < path.length) {
+        val cp = path.codePointAt(i)
+        if (shown == DISPLAY_PATH_MAX) {
+            out.append('…')
+            break
+        }
+        if (isHiddenControl(cp)) out.append("\\u%04X".format(cp)) else out.appendCodePoint(cp)
+        shown++
+        i += Character.charCount(cp)
+    }
+    return out.append('\u201D').toString()
+}
+
+private fun isHiddenControl(cp: Int): Boolean =
+    cp < 0x20 || cp in 0x7F..0x9F || cp == 0x2028 || cp == 0x2029 || cp == 0x200E || cp == 0x200F || cp == 0x061C ||
+        cp in 0x202A..0x202E || cp in 0x2066..0x2069
+
 /** What one choice key sends: its id and (for a permission-granting choice) the grant, or null when it is disabled. */
 internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermissions?)
 
@@ -168,8 +198,8 @@ internal fun pickFor(
  */
 internal fun grantSummary(read: List<String>, write: List<String>, network: Boolean): String {
     val parts = buildList {
-        if (read.isNotEmpty()) add("read ${read.joinToString(", ")}")
-        if (write.isNotEmpty()) add("write ${write.joinToString(", ")}")
+        if (read.isNotEmpty()) add("read ${read.joinToString(", ") { displayPath(it) }}")
+        if (write.isNotEmpty()) add("write ${write.joinToString(", ") { displayPath(it) }}")
         if (network) add("network access")
     }
     return if (parts.isEmpty()) "Confirm these permissions: none selected." else "Confirm these permissions: ${parts.joinToString("; ")}."
@@ -419,19 +449,23 @@ internal fun activeTurnOf(tree: JsObj?): JsObj? {
     return (state["turnsById"] as? JsObj)?.get(active) as? JsObj
 }
 
-/** The active turn's pending approvals, in insertion order (`Object.values(activeTurn.pendingApprovals)`). */
-internal fun pendingApprovals(tree: JsObj?): List<ApprovalView> {
+/**
+ * The active turn's pending approvals, in insertion order (`Object.values(activeTurn.pendingApprovals)`).
+ * [sessionId] is the CLIENT's key for the session (I-1: the card identity never trusts the tree's own
+ * `tetherSessionId`); null only for callers without one (tests, previews), which fall back to it.
+ */
+internal fun pendingApprovals(tree: JsObj?, sessionId: String? = null): List<ApprovalView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingApprovals") as? JsObj ?: return emptyList()
-    val sessionId = tree!!["tetherSessionId"].string().orEmpty()
+    val sessionId = sessionId ?: tree!!["tetherSessionId"].string().orEmpty()
     return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { approvalView(key, it, turnId, sessionId) } }
 }
 
-/** The active turn's pending questions. */
-internal fun pendingQuestions(tree: JsObj?): List<QuestionRequestView> {
+/** The active turn's pending questions ([sessionId] as for [pendingApprovals]). */
+internal fun pendingQuestions(tree: JsObj?, sessionId: String? = null): List<QuestionRequestView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingQuestions") as? JsObj ?: return emptyList()
-    val sessionId = tree!!["tetherSessionId"].string().orEmpty()
+    val sessionId = sessionId ?: tree!!["tetherSessionId"].string().orEmpty()
     return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { questionView(key, it, turnId, sessionId) } }
 }
 

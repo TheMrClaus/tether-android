@@ -287,8 +287,8 @@ private fun RunTab(
 ) {
     val listState = rememberLazyListState()
     val state = remember(projection, tree) { cardTree(projection, tree) }
-    val pending = remember(state, showApprovals) { if (showApprovals) pendingApprovals(state) else emptyList() }
-    val pendingQ = remember(state) { pendingQuestions(state) }
+    val pending = remember(state, showApprovals, consent.sessionId) { if (showApprovals) pendingApprovals(state, consent.sessionId) else emptyList() }
+    val pendingQ = remember(state, consent.sessionId) { pendingQuestions(state, consent.sessionId) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
 
     // Web parity: a running run follows the newest activity as its thread

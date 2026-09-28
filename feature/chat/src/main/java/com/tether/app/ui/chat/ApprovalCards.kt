@@ -270,10 +270,12 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
     val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
     val network = requested?.network == true && !selection.networkOff
-    // Round 4: the "Confirm these permissions" tick, required by EVERY grant. Never saved, and keyed
-    // on the record's generation: it resets when the identity changes and whenever the record is
-    // written, created, lost or evicted, so no loss of state can ever turn into a silent grant.
-    var confirmed by remember(cfp, generation) { mutableStateOf(false) }
+    // The "Confirm these permissions" tick, required by EVERY grant (round 4). Never saved. Round 5
+    // (F1): it records the store generation it was made at; it counts only while the record is still
+    // at that generation, and the key re-checks that against the store AT TAP TIME, so an untick in
+    // the same frame as the tap (two fingers, two queued clicks) can never send the old set.
+    var confirmedAt by remember(store, cfp, generation) { mutableStateOf<Long?>(null) }
+    val confirmed = confirmedAt != null && confirmedAt == generation
     val fp = remember(view.request, view.activeTurnId, consent.origin) { wireFingerprint(consent.origin, view.activeTurnId, view.request) }
     // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
     // never saved (after process death the ledger is gone, so the operator may tap again).
@@ -287,11 +289,28 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val subset = subsetGrant(readPaths, writePaths, network)
     val blocked = { overlayBlocked = true }
 
-    fun choose(choiceId: String?, decision: String?, granted: GrantedPermissions?) {
+    fun send(choiceId: String?, decision: String?, granted: GrantedPermissions?) {
         // One decision per card: a second tap (or a tap after a lock, or before arming) never reaches the client.
         if (latched || !armed || consent.lock != null || consent.isDecided(id, fp)) return
         latched = true
         if (!consent.onApproval(id, fp, choiceId, decision, granted).settles()) latched = false
+    }
+
+    /**
+     * F1: a provider choice, decided from the store AS IT IS NOW (never the values captured when the
+     * key was drawn). A permission-granting choice needs the confirmation, made at the store's current
+     * generation, and grants exactly the ticks the store holds at this moment.
+     */
+    fun choose(choice: ApprovalChoiceView) {
+        if (choice.permissionGrant == null) return send(choice.choiceId, null, null)
+        val liveGeneration = store.grantGeneration(cfp)
+        if (confirmedAt == null || confirmedAt != liveGeneration) return
+        val live = store.grant(cfp)
+        val liveRead = readList.filter { readList.indexOf(it) !in live.offRead }.distinct()
+        val liveWrite = writeList.filter { writeList.indexOf(it) !in live.offWrite }.distinct()
+        val liveNetwork = requested?.network == true && !live.networkOff
+        val pick = pickFor(view, choice, confirmed = true, subset = subsetGrant(liveRead, liveWrite, liveNetwork)) ?: return
+        send(pick.choiceId, null, pick.granted)
     }
 
     fun toggle(read: Boolean, path: String) {
@@ -377,7 +396,13 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 }
                 if (view.needsConfirm) {
                     Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
-                        GrantCheckbox(checked = confirmed, enabled = !frozen, onChange = { confirmed = !confirmed }, tag = "grant-confirm", onBlocked = blocked) {
+                        GrantCheckbox(
+                            checked = confirmed,
+                            enabled = !frozen,
+                            onChange = { confirmedAt = if (confirmed) null else store.grantGeneration(cfp) },
+                            tag = "grant-confirm",
+                            onBlocked = blocked,
+                        ) {
                             Text(
                                 grantSummary(readPaths, writePaths, network),
                                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
@@ -405,7 +430,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 view.choices.forEach { choice ->
                     val pick = pickFor(view, choice, confirmed, subset)
                     TetherKey(
-                        onClick = { if (pick != null) choose(pick.choiceId, null, pick.granted) },
+                        // The captured [pick] only draws the key; the tap re-reads the store (F1).
+                        onClick = { if (pick != null) choose(choice) },
                         classes = if (choice.permissionGrant != null) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
                         label = choice.label,
                         icon = if (choice.permissionGrant != null) TetherIcons.Check else TetherIcons.Ban,
@@ -417,7 +443,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 }
             } else {
                 TetherKey(
-                    onClick = { choose(null, "allow", null) },
+                    onClick = { send(null, "allow", null) },
                     classes = KeyClasses.ButtonPrimary,
                     label = "Approve",
                     icon = TetherIcons.Check,
@@ -425,7 +451,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-allow"),
                 )
                 TetherKey(
-                    onClick = { choose(null, "deny", null) },
+                    onClick = { send(null, "deny", null) },
                     classes = KeyClasses.ApprovalDeny,
                     label = "Deny",
                     icon = TetherIcons.Ban,
@@ -494,7 +520,8 @@ private fun GrantPathText(verb: String, path: String) {
     Text(
         buildAnnotatedString {
             append("$verb ")
-            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(path.breakAnywhere()) }
+            // L-3: escaped, cut and quoted for display; the grant itself carries the raw path.
+            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(displayPath(path).breakAnywhere()) }
         },
         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
         color = t.muted,
@@ -566,8 +593,9 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     val slots = remember(view.request) { com.tether.app.client.ConsentGuard.questionSlots(view.request) }
     fun slotOf(q: QuestionPromptView): Int = slots.slotOf.getOrElse(q.index) { q.index }
     fun labelIndex(q: QuestionPromptView, label: String): Int = slots.labels[slotOf(q)].orEmpty().indexOf(label)
-    fun isAnswered(q: QuestionPromptView) =
-        sel.picks[slotOf(q)].orEmpty().isNotEmpty() || jsTrim(sel.other[slotOf(q)].orEmpty()).isNotEmpty()
+    fun answeredIn(state: QuestionSelection, q: QuestionPromptView) =
+        state.picks[slotOf(q)].orEmpty().isNotEmpty() || jsTrim(state.other[slotOf(q)].orEmpty()).isNotEmpty()
+    fun isAnswered(q: QuestionPromptView) = answeredIn(sel, q)
     val submitAttempted = sel.attempted
     val pageIndex = sel.page.coerceIn(0, (view.prompts.size - 1).coerceAtLeast(0))
     fun update(change: (QuestionSelection) -> QuestionSelection) = store.setQuestion(cfp, change(store.question(cfp)))
@@ -590,12 +618,17 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     // L2: a new page re-arms, so a double tap on Next / Skip cannot land on the next page's keys.
     val armed = rememberArmed(cfp to pageIndex, !sent && unavailable == null)
 
-    fun submit(effectiveSkipped: Set<Int> = sel.skipped) {
-        if (latched || !armed || unavailable != null || consent.isDecided(id, fp)) return
+    // F1: every key reads the store AT TAP TIME (never the values captured when it was drawn), and a
+    // tap aimed at a page that is no longer the store's page (two taps in one frame) does nothing.
+    fun onThisPage(): Boolean = store.question(cfp).page.coerceIn(0, (view.prompts.size - 1).coerceAtLeast(0)) == pageIndex
+
+    fun submit(extraSkipped: Int? = null) {
+        if (latched || !armed || unavailable != null || consent.isDecided(id, fp) || !onThisPage()) return
         update { it.copy(attempted = true) }
-        if (!view.prompts.all { slotOf(it) in effectiveSkipped || isAnswered(it) }) return
-        // L2: indices and the operator's own text; the guard builds the answer strings from the request.
         val now = store.question(cfp)
+        val effectiveSkipped = now.skipped + listOfNotNull(extraSkipped)
+        if (!view.prompts.all { slotOf(it) in effectiveSkipped || answeredIn(now, it) }) return
+        // L2: indices and the operator's own text; the guard builds the answer strings from the request.
         val picks = (now.picks.keys + now.other.keys).distinct().sorted().map { slot ->
             com.tether.app.client.ConsentGuard.QuestionPick(slot, now.picks[slot].orEmpty(), now.other[slot].orEmpty())
         }
@@ -604,15 +637,14 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     }
 
     fun next() {
-        if (!armed || question == null || !isAnswered(question)) return
+        if (!armed || question == null || !onThisPage() || !answeredIn(store.question(cfp), question)) return
         update { it.copy(page = pageIndex + 1) }
     }
 
     fun skip() {
-        if (!armed || question == null) return
-        val nextSkipped = sel.skipped + slotOf(question)
+        if (!armed || question == null || !onThisPage()) return
         update { it.copy(skipped = it.skipped + slotOf(question)) }
-        if (isLastPage) submit(nextSkipped) else update { it.copy(page = pageIndex + 1) }
+        if (isLastPage) submit(extraSkipped = slotOf(question)) else update { it.copy(page = pageIndex + 1) }
     }
 
     val frozen = !armed
@@ -697,7 +729,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     singleLine = true,
                     enabled = !frozen,
                 )
-                if (question.multiSelect) {
+                if (slots.single[slotOf(question)] == false) {
                     Text("Select all that apply.", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.74f)), color = t.muted)
                 }
             }

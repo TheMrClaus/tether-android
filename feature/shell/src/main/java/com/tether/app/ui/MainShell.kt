@@ -111,6 +111,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // and the no-session branch, so a rotation, a window resize across 840dp or a session switch
     // never drops what the operator ticked (ChatScreen falls back to its own only when unprovided).
     val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
+    // I-2: the records belong to the CONFIGURED server (not the socket's origin, so a drop keeps
+    // them): signing in to another server empties the store. Bound during composition, before any
+    // card of the new server reads it.
+    val configuredServer by vm.client.serverUrl.collectAsStateWithLifecycle()
+    cardStates.bindTo(configuredServer)
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
     val persisted = rememberPersistedPanels(prefs)
