@@ -15,9 +15,11 @@ import com.tether.app.client.WorkspaceFileListing
 import com.tether.app.client.WorkspaceFiles
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 /** workspace-file-browser.tsx NamePromptMode. */
@@ -241,10 +243,9 @@ class FileBrowserState(
         previewFullscreen = false
         mutationError = ""
         notice = ""
-        var job: Job? = null
-        job = scope.launch {
+        launchLatest({ listingJob = it }) { self ->
             val result = files.list(path)
-            if (listingJob !== job) return@launch
+            if (listingJob !== self) return@launchLatest
             loading = false
             when (result) {
                 is FilesResult.Ok -> {
@@ -258,7 +259,6 @@ class FileBrowserState(
                 }
             }
         }
-        listingJob = job
     }
 
     private fun selectPending(listing: WorkspaceFileListing) {
@@ -304,18 +304,17 @@ class FileBrowserState(
             return
         }
         previewLoading = true
-        var job: Job? = null
-        job = scope.launch {
+        launchLatest({ previewJob = it }) { self ->
             if (textFits) {
                 val result = files.readText(entry.path, entry.size)
-                if (previewJob !== job) return@launch
+                if (previewJob !== self) return@launchLatest
                 when (result) {
                     is FilesResult.Ok -> text = result.value
                     is FilesResult.Failed -> previewError = result.message
                 }
             } else {
                 val result = platform.loadImage(files, entry)
-                if (previewJob !== job) return@launch
+                if (previewJob !== self) return@launchLatest
                 when (result) {
                     is ImageLoad.Ok -> image = result.image
                     ImageLoad.TooLarge -> imageTooLarge = true
@@ -325,7 +324,6 @@ class FileBrowserState(
             }
             previewLoading = false
         }
-        previewJob = job
     }
 
     fun clearSelection() {
@@ -438,10 +436,9 @@ class FileBrowserState(
     fun loadDestDirectory(path: String) {
         destPicker = destPicker?.copy(loading = true, error = "") ?: return
         destJob?.cancel()
-        var job: Job? = null
-        job = scope.launch {
+        launchLatest({ destJob = it }) { self ->
             val result = files.list(path)
-            if (destJob !== job) return@launch
+            if (destJob !== self) return@launchLatest
             destPicker = destPicker?.let { prev ->
                 when (result) {
                     is FilesResult.Ok -> prev.copy(path = path, listing = result.value, loading = false)
@@ -449,7 +446,6 @@ class FileBrowserState(
                 }
             }
         }
-        destJob = job
     }
 
     fun closeDestPicker() {
@@ -538,6 +534,20 @@ class FileBrowserState(
         val share = pendingShare ?: return
         pendingShare = null
         if (started) platform.claimShare(share) else platform.discardShare(share)
+    }
+
+    /**
+     * A job that a newer one of its kind supersedes: [block] gets the job itself, to compare with
+     * the one now current. It is created unstarted and started only once [store] has kept it,
+     * because the scope is Dispatchers.Main.immediate: from the main thread the block runs at once,
+     * and when a result is already in hand (a fast server, a preempted main thread) nothing suspends
+     * it, so it can finish before launch returns — a job stored only after launch would take itself
+     * for superseded and drop its own result (ta-g04).
+     */
+    private fun launchLatest(store: (Job) -> Unit, block: suspend CoroutineScope.(self: Job) -> Unit) {
+        val job = scope.launch(start = CoroutineStart.LAZY) { block(coroutineContext.job) }
+        store(job)
+        job.start()
     }
 
     private fun submit(block: suspend () -> Unit) {
