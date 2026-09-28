@@ -1,8 +1,10 @@
-{"type":"hello","frame":{"type":"hello","protocolVersion":128},"verdict":{"ok":true}}
+{"type":"hello","frame":{"type":"hello","protocolVersion":132},"verdict":{"ok":true}}
 {"type":"node-add","frame":{"type":"node-add","credential":"parity-credential-bundle","label":"Peer","baseUrl":"https://peer.example.test","requestId":"node-add-1"},"verdict":{"ok":true}}
 {"type":"node-remove","frame":{"type":"node-remove","nodeId":"node-0001","requestId":"node-remove-1"},"verdict":{"ok":true}}
 {"type":"node-probe","frame":{"type":"node-probe","nodeId":"node-0001","requestId":"node-probe-1"},"verdict":{"ok":true}}
 {"type":"ping","frame":{"type":"ping","nonce":"ping-1"},"verdict":{"ok":true}}
+{"type":"overview-subscribe","frame":{"type":"overview-subscribe","filters":{"workspaces":["/workspace/project"],"providers":["claude"],"statuses":["running","waiting"]},"page":0,"pageSize":24},"verdict":{"ok":true}}
+{"type":"overview-unsubscribe","frame":{"type":"overview-unsubscribe"},"verdict":{"ok":true}}
 {"type":"create","frame":{"type":"create","provider":"claude","cwd":"/workspace/project","name":"Parity session","permissionMode":"default","sandboxPolicy":"workspace-write","useWorktree":true,"worktree":{"mode":"branch-off","baseRef":"origin/main","branch":"parity/branch","slug":"parity-branch"},"model":"claude-opus-4-1","reasoningEffort":"high","requestId":"create-1"},"verdict":{"ok":true}}
 {"type":"resume","frame":{"type":"resume","historyId":"11111111-1111-4111-8111-111111111111","cwd":"/workspace/project"},"verdict":{"ok":true}}
 {"type":"worktree-inspect","frame":{"type":"worktree-inspect","cwd":"/workspace/project","requestId":"inspect-1"},"verdict":{"ok":true}}

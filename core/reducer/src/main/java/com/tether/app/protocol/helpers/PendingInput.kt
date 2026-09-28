@@ -64,6 +64,13 @@ object PendingInput {
         if (queued is JsArr) {
             for (message in queued) (message["queueId"] as? JsStr)?.let { keys.add(it.value) }
         }
+        // v130 (S13.1-C, pending-input.mjs:145 @ 79c3d37): a queueId that already LEFT the queue
+        // (withdrawn, possibly on another device, or flushed into a turn) was accepted too — so
+        // reconcileWithSnapshot clears it instead of re-sending. Absent on a pre-v130 server.
+        val removed = projection["removedQueueIds"]
+        if (removed is JsArr) {
+            for (queueId in removed) (queueId as? JsStr)?.let { keys.add(it.value) }
+        }
         return keys
     }
 

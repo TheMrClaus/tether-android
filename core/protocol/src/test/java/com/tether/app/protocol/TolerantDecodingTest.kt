@@ -156,8 +156,11 @@ class TolerantDecodingTest {
         assertEquals(setOf("type", "protocolVersion", "client"), hello.keys)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         assertEquals(setOf("type", "protocolVersion"), ClientMessage.Hello().toJsonObject().keys)
-        assertEquals(129, TARGET_PROTOCOL_VERSION)
+        // ta-koy: the app speaks v132 (tether 79c3d37); the native floor it documents stays 129.
+        assertEquals(132, TARGET_PROTOCOL_VERSION)
+        assertEquals(TARGET_PROTOCOL_VERSION, PROTOCOL_VERSION)
         assertEquals(129, NATIVE_PROTOCOL_FLOOR)
+        assertEquals(132, ClientMessage.Hello(client = HELLO_CLIENT_ANDROID).protocolVersion)
     }
 
     @Test

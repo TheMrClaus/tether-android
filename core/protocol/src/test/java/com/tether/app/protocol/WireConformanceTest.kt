@@ -14,8 +14,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * PLAN §5.2: the vendored wire corpus (tether S0.3, captured at v128) against the
- * v129 Kotlin wire types.
+ * PLAN §5.2: the vendored wire corpus (tether S0.3's capture, re-run at 79c3d37 / v132 by
+ * ta-koy) against the v132 Kotlin wire types.
  *  (a) every s2c frame of every scenario decodes to a KNOWN ServerMessage subtype;
  *  (b) every client example decodes and re-encodes to canonically-equal JSON;
  *  (c) the Kotlin discriminator sets equal the TS unions' sets.
@@ -106,7 +106,7 @@ class WireConformanceTest {
     @Test
     fun everyClientExampleRoundTrips() {
         val lines = jsonl(File(corpusDir, "client-examples.jsonl"))
-        assertEquals(69, lines.size)
+        assertEquals(71, lines.size) // v131 added overview-subscribe / overview-unsubscribe
         val failures = mutableListOf<String>()
         val types = sortedSetOf<String>()
         for (line in lines) {
@@ -142,8 +142,8 @@ class WireConformanceTest {
         assertTrue("matrix missing at ${matrixFile.absolutePath}", matrixFile.isFile)
         val rows = TetherJson.parseToJsonElement(matrixFile.readText()).jsonObject["rows"]!!.jsonArray
         fun kind(k: String) = rows.map { it.jsonObject }.filter { it.str("kind") == k }.map { it.str("artifact")!! }.toSet()
-        assertEquals(kind("server-msg"), WireTypeLists.SERVER_TYPES)
-        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES)
+        assertEquals(kind("server-msg"), WireTypeLists.SERVER_TYPES - WireTypeLists.SINCE_PARITY_BASE_SERVER)
+        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES - WireTypeLists.SINCE_PARITY_BASE_CLIENT)
     }
 
     /** Optional: parse the live TS unions when TETHER_PROTOCOL_TS names lib/protocol.ts. */
@@ -156,7 +156,8 @@ class WireConformanceTest {
             val start = src.indexOf("export type $name =")
             assertTrue("no union $name in $path", start >= 0)
             val end = src.indexOf("\nexport ", start + 10).let { if (it < 0) src.length else it }
-            return Regex("""\|\s*\{\s*type:\s*"([^"]+)"""").findAll(src.substring(start, end)).map { it.groupValues[1] }.toSet()
+            // v131 members are intersections: `| ({ type: "overview-snapshot" } & OverviewSnapshotBody)`.
+            return Regex("""\|\s*\(?\s*\{\s*type:\s*"([^"]+)"""").findAll(src.substring(start, end)).map { it.groupValues[1] }.toSet()
         }
         assertEquals(union("ServerMessage"), WireTypeLists.SERVER_TYPES)
         assertEquals(union("ClientMessage"), WireTypeLists.CLIENT_TYPES)

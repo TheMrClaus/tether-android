@@ -4,6 +4,12 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.LegacyProjectionAdapter
+import com.tether.app.protocol.model.OverviewActivity
+import com.tether.app.protocol.model.OverviewCard
+import com.tether.app.protocol.model.OverviewCounts
+import com.tether.app.protocol.model.OverviewFacets
+import com.tether.app.protocol.model.OverviewNormalizedFilters
+import com.tether.app.protocol.model.OverviewPendingPanel
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.tree.JsCodec
@@ -17,7 +23,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Server -> client frames: every member of tether lib/protocol.ts `ServerMessage`
- * at v129 (see [TYPES]). One JSON object per text frame.
+ * at v132 (see [TYPES]). One JSON object per text frame.
  *
  * TOLERANT DECODING (PLAN D4) — [parse] never throws:
  *  - unknown `type`, non-JSON, or no `type` -> [Unknown] (the caller logs it);
@@ -296,6 +302,42 @@ sealed interface ServerMessage {
 
     data class ErrorFrame(val message: String, val requestId: String? = null) : ServerMessage
 
+    // ---- v131 Overview feed (opt-in; see model/Overview.kt) ---------------------------
+
+    /**
+     * Sent only to a socket that sent `overview-subscribe` — this app never does yet. Replaces all
+     * local overview state. [feedId] + [cursor] are required (the step identity); the rest
+     * defaults tolerantly. [activity]: <= 50, newest first.
+     */
+    data class OverviewSnapshot(
+        val feedId: String,
+        val cursor: Long,
+        val generatedAt: Long = 0,
+        val activitySince: Long = 0,
+        val filters: OverviewNormalizedFilters = OverviewNormalizedFilters(),
+        val page: Int = 0,
+        val pageSize: Int = 0,
+        val pageCount: Int = 0,
+        val totalCards: Int = 0,
+        val counts: OverviewCounts = OverviewCounts(),
+        val facets: OverviewFacets = OverviewFacets(),
+        val cards: List<OverviewCard> = emptyList(),
+        val pending: OverviewPendingPanel = OverviewPendingPanel(),
+        val activity: List<OverviewActivity> = emptyList(),
+    ) : ServerMessage
+
+    /** Sent only to a subscribed socket. [prevCursor] != the last cursor (or a new [feedId]) = re-subscribe. */
+    data class OverviewDelta(
+        val feedId: String,
+        val cursor: Long,
+        val prevCursor: Long,
+        val upserts: List<OverviewCard> = emptyList(),
+        val removals: List<String> = emptyList(),
+        val counts: OverviewCounts = OverviewCounts(),
+        val pending: OverviewPendingPanel = OverviewPendingPanel(),
+        val activity: List<OverviewActivity> = emptyList(),
+    ) : ServerMessage
+
     /**
      * Anything unrecognized or unparseable — must be inert. [type] is null for a
      * non-object / typeless frame; [raw] is the parsed frame when it was JSON;
@@ -304,7 +346,7 @@ sealed interface ServerMessage {
     data class Unknown(val type: String?, val raw: JsonObject? = null, val reason: String? = null) : ServerMessage
 
     companion object {
-        /** Every `type` discriminator of the v129 ServerMessage union this module decodes. */
+        /** Every `type` discriminator of the v132 ServerMessage union this module decodes. */
         val TYPES: Set<String> get() = ServerDecoders.decoders.keys
 
         /**
@@ -792,5 +834,38 @@ private object ServerDecoders {
             )
         },
         "error" to { r -> ServerMessage.ErrorFrame(r.str("message"), r.o.str("requestId")) },
+        "overview-snapshot" to { r ->
+            ServerMessage.OverviewSnapshot(
+                feedId = r.str("feedId"),
+                cursor = r.long("cursor"),
+                generatedAt = r.o.long("generatedAt") ?: 0,
+                activitySince = r.o.long("activitySince") ?: 0,
+                filters = r.optModel("filters", OverviewNormalizedFilters.serializer()) ?: OverviewNormalizedFilters(),
+                page = r.int("page", 0),
+                pageSize = r.int("pageSize", 0),
+                pageCount = r.int("pageCount", 0),
+                totalCards = r.int("totalCards", 0),
+                counts = r.optModel("counts", OverviewCounts.serializer()) ?: OverviewCounts(),
+                facets = r.optModel("facets", OverviewFacets.serializer()) ?: OverviewFacets(),
+                cards = r.optList("cards", OverviewCard.serializer()).orEmpty(),
+                pending = r.optModel("pending", OverviewPendingPanel.serializer()) ?: OverviewPendingPanel(),
+                activity = r.optList("activity", OverviewActivity.serializer()).orEmpty(),
+            )
+        },
+        "overview-delta" to { r ->
+            ServerMessage.OverviewDelta(
+                feedId = r.str("feedId"),
+                cursor = r.long("cursor"),
+                prevCursor = r.long("prevCursor"),
+                upserts = r.optList("upserts", OverviewCard.serializer()).orEmpty(),
+                removals = r.o.strList("removals").orEmpty(),
+                counts = r.optModel("counts", OverviewCounts.serializer()) ?: OverviewCounts(),
+                pending = r.optModel("pending", OverviewPendingPanel.serializer()) ?: OverviewPendingPanel(),
+                activity = r.optList("activity", OverviewActivity.serializer()).orEmpty(),
+            )
+        },
     )
+
+    /** Optional single modeled object: absent or malformed -> null (the caller defaults it). */
+    private fun <T> Req.optModel(key: String, serializer: KSerializer<T>): T? = o.obj(key)?.let { decodeOrNull(serializer, it) }
 }

@@ -42,6 +42,13 @@ value class SessionView(val obj: JsObj) {
     val activeTurn: TurnView? get() = activeTurnId?.let { turn(it) }
 
     val queuedMessages: List<QueuedMessageView> get() = obj.array("queuedMessages").objects(::QueuedMessageView)
+
+    /**
+     * v130 (S13.1-C): the last 50 queueIds that LEFT the queue (withdrawn or flushed), oldest
+     * first — acceptance evidence for pending-input reconciliation. Null when the key is absent (a
+     * pre-v130 server) or not an array; non-string entries are skipped.
+     */
+    val removedQueueIds: List<String>? get() = (obj["removedQueueIds"] as? JsArr)?.mapNotNull { (it as? JsStr)?.value }
     val notices: JsArr get() = obj.array("notices")
     val providerNotices: JsArr get() = obj.array("providerNotices")
     val mcpHealth: JsObj get() = obj["mcpHealth"] as? JsObj ?: JsObj.EMPTY
@@ -111,6 +118,9 @@ value class ApprovalView(val obj: JsObj) {
     val input: JsValue? get() = obj["input"]
     val choices: JsArr? get() = obj["choices"] as? JsArr
     val metadata: JsObj? get() = obj["metadata"] as? JsObj
+
+    /** v131: the journal-stamped `ts` of the request event (epoch ms); null on an unstamped fold / pre-v131. */
+    val createdAt: Double? get() = obj.number("createdAt")
 }
 
 @JvmInline
@@ -118,6 +128,9 @@ value class QuestionView(val obj: JsObj) {
     val requestId: String? get() = obj.string("requestId")
     val toolId: String? get() = obj.string("toolId")
     val questions: JsArr get() = obj.array("questions")
+
+    /** v131: as [ApprovalView.createdAt]. */
+    val createdAt: Double? get() = obj.number("createdAt")
 }
 
 @JvmInline

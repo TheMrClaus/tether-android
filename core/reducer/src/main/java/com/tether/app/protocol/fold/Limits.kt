@@ -151,6 +151,9 @@ object Limits {
     // events.mjs:957
     const val MAX_SPAWNED_RUNS = 50
 
+    // events.mjs:967 (79c3d37) — v130 (S13.1-C): how many removed queueIds the projection retains.
+    const val MAX_REMOVED_QUEUE_IDS = 50
+
     // events.mjs:958
     const val MAX_SPAWNED_RUN_KEYS = 2000
 

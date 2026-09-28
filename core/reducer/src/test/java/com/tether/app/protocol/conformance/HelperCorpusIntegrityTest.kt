@@ -23,8 +23,8 @@ class HelperCorpusIntegrityTest {
 
     @Test
     fun manifestPinsProtocolAndTetherSha() {
-        assertEquals(128.0, manifest["protocolVersion"].num)
-        assertEquals("157b87d99a26b9f7e220c892ca53537ee5775923", manifest["tetherSha"].str)
+        assertEquals(132.0, manifest["protocolVersion"].num)
+        assertEquals("79c3d377d2f1e650286092b3387392c15512a843", manifest["tetherSha"].str)
         val environment = (manifest["helpers"] as JsObj)["environment"] as JsObj
         assertEquals("UTC", environment["timeZone"].str)
         assertEquals(1790078400000.0, environment["referenceNowMs"].num)

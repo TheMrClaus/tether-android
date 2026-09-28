@@ -2,6 +2,7 @@ package com.tether.app.protocol.fold
 
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsBool
+import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -210,12 +211,17 @@ private fun foldQueuedUpdated(state: JsObj, event: JsObj): JsObj {
     return state.put("queuedMessages", queued)
 }
 
-// events.mjs:2888
+// events.mjs:2912 (79c3d37)
 private fun foldQueuedRemoved(state: JsObj, event: JsObj): JsObj {
     if (!hasQueueId(state, event["queueId"])) return state
-    return state.put(
-        "queuedMessages",
-        state["queuedMessages"].arr!!.filterKeep { !strictEquals(it.obj?.get("queueId"), event["queueId"]) },
+    // v130 (S13.1-C): remember the id (bounded, deduped, newest last) so a snapshot proves it was
+    // accepted even after it left the queue. `?? []`: a projection folded before v130 has no list.
+    val queueId = event["queueId"] ?: JsNull
+    val prior = state["removedQueueIds"].let { if (it == null || it is JsNull) JsArr.EMPTY else it.arr!! }
+    val removed = prior.filterKeep { !strictEquals(it, queueId) }.add(queueId)
+    return state.with(
+        "queuedMessages" to state["queuedMessages"].arr!!.filterKeep { !strictEquals(it.obj?.get("queueId"), event["queueId"]) },
+        "removedQueueIds" to (if (removed.size > Limits.MAX_REMOVED_QUEUE_IDS) removed.slice(-Limits.MAX_REMOVED_QUEUE_IDS) else removed),
     )
 }
 
@@ -252,6 +258,9 @@ private fun foldApprovalRequest(state: JsObj, event: JsObj): JsObj {
     if (!isOpenCurrentTurn(state, event["turnId"])) return state
     val choices = normalizeApprovalChoices(event["choices"])
     val metadata = normalizeApprovalMetadata(event["metadata"])
+    // v131: the journal-stamped `ts` of this request (never a clock read); a KEY only when the
+    // event is stamped, so an unstamped fold keeps the pre-v131 shape.
+    val createdAt = nonNegativeFiniteNumber(event["ts"])
     val approval = JsObj.of(
         "requestId" to event["requestId"],
         "toolId" to event["toolId"],
@@ -259,6 +268,7 @@ private fun foldApprovalRequest(state: JsObj, event: JsObj): JsObj {
         "input" to event["input"],
         "choices" to choices,
         "metadata" to metadata,
+        "createdAt" to createdAt,
     )
     val next = updateTurn(state) { turn ->
         turn.put("pendingApprovals", turn["pendingApprovals"].obj!!.put(jsToString(event["requestId"]), approval))
@@ -269,8 +279,15 @@ private fun foldApprovalRequest(state: JsObj, event: JsObj): JsObj {
 // events.mjs:2517
 private fun foldQuestionRequest(state: JsObj, event: JsObj): JsObj {
     if (!isOpenCurrentTurn(state, event["turnId"])) return state
+    // v131: journal-stamped creation time, same rule as approval_request.
+    val createdAt = nonNegativeFiniteNumber(event["ts"])
     val next = updateTurn(state) { turn ->
-        val question = JsObj.of("requestId" to event["requestId"], "toolId" to event["toolId"], "questions" to event["questions"])
+        val question = JsObj.of(
+            "requestId" to event["requestId"],
+            "toolId" to event["toolId"],
+            "questions" to event["questions"],
+            "createdAt" to createdAt,
+        )
         turn.put("pendingQuestions", turn["pendingQuestions"].obj!!.put(jsToString(event["requestId"]), question))
     }
     return withDerivedStatus(next)

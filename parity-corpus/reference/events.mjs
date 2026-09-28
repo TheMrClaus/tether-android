@@ -400,6 +400,12 @@ export function initialSessionState({ tetherSessionId, provider, cwd, nativeSess
     // `notices`, appended to / filtered, never mutated in place, so the fold stays
     // pure. Empty between turns (an idle-composed message flushes immediately).
     queuedMessages: [],
+    // v130 (S13.1-C): the last MAX_REMOVED_QUEUE_IDS queueIds that left the queue
+    // (withdrawn by the operator OR flushed into a turn), oldest first. The queue
+    // itself only shows what is pending NOW, so without this a queue-add whose ack
+    // was lost and that was then removed on ANOTHER device looked "never
+    // accepted" to a reconnecting client, which re-sent it (lib/pending-input.mjs).
+    removedQueueIds: [],
   };
 }
 
@@ -955,6 +961,10 @@ function normalizeBackgroundCommand(event) {
 // as the background commands above — a hand-written or forged journal line can
 // never inflate the projection, and an unknown status/origin is dropped whole.
 export const MAX_SPAWNED_RUNS = 50;
+// v130 (S13.1-C, SYNC_DESIGN §6.1 C): how many removed queueIds the projection
+// retains (oldest dropped). Bounds the cross-device "withdrawn queue item"
+// evidence a reconnecting client reconciles against (lib/pending-input.mjs).
+export const MAX_REMOVED_QUEUE_IDS = 50;
 export const MAX_SPAWNED_RUN_KEYS = 2000;
 export const SPAWNED_RUN_OUTPUT_CAP_CHARS = 64 * 1024;
 const SPAWNED_RUN_STATUSES = new Set(["running", "finished", "error", "stopped", "interrupted"]);
@@ -2496,6 +2506,12 @@ function reduceEvent(state, event) {
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
       const choices = normalizeApprovalChoices(event.choices);
       const metadata = normalizeApprovalMetadata(event.metadata);
+      // v131: `createdAt` is the journal-stamped `ts` of this request event —
+      // never a clock read — so the pending request's age is identical on the
+      // server, on every client folding the same events, and on replay. Added as
+      // a KEY only when the event is stamped (a direct unit-test fold without
+      // `ts` keeps the pre-v131 shape byte-for-byte).
+      const createdAt = nonNegativeFiniteNumber(event.ts);
       const approval = {
         requestId: event.requestId,
         toolId: event.toolId,
@@ -2503,6 +2519,7 @@ function reduceEvent(state, event) {
         input: event.input,
         ...(choices === undefined ? {} : { choices }),
         ...(metadata === undefined ? {} : { metadata }),
+        ...(createdAt == null ? {} : { createdAt }),
       };
       const next = updateTurn(state, (turn) => ({
         ...turn,
@@ -2516,11 +2533,18 @@ function reduceEvent(state, event) {
 
     case "question_request": {
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
+      // v131: journal-stamped creation time, same rule as approval_request.
+      const createdAt = nonNegativeFiniteNumber(event.ts);
       const next = updateTurn(state, (turn) => ({
         ...turn,
         pendingQuestions: {
           ...turn.pendingQuestions,
-          [event.requestId]: { requestId: event.requestId, toolId: event.toolId, questions: event.questions },
+          [event.requestId]: {
+            requestId: event.requestId,
+            toolId: event.toolId,
+            questions: event.questions,
+            ...(createdAt == null ? {} : { createdAt }),
+          },
         },
       }));
       return { ...next, status: deriveSessionStatus(currentTurn(next)) };
@@ -2889,7 +2913,16 @@ function reduceEvent(state, event) {
       // Remove a queued message — by the user (cancel) OR by the flush path (the
       // message is leaving the queue to become a turn). A no-op if already gone.
       if (!state.queuedMessages.some((m) => m.queueId === event.queueId)) return state;
-      return { ...state, queuedMessages: state.queuedMessages.filter((m) => m.queueId !== event.queueId) };
+      // v130 (S13.1-C): remember the id (bounded, deduped, newest last) so a
+      // snapshot proves it was accepted even after it left the queue. `?? []`: a
+      // projection folded before v130 has no list yet.
+      const removed = (state.removedQueueIds ?? []).filter((id) => id !== event.queueId);
+      removed.push(event.queueId);
+      return {
+        ...state,
+        queuedMessages: state.queuedMessages.filter((m) => m.queueId !== event.queueId),
+        removedQueueIds: removed.length > MAX_REMOVED_QUEUE_IDS ? removed.slice(-MAX_REMOVED_QUEUE_IDS) : removed,
+      };
     }
 
     // background_pending stays a journal-only reduce()-NO-OP (falls through to

@@ -118,6 +118,8 @@ fun initialSessionState(args: JsObj): JsObj = JsObj.of(
     "turnsById" to JsObj.EMPTY,
     "activeTurnId" to JsNull,
     "queuedMessages" to JsArr.EMPTY,
+    // v130 (S13.1-C): the last MAX_REMOVED_QUEUE_IDS queueIds that left the queue, oldest first.
+    "removedQueueIds" to JsArr.EMPTY,
 )
 
 /** Kotlin-side convenience for the common `initialSessionState({ ... })` call. */

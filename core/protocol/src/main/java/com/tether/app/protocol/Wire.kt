@@ -12,11 +12,15 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * The protocol the wire TYPES in this module model: tether lib/protocol.ts
- * PROTOCOL_VERSION at 7d65611 + S1.1 (v129). Every ClientMessage/ServerMessage
- * of that union has a Kotlin type; see WireConformanceTest. Since T1.2 this is
- * also what the runtime speaks ([PROTOCOL_VERSION]).
+ * PROTOCOL_VERSION at 79c3d37 (v132; ta-koy moved it from v129). Every
+ * ClientMessage/ServerMessage of that union has a Kotlin type; see
+ * WireConformanceTest. Since T1.2 this is also what the runtime speaks
+ * ([PROTOCOL_VERSION]). v130-v132 are all additive and not native-breaking:
+ * AgentSession.lastSeq and SessionProjection.removedQueueIds (v130), the opt-in
+ * Overview feed frames and pending-request `createdAt` (v131), and
+ * OverviewActivity.workspace (v132).
  */
-const val TARGET_PROTOCOL_VERSION: Int = 129
+const val TARGET_PROTOCOL_VERSION: Int = 132
 
 /**
  * The protocol version the RUNTIME speaks: the `hello` this app sends. The
@@ -28,8 +32,9 @@ const val PROTOCOL_VERSION: Int = TARGET_PROTOCOL_VERSION
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be
- * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR). The server advertises
- * its own value in `ready.nativeProtocolFloor` and `/healthz`.
+ * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v132). The
+ * server advertises its own value in `ready.nativeProtocolFloor` and `/healthz`;
+ * this constant is documentation only — the runtime always trusts the server's.
  */
 const val NATIVE_PROTOCOL_FLOOR: Int = 129
 

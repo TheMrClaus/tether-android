@@ -1,6 +1,6 @@
 {
-  "tetherSha": "44a4656f92460e86c0e0cbe72e718e64325b3924",
-  "protocolVersion": 128,
+  "tetherSha": "79c3d377d2f1e650286092b3387392c15512a843",
+  "protocolVersion": 132,
   "frameWrapper": "{ dir: \"s2c\" | \"c2s\", sock?: string, frame } — one per line, arrival order; `sock` names a secondary socket (absent = the primary one)",
   "boots": [
     {
@@ -364,6 +364,14 @@
   ],
   "serverTypesMissing": [
     {
+      "type": "overview-snapshot",
+      "reason": "v131 opt-in: sent only to a socket that sent overview-subscribe (the web Overview); the native client never subscribes, and the scripted scenarios do not"
+    },
+    {
+      "type": "overview-delta",
+      "reason": "v131 opt-in: sent only to a socket that sent overview-subscribe (the web Overview); the native client never subscribes, and the scripted scenarios do not"
+    },
+    {
       "type": "approval",
       "reason": "declared in ServerMessage but never emitted by server.mjs at this sha: approval prompts reach clients only as `event` frames carrying AgentEvent `approval_request` (captured in turn-approve/turn-interrupt/queue/handoff)"
     },
@@ -383,6 +391,8 @@
     "node-remove",
     "node-probe",
     "ping",
+    "overview-subscribe",
+    "overview-unsubscribe",
     "create",
     "resume",
     "worktree-inspect",

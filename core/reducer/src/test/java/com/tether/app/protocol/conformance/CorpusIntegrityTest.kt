@@ -16,8 +16,9 @@ class CorpusIntegrityTest {
     private val files = (manifest["files"] as JsArr).map { it as JsObj }
 
     @Test
-    fun protocolVersionIs128() {
-        assertEquals(128.0, manifest["protocolVersion"].num)
+    fun protocolVersionIs132() {
+        // ta-koy: the protocol corpora moved to tether 79c3d37 (v132); the UI base stays 7d65611.
+        assertEquals(132.0, manifest["protocolVersion"].num)
     }
 
     @Test
@@ -80,6 +81,6 @@ class CorpusIntegrityTest {
         val dir = File(CanonicalJson.corpusDir, "reference")
         val recorded = File(dir, "SHA256").readText().trim().substringBefore(' ')
         assertEquals(recorded, CanonicalJson.sha256Hex(File(dir, "events.mjs").readBytes()))
-        assertTrue(recorded.startsWith("6478d19c9758e122"))
+        assertTrue(recorded.startsWith("36dc408c17975a01")) // events.mjs @ 79c3d37
     }
 }

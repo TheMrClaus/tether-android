@@ -6339,6 +6339,408 @@
     []
    ],
    "result": "default"
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": null,
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": [],
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": [
+      "q-gone"
+     ],
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live",
+     "q-gone"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": [
+      "q-gone",
+      7,
+      null,
+      {
+       "queueId": "q-obj"
+      },
+      "q-also"
+     ],
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live",
+     "q-gone",
+     "q-also"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": "q-gone",
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "acceptedKeys",
+   "args": [
+    {
+     "queuedMessages": [
+      {
+       "queueId": "q-live"
+      }
+     ],
+     "removedQueueIds": {
+      "0": "q-gone"
+     },
+     "turnsById": {
+      "t1": {
+       "idempotencyKey": "k-turn"
+      }
+     }
+    }
+   ],
+   "result": {
+    "$set": [
+     "k-turn",
+     "q-live"
+    ]
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "reconcileWithSnapshot",
+   "args": [
+    {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "withdrawn elsewhere",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-other",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "never accepted",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    },
+    "s1",
+    {
+     "queuedMessages": [],
+     "turnsById": {}
+    }
+   ],
+   "result": {
+    "cleared": [],
+    "store": {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "withdrawn elsewhere",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-other",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "never accepted",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    }
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "reconcileWithSnapshot",
+   "args": [
+    {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "withdrawn elsewhere",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-other",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "never accepted",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    },
+    "s1",
+    {
+     "queuedMessages": [],
+     "removedQueueIds": [
+      "q-gone"
+     ],
+     "turnsById": {}
+    }
+   ],
+   "result": {
+    "cleared": [
+     "q-gone"
+    ],
+    "store": {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-other",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "never accepted",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    }
+   }
+  },
+  {
+   "table": "pending-input",
+   "fn": "reconcileWithSnapshot",
+   "args": [
+    {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "withdrawn elsewhere",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-other",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s1",
+       "text": "never accepted",
+       "tries": 1
+      },
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    },
+    "s1",
+    {
+     "queuedMessages": [],
+     "removedQueueIds": [
+      "q-gone",
+      "q-other"
+     ],
+     "turnsById": {}
+    }
+   ],
+   "result": {
+    "cleared": [
+     "q-gone",
+     "q-other"
+    ],
+    "store": {
+     "records": [
+      {
+       "firstQueuedAt": 1,
+       "key": "q-gone",
+       "kind": "queue",
+       "sentAt": 1,
+       "sessionId": "s2",
+       "text": "other session",
+       "tries": 1
+      }
+     ]
+    }
+   }
   }
  ]
 }

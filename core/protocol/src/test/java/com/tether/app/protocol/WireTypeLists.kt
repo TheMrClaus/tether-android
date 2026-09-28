@@ -1,10 +1,12 @@
 package com.tether.app.protocol
 
 /**
- * The v129 TS unions' discriminator sets, checked in so CI (no tether checkout)
- * can verify type coverage. Derived from docs/parity/matrix.json (kind
- * `server-msg` / `client-msg`, 41 + 67 rows), which S0.1 generated from
- * tether lib/protocol.ts; v129 (S1.1) added fields only, no new types.
+ * The v132 TS unions' discriminator sets, checked in so CI (no tether checkout)
+ * can verify type coverage. The PARITY_BASE (7d65611, v128) part is derived from
+ * docs/parity/matrix.json (kind `server-msg` / `client-msg`, 41 + 67 rows), which
+ * S0.1 generated from tether lib/protocol.ts; v129 (S1.1) and v130 (S13.1) added
+ * fields only; v131 added the opt-in Overview frames ([SINCE_PARITY_BASE_SERVER] /
+ * [SINCE_PARITY_BASE_CLIENT]), which the matrix gains when PARITY_BASE moves.
  * WireConformanceTest re-checks these against matrix.json, and against
  * lib/protocol.ts itself when TETHER_PROTOCOL_TS points at one.
  */
@@ -18,6 +20,8 @@ object WireTypeLists {
         "ready", "scheduled-actions", "search-results", "seen", "server-settings", "session",
         "session-controls", "session-order", "snapshot", "turns-detail", "version_mismatch",
         "worktree-diff", "worktree-logs", "worktree-scripts", "worktree-source",
+        // v131 (opt-in Overview feed)
+        "overview-delta", "overview-snapshot",
     )
 
     val CLIENT_TYPES: Set<String> = setOf(
@@ -34,5 +38,11 @@ object WireTypeLists {
         "set-auto-continue-on-limit", "set-fast-mode", "set-mode", "set-model", "set-providers",
         "set-reasoning-effort", "set-server-settings", "set-session-order", "stop-command",
         "worktree-diff", "worktree-inspect", "worktree-logs", "worktree-script", "worktree-scripts",
+        // v131 (opt-in Overview feed)
+        "overview-subscribe", "overview-unsubscribe",
     )
+
+    /** Types added after PARITY_BASE (7d65611): not in matrix.json until the matrix is rebuilt at a newer base. */
+    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("overview-delta", "overview-snapshot")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("overview-subscribe", "overview-unsubscribe")
 }

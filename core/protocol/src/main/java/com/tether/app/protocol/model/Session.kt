@@ -32,6 +32,10 @@ data class AgentSession(
     // "last-active" sort; `nameIsCustom` keeps an operator rename over the discovered title;
     // v101 `parentSessionId` groups delegate children, `handedOffTo` badges a handed-off source.
     val lastMessageAt: Long? = null,
+    // v130 (S13.1, SYNC_DESIGN §6.1 A): the session's journal head seq as of serialization, on
+    // every AgentSession the server emits. A HINT: the attach reply's `throughSeq` stays
+    // authoritative. Absent when the server holds no journal for the session, or before v130.
+    val lastSeq: Long? = null,
     val nameIsCustom: Boolean = false,
     val parentSessionId: String? = null,
     val handedOffTo: String? = null,

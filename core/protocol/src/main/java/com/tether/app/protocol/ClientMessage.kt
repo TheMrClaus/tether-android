@@ -12,7 +12,7 @@ import kotlinx.serialization.json.put
 
 /**
  * Client -> server frames: every member of tether lib/protocol.ts `ClientMessage`
- * at v129 (see [TYPES]). Serialized by hand via buildJsonObject so field names
+ * at v132 (see [TYPES]). Serialized by hand via buildJsonObject so field names
  * are EXACTLY what lib/protocol-validate.mjs accepts:
  *  - optional fields are omitted entirely, never sent as null — except where the
  *    TS type itself allows null ([OrNull], or a required `T | null` field);
@@ -44,6 +44,28 @@ sealed interface ClientMessage {
 
     data class Ping(val nonce: String? = null) : ClientMessage {
         override fun toJsonObject() = frame("ping") { opt("nonce", nonce) }
+    }
+
+    // ---- v131 Overview feed (opt-in; the app does not subscribe yet) -----------------
+
+    /**
+     * Opt into the read-only Overview feed; re-sending replaces the subscription and yields a
+     * fresh `overview-snapshot`. [page] is 0-based, [pageSize] 1..48 (server default 24).
+     */
+    data class OverviewSubscribe(
+        val filters: com.tether.app.protocol.model.OverviewFilters? = null,
+        val page: Int? = null,
+        val pageSize: Int? = null,
+    ) : ClientMessage {
+        override fun toJsonObject() = frame("overview-subscribe") {
+            filters?.let { put("filters", it.toJsonObject()) }
+            opt("page", page?.toLong())
+            opt("pageSize", pageSize?.toLong())
+        }
+    }
+
+    data object OverviewUnsubscribe : ClientMessage {
+        override fun toJsonObject() = frame("overview-unsubscribe") {}
     }
 
     // ---- multi-host nodes (v109) --------------------------------------------
@@ -652,7 +674,7 @@ sealed interface ClientMessage {
     }
 
     companion object {
-        /** Every `type` discriminator of the v129 ClientMessage union this module models. */
+        /** Every `type` discriminator of the v132 ClientMessage union this module models. */
         val TYPES: Set<String> get() = ClientDecoders.decoders.keys
 
         /** Decode an outbound frame back into its type. Never throws; failure carries the reason. */
@@ -893,6 +915,16 @@ private object ClientDecoders {
         "node-remove" to { r -> ClientMessage.NodeRemove(r.str("nodeId"), r.o.str("requestId")) },
         "node-probe" to { r -> ClientMessage.NodeProbe(r.str("nodeId"), r.o.str("requestId")) },
         "ping" to { r -> ClientMessage.Ping(r.o.str("nonce")) },
+        "overview-subscribe" to { r ->
+            ClientMessage.OverviewSubscribe(
+                filters = r.nested("filters")?.let { f ->
+                    com.tether.app.protocol.model.OverviewFilters(f.o.strList("workspaces"), f.o.strList("providers"), f.o.strList("statuses"))
+                },
+                page = r.o.long("page")?.toInt(),
+                pageSize = r.o.long("pageSize")?.toInt(),
+            )
+        },
+        "overview-unsubscribe" to { _ -> ClientMessage.OverviewUnsubscribe },
         "create" to { r ->
             ClientMessage.Create(
                 provider = r.str("provider"),

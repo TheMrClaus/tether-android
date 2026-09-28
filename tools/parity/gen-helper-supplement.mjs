@@ -102,6 +102,37 @@ for (const env of [undefined, null]) record("panel-widths", "clampPanelWidth", p
 for (const options of [undefined, null]) record("model-picker", "modelReading", picker.modelReading, [options]);
 for (const session of [undefined, null, []]) record("codex-mode-presets", "codexModeForSession", codex.codexModeForSession, [session]);
 
+// ---- (5) v130 (S13.1-C) removedQueueIds: accepted evidence for a queue item that left the queue ----
+// Needs a tether tree >= v130 (66626a8); on an older tree these cases record the pre-v130 result.
+const removedShapes = [
+  undefined,
+  null,
+  [],
+  ["q-gone"],
+  ["q-gone", 7, null, { queueId: "q-obj" }, "q-also"],
+  "q-gone",
+  { 0: "q-gone" },
+];
+for (const removedQueueIds of removedShapes) {
+  const projection = {
+    turnsById: { t1: { idempotencyKey: "k-turn" } },
+    queuedMessages: [{ queueId: "q-live" }],
+    ...(removedQueueIds === undefined ? {} : { removedQueueIds }),
+  };
+  record("pending-input", "acceptedKeys", pending.acceptedKeys, [projection]);
+}
+const queueStore = {
+  records: [
+    { key: "q-gone", kind: "queue", sessionId: "s1", text: "withdrawn elsewhere", sentAt: 1, tries: 1, firstQueuedAt: 1 },
+    { key: "q-other", kind: "queue", sessionId: "s1", text: "never accepted", sentAt: 1, tries: 1, firstQueuedAt: 1 },
+    { key: "q-gone", kind: "queue", sessionId: "s2", text: "other session", sentAt: 1, tries: 1, firstQueuedAt: 1 },
+  ],
+};
+for (const removedQueueIds of [undefined, ["q-gone"], ["q-gone", "q-other"]]) {
+  const projection = { turnsById: {}, queuedMessages: [], ...(removedQueueIds === undefined ? {} : { removedQueueIds }) };
+  record("pending-input", "reconcileWithSnapshot", pending.reconcileWithSnapshot, [queueStore, "s1", projection]);
+}
+
 process.stdout.write(JSON.stringify({
   generator: "tools/parity/gen-helper-supplement.mjs",
   node: process.version,
