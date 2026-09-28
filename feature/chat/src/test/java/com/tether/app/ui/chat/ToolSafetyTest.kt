@@ -247,8 +247,9 @@ class ToolSafetyTest {
     // --- The clip-cache wiring (UiRoot) --------------------------------------------------------
 
     private class CacheClient(private val base: ChatTestClient = ChatTestClient()) : TetherClient by base {
-        override val configured = MutableStateFlow(true)
-        override val serverUrl = MutableStateFlow<String?>("https://tether.example")
+        // Before the stored settings are read, a real client says "signed out, no server".
+        override val configured = MutableStateFlow(false)
+        override val serverUrl = MutableStateFlow<String?>(null)
         override val storedSettingsLoaded = MutableStateFlow(false)
     }
 
@@ -260,6 +261,8 @@ class ToolSafetyTest {
         val job = launch(Dispatchers.Default) { syncToolMediaCache(client, cache) }
         kotlinx.coroutines.delay(200)
         assertTrue("nothing happens before the stored settings are read", File(here, "a.mp4").exists())
+        client.configured.value = true
+        client.serverUrl.value = origin
         client.storedSettingsLoaded.value = true
         kotlinx.coroutines.delay(300)
         assertTrue("the current server's clips stay", File(here, "a.mp4").exists())
@@ -303,6 +306,56 @@ class ToolSafetyTest {
         // Past depth 64 a container prints … (the rest of the print stays well-formed around it).
         assertTrue(jsonStringifyPretty(nested(70)).contains("…"))
         assertTrue(!jsonStringifyPretty(nested(63)).contains("…"))
+    }
+
+    @Test fun printingStopsAtTheLimitWithoutVisitingTheRest() {
+        // A million shared 1 KB strings: a full print would be a gigabyte; the summary is 601 characters.
+        val kb = JsStr("x".repeat(1024))
+        val huge = JsArr.of(List(1_000_000) { kb })
+        val started = System.nanoTime()
+        assertEquals(601, summarize(huge).length)
+        assertEquals(DISPLAY_MAX + 1, displayValue(huge).length)
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 1_000)
+        // Without a limit, the depth cap alone keeps a 10k-deep value cheap.
+        val t0 = System.nanoTime()
+        assertTrue(jsonStringifyPretty(nested(10_000)).length < 10_000)
+        assertTrue((System.nanoTime() - t0) / 1_000_000 < 1_000)
+    }
+
+    @Test fun aStreamingCommandLaysOutItsNewestOutput() {
+        // Just over the cap, in 100-character lines: the head is dropped, the newest line shows.
+        val output = (1..700).joinToString("\n") { "line $it ".padEnd(99, '.') }
+        val tree = foldTree(
+            freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k") },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "c"); put("name", "command_execution"); put("input", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"command":"yes"}""")) },
+            ev("tool_output_delta", "t1", ts = 1) { put("toolId", "c"); put("chunk", output) },
+        )
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                ChatTranscript(
+                    projection = LegacyProjectionAdapter.adaptOnce(tree)!!,
+                    tree = tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    onApproval = { _, _, _ -> },
+                    onAnswer = { _, _, _ -> },
+                    zone = ChatFixtures.zone,
+                    showTimeline = false,
+                    richCodex = true,
+                )
+            }
+        }
+        rule.waitForIdle()
+        // (A node taller than the viewport sends performScrollToNode round forever: read the tree.)
+        fun texts() = rule.onAllNodes(hasText("line", substring = true)).fetchSemanticsNodes()
+            .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }
+        assertTrue("the streamed head is dropped", texts().any { it.startsWith("… ") && it.contains("earlier characters") })
+        assertTrue("collapsed: only a peek", texts().none { it.contains("line 700 ") })
+        rule.onNodeWithContentDescription("Show more").performClick()
+        rule.waitForIdle()
+        assertTrue("the newest line shows", texts().any { it.contains("line 700 ") })
+        assertTrue("…and the oldest does not", texts().none { it.contains("line 1 .") })
     }
 
     @Test fun aHugeStringOrObjectStopsAtTheLimit() {
