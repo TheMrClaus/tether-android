@@ -193,6 +193,27 @@ class NavShellTest {
     }
 
     @Test
+    fun eachLinkDrivenSwitchRestartsTheGuard() {
+        link("tether://session/$OTHER_LISTED")
+        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) { vm.selectedSessionId.value == OTHER_LISTED }
+        val first = rule.mainClock.currentTime
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS - 150)
+        link("tether://session/$LISTED")
+        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) { vm.selectedSessionId.value == LISTED }
+        rule.mainClock.autoAdvance = false
+        try {
+            // Past the first switch's window, inside the second one's.
+            rule.mainClock.advanceTimeBy(maxOf(0L, first + NAV_INPUT_GUARD_MS + 50 - rule.mainClock.currentTime))
+            rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertExists()
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
+        rule.waitForIdle()
+        rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertDoesNotExist()
+    }
+
+    @Test
     fun noGuardWithoutASwitch() {
         link("https://evil.example/?session=$LISTED")
         rule.waitForIdle()
