@@ -140,13 +140,20 @@ class FileBrowserRecreationTest {
 
     private fun shareDirs() = File(FileCache(context.cacheDir).root, FileCache.SHARE_DIR).listFiles().orEmpty().toList()
 
+    private fun chooserStarted(): Boolean {
+        var started = false
+        scenario.onActivity { started = shadowOf(it).peekNextStartedActivity()?.action == Intent.ACTION_CHOOSER }
+        return started
+    }
+
     private fun shareReadme() {
         compose.runOnIdle { state!!.open() }
         waitForText("README.md")
         compose.onNodeWithContentDescription("Actions for README.md").performClick()
         compose.onNodeWithText("Share…").performClick()
-        // The copy is made, the share sheet started, and the copy claimed for its window.
-        waitFor { shareDirs().isNotEmpty() && state!!.pendingShare == null }
+        // The copy is made and the share sheet started; the claim runs in the same main-thread step.
+        waitFor { chooserStarted() && state!!.pendingShare == null }
+        assertEquals(1, shareDirs().size)
     }
 
     @Test fun aRotationKeepsTheBrowserOpenInItsFolderAndAClaimedCopyInItsWindow() {
