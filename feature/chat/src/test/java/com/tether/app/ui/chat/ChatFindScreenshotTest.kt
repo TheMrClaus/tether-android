@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -69,7 +70,7 @@ fun ComposeContentTestRule.snapFind(shot: FindShot, skin: TetherSkin, name: Stri
                     canStep = results.hits.isNotEmpty(),
                     onStep = {},
                     onClose = {},
-                    focusRequester = FocusRequester(),
+                    focusRequester = remember { FocusRequester() },
                     modifier = Modifier.align(Alignment.TopEnd).padding(top = t.css.spaceSm, end = t.css.spaceMd),
                 )
             }
