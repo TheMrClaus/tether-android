@@ -310,6 +310,40 @@ class WorkspaceFilesHttpTest {
         assertEquals("the other origin saw nothing", 0, elsewhere.requestCount)
     }
 
+    @Test fun aRequestThatWouldLeaveThePairedOriginIsRefusedBeforeSending() = runBlocking {
+        // A signer that rewrites the URL (a bug, or a hostile authority) cannot carry the credential off.
+        authority = FilesAuthority.Paired(server.url("/")) { it.url(elsewhere.url("/api/files/list?path=%2F")).header("Authorization", "Bearer tthr_test") }
+        assertEquals(FilesResult.Failed("This folder could not be opened."), files.list("/w"))
+        authority = FilesAuthority.Paired(server.url("/")) { it.url(server.url("/").newBuilder().port(elsewhere.port).build()) }
+        assertEquals(FilesResult.Failed("That item could not be deleted."), files.delete("/w/a"))
+        assertEquals(0, elsewhere.requestCount)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun anUploadSourceThatThrowsFailsThatUploadNotTheApp() = runBlocking {
+        server.enqueue(ok("""{"ok":true,"parent":"/w"}"""))
+        val revoked = object : UploadSource {
+            override val length: Long = 3
+            override fun open(): InputStream = throw SecurityException("grant revoked")
+        }
+        assertEquals(FilesResult.Failed("\"a.png\" could not be uploaded."), files.upload("/w", "a.png", revoked))
+        val unreadable = object : UploadSource {
+            override val length: Long? = null
+            override fun open(): InputStream = throw java.io.FileNotFoundException("gone")
+        }
+        server.enqueue(ok("""{"ok":true,"parent":"/w"}"""))
+        assertEquals(FilesResult.Failed("\"b\" could not be uploaded."), files.upload("/w", "b", unreadable))
+    }
+
+    @Test fun aSinkThatThrowsFailsThatDownloadNotTheApp() = runBlocking {
+        server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(10))))
+        val sink = object : java.io.OutputStream() {
+            override fun write(b: Int) = throw SecurityException("grant revoked")
+            override fun write(b: ByteArray, off: Int, len: Int) = throw SecurityException("grant revoked")
+        }
+        assertEquals(FilesResult.Failed("This file could not be opened."), files.download("/w/a", 100, sink))
+    }
+
     @Test fun aClientThatFollowsRedirectsIsRejected() {
         try {
             HttpWorkspaceFiles(OkHttpClient(), authority = { authority })

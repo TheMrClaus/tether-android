@@ -3,6 +3,7 @@ package com.tether.app.client
 import com.tether.app.protocol.TetherJson
 import java.io.IOException
 import java.io.OutputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -213,8 +214,9 @@ class HttpWorkspaceFiles(
         }
         val unsigned = RouteBuilder(paired.origin).build()
         val request = paired.sign(unsigned).build()
-        // Defence in depth: the credential only ever travels to the origin it belongs to.
-        check(sameOrigin(request.url, paired.origin)) { "a files request left the paired origin" }
+        // Defence in depth: the credential only ever travels to the origin it belongs to. A request
+        // that would leave it is refused before anything is sent.
+        if (!sameOrigin(request.url, paired.origin)) return FilesResult.Failed(fallback)
         val call = http.newCall(request)
         return try {
             callCancellably(call) { response ->
@@ -223,8 +225,16 @@ class HttpWorkspaceFiles(
             }
         } catch (e: UploadTooLarge) {
             throw e
+        } catch (_: UploadSourceFailed) {
+            FilesResult.Failed(fallback)
         } catch (_: IOException) {
             FilesResult.Failed(FilesCopy.UNREACHABLE)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: RuntimeException) {
+            // A sink or source that throws something else (a provider's SecurityException) fails
+            // this call, never the app.
+            FilesResult.Failed(fallback)
         }
     }
 
@@ -274,7 +284,15 @@ class HttpWorkspaceFiles(
         override fun isOneShot(): Boolean = true
 
         override fun writeTo(sink: BufferedSink) {
-            source.open().source().use { input ->
+            val stream = try {
+                source.open()
+            } catch (e: IOException) {
+                throw UploadSourceFailed(e)
+            } catch (e: RuntimeException) {
+                // A revoked grant: a failure of this upload (OkHttp only carries IOException).
+                throw UploadSourceFailed(e)
+            }
+            stream.source().use { input ->
                 val buffer = Buffer()
                 var total = 0L
                 while (true) {
@@ -289,6 +307,9 @@ class HttpWorkspaceFiles(
     }
 
     private class UploadTooLarge : IOException("upload passes the server's cap")
+
+    /** The picked document could not be read: the upload's own failure, not the server's. */
+    private class UploadSourceFailed(cause: Exception) : IOException("the upload source could not be opened", cause)
 
     companion object {
         private val JSON = "application/json".toMediaType()
