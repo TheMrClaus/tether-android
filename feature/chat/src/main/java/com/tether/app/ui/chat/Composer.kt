@@ -187,19 +187,30 @@ fun Composer(
 
     // The command-name fragment being typed ("/mod" -> "mod"), or null when the
     // draft isn't a bare slash command — drives whether the menu shows.
-    val slashQuery = if (claude && draft.startsWith("/") && !draft.drop(1).contains(" ")) draft.drop(1) else null
-    val menuMatches = remember(slashQuery, commands) {
-        if (slashQuery == null) {
-            emptyList()
-        } else {
-            val q = slashQuery.lowercase()
-            commands.filter { command ->
-                command.name.lowercase().startsWith(q) ||
-                    command.aliases.orEmpty().any { it.lowercase().startsWith(q) }
-            }
+    fun slashQueryOf(text: String): String? =
+        if (claude && text.startsWith("/") && !text.drop(1).contains(" ")) text.drop(1) else null
+    fun matchesFor(query: String?): List<SessionCommandOption> {
+        if (query == null) return emptyList()
+        val q = query.lowercase()
+        return commands.filter { command ->
+            command.name.lowercase().startsWith(q) ||
+                command.aliases.orEmpty().any { it.lowercase().startsWith(q) }
         }
     }
+    val slashQuery = slashQueryOf(draft)
+    val menuMatches = remember(slashQuery, commands) { matchesFor(slashQuery) }
     val menuOpen = slashQuery != null && !menuDismissed && menuMatches.isNotEmpty() && !busy
+
+    /**
+     * The open menu's matches for the text in the field NOW (null = closed). Key and IME actions read
+     * the live [field], never the composition-time [draft]: a keystroke and an Enter can land in one
+     * frame, before the recomposition that would refresh [draft] (T7.1 verifier finding).
+     */
+    fun liveMenu(): List<SessionCommandOption>? {
+        val query = slashQueryOf(field.text) ?: return null
+        val matches = matchesFor(query)
+        return if (!menuDismissed && matches.isNotEmpty() && !busy) matches else null
+    }
 
     fun openModelPicker() {
         if (!claude) return
@@ -213,7 +224,7 @@ fun Composer(
             val isDefaultChoice = model.value.isEmpty() || model.value == "default"
             flash(if (isDefaultChoice) "Model reset to the CLI default." else "Model set to ${model.displayName}.")
             showModelPicker = false
-            if (draft.startsWith("/model")) setDraft("")
+            if (field.text.startsWith("/model")) setDraft("")
         }
     }
 
@@ -273,7 +284,8 @@ fun Composer(
 
     fun submit() {
         if (session == null) return
-        val text = draft.trim()
+        // The live field, not the composition-time [draft] (see [liveMenu]).
+        val text = field.text.trim()
         val hasAttachments = picked.isNotEmpty()
         if (text.isEmpty() && !hasAttachments) return
         if (trySlashCommand(text, hasAttachments)) return
@@ -300,14 +312,15 @@ fun Composer(
     fun onComposerKey(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown || field.composition != null) return false
         val enter = (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed
-        if (menuOpen) {
+        val menu = liveMenu()
+        if (menu != null) {
             when {
                 event.key == Key.Escape -> {
                     menuDismissed = true
                     return true
                 }
                 event.key == Key.Tab || enter -> {
-                    menuMatches.firstOrNull()?.let(::acceptCommand)
+                    menu.firstOrNull()?.let(::acceptCommand)
                     return true
                 }
             }
@@ -445,7 +458,8 @@ fun Composer(
                         metrics = metrics,
                         onKey = ::onComposerKey,
                         onImeSend = {
-                            if (menuOpen) menuMatches.firstOrNull()?.let(::acceptCommand) else submit()
+                            val menu = liveMenu()
+                            if (menu != null) menu.firstOrNull()?.let(::acceptCommand) else submit()
                         },
                         interactionSource = inputInteraction,
                     )
