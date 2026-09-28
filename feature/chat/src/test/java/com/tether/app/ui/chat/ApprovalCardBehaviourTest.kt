@@ -1116,6 +1116,37 @@ class ApprovalCardBehaviourTest {
         assertTrue(store.question(pendingQuestions(ApprovalFixtures.question.tree).single().contentFp).other.isEmpty())
     }
 
+    @Test fun aPickChangeAndNextInOneFrameStayOnThePage() {
+        // The page stays answered (SQLite replaces Postgres), but Next acts only on what was drawn.
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.waitForIdle()
+        val sqlite = rule.onNodeWithText("SQLite").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            sqlite()
+            next()
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
+        rule.onNodeWithText("SQLite").assertIsOn()
+    }
+
+    @Test fun twoConfirmTapsInOneFrameLeaveItUnconfirmed() {
+        // I-A: the box toggles against the live state, so two taps in one frame are on-then-off.
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            confirm()
+            confirm()
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+    }
+
     @Test fun anOptionAndASubmitUnderTwoFingersSendNothing() {
         show(ApprovalFixtures.question)
         scrollTo("question-next")
