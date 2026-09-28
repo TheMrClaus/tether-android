@@ -5,10 +5,9 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Seam over the Firebase token calls, which are Play Services `Task`s.
@@ -48,8 +47,8 @@ fun interface FirebaseTokenProvider {
  * caller's thread. Logout reaches [delete] from the UI (TetherViewModel.logout
  * runs on Main), and the old `Tasks.await` threw on the main thread; the
  * `catch` swallowed that, so the token was never deleted (round 3). The wait is
- * [await] under [withTimeout], so it is cancellable: a logout timeout or a
- * cancelled scope cuts it short.
+ * [await] under [withTimeoutOrNull], so it is cancellable: a logout timeout or a
+ * cancelled scope cuts it short, and propagates to the caller.
  */
 internal class PlayServicesTokenProvider(
     private val getToken: () -> Task<String>,
@@ -64,10 +63,12 @@ internal class PlayServicesTokenProvider(
         bestEffort { deleteToken().await() }
     }
 
+    // withTimeoutOrNull answers null for its own timeout only. A caller's timeout
+    // (the 5 s logout bound) or cancellation is rethrown below, never taken as
+    // this call's own (ta-ouu): catching TimeoutCancellationException here would
+    // swallow the caller's too.
     private suspend fun <T> bestEffort(call: suspend () -> T): T? = try {
-        withContext(io) { withTimeout(timeoutMs) { call() } }
-    } catch (_: TimeoutCancellationException) {
-        null
+        withContext(io) { withTimeoutOrNull(timeoutMs) { call() } }
     } catch (e: CancellationException) {
         throw e
     } catch (_: Exception) {

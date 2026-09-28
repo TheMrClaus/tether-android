@@ -57,9 +57,12 @@ class PushController(
     }
 
     private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) {
-            tokenProvider.delete()
-            // A re-pair may then accept another project from the same server.
+            // Local first (ta-ouu): forget the accepted project, so a re-pair may
+            // accept another one from the same server, before the network
+            // delete. A hung delete (cut by the 5 s logout bound) or a failed one
+            // then never leaves the old binding behind.
             firebase.forget()
+            tokenProvider.delete()
         } }
 
     fun start() {
@@ -236,17 +239,22 @@ internal class PushSyncCoordinator(
     }
 
     suspend fun onLoggedOut(baseUrl: String, credential: Credential) = mutex.withLock {
+        // Reset first: the logout bound may cancel what follows, and nothing
+        // synced belongs to a signed-in server any more.
+        lastSyncKey = null
+        syncedServer = null
+        needsFullSync = true
         registrar.unregister(baseUrl, credential)
         // Also kill the token itself: any other server that still holds it (a
         // failed DELETE, an earlier pairing) prunes its row on the next send.
         try {
             deleteToken()
+        } catch (e: CancellationException) {
+            // The caller's logout bound (or scope) ended it: honour that.
+            throw e
         } catch (_: RuntimeException) {
             // Best-effort by contract.
         }
-        lastSyncKey = null
-        syncedServer = null
-        needsFullSync = true
     }
 
     private suspend fun reconcile(request: PushSyncRequest) {
