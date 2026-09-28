@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.tether.app.ui.theme.LocalReducedMotion
@@ -163,16 +164,15 @@ internal fun ChatTranscript(
         if (sticky && lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
     }
 
-    // T5.3 chat-view.tsx:2066-2074: land on the active OCCURRENCE, centred. The row holding it is
-    // brought on screen first (a lazy row far away is not composed); its text then reports the
-    // mark's bounds once ([LocalFindActiveMark]) and the list centres them. A jump stops the
-    // follow mode, so the next streamed delta does not pull the view away from the match.
+    // T5.3 chat-view.tsx:2066-2074: land on the active OCCURRENCE, centred. A jump stops the
+    // follow mode (so the next streamed delta does not pull the view away from the match), brings
+    // the row holding it on screen (a lazy row far away is not composed), waits for its text to
+    // report the mark's bounds ([LocalFindActiveMark]), and centres them.
     val activeHit = find?.activeHit
     val activeKey = activeHit?.let { "${it.turnId}/${it.blockId}#${it.ordinal}" }
-    val center = remember(activeKey) { FindCenterRequest() }
-    var viewport by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val mark = remember(activeKey) { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
+    val viewport = remember { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
     val reduced = LocalReducedMotion.current
-    val findScope = rememberCoroutineScope()
     LaunchedEffect(activeKey) {
         val hit = activeHit ?: return@LaunchedEffect
         sticky = false
@@ -180,15 +180,15 @@ internal fun ChatTranscript(
         if (row < 0) return@LaunchedEffect
         val index = row + leading
         if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
+        var frames = 0
+        while (mark[0] == null && frames++ < FIND_REPORT_FRAMES) withFrameNanos { }
+        withFrameNanos { }
+        val at = mark[0] ?: return@LaunchedEffect
+        val box = viewport[0] ?: return@LaunchedEffect
+        val delta = at.center.y - box.center.y
+        if (reduced) listState.scrollBy(delta) else listState.animateScrollBy(delta)
     }
-    val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark ->
-        val box = viewport
-        if (box != null && !center.done) {
-            center.done = true
-            val delta = mark.center.y - box.center.y
-            findScope.launch { if (reduced) listState.scrollBy(delta) else listState.animateScrollBy(delta) }
-        }
-    }
+    val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark[0] = it }
 
     val layoutPadding = PaddingValues(
         start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr),
@@ -204,7 +204,7 @@ internal fun ChatTranscript(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(followGuard)
-                .onGloballyPositioned { viewport = it.boundsInRoot() }
+                .onGloballyPositioned { viewport[0] = it.boundsInRoot() }
                 .testTag("chat-transcript"),
             contentPadding = layoutPadding,
         ) {
@@ -342,7 +342,5 @@ private fun LoadEarlierKey(count: Int, onClick: () -> Unit) {
 @androidx.compose.runtime.Immutable
 internal class TranscriptFind(val results: FindResults, val needle: String, val activeHit: FindHit?)
 
-/** One centring per active occurrence: the first report of its bounds wins. */
-private class FindCenterRequest {
-    var done = false
-}
+/** How many frames the jump waits for the active mark's text to lay out and report. */
+private const val FIND_REPORT_FRAMES = 10

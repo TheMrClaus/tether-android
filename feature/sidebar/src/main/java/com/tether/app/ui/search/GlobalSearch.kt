@@ -400,7 +400,9 @@ private fun Filters(form: GlobalSearchForm, onFormChange: (GlobalSearchForm) -> 
                     horizontal = if (studio) (if (narrow) 16.dp else 24.dp) else t.css.spaceMd,
                     vertical = if (studio) (if (narrow) 12.dp else 16.dp) else t.css.spaceSm,
                 ),
-            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
+            // `justify-content: space-between` + `flex-wrap`: the right group sits at the end of
+            // the chips' line when it fits, else starts a line of its own.
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalArrangement = Arrangement.spacedBy(gap),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
@@ -417,16 +419,17 @@ private fun Filters(form: GlobalSearchForm, onFormChange: (GlobalSearchForm) -> 
                     }
                 }
             }
-            // `justify-content: space-between` pushes this group to the end of its line.
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            // `.global-search-filter-right`: one line (Studio lets it wrap at <=640px).
+            val select: @Composable () -> Unit = { TimeSelect(TimeWindow.of(form.timeWindow)) { onFormChange(form.copy(timeWindow = it.id)) } }
+            val scope: @Composable () -> Unit = { ScopeToggle(form.scopeToWorkspace) { onFormChange(form.copy(scopeToWorkspace = it)) } }
+            if (studio && narrow) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                     verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                     itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TimeSelect(TimeWindow.of(form.timeWindow)) { onFormChange(form.copy(timeWindow = it.id)) }
-                    ScopeToggle(form.scopeToWorkspace) { onFormChange(form.copy(scopeToWorkspace = it)) }
-                }
+                ) { select(); scope() }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm), verticalAlignment = Alignment.CenterVertically) { select(); scope() }
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
