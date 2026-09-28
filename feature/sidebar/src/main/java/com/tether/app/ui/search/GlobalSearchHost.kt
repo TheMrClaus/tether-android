@@ -85,9 +85,11 @@ fun GlobalSearchHost(
 }
 
 /**
- * dashboard.tsx:1167-1184 `openGlobalHit`. A live session of the conversation: its block becomes
- * current and it is selected (no mark-seen, as on the web). Otherwise the sidebar's `reopen`: the
- * owning block becomes current, `resume` goes out, and only a sent resume marks it seen and
+ * dashboard.tsx:1167-1184 `openGlobalHit`. A live session of the conversation opens through
+ * T4.4's [TetherViewModel.openSession], the one path for selecting a session from outside the
+ * sidebar: its `openRequests` event makes the session's block current (SessionDrawer) and closes
+ * the phone drawer (MainShell); no mark-seen, as on the web. Otherwise the sidebar's `reopen`:
+ * the owning block becomes current, `resume` goes out, and only a sent resume marks it seen and
  * closes the drawer. Then the find request, and the modal closes (clearing its results).
  */
 internal fun openGlobalHit(
@@ -102,9 +104,7 @@ internal fun openGlobalHit(
 ) {
     val live = sessions.firstOrNull { it.historyId == hit.historyId }
     if (live != null) {
-        controller.focusWorkspaceFor(live.cwd, workspaces, current)
-        vm.selectSession(live.id)
-        onCloseDrawer()
+        vm.openSession(live.id)
     } else {
         controller.focusWorkspaceFor(hit.cwd, workspaces, current)
         val history = hit.toHistory()

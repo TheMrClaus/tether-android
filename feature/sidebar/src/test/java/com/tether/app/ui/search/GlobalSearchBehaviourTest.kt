@@ -25,6 +25,7 @@ import com.tether.app.ui.sidebar.choiceFor
 import com.tether.app.ui.sidebar.frame
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -219,13 +220,19 @@ class GlobalSearchBehaviourTest {
         h.client.globalReply(h.client.globalSearchResults.value.requestId, "parity", listOf(hit("h-1", "Parity notes thread")))
         rule.waitForIdle()
         h.client.frames.clear()
+        // T4.4's link path is the one way a session opens from outside the sidebar.
+        val opened = mutableListOf<String>()
+        val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch { h.vm.openRequests.collect { opened += it } }
         rule.onNodeWithTag(GlobalSearchTags.hit("h-1")).performClick()
         rule.waitForIdle()
+        watcher.cancel()
         assertEquals("s-live", h.vm.selectedSessionId.value)
+        assertEquals(listOf("s-live"), opened)
         assertEquals(listOf("attach"), h.client.types().filter { it == "attach" || it == "resume" || it == "mark-seen" })
         assertNull(h.vm.openingHistoryId.value)
         assertEquals("h-1", h.vm.findRequest.value!!.historyId)
-        assertEquals(1, h.drawerClosed)
+        // The shell closes the drawer on the openRequests event; the host adds no second close.
+        assertEquals(0, h.drawerClosed)
     }
 
     @Test fun closeClearsTheResultsButTheFormSurvivesAReopen() {
