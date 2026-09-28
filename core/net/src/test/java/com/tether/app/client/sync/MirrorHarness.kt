@@ -75,6 +75,8 @@ class MirrorHarness(
     var mirrorDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null,
     /** The client's bound on a mirror bind: generous here, so a loaded CI box does not turn the mirror off. */
     var bindTimeoutMs: Long = 30_000,
+    /** The client's bound on a hydration read (generous by default, for the same reason). */
+    var hydrateTimeoutMs: Long = 30_000,
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val server = MockWebServer()
@@ -125,7 +127,10 @@ class MirrorHarness(
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
             mirror = mirrorOrNull,
-        ).also { it.mirrorBindTimeoutMs = bindTimeoutMs }
+        ).also {
+            it.mirrorBindTimeoutMs = bindTimeoutMs
+            it.mirrorHydrateTimeoutMs = hydrateTimeoutMs
+        }
         var ws: WebSocket? = null
     }
 

@@ -85,6 +85,9 @@ private const val CLOSE_DEVICE_REVOKED = 4001
 /** Application close code: the cookie session was revoked (server.mjs §disconnectRevokedSessionSockets). */
 private const val CLOSE_SESSION_REVOKED = 4002
 
+/** A hydration read that has not landed by then counts as "no saved copy" (T13.1): recovered by a full attach. */
+private const val MIRROR_HYDRATE_TIMEOUT_MS = 15_000L
+
 /** A mirror bind that has not answered by then means no mirror for this process (T13.1, M2). */
 private const val MIRROR_BIND_TIMEOUT_MS = 5_000L
 
@@ -981,7 +984,9 @@ class RealTetherClient(
             origin to link.mirror.hydrateAsync(origin, sessionId)
         }
         scope.launch {
-            val result = read.await()
+            // Bounded: a writer that is stuck (not dead) must not leave the session blank. A read
+            // that does not land in time is treated as "no saved copy" (then recovered below).
+            val result = withTimeoutOrNull(mirrorHydrateTimeoutMs) { read.await() } ?: Hydration.None
             val built = (result as? Hydration.Loaded)?.session?.let { session ->
                 try {
                     session to MirrorLink.rebuild(session)
@@ -1004,13 +1009,28 @@ class RealTetherClient(
         var fullAttachOn: WebSocket? = null
         synchronized(lock) {
             // A sign-out, re-bind or origin switch since: this read belongs to a binding that is
-            // gone, even if the same origin is bound again (L1).
-            if (mirrorOrigin != origin || currentOriginLocked() != origin || mirrorGeneration != generation) return
+            // gone, even if the same origin is bound again (L1). Nothing of it is used; but a
+            // session left with a cursor, no tree and no read in flight would stay blank, so it
+            // gets a full attach (defensive: wipe and switch forget restored cursors already).
+            if (mirrorOrigin != origin || currentOriginLocked() != origin || mirrorGeneration != generation) {
+                if (!sessionStore.has(sessionId) && !sessionStore.isHydrating(sessionId) && tracker.cursorFor(sessionId) != null) {
+                    tracker.forget(sessionId)
+                    seededFromMirror.remove(sessionId)
+                    if (sessionId in attachedThisEpoch && socketOpen && handshakeDone) fullAttachOn = socket
+                }
+                return@synchronized
+            }
             when (val outcome = sessionStore.completeHydration(sessionId, session, rebuilt)) {
                 // A snapshot with state won, or a projection exists already.
                 SessionStore.HydrationOutcome.Cancelled -> return
                 SessionStore.HydrationOutcome.Failed -> {
-                    if (result is Hydration.None) return // no saved copy: nothing to drop
+                    // No saved copy and no cursor: nothing to recover (the attach is a full one).
+                    // A cursor with no tree, though (restored from the mirror, possibly confirmed by
+                    // a stateless reply, and the read came back empty: a dead or stuck writer), would
+                    // leave the session blank for the whole process: recover it like a corrupt copy.
+                    // Keyed on the cursor, not seededFromMirror: a stateless reply removes the
+                    // session from that set before the read lands.
+                    if (result is Hydration.None && tracker.cursorFor(sessionId) == null) return
                     // Unreadable or unfoldable (Corrupt, or a fold throw): the saved copy goes, and
                     // the restored cursor with it, so the attach is a FULL one.
                     mirrorLink?.drop(origin, sessionId)
@@ -2675,6 +2695,10 @@ class RealTetherClient(
      */
     @Volatile
     internal var raceHook: ((RacePoint, Any?) -> Unit)? = null
+
+    /** Test seam: the bound on a hydration read (production: [MIRROR_HYDRATE_TIMEOUT_MS]). */
+    @Volatile
+    internal var mirrorHydrateTimeoutMs: Long = MIRROR_HYDRATE_TIMEOUT_MS
 
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile

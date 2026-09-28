@@ -100,6 +100,9 @@ class SessionStore {
         return true
     }
 
+    /** A read of [sessionId]'s saved copy is in flight. */
+    fun isHydrating(sessionId: String): Boolean = hydrating.containsKey(sessionId)
+
     /** A live event folded by the cursor while its session's saved copy is read: kept for later. True = buffered. */
     fun bufferIfHydrating(sessionId: String, event: JsObj): Boolean {
         val pending = hydrating[sessionId] ?: return false

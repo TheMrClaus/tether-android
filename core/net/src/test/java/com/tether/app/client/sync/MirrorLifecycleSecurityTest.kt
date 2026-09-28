@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import okhttp3.mockwebserver.MockResponse
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -202,6 +204,56 @@ class MirrorLifecycleSecurityTest {
         } finally {
             b.shutdown()
         }
+    }
+
+    /**
+     * Verifier repro (round 3): after a restart the writer dies on the hydration read, the
+     * restored cursor got a stateless reply, and the dead writer answers "no copy". The session
+     * must not stay blank: the client falls back to a full attach, and live events show.
+     */
+    @Test
+    fun aRestoredSessionWhoseReadDiesIsFullyReattachedNotLeftBlank() {
+        mirroredThenKilled()
+        h.boot(ready = ready("s1"), handshake = false) { p -> p.mirror.beforeHydrateRead = { throw OutOfMemoryError("simulated") } }
+        h.ws.send(ready("s1"))
+        h.expectFrame("hello")
+        h.await(h.client.connection) { it == ConnectionState.Connected }
+        recoversWithAFullAttach()
+        assertTrue(h.mirror.dead)
+    }
+
+    /** The same trap with a writer that is stuck rather than dead: the read's bound recovers it. */
+    @Test
+    fun aRestoredSessionWhoseReadNeverLandsIsFullyReattachedNotLeftBlank() {
+        h.close()
+        h = MirrorHarness(hydrateTimeoutMs = 1_000)
+        h.startServer()
+        mirroredThenKilled()
+        val stuck = CountDownLatch(1)
+        try {
+            h.boot(ready = ready("s1"), handshake = false) { p -> p.mirror.beforeHydrateRead = { stuck.await(30, TimeUnit.SECONDS) } }
+            h.ws.send(ready("s1"))
+            h.expectFrame("hello")
+            h.await(h.client.connection) { it == ConnectionState.Connected }
+            recoversWithAFullAttach()
+        } finally {
+            stuck.countDown()
+        }
+    }
+
+    private fun recoversWithAFullAttach() {
+        // The capped ready re-attach asks for a delta from the restored cursor; the server is at head.
+        val delta = h.expectFrame("attach")
+        assertEquals(5L, delta["afterSeq"]!!.jsonPrimitive.longOrNull)
+        h.ws.send(snapshotFrame("s1", 5, state = null))
+        // The read comes back empty: a FULL attach, not a blank session.
+        val full = h.expectFrame("attach")
+        assertEquals("s1", full["sessionId"]!!.jsonPrimitive.content)
+        assertNull("recovery is a full attach", full["afterSeq"])
+        h.ws.send(snapshotFrame("s1", 5, state))
+        h.await(h.client.projectionTrees) { it.containsKey("s1") }
+        h.ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_started","turnId":"t6","seq":6,"ts":6}}""")
+        h.await(h.client.projectionTrees) { it["s1"]?.get("activeTurnId") == com.tether.app.protocol.tree.JsStr("t6") }
     }
 
     @Test
