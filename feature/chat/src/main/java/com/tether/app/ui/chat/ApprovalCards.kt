@@ -399,7 +399,11 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         GrantCheckbox(
                             checked = confirmed,
                             enabled = !frozen,
-                            onChange = { confirmedAt = if (confirmed) null else store.grantGeneration(cfp) },
+                            // I-A: toggled against the LIVE generation (never the drawn `confirmed`).
+                            onChange = {
+                                val g = store.grantGeneration(cfp)
+                                confirmedAt = if (confirmedAt == g) null else g
+                            },
                             tag = "grant-confirm",
                             onBlocked = blocked,
                         ) {
@@ -622,8 +626,14 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     // tap aimed at a page that is no longer the store's page (two taps in one frame) does nothing.
     fun onThisPage(): Boolean = store.question(cfp).page.coerceIn(0, (view.prompts.size - 1).coerceAtLeast(0)) == pageIndex
 
-    fun submit(extraSkipped: Int? = null) {
+    // Round 6 (L-A): a key decides only on the selection that was DRAWN. If anything changed in the
+    // store since this card was composed (an option or Other text in the same frame, a second
+    // finger), the tap is refused: the operator sees the change first and taps again.
+    fun isDrawn(): Boolean = store.question(cfp) == sel
+
+    fun submit(extraSkipped: Int? = null, drawnChecked: Boolean = false) {
         if (latched || !armed || unavailable != null || consent.isDecided(id, fp) || !onThisPage()) return
+        if (!drawnChecked && !isDrawn()) return
         update { it.copy(attempted = true) }
         val now = store.question(cfp)
         val effectiveSkipped = now.skipped + listOfNotNull(extraSkipped)
@@ -637,14 +647,15 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     }
 
     fun next() {
-        if (!armed || question == null || !onThisPage() || !answeredIn(store.question(cfp), question)) return
+        if (!armed || question == null || !onThisPage() || !isDrawn() || !answeredIn(store.question(cfp), question)) return
         update { it.copy(page = pageIndex + 1) }
     }
 
     fun skip() {
-        if (!armed || question == null || !onThisPage()) return
+        if (!armed || question == null || !onThisPage() || !isDrawn()) return
         update { it.copy(skipped = it.skipped + slotOf(question)) }
-        if (isLastPage) submit(extraSkipped = slotOf(question)) else update { it.copy(page = pageIndex + 1) }
+        // The drawn check was made above, before this skip's own write.
+        if (isLastPage) submit(extraSkipped = slotOf(question), drawnChecked = true) else update { it.copy(page = pageIndex + 1) }
     }
 
     val frozen = !armed
@@ -712,7 +723,10 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                             active = labelAt in sel.picks[slot].orEmpty(),
                             multi = multi,
                             enabled = !frozen,
-                            onToggle = { update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) } },
+                            // L-A: an option of a page that is no longer shown (a second finger after Next) is ignored.
+                            onToggle = {
+                                if (onThisPage()) update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) }
+                            },
                             onBlocked = blocked,
                         )
                     }
@@ -721,8 +735,10 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     value = sel.other[slotOf(question)].orEmpty(),
                     // An HTML text input drops line breaks; so does this one. Capped at the guard's limit.
                     onValueChange = { text ->
-                        val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
-                        update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                        if (onThisPage()) {
+                            val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
+                            update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
                     placeholder = "Other (type your own answer)…",

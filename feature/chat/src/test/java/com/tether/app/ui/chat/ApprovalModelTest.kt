@@ -246,10 +246,22 @@ class ApprovalModelTest {
         assertEquals("“/a\\u000Ab”", displayPath("/a\nb"))
         assertEquals("“\\u202Egnp.exe”", displayPath("\u202Egnp.exe"))
         assertEquals("“\\u2028\\u2066\\u0085”", displayPath("\u2028\u2066\u0085"))
-        val long = displayPath("/" + "p".repeat(500))
-        assertTrue(long.endsWith("…”"))
-        assertEquals(DISPLAY_PATH_MAX + 3, long.length) // quotes + ellipsis
+        // L-B: the middle goes; the head AND the scope-deciding tail stay.
+        val long = displayPath("/srv/" + "p".repeat(500) + "/../../etc")
+        assertTrue(long, long.startsWith("“/srv/ppp"))
+        assertTrue(long, long.endsWith("pp/../../etc”"))
+        assertTrue(long, long.contains("…"))
+        assertEquals(DISPLAY_PATH_MAX + 2, long.length) // + the two quotes
         assertEquals("“/x; no network access”", displayPath("/x; no network access"))
+        // L-C: by category, plus the listed look-alikes.
+        assertEquals("“data\\u200B”", displayPath("data\u200B")) // FORMAT (zero-width space)
+        assertEquals("“a\\u{E0041}b”", displayPath("a\uDB40\uDC41b")) // a tag character (FORMAT, astral)
+        assertEquals("“a\\u00A0b”", displayPath("a\u00A0b")) // a space that is not U+0020
+        assertEquals("“a b”", displayPath("a b"))
+        assertEquals("“/fake\\u201D; network access; read \\u201C/y”", displayPath("/fake\u201D; network access; read \u201C/y"))
+        assertEquals("“a\\u005Cu0041”", displayPath("a\\u0041")) // a literal backslash cannot fake an escape
+        assertEquals("“\\u3164x\\uFE0F\\uE000”", displayPath("\u3164x\uFE0F\uE000")) // Hangul filler, variation selector, private use
+        assertEquals("“\\uD800”", displayPath("\uD800")) // a lone surrogate
     }
 
     private companion object {

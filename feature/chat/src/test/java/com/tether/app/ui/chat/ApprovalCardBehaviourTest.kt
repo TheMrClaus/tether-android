@@ -1056,7 +1056,7 @@ class ApprovalCardBehaviourTest {
         assertEquals(listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()), calls)
     }
 
-    @Test fun aQuestionSubmitReadsThePicksAtTapTime() {
+    @Test fun aPickAndASubmitInOneFrameSendNothingUndrawn() {
         fixture = ApprovalFixtures.question
         show(ApprovalFixtures.question)
         scrollTo("question-next")
@@ -1065,7 +1065,8 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle(); arm()
         scrollTo("question-submit")
         rule.onNodeWithText("staging").performClick()
-        // A pick and the submit in one frame: the submit sends the pick made just before it.
+        // Round 6 (L-A): a pick and the submit in one frame: the answer on the wire would be one the
+        // operator has not seen drawn, so nothing is sent.
         val production = rule.onNodeWithText("production").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         rule.runOnUiThread {
@@ -1073,7 +1074,67 @@ class ApprovalCardBehaviourTest {
             submit()
         }
         rule.waitForIdle()
+        assertTrue("an undrawn answer went out: $calls", calls.isEmpty())
+        // Drawn now: the next Submit sends exactly what is on screen.
+        rule.onNodeWithTag("question-submit").performClick()
+        rule.waitForIdle()
         assertEquals(listOf("question:q-1:{${ApprovalFixtures.Q_DB}=Postgres, ${ApprovalFixtures.Q_ENV}=staging, production}"), calls)
+    }
+
+    @Test fun aNextAndAnOptionUnderASecondFingerDoNotAnswerThePageLeft() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.waitForIdle()
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().boundsInRoot
+        val sqlite = rule.onNodeWithText("SQLite").fetchSemanticsNode().boundsInRoot
+        rule.onNodeWithTag("question-next").performTouchInput {
+            down(0, center)
+            down(1, sqlite.center - next.topLeft)
+            up(0) // Next: page 2
+            up(1) // an option of page 1, which is no longer shown
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        assertEquals(mapOf(0 to listOf(0)), store.question(pendingQuestions(ApprovalFixtures.question.tree).single().contentFp).picks)
+    }
+
+    @Test fun aNextAndATypedOtherInOneFrameDoNotWriteThePageLeft() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.waitForIdle()
+        val field = rule.onNode(androidx.compose.ui.test.hasSetTextAction() and androidx.compose.ui.test.hasAnyAncestor(hasTestTag("question-other")))
+            .fetchSemanticsNode().config[SemanticsActions.SetText].action!!
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            next()
+            field(androidx.compose.ui.text.AnnotatedString("typed after Next"))
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        assertTrue(store.question(pendingQuestions(ApprovalFixtures.question.tree).single().contentFp).other.isEmpty())
+    }
+
+    @Test fun anOptionAndASubmitUnderTwoFingersSendNothing() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle(); arm()
+        scrollTo("question-submit")
+        rule.onNodeWithText("staging").performClick()
+        rule.waitForIdle()
+        val option = rule.onNodeWithText("production").fetchSemanticsNode().boundsInRoot
+        val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().boundsInRoot
+        rule.onNodeWithText("production").performTouchInput {
+            down(0, center)
+            down(1, submit.center - option.topLeft)
+            up(0)
+            up(1)
+        }
+        rule.waitForIdle()
+        assertTrue("an undrawn answer went out: $calls", calls.isEmpty())
     }
 
     @Test fun twoNextTapsInOneFrameMoveOnePage() {
@@ -1130,7 +1191,7 @@ class ApprovalCardBehaviourTest {
         assertTrue(label, label.contains("“/x\\u000A/etc/shadow”"))
         assertTrue(label, label.contains("“/safe\\u202Etxt.exe”"))
         assertTrue(label, label.contains("“/x; no network access”"))
-        assertTrue(label, label.contains("…”"))
+        assertTrue(label, label.contains("…d"))
         assertTrue("no raw control reaches the screen", label.none { it == '\n' || it == '\u202E' })
         assertTrue(label, label.endsWith("; network access."))
     }

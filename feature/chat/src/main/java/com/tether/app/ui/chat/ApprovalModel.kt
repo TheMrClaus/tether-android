@@ -144,35 +144,61 @@ internal fun isFullGrant(grant: GrantedPermissions, requested: RequestedPermissi
         (grant.networkEnabled == true) == requested.network
 }
 
-/** L-3: longest path (in code points) a card shows before "…". */
-internal const val DISPLAY_PATH_MAX = 160
+/** L-3 / L-B: a shown path keeps its first [DISPLAY_PATH_HEAD] and last [DISPLAY_PATH_TAIL] code points. */
+internal const val DISPLAY_PATH_HEAD = 60
+internal const val DISPLAY_PATH_TAIL = 99
+internal const val DISPLAY_PATH_MAX = DISPLAY_PATH_HEAD + 1 + DISPLAY_PATH_TAIL
 
 /**
- * L-3: a server path as the card SHOWS it (never as it is granted: the grant carries the raw path):
- * C0/C1 controls, DEL, the line / paragraph separators and every bidi control (U+200E/200F, U+061C,
- * U+202A-202E, U+2066-2069) as visible `\uXXXX`; cut to [DISPLAY_PATH_MAX] code points with "…"; and
- * quoted, so a path cannot pose as the sentence around it ("/x; no network access").
+ * A server path as the card SHOWS it (never as it is granted: the grant carries the raw path).
+ * - Escaped BY CATEGORY (L-C): every code point that could hide, reorder, fake a space or fake the
+ *   quotes around it is written out as a visible `\uXXXX` (`\u{XXXXX}` above the BMP), see
+ *   [needsEscape]; so is the backslash itself, so an escape cannot be faked.
+ * - Cut in the MIDDLE (L-B): the head and the TAIL (which decides the scope: a trailing `/../..`)
+ *   both stay, with "…" between them.
+ * - Quoted with curly quotes, which themselves are always escaped inside, so a path cannot pose as
+ *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`).
  */
 internal fun displayPath(path: String): String {
-    val out = StringBuilder("\u201C")
-    var shown = 0
-    var i = 0
-    while (i < path.length) {
-        val cp = path.codePointAt(i)
-        if (shown == DISPLAY_PATH_MAX) {
-            out.append('…')
-            break
-        }
-        if (isHiddenControl(cp)) out.append("\\u%04X".format(cp)) else out.appendCodePoint(cp)
-        shown++
-        i += Character.charCount(cp)
+    val cps = path.codePoints().toArray()
+    val shown = if (cps.size <= DISPLAY_PATH_MAX) {
+        render(cps, 0, cps.size)
+    } else {
+        render(cps, 0, DISPLAY_PATH_HEAD) + "…" + render(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
     }
-    return out.append('\u201D').toString()
+    return "\u201C$shown\u201D"
 }
 
-private fun isHiddenControl(cp: Int): Boolean =
-    cp < 0x20 || cp in 0x7F..0x9F || cp == 0x2028 || cp == 0x2029 || cp == 0x200E || cp == 0x200F || cp == 0x061C ||
-        cp in 0x202A..0x202E || cp in 0x2066..0x2069
+private fun render(cps: IntArray, from: Int, to: Int): String {
+    val out = StringBuilder()
+    for (i in from until to) {
+        val cp = cps[i]
+        when {
+            !needsEscape(cp) -> out.appendCodePoint(cp)
+            cp > 0xFFFF -> out.append("\\u{%X}".format(cp))
+            else -> out.append("\\u%04X".format(cp))
+        }
+    }
+    return out.toString()
+}
+
+/**
+ * L-C: escape when the code point's general category is CONTROL, FORMAT, LINE_SEPARATOR,
+ * PARAGRAPH_SEPARATOR, SURROGATE, PRIVATE_USE or UNASSIGNED, or a SPACE_SEPARATOR other than U+0020;
+ * plus the variation selectors (U+FE00-FE0F, U+E0100-E01EF), the Hangul fillers (U+115F, U+1160,
+ * U+3164, U+FFA0), the curly quotes U+201C / U+201D and the backslash.
+ */
+internal fun needsEscape(cp: Int): Boolean {
+    when (Character.getType(cp)) {
+        Character.CONTROL.toInt(), Character.FORMAT.toInt(), Character.LINE_SEPARATOR.toInt(),
+        Character.PARAGRAPH_SEPARATOR.toInt(), Character.SURROGATE.toInt(), Character.PRIVATE_USE.toInt(),
+        Character.UNASSIGNED.toInt(),
+        -> return true
+        Character.SPACE_SEPARATOR.toInt() -> return cp != 0x20
+    }
+    return cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF || cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 ||
+        cp == 0x201C || cp == 0x201D || cp == 0x5C
+}
 
 /** What one choice key sends: its id and (for a permission-granting choice) the grant, or null when it is disabled. */
 internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermissions?)
