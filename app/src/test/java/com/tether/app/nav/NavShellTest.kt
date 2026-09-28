@@ -8,6 +8,18 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isFocused
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
+import com.tether.app.nav.NavTestClient.Companion.OTHER_LISTED
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -126,6 +138,58 @@ class NavShellTest {
         rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(cwd, vm.currentWorkspace.value)
+    }
+
+    private fun openAndSettle(id: String) {
+        link("tether://session/$id")
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
+        rule.waitForIdle()
+        assertEquals(id, vm.selectedSessionId.value)
+    }
+
+    private fun composer() = rule.onAllNodes(hasSetTextAction()).onFirst()
+
+    private fun composerText(): String =
+        composer().fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
+
+    @Test
+    fun aLinkTakesFocusAndTheKeyboardAwayFromThePreviousComposer() {
+        openAndSettle(OTHER_LISTED)
+        composer().requestFocus()
+        composer().assertIsFocused()
+        link("tether://session/$LISTED")
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
+        rule.waitForIdle()
+        assertEquals(LISTED, vm.selectedSessionId.value)
+        // No text field holds focus, so no keyboard input session carries over (in keyboard mode
+        // Compose may park focus on a plain button, which takes no text).
+        rule.onAllNodes(isFocused() and hasSetTextAction()).assertCountEquals(0)
+    }
+
+    @Test
+    fun hardwareKeysAreSwallowedWhileTheGuardIsUp() {
+        openAndSettle(OTHER_LISTED)
+        link("tether://session/$LISTED")
+        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) {
+            rule.onAllNodesWithTag(NAV_INPUT_GUARD_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+        rule.mainClock.autoAdvance = false
+        val before: String
+        try {
+            composer().requestFocus()
+            before = composerText()
+            composer().performKeyInput { pressKey(Key.A) }
+            rule.mainClock.advanceTimeByFrame()
+            assertEquals("a key reached the composer during the guard", before, composerText())
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
+        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
+        rule.waitForIdle()
+        composer().requestFocus()
+        composer().performKeyInput { pressKey(Key.A) }
+        rule.waitForIdle()
+        assertEquals("after the guard keys type", before.length + 1, composerText().length)
     }
 
     @Test

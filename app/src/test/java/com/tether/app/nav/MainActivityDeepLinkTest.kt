@@ -157,6 +157,20 @@ class MainActivityDeepLinkTest {
     }
 
     @Test
+    fun anExpiredSignInHoldsTheLinkUntilTheServerAcceptsItAgain() {
+        // The credential is still stored (configured) but the server ended the sign-in: the login
+        // screen shows, so the link must wait even though the session is listed.
+        install(NavTestClient(configured = true, connection = ConnectionState.AuthRequired))
+        val activity = launch(view("tether://session/$LISTED"))
+        assertNull(activity.vm.selectedSessionId.value)
+        assertFalse(LISTED in client.attached)
+        client.connectionFlow.value = ConnectionState.Connecting
+        client.connectionFlow.value = ConnectionState.Connected
+        idle()
+        assertEquals(LISTED, activity.vm.selectedSessionId.value)
+    }
+
+    @Test
     fun signedOutASignInToAnotherServerDoesNotOpenTheLink() {
         install(NavTestClient(configured = false, connection = ConnectionState.AuthRequired))
         val activity = launch(view("tether://session/$LISTED"))

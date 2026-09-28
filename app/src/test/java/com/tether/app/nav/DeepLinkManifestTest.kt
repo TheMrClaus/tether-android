@@ -22,7 +22,8 @@ import org.w3c.dom.Element
 /**
  * T4.4: the exported surface stays minimal. MainActivity is the only activity with filters in the
  * release manifest, its filters are exactly the launcher, the FCM click action and
- * `tether://session`, nothing claims http(s) (so no autoVerify), and it is `singleTask`.
+ * `tether://session`, nothing claims http(s) (so no autoVerify), and it is `singleTop`: a launcher
+ * relaunch must keep whatever was opened above it, which `singleTask` (or clearTaskOnLaunch) clears.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -58,7 +59,11 @@ class DeepLinkManifestTest {
         val activities = manifest("src/main/AndroidManifest.xml").children("activity")
         val main = activities.single { it.attr("name") == ".MainActivity" }
         assertEquals("true", main.attr("exported"))
-        assertEquals("singleTask", main.attr("launchMode"))
+        assertEquals("singleTop", main.attr("launchMode"))
+        // Nothing that clears the task above the root on a relaunch.
+        for (attr in listOf("clearTaskOnLaunch", "finishOnTaskLaunch", "taskAffinity", "documentLaunchMode", "allowTaskReparenting")) {
+            assertEquals(attr, "", main.attr(attr))
+        }
         assertEquals(
             setOf(
                 "a:android.intent.action.MAIN|c:android.intent.category.LAUNCHER",
@@ -102,6 +107,6 @@ class DeepLinkManifestTest {
         assertFalse(resolvesToUs("https://tether.example.com/?session=s1"))
         assertFalse(resolvesToUs("http://tether.example.com/?session=s1"))
         val info = pm.getActivityInfo(ComponentName(context, MainActivity::class.java), PackageManager.GET_META_DATA)
-        assertEquals(ActivityInfo.LAUNCH_SINGLE_TASK, info.launchMode)
+        assertEquals(ActivityInfo.LAUNCH_SINGLE_TOP, info.launchMode)
     }
 }

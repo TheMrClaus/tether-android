@@ -12,7 +12,8 @@ import org.robolectric.annotation.Config
 
 /**
  * T4.4: a chat link naming a session on the paired server opens it in the app; every other link
- * (other hosts, the server's other pages, look-alikes) still leaves through the Custom Tab.
+ * (other hosts, the server's other pages, look-alikes, and the app's own tether:// scheme) still
+ * leaves through the Custom Tab path.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -46,6 +47,10 @@ class SessionLinkOpenerTest {
             "https://tether.example.com/?session=..%2Fx",
             "http://tether.example.com/?session=s1",
             "mailto:someone@example.com",
+            // Chat text is agent-written: a tether:// link names no server, so it is not opened in
+            // the app from there. It goes to the Custom Tab path, whose scheme allowlist drops it.
+            "tether://session/s1",
+            "TETHER://session/s1",
         )
         links.forEach(::open)
         assertEquals(emptyList<ParsedLink.Open>(), inApp)

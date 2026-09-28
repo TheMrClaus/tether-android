@@ -18,9 +18,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import com.tether.app.nav.DeepLinkIntents
@@ -79,11 +82,16 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     // session in a push intent could only come from another app (T12.1 H1).
     val navigator = viewModel<NavigationViewModel>().navigator
     var inputGuard by remember { mutableStateOf(false) }
+    var guardSerial by remember { mutableIntStateOf(0) }
+    val focusManager = LocalFocusManager.current
     val applyNav: (NavEffect?) -> Unit = { effect ->
         when (effect) {
             is NavEffect.Open -> {
+                // Focus (and with it the keyboard's input session) does not follow a link into
+                // the new session: typing aimed at the previous composer stops here.
+                focusManager.clearFocus(force = true)
                 vm.openSession(effect.sessionId)
-                inputGuard = true
+                guardSerial++
             }
             is NavEffect.Notice -> vm.reportLocalError(effect.text)
             null -> Unit
@@ -103,13 +111,14 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     LaunchedEffect(vm, navigator) {
         vm.selectedSessionId.drop(1).collect { if (it != null) navigator.onUserSelection() }
     }
-    // A switch made by a link swallows touches briefly, so a tap aimed at the previous
-    // session cannot land on the new one's controls (another window can fire a link).
-    LaunchedEffect(inputGuard) {
-        if (inputGuard) {
-            delay(NAV_INPUT_GUARD_MS)
-            inputGuard = false
-        }
+    // A switch made by a link swallows touches and hardware keys briefly, so input aimed at
+    // the previous session cannot land on the new one's controls (another window can fire a
+    // link). Each switch restarts the window.
+    LaunchedEffect(guardSerial) {
+        if (guardSerial == 0) return@LaunchedEffect
+        inputGuard = true
+        delay(NAV_INPUT_GUARD_MS)
+        inputGuard = false
     }
     val linkOpener = remember(client, navigator) {
         SessionLinkOpener(
@@ -220,6 +229,7 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onPreviewKeyEvent { inputGuard }
                     // A notice already cleared the status bar.
                     .then(if (denied || mismatch != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
