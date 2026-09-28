@@ -27,13 +27,13 @@ class ToolParsingBoundsTest {
         (doc["diffs"] as com.tether.app.protocol.tree.JsArr).forEach { collect(((it as JsObj)["input"] as com.tether.app.protocol.tree.JsStr).value) }
         corpus += listOf(
             "diff --git a/x b/y", "diff --git a/x b/", "diff --git a/ b/y", "diff --git a/a b/b b/c", "diff --git a/a b/b\r",
-            "diff --git a/a  b/b", "diff --git a/a b/b ", "diff --git a/a\u0085 b/b", "diff --git a/b/ b/", "diff --git a/ b/ b/",
+            "diff --git a/a\u2028 b/b", "diff --git a/a b/b\u2029", "diff --git a/a\u0085 b/b", "diff --git a/b/ b/", "diff --git a/ b/ b/",
             "diff --git a/x  b/y", "diff --git b/x a/y", "diff --git a/x b/y ", "diff --git a/x b/ y", "diff --git a/", "diff --git ",
             "diff --git a/ b/b/ b/c",
         )
         for (line in corpus) assertEquals(line, old(line), diffGitPaths(line))
         val random = Random(62)
-        val alphabet = listOf("a", "b", " ", "/", " b/", "b/", "\r", " ", " ", "\u0085", "x", "\t", "é", "😀")
+        val alphabet = listOf("a", "b", " ", "/", " b/", "b/", "\r", "\u2028", "\u2029", "\u0085", "x", "\t", "é", "😀")
         repeat(20_000) {
             val tail = (0 until random.nextInt(0, 12)).joinToString("") { alphabet[random.nextInt(alphabet.size)] }
             val line = "diff --git a/$tail"

@@ -293,7 +293,18 @@ internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription
 internal fun ToolInputView(name: String?, input: com.tether.app.protocol.tree.JsValue?) {
     val model = remember(name, input) { toolInputModel(name, input) }
     when (model) {
-        is ToolInputModel.Raw -> ToolIoPre(model.text)
+        is ToolInputModel.Raw -> {
+            model.note?.let { note ->
+                val t = LocalTetherTokens.current
+                Text(
+                    note,
+                    style = TextStyle(fontFamily = LocalTetherTypography.current.mono, fontSize = rem(0.72f)),
+                    color = t.muted,
+                    modifier = Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceXs).testTag("edit-too-large"),
+                )
+            }
+            ToolIoPre(model.text)
+        }
         is ToolInputModel.Edit -> FileEditView(model)
     }
 }
@@ -437,8 +448,14 @@ internal fun ToolCard(block: JsObj, showThinking: Boolean, modifier: Modifier = 
         val input = block["input"]
         if (!input.isNullish()) ToolInputView(name, input)
         val subagent = block["subagent"] as? JsObj
-        val plan = remember(block, showThinking) { cardMediaPlan(subagent, block, showThinking) }
-        subagent?.let { SubagentThread(it, parentRunning = state == ToolState.Running, showThinking = showThinking, tileLimits = plan.byEntry) }
+        val running = state == ToolState.Running
+        // The thread's <details> state lives here so a CLOSED thread gives its tile share back
+        // to the card's own result (its steps load nothing while closed).
+        val window = remember(subagent, showThinking, running) { subagent?.let { subagentWindow(it, showThinking, newest = running) } }
+        val threadHasMedia = remember(window) { window?.entries?.any { asString(it["kind"]) == "tool" && extractToolMedia(it["output"]).isNotEmpty() } == true }
+        val threadOpen = rememberDetailsOpen(running || threadHasMedia)
+        val plan = remember(block, showThinking, threadOpen.value) { cardMediaPlan(if (threadOpen.value) subagent else null, block, showThinking) }
+        if (window != null) SubagentThread(window, threadOpen, showThinking = showThinking, tileLimits = plan.byEntry)
         if (state == ToolState.Interrupted) InterruptedEvidence(output)
         if (block.isDone() && state != ToolState.Interrupted && !output.isNullish()) {
             val media = remember(output) { extractToolMedia(output) }
@@ -485,16 +502,14 @@ internal fun InterruptedEvidence(output: com.tether.app.protocol.tree.JsValue?) 
  * indented `space-md` behind a 2px `--line-strong` rail.
  */
 @Composable
-internal fun SubagentThread(thread: JsObj, parentRunning: Boolean, showThinking: Boolean, tileLimits: Map<String, Int> = emptyMap()) {
+internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThinking: Boolean, tileLimits: Map<String, Int> = emptyMap()) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    // R5-M1: at most SUBAGENT_ROWS_MAX steps are drawn — the newest while the parent runs, the
-    // first once it is done — so a never-ending Task cannot grow one list item without bound.
-    val window = remember(thread, showThinking, parentRunning) { subagentWindow(thread, showThinking, newest = parentRunning) }
+    // R5-M1: at most SUBAGENT_ROWS_MAX steps are drawn (the caller's [window]) — the newest while
+    // the parent runs, the first once it is done — so a never-ending Task cannot grow one list
+    // item without bound. [open] is the <details> state, held by the card (it decides the tiles).
     val entries = window.entries
     if (entries.isEmpty()) return
-    val hasMedia = entries.any { asString(it["kind"]) == "tool" && extractToolMedia(it["output"]).isNotEmpty() }
-    val open = rememberDetailsOpen(parentRunning || hasMedia)
     val steps = window.total
     Column(Modifier.fillMaxWidth().background(t.tintXs).topRule(t.line).padding(top = 1.dp)) {
         Row(

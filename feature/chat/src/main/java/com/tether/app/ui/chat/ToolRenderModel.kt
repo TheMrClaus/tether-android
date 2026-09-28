@@ -297,8 +297,8 @@ sealed interface ToolInputModel {
     /** A file edit: the path, its tag (null = none) and one diff per edit. */
     data class Edit(val filePath: String, val tag: String?, val diffs: List<List<EditDiffRow>>, val totals: List<Int> = diffs.map { it.size }) : ToolInputModel
 
-    /** Everything else: `summarize(input)` in an expandable pre. */
-    data class Raw(val text: String) : ToolInputModel
+    /** Everything else: `summarize(input)` in an expandable pre; [note] says why a file edit is not a diff. */
+    data class Raw(val text: String, val note: String? = null) : ToolInputModel
 }
 
 internal fun toolInputModel(name: String?, input: JsValue?): ToolInputModel {
@@ -334,7 +334,27 @@ internal fun toolInputModel(name: String?, input: JsValue?): ToolInputModel {
             }
         }
     }
-    return ToolInputModel.Raw(summarize(input))
+    val tooLarge = record != null && !filePath.isNullOrEmpty() && (name == "Edit" || name == "MultiEdit") && editTooLarge(name, record)
+    return ToolInputModel.Raw(summarize(input), if (tooLarge) TOO_LARGE_TO_DIFF else null)
+}
+
+/** The note a refused Edit / MultiEdit shows over its raw input. */
+internal const val TOO_LARGE_TO_DIFF = "Too large to diff"
+
+/** Whether a well-formed Edit / MultiEdit fell back to raw only because of [EDIT_DIFF_MAX_CHARS]. */
+private fun editTooLarge(name: String, record: JsObj): Boolean {
+    if (name == "Edit") {
+        val o = asString(record["old_string"]) ?: return false
+        val n = asString(record["new_string"]) ?: return false
+        return o.length.toLong() + n.length > EDIT_DIFF_MAX_CHARS
+    }
+    val edits = record["edits"] as? JsArr ?: return false
+    val valid = edits.mapNotNull(::asRecord).mapNotNull { e ->
+        val o = asString(e["old_string"]) ?: return@mapNotNull null
+        val n = asString(e["new_string"]) ?: return@mapNotNull null
+        o.length.toLong() + n.length + 1
+    }
+    return valid.isNotEmpty() && valid.sum() > EDIT_DIFF_MAX_CHARS
 }
 
 // --- Tool activity grouping (chat-view.tsx:726-838) --------------------------------------------

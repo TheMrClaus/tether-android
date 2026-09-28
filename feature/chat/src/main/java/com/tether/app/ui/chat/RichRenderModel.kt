@@ -104,6 +104,8 @@ internal class DiffCardPlan(val files: List<List<PlannedFile>>, val groupsDrawn:
     val totalFiles: Int get() = files.sumOf { it.size } + hiddenFiles
     val more: String? get() = when {
         hiddenFiles <= 0 -> null
+        // A hidden change with no diff has no lines to count: "+1 more file" alone.
+        hiddenRows <= 0 -> "+${localeCount(hiddenFiles)} more file${if (hiddenFiles == 1) "" else "s"}"
         else -> "${moreLinesLabel(hiddenRows)} · +${localeCount(hiddenFiles)} more file${if (hiddenFiles == 1) "" else "s"}"
     }
 }

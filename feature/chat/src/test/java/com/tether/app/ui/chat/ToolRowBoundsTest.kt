@@ -201,6 +201,51 @@ class ToolRowBoundsTest {
         assertTrue(few is ToolInputModel.Edit)
     }
 
+    @Test fun aHiddenChangeWithNoDiffCountsOnlyAsAFile() {
+        val oneFile = "diff --git a/f b/f\n" + (1..2_000).joinToString("\n") { "+r$it" }
+        assertEquals("+1 more file", planDiffCard(listOf(oneFile, ""), headerCost = 1).more)
+        assertEquals("+2 more lines · +1 more file", planDiffCard(listOf(oneFile, "+a\n+b"), headerCost = 1).more)
+    }
+
+    @Test fun aRefusedEditSaysWhy() {
+        val big = "y".repeat(EDIT_DIFF_MAX_CHARS)
+        val refused = toolInputModel("Edit", JsObj.of("file_path" to js("a"), "old_string" to js(big), "new_string" to js("x"))) as ToolInputModel.Raw
+        assertEquals(TOO_LARGE_TO_DIFF, refused.note)
+        val multi = toolInputModel("MultiEdit", JsObj.of("file_path" to js("a"), "edits" to JsArr.of(List(300_000) { JsObj.of("old_string" to js(""), "new_string" to js("")) }))) as ToolInputModel.Raw
+        assertEquals(TOO_LARGE_TO_DIFF, multi.note)
+        // A malformed Edit is raw for another reason: no note.
+        assertEquals(null, (toolInputModel("Edit", JsObj.of("file_path" to js("a"), "old_string" to js("x"))) as ToolInputModel.Raw).note)
+        assertEquals(null, (toolInputModel("Bash", JsObj.of("command" to js("ls"))) as ToolInputModel.Raw).note)
+        rule.setContent { ChatHost(TetherSkin.Machine) { ToolInputView("Edit", JsObj.of("file_path" to js("a"), "old_string" to js(big), "new_string" to js("x"))) } }
+        rule.waitForIdle()
+        rule.onAllNodes(hasText(TOO_LARGE_TO_DIFF)).fetchSemanticsNodes().single()
+    }
+
+    @Test fun aClosedThreadGivesItsTilesBackToTheCardsResult() {
+        fun media(seed: Int) = JsArr.of(List(12) { JsObj.of("type" to js("media_ref"), "mediaKind" to js("image"), "mediaType" to js("image/png"), "url" to js("/api/tool-media/${"%064x".format(seed * 100 + it)}.png")) })
+        val thread = JsObj.of(
+            "order" to JsArr.of(js("s0")),
+            "entries" to JsObj.of("s0" to JsObj.of("key" to js("s0"), "kind" to js("tool"), "name" to js("Shot"), "done" to JsBool.TRUE, "output" to media(1))),
+        )
+        val block = JsObj.of("kind" to js("tool"), "name" to js("Task"), "done" to JsBool.TRUE, "output" to media(2), "subagent" to thread)
+        val loader = ToolFixtures.FakeLoader()
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                CompositionLocalProvider(LocalToolMediaLoader provides loader) {
+                    androidx.compose.foundation.layout.Box(Modifier.verticalScroll(rememberScrollState())) { ToolCard(block, showThinking = false) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        // Open (it holds media): the step's 12 tiles, none for the result.
+        val stepUrls = (0 until 12).map { "/api/tool-media/${"%064x".format(100 + it)}.png" }.toSet()
+        val cardUrls = (0 until 12).map { "/api/tool-media/${"%064x".format(200 + it)}.png" }.toSet()
+        assertEquals(stepUrls, loader.loads.toSet())
+        rule.onNode(hasText("Subagent · 1 step")).performClick()
+        rule.waitForIdle()
+        assertTrue("closed, the result gets the tiles", loader.loads.toSet().containsAll(cardUrls))
+    }
+
     @Test fun longTitlesAreCutBeforeTheyAreDrawn() {
         val long = "x".repeat(1_000_000)
         rule.setContent {

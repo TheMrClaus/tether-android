@@ -162,8 +162,8 @@ object MediaLimits {
 
 /**
  * The card-wide tile budget (R3-M1): [MediaLimits.MAX_TILES] handed out in order across [rows]
- * (the card's own result first, then each sub-agent entry); a row past the budget gets 0 tiles
- * and only its "+N more" tile.
+ * — in screen order: each drawn sub-agent entry of an OPEN thread first, then the card's own
+ * result; a row past the budget gets 0 tiles and only its "+N more" tile.
  */
 internal fun tileBudget(rows: List<Int>, budget: Int = MediaLimits.MAX_TILES): List<Int> {
     var left = budget
