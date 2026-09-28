@@ -68,7 +68,16 @@ Divergences from the web, on purpose:
   separator, surrogate, private-use and unassigned categories, spaces other than U+0020, variation
   selectors, Hangul fillers, the curly quotes and the backslash. So no path can pose as part of the sentence
   around it (the web shows them raw). The grant itself carries the raw path. Round 5 re-recorded the 8
-  `approval-grants` goldens for the quotes.
+  `approval-grants` goldens for the quotes. Round 7 adds: default-ignorable code points, the braille blank,
+  every Pi/Pf quote and quote look-alike and the ellipsis are escaped too; each shown path (and each context
+  value) is its own bidi island (FSI…PDI), so right-to-left letters cannot reorder the separators around it; a
+  path with a `.` or `..` segment is never cut and carries "(contains relative segments (..))"; and the reason,
+  working directory and network host lines go through the same escaping (the working directory quoted like a
+  path). Round 7 re-recorded `approval-grants` (the isolation marks shift the label's line breaks) and
+  `approval-choices` (the quoted working directory), 14 goldens.
+- The confirmation only ever refers to words that were on screen: ticking it counts only if the ticks have not
+  changed since the card was drawn, so a tick change, the confirmation and a grant key in the same instant
+  send nothing; after the redraw the operator confirms the set now shown.
 - A question card's Submit, Next and Skip decide only on the selection that was drawn: a pick or text change
   in the same instant (a second finger) makes the tap do nothing, and an option or Other field of a page that
   is no longer shown ignores input. The operator sees the change and taps again.
