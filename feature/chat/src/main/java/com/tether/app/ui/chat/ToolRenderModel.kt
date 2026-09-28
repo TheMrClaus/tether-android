@@ -239,6 +239,7 @@ internal fun lineDiffBounded(oldStr: String, newStr: String, max: Int): Pair<Lis
  * any size and shows the first 200 rows).
  */
 internal const val EDIT_DIFF_MAX_CHARS: Int = 256 * 1024
+// (R5-L3) every edit counts at least one toward it, so 300K empty edits cannot slip under.
 
 /** The lines of [text] as ADD rows, at most [max] built (walked with indexOf, never a whole split), and how many there are. */
 internal fun addedLines(text: String, max: Int): Pair<List<EditDiffRow>, Int> {
@@ -322,7 +323,7 @@ internal fun toolInputModel(name: String?, input: JsValue?): ToolInputModel {
             val valid = edits.mapNotNull(::asRecord)
                 .map { asString(it["old_string"]) to asString(it["new_string"]) }
                 .filter { (o, n) -> o != null && n != null }
-            if (valid.isNotEmpty() && valid.sumOf { (o, n) -> o!!.length.toLong() + n!!.length } <= EDIT_DIFF_MAX_CHARS) {
+            if (valid.isNotEmpty() && valid.sumOf { (o, n) -> o!!.length.toLong() + n!!.length + 1 } <= EDIT_DIFF_MAX_CHARS) {
                 val diffs = valid.map { (o, n) -> lineDiffBounded(o!!, n!!, MAX_DIFF_ROWS) }
                 return ToolInputModel.Edit(
                     filePath,

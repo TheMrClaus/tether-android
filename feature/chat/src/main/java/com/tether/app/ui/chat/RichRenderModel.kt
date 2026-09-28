@@ -278,9 +278,15 @@ internal fun diffGitPaths(line: String): Pair<String, String>? {
     return line.substring(DIFF_GIT_PREFIX.length, idx) to line.substring(idx + 3)
 }
 
-private fun diffPath(line: String): String? {
-    val path = jsTrim(line.substring(4).split("\t", limit = 2)[0])
-    return if (path == "/dev/null") null else path.replaceFirst(Regex("^[ab]/"), "")
+/**
+ * `diffPath`: `line.slice(4).split("\t", 1)[0].trim()`, `/dev/null` → null, a leading `a/` or
+ * `b/` dropped (R5-L2: no regex compiled per call, no split).
+ */
+internal fun diffPath(line: String, from: Int = 0, to: Int = line.length): String? {
+    val tab = line.indexOf('\t', from + 4).let { if (it < 0 || it > to) to else it }
+    val path = jsTrim(line.substring(from + 4, tab))
+    if (path == "/dev/null") return null
+    return if (path.startsWith("a/") || path.startsWith("b/")) path.substring(2) else path
 }
 
 /** A bounded parse: the files begun within the budget, and what was only counted past it. */
@@ -298,7 +304,13 @@ internal fun parseUnifiedDiff(unifiedDiff: String?): List<DiffFileView> = parseU
  */
 internal fun parseUnifiedDiffBounded(unifiedDiff: String?, rowBudget: Int): DiffParse {
     if (unifiedDiff.isNullOrEmpty()) return DiffParse(emptyList(), 0, 0)
-    class Builder(val key: String, var oldPath: String?, var newPath: String?, val rows: MutableList<UnifiedDiffRow>, var total: Int)
+    class Builder(val key: String, var oldPath: String?, var newPath: String?, val rows: MutableList<UnifiedDiffRow>, var total: Int) {
+        // Past the budget only the LAST `---` / `+++` line counts; it is parsed once, at the end.
+        var lateOld = -1
+        var lateOldEnd = -1
+        var lateNew = -1
+        var lateNewEnd = -1
+    }
     val files = ArrayList<Builder>()
     var current: Builder? = null
     var skipping = false // the current file was begun past the budget: counted, never built
@@ -342,8 +354,17 @@ internal fun parseUnifiedDiffBounded(unifiedDiff: String?, rowBudget: Int): Diff
                 file.total++
                 val build = left > 0
                 if (build) left--
-                // Paths still follow a file's own `---` / `+++` lines, built or not.
-                if (build || text.startsWith("--- ", start) || text.startsWith("+++ ", start)) {
+                // Paths still follow a file's own `---` / `+++` lines, built or not; past the
+                // budget only their offsets are noted (R5-L2), parsed once when the text ends.
+                if (!build) {
+                    if (text.startsWith("--- ", start)) {
+                        file.lateOld = start
+                        file.lateOldEnd = end
+                    } else if (text.startsWith("+++ ", start)) {
+                        file.lateNew = start
+                        file.lateNewEnd = end
+                    }
+                } else {
                     val line = text.substring(start, end)
                     when {
                         line.startsWith("--- ") -> {
@@ -365,6 +386,10 @@ internal fun parseUnifiedDiffBounded(unifiedDiff: String?, rowBudget: Int): Diff
         }
         if (nl < 0) break
         start = nl + 1
+    }
+    for (f in files) {
+        if (f.lateOld >= 0) f.oldPath = diffPath(text, f.lateOld, f.lateOldEnd)
+        if (f.lateNew >= 0) f.newPath = diffPath(text, f.lateNew, f.lateNewEnd)
     }
     return DiffParse(files.map { DiffFileView(it.key, it.oldPath, it.newPath, it.rows.toList(), it.total) }, hiddenRows, hiddenFiles)
 }
@@ -393,11 +418,14 @@ internal fun mcpView(block: JsObj): McpView {
     val result = record(output["result"])
     val error = record(output["error"])
     val name = text(block["name"])
-    val fallback = if (name.startsWith("mcp:")) name.substring(4).split("/") else emptyList()
+    // R5-L1: `name.slice(4).split("/")` read as [0] and slice(1).join("/"), with one indexOf.
+    val slash = if (name.startsWith("mcp:")) name.indexOf('/', 4) else -1
+    val fallbackServer = if (!name.startsWith("mcp:")) "" else if (slash < 0) name.substring(4) else name.substring(4, slash)
+    val fallbackTool = if (slash < 0) "" else name.substring(slash + 1)
     val content = result["content"]
     return McpView(
-        server = text(input["server"]).ifEmpty { fallback.getOrNull(0).orEmpty() }.ifEmpty { "MCP" },
-        tool = text(input["tool"]).ifEmpty { fallback.drop(1).joinToString("/") }.ifEmpty { "tool" },
+        server = text(input["server"]).ifEmpty { fallbackServer }.ifEmpty { "MCP" },
+        tool = text(input["tool"]).ifEmpty { fallbackTool }.ifEmpty { "tool" },
         arguments = displayValue(input["arguments"]),
         progress = (block["output"] as? JsStr)?.value ?: "",
         result = displayValue(if (content.isNullish()) result["structuredContent"] else content),
@@ -424,16 +452,23 @@ data class CollaborationView(
     val reasoningEffort: String?,
     val agents: List<AgentState>,
     val status: String?,
+    /** Every agent state the block holds; [agents] is at most [AGENT_ROWS_MAX] of them (R5-M1). */
+    val agentsTotal: Int = agents.size,
     val running: Boolean,
     val failed: Boolean,
 )
 
-private fun agentStates(value: JsValue?): List<AgentState> {
+/** Agent-state rows a collaboration card draws before "+N more agents" (the web draws them all). */
+internal const val AGENT_ROWS_MAX = 50
+
+/** `agentStates` (Object.entries order), materialising at most [max] rows; the second value counts them all. */
+private fun agentStates(value: JsValue?, max: Int = AGENT_ROWS_MAX): Pair<List<AgentState>, Int> {
     val states = record(value)
-    return com.tether.app.protocol.tree.JsCodec.jsPropertyOrder(states.keys).map { id ->
+    val ordered = com.tether.app.protocol.tree.JsCodec.jsPropertyOrder(states.keys)
+    return ordered.take(max).map { id ->
         val state = states.getValue(id)
         AgentState(id, (state as? JsStr)?.value ?: displayValue(state))
-    }
+    } to ordered.size
 }
 
 internal fun collaborationView(block: JsObj): CollaborationView {
@@ -447,7 +482,8 @@ internal fun collaborationView(block: JsObj): CollaborationView {
         prompt = optionalText(input["prompt"]),
         model = optionalText(input["model"]),
         reasoningEffort = optionalText(input["reasoningEffort"]),
-        agents = agentStates(if (states.isNullish()) input["agentsStates"] else states),
+        agents = agentStates(if (states.isNullish()) input["agentsStates"] else states).first,
+        agentsTotal = record(if (states.isNullish()) input["agentsStates"] else states).size,
         status = optionalText(output["status"]),
         running = !block.isDone(),
         failed = block.isErrorBlock(),

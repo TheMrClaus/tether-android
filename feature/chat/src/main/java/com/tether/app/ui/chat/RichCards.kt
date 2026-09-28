@@ -122,7 +122,7 @@ private fun RichHead(title: String, status: String?, failed: Boolean, modifier: 
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         icons()
-        Text(title, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f))
+        Text(cutLine(title, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f))
         if (status != null) {
             Text(
                 status.uppercase(Locale.ROOT),
@@ -313,7 +313,7 @@ private fun CodexMcpCallCard(block: JsObj, nested: Boolean) {
     val t = LocalTetherTokens.current
     val mcp = remember(block) { mcpView(block) }
     val duration = formatDuration(mcp.durationMs)
-    RichCard(mcp.failed, "MCP call ${mcp.server} ${mcp.tool}", nested = nested) {
+    RichCard(mcp.failed, cutLine("MCP call ${mcp.server} ${mcp.tool}", PATH_MAX), nested = nested) {
         RichHead("${mcp.server} / ${mcp.tool}", richStatusText(mcp.running, mcp.failed, mcp.status), mcp.failed) {
             RichStatusIcon(mcp.running, mcp.failed)
             HeadIcon(TetherIcons.Network, t.muted)
@@ -341,7 +341,7 @@ private fun CodexCollaborationCard(block: JsObj, nested: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val view = remember(block) { collaborationView(block) }
-    RichCard(view.failed, "Collaboration ${view.action}", nested = nested) {
+    RichCard(view.failed, cutLine("Collaboration ${view.action}", PATH_MAX), nested = nested) {
         RichHead(view.action, richStatusText(view.running, view.failed, view.status), view.failed) {
             RichStatusIcon(view.running, view.failed)
             HeadIcon(TetherIcons.Bot, t.muted)
@@ -361,9 +361,18 @@ private fun CodexCollaborationCard(block: JsObj, nested: Boolean) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
                     ) {
-                        Text(agent.id, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f))
-                        Text(agent.state, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
+                        Text(cutLine(agent.id, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f))
+                        Text(cutLine(agent.state, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
                     }
+                }
+                if (view.agentsTotal > view.agents.size) {
+                    val more = view.agentsTotal - view.agents.size
+                    Text(
+                        "+${localeCount(more)} more agent${if (more == 1) "" else "s"}",
+                        style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)),
+                        color = t.faint,
+                        modifier = Modifier.padding(horizontal = t.css.spaceMd, vertical = t.css.spaceXs).testTag("agents-more"),
+                    )
                 }
             }
         }
