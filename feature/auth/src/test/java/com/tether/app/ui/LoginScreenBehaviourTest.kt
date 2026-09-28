@@ -86,8 +86,12 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         /** Registered passkeys (the owner has one): only ever reported by the probe. */
         var passkeyCount = 1
 
-        /** A proxy in front of Tether answering the login POST itself (basic auth). */
-        @Volatile var gatewayChallenge = false
+        /**
+         * A gateway in front of Tether answering the login POST itself, the way Tether's README
+         * sets SSO up: /healthz, /api/auth/session, /ws and /api/devices/claim exempt, and
+         * /api/auth/login left gated. "basic" = a basic-auth challenge; "sso" = a bare 401 page.
+         */
+        @Volatile var gateway: String? = null
 
         val logins = ConcurrentLinkedQueue<JsonObject>()
         val probes = AtomicInteger()
@@ -117,12 +121,20 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
                     )
                 }
             }
-            "/api/auth/login" -> if (gatewayChallenge) {
-                MockResponse().setResponseCode(401).addHeader("WWW-Authenticate", "Basic realm=\"lab\"")
-                    .setHeader("Content-Type", "text/html").setBody("<html><body>401 Authorization Required</body></html>")
-            } else {
+            "/api/auth/login" -> {
                 val body = TetherJson.parseToJsonElement(request.body.readUtf8()) as JsonObject
                 logins += body
+                loginResponse(body)
+            }
+            else -> MockResponse().setResponseCode(404).setBody("""{"error":"not found"}""")
+        }
+
+        private fun loginResponse(body: JsonObject): MockResponse = when (gateway) {
+            "basic" -> MockResponse().setResponseCode(401).addHeader("WWW-Authenticate", "Basic realm=\"lab\"")
+                .setHeader("Server", "nginx/1.27.1")
+                .setHeader("Content-Type", "text/html").setBody("<html><body>401 Authorization Required</body></html>")
+            "sso" -> MockResponse().setResponseCode(401).setHeader("Content-Type", "text/plain").setBody("401 Unauthorized")
+            else -> {
                 val presentedUsername = body["username"]?.jsonPrimitive?.content.orEmpty()
                 val presentedPassword = body["password"]?.jsonPrimitive?.content.orEmpty()
                 val credentialsMatch = presentedPassword == password && (username.isEmpty() || presentedUsername == username)
@@ -132,7 +144,6 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
                     MockResponse().setResponseCode(401).setBody("""{"error":"$REFUSED"}""")
                 }
             }
-            else -> MockResponse().setResponseCode(404).setBody("""{"error":"not found"}""")
         }
     }
 
@@ -355,18 +366,37 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         assertEquals("Op.Erator_1" to "correct horse", lastLogin())
     }
 
-    @Test fun a401FromSomethingInFrontOfTetherIsNotCalledWrongCredentials() {
-        console.gatewayChallenge = true
+    /**
+     * The owner's report: the username line shows (the probe is exempt and reached Tether),
+     * "checking password", then "That password is not correct." - the old fallback for a 401
+     * without Tether's `{error}`. That 401 came from the gateway, which the password never
+     * gets past from the app (it holds no SSO session), so the screen must say so.
+     */
+    @Test fun aGatewayGuardingTheLoginIsNamedNotCalledAWrongPassword() {
+        console.gateway = "sso"
         launch()
         typeUrl()
         waitFor { usernameShown }
         field("Operator username").performTextInput("operator")
         submitPassword(console.password)
-        waitFor { shows("not from Tether’s login") }
-        assertTrue(shows("it asks for Basic authentication"))
-        assertTrue(!shows(REFUSED))
+        waitFor { shows("before Tether checked the password (HTTP 401)") }
+        assertTrue(shows("Pair this device with a code from the browser instead."))
         assertTrue(!shows("That password is not correct."))
+        assertTrue(!shows(REFUSED))
         assertTrue(!shows(USERNAME_MISSING_HINT))
+        // The password did reach the gateway once; nothing retried it behind the user's back.
+        assertEquals(1, console.logins.size)
+    }
+
+    @Test fun aBasicAuthProxyIsNamedWithItsServerAndScheme() {
+        console.gateway = "basic"
+        launch()
+        typeUrl()
+        waitFor { usernameShown }
+        field("Operator username").performTextInput("operator")
+        submitPassword(console.password)
+        waitFor { shows("(HTTP 401, from nginx/1.27.1, asking for Basic authentication)") }
+        assertTrue(!shows("That password is not correct."))
     }
 
     @Test fun aRefusalFromTetherShowsItsOwnWordsAndOnlyRetroClearsThePassword() {

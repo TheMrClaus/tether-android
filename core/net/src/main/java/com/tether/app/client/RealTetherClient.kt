@@ -103,6 +103,9 @@ private const val LOGOUT_CALL_TIMEOUT_MS = 5_000L
 /** An RFC 9110 auth-scheme token, short enough to show on the login screen. */
 private val AUTH_SCHEME = Regex("[A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]{0,31}")
 
+/** The first product of a `Server` header ("nginx/1.27.1"), short enough to show. */
+private val SERVER_PRODUCT = Regex("[A-Za-z][A-Za-z0-9._/-]{0,39}")
+
 private const val REDIRECT_MESSAGE =
     "The server redirected this request instead of answering it. Check the URL (https:// or http://). " +
         "If a sign-in gateway (SSO) is in front of Tether, pair this device with a code instead."
@@ -456,19 +459,16 @@ class RealTetherClient(
                 }
                 // Tether's own refusal is JSON `{error}` and never carries a challenge
                 // header. Anything else is something in front of Tether (basic auth, a
-                // proxy, an SSO gateway) and must not read as a wrong password (ta-s4r).
+                // proxy, an SSO gateway: Tether's README tells SSO setups to keep
+                // /api/auth/login gated while /healthz and /api/auth/session are exempt)
+                // and must not read as a wrong password (ta-s4r).
                 401 -> {
-                    val challenge = response.header("WWW-Authenticate")
-                    val error = parseJsonObject(response)?.get("error")
-                        ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
-                    return@withContext if (challenge == null && error != null) {
+                    val obj = parseJsonObject(response)
+                    val error = obj.stringField("error")
+                    return@withContext if (response.header("WWW-Authenticate") == null && error != null) {
                         LoginResult.BadPassword(error)
                     } else {
-                        LoginResult.GatewayRefused(
-                            status = 401,
-                            // The scheme token only (never the realm), and only when it looks like one.
-                            scheme = challenge?.trim()?.substringBefore(' ')?.takeIf { AUTH_SCHEME.matches(it) },
-                        )
+                        gatewayRefusal(response)
                     }
                 }
                 // lib/login-guard.mjs: failed attempts only, so a correct password
@@ -478,11 +478,13 @@ class RealTetherClient(
                 )
                 403 -> {
                     val obj = parseJsonObject(response)
-                    val error = obj?.get("error")?.jsonPrimitive?.content
-                    return@withContext if (obj?.get("code")?.jsonPrimitive?.content == "password_login_disabled") {
-                        LoginResult.PasswordDisabled(error ?: "Password sign-in is turned off for this console.")
-                    } else {
-                        LoginResult.Unreachable(error ?: "login returned HTTP 403")
+                    val error = obj.stringField("error")
+                    return@withContext when {
+                        obj.stringField("code") == "password_login_disabled" ->
+                            LoginResult.PasswordDisabled(error ?: "Password sign-in is turned off for this console.")
+                        // Not Tether's JSON: a gateway's refusal, reported as one.
+                        error == null -> gatewayRefusal(response)
+                        else -> LoginResult.Unreachable(error)
                     }
                 }
                 in 300..399 -> return@withContext LoginResult.Unreachable(REDIRECT_MESSAGE)
@@ -2857,6 +2859,21 @@ class RealTetherClient(
     } catch (_: Exception) {
         null
     }
+
+    /** A string field of a JSON object; null when absent or not a string (never throws). */
+    private fun JsonObject?.stringField(name: String): String? =
+        (this?.get(name) as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /**
+     * A login refusal that did not come from Tether, with what the screen may show to tell a
+     * proxy from Tether in one try: the status, the auth scheme of any challenge (never the
+     * realm) and the `Server` product, each only when it is a plain token. No body is kept.
+     */
+    private fun gatewayRefusal(response: Response): LoginResult.GatewayRefused = LoginResult.GatewayRefused(
+        status = response.code,
+        scheme = response.header("WWW-Authenticate")?.trim()?.substringBefore(' ')?.takeIf { AUTH_SCHEME.matches(it) },
+        server = response.header("Server")?.trim()?.substringBefore(' ')?.takeIf { SERVER_PRODUCT.matches(it) },
+    )
 
     private fun parseJsonField(response: Response, field: String): String? =
         parseJsonObject(response)?.get(field)?.jsonPrimitive?.content

@@ -492,11 +492,13 @@ sealed interface LoginResult {
     data class BadPassword(val message: String) : LoginResult
 
     /**
-     * A 401 that did not come from Tether's login handler: a `WWW-Authenticate` challenge or
-     * a body without Tether's `{error}` (a proxy, basic auth, an SSO gateway in front of it).
-     * [scheme] is the challenge's auth scheme ("Basic", "Bearer"), when there was one.
+     * A 401/403 that did not come from Tether's login handler: a `WWW-Authenticate` challenge
+     * or a body without Tether's `{error}` (a proxy, basic auth, an SSO gateway in front of it;
+     * Tether's README has SSO setups keep /api/auth/login gated). The password was never
+     * checked. [scheme] is the challenge's auth scheme ("Basic"), [server] the `Server`
+     * header's first product ("nginx/1.27.1"), each only when present and a plain token.
      */
-    data class GatewayRefused(val status: Int, val scheme: String?) : LoginResult
+    data class GatewayRefused(val status: Int, val scheme: String?, val server: String? = null) : LoginResult
     data class RateLimited(val message: String) : LoginResult
 
     /** 403 `password_login_disabled`: this console accepts passkeys only (passkeys → T10.5). */

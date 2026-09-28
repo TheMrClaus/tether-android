@@ -160,10 +160,45 @@ class AuthFlowsTest {
         h.server.enqueue(health())
         h.server.enqueue(MockResponse().setResponseCode(401).addHeader("WWW-Authenticate", "<script>").setBody("{\"error\":\"x\"}"))
         assertEquals(LoginResult.GatewayRefused(401, null), runBlocking { h.client.login(base, "pw", "operator") })
+        // The Server product is kept (a plain token only) so the screen can name the gateway.
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setHeader("Server", "nginx/1.27.1 (Ubuntu)").setBody("<html/>"))
+        assertEquals(LoginResult.GatewayRefused(401, null, "nginx/1.27.1"), runBlocking { h.client.login(base, "pw", "operator") })
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setHeader("Server", "<b>x</b>").setBody("<html/>"))
+        assertEquals(LoginResult.GatewayRefused(401, null, null), runBlocking { h.client.login(base, "pw", "operator") })
+        // A JSON body whose `error` is not a string is not Tether's (and never throws).
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":{"code":401},"status":"KO"}"""))
+        assertEquals(LoginResult.GatewayRefused(401, null), runBlocking { h.client.login(base, "pw", "operator") })
+        // A gateway's 403 page is a gateway refusal too; Tether's 403 JSON keeps its words.
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(403).setBody("<html>Forbidden</html>"))
+        assertEquals(LoginResult.GatewayRefused(403, null), runBlocking { h.client.login(base, "pw", "operator") })
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":"Nope."}"""))
+        assertEquals(LoginResult.Unreachable("Nope."), runBlocking { h.client.login(base, "pw", "operator") })
         // Tether's own refusal keeps Tether's words.
         h.server.enqueue(health())
         h.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}"""))
         assertEquals(LoginResult.BadPassword("Those credentials are not correct."), runBlocking { h.client.login(base, "pw", "operator") })
+    }
+
+    @Test
+    fun theSignInProbeAndTheLoginGoToTheSameOriginAndRoot() {
+        // A typed base path or trailing slashes never split the two: both resolve the absolute
+        // path against the same origin, so the probe that showed the username field is
+        // answered by the same server the password goes to.
+        newClient()
+        val typed = h.server.url("/some/base//").toString()
+        h.server.enqueue(MockResponse().setBody("""{"authenticated":false,"usernameRequired":true}"""))
+        assertEquals(true, runBlocking { h.client.signInRequirements(typed) }?.usernameRequired)
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}"""))
+        runBlocking { h.client.login(typed, "pw", "operator") }
+        assertEquals("/api/auth/session", take().path)
+        assertEquals("/healthz", take().path)
+        assertEquals("/api/auth/login", take().path)
     }
 
     @Test

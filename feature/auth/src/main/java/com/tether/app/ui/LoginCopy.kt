@@ -139,10 +139,11 @@ fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? 
  * credentials were not checked by Tether at all, so retyping them cannot help.
  */
 fun gatewayRefusedCopy(result: LoginResult.GatewayRefused): String =
-    "The server refused the sign-in (HTTP ${result.status}, not from Tether’s login" +
-        (result.scheme?.let { "; it asks for $it authentication" } ?: "") + "). " +
-        "Something in front of Tether, such as a proxy or SSO gateway, wants its own sign-in. " +
-        "Pair this device with a code instead."
+    "The server refused the sign-in before Tether checked the password (HTTP ${result.status}" +
+        (result.server?.let { ", from $it" } ?: "") +
+        (result.scheme?.let { ", asking for $it authentication" } ?: "") + "). " +
+        "A sign-in gateway (SSO or a proxy) guards the password login, so the app cannot use it here. " +
+        "Pair this device with a code from the browser instead."
 
 /** Error line for a pairing attempt; null = success or the local-network flow takes over. */
 fun pairErrorCopy(result: PairResult): String? = when (result) {

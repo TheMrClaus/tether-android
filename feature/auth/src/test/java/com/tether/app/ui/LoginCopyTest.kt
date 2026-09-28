@@ -71,12 +71,15 @@ class LoginCopyTest {
         // ta-s4r: the username hint rides only on Tether's refusal, and only when it was asked for.
         assertEquals("nope $USERNAME_MISSING_HINT", loginErrorCopy(LoginResult.BadPassword("nope"), usernameHint = true))
         assertEquals(
-            "The server refused the sign-in (HTTP 401, not from Tether’s login; it asks for Basic authentication). " +
-                "Something in front of Tether, such as a proxy or SSO gateway, wants its own sign-in. " +
-                "Pair this device with a code instead.",
-            loginErrorCopy(LoginResult.GatewayRefused(401, "Basic"), usernameHint = true),
+            "The server refused the sign-in before Tether checked the password (HTTP 401, from nginx/1.27.1, " +
+                "asking for Basic authentication). A sign-in gateway (SSO or a proxy) guards the password login, " +
+                "so the app cannot use it here. Pair this device with a code from the browser instead.",
+            loginErrorCopy(LoginResult.GatewayRefused(401, "Basic", "nginx/1.27.1"), usernameHint = true),
         )
-        assertTrue(loginErrorCopy(LoginResult.GatewayRefused(401, null))!!.startsWith("The server refused the sign-in (HTTP 401, not from Tether’s login). "))
+        assertTrue(
+            loginErrorCopy(LoginResult.GatewayRefused(403, null))!!
+                .startsWith("The server refused the sign-in before Tether checked the password (HTTP 403). "),
+        )
         assertNull(pairErrorCopy(PairResult.Success))
         assertEquals("That pairing code is not valid or has expired.", pairErrorCopy(PairResult.Rejected("")))
     }
