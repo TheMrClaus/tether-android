@@ -293,6 +293,35 @@ class FileLifecycleTest {
         assertEquals(Decoded.Failed, BoundedImages.decode(cache.newScratch().apply { writeText("not an image") }))
     }
 
+    @Test fun aDecoderThatThrowsIsTooLargeOrFailedNeverACrash() {
+        val file = cache.newScratch().apply { writeBytes(pngHeader(64, 64)) }
+        var calls = 0
+        fun boundsThenThrow(error: Throwable): (String, android.graphics.BitmapFactory.Options) -> Bitmap? = { path, options ->
+            calls++
+            if (options.inJustDecodeBounds) android.graphics.BitmapFactory.decodeFile(path, options) else throw error
+        }
+        assertEquals(Decoded.TooLarge, BoundedImages.decode(file, boundsThenThrow(OutOfMemoryError("bitmap"))))
+        assertEquals(Decoded.Failed, BoundedImages.decode(file, boundsThenThrow(IllegalArgumentException("bitmap too large"))))
+        assertEquals(4, calls)
+    }
+
+    @Test fun sweepsRunOffTheMainThread() {
+        val thread = CompletableDeferred<Thread>()
+        FileCache.sweepInBackground { thread.complete(Thread.currentThread()) }
+        val ran = runBlocking { withTimeout(5_000) { thread.await() } }
+        assertTrue("swept on ${ran.name}", ran !== android.os.Looper.getMainLooper().thread && ran !== Thread.currentThread())
+    }
+
+    @Test fun claimingStartsTheWindowAtTheHandOff() = runBlocking {
+        files.downloads[entry.path] = byteArrayOf(1)
+        val share = (platform.shareCopy(files, entry) as FilesResult.Ok).value
+        // A slow download: the copy was written long before the sheet took it.
+        File(share.id).walkTopDown().forEach { it.setLastModified(System.currentTimeMillis() - FileCache.SHARE_GRACE_MS - 5_000) }
+        platform.claimShare(share)
+        cache.sweepExpired()
+        assertTrue("the receiving app gets its full window", File(share.id).exists())
+    }
+
     @Test fun f16CountsEightBytesAPixel() {
         assertEquals(8, BoundedImages.bytesPerPixel(Bitmap.Config.RGBA_F16))
         assertEquals(4, BoundedImages.bytesPerPixel(Bitmap.Config.ARGB_8888))

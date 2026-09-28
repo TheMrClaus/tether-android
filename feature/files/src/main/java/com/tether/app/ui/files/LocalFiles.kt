@@ -128,12 +128,16 @@ sealed interface Decoded {
  * wide-gamut 4096² image can exhaust memory or trip the canvas's "bitmap too large" limit.
  */
 object BoundedImages {
-    fun decode(file: File): Decoded = try {
+    fun decode(
+        file: File,
+        // The platform decoder; a parameter only so tests can make it throw.
+        decodeFile: (String, BitmapFactory.Options) -> Bitmap? = { path, options -> BitmapFactory.decodeFile(path, options) },
+    ): Decoded = try {
         val options = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        BitmapFactory.decodeFile(file.path, options)
+        decodeFile(file.path, options)
         val sample = plan(options.outWidth, options.outHeight, bytesPerPixel(options.outConfig))
         when {
             options.outWidth <= 0 || options.outHeight <= 0 -> Decoded.Failed
@@ -141,7 +145,7 @@ object BoundedImages {
             else -> {
                 options.inJustDecodeBounds = false
                 options.inSampleSize = sample
-                val bitmap = BitmapFactory.decodeFile(file.path, options)
+                val bitmap = decodeFile(file.path, options)
                 when {
                     bitmap == null -> Decoded.Failed
                     // The decoder's own answer, whatever config it chose.
