@@ -134,7 +134,7 @@ class ConsentActions(
     /** chat-view.tsx:3658 unavailableReason (a legacy OpenCode session), or null. */
     val questionUnavailable: String?,
     internal val onApproval: (requestId: String, fingerprint: String, choiceId: String?, decision: String?, granted: GrantedPermissions?) -> ConsentResult,
-    internal val onAnswer: (requestId: String, fingerprint: String, answers: Map<String, String>, response: String?) -> ConsentResult,
+    internal val onAnswer: (requestId: String, fingerprint: String, picks: List<com.tether.app.client.ConsentGuard.QuestionPick>, skipped: Set<Int>) -> ConsentResult,
     val onOpenRun: (runId: String) -> Unit,
     /** L4: decided keys sent on an earlier socket (delivery unconfirmed). */
     val unconfirmed: Set<String> = emptySet(),
@@ -254,19 +254,26 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val studio = isStudio(t)
     val shape = cardShape(t)
     val requested = view.requested
-    // Round 3: the card's identity is [ApprovalView.contentFp] (request + turn, no origin). The
-    // ticks live in the screen's CardStateStore under it (they survive a scroll, a tab switch, a
-    // drop and reconnect, backgrounding; a re-raised request is another identity and starts fully
-    // ticked). The origin-bound fingerprint is only what the client checks at tap time.
+    // The card's identity is [ApprovalView.contentFp] (session + turn + request, no origin). The
+    // ticks live in the shell's CardStateStore under it (they survive a scroll, a tab switch, a
+    // layout switch, a drop and reconnect, backgrounding); a re-raised request is another identity
+    // and starts fully ticked. The origin-bound fingerprint is only what the client checks at tap time.
     val id = view.requestId
     val cfp = view.contentFp
     val store = rememberCardStates()
     val selection = store.grant(cfp)
-    val readPaths = requested?.read.orEmpty().filterIndexed { i, _ -> i !in selection.offRead }.distinct()
-    val writePaths = requested?.write.orEmpty().filterIndexed { i, _ -> i !in selection.offWrite }.distinct()
+    val generation = store.grantGeneration(cfp)
+    // M1: a path's state is its CANONICAL index (its first occurrence): a path listed twice is one
+    // permission, ticked or not as one.
+    val readList = requested?.read.orEmpty()
+    val writeList = requested?.write.orEmpty()
+    val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
+    val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
     val network = requested?.network == true && !selection.networkOff
-    // Never saved: a lost confirmation only ever narrows (the operator confirms again).
-    var exactConfirmed by remember(cfp) { mutableStateOf(false) }
+    // Round 4: the "Confirm these permissions" tick, required by EVERY grant. Never saved, and keyed
+    // on the record's generation: it resets when the identity changes and whenever the record is
+    // written, created, lost or evicted, so no loss of state can ever turn into a silent grant.
+    var confirmed by remember(cfp, generation) { mutableStateOf(false) }
     val fp = remember(view.request, view.activeTurnId, consent.origin) { wireFingerprint(consent.origin, view.activeTurnId, view.request) }
     // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
     // never saved (after process death the ledger is gone, so the operator may tap again).
@@ -287,7 +294,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         if (!consent.onApproval(id, fp, choiceId, decision, granted).settles()) latched = false
     }
 
-    fun toggle(read: Boolean, index: Int) {
+    fun toggle(read: Boolean, path: String) {
+        val index = if (read) readList.indexOf(path) else writeList.indexOf(path)
         val now = store.grant(cfp)
         store.setGrant(
             cfp,
@@ -338,20 +346,20 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
 
         if (requested != null) {
             GrantFieldset {
-                requested.read.forEachIndexed { index, path ->
+                requested.read.forEach { path ->
                     GrantCheckbox(
-                        checked = index !in selection.offRead,
+                        checked = readList.indexOf(path) !in selection.offRead,
                         enabled = !frozen && view.allowsSubset,
-                        onChange = { toggle(read = true, index = index) },
+                        onChange = { toggle(read = true, path = path) },
                         tag = "grant-read",
                         onBlocked = blocked,
                     ) { GrantPathText("Read", path) }
                 }
-                requested.write.forEachIndexed { index, path ->
+                requested.write.forEach { path ->
                     GrantCheckbox(
-                        checked = index !in selection.offWrite,
+                        checked = writeList.indexOf(path) !in selection.offWrite,
                         enabled = !frozen && view.allowsSubset,
-                        onChange = { toggle(read = false, index = index) },
+                        onChange = { toggle(read = false, path = path) },
                         tag = "grant-write",
                         onBlocked = blocked,
                     ) { GrantPathText("Write", path) }
@@ -369,9 +377,9 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 }
                 if (view.needsConfirm) {
                     Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
-                        GrantCheckbox(checked = exactConfirmed, enabled = !frozen, onChange = { exactConfirmed = !exactConfirmed }, tag = "grant-confirm", onBlocked = blocked) {
+                        GrantCheckbox(checked = confirmed, enabled = !frozen, onChange = { confirmed = !confirmed }, tag = "grant-confirm", onBlocked = blocked) {
                             Text(
-                                "Confirm the complete permission expansion shown above.",
+                                grantSummary(readPaths, writePaths, network),
                                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
                                 color = t.warning,
                             )
@@ -395,7 +403,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         ) {
             if (view.choices.isNotEmpty()) {
                 view.choices.forEach { choice ->
-                    val pick = pickFor(view, choice, exactConfirmed, subset)
+                    val pick = pickFor(view, choice, confirmed, subset)
                     TetherKey(
                         onClick = { if (pick != null) choose(pick.choiceId, null, pick.granted) },
                         classes = if (choice.permissionGrant != null) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
@@ -541,9 +549,10 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     val type = LocalTetherTypography.current
     val consent = LocalConsent.current
     val studio = isStudio(t)
-    // As the approval card: the page, picks, "Other" text and skips live in the screen's
-    // CardStateStore under [QuestionRequestView.contentFp], by prompt / option INDEX (never the
-    // server's text, L3); only the send latch is local and unsaved.
+    // As the approval card: the page, picks, "Other" text and skips live in the shell's
+    // CardStateStore under [QuestionRequestView.contentFp], by answer SLOT and by index into the
+    // slot's label union (never the server's text, L3; a pick is a LABEL whichever page it was made
+    // on, L1); only the send latch is local and unsaved.
     val id = view.requestId
     val cfp = view.contentFp
     val store = rememberCardStates()
@@ -552,13 +561,13 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     var latched by remember(cfp) { mutableStateOf(false) }
     var overlayBlocked by remember(cfp) { mutableStateOf(false) }
     val blocked = { overlayBlocked = true }
-    // The web keys picks by question TEXT: prompts that repeat a text share one slot (the first index).
-    val canon = remember(view.prompts) { view.prompts.map { p -> view.prompts.indexOfFirst { it.question == p.question } } }
-    val picks: Map<String, List<String>> = view.prompts.indices.filter { canon[it] == it }.associate { i ->
-        view.prompts[i].question to sel.picks[i].orEmpty().mapNotNull { view.prompts[i].options.getOrNull(it)?.label }
-    }
-    val other: Map<String, String> = view.prompts.indices.filter { canon[it] == it }.mapNotNull { i -> sel.other[i]?.let { view.prompts[i].question to it } }.toMap()
-    val skipped: Set<String> = sel.skipped.mapNotNullTo(HashSet()) { view.prompts.getOrNull(it)?.question }
+    // The web keys picks by question TEXT: prompts repeating a text share a slot, and a slot's
+    // options are the union of their labels (ConsentGuard.questionSlots, the builder's own map).
+    val slots = remember(view.request) { com.tether.app.client.ConsentGuard.questionSlots(view.request) }
+    fun slotOf(q: QuestionPromptView): Int = slots.slotOf.getOrElse(q.index) { q.index }
+    fun labelIndex(q: QuestionPromptView, label: String): Int = slots.labels[slotOf(q)].orEmpty().indexOf(label)
+    fun isAnswered(q: QuestionPromptView) =
+        sel.picks[slotOf(q)].orEmpty().isNotEmpty() || jsTrim(sel.other[slotOf(q)].orEmpty()).isNotEmpty()
     val submitAttempted = sel.attempted
     val pageIndex = sel.page.coerceIn(0, (view.prompts.size - 1).coerceAtLeast(0))
     fun update(change: (QuestionSelection) -> QuestionSelection) = store.setQuestion(cfp, change(store.question(cfp)))
@@ -576,19 +585,22 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     val total = view.prompts.size
     val question = view.prompts.getOrNull(pageIndex)
     val isLastPage = pageIndex >= total - 1
-    fun isAnswered(q: QuestionPromptView) = isPromptAnswered(q, picks, other)
-    val allAnswered = view.prompts.all { it.question in skipped || isAnswered(it) }
+    val allAnswered = view.prompts.all { slotOf(it) in sel.skipped || isAnswered(it) }
 
     // L2: a new page re-arms, so a double tap on Next / Skip cannot land on the next page's keys.
     val armed = rememberArmed(cfp to pageIndex, !sent && unavailable == null)
 
-    fun submit(effectiveSkipped: Set<String> = skipped) {
+    fun submit(effectiveSkipped: Set<Int> = sel.skipped) {
         if (latched || !armed || unavailable != null || consent.isDecided(id, fp)) return
         update { it.copy(attempted = true) }
-        if (!view.prompts.all { it.question in effectiveSkipped || isAnswered(it) }) return
-        val payload = buildQuestionAnswers(view.prompts, picks, other, effectiveSkipped)
+        if (!view.prompts.all { slotOf(it) in effectiveSkipped || isAnswered(it) }) return
+        // L2: indices and the operator's own text; the guard builds the answer strings from the request.
+        val now = store.question(cfp)
+        val picks = (now.picks.keys + now.other.keys).distinct().sorted().map { slot ->
+            com.tether.app.client.ConsentGuard.QuestionPick(slot, now.picks[slot].orEmpty(), now.other[slot].orEmpty())
+        }
         latched = true
-        if (!consent.onAnswer(id, fp, payload.answers, payload.response).settles()) latched = false
+        if (!consent.onAnswer(id, fp, picks, effectiveSkipped).settles()) latched = false
     }
 
     fun next() {
@@ -598,8 +610,8 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
 
     fun skip() {
         if (!armed || question == null) return
-        val nextSkipped = skipped + question.question
-        update { it.copy(skipped = it.skipped + pageIndex) }
+        val nextSkipped = sel.skipped + slotOf(question)
+        update { it.copy(skipped = it.skipped + slotOf(question)) }
         if (isLastPage) submit(nextSkipped) else update { it.copy(page = pageIndex + 1) }
     }
 
@@ -637,7 +649,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
             }
         }
         if (question != null) {
-            val highlight = submitAttempted && !isAnswered(question) && question.question !in skipped
+            val highlight = submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
             // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
             // so (as on the web) no rule is drawn — the validation sentence below carries it.
             Column(
@@ -659,23 +671,27 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     modifier = Modifier.padding(vertical = pMargin(0.9f)),
                 )
                 Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
-                    val slot = canon[pageIndex]
-                    question.options.forEachIndexed { optionIndex, option ->
-                        val active = optionIndex in sel.picks[slot].orEmpty()
+                    val slot = slotOf(question)
+                    val multi = slots.single[slot] != true
+                    question.options.forEach { option ->
+                        val labelAt = labelIndex(question, option.label)
                         QuestionOption(
                             option = option,
-                            active = active,
-                            multi = question.multiSelect,
+                            active = labelAt in sel.picks[slot].orEmpty(),
+                            multi = multi,
                             enabled = !frozen,
-                            onToggle = { update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), question.multiSelect, optionIndex))) } },
+                            onToggle = { update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) } },
                             onBlocked = blocked,
                         )
                     }
                 }
                 TetherInputWell(
-                    value = other[question.question].orEmpty(),
-                    // An HTML text input drops line breaks; so does this one (response lines are the Other texts).
-                    onValueChange = { text -> update { it.copy(other = it.other + (canon[pageIndex] to text.replace("\r", "").replace("\n", ""))) } },
+                    value = sel.other[slotOf(question)].orEmpty(),
+                    // An HTML text input drops line breaks; so does this one. Capped at the guard's limit.
+                    onValueChange = { text ->
+                        val clean = text.replace("\r", "").replace("\n", "").take(com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
+                        update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                    },
                     modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
                     placeholder = "Other (type your own answer)…",
                     singleLine = true,

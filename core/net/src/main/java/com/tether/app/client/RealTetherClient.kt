@@ -2664,8 +2664,8 @@ class RealTetherClient(
             return ConsentResult.InvalidChoice
         }
         val message = ClientMessage.Approval(sessionId, requestId, choiceId, decision, grantedPermissions)
-        return transmitConsent(sessionId, requestId, expectedFingerprint, message, ConsentGuard::pendingApproval) { _, request ->
-            ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions)
+        return transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingApproval) { _, request ->
+            ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions) ?: message
         }
     }
 
@@ -2673,15 +2673,18 @@ class RealTetherClient(
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
-        answers: Map<String, String>,
-        response: String?,
-    ): ConsentResult {
-        val message = ClientMessage.Question(sessionId, requestId, answers, response)
-        return transmitConsent(sessionId, requestId, expectedFingerprint, message, ConsentGuard::pendingQuestion) { tree, request ->
-            // An answer already on record (question_answered, from this or another device) closes it.
-            if (ConsentGuard.isAnswered(tree, requestId)) ConsentResult.NotPending else ConsentGuard.checkQuestion(request, answers, response)
+        picks: List<ConsentGuard.QuestionPick>,
+        skipped: Set<Int>,
+    ): ConsentResult =
+        transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingQuestion) { tree, request ->
+            when {
+                // An answer already on record (question_answered, from this or another device) closes it.
+                ConsentGuard.isAnswered(tree, requestId) -> ConsentResult.NotPending
+                else -> ConsentGuard.buildAnswers(request, picks, skipped)?.let { reply ->
+                    ClientMessage.Question(sessionId, requestId, reply.answers, reply.response)
+                } ?: ConsentResult.InvalidChoice
+            }
         }
-    }
 
     /**
      * T6.3 (SYNC_DESIGN §5.1 I2/I3, §5.4): the one path an operator decision takes to the wire.
@@ -2697,11 +2700,10 @@ class RealTetherClient(
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
-        message: ClientMessage,
         pending: (JsObj?, String) -> JsObj?,
-        check: (JsObj?, JsObj) -> ConsentResult?,
+        /** The frame to send ([ClientMessage]), or the refusal ([ConsentResult]). */
+        decide: (JsObj?, JsObj) -> Any,
     ): ConsentResult {
-        val text = message.encode()
         val result = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
@@ -2716,7 +2718,11 @@ class RealTetherClient(
             if (fingerprint != expectedFingerprint) return@synchronized ConsentResult.NotPending
             val entry = ConsentLedger.Entry(origin, sessionId, turnId, requestId, fingerprint, epoch)
             if (consentLedger.contains(entry)) return@synchronized ConsentResult.AlreadyDecided
-            check(tree, request)?.let { return@synchronized it }
+            val text = when (val decided = decide(tree, request)) {
+                is ConsentResult -> return@synchronized decided
+                is ClientMessage -> decided.encode()
+                else -> return@synchronized ConsentResult.InvalidChoice
+            }
             if (!consentLedger.claim(entry, ::stillPendingLocked)) return@synchronized ConsentResult.AlreadyDecided
             if (!ws.send(text)) {
                 consentLedger.release(entry)

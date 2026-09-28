@@ -100,8 +100,18 @@ class ChatTestClient : TetherClient {
         consentCalls += "approval:$sessionId:$requestId:${choiceId ?: decision}" + (grantedPermissions?.let { ":" + it.toJsonObject() } ?: "")
         return settle(sessionId, requestId, expectedFingerprint)
     }
-    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
-        consentCalls += "question:$sessionId:$requestId:$answers" + (response?.let { ":$it" } ?: "")
+    override fun answerQuestion(
+        sessionId: String,
+        requestId: String,
+        expectedFingerprint: String,
+        picks: List<com.tether.app.client.ConsentGuard.QuestionPick>,
+        skipped: Set<Int>,
+    ): com.tether.app.client.ConsentResult {
+        // Like the real client: the guard builds the answer from the request (and refuses bad indices).
+        val tree = projectionTrees.value[sessionId]
+        val request = com.tether.app.client.ConsentGuard.pendingQuestion(tree, requestId)
+        val reply = request?.let { com.tether.app.client.ConsentGuard.buildAnswers(it, picks, skipped) }
+        consentCalls += "question:$sessionId:$requestId:" + (reply?.let { "${it.answers}" + (it.response?.let { r -> ":$r" } ?: "") } ?: "<invalid $picks>")
         return settle(sessionId, requestId, expectedFingerprint)
     }
 

@@ -114,59 +114,101 @@ object ConsentGuard {
     }
 
     /**
-     * Null when [answers] / [response] are what the web's `buildQuestionAnswers` can produce for
-     * [request] (chat-view.tsx:940-957): every key is one of its question texts, and every value is
-     * distinct OFFERED option labels (at most one for a single-select question) joined by ", ",
-     * optionally followed by the operator's own "Other" text. Every "Other" text is also a line of
-     * [response], in question order, and [response] holds nothing else. (The web offers "Other" on
-     * every question, so free text is always allowed there, and only there.)
+     * Round 4: a card's IDENTITY (its saved state's key, and its lazy row's): SHA-256 hex of the
+     * canonical JSON of `{"kind":"card","sessionId":…,"activeTurnId":…,"request":…}`. No server
+     * origin (a drop and reconnect keep it), but the session (identical content in two sessions is two
+     * cards). Distinct from [fingerprint], which binds the WIRE decision to the server as well.
      */
-    fun checkQuestion(request: JsObj, answers: Map<String, String>, response: String? = null): ConsentResult? {
-        val prompts = (request["questions"] as? JsArr).orEmpty().mapNotNull { it as? JsObj }
-        val byText = LinkedHashMap<String, JsObj>()
-        for (p in prompts) {
-            val text = (p["question"] as? JsStr)?.value ?: continue
-            byText.putIfAbsent(text, p) // the web keys picks by text: duplicates share one answer
-        }
-        if (!answers.keys.all { it in byText }) return ConsentResult.InvalidChoice
-        val extras = if (response.isNullOrEmpty()) ArrayDeque() else ArrayDeque(response.split("\n"))
-        for ((text, prompt) in byText) {
-            val value = answers[text] ?: continue
-            if (value.isEmpty()) return ConsentResult.InvalidChoice
-            val labels = (prompt["options"] as? JsArr).orEmpty().mapNotNull { ((it as? JsObj)?.get("label") as? JsStr)?.value }.toSet()
-            val single = (prompt["multiSelect"] as? JsBool)?.value != true
-            val extra = extras.firstOrNull()
-            val withExtra = extra != null && extra.isNotEmpty() && (value == extra || value.endsWith(", $extra")) &&
-                decomposes(value.removeSuffix(extra).removeSuffix(", "), labels, single)
-            when {
-                withExtra -> extras.removeFirst()
-                decomposes(value, labels, single) && value.isNotEmpty() -> Unit
-                else -> return ConsentResult.InvalidChoice
-            }
-        }
-        return if (extras.isEmpty()) null else ConsentResult.InvalidChoice
+    fun cardIdentity(sessionId: String, activeTurnId: String, request: JsObj): String {
+        val canonical = JsCodec.canonical(
+            JsObj.of(
+                "kind" to JsStr("card"),
+                "sessionId" to JsStr(sessionId),
+                "activeTurnId" to JsStr(activeTurnId),
+                "request" to request,
+            ),
+        )
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
-    /** [value] is empty, or distinct members of [labels] joined by ", " (one at most when [single]). */
-    private fun decomposes(value: String, labels: Set<String>, single: Boolean): Boolean {
-        if (value.isEmpty()) return true
-        if (single) return value in labels
-        // Labels may themselves contain ", ": search the splits (bounded by the option count).
-        fun from(start: Int, used: Set<String>): Boolean {
-            if (start == value.length) return true
-            for (label in labels) {
-                if (label in used || !value.startsWith(label, start)) continue
-                val end = start + label.length
-                if (end == value.length) return true
-                if (value.startsWith(", ", end) && end + 2 < value.length && from(end + 2, used + label)) return true
+    /** Longest "Other" text an answer may carry (the card cuts its field there). */
+    const val MAX_OTHER_CHARS = 4_000
+
+    /**
+     * How a question request's prompts map to answer SLOTS, as the web keys its state (by question
+     * text, chat-view.tsx:965-1128): prompts repeating a text share one slot (its first prompt's
+     * index), and a slot's options are the union of its prompts' labels in first-seen order, so a
+     * pick is the same LABEL whichever page it was made on.
+     */
+    class QuestionSlots(val slotOf: List<Int>, val texts: Map<Int, String>, val labels: Map<Int, List<String>>, val single: Map<Int, Boolean>)
+
+    fun questionSlots(request: JsObj): QuestionSlots {
+        val prompts = (request["questions"] as? JsArr).orEmpty().map { it as? JsObj }
+        val textOf = prompts.map { (it?.get("question") as? JsStr)?.value }
+        val slotOf = textOf.mapIndexed { i, t -> if (t == null) i else textOf.indexOf(t) }
+        val texts = LinkedHashMap<Int, String>()
+        val labels = LinkedHashMap<Int, MutableList<String>>()
+        val single = LinkedHashMap<Int, Boolean>()
+        prompts.forEachIndexed { i, p ->
+            val text = textOf[i] ?: return@forEachIndexed
+            val slot = slotOf[i]
+            texts.putIfAbsent(slot, text)
+            val union = labels.getOrPut(slot) { ArrayList() }
+            (p?.get("options") as? JsArr).orEmpty().forEach { o ->
+                val label = ((o as? JsObj)?.get("label") as? JsStr)?.value ?: return@forEach
+                if (label !in union) union.add(label)
             }
-            return false
+            // A slot takes several picks only when every prompt of it is multi-select.
+            single[slot] = (single[slot] ?: false) || (p?.get("multiSelect") as? JsBool)?.value != true
         }
-        return labels.size <= MAX_OPTIONS_SEARCHED && from(0, emptySet())
+        return QuestionSlots(slotOf, texts, labels, single)
     }
 
-    /** Past this many options a value is not searched (refused): no provider offers that many. */
-    private const val MAX_OPTIONS_SEARCHED = 64
+    /** One slot's answer as the card holds it: indices into [QuestionSlots.labels] of [slot], and the "Other" text. */
+    data class QuestionPick(val slot: Int, val picks: List<Int>, val other: String)
+
+    /** The `question` frame's payload (`answers.answers` / `answers.response`), built here from the request. */
+    data class QuestionReply(val answers: Map<String, String>, val response: String?)
+
+    /**
+     * L2: the answer is BUILT here, from the request and the operator's indices, exactly as the web's
+     * `buildQuestionAnswers` builds it (chat-view.tsx:940-957): prompts in order; a [skipped] slot
+     * left out; the slot's picked labels in pick order, the trimmed "Other" text last and also a line
+     * of `response`; an empty result left out. Nothing is parsed. Null (refuse) when an index is not
+     * one the request offered: a slot that is not a slot, a repeated slot, a pick out of range or
+     * repeated, two picks on a single-select slot, or an "Other" text over [MAX_OTHER_CHARS].
+     */
+    fun buildAnswers(request: JsObj, picks: List<QuestionPick>, skipped: Set<Int>): QuestionReply? {
+        val slots = questionSlots(request)
+        val bySlot = HashMap<Int, QuestionPick>()
+        for (p in picks) {
+            val labels = slots.labels[p.slot] ?: return null
+            if (slots.slotOf.getOrNull(p.slot) != p.slot || bySlot.put(p.slot, p) != null) return null
+            if (p.picks.any { it !in labels.indices } || p.picks.toSet().size != p.picks.size) return null
+            if (slots.single[p.slot] == true && p.picks.size > 1) return null
+            if (p.other.length > MAX_OTHER_CHARS) return null
+        }
+        if (skipped.any { slots.slotOf.getOrNull(it) != it }) return null
+        val answers = LinkedHashMap<String, String>()
+        var response: String? = null
+        // Every prompt in order, a repeated text included: the web does the same (its `response`
+        // then carries that slot's Other text once per prompt).
+        for (slot in slots.slotOf) {
+            val text = slots.texts[slot] ?: continue
+            if (slot in skipped) continue
+            val pick = bySlot[slot]
+            val parts = pick?.picks.orEmpty().map { slots.labels.getValue(slot)[it] }.toMutableList()
+            val extra = com.tether.app.protocol.fold.jsTrim(pick?.other.orEmpty())
+            if (extra.isNotEmpty()) {
+                parts.add(extra)
+                response = if (response != null) "$response\n$extra" else extra
+            }
+            if (parts.isEmpty()) continue
+            answers[text] = parts.joinToString(", ")
+        }
+        return QuestionReply(answers, response)
+    }
 
     /**
      * The request's `metadata.requestedPermissions` as the wire type, exactly as the web sends it

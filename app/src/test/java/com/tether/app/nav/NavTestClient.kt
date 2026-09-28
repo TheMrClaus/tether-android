@@ -67,7 +67,7 @@ class NavTestClient(
         stateChanges += "approval"
         return com.tether.app.client.ConsentResult.NotConnected
     }
-    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, answers: Map<String, String>, response: String?): com.tether.app.client.ConsentResult {
+    override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, picks: List<com.tether.app.client.ConsentGuard.QuestionPick>, skipped: Set<Int>): com.tether.app.client.ConsentResult {
         stateChanges += "answerQuestion"
         return com.tether.app.client.ConsentResult.NotConnected
     }

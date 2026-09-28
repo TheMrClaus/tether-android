@@ -86,7 +86,7 @@ internal data class ApprovalView(
     val allowsSubset: Boolean get() = choices.any { it.permissionGrant == "subset" }
 }
 
-internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String): ApprovalView {
+internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String, sessionId: String = ""): ApprovalView {
     val metadata = obj["metadata"] as? JsObj
     val network = (metadata?.get("network") as? JsObj)?.let { n ->
         val host = n["host"].string() ?: return@let null
@@ -105,7 +105,7 @@ internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String): 
     val input = obj["input"]?.takeUnless { it === JsNull }
     return ApprovalView(
         requestId = requestId,
-        contentFp = ContentFingerprints.of(activeTurnId, obj),
+        contentFp = ContentFingerprints.of(sessionId, activeTurnId, obj),
         activeTurnId = activeTurnId,
         request = obj,
         toolId = obj["toolId"].string().orEmpty(),
@@ -151,13 +151,28 @@ internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermi
 internal fun pickFor(
     view: ApprovalView,
     choice: ApprovalChoiceView,
-    exactConfirmed: Boolean,
+    confirmed: Boolean,
     subset: GrantedPermissions?,
 ): ApprovalPick? = when (choice.permissionGrant) {
-    "exact" -> view.requested?.exact?.takeIf { exactConfirmed }?.let { ApprovalPick(choice.choiceId, it) }
-    // I5: ticking EVERYTHING grants the full expansion, so it needs the same confirmation as "exact".
-    "subset" -> subset?.takeIf { exactConfirmed || !isFullGrant(it, view.requested) }?.let { ApprovalPick(choice.choiceId, it) }
+    // Round 4 (coordinator decision, stricter than the web): EVERY permission-granting choice needs
+    // the confirmation, and the confirmation names what is ticked, so "Allow all" also needs every
+    // box ticked (what it grants is what was confirmed).
+    "exact" -> view.requested?.exact?.takeIf { confirmed && subset != null && isFullGrant(subset, view.requested) }?.let { ApprovalPick(choice.choiceId, it) }
+    "subset" -> subset?.takeIf { confirmed }?.let { ApprovalPick(choice.choiceId, it) }
     else -> ApprovalPick(choice.choiceId, null)
+}
+
+/**
+ * The confirmation's words: what a grant of the ticked [read] / [write] paths and [network] gives
+ * (never colour alone; read aloud as the checkbox's label).
+ */
+internal fun grantSummary(read: List<String>, write: List<String>, network: Boolean): String {
+    val parts = buildList {
+        if (read.isNotEmpty()) add("read ${read.joinToString(", ")}")
+        if (write.isNotEmpty()) add("write ${write.joinToString(", ")}")
+        if (network) add("network access")
+    }
+    return if (parts.isEmpty()) "Confirm these permissions: none selected." else "Confirm these permissions: ${parts.joinToString("; ")}."
 }
 
 // --- Questions --------------------------------------------------------------------------------------
@@ -166,7 +181,14 @@ internal fun pickFor(
 internal data class QuestionOptionView(val label: String, val description: String?)
 
 @Immutable
-internal data class QuestionPromptView(val question: String, val header: String?, val multiSelect: Boolean, val options: List<QuestionOptionView>)
+internal data class QuestionPromptView(
+    val question: String,
+    val header: String?,
+    val multiSelect: Boolean,
+    val options: List<QuestionOptionView>,
+    /** The prompt's index in the request's `questions` array (ConsentGuard.questionSlots indexes by it). */
+    val index: Int = 0,
+)
 
 /** One pending AskUserQuestion (`turn.pendingQuestions[requestId]`); id and identity as for [ApprovalView]. */
 @Immutable
@@ -183,8 +205,10 @@ internal data class QuestionRequestView(
 internal fun wireFingerprint(origin: String?, activeTurnId: String, request: JsObj): String =
     ConsentGuard.fingerprint(origin.orEmpty(), activeTurnId, request)
 
-internal fun questionView(requestId: String, obj: JsObj, activeTurnId: String): QuestionRequestView {
-    val prompts = obj["questions"].objects().mapNotNull { q ->
+internal fun questionView(requestId: String, obj: JsObj, activeTurnId: String, sessionId: String = ""): QuestionRequestView {
+    val raw = obj["questions"] as? JsArr
+    val prompts = raw.orEmpty().withIndex().mapNotNull { (index, value) ->
+        val q = value as? JsObj ?: return@mapNotNull null
         // The prompt text is the answers map's key, so it is kept whole (never cut).
         val text = q["question"].string() ?: return@mapNotNull null
         QuestionPromptView(
@@ -195,38 +219,10 @@ internal fun questionView(requestId: String, obj: JsObj, activeTurnId: String): 
                 val label = o["label"].string() ?: return@mapNotNull null
                 QuestionOptionView(label, o["description"].truthyString()?.let(::cut))
             },
+            index = index,
         )
     }
-    return QuestionRequestView(requestId, ContentFingerprints.of(activeTurnId, obj), activeTurnId, obj, obj["toolId"].string().orEmpty(), prompts)
-}
-
-/** The `question` reply payload (chat-view.tsx:940-957 buildQuestionAnswers). */
-internal data class QuestionAnswers(val answers: Map<String, String>, val response: String?)
-
-/**
- * A skipped question is left out (never an empty answer); a pick list is joined ", " with the
- * trimmed "Other" text last; every "Other" text also joins [QuestionAnswers.response] by newline.
- */
-internal fun buildQuestionAnswers(
-    prompts: List<QuestionPromptView>,
-    picks: Map<String, List<String>>,
-    other: Map<String, String>,
-    skipped: Set<String>,
-): QuestionAnswers {
-    val answers = LinkedHashMap<String, String>()
-    var response: String? = null
-    for (q in prompts) {
-        if (q.question in skipped) continue
-        val parts = picks[q.question].orEmpty().toMutableList()
-        val extra = jsTrim(other[q.question].orEmpty())
-        if (extra.isNotEmpty()) {
-            parts.add(extra)
-            response = if (response != null) "$response\n$extra" else extra
-        }
-        if (parts.isEmpty()) continue
-        answers[q.question] = parts.joinToString(", ")
-    }
-    return QuestionAnswers(answers, response)
+    return QuestionRequestView(requestId, ContentFingerprints.of(sessionId, activeTurnId, obj), activeTurnId, obj, obj["toolId"].string().orEmpty(), prompts)
 }
 
 /** `isAnswered(q)`: a pick, or non-blank "Other" text. */
@@ -427,14 +423,16 @@ internal fun activeTurnOf(tree: JsObj?): JsObj? {
 internal fun pendingApprovals(tree: JsObj?): List<ApprovalView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingApprovals") as? JsObj ?: return emptyList()
-    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { approvalView(key, it, turnId) } }
+    val sessionId = tree!!["tetherSessionId"].string().orEmpty()
+    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { approvalView(key, it, turnId, sessionId) } }
 }
 
 /** The active turn's pending questions. */
 internal fun pendingQuestions(tree: JsObj?): List<QuestionRequestView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingQuestions") as? JsObj ?: return emptyList()
-    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { questionView(key, it, turnId) } }
+    val sessionId = tree!!["tetherSessionId"].string().orEmpty()
+    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { questionView(key, it, turnId, sessionId) } }
 }
 
 /** The request ids the active turn already records an answer for. */

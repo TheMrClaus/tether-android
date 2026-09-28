@@ -183,16 +183,17 @@ interface TetherClient {
     ): ConsentResult
 
     /**
-     * T6.3: the operator's answer to a pending question, under the same rules as [approval].
-     * [answers] maps the EXACT question text to the chosen option label(s) (comma-joined for
-     * multi-select, the "Other" text appended); [response] is the joined free text.
+     * T6.3: the operator's answer to a pending question, under the same rules as [approval]. The
+     * operator's picks are INDICES ([ConsentGuard.QuestionPick], per answer slot) plus their own
+     * "Other" text, and [skipped] slots; the answer strings and `response` are built by
+     * [ConsentGuard.buildAnswers] from the request itself (round 4, L2: nothing is parsed).
      */
     fun answerQuestion(
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
-        answers: Map<String, String>,
-        response: String? = null,
+        picks: List<ConsentGuard.QuestionPick>,
+        skipped: Set<Int> = emptySet(),
     ): ConsentResult
 
     /**

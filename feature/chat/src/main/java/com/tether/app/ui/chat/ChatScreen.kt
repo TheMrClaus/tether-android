@@ -349,7 +349,7 @@ internal fun consentActionsFor(
         unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
         onApproval = { requestId, fingerprint, choiceId, decision, granted -> vm.client.approval(s.id, requestId, fingerprint, choiceId, decision, granted) },
-        onAnswer = { requestId, fingerprint, answers, response -> vm.client.answerQuestion(s.id, requestId, fingerprint, answers, response) },
+        onAnswer = { requestId, fingerprint, picks, skipped -> vm.client.answerQuestion(s.id, requestId, fingerprint, picks, skipped) },
         onOpenRun = { runId -> vm.selectRun(s.id, runId) },
     )
 }

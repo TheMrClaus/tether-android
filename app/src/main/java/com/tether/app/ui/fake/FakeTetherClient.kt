@@ -553,11 +553,15 @@ class FakeTetherClient : TetherClient {
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
-        answers: Map<String, String>,
-        response: String?,
+        picks: List<ConsentGuard.QuestionPick>,
+        skipped: Set<Int>,
     ): ConsentResult {
-        val result = decide(sessionId, requestId, expectedFingerprint, question = true) { ConsentGuard.checkQuestion(it, answers, response) }
-        if (result == ConsentResult.Sent) answer(sessionId, requestId, answers)
+        var reply: ConsentGuard.QuestionReply? = null
+        val result = decide(sessionId, requestId, expectedFingerprint, question = true) { request ->
+            reply = ConsentGuard.buildAnswers(request, picks, skipped)
+            if (reply == null) ConsentResult.InvalidChoice else null
+        }
+        if (result == ConsentResult.Sent) answer(sessionId, requestId, reply!!.answers)
         return result
     }
 

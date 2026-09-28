@@ -23,9 +23,8 @@ import kotlinx.serialization.json.put
 /*
  * T6.3 round 3: where an attention card's state lives, and under which identity.
  *
- * Identity. A card's state belongs to ONE request: its content fingerprint [contentFingerprint] =
- * ConsentGuard.fingerprint(origin = "", activeTurnId, request), i.e. the canonical request plus its
- * turn, WITHOUT the server origin. A socket drop and a reconnect to the same server keep it (the
+ * Identity. A card's state belongs to ONE request of ONE session: ConsentGuard.cardIdentity =
+ * sha256(canonical {"kind":"card", sessionId, activeTurnId, request}), WITHOUT the server origin. A socket drop and a reconnect to the same server keep it (the
  * origin-bound fingerprint the client checks is only computed at tap time); a request re-raised
  * under the same id with different content, or in another turn, gets a new one. The lazy row's key
  * carries it too (ChatItem.Approval / Question), so a new request never reuses a row's saved slot.
@@ -34,18 +33,24 @@ import kotlinx.serialization.json.put
  * backgrounded, loses its saved state: LazySaveableStateHolder.performSave) but here, one store per
  * chat screen, saved with the screen, keyed by that identity. Only indices and the operator's own
  * "Other" text are saved, never server text (a huge question cannot overflow the Bundle). What is NOT
- * stored: the "confirm the complete expansion" tick and the send latch (see ApprovalCard).
+ * stored: the "Confirm these permissions" tick and the send latch (see ApprovalCard).
  *
- * Losing a record (the bounded store evicting it) only ever returns the card to its first state: every
- * requested permission ticked, which is the full expansion and needs the confirmation (I5).
+ * Round 4: every grant needs that unsaved confirmation, keyed on the record's generation, so a lost,
+ * evicted, created or changed record always also clears it: no state loss can become a silent grant.
  */
 
-/** Unticked permissions of one grant card, by index into the requested lists. Default: nothing unticked. */
+/**
+ * Unticked permissions of one grant card, by CANONICAL index into the requested lists (a path's first
+ * index, `read.indexOf(path)`: the reducer does not dedupe paths, and a path listed twice is one
+ * permission). Default: nothing unticked.
+ */
 internal data class GrantSelection(val offRead: Set<Int> = emptySet(), val offWrite: Set<Int> = emptySet(), val networkOff: Boolean = false)
 
 /**
- * One question card: the page, the picks (option indices in pick order) and "Other" text per prompt
- * index, the skipped prompt indices, and whether Submit was tried.
+ * One question card, per answer SLOT (ConsentGuard.questionSlots: prompts sharing a text share a
+ * slot): the page, the picks as indices into the slot's label union (so a pick is a LABEL, whichever
+ * page it was made on), the "Other" text (at most ConsentGuard.MAX_OTHER_CHARS), the skipped slots,
+ * and whether Submit was tried.
  */
 internal data class QuestionSelection(
     val page: Int = 0,
@@ -56,25 +61,41 @@ internal data class QuestionSelection(
 )
 
 @Stable
-internal class CardStateStore(
+class CardStateStore internal constructor(
     grants: Map<String, GrantSelection> = emptyMap(),
     questions: Map<String, QuestionSelection> = emptyMap(),
 ) {
+    constructor() : this(emptyMap(), emptyMap())
+
     private val grantStates = mutableStateMapOf<String, GrantSelection>().apply { putAll(grants) }
     private val questionStates = mutableStateMapOf<String, QuestionSelection>().apply { putAll(questions) }
 
-    fun grant(contentFp: String): GrantSelection = grantStates[contentFp] ?: GrantSelection()
+    // Round 4: every write, creation or loss of a grant record gets a new generation; the card keys
+    // its (unsaved) confirmation on it, so no change to what is ticked can keep an old confirmation.
+    private var counter = 0L
+    private val generations = mutableStateMapOf<String, Long>().apply { grants.keys.forEach { put(it, ++counter) } }
 
-    fun setGrant(contentFp: String, value: GrantSelection) = put(grantStates, contentFp, value)
+    internal fun grant(contentFp: String): GrantSelection = grantStates[contentFp] ?: GrantSelection()
 
-    fun question(contentFp: String): QuestionSelection = questionStates[contentFp] ?: QuestionSelection()
+    /** The record's generation; 0 = no record (never written, or lost). */
+    internal fun grantGeneration(contentFp: String): Long = generations[contentFp] ?: 0L
 
-    fun setQuestion(contentFp: String, value: QuestionSelection) = put(questionStates, contentFp, value)
+    internal fun setGrant(contentFp: String, value: GrantSelection) {
+        put(grantStates, contentFp, value)
+        generations[contentFp] = ++counter
+        generations.keys.retainAll(grantStates.keys) // an evicted record's generation goes too (0)
+    }
 
-    /** Test seam: forget everything (what an eviction does to one record). */
-    fun clear() {
+    internal fun question(contentFp: String): QuestionSelection = questionStates[contentFp] ?: QuestionSelection()
+
+    internal fun setQuestion(contentFp: String, value: QuestionSelection) =
+        put(questionStates, contentFp, value.copy(other = value.other.mapValues { it.value.take(ConsentGuard.MAX_OTHER_CHARS) }))
+
+    /** Test seam: forget everything (what an eviction does to a record). */
+    internal fun clear() {
         grantStates.clear()
         questionStates.clear()
+        generations.clear()
     }
 
     private fun <T> put(map: MutableMap<String, T>, key: String, value: T) {
@@ -83,7 +104,7 @@ internal class CardStateStore(
         while (map.size > MAX_RECORDS) map.remove(map.keys.first())
     }
 
-    fun encode(): String = buildJsonObject {
+    internal fun encode(): String = buildJsonObject {
         put("g", buildJsonArray {
             grantStates.forEach { (fp, g) ->
                 add(buildJsonArray { add(JsonPrimitive(fp)); add(ints(g.offRead)); add(ints(g.offWrite)); add(JsonPrimitive(g.networkOff)) })
@@ -96,7 +117,7 @@ internal class CardStateStore(
                         add(JsonPrimitive(fp))
                         add(JsonPrimitive(q.page))
                         add(buildJsonObject { q.picks.forEach { (i, l) -> put(i.toString(), ints(l)) } })
-                        add(buildJsonObject { q.other.forEach { (i, t) -> put(i.toString(), JsonPrimitive(t)) } })
+                        add(buildJsonObject { q.other.forEach { (i, t) -> put(i.toString(), JsonPrimitive(t.take(ConsentGuard.MAX_OTHER_CHARS))) } })
                         add(ints(q.skipped))
                         add(JsonPrimitive(q.attempted))
                     },
@@ -113,7 +134,7 @@ internal class CardStateStore(
 
         private fun intList(e: kotlinx.serialization.json.JsonElement) = e.jsonArray.map { it.jsonPrimitive.int }
 
-        fun decode(raw: String): CardStateStore = runCatching {
+        internal fun decode(raw: String): CardStateStore = runCatching {
             val o = Json.parseToJsonElement(raw).jsonObject
             val grants = o["g"]!!.jsonArray.associate { e ->
                 val a = e.jsonArray
@@ -136,8 +157,12 @@ internal class CardStateStore(
     }
 }
 
-/** The chat screen's store (ChatScreen provides one for the transcript and every run tab). */
-internal val LocalCardStates = staticCompositionLocalOf<CardStateStore?> { null }
+/**
+ * The store in scope. Round 4 (H1): MainShell provides ONE, above the phone / expanded layout switch
+ * and the no-session branch, so a rotation, a window resize or a session switch keeps it; ChatScreen
+ * falls back to its own only when nobody provides one.
+ */
+val LocalCardStates = staticCompositionLocalOf<CardStateStore?> { null }
 
 /** The store in scope, or one saved here when no screen provides it (tests, previews). */
 @Composable
@@ -155,13 +180,13 @@ internal object ContentFingerprints {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, String>?): Boolean = size > SIZE
     }
 
-    /** Identity key: the request object itself (compared by ===) and its turn. */
-    private class Key(val request: JsObj, val turnId: String) {
-        override fun equals(other: Any?): Boolean = other is Key && other.request === request && other.turnId == turnId
-        override fun hashCode(): Int = System.identityHashCode(request) * 31 + turnId.hashCode()
+    /** Identity key: the request object itself (compared by ===), its turn and its session. */
+    private class Key(val request: JsObj, val turnId: String, val sessionId: String) {
+        override fun equals(other: Any?): Boolean = other is Key && other.request === request && other.turnId == turnId && other.sessionId == sessionId
+        override fun hashCode(): Int = (System.identityHashCode(request) * 31 + turnId.hashCode()) * 31 + sessionId.hashCode()
     }
 
-    fun of(activeTurnId: String, request: JsObj): String = synchronized(cache) {
-        cache.getOrPut(Key(request, activeTurnId)) { ConsentGuard.fingerprint("", activeTurnId, request) }
+    fun of(sessionId: String, activeTurnId: String, request: JsObj): String = synchronized(cache) {
+        cache.getOrPut(Key(request, activeTurnId, sessionId)) { ConsentGuard.cardIdentity(sessionId, activeTurnId, request) }
     }
 }
