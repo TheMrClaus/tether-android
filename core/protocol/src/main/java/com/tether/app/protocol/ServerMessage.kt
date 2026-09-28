@@ -308,10 +308,12 @@ sealed interface ServerMessage {
         val TYPES: Set<String> get() = ServerDecoders.decoders.keys
 
         /**
-         * How deep a frame may nest. kotlinx's tree reader recurses per nested array, so a
+         * How deep a frame may nest. kotlinx's tree reader recurses per nested bracket, so a
          * hostile 100k-deep frame overflowed the socket reader's stack (a crash on every
-         * reconnect). Such a frame is refused unread; values inside a frame are further capped at
-         * [com.tether.app.protocol.tree.JsCodec.MAX_DEPTH] when they enter the fold.
+         * reconnect). A deeper frame is NOT dropped (a dropped event or snapshot would re-attach
+         * in a quiet loop): every container past this depth is replaced by `null` in the text
+         * before kotlinx reads it ([flattenDeeperThan]), the rule the fold applies at
+         * [com.tether.app.protocol.tree.JsCodec.MAX_DEPTH] anyway.
          */
         const val MAX_FRAME_DEPTH: Int = 1024
 
@@ -334,11 +336,71 @@ sealed interface ServerMessage {
             return false
         }
 
+        /**
+         * [text] with every array or object that would open deeper than [limit] replaced by
+         * `null` (strings and escapes respected; linear). Unbalanced input stays unbalanced, so
+         * the parser still rejects it.
+         */
+        fun flattenDeeperThan(text: String, limit: Int): String {
+            if (!nestsDeeperThan(text, limit)) return text
+            val out = StringBuilder(text.length)
+            var depth = 0
+            var inString = false
+            var i = 0
+            while (i < text.length) {
+                val c = text[i]
+                if (inString) {
+                    out.append(c)
+                    if (c == '\\' && i + 1 < text.length) {
+                        out.append(text[i + 1])
+                        i++
+                    } else if (c == '"') {
+                        inString = false
+                    }
+                    i++
+                    continue
+                }
+                when (c) {
+                    '"' -> {
+                        inString = true
+                        out.append(c)
+                    }
+                    '[', '{' -> if (depth + 1 > limit) {
+                        // Skip the whole container, strings included, and write `null` for it.
+                        var d = 0
+                        var s = false
+                        while (i < text.length) {
+                            val k = text[i]
+                            if (s) {
+                                if (k == '\\') i++ else if (k == '"') s = false
+                            } else when (k) {
+                                '"' -> s = true
+                                '[', '{' -> d++
+                                ']', '}' -> if (--d == 0) break
+                            }
+                            i++
+                        }
+                        out.append("null")
+                    } else {
+                        depth++
+                        out.append(c)
+                    }
+                    ']', '}' -> {
+                        depth--
+                        out.append(c)
+                    }
+                    else -> out.append(c)
+                }
+                i++
+            }
+            return out.toString()
+        }
+
         /** Parse one text frame. Never throws. */
         fun parse(text: String): ServerMessage {
-            if (nestsDeeperThan(text, MAX_FRAME_DEPTH)) return Unknown(null, reason = "nested too deep")
+            val bounded = flattenDeeperThan(text, MAX_FRAME_DEPTH)
             val root = try {
-                TetherJson.parseToJsonElement(text) as? JsonObject
+                TetherJson.parseToJsonElement(bounded) as? JsonObject
             } catch (_: Exception) {
                 null
             } ?: return Unknown(null, reason = "not a JSON object")

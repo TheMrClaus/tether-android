@@ -249,7 +249,11 @@ open class PushRegistrar(
                 // never read whole into memory.
                 val bytes = response.peekBody(MAX_CONFIG_BYTES + 1).bytes()
                 if (bytes.size > MAX_CONFIG_BYTES) return null
-                val obj = TetherJson.parseToJsonElement(bytes.decodeToString()) as? JsonObject ?: return null
+                val text = bytes.decodeToString()
+                // T6.2 R3-M3: kotlinx's tree reader recurses per nested bracket; 16 KB of `[`
+                // overflowed the stack on every start while push was on.
+                if (com.tether.app.protocol.ServerMessage.nestsDeeperThan(text, com.tether.app.protocol.ServerMessage.MAX_FRAME_DEPTH)) return null
+                val obj = TetherJson.parseToJsonElement(text) as? JsonObject ?: return null
                 FcmConfig(
                     configured = (obj["configured"] as? JsonPrimitive)?.booleanOrNull == true,
                     client = FirebaseClientConfig.parse(obj.fcmClientObject()),

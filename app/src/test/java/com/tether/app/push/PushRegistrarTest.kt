@@ -96,6 +96,25 @@ class PushRegistrarTest {
     }
 
     @Test
+    fun aSixteenThousandDeepConfigIsUnavailableNotAStackOverflow() {
+        // Under the 16 KB cap, 16k levels deep. Run where a real start runs it: a 1 MB-stack thread.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("[".repeat(8_000) + "{\"a\":".repeat(1) + "[".repeat(7_990)))
+        var result: PushRegistrarResult? = null
+        var failure: Throwable? = null
+        val thread = Thread(null, {
+            try {
+                result = runBlocking(kotlinx.coroutines.Dispatchers.Unconfined) { registrar().sync(PushScope.All, emptySet(), emptySet(), syncHints = false) }
+            } catch (t: Throwable) {
+                failure = t
+            }
+        }, "one-mb", 1024L * 1024L)
+        thread.start()
+        thread.join(20_000)
+        failure?.let { throw it }
+        assertEquals(PushRegistrarResult.Error("Push config unreachable."), result)
+    }
+
+    @Test
     fun aMalformedConfigIsUnavailableNotACrash() = runBlocking {
         val bodies = listOf(
             "<!doctype html><html><body>Sign in to the proxy</body></html>", // auth proxy, 200

@@ -2,6 +2,8 @@ package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.composed
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -495,11 +497,177 @@ class ToolSafetyTest {
         }
         rule.waitForIdle()
         rule.onNodeWithContentDescription("Show more").performClick()
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("+1,001 more lines"))
-        // The 5,000-character first line is cut at 2,000 characters.
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("+1,002 more lines")) // 3,001 rows; the path row costs one of the 2,000
+        // The 5,000-character first line is cut at UNIFIED_LINE_MAX characters (it never wraps).
         val first = rule.onAllNodes(hasText("yyyy", substring = true)).fetchSemanticsNodes()
             .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }.maxByOrNull { it.length }!!
-        assertEquals(DIFF_LINE_MAX + 1, first.length)
+        assertEquals(UNIFIED_LINE_MAX + 1, first.length)
         assertTrue(rule.onAllNodesWithTag("unified-diff").fetchSemanticsNodes().isNotEmpty())
     }
+
+    // --- Round 4 ---------------------------------------------------------------------------------
+
+    private fun mediaOutput(n: Int, seed: Int): String = (0 until n).joinToString(",", "[", "]") {
+        """{"type":"media_ref","mediaKind":"image","mediaType":"image/png","url":"/api/tool-media/${"%064x".format(seed * 1000 + it)}.png","bytes":9}"""
+    }
+
+    /** A Task whose 50 sub-agent tool entries each returned 12 pictures, and whose own result has 12 more. */
+    private fun mediaHeavyTask(): ChatFixtures.Folded {
+        val events = ArrayList<com.tether.app.protocol.AgentEvent>()
+        events += ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k") }
+        events += ev("tool_start", "t1", ts = 1) { put("toolId", "task"); put("name", "Task"); put("input", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"description":"shots"}""")) }
+        for (i in 0 until 50) {
+            val items = """[{"key":"sub$i","kind":"tool","name":"Screenshot","input":{}},{"key":"sub$i","kind":"tool_result","isError":false,"output":${mediaOutput(12, i)}}]"""
+            events += ev("subagent_message", "t1", ts = 1) { put("parentToolUseId", "task"); put("items", com.tether.app.protocol.TetherJson.parseToJsonElement(items)) }
+        }
+        events += ev("tool_end", "t1", ts = 1) { put("toolId", "task"); put("output", com.tether.app.protocol.TetherJson.parseToJsonElement(mediaOutput(12, 99))) }
+        return ChatFixtures.fold(*events.toTypedArray())
+    }
+
+    @Test fun oneTileBudgetSpansTheWholeCardSubAgentEntriesIncluded() {
+        assertEquals(listOf(5, 7, 0, 0), tileBudget(listOf(5, 12, 12, 3)))
+        assertEquals(listOf(0), tileBudget(listOf(0)))
+        val fixture = mediaHeavyTask()
+        val block = ((fixture.tree["turnsById"] as JsObj)["t1"] as JsObj).let { (it["blocksById"] as JsObj)["task"] as JsObj }
+        val subagent = block["subagent"] as? JsObj
+        if (subagent == null || subagentEntries(subagent, false).size < 50) {
+            // The fold keeps sub-agent entries under the parent: this fixture must exercise them.
+            error("fixture has no sub-agent entries: ${block.keys}")
+        }
+        val plan = cardMediaPlan(subagent, block, showThinking = false)
+        assertEquals(12, plan.byEntry.values.sum() + plan.card)
+        assertEquals(12, plan.byEntry.values.first())
+        assertEquals(0, plan.card)
+        val loader = ToolFixtures.FakeLoader()
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                CompositionLocalProvider(LocalToolMediaLoader provides loader) { ToolCard(block, showThinking = false) }
+            }
+        }
+        rule.waitForIdle()
+        assertEquals("the whole card loads 12 pictures", 12, loader.loads.distinct().size)
+        assertTrue(rule.onAllNodesWithTag("tool-media-more").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test fun thumbnailsDecodeToWhatATileShows() {
+        assertEquals(512, MediaLimits.THUMB_SIDE)
+        assertEquals(1L * 1024 * 1024, MediaLimits.THUMB_DECODED_BYTES)
+        assertEquals(2, BoundedMediaDecoder.plan(1024, 1024, 4, MediaLimits.THUMB_SIDE, MediaLimits.THUMB_DECODED_BYTES))
+    }
+
+    private fun diffOf(files: Int, rows: Int) = (0 until files).joinToString("\n") { f ->
+        "diff --git a/f$f b/f$f\n--- a/f$f\n+++ b/f$f\n@@ -0,0 +1,$rows @@\n" + (1..rows).joinToString("\n") { "+r$it" }
+    }
+
+    @Test fun oneRowBudgetSpansAWholeDiffCard() {
+        val files = parseUnifiedDiff(diffOf(100, 2_000))
+        val plan = planDiffCard(listOf(files))
+        assertEquals(1, plan.files.single().size) // 2,004 rows: the first file takes the whole budget
+        assertEquals(DIFF_CARD_MAX_ROWS, plan.files.single().sumOf { it.rows })
+        assertEquals(99, plan.hiddenFiles)
+        assertEquals("+${"%,d".format(99 * 2_004)} more lines · +99 more files", plan.more)
+        // A file-change card: each change's path row costs one, and a change past the budget is not drawn.
+        val changes = (0 until 10).map { parseUnifiedDiff(diffOf(1, 500)) } + List(3) { emptyList() }
+        val cards = planDiffCard(changes, headerCost = 1)
+        assertTrue(cards.groupsDrawn < changes.size)
+        assertEquals(changes.size - cards.groupsDrawn, cards.hiddenFiles)
+        assertEquals(null, planDiffCard(listOf(parseUnifiedDiff(diffOf(2, 10)))).more)
+    }
+
+    @Test fun aHundredFileTurnDiffBuildsAtMostItsBudgetAndOnlyAPeekWhileCollapsed() {
+        val text = diffOf(100, 2_000)
+        rule.setContent { ChatHost(TetherSkin.Machine) { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.verticalScrollForTest()) { CodexUnifiedDiff(text) } } }
+        rule.waitForIdle()
+        fun rowsBuilt() = rule.onAllNodes(hasText("r", substring = true)).fetchSemanticsNodes()
+            .count { n -> n.config[SemanticsProperties.Text].joinToString("") { it.text }.matches(Regex("r\\d+")) }
+        assertTrue("collapsed: a peek of rows (${rowsBuilt()})", rowsBuilt() <= DIFF_PEEK_ROWS)
+        rule.onAllNodes(hasTestTag("diff-more")).fetchSemanticsNodes().single()
+        rule.onNodeWithContentDescription("Show more").performClick()
+        rule.waitForIdle()
+        assertTrue("open: the card's budget (${rowsBuilt()})", rowsBuilt() <= DIFF_CARD_MAX_ROWS)
+    }
+
+    @Test fun aSweptFolderMidDownloadFailsTheLoadNotTheApp() = runBlocking {
+        val cache = this@ToolSafetyTest.cache
+        val source = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                // A sign-in change sweeps the folders while the bytes are on their way.
+                ToolMediaCache.sync(cache, signedIn = false, origin = null)
+                sink.write(if (url.endsWith(".mp4")) clip else png)
+                return ToolMediaResult.Ok(0, "")
+            }
+        }
+        val repo = ToolMediaRepository(source, cache, origin)
+        assertTrue(repo.image(ToolMediaItem("image", "image/png", url(png, "png"))) is MediaImage.Failed)
+        assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))))
+    }
+
+    @Test fun signInChangesAlsoSweepPictureDownloadsInFlight() {
+        val tmp = File(cache, ToolMediaRepository.TMP_DIR).apply { mkdirs() }
+        File(tmp, "img1.part").writeBytes(ByteArray(3))
+        ToolMediaCache.sync(cache, signedIn = true, origin = origin)
+        assertTrue(!tmp.exists())
+    }
+
+    @Test fun anOversizeDataPictureIsRefusedBeforeItIsHashed() = runBlocking {
+        val repo = ToolMediaRepository(ToolMediaSource.Unavailable, cache, origin)
+        val huge = "data:image/png;base64," + "A".repeat(((MediaLimits.MAX_IMAGE_BYTES / 3) * 4 + 8).toInt())
+        val started = System.nanoTime()
+        assertEquals(MediaImage.TooLarge, repo.image(ToolMediaItem("image", "image/png", huge)))
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 200)
+    }
+
+    @Test fun thePictureTimeoutStartsOnceALoadSlotIsHeld() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val holding = AtomicInteger()
+        val slow = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                holding.incrementAndGet()
+                release.await()
+                sink.write(png)
+                return ToolMediaResult.Ok(png.size.toLong(), "image/png")
+            }
+        }
+        val fast = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                sink.write(png)
+                return ToolMediaResult.Ok(png.size.toLong(), "image/png")
+            }
+        }
+        val slowRepo = ToolMediaRepository(slow, cache, origin, imageTimeoutMs = 20_000)
+        val fastRepo = ToolMediaRepository(fast, cache, origin, imageTimeoutMs = 300)
+        val holders = (0 until 2).map { i -> async(Dispatchers.Default) { slowRepo.image(ToolMediaItem("image", "image/png", url(png, "png")), full = i == 0) } }
+        withTimeout(20_000) { while (holding.get() < 2) kotlinx.coroutines.delay(10) }
+        // Queued behind both slots for longer than its own timeout, then served.
+        val queued = async(Dispatchers.Default) { fastRepo.image(ToolMediaItem("image", "image/png", "data:image/png;base64," + android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP))) }
+        kotlinx.coroutines.delay(800)
+        release.complete(Unit)
+        holders.awaitAll()
+        assertTrue("a queued load is not timed out while it waits", queued.await() is MediaImage.Ok)
+    }
+
+    @Test fun theGitChangesCardCapsItsHunksAndFileLists() {
+        val hunks = (1..3_000).joinToString("\n") { "+" + "z".repeat(if (it == 1) 2_000 else 2) }
+        val summary = WorktreeDiffSummaryView("origin/main", 0.0, (0 until 600).map { WorktreeDiffEntry("f$it", "M") }, emptyList())
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.verticalScrollForTest()) {
+                    GitChangesCard(summary, mapOf("f0" to com.tether.app.protocol.ServerMessage.GitDiffFile("s", "f0", hunks, false, false)), onRequestFile = {})
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onAllNodes(hasText("+100 more files")).fetchSemanticsNodes().single()
+        rule.onNodeWithContentDescription("Modified f0").performClick()
+        rule.waitForIdle()
+        rule.onAllNodes(hasText("+1,000 more lines")).fetchSemanticsNodes().single()
+        val longest = rule.onAllNodes(hasText("zz", substring = true)).fetchSemanticsNodes()
+            .maxOf { n -> n.config[SemanticsProperties.Text].joinToString("") { it.text }.length }
+        assertEquals(UNIFIED_LINE_MAX + 1, longest)
+    }
+}
+
+/** A tall, unconstrained host (a card inside a scroller, as the panel will be). */
+private fun androidx.compose.ui.Modifier.verticalScrollForTest(): androidx.compose.ui.Modifier = composed {
+    this.verticalScroll(androidx.compose.foundation.rememberScrollState())
 }

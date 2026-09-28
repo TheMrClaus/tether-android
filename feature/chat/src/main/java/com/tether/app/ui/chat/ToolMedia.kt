@@ -127,8 +127,8 @@ object MediaLimits {
     const val MAX_IMAGE_BYTES: Long = 32L * 1024L * 1024L
 
     /** A row thumbnail: at most this many pixels a side and bytes decoded (it shows ≤ 320dp tall). */
-    const val THUMB_SIDE: Int = 1024
-    const val THUMB_DECODED_BYTES: Long = 4L * 1024L * 1024L
+    const val THUMB_SIDE: Int = 512
+    const val THUMB_DECODED_BYTES: Long = 1L * 1024L * 1024L
 
     /** The viewer's decode. */
     const val FULL_SIDE: Int = 2048
@@ -146,7 +146,10 @@ object MediaLimits {
     /** Picture loads in flight at once, across the whole app. */
     const val CONCURRENT_IMAGE_LOADS: Int = 2
 
-    /** Tiles one row draws before a "+N more" tile (the rest open in the viewer). */
+    /**
+     * Tiles one CARD draws in total — its own result and every sub-agent entry share this budget
+     * (R3-M1: a per-row budget let 50 entries × 12 tiles hold 600 bitmaps) — then "+N more" tiles.
+     */
     const val MAX_TILES: Int = 12
 
     /** One picture / one clip may take this long end to end, then it fails. */
@@ -155,6 +158,16 @@ object MediaLimits {
 
     /** The image types a `data:` URI may carry (lib/tool-media-store.mjs IMAGE_MEDIA_TYPES). */
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
+}
+
+/**
+ * The card-wide tile budget (R3-M1): [MediaLimits.MAX_TILES] handed out in order across [rows]
+ * (the card's own result first, then each sub-agent entry); a row past the budget gets 0 tiles
+ * and only its "+N more" tile.
+ */
+internal fun tileBudget(rows: List<Int>, budget: Int = MediaLimits.MAX_TILES): List<Int> {
+    var left = budget
+    return rows.map { n -> minOf(n, left).also { left -= it } }
 }
 
 /** The app-wide gates: picture loads share one semaphore, clip downloads one lock per content hash. */
@@ -301,6 +314,8 @@ object ToolMediaCache {
     fun dirFor(cacheDir: File, origin: String): File = File(File(cacheDir, DIR), originKey(origin))
 
     fun sync(cacheDir: File, signedIn: Boolean, origin: String?) {
+        // R3-L3: picture downloads in flight belong to the old sign-in too.
+        File(cacheDir, ToolMediaRepository.TMP_DIR).deleteRecursively()
         val root = File(cacheDir, DIR)
         if (!signedIn || origin == null) {
             root.deleteRecursively()
@@ -382,24 +397,34 @@ class ToolMediaRepository(
 
     override suspend fun image(item: ToolMediaItem, full: Boolean): MediaImage {
         if (item.isVideo) return MediaImage.Failed
-        val key = cacheKey(item.src, full)
-        cache.get(key)?.let { return MediaImage.Ok(it) }
-        val result = try {
-            kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) {
-                MediaGates.images.withPermit { withContext(Dispatchers.IO) { loadImage(item.src, full) } }
+        // R3-L2: an over-size data: picture is refused before anything touches it (no hashing).
+        parseDataUri(item.src)?.let { if (it.payloadLength.toLong() / 4 * 3 > MediaLimits.MAX_IMAGE_BYTES) return MediaImage.TooLarge }
+        return try {
+            // The key is computed once, off the main thread.
+            val key = withContext(Dispatchers.IO) { cacheKey(item.src, full) }
+            cache.get(key)?.let { return MediaImage.Ok(it) }
+            // The timeout starts once a load slot is held (a queued picture is not "slow").
+            val result = MediaGates.images.withPermit {
+                kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) { withContext(Dispatchers.IO) { loadImage(item.src, full) } }
             } ?: MediaImage.Failed
+            if (result is MediaImage.Ok) cache.put(key, result.bitmap)
+            result
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (_: OutOfMemoryError) {
             MediaImage.TooLarge
+        } catch (_: Exception) {
+            // R3-L1: an I/O failure (a cache folder swept mid-load, a full disk) is a failed load, never a crash.
+            MediaImage.Failed
         }
-        if (result is MediaImage.Ok) cache.put(key, result.bitmap)
-        return result
     }
 
     private suspend fun loadImage(src: String, full: Boolean): MediaImage {
         val side = if (full) MediaLimits.FULL_SIDE else MediaLimits.THUMB_SIDE
         val bytes = if (full) MediaLimits.FULL_DECODED_BYTES else MediaLimits.THUMB_DECODED_BYTES
-        val tmp = File.createTempFile("img", ".part", tmpDir)
+        var tmp: File? = null
         try {
+            val file = File.createTempFile("img", ".part", tmpDir).also { tmp = it }
             val data = parseDataUri(src)
             if (data != null) {
                 val type = data.mediaType
@@ -408,7 +433,7 @@ class ToolMediaRepository(
                 if (data.payloadLength.toLong() / 4 * 3 > MediaLimits.MAX_IMAGE_BYTES) return MediaImage.TooLarge
                 val fits = try {
                     android.util.Base64InputStream(AsciiInputStream(src, data.payloadStart), Base64.DEFAULT).use { input ->
-                        FileOutputStream(tmp).use { out -> copyBounded(input, out, MediaLimits.MAX_IMAGE_BYTES) }
+                        FileOutputStream(file).use { out -> copyBounded(input, out, MediaLimits.MAX_IMAGE_BYTES) }
                     }
                 } catch (_: java.io.IOException) {
                     return MediaImage.Failed
@@ -416,13 +441,13 @@ class ToolMediaRepository(
                     return MediaImage.Failed
                 }
                 if (!fits) return MediaImage.TooLarge
-                if (!MediaMagic.matches(tmp, type)) return MediaImage.Failed
-                return BoundedMediaDecoder.decode(tmp, side, bytes)
+                if (!MediaMagic.matches(file, type)) return MediaImage.Failed
+                return BoundedMediaDecoder.decode(file, side, bytes)
             }
             val ext = ToolMediaSource.extensionOf(src) ?: return MediaImage.Failed
             if (ext == "mp4") return MediaImage.Failed
             val digest = java.security.MessageDigest.getInstance("SHA-256")
-            val result = java.security.DigestOutputStream(FileOutputStream(tmp), digest).use { out ->
+            val result = java.security.DigestOutputStream(FileOutputStream(file), digest).use { out ->
                 source.fetch(src, MediaLimits.MAX_IMAGE_BYTES, out)
             }
             return when (result) {
@@ -430,8 +455,8 @@ class ToolMediaRepository(
                     val hashed = digest.digest().joinToString("") { "%02x".format(it) }
                     when {
                         hashed != namedSha256(src) -> MediaImage.Failed
-                        !MediaMagic.matches(tmp, ToolMediaSource.CONTENT_TYPE_BY_EXT.getValue(ext)) -> MediaImage.Failed
-                        else -> BoundedMediaDecoder.decode(tmp, side, bytes)
+                        !MediaMagic.matches(file, ToolMediaSource.CONTENT_TYPE_BY_EXT.getValue(ext)) -> MediaImage.Failed
+                        else -> BoundedMediaDecoder.decode(file, side, bytes)
                     }
                 }
                 ToolMediaResult.TooLarge -> MediaImage.TooLarge
@@ -440,7 +465,7 @@ class ToolMediaRepository(
         } catch (_: java.io.IOException) {
             return MediaImage.Failed
         } finally {
-            tmp.delete()
+            tmp?.delete()
         }
     }
 
@@ -449,11 +474,15 @@ class ToolMediaRepository(
         if (ext != "mp4" || origin == null) return MediaVideo.Failed
         val expected = namedSha256(item.src) ?: return MediaVideo.Failed
         return try {
-            kotlinx.coroutines.withTimeoutOrNull(videoTimeoutMs) {
-                MediaGates.clip(expected).withLock { withContext(Dispatchers.IO) { downloadClip(item.src, expected) } }
+            MediaGates.clip(expected).withLock {
+                kotlinx.coroutines.withTimeoutOrNull(videoTimeoutMs) { withContext(Dispatchers.IO) { downloadClip(item.src, expected) } }
             } ?: MediaVideo.Failed
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (_: OutOfMemoryError) {
             MediaVideo.TooLarge
+        } catch (_: Exception) {
+            MediaVideo.Failed
         }
     }
 
@@ -467,23 +496,27 @@ class ToolMediaRepository(
         }
         // L2: a temp file of its own (never a shared name), removed however this ends (cancellation
         // included), and the CLOSED file re-hashed before it takes the content address.
-        val part = File.createTempFile(expected, ".part", dir)
+        var part: File? = null
         try {
+            val temp = File.createTempFile(expected, ".part", dir).also { part = it }
             val result = try {
-                FileOutputStream(part).use { out -> source.fetch(src, MediaLimits.MAX_VIDEO_BYTES, out) }
+                FileOutputStream(temp).use { out -> source.fetch(src, MediaLimits.MAX_VIDEO_BYTES, out) }
             } catch (_: java.io.IOException) {
                 ToolMediaResult.Failed()
             }
             return when {
                 result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge
                 result !is ToolMediaResult.Ok -> MediaVideo.Failed
-                sha256OfFile(part) != expected -> MediaVideo.Failed
-                !MediaMagic.matches(part, "video/mp4") -> MediaVideo.Failed
-                !part.renameTo(file) -> MediaVideo.Failed
+                sha256OfFile(temp) != expected -> MediaVideo.Failed
+                !MediaMagic.matches(temp, "video/mp4") -> MediaVideo.Failed
+                !temp.renameTo(file) -> MediaVideo.Failed
                 else -> MediaVideo.Ok(file).also { ToolMediaCache.evict(dir) }
             }
+        } catch (_: java.io.IOException) {
+            // R3-L1: the folder swept by a sign-in change mid-download, a full disk: failed, not a crash.
+            return MediaVideo.Failed
         } finally {
-            if (part.exists()) part.delete()
+            part?.let { if (it.exists()) it.delete() }
         }
     }
 
@@ -506,7 +539,7 @@ class ToolMediaRepository(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare: Boolean = false) {
+fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare: Boolean = false, limit: Int = MediaLimits.MAX_TILES) {
     if (items.isEmpty()) return
     val t = LocalTetherTokens.current
     var openIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -528,11 +561,12 @@ fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        items.take(MediaLimits.MAX_TILES).forEachIndexed { index, item ->
+        val shown = limit.coerceIn(0, items.size)
+        items.take(shown).forEachIndexed { index, item ->
             MediaTile(item, onOpen = { openIndex = index })
         }
-        // Security review M1: at most MAX_TILES load in the row; the rest open in the viewer.
-        if (items.size > MediaLimits.MAX_TILES) MoreTile(items.size - MediaLimits.MAX_TILES) { openIndex = MediaLimits.MAX_TILES }
+        // At most [limit] tiles load here (the card's share of MAX_TILES); the rest open in the viewer.
+        if (items.size > shown) MoreTile(items.size - shown) { openIndex = shown }
     }
     openIndex?.let { index ->
         if (index in items.indices) {

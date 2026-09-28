@@ -432,8 +432,8 @@ class ToolCardBehaviourTest {
         assertEquals(MediaImage.TooLarge, BoundedMediaDecoder.decode(file) { _, _ -> throw OutOfMemoryError("x") })
         file.writeText("not an image")
         assertEquals(MediaImage.Failed, BoundedMediaDecoder.decode(file))
-        // A thumbnail decodes under the tighter bound: 4096² samples to 1024² (4 MB).
-        assertEquals(4, BoundedMediaDecoder.plan(4096, 4096, 4, MediaLimits.THUMB_SIDE, MediaLimits.THUMB_DECODED_BYTES))
+        // A thumbnail decodes under the tighter bound: 4096² samples to 512² (1 MB).
+        assertEquals(8, BoundedMediaDecoder.plan(4096, 4096, 4, MediaLimits.THUMB_SIDE, MediaLimits.THUMB_DECODED_BYTES))
         file.delete()
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -198,18 +199,35 @@ fun GitChangesCard(
             )
             if (diff.committed.isNotEmpty()) {
                 GroupLabel("Committed (${diff.committed.size})")
-                diff.committed.forEach { entry ->
+                diff.committed.take(GIT_MAX_FILES).forEach { entry ->
                     FileRow(entry.path, committedWord(entry.status), expanded == entry.path, fileDiffs?.get(entry.path), toggle)
                 }
+                if (diff.committed.size > GIT_MAX_FILES) MoreFiles(diff.committed.size - GIT_MAX_FILES)
             }
             if (diff.uncommitted.isNotEmpty()) {
                 GroupLabel("Working tree (${diff.uncommitted.size})")
-                diff.uncommitted.forEach { entry ->
+                diff.uncommitted.take(GIT_MAX_FILES).forEach { entry ->
                     FileRow(entry.path, uncommittedWord(entry.status), expanded == entry.path, fileDiffs?.get(entry.path), toggle)
                 }
+                if (diff.uncommitted.size > GIT_MAX_FILES) MoreFiles(diff.uncommitted.size - GIT_MAX_FILES)
             }
         }
     }
+}
+
+/** Rows one file group draws; the rest is counted (the server also caps the list). */
+internal const val GIT_MAX_FILES = 500
+
+@Composable
+private fun MoreFiles(count: Int) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Text(
+        "+${localeCount(count)} more file${if (count == 1) "" else "s"}",
+        style = type.body.copy(fontSize = rem(0.72f)),
+        color = t.muted,
+        modifier = Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
+    )
 }
 
 /** `.groupLabel`: 0.66rem/650/0.04em uppercase muted under a rule. */
@@ -313,7 +331,11 @@ private fun HunkPre(hunks: String) {
             .testTag("git-hunks"),
     ) {
         Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)) {
-            hunks.split("\n").forEach { line ->
+            // Round 4: the same caps as the transcript's diffs, so the host (T8.3) cannot ship it
+            // uncapped — DIFF_CARD_MAX_ROWS lines, each cut at UNIFIED_LINE_MAX, then "+N more lines".
+            val lines = remember(hunks) { hunks.split("\n") }
+            lines.take(DIFF_CARD_MAX_ROWS).forEach { raw ->
+                val line = cutLine(raw, UNIFIED_LINE_MAX)
                 val (bg, ink) = when (hunkLineKind(line)) {
                     "add" -> t.diffAddBg to t.diffAddInk
                     "del" -> t.diffDelBg to t.diffDelInk
@@ -321,6 +343,9 @@ private fun HunkPre(hunks: String) {
                     else -> Color.Transparent to t.muted
                 }
                 Text(line.ifEmpty { " " }, style = style, color = ink, softWrap = false, modifier = Modifier.fillMaxWidth().background(bg))
+            }
+            if (lines.size > DIFF_CARD_MAX_ROWS) {
+                Text(moreLinesLabel(lines.size - DIFF_CARD_MAX_ROWS), style = style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = t.faint, softWrap = false)
             }
         }
     }

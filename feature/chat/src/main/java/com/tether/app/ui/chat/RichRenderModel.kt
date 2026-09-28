@@ -64,8 +64,64 @@ internal const val DIFF_LINE_MAX = 2_000
 internal fun cutLine(text: String, max: Int = DIFF_LINE_MAX): String =
     if (text.length <= max) text else "${text.substring(0, safeCut(text, max))}…"
 
-/** Rows a unified diff file draws before "+N more lines" (the web draws them all). */
-internal const val DIFF_FILE_MAX_ROWS = 2_000
+/**
+ * Rows one diff CARD draws in total — every file of a file-change card or of a turn diff shares it
+ * (R3-M2: a per-file budget let 100 files × 2,000 rows build one list item) — then
+ * "+N more lines · +M more files" (the web draws them all).
+ */
+internal const val DIFF_CARD_MAX_ROWS = 2_000
+
+/** A unified-diff line (never wrapped: it scrolls sideways) is cut at this many characters. */
+internal const val UNIFIED_LINE_MAX = 500
+
+/** One file of a diff card and how many of its rows it draws. */
+internal class PlannedFile(val file: DiffFileView, val label: String, val rows: Int)
+
+/**
+ * A card's diff: per change (a turn diff is one group), the files it draws; [groupsDrawn] leading
+ * groups are drawn at all; what the budget left out ([hiddenRows] of [hiddenFiles] undrawn files).
+ */
+internal class DiffCardPlan(val files: List<List<PlannedFile>>, val groupsDrawn: Int, val hiddenRows: Int, val hiddenFiles: Int) {
+    val more: String? get() = when {
+        hiddenFiles <= 0 -> null
+        else -> "${moreLinesLabel(hiddenRows)} · +${localeCount(hiddenFiles)} more file${if (hiddenFiles == 1) "" else "s"}"
+    }
+}
+
+/**
+ * [DIFF_CARD_MAX_ROWS] handed out in order over [groups] (one per change of a file-change card,
+ * whose path row costs [headerCost]; a turn diff is one group with no header): a file gets what
+ * is left (a partial file shows its own "+N more lines"); a file or a whole change past the budget
+ * is not drawn, and the card-level line counts it (a change with no diff counts as one file).
+ */
+internal fun planDiffCard(groups: List<List<DiffFileView>>, budget: Int = DIFF_CARD_MAX_ROWS, headerCost: Int = 0): DiffCardPlan {
+    var left = budget
+    var hiddenRows = 0
+    var hiddenFiles = 0
+    var groupsDrawn = 0
+    val out = groups.map { files ->
+        if (left <= 0) {
+            hiddenFiles += maxOf(1, files.size)
+            hiddenRows += files.sumOf { it.rows.size }
+            return@map emptyList()
+        }
+        groupsDrawn++
+        left -= headerCost
+        files.mapIndexedNotNull { index, file ->
+            val label = file.newPath ?: file.oldPath ?: "Patch ${index + 1}"
+            if (left <= 0) {
+                hiddenFiles++
+                hiddenRows += file.rows.size
+                null
+            } else {
+                val take = minOf(left, file.rows.size)
+                left -= take
+                PlannedFile(file, label, take)
+            }
+        }
+    }
+    return DiffCardPlan(out, groupsDrawn, hiddenRows, hiddenFiles)
+}
 
 // --- Codex (codex-app-server-v2) ----------------------------------------------------------------
 

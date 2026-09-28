@@ -34,7 +34,10 @@ object ReleaseCheck {
         try {
             noRedirects.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
-                val obj = TetherJson.parseToJsonElement(response.body.string()) as? JsonObject
+                val text = response.body.string()
+                // T6.2: the same stack guard as every other server-sent JSON (ServerMessage.MAX_FRAME_DEPTH).
+                if (com.tether.app.protocol.ServerMessage.nestsDeeperThan(text, com.tether.app.protocol.ServerMessage.MAX_FRAME_DEPTH)) return@withContext null
+                val obj = TetherJson.parseToJsonElement(text) as? JsonObject
                     ?: return@withContext null
                 val tag = obj.str("tag_name")?.takeIf { it.isNotBlank() } ?: return@withContext null
                 // Only an https page on github.com is ever opened from here.

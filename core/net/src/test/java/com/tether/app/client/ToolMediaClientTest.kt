@@ -157,14 +157,18 @@ class ToolMediaClientTest {
         assertEquals(false, h.client.gitFileDiffs.value.containsKey("s3"))
     }
 
-    @Test fun aHundredThousandDeepFrameIsDroppedAndTheConnectionLives() {
+    @Test fun aHundredThousandDeepFrameIsReadNotDroppedAndTheConnectionLives() {
         h.enqueueConnect()
         h.newClient()
         h.client.start()
         val ws = h.nextSocket()
         h.handshake(ws)
-        ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"a","hunks":""" + "[".repeat(100_000) + "]".repeat(100_000) + ""","truncated":false,"binary":false}""")
-        h.serverBarrier(ws)
+        h.client.requestGitFileDiff("s1", "a")
+        h.expectFrame("git-diff-file")
+        // A reply carrying a 100k-deep extra field: its deep part becomes null, the reply lands.
+        ws.send("""{"type":"git-diff-file","sessionId":"s1","path":"a","hunks":"+x","truncated":false,"binary":false,"extra":""" + "[".repeat(100_000) + "]".repeat(100_000) + "}")
+        val diffs = await(h.client.gitFileDiffs) { it["s1"]?.containsKey("a") == true }
+        assertEquals("+x", diffs["s1"]!!["a"]!!.hunks)
         assertEquals(ConnectionState.Connected, h.client.connection.value)
     }
 

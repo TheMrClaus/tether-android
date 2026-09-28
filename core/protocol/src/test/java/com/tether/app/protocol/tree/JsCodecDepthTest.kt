@@ -32,15 +32,33 @@ class JsCodecDepthTest {
         return d
     }
 
-    @Test fun aHundredThousandDeepFrameIsRefusedUnread() = onSmallStack {
-        val deep = "{\"type\":\"event\",\"sessionId\":\"s\",\"event\":{\"type\":\"tool_end\",\"output\":" +
-            "[".repeat(100_000) + "1" + "]".repeat(100_000) + "}}"
-        val refused = com.tether.app.protocol.ServerMessage.parse(deep)
-        assertEquals(com.tether.app.protocol.ServerMessage.Unknown(null, reason = "nested too deep"), refused)
-        // Brackets inside strings do not count; the limit itself still parses.
-        assertEquals(false, com.tether.app.protocol.ServerMessage.nestsDeeperThan("\"" + "[".repeat(5_000) + "\\\"\"", 10))
-        assertEquals(true, com.tether.app.protocol.ServerMessage.nestsDeeperThan("[[[", 2))
-        assertEquals(false, com.tether.app.protocol.ServerMessage.nestsDeeperThan("[[]]", 2))
+    private val sm = com.tether.app.protocol.ServerMessage
+
+    @Test fun aHundredThousandDeepFrameIsReadWithItsDeepPartNulled() = onSmallStack {
+        val deep = "{\"type\":\"git-diff-file\",\"sessionId\":\"s\",\"path\":\"p\",\"hunks\":\"h\",\"truncated\":false,\"binary\":false,\"x\":" +
+            "[".repeat(100_000) + "1" + "]".repeat(100_000) + "}"
+        // Not dropped: the frame decodes, its too-deep part is null.
+        val message = sm.parse(deep)
+        assertEquals(com.tether.app.protocol.ServerMessage.GitDiffFile("s", "p", "h", truncated = false, binary = false), message)
+        val objects = "{\"type\":\"x\",\"v\":" + "{\"a\":".repeat(50_000) + "1" + "}".repeat(50_000) + "}"
+        val unknown = sm.parse(objects) as com.tether.app.protocol.ServerMessage.Unknown
+        assertEquals("x", unknown.type)
+    }
+
+    @Test fun theGuardCountsObjectsAndSkipsStringsAndEscapes() {
+        assertEquals(true, sm.nestsDeeperThan("[[[", 2))
+        assertEquals(false, sm.nestsDeeperThan("[[]]", 2))
+        assertEquals(true, sm.nestsDeeperThan("{\"a\":{\"a\":{\"a\":1}}}", 2))
+        assertEquals(true, sm.nestsDeeperThan("[{\"a\":[1]}]", 2))
+        // Brackets inside strings, escaped quotes and escaped backslashes do not count.
+        assertEquals(false, sm.nestsDeeperThan("[\"[[[[\"]", 1))
+        assertEquals(false, sm.nestsDeeperThan("[\"\\\"[[[\"]", 1))
+        assertEquals(true, sm.nestsDeeperThan("[\"\\\\\",[[]]]", 2))
+        assertEquals(false, sm.nestsDeeperThan("\"" + "[".repeat(5_000) + "\\\"\"", 10))
+        // The rewrite keeps everything at or above the limit, strings intact.
+        assertEquals("[[null],\"[[[\"]", sm.flattenDeeperThan("[[[1,[2]]],\"[[[\"]", 2))
+        assertEquals("{\"a\":{\"b\":null,\"c\":\"}\\\"{\"}}", sm.flattenDeeperThan("{\"a\":{\"b\":{\"x\":\"]\"},\"c\":\"}\\\"{\"}}", 2))
+        assertEquals("[1]", sm.flattenDeeperThan("[1]", 5))
     }
 
     @Test fun aFrameAtTheLimitParsesAndItsValueIsCapped() = onSmallStack {

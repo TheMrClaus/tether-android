@@ -436,12 +436,14 @@ internal fun ToolCard(block: JsObj, showThinking: Boolean, modifier: Modifier = 
         )
         val input = block["input"]
         if (!input.isNullish()) ToolInputView(name, input)
-        (block["subagent"] as? JsObj)?.let { SubagentThread(it, parentRunning = state == ToolState.Running, showThinking = showThinking) }
+        val subagent = block["subagent"] as? JsObj
+        val plan = remember(block, showThinking) { cardMediaPlan(subagent, block, showThinking) }
+        subagent?.let { SubagentThread(it, parentRunning = state == ToolState.Running, showThinking = showThinking, tileLimits = plan.byEntry) }
         if (state == ToolState.Interrupted) InterruptedEvidence(output)
         if (block.isDone() && state != ToolState.Interrupted && !output.isNullish()) {
             val media = remember(output) { extractToolMedia(output) }
             val text = remember(output) { remainingToolText(output) }
-            ToolMediaRow(media)
+            ToolMediaRow(media, limit = plan.card)
             if (text.isNotEmpty()) ToolIoPre(text, output = true, contentDescription = null)
         }
     }
@@ -483,14 +485,10 @@ internal fun InterruptedEvidence(output: com.tether.app.protocol.tree.JsValue?) 
  * indented `space-md` behind a 2px `--line-strong` rail.
  */
 @Composable
-internal fun SubagentThread(thread: JsObj, parentRunning: Boolean, showThinking: Boolean) {
+internal fun SubagentThread(thread: JsObj, parentRunning: Boolean, showThinking: Boolean, tileLimits: Map<String, Int> = emptyMap()) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val order = (thread["order"] as? com.tether.app.protocol.tree.JsArr)?.mapNotNull { (it as? JsStr)?.value } ?: emptyList()
-    val byKey = thread["entries"] as? JsObj ?: JsObj.EMPTY
-    val entries = order.mapNotNull { byKey[it] as? JsObj }.filter { e ->
-        asString(e["kind"]) != "thinking" || (showThinking && !asString(e["text"]).isNullOrEmpty())
-    }
+    val entries = remember(thread, showThinking) { subagentEntries(thread, showThinking) }
     if (entries.isEmpty()) return
     val hasMedia = entries.any { asString(it["kind"]) == "tool" && extractToolMedia(it["output"]).isNotEmpty() }
     val open = rememberDetailsOpen(parentRunning || hasMedia)
@@ -528,7 +526,7 @@ internal fun SubagentThread(thread: JsObj, parentRunning: Boolean, showThinking:
                             MarkdownBody(blocks, LocalTetherTypography.current.chatBody.copy(fontSize = rem(0.82f)), t.ink)
                         }
                         "thinking" -> ThinkingCard(TurnBlock(blockId = asString(entry["key"]) ?: "", kind = "thinking", text = asString(entry["text"])))
-                        else -> SubagentToolCard(entry)
+                        else -> SubagentToolCard(entry, tileLimits[asString(entry["key"])] ?: 0)
                     }
                 }
             }
@@ -541,7 +539,7 @@ internal fun SubagentThread(thread: JsObj, parentRunning: Boolean, showThinking:
  * error, `--line-strong` interrupted); head padded 0.3rem `space-md`, mono 0.74rem, 12px glyphs.
  */
 @Composable
-private fun SubagentToolCard(entry: JsObj) {
+private fun SubagentToolCard(entry: JsObj, tileLimit: Int) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val state = toolStateOf(entry)
@@ -574,11 +572,37 @@ private fun SubagentToolCard(entry: JsObj) {
         if (!input.isNullish()) ToolInputView(asString(entry["name"]), input)
         if (state == ToolState.Interrupted) InterruptedEvidence(output)
         if (entry.isDone() && state != ToolState.Interrupted && !output.isNullish()) {
-            ToolMediaRow(remember(output) { extractToolMedia(output) })
+            ToolMediaRow(remember(output) { extractToolMedia(output) }, limit = tileLimit)
             val text = remember(output) { remainingToolText(output) }
             if (text.isNotEmpty()) ToolIoPre(text, output = true)
         }
     }
+}
+
+/** The thread's shown entries, in order (a thinking entry only when shown and non-empty). */
+internal fun subagentEntries(thread: JsObj, showThinking: Boolean): List<JsObj> {
+    val order = (thread["order"] as? com.tether.app.protocol.tree.JsArr)?.mapNotNull { (it as? JsStr)?.value } ?: emptyList()
+    val byKey = thread["entries"] as? JsObj ?: JsObj.EMPTY
+    return order.mapNotNull { byKey[it] as? JsObj }.filter { e ->
+        asString(e["kind"]) != "thinking" || (showThinking && !asString(e["text"]).isNullOrEmpty())
+    }
+}
+
+/** How many tiles each part of one tool card may draw: per sub-agent entry key, and the card's own result. */
+internal class CardMediaPlan(val byEntry: Map<String, Int>, val card: Int)
+
+/**
+ * R3-M1: one [MediaLimits.MAX_TILES] budget per card, in screen order — the sub-agent entries
+ * (which render first), then the card's own result.
+ */
+internal fun cardMediaPlan(subagent: JsObj?, block: JsObj, showThinking: Boolean): CardMediaPlan {
+    val entries = subagent?.let { subagentEntries(it, showThinking) } ?: emptyList()
+    fun shows(o: JsObj) = o.isDone() && !o.isInterrupted() && !o["output"].isNullish()
+    val keyed = entries.filter { asString(it["kind"]) != "message" && asString(it["kind"]) != "thinking" && shows(it) }
+        .map { (asString(it["key"]) ?: "") to extractToolMedia(it["output"]).size }
+    val cardCount = if (shows(block)) extractToolMedia(block["output"]).size else 0
+    val limits = tileBudget(keyed.map { it.second } + cardCount)
+    return CardMediaPlan(keyed.mapIndexed { i, (key, _) -> key to limits[i] }.toMap(), limits.last())
 }
 
 /**

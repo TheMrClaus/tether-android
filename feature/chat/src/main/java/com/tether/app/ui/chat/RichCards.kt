@@ -20,7 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -260,6 +263,7 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val view = remember(block) { fileChangeView(block) }
+    val plan = remember(view) { planDiffCard(view.changes.map { if (it.diff.isEmpty()) emptyList() else parseUnifiedDiff(it.diff) }, headerCost = 1) }
     RichCard(view.failed, "Codex file changes", nested = nested) {
         RichHead("File changes", richStatusText(view.running, view.failed, view.status), view.failed) {
             RichStatusIcon(view.running, view.failed)
@@ -267,7 +271,8 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
         }
         if (view.changes.isNotEmpty()) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                view.changes.forEach { change ->
+                // Only the changes the card's row budget reaches are drawn (a path row costs one).
+                view.changes.take(plan.groupsDrawn).forEachIndexed { changeIndex, change ->
                     Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp)) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
@@ -286,16 +291,15 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
                                     .semantics { contentDescription = change.kind },
                             )
                         }
-                        if (change.diff.isNotEmpty()) {
-                            val files = remember(change.diff) { parseUnifiedDiff(change.diff) }
+                        val files = plan.files[changeIndex]
+                        if (files.isNotEmpty()) {
                             Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                                files.forEachIndexed { index, file ->
-                                    DiffFile(file, fallbackLabel = file.newPath ?: file.oldPath ?: "Patch ${index + 1}")
-                                }
+                                files.forEach { planned -> DiffFile(planned.file, planned.label, planned.rows) }
                             }
                         }
                     }
                 }
+                plan.more?.let { DiffMore(it) }
             }
         } else if (view.streamingOutput.isEmpty()) {
             RichCopy("No file details were reported.")
@@ -388,7 +392,7 @@ private fun CodexSubagentActivityCard(block: JsObj, nested: Boolean) {
  * additions/deletions on the diff tints, the rest muted. Plain text: no syntax highlighting.
  */
 @Composable
-internal fun DiffFile(file: DiffFileView, fallbackLabel: String) {
+internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int = DIFF_CARD_MAX_ROWS) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val label = file.newPath ?: file.oldPath ?: fallbackLabel
@@ -401,20 +405,23 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String) {
             HeadIcon(TetherIcons.FileDiff, t.ink)
             Text(label.breakAnywhere(), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink)
         }
-        TetherExpandableBlock(clamp = toolClamp()) {
-            UnifiedDiffRows(file.rows, label)
+        // Collapsed, only a peek of rows is built (the clamp shows a few); open, up to [rowLimit].
+        var open by remember { mutableStateOf(false) }
+        val limit = minOf(rowLimit, file.rows.size)
+        TetherExpandableBlock(clamp = toolClamp(), onOpenChange = { open = it }, forceOverflow = limit > DIFF_PEEK_ROWS) {
+            val more = if (open && file.rows.size > limit) moreLinesLabel(file.rows.size - limit) else null
+            UnifiedDiffRows(file.rows, label, if (open) limit else minOf(limit, DIFF_PEEK_ROWS), more)
         }
     }
 }
 
 @Composable
-private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String) {
-    // Security review M3: at most DIFF_FILE_MAX_ROWS rows, each cut at DIFF_LINE_MAX characters,
-    // then a "+N more lines" row (the web draws every row in full).
-    val rows = remember(allRows) {
-        val shown = allRows.take(DIFF_FILE_MAX_ROWS).map { if (it.text.length > DIFF_LINE_MAX) it.copy(text = cutLine(it.text)) else it }
-        val hidden = allRows.size - shown.size
-        if (hidden > 0) shown + UnifiedDiffRow("more", "…", moreLinesLabel(hidden)) else shown
+private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String, limit: Int, more: String?) {
+    // Security review M3 / R3-M2: [limit] rows (the card's budget share, or a peek while
+    // collapsed), each cut at UNIFIED_LINE_MAX characters; a file the card cut short says how much.
+    val rows = remember(allRows, limit, more) {
+        val shown = allRows.take(limit).map { if (it.text.length > UNIFIED_LINE_MAX) it.copy(text = cutLine(it.text, UNIFIED_LINE_MAX)) else it }
+        if (more != null) shown + UnifiedDiffRow("more", "…", more) else shown
     }
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -470,6 +477,22 @@ private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String) {
     }
 }
 
+/** Rows a collapsed diff file builds (its clamp shows about a dozen). */
+internal const val DIFF_PEEK_ROWS = 64
+
+/** The card's "+N more lines · +M more files": faint italic mono under a rule. */
+@Composable
+private fun DiffMore(text: String) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Text(
+        text,
+        style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f), fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+        color = t.faint,
+        modifier = Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceXs).testTag("diff-more"),
+    )
+}
+
 /**
  * `CodexUnifiedDiff`: the turn's aggregate diff (`turn/diff/updated`), a `<details open>` card —
  * "Turn changes" and its file count — then each file.
@@ -487,8 +510,10 @@ internal fun CodexUnifiedDiff(unifiedDiff: String, label: String = "Turn changes
             HeadIcon(TetherIcons.FileDiff, t.muted, 15.dp)
         }
         if (open.value) {
+            val plan = remember(files) { planDiffCard(listOf(files)) }
             Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                files.forEachIndexed { index, file -> DiffFile(file, "Patch ${index + 1}") }
+                plan.files.single().forEach { planned -> DiffFile(planned.file, "Patch ${files.indexOf(planned.file) + 1}", planned.rows) }
+                plan.more?.let { DiffMore(it) }
             }
         }
     }
