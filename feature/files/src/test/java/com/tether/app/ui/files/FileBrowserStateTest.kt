@@ -312,6 +312,13 @@ class FileBrowserStateTest {
         assertEquals("the refused one says why, in the server's words", UploadNames.INVALID, s.mutationError)
     }
 
+    @Test fun theIdentityIsTheServerWhileSignedInAndNothingOnceRefused() {
+        assertEquals("https://a", FileBrowserViewModel.identity(true, com.tether.app.client.ConnectionState.Connected, "https://a"))
+        assertEquals("a reconnect is still the same session", "https://a", FileBrowserViewModel.identity(true, com.tether.app.client.ConnectionState.Connecting, "https://a"))
+        assertNull("signed out", FileBrowserViewModel.identity(false, com.tether.app.client.ConnectionState.Disconnected, "https://a"))
+        assertNull("credential refused", FileBrowserViewModel.identity(true, com.tether.app.client.ConnectionState.AuthRequired, "https://a"))
+    }
+
     @Test fun closeLetsGoOfThePreview() = runTest {
         files.texts[readme.path] = FilesResult.Ok(README_TEXT)
         val s = browser()

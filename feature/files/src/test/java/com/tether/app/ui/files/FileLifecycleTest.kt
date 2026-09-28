@@ -256,6 +256,28 @@ class FileLifecycleTest {
         assertEquals("discard share-2", fake.calls.last())
     }
 
+    @Test fun aShareSheetThePlatformRefusesDiscardsTheCopyWithoutACrash() {
+        val ready = ShareReady(target, "application/pdf", "report.pdf", "share-3")
+        val fake = FakePlatform().apply { share = FilesResult.Ok(ready) }
+        files.listings[ROOT] = FilesResult.Ok(FilesFixtures.listing())
+        val s = FileBrowserState(files, fake, CoroutineScope(Dispatchers.Main)).apply { cwd = ROOT }
+        rule.setContent {
+            val base = androidx.compose.ui.platform.LocalContext.current
+            val refusing = object : android.content.ContextWrapper(base) {
+                override fun startActivity(intent: android.content.Intent?) = throw SecurityException("chooser refused")
+            }
+            com.tether.app.ui.theme.TetherTheme(com.tether.app.ui.theme.ThemeChoice(com.tether.app.ui.theme.TetherSkin.Machine.family, com.tether.app.ui.theme.ThemeMode.Dark)) {
+                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalContext provides refusing) { WorkspaceFileBrowser(s) }
+            }
+        }
+        rule.runOnIdle { s.open() }
+        rule.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); s.listing != null }
+        rule.runOnIdle { s.share(entry) }
+        rule.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); fake.calls.contains("discard share-3") }
+        assertNull(s.pendingShare)
+        assertFalse("never claimed", fake.calls.contains("claim share-3"))
+    }
+
     // --- process start sweep (L3, H3) ---
 
     @Test fun theProviderSweepsWhatAPreviousProcessLeftOffTheMainThread() {

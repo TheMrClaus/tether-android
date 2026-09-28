@@ -59,8 +59,10 @@ class FileBrowserViewModel(
     companion object {
         /** The server a signed-in client talks to; null while nobody is signed in there. */
         fun identityOf(client: TetherClient): Flow<String?> =
-            combine(client.configured, client.connection, client.serverUrl) { configured, connection, url ->
-                if (configured && connection !is ConnectionState.AuthRequired) url else null
-            }
+            combine(client.configured, client.connection, client.serverUrl, ::identity)
+
+        /** Signed in = configured and not refused (the shell shows the login screen on AuthRequired). */
+        fun identity(configured: Boolean, connection: ConnectionState, serverUrl: String?): String? =
+            if (configured && connection !is ConnectionState.AuthRequired) serverUrl else null
     }
 }
