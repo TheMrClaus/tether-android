@@ -175,6 +175,29 @@ class MirrorLifecycleSecurityTest {
     }
 
     @Test
+    fun aSessionOpenedRightAfterASwitchNeverShowsTheOldServersCopy() {
+        mirroredThenKilled()
+        // Process 2: signed in to server A, s1 mirrored there, not opened yet.
+        h.boot(handshake = false)
+        val b = okhttp3.mockwebserver.MockWebServer()
+        try {
+            b.start()
+            b.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_129))
+            b.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=b; Path=/").setBody("{}"))
+            b.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+            // In the window after the switch to B and before the mirror re-binds, the UI opens s1.
+            h.client.raceHook = { point, _ -> if (point == com.tether.app.client.RacePoint.OriginSwitched) h.client.attach("s1") }
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(b.url("/").toString(), "pw") })
+            h.client.raceHook = null
+            runBlocking { h.mirror.flush() }
+            Thread.sleep(200)
+            assertNull("server A's saved transcript shown under server B", h.client.projectionTrees.value["s1"])
+        } finally {
+            b.shutdown()
+        }
+    }
+
+    @Test
     fun onlyListedOrAttachedSessionsAreMirrored() {
         h.boot(ready = ready("listed"))
         // Unsolicited states (the server broadcasts to every socket): one for a listed session,

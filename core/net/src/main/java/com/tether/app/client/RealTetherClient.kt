@@ -77,7 +77,7 @@ internal fun displayHost(origin: String, versus: String? = null): String {
 }
 
 /** See RealTetherClient.raceHook (tests only). */
-internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted }
+internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted, OriginSwitched }
 
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
@@ -596,6 +596,8 @@ class RealTetherClient(
         // A new sign-in (possibly to another server): its hello brings its own list.
         clearSignInViews()
         switch?.let(::completeOriginSwitch)
+        // T13.1 L1 test seam: the server just switched and the mirror is not re-bound yet.
+        if (switch != null) raceHook?.invoke(RacePoint.OriginSwitched, null)
         // The new origin's own unsent input, before the connection comes up.
         bindPendingToCurrentServer()
         start()
