@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,6 +110,9 @@ fun ChatScreen(
         consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed)
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
+    // Round 3: ONE saved store for every card of this screen (transcript and run tabs alike), above
+    // the lazy lists and the tab switch, so a narrowed grant outlives a scroll, a tab and a drop.
+    val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
 
     LaunchedEffect(session?.id, session?.provider) {
         val s = session
@@ -162,7 +166,7 @@ fun ChatScreen(
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader) {
+            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalCardStates provides cardStates) {
             when {
                 session == null -> EmptyCentered(
                     title = "No session selected",
@@ -283,8 +287,8 @@ private fun RunTab(
 ) {
     val listState = rememberLazyListState()
     val state = remember(projection, tree) { cardTree(projection, tree) }
-    val pending = remember(state, showApprovals, consent.origin) { if (showApprovals) pendingApprovals(state, consent.origin) else emptyList() }
-    val pendingQ = remember(state, consent.origin) { pendingQuestions(state, consent.origin) }
+    val pending = remember(state, showApprovals) { if (showApprovals) pendingApprovals(state) else emptyList() }
+    val pendingQ = remember(state) { pendingQuestions(state) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
 
     // Web parity: a running run follows the newest activity as its thread
@@ -313,10 +317,10 @@ private fun RunTab(
             SubagentRunPanel(run = run, showThinking = showThinking)
         }
         pending.forEach { approval ->
-            item(key = "approval/${approval.requestId}") { ApprovalCard(approval) }
+            item(key = "approval/${approval.requestId}/${approval.contentFp}") { ApprovalCard(approval) }
         }
         pendingQ.forEach { question ->
-            item(key = "question/${question.requestId}") { QuestionCard(question, answered = question.requestId in answeredIds) }
+            item(key = "question/${question.requestId}/${question.contentFp}") { QuestionCard(question, answered = question.requestId in answeredIds) }
         }
     }
     }

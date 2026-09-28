@@ -2674,7 +2674,7 @@ class RealTetherClient(
         val message = ClientMessage.Question(sessionId, requestId, answers, response)
         return transmitConsent(sessionId, requestId, expectedFingerprint, message, ConsentGuard::pendingQuestion) { tree, request ->
             // An answer already on record (question_answered, from this or another device) closes it.
-            if (ConsentGuard.isAnswered(tree, requestId)) ConsentResult.NotPending else ConsentGuard.checkQuestion(request, answers)
+            if (ConsentGuard.isAnswered(tree, requestId)) ConsentResult.NotPending else ConsentGuard.checkQuestion(request, answers, response)
         }
     }
 

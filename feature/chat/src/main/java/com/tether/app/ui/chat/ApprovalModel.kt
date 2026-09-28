@@ -58,13 +58,16 @@ internal data class RequestedPermissionsView(
 
 /**
  * One pending approval (`turn.pendingApprovals[requestId]`). [requestId] is the map key (I4: a
- * non-string `requestId` field never hides the card); [fingerprint] binds a decision to exactly this
- * request, turn and server ([ConsentGuard.fingerprint]).
+ * non-string `requestId` field never hides the card). [contentFp] is the card's identity
+ * (CardStateStore: the request and its turn, no origin); the origin-bound fingerprint the client
+ * checks is derived from [request] + [activeTurnId] at composition ([wireFingerprint]).
  */
 @Immutable
 internal data class ApprovalView(
     val requestId: String,
-    val fingerprint: String,
+    val contentFp: String,
+    val activeTurnId: String,
+    val request: JsObj,
     val toolId: String,
     val name: String,
     /** `approval.input`; null when absent or null (then no ToolInput renders). */
@@ -83,7 +86,7 @@ internal data class ApprovalView(
     val allowsSubset: Boolean get() = choices.any { it.permissionGrant == "subset" }
 }
 
-internal fun approvalView(requestId: String, obj: JsObj, origin: String, activeTurnId: String): ApprovalView {
+internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String): ApprovalView {
     val metadata = obj["metadata"] as? JsObj
     val network = (metadata?.get("network") as? JsObj)?.let { n ->
         val host = n["host"].string() ?: return@let null
@@ -102,7 +105,9 @@ internal fun approvalView(requestId: String, obj: JsObj, origin: String, activeT
     val input = obj["input"]?.takeUnless { it === JsNull }
     return ApprovalView(
         requestId = requestId,
-        fingerprint = ConsentGuard.fingerprint(origin, activeTurnId, obj),
+        contentFp = ContentFingerprints.of(activeTurnId, obj),
+        activeTurnId = activeTurnId,
+        request = obj,
         toolId = obj["toolId"].string().orEmpty(),
         name = cut(obj["name"].string().orEmpty(), 200),
         input = input,
@@ -163,11 +168,22 @@ internal data class QuestionOptionView(val label: String, val description: Strin
 @Immutable
 internal data class QuestionPromptView(val question: String, val header: String?, val multiSelect: Boolean, val options: List<QuestionOptionView>)
 
-/** One pending AskUserQuestion (`turn.pendingQuestions[requestId]`); the id and fingerprint as for [ApprovalView]. */
+/** One pending AskUserQuestion (`turn.pendingQuestions[requestId]`); id and identity as for [ApprovalView]. */
 @Immutable
-internal data class QuestionRequestView(val requestId: String, val fingerprint: String, val toolId: String, val prompts: List<QuestionPromptView>)
+internal data class QuestionRequestView(
+    val requestId: String,
+    val contentFp: String,
+    val activeTurnId: String,
+    val request: JsObj,
+    val toolId: String,
+    val prompts: List<QuestionPromptView>,
+)
 
-internal fun questionView(requestId: String, obj: JsObj, origin: String, activeTurnId: String): QuestionRequestView {
+/** The origin-bound fingerprint the client checks ([ConsentGuard.fingerprint]); "" origin when there is no live socket. */
+internal fun wireFingerprint(origin: String?, activeTurnId: String, request: JsObj): String =
+    ConsentGuard.fingerprint(origin.orEmpty(), activeTurnId, request)
+
+internal fun questionView(requestId: String, obj: JsObj, activeTurnId: String): QuestionRequestView {
     val prompts = obj["questions"].objects().mapNotNull { q ->
         // The prompt text is the answers map's key, so it is kept whole (never cut).
         val text = q["question"].string() ?: return@mapNotNull null
@@ -181,7 +197,7 @@ internal fun questionView(requestId: String, obj: JsObj, origin: String, activeT
             },
         )
     }
-    return QuestionRequestView(requestId, ConsentGuard.fingerprint(origin, activeTurnId, obj), obj["toolId"].string().orEmpty(), prompts)
+    return QuestionRequestView(requestId, ContentFingerprints.of(activeTurnId, obj), activeTurnId, obj, obj["toolId"].string().orEmpty(), prompts)
 }
 
 /** The `question` reply payload (chat-view.tsx:940-957 buildQuestionAnswers). */
@@ -218,10 +234,13 @@ internal fun isPromptAnswered(q: QuestionPromptView, picks: Map<String, List<Str
     picks[q.question].orEmpty().isNotEmpty() || jsTrim(other[q.question].orEmpty()).isNotEmpty()
 
 /** `toggle(q, label)`: multi-select adds/removes; single-select picks one or clears it. */
-internal fun togglePick(current: List<String>, q: QuestionPromptView, label: String): List<String> = when {
-    q.multiSelect -> if (label in current) current.filter { it != label } else current + label
-    label in current -> emptyList()
-    else -> listOf(label)
+internal fun togglePick(current: List<String>, q: QuestionPromptView, label: String): List<String> = togglePick(current, q.multiSelect, label)
+
+/** The same toggle over any pick key (labels, or option indices in the card store). */
+internal fun <T> togglePick(current: List<T>, multi: Boolean, pick: T): List<T> = when {
+    multi -> if (pick in current) current.filter { it != pick } else current + pick
+    pick in current -> emptyList()
+    else -> listOf(pick)
 }
 
 @Immutable
@@ -404,22 +423,18 @@ internal fun activeTurnOf(tree: JsObj?): JsObj? {
     return (state["turnsById"] as? JsObj)?.get(active) as? JsObj
 }
 
-/**
- * The active turn's pending approvals, in insertion order (`Object.values(activeTurn.pendingApprovals)`),
- * fingerprinted for [origin] (the live socket's server; "" when there is none, and then no card is
- * actionable anyway).
- */
-internal fun pendingApprovals(tree: JsObj?, origin: String?): List<ApprovalView> {
+/** The active turn's pending approvals, in insertion order (`Object.values(activeTurn.pendingApprovals)`). */
+internal fun pendingApprovals(tree: JsObj?): List<ApprovalView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingApprovals") as? JsObj ?: return emptyList()
-    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { approvalView(key, it, origin.orEmpty(), turnId) } }
+    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { approvalView(key, it, turnId) } }
 }
 
-/** The active turn's pending questions, fingerprinted as [pendingApprovals]. */
-internal fun pendingQuestions(tree: JsObj?, origin: String?): List<QuestionRequestView> {
+/** The active turn's pending questions. */
+internal fun pendingQuestions(tree: JsObj?): List<QuestionRequestView> {
     val turnId = ConsentGuard.activeTurnId(tree) ?: return emptyList()
     val map = activeTurnOf(tree)?.get("pendingQuestions") as? JsObj ?: return emptyList()
-    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { questionView(key, it, origin.orEmpty(), turnId) } }
+    return map.entries.mapNotNull { (key, value) -> (value as? JsObj)?.let { questionView(key, it, turnId) } }
 }
 
 /** The request ids the active turn already records an answer for. */

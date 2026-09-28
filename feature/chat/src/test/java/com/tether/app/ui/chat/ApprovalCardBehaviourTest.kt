@@ -96,7 +96,8 @@ class ApprovalCardBehaviourTest {
 
     /** The fingerprint the card renders for [requestId] of [f]. */
     private fun fpOf(f: ChatFixtures.Folded, requestId: String): String =
-        (pendingApprovals(f.tree, TEST_ORIGIN).map { it.requestId to it.fingerprint } + pendingQuestions(f.tree, TEST_ORIGIN).map { it.requestId to it.fingerprint })
+        (pendingApprovals(f.tree).map { it.requestId to wireFingerprint(TEST_ORIGIN, it.activeTurnId, it.request) } +
+            pendingQuestions(f.tree).map { it.requestId to wireFingerprint(TEST_ORIGIN, it.activeTurnId, it.request) })
             .first { it.first == requestId }.second
 
     private var fixture by mutableStateOf(ApprovalFixtures.write)
@@ -121,6 +122,7 @@ class ApprovalCardBehaviourTest {
         consent = c
         rule.setContent {
             ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides store) {
                 androidx.compose.runtime.key(generation) {
                     ChatTranscript(
                         projection = fixture.projection,
@@ -132,6 +134,7 @@ class ApprovalCardBehaviourTest {
                         listState = listState,
                     )
                 }
+                }
             }
             hostView = androidx.compose.ui.platform.LocalView.current
         }
@@ -140,6 +143,9 @@ class ApprovalCardBehaviourTest {
     }
 
     private val listState = androidx.compose.foundation.lazy.LazyListState()
+
+    /** The card store the screen would provide (tests reach in to simulate a lost record). */
+    private val store = CardStateStore()
     private var hostView: android.view.View? = null
 
     /** I3: let the cards' arm delay pass (a fresh or changed card is disabled for 500 ms). */
@@ -308,6 +314,7 @@ class ApprovalCardBehaviourTest {
         rule.onAllNodesWithTag("question-option")[0].assertIsOn()
         rule.onNodeWithTag("question-next").assertIsEnabled().performClick()
         rule.waitForIdle()
+        arm() // L2: a new page re-arms
         scrollTo("question-submit")
         rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
         rule.onNodeWithText("staging").performClick()
@@ -327,6 +334,7 @@ class ApprovalCardBehaviourTest {
         scrollTo("question-skip")
         rule.onNodeWithTag("question-skip").assertHeightIsAtLeast(44.dp).performClick() // skip page 1
         rule.waitForIdle()
+        arm()
         scrollTo("question-submit")
         rule.onNodeWithTag("question-submit").performClick() // page 2 unanswered
         rule.waitForIdle()
@@ -540,6 +548,9 @@ class ApprovalCardBehaviourTest {
         tapWithFlags("approval-allow", android.view.MotionEvent.FLAG_WINDOW_IS_OBSCURED)
         tapWithFlags("approval-deny", FLAG_PARTIALLY_OBSCURED)
         assertTrue("an obscured touch decided: $calls", calls.isEmpty())
+        // The refusal is explained, in words.
+        rule.onNodeWithTag("consent-overlay").assertIsDisplayed()
+        rule.onNodeWithText(OVERLAY_COPY).assertIsDisplayed()
         // The same touch, unobscured, is a tap: the filter is what refused it.
         tapWithFlags("approval-allow", 0)
         assertEquals(listOf("approval:req-w:allow"), calls)
@@ -575,6 +586,232 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithText(UNCONFIRMED_COPY).assertIsDisplayed()
         rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
         assertTrue(calls.isEmpty())
+    }
+    // ---- round 3: identity (N1), lost records (L1), page re-arm (L2), Bundle size (L3) ----------
+
+    /** [base] with req-g re-raised under the SAME id, wider: a second write path, still network. */
+    private fun widerGrants(base: ChatFixtures.Folded, turnId: String): ChatFixtures.Folded {
+        val tree = foldTree(base.tree, ev("approval_request", turnId, ts = 2) {
+            put("requestId", "req-g"); put("toolId", "perm-1"); put("name", "permissions")
+            putJsonArray("choices") {
+                addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") }
+            }
+            putJsonObject("metadata") {
+                put("provider", "codex"); put("kind", "permissions")
+                putJsonObject("requestedPermissions") {
+                    putJsonObject("fileSystem") {
+                        putJsonArray("read") { add("/srv/fixtures"); add("/srv/schema.sql") }
+                        putJsonArray("write") { add("/w/report"); add("/etc") }
+                    }
+                    putJsonObject("network") { put("enabled", true) }
+                }
+            }
+        })
+        return ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    private fun assertR2FullAndUnconfirmed() {
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        rule.onAllNodesWithTag("grant-write").assertCountEquals(2)
+        rule.onAllNodesWithTag("grant-write")[1].assertIsOn()
+        rule.onAllNodesWithTag("grant-read")[0].assertIsOn()
+        rule.onNodeWithTag("grant-network").assertIsOn()
+        // Everything ticked is the full expansion: Allow selected needs the confirmation too.
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+    }
+
+    @Test fun aWiderReRaiseWhileTheCardIsOffScreenStartsFromScratch() {
+        show(grantsAfterHistory)
+        narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.runOnIdle { kotlinx.coroutines.runBlocking { listState.scrollToItem(0) } }
+        rule.waitForIdle()
+        rule.onAllNodesWithTag("approval-card").assertCountEquals(0)
+        rule.runOnIdle { fixture = widerGrants(grantsAfterHistory, "g1") }
+        rule.waitForIdle()
+        scrollTo("approval-choice")
+        arm()
+        assertR2FullAndUnconfirmed()
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun aWiderReRaiseAcrossStateRestorationStartsFromScratch() {
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
+        var f by mutableStateOf(ApprovalFixtures.grants)
+        val c = actions()
+        tester.setContent {
+            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        // The saved state was written for R1; R2 (same id, wider) is what the restored screen shows.
+        f = widerGrants(ApprovalFixtures.grants, "t1")
+        tester.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        arm()
+        assertR2FullAndUnconfirmed()
+    }
+
+    @Test fun theSameRequestKeepsItsNarrowingAcrossRestorationButNotTheConfirmation() {
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
+        val c = actions()
+        tester.setContent {
+            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                ChatTranscript(projection = ApprovalFixtures.grants.projection, tree = ApprovalFixtures.grants.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        narrowTheGrant()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        tester.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        arm()
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
+        // Never saved: losing it only narrows (the operator confirms again).
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+    }
+
+    @Test fun aLostRecordFallsBackToTheFullGrantThatNeedsTheConfirmation() {
+        // L1: whatever drops a card's record (the store's bound), the card comes back fully ticked,
+        // which is the full expansion, so neither grant key works without the confirmation (I5).
+        show(ApprovalFixtures.grants)
+        narrowTheGrant()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
+        rule.runOnIdle { store.clear() }
+        rule.waitForIdle()
+        rule.onNodeWithTag("grant-network").assertIsOn()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        assertTrue(calls.isEmpty())
+    }
+
+    /** The question fixture with q-1 re-raised under the same id, a third option on page 1. */
+    private fun widerQuestion(): ChatFixtures.Folded {
+        val tree = foldTree(ApprovalFixtures.question.tree, ev("question_request", "t1", ts = 2) {
+            put("requestId", "q-1"); put("toolId", "ask-1")
+            putJsonArray("questions") {
+                addJsonObject {
+                    put("question", ApprovalFixtures.Q_DB); put("header", "Database"); put("multiSelect", false)
+                    putJsonArray("options") {
+                        addJsonObject { put("label", "Postgres"); put("description", "") }
+                        addJsonObject { put("label", "SQLite"); put("description", "") }
+                        addJsonObject { put("label", "DynamoDB"); put("description", "") }
+                    }
+                }
+            }
+        })
+        return ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    @Test fun aQuestionsPicksAndPageSurviveStateRestoration() {
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
+        val c = actions()
+        tester.setContent {
+            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                ChatTranscript(projection = ApprovalFixtures.question.projection, tree = ApprovalFixtures.question.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        scrollTo("question-next")
+        rule.onNodeWithText("SQLite").performClick()
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle()
+        arm()
+        rule.onNodeWithText("production").performClick()
+        tester.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        arm()
+        scrollTo("question-submit")
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onAllNodesWithTag("question-option")[1].assertIsOn()
+        rule.onNodeWithTag("question-submit").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("question:q-1:{${ApprovalFixtures.Q_DB}=SQLite, ${ApprovalFixtures.Q_ENV}=production}"), calls)
+    }
+
+    @Test fun aReRaisedQuestionStartsOverOnScreenAndAcrossRestoration() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("SQLite").performClick()
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle()
+        rule.runOnIdle { fixture = widerQuestion() }
+        rule.waitForIdle()
+        arm()
+        scrollTo("question-submit")
+        // Page 1 of the new request (it has one question), nothing picked.
+        rule.onAllNodesWithTag("question-option").assertCountEquals(3)
+        rule.onAllNodesWithTag("question-option")[1].assertIsOff()
+        rule.onNodeWithTag("question-submit").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-validation").assertIsDisplayed()
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun aDoubleTapAcrossAPageChangeLandsOnNothing() {
+        // L2: tap Next, and a second tap at once where page 2's Skip / Submit now are.
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-next").assertIsEnabled()
+        // (waitForIdle recomposes but never lets the arm delay's virtual 500 ms pass: arm() does.)
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread { next() }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-submit").assertIsNotEnabled()
+        rule.onNodeWithTag("question-skip").assertIsNotEnabled()
+        val skip = rule.onNodeWithTag("question-skip").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            skip()
+            submit()
+        }
+        rule.waitForIdle()
+        assertTrue("a tap meant for page 1 decided page 2: $calls", calls.isEmpty())
+        arm()
+        rule.onNodeWithTag("question-skip").assertIsEnabled()
+    }
+
+    @Test fun aHugeQuestionIsNeverWrittenIntoTheSavedState() {
+        // L3: the store saves indices and the operator's own text only.
+        val huge = "Pick one: " + "x".repeat(200_000)
+        val tree = foldTree(ApprovalFixtures.question.tree, ev("question_request", "t1", ts = 2) {
+            put("requestId", "q-big"); put("toolId", "ask-big")
+            putJsonArray("questions") {
+                addJsonObject {
+                    put("question", huge); put("header", "Huge"); put("multiSelect", false)
+                    putJsonArray("options") { addJsonObject { put("label", "y".repeat(50_000)); put("description", "") } }
+                }
+            }
+        })
+        show(ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("question-card"))
+        rule.onAllNodesWithTag("question-option").onFirst().performClick()
+        rule.waitForIdle()
+        val saved = store.encode()
+        assertTrue("saved state is ${saved.length} chars", saved.length < 1_000)
+        assertTrue(!saved.contains("xxxxxxxx") && !saved.contains("yyyyyyyy"))
+        // And it restores to the same picks.
+        val back = CardStateStore.decode(saved)
+        assertEquals(store.encode(), back.encode())
     }
 }
 
@@ -677,5 +914,95 @@ class ApprovalScreenBehaviourTest {
         rule.onNodeWithText(ConsentLock.ReadOnly.copy).assertIsDisplayed()
         rule.onNodeWithTag("question-submit").assertIsNotEnabled()
         assertTrue(client.consentCalls.isEmpty())
+    }
+
+    // ---- round 3: the card state survives a link blip and a tab switch (B1) -------------------
+
+    /** The link drops (as a background grace-period close does) and comes back to the same server. */
+    private fun blip(client: ChatTestClient) {
+        rule.runOnIdle {
+            client.link.value = ConnectionState.Disconnected
+            client.origin.value = null
+            client.live.value = emptySet()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            client.link.value = ConnectionState.Connected
+            client.origin.value = TEST_ORIGIN
+            client.live.value = setOf("s1")
+        }
+        rule.waitForIdle()
+        arm()
+    }
+
+    @Test fun aNarrowedGrantSurvivesATransientReconnect() {
+        val client = ChatTestClient()
+        client.show(session, ApprovalFixtures.grants)
+        host(client)
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").performClick()
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        blip(client)
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        rule.onAllNodesWithTag("grant-read")[0].assertIsOn()
+    }
+
+    @Test fun aQuestionPageSurvivesATransientReconnect() {
+        val client = ChatTestClient()
+        client.show(session, ApprovalFixtures.question)
+        host(client)
+        scrollTo("question-next")
+        rule.onNodeWithText("SQLite").performClick()
+        rule.onNodeWithTag("question-next").performClick()
+        rule.waitForIdle()
+        arm()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        blip(client)
+        scrollTo("question-submit")
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithText("staging").performClick()
+        rule.onNodeWithTag("question-submit").performClick()
+        rule.waitForIdle()
+        // Page 1's pick survived the blip too.
+        assertEquals(listOf("question:s1:q-1:{${ApprovalFixtures.Q_DB}=SQLite, ${ApprovalFixtures.Q_ENV}=staging}"), client.consentCalls)
+    }
+
+    @Test fun aBlipThenAFurtherNarrowingSendsWhatTheOperatorUnticked() {
+        val client = ChatTestClient()
+        client.show(session, ApprovalFixtures.grants)
+        host(client)
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").performClick() // network off
+        blip(client)
+        scrollTo("grant-network")
+        rule.onAllNodesWithTag("grant-read")[0].performClick() // /srv/fixtures off
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        rule.waitForIdle()
+        assertEquals(
+            listOf("approval:s1:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),
+            client.consentCalls,
+        )
+    }
+
+    @Test fun aNarrowingSurvivesASwitchToARunTabAndBack() {
+        val tree = foldTree(
+            ApprovalFixtures.grants.tree,
+            ev("tool_start", "t1", ts = 1) { put("toolId", "task-9"); put("name", "Agent"); putJsonObject("input") { put("description", "Survey") } },
+        )
+        val client = ChatTestClient()
+        client.show(session, ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
+        val vm = host(client)
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").performClick()
+        rule.runOnIdle { vm.selectRun("s1", "t1::task-9") }
+        rule.waitForIdle()
+        arm()
+        rule.onNodeWithTag("grant-network").assertIsOff() // the run tab shows the same card, same state
+        rule.runOnIdle { vm.selectRun("s1", null) }
+        rule.waitForIdle()
+        arm()
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").assertIsOff()
     }
 }

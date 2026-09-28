@@ -556,7 +556,7 @@ class FakeTetherClient : TetherClient {
         answers: Map<String, String>,
         response: String?,
     ): ConsentResult {
-        val result = decide(sessionId, requestId, expectedFingerprint, question = true) { ConsentGuard.checkQuestion(it, answers) }
+        val result = decide(sessionId, requestId, expectedFingerprint, question = true) { ConsentGuard.checkQuestion(it, answers, response) }
         if (result == ConsentResult.Sent) answer(sessionId, requestId, answers)
         return result
     }

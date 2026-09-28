@@ -17,7 +17,7 @@ import org.junit.Test
 class ApprovalModelTest {
 
     private fun items(fixture: ChatFixtures.Folded, open: Boolean = false, showApprovals: Boolean = true) =
-        buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone, groupOpen = { _, d -> open || d }, showApprovals = showApprovals, consentOrigin = TEST_ORIGIN)
+        buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone, groupOpen = { _, d -> open || d }, showApprovals = showApprovals)
 
     private fun ChatItem.label(): String = when (this) {
         is ChatItem.Block -> "block:${block.blockId}"
@@ -110,7 +110,7 @@ class ApprovalModelTest {
     }
 
     @Test fun aChoiceSendsOnlyWhatItsGrantAllows() {
-        val view = pendingApprovals(ApprovalFixtures.grants.tree, TEST_ORIGIN).single()
+        val view = pendingApprovals(ApprovalFixtures.grants.tree).single()
         val (all, some, deny) = view.choices
         val requested = checkNotNull(view.requested)
         assertEquals(listOf("/srv/fixtures", "/srv/schema.sql"), requested.read)
@@ -131,7 +131,7 @@ class ApprovalModelTest {
     }
 
     @Test fun approvalViewReadsTheWebsFields() {
-        val view = pendingApprovals(ApprovalFixtures.choices.tree, TEST_ORIGIN).single()
+        val view = pendingApprovals(ApprovalFixtures.choices.tree).single()
         assertEquals("command_execution", view.name)
         assertEquals("The command reaches outside the workspace sandbox.", view.reason)
         assertEquals("/w/pipeline", view.cwd)
@@ -142,7 +142,7 @@ class ApprovalModelTest {
     }
 
     @Test fun questionPagingHelpersFollowTheWeb() {
-        val q = pendingQuestions(ApprovalFixtures.question.tree, TEST_ORIGIN).single()
+        val q = pendingQuestions(ApprovalFixtures.question.tree).single()
         val (db, env) = q.prompts
         assertEquals(listOf("Postgres"), togglePick(emptyList(), db, "Postgres"))
         assertEquals(listOf("SQLite"), togglePick(listOf("Postgres"), db, "SQLite"))
@@ -157,19 +157,23 @@ class ApprovalModelTest {
         val tree = foldTree(ApprovalFixtures.write.tree, ev("approval_request", "t1", ts = 1) {
             put("requestId", 42); put("toolId", "t-42"); put("name", "Bash"); putJsonObject("input") { put("command", "ls") }
         })
-        val views = pendingApprovals(tree, TEST_ORIGIN)
+        val views = pendingApprovals(tree)
         assertEquals(listOf("req-w", "42"), views.map { it.requestId })
     }
 
-    @Test fun theFingerprintFollowsTheRequestTheTurnAndTheServer() {
-        val a = pendingApprovals(ApprovalFixtures.write.tree, TEST_ORIGIN).single().fingerprint
-        assertEquals(a, pendingApprovals(ApprovalFixtures.write.tree, TEST_ORIGIN).single().fingerprint)
-        assertTrue(a != pendingApprovals(ApprovalFixtures.write.tree, "http://other:1").single().fingerprint)
+    @Test fun theCardIdentityIgnoresTheServerButTheWireFingerprintDoesNot() {
+        val v = pendingApprovals(ApprovalFixtures.write.tree).single()
+        assertEquals(com.tether.app.client.ConsentGuard.fingerprint("", v.activeTurnId, v.request), v.contentFp)
+        assertTrue(wireFingerprint(TEST_ORIGIN, v.activeTurnId, v.request) != wireFingerprint("http://other:1", v.activeTurnId, v.request))
+        assertEquals(v.contentFp, pendingApprovals(ApprovalFixtures.write.tree).single().contentFp)
         val wider = foldTree(ApprovalFixtures.write.tree, ev("approval_request", "t1", ts = 1) {
             put("requestId", "req-w"); put("toolId", "toolu_w"); put("name", "Write")
             putJsonObject("input") { put("file_path", "/etc/passwd"); put("content", "x") }
         })
-        assertTrue(a != pendingApprovals(wider, TEST_ORIGIN).single().fingerprint)
+        val w = pendingApprovals(wider).single()
+        assertTrue(v.contentFp != w.contentFp)
+        // The lazy key carries it: the re-raised request is a different row.
+        assertTrue(ChatItem.Approval(v).key != ChatItem.Approval(w).key)
     }
 
     private companion object {

@@ -204,11 +204,11 @@ class ConsentTransmissionTest {
     fun aQuestionIsAnsweredOnceOnlyWithItsOwnQuestionsAndNeverAfterAnAnswerIsOnRecord() {
         val (client, ws) = connected()
         assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Something else?" to "x")))
-        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres"), "Postgres, please"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "Postgres, please"), "Postgres, please"))
         assertEquals(ConsentResult.AlreadyDecided, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), mapOf("Which DB?" to "SQLite")))
         val frame = consentFrames().single()
         assertEquals("q1", frame.str("requestId"))
-        assertEquals("""{"answers":{"Which DB?":"Postgres"},"response":"Postgres, please"}""", frame["answers"].toString())
+        assertEquals("""{"answers":{"Which DB?":"Postgres, please"},"response":"Postgres, please"}""", frame["answers"].toString())
 
     }
 
@@ -363,6 +363,16 @@ class ConsentTransmissionTest {
     }
 
     @Test
+    fun anAnswerValueTheRequestDidNotOfferIsRefused() {
+        val (client, _) = connected()
+        val fp = consentFp(client, "s1", "q1", question = true)
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "DROP TABLE users")))
+        assertEquals(ConsentResult.InvalidChoice, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "Postgres"), "extra instructions"))
+        assertTrue(consentFrames().isEmpty())
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", fp, mapOf("Which DB?" to "Postgres")))
+    }
+
+    @Test
     fun aForgedOrStaleFingerprintIsRefused() {
         val (client, _) = connected()
         assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", "0".repeat(64), choiceId = "accept"))
@@ -456,5 +466,43 @@ class ConsentGuardUnitTest {
         assertTrue("a still pending: kept", ledger.contains(e("a")))
         assertFalse("b resolved: evicted", ledger.contains(e("b")))
         assertFalse("a second claim of a kept request is refused", ledger.claim(e("a"), still))
+    }
+
+    private fun q(text: String, multi: Boolean, vararg labels: String) = com.tether.app.protocol.tree.JsObj.of(
+        "question" to com.tether.app.protocol.tree.JsStr(text),
+        "header" to com.tether.app.protocol.tree.JsStr("H"),
+        "multiSelect" to com.tether.app.protocol.tree.JsBool.of(multi),
+        "options" to com.tether.app.protocol.tree.JsArr.of(labels.map { com.tether.app.protocol.tree.JsObj.of("label" to com.tether.app.protocol.tree.JsStr(it)) }),
+    )
+
+    private val questionRequest = com.tether.app.protocol.tree.JsObj.of(
+        "requestId" to com.tether.app.protocol.tree.JsStr("q"),
+        "questions" to com.tether.app.protocol.tree.JsArr.of(
+            q("DB?", false, "Postgres", "SQLite"),
+            q("Env?", true, "staging", "production", "eu, us"),
+        ),
+    )
+
+    private fun ok(answers: Map<String, String>, response: String? = null) =
+        assertEquals("$answers / $response", null, ConsentGuard.checkQuestion(questionRequest, answers, response))
+
+    private fun bad(answers: Map<String, String>, response: String? = null) =
+        assertEquals("$answers / $response", ConsentResult.InvalidChoice, ConsentGuard.checkQuestion(questionRequest, answers, response))
+
+    @Test fun answerValuesAreOfferedLabelsOrTheOperatorsOwnOtherText() {
+        ok(emptyMap())
+        ok(mapOf("DB?" to "Postgres"))
+        ok(mapOf("Env?" to "production, staging"))
+        ok(mapOf("Env?" to "eu, us, staging")) // a label that itself contains ", "
+        ok(mapOf("DB?" to "Mongo"), "Mongo") // "Other" text, echoed in response
+        ok(mapOf("DB?" to "SQLite, with WAL", "Env?" to "staging, canary"), "with WAL\ncanary")
+        bad(mapOf("DB?" to "Mongo")) // free text that is not in response
+        bad(mapOf("DB?" to "Postgres, SQLite")) // two picks on a single-select question
+        bad(mapOf("Env?" to "staging, staging")) // a label twice
+        bad(mapOf("Env?" to "prod")) // not offered, not Other
+        bad(mapOf("DB?" to "")) // an empty answer (the web leaves the key out)
+        bad(mapOf("DB?" to "Postgres"), "smuggled") // response lines nobody typed into an answer
+        bad(mapOf("DB?" to "Mongo", "Env?" to "x"), "x\nMongo") // Other texts out of question order
+        bad(mapOf("Nope?" to "Postgres"))
     }
 }

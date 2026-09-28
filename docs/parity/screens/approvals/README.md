@@ -59,9 +59,21 @@ Divergences from the web, on purpose:
 - Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
   `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
   500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
-- Card state (ticks, confirmation, picks, page) survives scrolling and re-creation and is bound to the exact
-  request (its fingerprint): a re-raised request with the same id starts over. After process death a decision
-  may be made again (the in-memory ledger died with the process); a decision sent on a socket that then
-  dropped says "Sent before the connection dropped — delivery unconfirmed" and is never sent again.
+- Card state is bound to the exact request and kept per chat screen, not per row. Its identity is the
+  request's content fingerprint (the canonical request plus its turn, without the server origin); the lazy
+  row's key carries it, so a request re-raised under the same id with other content is a new card that starts
+  fully ticked, unconfirmed and on page 1, whether it changed on screen, off screen or across a restore.
+  The ticks, a question's page, picks, "Other" text and skips live in one saved store above the transcript
+  and the run tabs, by index (never the server's text), so they survive a scroll, a tab switch, a link drop
+  and reconnect to the same server, backgrounding and a configuration change. The "confirm the complete
+  expansion" tick is never saved: after any re-creation the operator confirms again. If a record is ever lost
+  (the store keeps the newest 64 per kind), the card comes back fully ticked, which needs the confirmation.
+  After process death a decision may be made again (the in-memory ledger died with the process); a decision
+  sent on a socket that then dropped says "Sent before the connection dropped — delivery unconfirmed" and is
+  never sent again. A question page change re-arms the 500 ms delay, and a touch refused because of an overlay
+  says so: "A screen overlay is blocking this card."
+- Question answers are validated like approval choices: every value is offered option labels (one at most on
+  a single-select question) and, optionally, the operator's own "Other" text, which must also be a line of
+  the response. An "Other" field drops line breaks, as an HTML text input does.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.

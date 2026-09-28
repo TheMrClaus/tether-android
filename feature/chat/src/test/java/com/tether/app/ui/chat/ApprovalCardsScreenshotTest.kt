@@ -75,7 +75,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
     val listState = LazyListState()
     val consent = shotConsent(
         lock = if (shot == ApprovalShot.Locked) ConsentLock.Offline else null,
-        decided = if (shot == ApprovalShot.Sent) setOf(consentKey("s1", "req-w", pendingApprovals(fixture.tree, TEST_ORIGIN).single().fingerprint)) else emptySet(),
+        decided = if (shot == ApprovalShot.Sent) setOf(consentKey("s1", "req-w", pendingApprovals(fixture.tree).single().let { wireFingerprint(TEST_ORIGIN, it.activeTurnId, it.request) })) else emptySet(),
     )
     setContent {
         ChatHost(skin, wellHeight, wellWidth) {
@@ -100,6 +100,8 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
         ApprovalShot.QuestionValidation -> {
             onNodeWithText("Postgres").performClick()
             onNodeWithTag("question-next").performClick()
+            waitForIdle()
+            mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100) // L2: page 2 re-arms
             waitForIdle()
             onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("question-submit"))
             onNodeWithTag("question-submit").performClick()

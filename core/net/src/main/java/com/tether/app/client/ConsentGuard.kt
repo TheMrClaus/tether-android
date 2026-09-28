@@ -113,11 +113,60 @@ object ConsentGuard {
         }
     }
 
-    /** Null when every key of [answers] is one of [request]'s question texts. */
-    fun checkQuestion(request: JsObj, answers: Map<String, String>): ConsentResult? {
-        val texts = (request["questions"] as? JsArr).orEmpty().mapNotNullTo(HashSet()) { ((it as? JsObj)?.get("question") as? JsStr)?.value }
-        return if (answers.keys.all { it in texts }) null else ConsentResult.InvalidChoice
+    /**
+     * Null when [answers] / [response] are what the web's `buildQuestionAnswers` can produce for
+     * [request] (chat-view.tsx:940-957): every key is one of its question texts, and every value is
+     * distinct OFFERED option labels (at most one for a single-select question) joined by ", ",
+     * optionally followed by the operator's own "Other" text. Every "Other" text is also a line of
+     * [response], in question order, and [response] holds nothing else. (The web offers "Other" on
+     * every question, so free text is always allowed there, and only there.)
+     */
+    fun checkQuestion(request: JsObj, answers: Map<String, String>, response: String? = null): ConsentResult? {
+        val prompts = (request["questions"] as? JsArr).orEmpty().mapNotNull { it as? JsObj }
+        val byText = LinkedHashMap<String, JsObj>()
+        for (p in prompts) {
+            val text = (p["question"] as? JsStr)?.value ?: continue
+            byText.putIfAbsent(text, p) // the web keys picks by text: duplicates share one answer
+        }
+        if (!answers.keys.all { it in byText }) return ConsentResult.InvalidChoice
+        val extras = if (response.isNullOrEmpty()) ArrayDeque() else ArrayDeque(response.split("\n"))
+        for ((text, prompt) in byText) {
+            val value = answers[text] ?: continue
+            if (value.isEmpty()) return ConsentResult.InvalidChoice
+            val labels = (prompt["options"] as? JsArr).orEmpty().mapNotNull { ((it as? JsObj)?.get("label") as? JsStr)?.value }.toSet()
+            val single = (prompt["multiSelect"] as? JsBool)?.value != true
+            val extra = extras.firstOrNull()
+            val withExtra = extra != null && extra.isNotEmpty() && (value == extra || value.endsWith(", $extra")) &&
+                decomposes(value.removeSuffix(extra).removeSuffix(", "), labels, single)
+            when {
+                withExtra -> extras.removeFirst()
+                decomposes(value, labels, single) && value.isNotEmpty() -> Unit
+                else -> return ConsentResult.InvalidChoice
+            }
+        }
+        return if (extras.isEmpty()) null else ConsentResult.InvalidChoice
     }
+
+    /** [value] is empty, or distinct members of [labels] joined by ", " (one at most when [single]). */
+    private fun decomposes(value: String, labels: Set<String>, single: Boolean): Boolean {
+        if (value.isEmpty()) return true
+        if (single) return value in labels
+        // Labels may themselves contain ", ": search the splits (bounded by the option count).
+        fun from(start: Int, used: Set<String>): Boolean {
+            if (start == value.length) return true
+            for (label in labels) {
+                if (label in used || !value.startsWith(label, start)) continue
+                val end = start + label.length
+                if (end == value.length) return true
+                if (value.startsWith(", ", end) && end + 2 < value.length && from(end + 2, used + label)) return true
+            }
+            return false
+        }
+        return labels.size <= MAX_OPTIONS_SEARCHED && from(0, emptySet())
+    }
+
+    /** Past this many options a value is not searched (refused): no provider offers that many. */
+    private const val MAX_OPTIONS_SEARCHED = 64
 
     /**
      * The request's `metadata.requestedPermissions` as the wire type, exactly as the web sends it

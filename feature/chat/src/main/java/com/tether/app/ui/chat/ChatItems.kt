@@ -121,13 +121,15 @@ internal sealed interface ChatItem {
 
     /** T6.3: the active turn's pending approval, below the transcript (a `.chat-scroll` child). */
     data class Approval(val approval: ApprovalView) : ChatItem {
-        override val key: String get() = "approval/${approval.requestId}"
+        // Round 3 (N1): the identity rides in the lazy key, so a request re-raised under the same id
+        // with other content is a NEW row and never inherits the old row's saved slot.
+        override val key: String get() = "approval/${approval.requestId}/${approval.contentFp}"
         override val startsGroup: Boolean get() = true
     }
 
     /** T6.3: the active turn's pending question; [answered] when an answer is already on record. */
     data class Question(val question: QuestionRequestView, val answered: Boolean) : ChatItem {
-        override val key: String get() = "question/${question.requestId}"
+        override val key: String get() = "question/${question.requestId}/${question.contentFp}"
         override val startsGroup: Boolean get() = true
     }
 
@@ -207,8 +209,6 @@ internal fun buildChatItems(
     richCodex: Boolean = false,
     groupOpen: (key: String, default: Boolean) -> Boolean = { _, default -> default },
     showApprovals: Boolean = true,
-    /** T6.3: the live socket's server origin, for the cards' fingerprints (null: none). */
-    consentOrigin: String? = null,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     val trimmed = trimmedTurnCount(projection)
@@ -316,8 +316,8 @@ internal fun buildChatItems(
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
     }
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
-    if (showApprovals) pendingApprovals(state, consentOrigin).forEach { items.add(ChatItem.Approval(it)) }
+    if (showApprovals) pendingApprovals(state).forEach { items.add(ChatItem.Approval(it)) }
     val answeredIds = answeredRequestIds(state)
-    pendingQuestions(state, consentOrigin).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
+    pendingQuestions(state).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items
 }
