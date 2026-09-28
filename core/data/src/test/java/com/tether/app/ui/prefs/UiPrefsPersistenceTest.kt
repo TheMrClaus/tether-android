@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -31,11 +32,16 @@ import org.junit.rules.TemporaryFolder
  * the store's scope and open a fresh store on the same file.
  */
 class UiPrefsPersistenceTest {
+    private companion object {
+        const val A = "https://a.example:443"
+        const val B = "http://192.168.1.20:4173"
+    }
+
     @get:Rule
     val tmp = TemporaryFolder()
 
     private val prefsFile get() = File(tmp.root, "tether_ui_prefs.preferences_pb")
-    private val draftsFile get() = File(tmp.root, "tether_drafts.preferences_pb")
+    private val draftsFile get() = File(tmp.root, DraftStore.FILE_NAME)
 
     private suspend fun <T> withStore(file: File, block: suspend (DataStore<Preferences>) -> T): T {
         val job = Job()
@@ -145,36 +151,65 @@ class UiPrefsPersistenceTest {
     @Test
     fun draftsArePerSessionAndSurviveARestart() = runBlocking {
         withDrafts { drafts ->
-            assertEquals("", drafts.read("s1"))
-            drafts.write("s1", "half a thought")
-            drafts.write("s2", "another")
-            assertEquals("half a thought", drafts.read("s1"))
-            assertEquals("another", drafts.read("s2"))
+            assertEquals("", drafts.read(A, "s1"))
+            drafts.write(A, "s1", "half a thought")
+            drafts.write(A, "s2", "another")
+            assertEquals("half a thought", drafts.read(A, "s1"))
+            assertEquals("another", drafts.read(A, "s2"))
         }
         withDrafts { drafts ->
-            assertEquals("half a thought", drafts.read("s1"))
-            assertEquals("another", drafts.read("s2"))
-            drafts.write("s1", "revised")
-            drafts.clear("s2")
+            assertEquals("half a thought", drafts.read(A, "s1"))
+            assertEquals("another", drafts.read(A, "s2"))
+            drafts.write(A, "s1", "revised")
+            drafts.clear(A, "s2")
         }
         withDrafts { drafts ->
-            assertEquals("revised", drafts.read("s1"))
-            assertEquals("", drafts.read("s2"))
+            assertEquals("revised", drafts.read(A, "s1"))
+            assertEquals("", drafts.read(A, "s2"))
         }
     }
 
-    /** The web's key scheme, and its only cleanup rule: an empty draft removes the key (chat-view.tsx:1578-1583). */
+    /**
+     * T7.1: drafts are per server origin, like the web's localStorage and T1.3's pending slots
+     * (ta-s8q): the same session id on another server reads nothing, and clearing one origin's
+     * draft leaves the other's alone.
+     */
+    @Test
+    fun draftsArePerServerOrigin() = runBlocking {
+        withDrafts { drafts ->
+            drafts.write(A, "s1", "for server A")
+            assertEquals("", drafts.read(B, "s1"))
+            drafts.write(B, "s1", "for server B")
+        }
+        withDrafts { drafts ->
+            assertEquals("for server A", drafts.read(A, "s1"))
+            assertEquals("for server B", drafts.read(B, "s1"))
+            drafts.clear(B, "s1")
+            assertEquals("for server A", drafts.read(A, "s1"))
+            assertEquals("", drafts.read(B, "s1"))
+        }
+    }
+
+    /**
+     * The web's key scheme inside the origin's namespace, and its only cleanup rule: an empty
+     * draft removes the key (chat-view.tsx:1578-1583). An unscoped pre-T7.1 key is never read
+     * (it belongs to no known origin) and the next write drops it.
+     */
     @Test
     fun draftKeySchemeAndEmptyRemovesTheKey() = runBlocking {
-        assertEquals("tether:draft:abc-123", DraftStore.key("abc-123"))
+        assertEquals("tether:draft:abc-123", DraftStore.webKey("abc-123"))
+        assertEquals("https://a.example:443|tether:draft:abc-123", DraftStore.key(A, "abc-123"))
+        assertThrows(IllegalArgumentException::class.java) { DraftStore.key("https://A.example/", "x") }
+        withStore(draftsFile) { ds -> ds.edit { it[stringPreferencesKey("tether:draft:s1")] = "unscoped" } }
         withDrafts { drafts ->
-            drafts.write("s1", "text")
-            drafts.write("s2", "keep")
-            drafts.write("s1", "")
+            assertEquals("", drafts.read(A, "s1"))
+            drafts.write(A, "s1", "text")
+            drafts.write(A, "s2", "keep")
+            drafts.write(A, "s1", "")
         }
         withStore(draftsFile) { ds ->
             val keys = ds.data.first().asMap().keys.map { it.name }.toSet()
-            assertEquals(setOf("tether:draft:s2"), keys)
+            assertEquals(setOf("https://a.example:443|tether:draft:s2"), keys)
         }
     }
 

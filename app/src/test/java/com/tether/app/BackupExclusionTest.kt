@@ -1,6 +1,7 @@
 package com.tether.app
 
 import com.tether.app.client.DataStoreSettings
+import com.tether.app.ui.prefs.DraftStore
 import java.io.File
 import java.util.Properties
 import javax.xml.parsers.DocumentBuilderFactory
@@ -47,6 +48,9 @@ class BackupExclusionTest {
         "file" to DataStoreSettings.CREDENTIALS_DIR,
         "file" to DataStoreSettings.SETTINGS_FILE,
         "file" to "${DataStoreSettings.SETTINGS_FILE}.tmp",
+        // T7.1: unsent composer drafts are user content (preferencesDataStore keeps them in files/datastore/).
+        "file" to "datastore/${DraftStore.FILE_NAME}",
+        "file" to "datastore/${DraftStore.FILE_NAME}.tmp",
     )
 
     @Test

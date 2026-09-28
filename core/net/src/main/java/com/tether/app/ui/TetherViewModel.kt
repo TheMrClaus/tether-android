@@ -10,6 +10,7 @@ import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
 import com.tether.app.client.TetherClient
 import com.tether.app.client.isWarning
+import com.tether.app.client.serverOrigin
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.HistorySession
@@ -81,18 +82,34 @@ class TetherViewModel(
      * Unsent composer text per session (T2.3; the web's `tether:draft:<id>`, chat-view.tsx:
      * 1561-1584). A session is present once its stored draft has been loaded ([loadDraft]) or
      * the operator has typed; absent means "not loaded yet". Every change is written through
-     * to [draftStore], so a draft survives a session switch and process death.
+     * to [draftStore], so a draft survives a session switch, a rotation (this view model) and
+     * process death (the store).
+     *
+     * T7.1: the map holds the drafts of ONE server origin, [draftOrigin] (the canonical origin of
+     * [TetherClient.serverUrl], as T1.3/ta-s8q keys unsent input). When the configured server
+     * changes, the map empties and the other origin's drafts are read from its own namespace;
+     * a load or write that started for the old origin never lands in the new one. With no server
+     * configured (no origin) a draft lives in memory only.
      */
     private val _drafts = MutableStateFlow<Map<String, String>>(emptyMap())
     val drafts: StateFlow<Map<String, String>> = _drafts.asStateFlow()
     private val draftLoads = HashSet<String>()
-    private val draftWrites = Channel<Pair<String, String>>(Channel.UNLIMITED)
+    private var draftOrigin: String? = serverOrigin(client.serverUrl.value)
+    private val draftWrites = Channel<DraftWrite>(Channel.UNLIMITED)
+
+    private data class DraftWrite(val origin: String, val sessionId: String, val text: String)
 
     /** Load [sessionId]'s stored draft once; never overwrites text typed meanwhile. */
     fun loadDraft(sessionId: String) {
         if (!draftLoads.add(sessionId) || sessionId in _drafts.value) return
+        val origin = draftOrigin
+        if (origin == null) {
+            _drafts.update { if (sessionId in it) it else it + (sessionId to "") }
+            return
+        }
         viewModelScope.launch {
-            val stored = draftStore.read(sessionId)
+            val stored = draftStore.read(origin, sessionId)
+            if (draftOrigin != origin) return@launch // the server changed while reading
             _drafts.update { if (sessionId in it) it else it + (sessionId to stored) }
         }
     }
@@ -110,7 +127,16 @@ class TetherViewModel(
     fun setDraft(sessionId: String, text: String) {
         if (_drafts.value[sessionId] == text) return
         _drafts.update { it + (sessionId to text) }
-        draftWrites.trySend(sessionId to text)
+        draftOrigin?.let { draftWrites.trySend(DraftWrite(it, sessionId, text)) }
+    }
+
+    /** Another server is configured: its drafts are its own (read on demand from its namespace). */
+    private fun onServerUrl(url: String?) {
+        val origin = serverOrigin(url)
+        if (origin == draftOrigin) return
+        draftOrigin = origin
+        draftLoads.clear()
+        _drafts.value = emptyMap()
     }
 
     /**
@@ -163,15 +189,18 @@ class TetherViewModel(
         viewModelScope.launch {
             client.sessions.collect { list -> onSessions(list) }
         }
+        viewModelScope.launch {
+            client.serverUrl.collect { url -> onServerUrl(url) }
+        }
         // One ordered writer: a burst of keystrokes collapses to the latest text per session.
         viewModelScope.launch {
             for (first in draftWrites) {
-                val latest = linkedMapOf(first)
+                val latest = linkedMapOf((first.origin to first.sessionId) to first.text)
                 while (true) {
                     val next = draftWrites.tryReceive().getOrNull() ?: break
-                    latest[next.first] = next.second
+                    latest[next.origin to next.sessionId] = next.text
                 }
-                for ((sessionId, text) in latest) draftStore.write(sessionId, text)
+                for ((key, text) in latest) draftStore.write(key.first, key.second, text)
             }
         }
         viewModelScope.launch {
