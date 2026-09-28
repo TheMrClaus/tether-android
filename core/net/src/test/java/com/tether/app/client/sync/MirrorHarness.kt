@@ -47,12 +47,22 @@ class SoftwareKek : CredentialKeySource {
     @Volatile var key: SecretKey? = null
     @Volatile var destroyed = 0
 
-    override fun existingKey(): SecretKey? = key
+    /** Test seam (ta-hra R3): runs before every key lookup, e.g. to hold a "stuck Keystore". */
+    @Volatile var beforeExistingKey: (() -> Unit)? = null
+
+    /** The thread of every [destroyKey], in order. */
+    val destroyThreads = java.util.concurrent.ConcurrentLinkedQueue<Thread>()
+
+    override fun existingKey(): SecretKey? {
+        beforeExistingKey?.invoke()
+        return key
+    }
 
     override fun getOrCreateKey(): SecretKey =
         key ?: KeyGenerator.getInstance("AES").apply { init(256) }.generateKey().also { key = it }
 
     override fun destroyKey() {
+        destroyThreads.add(Thread.currentThread())
         key = null
         destroyed++
     }

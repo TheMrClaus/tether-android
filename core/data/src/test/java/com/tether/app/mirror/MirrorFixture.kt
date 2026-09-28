@@ -3,6 +3,7 @@ package com.tether.app.mirror
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.AesGcmCredentialCipher
+import com.tether.app.client.CredentialCipher
 import com.tether.app.client.SoftwareKeySource
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
@@ -33,14 +34,54 @@ class MirrorFixture(
     val context: Context = ApplicationProvider.getApplicationContext()
     val kekKeys = SoftwareKeySource()
     val keyFile = File(context.noBackupFilesDir, MirrorKeyStore.KEY_FILE)
-    val factory = AndroidMirrorDbFactory(context)
+    /**
+     * Test seams (ta-hra), null = pass through: each runs on the calling thread right before the
+     * KEK seals / opens / destroys, or the factory opens / deletes a DB, so a test can hold the
+     * writer inside a "Keystore call" or pick the instant of a process death.
+     */
+    @Volatile var beforeKekSeal: (() -> Unit)? = null
+    @Volatile var beforeKekOpen: (() -> Unit)? = null
+    @Volatile var beforeKekDestroy: (() -> Unit)? = null
+    @Volatile var beforeDbOpen: ((String) -> Unit)? = null
+    @Volatile var beforeDbDelete: ((String) -> Unit)? = null
+    private val androidFactory = AndroidMirrorDbFactory(context)
+    val factory: MirrorDbFactory = object : MirrorDbFactory {
+        override fun open(name: String): MirrorDatabase {
+            beforeDbOpen?.invoke(name)
+            return androidFactory.open(name)
+        }
+
+        override fun existing(): List<String> = androidFactory.existing()
+
+        override fun delete(name: String) {
+            beforeDbDelete?.invoke(name)
+            androidFactory.delete(name)
+        }
+    }
     val now = AtomicLong(1_000_000)
     private var scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val logs = java.util.concurrent.ConcurrentLinkedQueue<String>()
     var mirror: JournalMirror = newMirror()
         private set
 
-    fun keyStore() = MirrorKeyStore(keyFile, AesGcmCredentialCipher(kekKeys))
+    fun keyStore() = MirrorKeyStore(keyFile, HookedKek(AesGcmCredentialCipher(kekKeys)))
+
+    private inner class HookedKek(private val inner: CredentialCipher) : CredentialCipher {
+        override fun seal(plaintext: ByteArray, aad: ByteArray): ByteArray {
+            beforeKekSeal?.invoke()
+            return inner.seal(plaintext, aad)
+        }
+
+        override fun open(blob: ByteArray, aad: ByteArray): ByteArray {
+            beforeKekOpen?.invoke()
+            return inner.open(blob, aad)
+        }
+
+        override fun destroyKey() {
+            beforeKekDestroy?.invoke()
+            inner.destroyKey()
+        }
+    }
 
     private fun newMirror(version: String = reducerVersion) = JournalMirror(
         dbFactory = factory,
@@ -77,6 +118,11 @@ class MirrorFixture(
     }
 
     fun close() {
+        beforeKekSeal = null
+        beforeKekOpen = null
+        beforeKekDestroy = null
+        beforeDbOpen = null
+        beforeDbDelete = null
         runBlocking { mirror.abandon() }
         scope.cancel()
         for (name in factory.existing()) factory.delete(name)

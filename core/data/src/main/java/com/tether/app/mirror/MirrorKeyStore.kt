@@ -43,13 +43,22 @@ class MirrorKeyStore(
         data object Unavailable : Loaded
     }
 
-    @Synchronized
+    /**
+     * Guards the key FILE only (a read, or a write + rename), never a Keystore call ([kek]),
+     * so nothing that takes it can stall behind the Keystore (ta-hra R3). [destroy] does not
+     * take it at all.
+     */
+    private val fileLock = Any()
+
+    /** Writer thread. The Keystore unwrap runs outside [fileLock]. */
     fun load(): Loaded {
-        if (!file.isFile) return Loaded.Absent
-        val blob = try {
-            file.readBytes()
-        } catch (_: java.io.IOException) {
-            return Loaded.Unavailable
+        val blob = synchronized(fileLock) {
+            if (!file.isFile) return Loaded.Absent
+            try {
+                file.readBytes()
+            } catch (_: java.io.IOException) {
+                return Loaded.Unavailable
+            }
         }
         val plain = try {
             kek.open(blob, AAD)
@@ -68,8 +77,12 @@ class MirrorKeyStore(
         }
     }
 
-    /** Mint and wrap a NEW data key, replacing any previous one (atomic rename). */
-    @Synchronized
+    /**
+     * Writer thread. Mint and wrap a NEW data key, replacing any previous one (atomic rename).
+     * The Keystore wrap runs outside [fileLock]. A [destroy] racing this call can be undone by
+     * it (the file lands after the delete): the caller re-checks for a wipe and destroys the
+     * key if one landed ([JournalMirror]'s wipe epoch, ta-hra R1).
+     */
     fun create(): MirrorDataKey {
         val id = ByteArray(ID_BYTES).also(random::nextBytes)
         val key = ByteArray(MirrorCipher.KEY_BYTES).also(random::nextBytes)
@@ -79,28 +92,40 @@ class MirrorKeyStore(
         } finally {
             plain.fill(0)
         }
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeBytes(sealed)
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) throw java.io.IOException("could not write the mirror key file")
+        synchronized(fileLock) {
+            file.parentFile?.mkdirs()
+            val tmp = File(file.path + ".tmp")
+            tmp.writeBytes(sealed)
+            if (!tmp.renameTo(file)) {
+                file.delete()
+                if (!tmp.renameTo(file)) throw java.io.IOException("could not write the mirror key file")
+            }
         }
         return MirrorDataKey(id.toHex(), key)
     }
 
-    /** Forget the data key (rotation): the next [create] mints a new one. The KEK stays. */
-    @Synchronized
+    /**
+     * Forget the data key (rotation): the next [create] mints a new one. The KEK stays. No lock:
+     * an unlink is atomic, and it must never wait for a writer that is inside the Keystore.
+     */
     fun deleteDataKey() {
         file.delete()
         File(file.path + ".tmp").delete()
     }
 
-    /** Logout / revocation (§8.3): the data key AND the Keystore key that wraps it are destroyed. */
-    @Synchronized
+    /**
+     * Logout / revocation (§8.3), from any thread, without waiting for anything (ta-hra R3):
+     * the wrapped data key file goes FIRST, so every blob is unreadable from that instant even
+     * if the process dies inside the Keystore call that follows; then the Keystore key that
+     * wrapped it is destroyed, best effort (it wraps nothing on disk any more).
+     */
     fun destroy() {
         deleteDataKey()
-        kek.destroyKey()
+        try {
+            kek.destroyKey()
+        } catch (_: Exception) {
+            // Best effort: the file it could have opened is already gone.
+        }
     }
 
     companion object {

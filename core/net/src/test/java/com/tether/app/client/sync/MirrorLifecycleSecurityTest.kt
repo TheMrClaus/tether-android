@@ -273,4 +273,46 @@ class MirrorLifecycleSecurityTest {
         h.serverBarrier()
         assertTrue(h.dbSession("stranger") != null)
     }
+
+    /**
+     * ta-hra R3: the UI calls logout on main. A writer stuck inside a Keystore call (here the
+     * unwrap of the next process's bind) must not hold the logout, and the shred must not run
+     * on the caller's thread; the result is still wiped, then and after the writer comes back.
+     */
+    @Test
+    fun aLogoutWithTheWriterStuckInsideTheKeystoreReturnsPromptlyOffTheCallersThreadAndStillWipes() {
+        mirroredThenKilled()
+        h.bindTimeoutMs = 1_000 // the stuck bind gives up quickly; the writer stays stuck
+        val entered = CountDownLatch(1)
+        val stuck = CountDownLatch(1)
+        h.kek.beforeExistingKey = {
+            h.kek.beforeExistingKey = null
+            entered.countDown()
+            stuck.await(20, TimeUnit.SECONDS)
+        }
+        try {
+            h.boot(ready = ready("s1"))
+            assertTrue("the writer is inside the Keystore", entered.await(20, TimeUnit.SECONDS))
+            assertTrue(h.keyFile.exists())
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
+            h.kek.destroyThreads.clear()
+            val returned = CountDownLatch(1)
+            val caller = Thread {
+                runBlocking { h.client.logout() }
+                returned.countDown()
+            }
+            caller.start()
+            assertTrue("logout waited for the stuck writer", returned.await(10, TimeUnit.SECONDS))
+            // Unreadable already, the writer still stuck.
+            assertFalse(h.keyFile.exists())
+            assertTrue(h.kek.destroyed >= 1)
+            assertTrue(stuck.count == 1L)
+            assertTrue("the shred ran on the caller's thread", h.kek.destroyThreads.first() !== caller)
+        } finally {
+            stuck.countDown()
+            h.kek.beforeExistingKey = null
+        }
+        awaitTrue("mirror files deleted once the writer is back") { h.dbFactory.existing().isEmpty() }
+        assertFalse("the writer minted no key after the wipe", h.keyFile.exists())
+    }
 }

@@ -129,6 +129,14 @@ class JournalMirror(
     var dead: Boolean = false
         private set
 
+    /**
+     * Bumped by [wipe] under [queue], BEFORE the keys are shredded (ta-hra R1). An op dequeued
+     * under an older epoch belongs to the wiped sign-in: a data key it mints after the bump is
+     * destroyed again ([createKey]) and a bind it answers is answered with null.
+     */
+    @Volatile
+    private var wipeEpoch = 0L
+
     // ---- actor state (actor thread only) ----
     private var db: MirrorDatabase? = null
     private var dao: MirrorDao? = null
@@ -136,6 +144,9 @@ class JournalMirror(
     private var boundOrigin: String? = null
     private var originKey: String = ""
     private var writes = 0L
+
+    /** [wipeEpoch] when the op in hand was dequeued (set under [queue] by the actor). */
+    private var opEpoch = 0L
 
     /**
      * Test seam: runs on the actor right before a hydration reads the base, so a test can hold
@@ -163,30 +174,69 @@ class JournalMirror(
      * thread ([shredKeys]), so a process death before the writer gets to it still leaves nothing
      * readable (security review M1); the writer then closes and deletes every mirror DB file.
      * If the writer is dead, the files are deleted here too.
+     *
+     * ta-hra R1: everything still queued belongs to the sign-in being wiped. Under the queue
+     * lock the wipe epoch moves, queued writes are dropped, queued controls are answered with
+     * their fallbacks (a bind with null, a rotation, flush or read with "nothing"), and the
+     * Wipe goes first, so no queued bind or rotation can mint a key after the shred and no
+     * pre-wipe write can land under one. The op the writer already holds sees the epoch move.
+     *
+     * Never waits for the writer or its locks (ta-hra R3); callers on the main thread should
+     * still call it off main (the Keystore delete is an IPC).
      */
     fun wipe(): CompletableDeferred<Unit> {
-        shredKeys()
         val done = CompletableDeferred<Unit>()
-        enqueue(Op.Wipe(done))
-        if (dead) {
-            try {
-                for (name in dbFactory.existing()) dbFactory.delete(name)
-            } catch (e: Exception) {
-                log("mirror delete failed (${e.javaClass.simpleName})")
+        val cancelled = ArrayList<Op>()
+        val writerDead = synchronized(queue) {
+            wipeEpoch++
+            if (!dead) {
+                val it = queue.iterator()
+                while (it.hasNext()) {
+                    val op = it.next()
+                    if (op is Op.Close) continue // a test's process death stays queued
+                    it.remove()
+                    if (op !is Op.Write) {
+                        controlsQueued--
+                        cancelled += op
+                    }
+                }
+                queue.addFirst(Op.Wipe(done))
+                controlsQueued++
             }
+            dead
+        }
+        shredKeys()
+        // Answered after the shred: whoever waited sees the wipe's effect.
+        cancelled.forEach(::answer)
+        if (writerDead) {
+            deleteFiles()
+            done.complete(Unit)
+        } else {
+            signal.trySend(Unit)
         }
         return done
     }
 
     /**
-     * Destroy the wrapped data key and the Keystore key-encryption key, synchronously. Every
-     * blob on disk becomes unreadable at once; the next bind finds no key and deletes the DB.
+     * Destroy the wrapped data key and the Keystore key-encryption key, synchronously and
+     * without taking any lock a writer may hold ([MirrorKeyStore.destroy]): the key file goes
+     * first, so every blob on disk is unreadable at once; the next bind finds no key and
+     * deletes the DB.
      */
     fun shredKeys() {
         try {
             keyStore.destroy()
         } catch (e: Exception) {
             log("mirror key destroy failed (${e.javaClass.simpleName})")
+        }
+    }
+
+    /** Delete every mirror DB file, best effort (the keys are already gone). Any thread. */
+    private fun deleteFiles() {
+        try {
+            for (name in dbFactory.existing()) dbFactory.delete(name)
+        } catch (t: Throwable) {
+            log("mirror delete failed (${t.javaClass.simpleName})")
         }
     }
 
@@ -351,13 +401,16 @@ class JournalMirror(
             controlsQueued = 0
             queue.toList().also { queue.clear() }
         }
-        waiting.forEach(::answer)
         try {
             closeDb()
         } catch (_: Throwable) {
             // Nothing more to do for a cache.
         }
         boundOrigin = null
+        // ta-hra R4: a queued Wipe is not only answered: its files go first (the keys went on
+        // the wiping thread already).
+        if (waiting.any { it is Op.Wipe }) deleteFiles()
+        waiting.forEach(::answer)
     }
 
     private suspend fun loop() {
@@ -391,6 +444,7 @@ class JournalMirror(
             val batch = ArrayList<Op.Write>()
             var control: Op? = null
             synchronized(queue) {
+                opEpoch = wipeEpoch
                 while (queue.isNotEmpty() && batch.size < batchMaxOps) {
                     val op = queue.first()
                     if (op is Op.Write) {
@@ -418,6 +472,7 @@ class JournalMirror(
             throw e
         } catch (t: Throwable) {
             // An Error (guarded() turns every Exception into a fallback): answer this caller, then die.
+            if (op is Op.Wipe) deleteFiles() // R4: a wipe that failed half-way still deletes
             answer(op)
             throw t
         }
@@ -468,12 +523,12 @@ class JournalMirror(
             // Nothing on disk can be read without the key it was sealed under (§8.2).
             MirrorKeyStore.Loaded.Absent -> {
                 dbFactory.delete(name)
-                keyStore.create()
+                createKey() ?: return null
             }
             MirrorKeyStore.Loaded.Lost -> {
                 dbFactory.delete(name)
                 keyStore.destroy()
-                keyStore.create()
+                createKey() ?: return null
             }
             MirrorKeyStore.Loaded.Unavailable -> return null
         }
@@ -495,8 +550,30 @@ class JournalMirror(
             }
             d.putMeta(MetaEntity(META_REDUCER, reducerVersion))
         }
-        if (writes >= rotateAfterWrites) rotateNow()
-        return readIndex()
+        if (writes >= rotateAfterWrites) rotateNow() // leaves it unbound if a wipe landed
+        val index = if (dao != null && wipeEpoch == opEpoch) readIndex() else null
+        if (index == null || wipeEpoch != opEpoch) {
+            // A wipe landed during this bind (R1): its index is the wiped sign-in's.
+            closeDb()
+            boundOrigin = null
+            return null
+        }
+        return index
+    }
+
+    /**
+     * [MirrorKeyStore.create], unless a wipe landed since the op in hand was dequeued (R1): then
+     * the key just minted (after, or racing, the wipe's shred) is destroyed again and null is
+     * returned. The epoch is read AFTER the key file is written: a wipe whose bump comes later
+     * shreds that file itself.
+     */
+    private fun createKey(): MirrorDataKey? {
+        val fresh = keyStore.create()
+        if (wipeEpoch == opEpoch) return fresh
+        fresh.wipe()
+        keyStore.destroy()
+        log("mirror key minted during a wipe: destroyed")
+        return null
     }
 
     private fun openDb(name: String, key: String, dataKey: MirrorDataKey) {
@@ -578,7 +655,10 @@ class JournalMirror(
         val key = originKeyOf(origin)
         dbFactory.delete(dbName(key))
         keyStore.deleteDataKey()
-        val fresh = keyStore.create()
+        val fresh = createKey() ?: run {
+            boundOrigin = null // unbound until the next bind: later writes land nowhere
+            return
+        }
         try {
             openDb(dbName(key), key, fresh)
         } finally {

@@ -1084,7 +1084,13 @@ class RealTetherClient(
      * transcripts. Unsent input is not in the mirror and is untouched.
      */
     private fun wipeMirror() {
-        val mirror = mirrorForWipe ?: return
+        // The keys are shredded on THIS thread before it returns; the writer deletes the files.
+        unbindMirrorForWipe()?.wipe()
+    }
+
+    /** [wipeMirror]'s client half: unbind at once. Returns the mirror to wipe (null = none). */
+    private fun unbindMirrorForWipe(): JournalMirror? {
+        val mirror = mirrorForWipe ?: return null
         synchronized(lock) {
             mirrorOrigin = null
             mirrorGeneration++
@@ -1092,8 +1098,7 @@ class RealTetherClient(
             for (sessionId in seededFromMirror) tracker.forget(sessionId)
             clearMirrorStateLocked()
         }
-        // The keys are shredded on THIS thread before it returns; the writer deletes the files.
-        mirror.wipe()
+        return mirror
     }
 
     /** The origin of [webSocket] when it is the current socket. Caller holds [lock]. */
@@ -1243,7 +1248,10 @@ class RealTetherClient(
         }
         ws?.close(1000, "logout")
         clearSignInViews()
-        wipeMirror()
+        // The shred runs off the caller's thread (ta-hra R3: the UI calls logout from
+        // viewModelScope, on main; the Keystore delete is an IPC), but it is awaited: logout
+        // still returns only after the keys are gone (M1).
+        unbindMirrorForWipe()?.let { mirror -> withContext(Dispatchers.IO) { mirror.wipe() } }
         // A user logout is not a server verdict: no "session expired" copy.
         signedOutReasonState.value = null
         connectionState.value = ConnectionState.AuthRequired
