@@ -191,10 +191,11 @@ internal fun ToolHead(icon: @Composable () -> Unit, name: String?, status: Strin
                 name,
                 style = TextStyle(fontFamily = type.mono, fontSize = size, fontWeight = FontWeight(680)),
                 color = t.ink,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             )
+        } else {
+            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.weight(1f))
         StatusLabel(status, errorStatus)
     }
 }
@@ -556,9 +557,8 @@ private fun SubagentToolCard(entry: JsObj) {
         ) {
             ToolStateIcon(state, 12.dp)
             asString(entry["name"])?.let {
-                Text(it, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f), fontWeight = FontWeight(600)), color = t.ink, modifier = Modifier.weight(1f, fill = false))
-            }
-            Spacer(Modifier.weight(1f))
+                Text(it, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f), fontWeight = FontWeight(600)), color = t.ink, modifier = Modifier.weight(1f))
+            } ?: Spacer(Modifier.weight(1f))
             StatusLabel(toolStatusText(entry), error = false)
         }
         val input = entry["input"]

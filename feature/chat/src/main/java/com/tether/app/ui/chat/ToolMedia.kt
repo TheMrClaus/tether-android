@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -337,7 +338,8 @@ private fun MediaTile(item: ToolMediaItem, onOpen: () -> Unit) {
                 bitmap = state.bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
-                modifier = clickable.widthIn(max = w).heightIn(max = min(h.value, 320f).dp),
+                // `max-width: 100%; max-height: 320px; object-fit: contain` at the picture's own ratio.
+                modifier = clickable.widthIn(max = w).heightIn(max = 320.dp).aspectRatio(w.value / h.value),
             )
         }
         null -> Box(clickable.size(44.dp).background(t.tintXs), contentAlignment = Alignment.Center) {

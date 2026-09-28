@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -120,9 +119,8 @@ private fun RichHead(title: String, status: String?, failed: Boolean, modifier: 
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         icons()
-        Text(title, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f, fill = false))
+        Text(title, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f))
         if (status != null) {
-            Spacer(Modifier.weight(1f))
             Text(
                 status.uppercase(Locale.ROOT),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f), fontWeight = FontWeight(650), letterSpacing = 0.04.em),
@@ -358,8 +356,7 @@ private fun CodexCollaborationCard(block: JsObj, nested: Boolean) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
                     ) {
-                        Text(agent.id, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f, fill = false))
-                        Spacer(Modifier.weight(1f))
+                        Text(agent.id, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f))
                         Text(agent.state, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
                     }
                 }
