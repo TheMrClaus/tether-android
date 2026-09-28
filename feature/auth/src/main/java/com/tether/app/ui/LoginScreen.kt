@@ -35,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -81,6 +82,9 @@ private const val CODE_FIELD_MAX = 12
 /** Wait for typing to settle before asking a server what its sign-in needs. */
 private const val PROBE_DEBOUNCE_MS = 500L
 
+/** Pause before a submit re-asks a probe that just failed (one retry, ta-s4r). */
+private const val PROBE_RETRY_MS = 400L
+
 /**
  * Everything a surface renders, plus the callbacks. One state machine
  * ([LoginScreen]) drives all three surfaces, like use-login-flow.ts on the web.
@@ -96,6 +100,8 @@ class LoginUi(
     /** A server-side sign-out reason or the logout notice (idle feedback). */
     val notice: String?,
     val requirements: SignInRequirements?,
+    /** The probe answered nothing readable (see [usernameFieldShown]). */
+    val probeFailed: Boolean,
     val probing: Boolean,
     val hostname: String,
     val statusLines: List<String>,
@@ -106,8 +112,11 @@ class LoginUi(
     val onCode: (String) -> Unit,
     val onSubmit: () -> Unit,
 ) {
-    val busy: Boolean get() = phase == LoginPhase.Verifying || phase == LoginPhase.Success
-    val usernameRequired: Boolean get() = requirements?.usernameRequired == true
+    val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.Success
+
+    /** The username line is on screen: required, or the probe failed ([usernameOptional]). */
+    val usernameShown: Boolean get() = usernameFieldShown(requirements, probeFailed)
+    val usernameOptional: Boolean get() = usernameFieldOptional(requirements, probeFailed)
 
     /** Web `passwordLoginEnabled`: on unless the probe said off. */
     val passwordEnabled: Boolean get() = requirements?.passwordLoginEnabled != false
@@ -167,6 +176,17 @@ fun LoginScreen(
         if (baseUrl.isEmpty() && !saved.isNullOrEmpty()) baseUrl = saved
     }
 
+    // A probe reading lands only while it is still news: a newer answer (the
+    // submit's own probe) is never overwritten by a failure.
+    fun adoptProbe(probe: SignInRequirements?) {
+        if (probe != null) {
+            requirements = probe
+            probeFailed = false
+        } else if (requirements == null) {
+            probeFailed = true
+        }
+    }
+
     // use-login-flow.ts probes /api/auth/session on load; natively the URL is
     // typed first, so probe once it settles. No credential is sent.
     LaunchedEffect(baseUrl) {
@@ -174,13 +194,13 @@ fun LoginScreen(
         probeFailed = false
         if (hostnameOf(baseUrl).isEmpty()) return@LaunchedEffect
         delay(PROBE_DEBOUNCE_MS)
-        val probe = client.signInRequirements(baseUrl)
-        if (probe == null) probeFailed = true else requirements = probe
+        adoptProbe(client.signInRequirements(baseUrl))
     }
 
-    fun submit() {
-        if (phase == LoginPhase.Verifying || phase == LoginPhase.Success) return
-        val url = baseUrl.trim()
+    // The local-network retry re-enters submit (so it re-probes too); set below.
+    var submitAgain: () -> Unit = {}
+
+    fun send(url: String) {
         validateAttempt(mode, url, username, password, code, requirements)?.let {
             error = it
             phase = LoginPhase.Error
@@ -189,12 +209,14 @@ fun LoginScreen(
         phase = LoginPhase.Verifying
         error = null
         val attemptMode = mode
+        val sentUsername = username.trim()
+        val usernameHint = usernameHintFor(requirements, sentUsername)
         scope.launch {
             var blocked = false
             val failure = when (attemptMode) {
-                AuthMode.Password -> client.login(url, password, username.trim()).let {
+                AuthMode.Password -> client.login(url, password, sentUsername).let {
                     blocked = it is LoginResult.LocalNetworkBlocked
-                    loginErrorCopy(it)
+                    loginErrorCopy(it, usernameHint)
                 }
                 AuthMode.Pairing -> client.pair(url, code, deviceLabel).let {
                     blocked = it is PairResult.LocalNetworkBlocked
@@ -219,9 +241,42 @@ fun LoginScreen(
             // Blocked: the host shows the explanation / persistent notice and
             // retries this same connect once access is granted. Never a silent
             // failure, and never an automatic retry while access is denied.
-            if (blocked) onLocalNetworkBlocked { submit() } else onLocalNetworkClear()
+            if (blocked) onLocalNetworkBlocked { submitAgain() } else onLocalNetworkClear()
         }
     }
+
+    fun submit() {
+        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.Success) return
+        val url = baseUrl.trim()
+        // ta-s4r: a password never goes out with the sign-in requirements
+        // unknown. A console with a username refuses a password-only login with
+        // the same 401 as a wrong password, so a submit that beat the probe (or
+        // followed a failed one, e.g. before local-network access was granted)
+        // asks again first. The fields are disabled meanwhile, so the URL holds.
+        if (mode == AuthMode.Password && url.isNotEmpty() && requirements == null) {
+            val attempts = if (probeFailed) 1 else 2
+            phase = LoginPhase.Checking
+            error = null
+            scope.launch {
+                var probe: SignInRequirements? = null
+                for (attempt in 0 until attempts) {
+                    if (attempt > 0) delay(PROBE_RETRY_MS)
+                    probe = requirements ?: client.signInRequirements(url)
+                    if (probe != null) break
+                }
+                adoptProbe(probe)
+                // Still unknown: the username line is now shown as optional and
+                // the attempt goes out with whatever it holds; a refusal says
+                // the username may be the missing part.
+                phase = LoginPhase.Ready
+                send(url)
+            }
+            return
+        }
+        send(url)
+    }
+
+    submitAgain = ::submit
 
     val hostname = hostnameOf(baseUrl)
     val probing = hostname.isNotEmpty() && requirements == null && !probeFailed
@@ -235,11 +290,12 @@ fun LoginScreen(
         error = error,
         notice = logoutNotice ?: signedOutReason?.let(::signedOutCopy),
         requirements = requirements,
+        probeFailed = probeFailed,
         probing = probing,
         hostname = hostname,
         statusLines = statusLines(hostname, requirements, probeFailed),
         onMode = { next ->
-            if (phase != LoginPhase.Verifying && phase != LoginPhase.Success) {
+            if (phase != LoginPhase.Checking && phase != LoginPhase.Verifying && phase != LoginPhase.Success) {
                 mode = next
                 error = null
                 if (phase == LoginPhase.Error) phase = LoginPhase.Ready
@@ -284,8 +340,10 @@ private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
     TetherInputWell(
         value = ui.username,
         onValueChange = ui.onUsername,
-        modifier = modifier.semantics { contentDescription = "Operator username" },
-        placeholder = "Username",
+        modifier = modifier.semantics {
+            contentDescription = if (ui.usernameOptional) "Operator username, optional" else "Operator username"
+        },
+        placeholder = if (ui.usernameOptional) "Username (optional)" else "Username",
         singleLine = true,
         enabled = !ui.busy,
         keyboardOptions = KeyboardOptions(
@@ -295,6 +353,7 @@ private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
             imeAction = ImeAction.Next,
         ),
         fontFamily = fontFamily,
+        contentType = ContentType.Username,
     )
 }
 
@@ -311,6 +370,7 @@ private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go, autoCorrectEnabled = false),
         keyboardActions = KeyboardActions(onGo = { ui.onSubmit() }),
         fontFamily = fontFamily,
+        contentType = ContentType.Password,
     )
 }
 
@@ -399,12 +459,13 @@ private fun InstrumentLogin(ui: LoginUi) {
     val t = LocalTetherTokens.current
     val statusLabel = instrumentStatusLabel(ui.phase, ui.probing)
     val statusColor = when (ui.phase) {
-        LoginPhase.Verifying -> t.violet
+        LoginPhase.Checking, LoginPhase.Verifying -> t.violet
         LoginPhase.Success -> t.running
         LoginPhase.Error -> t.danger
         LoginPhase.Ready -> t.faint
     }
     val (feedback, feedbackColor) = when (ui.phase) {
+        LoginPhase.Checking -> "checking sign-in" to t.violet
         LoginPhase.Verifying ->
             (if (ui.mode == AuthMode.Pairing) "pairing device" else "checking password") to t.violet
         LoginPhase.Success -> "unlocked · opening console" to t.running
@@ -483,7 +544,8 @@ private fun InstrumentLogin(ui: LoginUi) {
 
                 when (ui.mode) {
                     AuthMode.Password -> if (ui.passwordEnabled) {
-                        if (ui.usernameRequired) LabeledRow("username ›", 84) { UsernameField(ui, it, JetBrainsMono) }
+                        if (ui.usernameShown) LabeledRow("username ›", 84) { UsernameField(ui, it, JetBrainsMono) }
+                        if (ui.usernameOptional) MonoText(USERNAME_OPTIONAL_HINT, t.muted, fontSize = 11.5.sp)
                         LabeledRow("password ›", 84) { mod ->
                             Row(mod, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 PasswordField(ui, Modifier.weight(1f), JetBrainsMono)
@@ -601,6 +663,7 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false) {
 private fun StudioForm(ui: LoginUi, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val (feedback, feedbackColor) = when (ui.phase) {
+        LoginPhase.Checking -> "Checking sign-in…" to t.violet
         LoginPhase.Verifying ->
             (if (ui.mode == AuthMode.Pairing) "Pairing this device…" else "Checking your password…") to t.violet
         LoginPhase.Success -> "You’re in. Opening your workspace…" to t.running
@@ -625,9 +688,10 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
         ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
         when (ui.mode) {
             AuthMode.Password -> if (ui.passwordEnabled) {
-                if (ui.usernameRequired) {
-                    StudioLabel("Username")
+                if (ui.usernameShown) {
+                    StudioLabel(if (ui.usernameOptional) "Username (optional)" else "Username")
                     UsernameField(ui, Modifier.fillMaxWidth())
+                    if (ui.usernameOptional) Text(USERNAME_OPTIONAL_HINT, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
                 }
                 StudioLabel("Password")
                 PasswordField(ui, Modifier.fillMaxWidth())
@@ -635,7 +699,11 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                     onClick = ui.onSubmit,
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Unlock Tether" },
                     classes = KeyClasses.ButtonPrimary,
-                    label = if (ui.phase == LoginPhase.Verifying) "Opening workspace…" else "Open workspace",
+                    label = when (ui.phase) {
+                        LoginPhase.Checking -> "Checking sign-in…"
+                        LoginPhase.Verifying -> "Opening workspace…"
+                        else -> "Open workspace"
+                    },
                     icon = TetherIcons.ArrowRight,
                     enabled = !ui.busy,
                 )
@@ -700,6 +768,7 @@ private fun RetroLogin(ui: LoginUi, studio: Boolean) {
         "host ${ui.hostname.ifEmpty { "…" }}",
     ) + ui.statusLines.drop(1)
     val feedback: Pair<String, Color>? = when (ui.phase) {
+        LoginPhase.Checking -> "checking sign-in" to t.violet
         LoginPhase.Verifying -> "authenticating" to t.violet
         LoginPhase.Success -> "ACCESS GRANTED" to t.running
         LoginPhase.Error -> "ACCESS DENIED — ${ui.error.orEmpty()}" to t.danger
@@ -707,6 +776,7 @@ private fun RetroLogin(ui: LoginUi, studio: Boolean) {
     }
     val hint = when {
         ui.mode == AuthMode.Pairing -> "type the code from your browser, ⏎ to send"
+        ui.passwordEnabled && ui.usernameOptional -> "login only if this console has a username · type your password, ⏎ to send"
         ui.passwordEnabled -> "type your password, ⏎ to send"
         else -> "password sign-in is off for this console — use a pairing code"
     }
@@ -732,7 +802,7 @@ private fun RetroLogin(ui: LoginUi, studio: Boolean) {
         }
         when (ui.mode) {
             AuthMode.Password -> if (ui.passwordEnabled) {
-                if (ui.usernameRequired) LabeledRow("login:", 88) { UsernameField(ui, it, JetBrainsMono) }
+                if (ui.usernameShown) LabeledRow("login:", 88) { UsernameField(ui, it, JetBrainsMono) }
                 LabeledRow("password:", 88) { mod -> RetroPromptWithEnter(mod, ui) { PasswordField(ui, it, JetBrainsMono) } }
             }
             AuthMode.Pairing -> LabeledRow("code:", 88) { mod -> RetroPromptWithEnter(mod, ui) { CodeField(ui, it) } }

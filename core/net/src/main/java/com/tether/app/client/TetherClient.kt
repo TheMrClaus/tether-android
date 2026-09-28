@@ -487,7 +487,16 @@ sealed interface SignInSessionsResult {
 
 sealed interface LoginResult {
     data object Success : LoginResult
+
+    /** Tether's own 401 (`{error}` from /api/auth/login): the username or password did not match. */
     data class BadPassword(val message: String) : LoginResult
+
+    /**
+     * A 401 that did not come from Tether's login handler: a `WWW-Authenticate` challenge or
+     * a body without Tether's `{error}` (a proxy, basic auth, an SSO gateway in front of it).
+     * [scheme] is the challenge's auth scheme ("Basic", "Bearer"), when there was one.
+     */
+    data class GatewayRefused(val status: Int, val scheme: String?) : LoginResult
     data class RateLimited(val message: String) : LoginResult
 
     /** 403 `password_login_disabled`: this console accepts passkeys only (passkeys → T10.5). */

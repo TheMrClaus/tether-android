@@ -114,6 +114,58 @@ class AuthFlowsTest {
     // Password login
     // ------------------------------------------------------------------
 
+    /**
+     * ta-s4r: the login request next to the web's (use-login-flow.ts submitPassword:
+     * `fetch("/api/auth/login", {method: "POST", headers: {"content-type": "application/json"},
+     * body: JSON.stringify({username, password})})`). server.mjs readBody JSON-parses any
+     * non-form body and compares both fields as-is (sha256 + timingSafeEqual), with no Origin
+     * or CSRF check on this route, so only the two strings matter; they must arrive unaltered.
+     */
+    @Test
+    fun loginSendsTheSameBytesAsTheWebFormWithNothingAltered() {
+        newClient()
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setBody("""{"ok":true}""").addHeader("set-cookie", "tether_session=s; Path=/; HttpOnly"))
+        val password = "  Pä\"ss\\wörd é "
+        assertEquals(LoginResult.Success, runBlocking { h.client.login(base, password, "Operator") })
+        take()
+        val login = take()
+        assertEquals("POST", login.method)
+        assertEquals("/api/auth/login", login.path)
+        assertEquals("application/json; charset=utf-8", login.getHeader("Content-Type"))
+        assertNull("a sign-in carries no earlier credential", login.getHeader("Cookie"))
+        assertNull(login.getHeader("Authorization"))
+        // JSON.stringify({username, password}) of the same strings, byte for byte.
+        assertEquals(
+            "{\"username\":\"Operator\",\"password\":\"  Pä\\\"ss\\\\wörd é \"}",
+            login.body.readUtf8(),
+        )
+    }
+
+    @Test
+    fun a401ThatIsNotTethersOwnIsAGatewayRefusalNotABadPassword() {
+        newClient()
+        // Basic auth in front: a challenge and an HTML page.
+        h.server.enqueue(health())
+        h.server.enqueue(
+            MockResponse().setResponseCode(401).addHeader("WWW-Authenticate", "Basic realm=\"lab\"")
+                .setBody("<html>401 Authorization Required</html>"),
+        )
+        assertEquals(LoginResult.GatewayRefused(401, "Basic"), runBlocking { h.client.login(base, "pw", "operator") })
+        // No challenge, but not Tether's `{error}` body either.
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setBody("Unauthorized"))
+        assertEquals(LoginResult.GatewayRefused(401, null), runBlocking { h.client.login(base, "pw", "operator") })
+        // A challenge that is not a scheme token is not echoed onto the screen.
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).addHeader("WWW-Authenticate", "<script>").setBody("{\"error\":\"x\"}"))
+        assertEquals(LoginResult.GatewayRefused(401, null), runBlocking { h.client.login(base, "pw", "operator") })
+        // Tether's own refusal keeps Tether's words.
+        h.server.enqueue(health())
+        h.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}"""))
+        assertEquals(LoginResult.BadPassword("Those credentials are not correct."), runBlocking { h.client.login(base, "pw", "operator") })
+    }
+
     @Test
     fun loginSendsUsernameAndPasswordAsTheWebFormDoes() {
         newClient()

@@ -32,8 +32,12 @@ fun loginSurfaceFor(variant: LoginVariant, studioFamily: Boolean): LoginSurface 
 /** The two ways in: the browser password, or a code minted by a browser session. */
 enum class AuthMode { Password, Pairing }
 
-/** use-login-flow.ts LoginPhase, minus the passkey states (T10.5). */
-enum class LoginPhase { Ready, Verifying, Success, Error }
+/**
+ * use-login-flow.ts LoginPhase, minus the passkey states (T10.5). [Checking] is
+ * native-only: a password submit that arrived before the sign-in probe answered
+ * waits for it (ta-s4r), where the web simply hides the form while probing.
+ */
+enum class LoginPhase { Ready, Checking, Verifying, Success, Error }
 
 /** Host shown in the readouts ("console · host"), or "" while the URL does not parse. */
 fun hostnameOf(rawUrl: String): String {
@@ -69,8 +73,37 @@ fun statusLines(hostname: String, requirements: SignInRequirements?, probeFailed
     return lines
 }
 
+/**
+ * Whether the password form shows the username line. The probe said so, or the
+ * probe could not be read at all (ta-s4r): a console with TETHER_USERNAME set
+ * refuses a password-only login, so an unknown answer must leave a way to type
+ * one. Still probing (null, not failed) hides it, like the web's form.
+ */
+fun usernameFieldShown(requirements: SignInRequirements?, probeFailed: Boolean): Boolean =
+    requirements?.usernameRequired == true || (requirements == null && probeFailed)
+
+/** The username line is shown only because the probe failed, so it may be left empty. */
+fun usernameFieldOptional(requirements: SignInRequirements?, probeFailed: Boolean): Boolean =
+    requirements == null && probeFailed
+
+/** Under an optional username line (probe unreachable). */
+const val USERNAME_OPTIONAL_HINT = "Only needed if this console has a username."
+
+/** Appended to a refused password when no username went with it (ta-s4r). */
+const val USERNAME_MISSING_HINT = "If this console has a username, enter it too."
+
+/**
+ * A refused password should also point at the username when none was sent and
+ * the console was not positively known to have none: the server's 401 is the
+ * same "Those credentials are not correct." for a missing username as for a
+ * wrong password.
+ */
+fun usernameHintFor(requirements: SignInRequirements?, username: String): Boolean =
+    username.isBlank() && requirements?.usernameRequired != false
+
 /** Instrument frame-bar status (instrument-login.tsx statusState). */
 fun instrumentStatusLabel(phase: LoginPhase, probing: Boolean): String = when {
+    phase == LoginPhase.Checking -> "probing"
     phase == LoginPhase.Verifying -> "verifying"
     phase == LoginPhase.Success -> "unlocked"
     phase == LoginPhase.Error -> "refused"
@@ -84,10 +117,15 @@ fun versionCopy(incompatibility: Incompatibility): String = when (incompatibilit
     IncompatibleReason.ServerTooOld -> "This server is older than the app. Update the server, then connect."
 }
 
-/** Error line for a password attempt; null = success or the local-network flow takes over. */
-fun loginErrorCopy(result: LoginResult): String? = when (result) {
+/**
+ * Error line for a password attempt; null = success or the local-network flow takes over.
+ * [usernameHint] (see [usernameHintFor]) adds [USERNAME_MISSING_HINT] to a refusal.
+ */
+fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? = when (result) {
     is LoginResult.Success, is LoginResult.LocalNetworkBlocked -> null
-    is LoginResult.BadPassword -> result.message.ifBlank { "Those credentials are not correct." }
+    is LoginResult.BadPassword -> result.message.ifBlank { "Those credentials are not correct." } +
+        if (usernameHint) " $USERNAME_MISSING_HINT" else ""
+    is LoginResult.GatewayRefused -> gatewayRefusedCopy(result)
     is LoginResult.RateLimited -> result.message.ifBlank { "Too many attempts. Try again in a few minutes." }
     is LoginResult.PasswordDisabled ->
         result.message.ifBlank { "Password sign-in is turned off for this console." } +
@@ -95,6 +133,16 @@ fun loginErrorCopy(result: LoginResult): String? = when (result) {
     is LoginResult.Unreachable -> result.message.ifBlank { "Could not reach the server." }
     is LoginResult.VersionMismatch -> versionCopy(result.incompatibility)
 }
+
+/**
+ * A 401 from something in front of Tether, never worded as a wrong password (ta-s4r): the
+ * credentials were not checked by Tether at all, so retyping them cannot help.
+ */
+fun gatewayRefusedCopy(result: LoginResult.GatewayRefused): String =
+    "The server refused the sign-in (HTTP ${result.status}, not from Tether’s login" +
+        (result.scheme?.let { "; it asks for $it authentication" } ?: "") + "). " +
+        "Something in front of Tether, such as a proxy or SSO gateway, wants its own sign-in. " +
+        "Pair this device with a code instead."
 
 /** Error line for a pairing attempt; null = success or the local-network flow takes over. */
 fun pairErrorCopy(result: PairResult): String? = when (result) {

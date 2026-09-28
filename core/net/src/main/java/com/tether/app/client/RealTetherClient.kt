@@ -100,6 +100,9 @@ private const val MIRROR_REATTACH_RECENT = 10
 /** Upper bound on the best-effort server calls made while signing out. */
 private const val LOGOUT_CALL_TIMEOUT_MS = 5_000L
 
+/** An RFC 9110 auth-scheme token, short enough to show on the login screen. */
+private val AUTH_SCHEME = Regex("[A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]{0,31}")
+
 private const val REDIRECT_MESSAGE =
     "The server redirected this request instead of answering it. Check the URL (https:// or http://). " +
         "If a sign-in gateway (SSO) is in front of Tether, pair this device with a code instead."
@@ -451,9 +454,23 @@ class RealTetherClient(
                     adoptCredential(normalized, Credential.Cookie(cookie))
                     return@withContext LoginResult.Success
                 }
-                401 -> return@withContext LoginResult.BadPassword(
-                    parseJsonField(response, "error") ?: "That password is not correct.",
-                )
+                // Tether's own refusal is JSON `{error}` and never carries a challenge
+                // header. Anything else is something in front of Tether (basic auth, a
+                // proxy, an SSO gateway) and must not read as a wrong password (ta-s4r).
+                401 -> {
+                    val challenge = response.header("WWW-Authenticate")
+                    val error = parseJsonObject(response)?.get("error")
+                        ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
+                    return@withContext if (challenge == null && error != null) {
+                        LoginResult.BadPassword(error)
+                    } else {
+                        LoginResult.GatewayRefused(
+                            status = 401,
+                            // The scheme token only (never the realm), and only when it looks like one.
+                            scheme = challenge?.trim()?.substringBefore(' ')?.takeIf { AUTH_SCHEME.matches(it) },
+                        )
+                    }
+                }
                 // lib/login-guard.mjs: failed attempts only, so a correct password
                 // is never throttled.
                 429 -> return@withContext LoginResult.RateLimited(

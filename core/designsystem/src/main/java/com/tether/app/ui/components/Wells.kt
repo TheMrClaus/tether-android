@@ -17,10 +17,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -79,6 +82,11 @@ fun TetherInputWell(
     fontFamily: FontFamily? = null,
     letterSpacing: TextUnit = TextUnit.Unspecified,
     interactionSource: MutableInteractionSource? = null,
+    /**
+     * What an autofill service may put here (ta-s4r: the sign-in's username and password), on
+     * the editable node itself so a password manager never has to guess which field is which.
+     */
+    contentType: ContentType? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -102,6 +110,7 @@ fun TetherInputWell(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier
+                .then(if (contentType != null) Modifier.semantics { this.contentType = contentType } else Modifier)
                 .fillMaxWidth()
                 .padding(horizontal = t.css.spaceMd, vertical = 11.dp),
             enabled = enabled,

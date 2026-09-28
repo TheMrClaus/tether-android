@@ -68,6 +68,15 @@ class LoginCopyTest {
         assertEquals("nope", loginErrorCopy(LoginResult.BadPassword("nope")))
         assertEquals("Too many attempts. Try again in a few minutes.", loginErrorCopy(LoginResult.RateLimited("")))
         assertEquals("Off. Pair this device with a code instead.", loginErrorCopy(LoginResult.PasswordDisabled("Off.")))
+        // ta-s4r: the username hint rides only on Tether's refusal, and only when it was asked for.
+        assertEquals("nope $USERNAME_MISSING_HINT", loginErrorCopy(LoginResult.BadPassword("nope"), usernameHint = true))
+        assertEquals(
+            "The server refused the sign-in (HTTP 401, not from Tether’s login; it asks for Basic authentication). " +
+                "Something in front of Tether, such as a proxy or SSO gateway, wants its own sign-in. " +
+                "Pair this device with a code instead.",
+            loginErrorCopy(LoginResult.GatewayRefused(401, "Basic"), usernameHint = true),
+        )
+        assertTrue(loginErrorCopy(LoginResult.GatewayRefused(401, null))!!.startsWith("The server refused the sign-in (HTTP 401, not from Tether’s login). "))
         assertNull(pairErrorCopy(PairResult.Success))
         assertEquals("That pairing code is not valid or has expired.", pairErrorCopy(PairResult.Rejected("")))
     }
@@ -88,5 +97,23 @@ class LoginCopyTest {
         assertEquals("Enter the password.", validateAttempt(AuthMode.Password, "h", "", "", "", probe))
         assertNull(validateAttempt(AuthMode.Password, "h", "", "pw", "", null))
         assertNull(validateAttempt(AuthMode.Pairing, "h", "", "", "ABCD1234", probe))
+    }
+
+    @Test
+    fun theUsernameLineFollowsTheProbeAndStaysOfferedWhenTheProbeFailed() {
+        // Still probing: hidden, like the web's form.
+        assertEquals(false, usernameFieldShown(null, probeFailed = false))
+        // Known: exactly what the console said.
+        assertEquals(false, usernameFieldShown(probe, probeFailed = false))
+        assertEquals(true, usernameFieldShown(probe.copy(usernameRequired = true), probeFailed = false))
+        assertEquals(false, usernameFieldOptional(probe.copy(usernameRequired = true), probeFailed = false))
+        // Unknown after a failed probe: offered, and optional.
+        assertEquals(true, usernameFieldShown(null, probeFailed = true))
+        assertEquals(true, usernameFieldOptional(null, probeFailed = true))
+        // The refusal hint: no username sent, and the console not known to have none.
+        assertEquals(true, usernameHintFor(null, " "))
+        assertEquals(false, usernameHintFor(probe, ""))
+        assertEquals(false, usernameHintFor(null, "operator"))
+        assertEquals("probing", instrumentStatusLabel(LoginPhase.Checking, probing = false))
     }
 }

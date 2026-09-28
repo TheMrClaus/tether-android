@@ -9,6 +9,12 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        // Robolectric (LoginScreenBehaviourTest) needs the merged resources: fonts, the test activity.
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -26,4 +32,11 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    // ta-s4r: the real screen over the real client against a MockWebServer "Tether".
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(composeBom)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
 }
