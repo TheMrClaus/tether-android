@@ -21,6 +21,11 @@
      - files/datastore/tether_drafts.preferences_pb holds unsent composer text
        per server origin (T2.3/T7.1): user content, like the unsent input in the
        settings file, so it stays on this device too.
+     - databases/ (the whole domain) holds the T13.1 journal mirror: session
+       transcripts, row-sealed under a data key whose Keystore wrapper never leaves
+       the device. It is a cache rebuilt from the server, so nothing is lost by
+       excluding it, and a transcript copy has no business in a backup
+       (SYNC_DESIGN §8.4). Its wrapped data key lives in no_backup/.
      Keep this in sync with backup_rules.xml (android:fullBackupContent). -->
 <data-extraction-rules>
     <cloud-backup>
@@ -31,6 +36,7 @@
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
         <exclude domain="sharedpref" path="tether_push_firebase.xml" />
+        <exclude domain="database" path="." />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="credentials" />
@@ -40,5 +46,6 @@
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
         <exclude domain="sharedpref" path="tether_push_firebase.xml" />
+        <exclude domain="database" path="." />
     </device-transfer>
 </data-extraction-rules>

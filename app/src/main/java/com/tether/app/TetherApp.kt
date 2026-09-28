@@ -1,6 +1,7 @@
 package com.tether.app
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -8,11 +9,18 @@ import com.tether.app.client.AesGcmCredentialCipher
 import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.KeystoreCredentialKeySource
 import com.tether.app.client.RealTetherClient
+import com.tether.app.client.sync.REDUCER_VERSION
+import com.tether.app.mirror.AndroidMirrorDbFactory
+import com.tether.app.mirror.JournalMirror
+import com.tether.app.mirror.MirrorKeyStore
 import com.tether.app.net.AndroidLocalNetworkAccess
 import com.tether.app.push.PushChannels
 import com.tether.app.push.PushController
 import com.tether.app.ui.ClientLocator
 import com.tether.app.ui.prefs.UiPrefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
 import okhttp3.OkHttpClient
 
 /** Points the UI's ClientLocator at the real protocol client. */
@@ -50,6 +58,28 @@ class TetherApp : Application() {
             scope = pushScope,
         )
 
+        // T13.1 journal mirror (SYNC_DESIGN §2, §8): per-row AES-GCM under a data key wrapped by
+        // its own non-exportable Keystore key; the DB lives in databases/ and the wrapped key in
+        // noBackupFilesDir, both excluded from backup and transfer.
+        val mirrorDbs = AndroidMirrorDbFactory(this)
+        val mirrorKeys = MirrorKeyStore(
+            file = File(noBackupFilesDir, MirrorKeyStore.KEY_FILE),
+            kek = AesGcmCredentialCipher(MirrorKeyStore.keystoreKek()),
+        )
+        val mirror = if (BuildConfig.MIRROR_ENABLED) {
+            JournalMirror(
+                dbFactory = mirrorDbs,
+                keyStore = mirrorKeys,
+                reducerVersion = REDUCER_VERSION,
+                scope = appScope,
+                // Exception types only (JournalMirror never passes content here).
+                log = { Log.w("TetherMirror", it) },
+            )
+        } else {
+            appScope.launch(Dispatchers.IO) { runCatching { JournalMirror.purge(mirrorDbs, mirrorKeys) } }
+            null
+        }
+
         ClientLocator.factory = { context ->
             RealTetherClient(
                 settings = settings,
@@ -60,6 +90,7 @@ class TetherApp : Application() {
                 // Logout forgets the credential first, so push is unregistered
                 // with the one that was in force (device tokens only).
                 onLogout = { baseUrl, credential -> push.unregisterAfterLogout(baseUrl, credential) },
+                mirror = mirror,
             )
         }
 

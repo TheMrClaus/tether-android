@@ -31,6 +31,13 @@ android {
         targetSdk = 37
         versionCode = 16
         versionName = "0.6.0"
+        // T13.1 rollback flag (SYNC_DESIGN §2.6): the Room journal mirror. Off with
+        // `-Ptether.mirrorEnabled=false`; an existing mirror is then deleted with its keys.
+        buildConfigField(
+            "boolean",
+            "MIRROR_ENABLED",
+            providers.gradleProperty("tether.mirrorEnabled").orElse("true").get().toBooleanStrict().toString(),
+        )
     }
 
     signingConfigs {

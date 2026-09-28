@@ -6,6 +6,12 @@ plugins {
 
 android {
     namespace = "com.tether.app.core.net"
+    // T13.1: the journal-mirror tests (Room on Robolectric's SQLite) need the merged manifest.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -21,6 +27,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
 
 // T1.3: PendingInputTest replays parity-corpus/helpers/pending-input.json through the typed facade.
@@ -30,4 +38,8 @@ tasks.withType<Test>().configureEach {
     inputs.dir(corpusDir.dir("helpers")).withPropertyName("parityHelperCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
     // T5.1: SidebarSyncTest re-encodes the sidebar frames against parity-corpus/wire.
     inputs.dir(corpusDir.dir("wire")).withPropertyName("parityWireCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
+    // T13.1: JournalMirrorConformanceTest drives every reducer corpus case through the client + mirror.
+    inputs.dir(corpusDir.dir("reducer")).withPropertyName("parityReducerCorpus").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(corpusDir.file("corpus-manifest.json")).withPropertyName("parityManifest").withPathSensitivity(PathSensitivity.RELATIVE)
+    maxHeapSize = "2g"
 }

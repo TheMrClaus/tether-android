@@ -30,6 +30,10 @@ androidxCore = "1.19.1"
 # Roborazzi screenshot tests (JVM, Robolectric native graphics). 1.75.0 is the latest
 # stable on Maven Central as of 2026-09-27.
 roborazzi = "1.75.0"
+# T13.1 journal mirror (SYNC_DESIGN §2.2). KSP2 (2.3.x) is versioned independently of Kotlin
+# and supports AGP 9 built-in Kotlin. Latest stable on Maven Central / Google as of 2026-09.
+room = "2.8.5"
+ksp = "2.3.12"
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "androidxCore" }
@@ -68,8 +72,12 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 
 [plugins]
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+room = { id = "androidx.room", version.ref = "room" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 # Lint for the pure Kotlin/JVM modules (:core:protocol, :core:reducer).

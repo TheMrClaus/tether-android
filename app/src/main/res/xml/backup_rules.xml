@@ -2,7 +2,8 @@
 <!-- android:fullBackupContent, for completeness (it applies where
      dataExtractionRules does not). Same exclusions and reasons as
      data_extraction_rules.xml: never back up the sealed credentials or the
-     pre-T1.4 settings file that held them in plaintext, nor the FCM token and its Firebase project binding, nor the unsent composer drafts. -->
+     pre-T1.4 settings file that held them in plaintext, nor the FCM token and its Firebase project binding,
+     nor the unsent composer drafts, nor databases/ (the T13.1 journal mirror of session transcripts). -->
 <full-backup-content>
     <exclude domain="file" path="credentials" />
     <exclude domain="file" path="tether_settings.preferences_pb" />
@@ -11,4 +12,5 @@
     <exclude domain="file" path="datastore/tether_drafts.preferences_pb.tmp" />
     <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
     <exclude domain="sharedpref" path="tether_push_firebase.xml" />
+    <exclude domain="database" path="." />
 </full-backup-content>

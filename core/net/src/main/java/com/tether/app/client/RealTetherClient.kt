@@ -1,5 +1,7 @@
 package com.tether.app.client
 
+import com.tether.app.client.sync.MirrorLink
+import com.tether.app.mirror.JournalMirror
 import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
@@ -188,7 +190,18 @@ class RealTetherClient(
     private val onLogout: suspend (baseUrl: String, credential: Credential) -> Unit = { _, _ -> },
     /** How long a node-add/remove/probe waits for its `node-result` (timed on [scheduler]). */
     private val nodeRequestTimeoutMs: Long = NodeRegistryRules.REQUEST_TIMEOUT_MS,
+    /**
+     * T13.1 journal mirror (SYNC_DESIGN §2): null = off (the `mirrorEnabled` rollback flag).
+     * Bound to the origin in force; wiped with its data key on logout and revocation.
+     */
+    mirror: JournalMirror? = null,
 ) : TetherClient {
+
+    // T13.1: frame -> mirror writes (null when the mirror is off).
+    private val mirrorLink: MirrorLink? = mirror?.let(::MirrorLink)
+
+    // The origin the mirror is bound to (or being bound to); null = unbound. Guarded by lock.
+    private var mirrorOrigin: String? = null
 
     /**
      * Every request that carries (or obtains) a credential goes through this
@@ -691,6 +704,7 @@ class RealTetherClient(
      * newer binding loads its own). Checks the unattributed 0.6.0 slot once.
      */
     private suspend fun bindPendingToCurrentServer() {
+        bindMirrorToCurrentServer()
         val (target, checkUnattributed) = synchronized(lock) {
             val check = !unattributedChecked
             unattributedChecked = true
@@ -838,6 +852,36 @@ class RealTetherClient(
     }
 
     /**
+     * T13.1: bind the mirror to the origin in force (once per origin; a new origin's bind
+     * deletes the previous origin's DB). Runs before the first connect of a binding, so the
+     * mirror is open before any frame of that origin arrives.
+     */
+    private suspend fun bindMirrorToCurrentServer() {
+        val link = mirrorLink ?: return
+        val origin = synchronized(lock) {
+            val current = currentOriginLocked() ?: return
+            if (current == mirrorOrigin) return
+            mirrorOrigin = current
+            current
+        }
+        link.mirror.bind(origin)
+    }
+
+    /**
+     * T13.1 (SYNC_DESIGN §8.3): logout / revocation. The mirror DB and its data key (and the
+     * Keystore key wrapping it) are destroyed: a signed-out or revoked device keeps no
+     * transcripts. Unsent input is not in the mirror and is untouched.
+     */
+    private fun wipeMirror() {
+        val link = mirrorLink ?: return
+        synchronized(lock) { mirrorOrigin = null }
+        link.mirror.wipe()
+    }
+
+    /** The origin of [webSocket] when it is the current socket. Caller holds [lock]. */
+    private fun mirrorOriginLocked(): String? = if (mirrorLink == null) null else socketOrigin
+
+    /**
      * After a late binding (the socket was already live): attach the sessions
      * with pending input that this epoch has not attached yet, then drain, all
      * on the socket that is live now and only if it is the store's origin.
@@ -932,6 +976,7 @@ class RealTetherClient(
         }
         ws?.cancel()
         clearSignInViews()
+        wipeMirror()
         connectionState.value = ConnectionState.Disconnected
         // stop() is logout: drop the persisted base URL + credential so the UI's
         // `configured` flow flips false and the setup screen returns. A later
@@ -966,6 +1011,7 @@ class RealTetherClient(
         }
         ws?.close(1000, "logout")
         clearSignInViews()
+        wipeMirror()
         // A user logout is not a server verdict: no "session expired" copy.
         signedOutReasonState.value = null
         connectionState.value = ConnectionState.AuthRequired
@@ -1371,6 +1417,9 @@ class RealTetherClient(
         }
         ws?.cancel()
         clearSignInViews()
+        // A dead credential (4001/4002 revocation, or the probe's authenticated:false): the
+        // device must not keep transcripts it can no longer prove it may read (§8.3).
+        wipeMirror()
         // State first: an observer that sees the reason must see the settled state.
         connectionState.value = ConnectionState.AuthRequired
         signedOutReasonState.value = reason
@@ -1708,6 +1757,7 @@ class RealTetherClient(
             // Published under the same check: a late ready of a socket let go
             // (another server's) can never show its sessions.
             sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
+            mirrorOriginLocked()?.let { mirrorLink?.sessions(it, message.sessions, full = true) }
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
             handshakeDone = true
@@ -1768,6 +1818,7 @@ class RealTetherClient(
         val current = synchronized(lock) {
             if (socket !== webSocket) return@synchronized false
             tracker.onSnapshot(message.sessionId, message.throughSeq)
+            mirrorOriginLocked()?.let { mirrorLink?.snapshot(it, message) }
             true
         }
         if (!current) return
@@ -1812,7 +1863,12 @@ class RealTetherClient(
         val decision = synchronized(lock) {
             // A let-go socket's event: dropped (its cursor and acks are not ours).
             if (socket !== webSocket) return
-            tracker.onEvent(message.sessionId, event.seq, canSend = socketOpen)
+            tracker.onEvent(message.sessionId, event.seq, canSend = socketOpen).also { decision ->
+                // Only what the cursor folds is mirrored, in frame order (§2.3).
+                if (decision == CursorTracker.Decision.Fold) {
+                    mirrorOriginLocked()?.let { mirrorLink?.event(it, message.sessionId, event) }
+                }
+            }
         }
         when (decision) {
             CursorTracker.Decision.Ignore,
@@ -1854,6 +1910,8 @@ class RealTetherClient(
             val current = ifCurrent(webSocket) {
                 projectionTreesState.value = projectionTreesState.value - message.sessionId
                 projectionsState.value = projectionsState.value - message.sessionId
+                // The reducer is the arbiter (§10 C5): the mirrored base goes too.
+                mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
             }
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
@@ -1875,7 +1933,10 @@ class RealTetherClient(
         val turnsById = tree["turnsById"] as? JsObj ?: JsObj.EMPTY
         val next = tree.put("turnsById", turnsById.spread(message.turns))
         val typed = adapt(message.sessionId, next)
-        ifCurrent(webSocket) { publishLocked(message.sessionId, next, typed) }
+        ifCurrent(webSocket) {
+            publishLocked(message.sessionId, next, typed)
+            mirrorOriginLocked()?.let { mirrorLink?.turnsDetail(it, message.sessionId, message.turns, tree) }
+        }
     }
 
     /**
@@ -1911,6 +1972,7 @@ class RealTetherClient(
     private fun upsertSessionLocked(session: AgentSession) {
         sessionsState.value = (listOf(session) + sessionsState.value.filter { it.id != session.id })
             .sortedByDescending { it.updatedAt }
+        mirrorOriginLocked()?.let { mirrorLink?.sessions(it, listOf(session), full = false) }
     }
 
     // ------------------------------------------------------------------
@@ -2187,6 +2249,8 @@ class RealTetherClient(
     override fun attach(sessionId: String) {
         val afterSeq = synchronized(lock) {
             subscribed.add(sessionId)
+            // §3.1 rule 5: "most recently opened" orders the capped ready re-attach.
+            mirrorOrigin?.let { mirrorLink?.opened(it, sessionId) }
             if (!socketOpen || !handshakeDone || !attachedThisEpoch.add(sessionId)) return
             tracker.cursorFor(sessionId)
         }
