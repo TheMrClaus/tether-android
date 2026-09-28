@@ -1228,9 +1228,12 @@ class ApprovalCardBehaviourTest {
     }
     // ---- round 7: a confirmation refers to the words that were on screen -----------------------
 
+    /** Frame 0: confirmed (drawn, so Allow selected is enabled). Frame 1: tick + Confirm + Allow selected at once. */
     private fun tickConfirmAllowInOneFrame(tickTag: String, index: Int = 0) {
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
         val tick = rule.onAllNodesWithTag(tickTag)[index].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
@@ -1249,11 +1252,13 @@ class ApprovalCardBehaviourTest {
     }
 
     @Test fun aTickAConfirmAndAGrantInOneFrameSendNothing() {
-        // First untick /srv/fixtures (drawn), then: re-tick it + confirm + grant in one frame.
+        // First untick /srv/fixtures and confirm (both drawn), then: re-tick it + Confirm + grant in one frame.
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
         rule.onAllNodesWithTag("grant-read")[0].performClick()
+        rule.onNodeWithTag("grant-confirm").performClick()
         rule.waitForIdle()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
         val tick = rule.onAllNodesWithTag("grant-read")[0].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
