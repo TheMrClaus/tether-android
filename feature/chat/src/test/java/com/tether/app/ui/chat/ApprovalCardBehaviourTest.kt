@@ -997,6 +997,44 @@ class ApprovalCardBehaviourTest {
         assertTrue("a grant left with the pre-untick set: $calls", calls.isEmpty())
     }
 
+    @Test fun anUntickAConfirmationAndATapInOneFrameSendNothing() {
+        // Untick, confirm and both grant keys in ONE frame, before any redraw: the keys were drawn
+        // unconfirmed (disabled), so nothing goes out; a confirmation only counts once it is drawn.
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        val untick = rule.onNodeWithTag("grant-network").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val all = rule.onNodeWithText("ALLOW ALL", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            untick()
+            confirm()
+            all() // not every box is ticked NOW: "Allow all" sends nothing
+            allow()
+        }
+        rule.waitForIdle()
+        assertTrue("sent $calls", calls.isEmpty())
+        // Redrawn: the untick moved the record, so the confirmation made in that frame is dropped too;
+        // the operator confirms the new set on screen.
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithTag("grant-network").assertIsOff()
+    }
+
+    @Test fun anUnpickAndNextInOneFrameStayOnThePage() {
+        show(ApprovalFixtures.question)
+        scrollTo("question-next")
+        rule.onNodeWithText("Postgres").performClick()
+        rule.waitForIdle()
+        val unpick = rule.onNodeWithText("Postgres").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        rule.runOnUiThread {
+            unpick()
+            next()
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
+    }
+
     @Test fun aConfirmationMadeOnAnExistingRecordDiesWithTheNextChange() {
         // The record exists first (one untick), THEN the operator confirms, then changes a tick: the
         // confirmation belonged to the earlier state (kills "generation bumped only on creation").
