@@ -1,8 +1,10 @@
 package com.tether.app.ui.files
 
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.FileProvider
 import com.tether.app.client.FilesCopy
@@ -11,76 +13,184 @@ import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFiles
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * The real [BrowserPlatform]. Every byte comes through [WorkspaceFiles.download] (streamed, with a
- * cap) into either the app cache ([FileCache]) or a document the user chose in the system
- * picker; nothing is ever written to a path derived from a server-supplied name.
+ * The document the user chose in the system "create document" picker, behind a seam (the real one
+ * is the ContentResolver; tests pass their own). Every call may throw anything a provider throws.
  */
-class AndroidBrowserPlatform(private val context: Context) : BrowserPlatform {
-    private val cache = FileCache(context.cacheDir)
+interface DocumentTarget {
+    /** The document's current size, null when the provider does not say. */
+    fun sizeOf(uri: Uri): Long?
+    fun openForWrite(uri: Uri, truncate: Boolean): OutputStream
+    fun delete(uri: Uri)
+}
+
+class ResolverDocuments(private val resolver: ContentResolver) : DocumentTarget {
+    override fun sizeOf(uri: Uri): Long? =
+        resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getLong)
+        }
+
+    override fun openForWrite(uri: Uri, truncate: Boolean): OutputStream =
+        resolver.openOutputStream(uri, if (truncate) "wt" else "w") ?: throw IOException("the provider gave no stream")
+
+    override fun delete(uri: Uri) {
+        DocumentsContract.deleteDocument(resolver, uri)
+    }
+}
+
+/**
+ * The real [BrowserPlatform]. Every byte comes through [WorkspaceFiles.download] (streamed, with a
+ * cap) into the app cache ([FileCache]); a document the user chose is written only once the whole
+ * file is in hand. Nothing is ever written to a path derived from a server-supplied name, and no
+ * provider, decoder or I/O failure escapes as an exception: each is an error result.
+ */
+class AndroidBrowserPlatform(
+    private val context: Context,
+    private val documents: DocumentTarget = ResolverDocuments(context.contentResolver),
+    private val cache: FileCache = FileCache(context.cacheDir),
+    /** Runs a sweep off the main thread (tests run it inline). */
+    private val background: (() -> Unit) -> Unit = FileCache::sweepInBackground,
+) : BrowserPlatform {
+
+    /** Shared copies made but not yet handed to the share sheet, by id (their directory). */
+    private val unclaimed = ConcurrentHashMap<String, File>()
 
     override suspend fun loadImage(files: WorkspaceFiles, entry: WorkspaceFileEntry): ImageLoad = withContext(Dispatchers.IO) {
         if (entry.size > BrowserLimits.MAX_IMAGE_PREVIEW_BYTES) return@withContext ImageLoad.TooLarge
-        val scratch = cache.newScratch()
+        var scratch: File? = null
         try {
-            val result = scratch.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_IMAGE_PREVIEW_BYTES, out) }
+            val file = cache.newScratch().also { scratch = it }
+            val result = file.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_IMAGE_PREVIEW_BYTES, out) }
             when (result) {
                 is FilesResult.Failed -> if (result.tooLarge) ImageLoad.TooLarge else ImageLoad.Failed(result.message)
-                is FilesResult.Ok -> BoundedImages.decode(scratch)?.let { ImageLoad.Ok(it.asImageBitmap()) }
-                    ?: ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
+                is FilesResult.Ok -> when (val decoded = BoundedImages.decode(file)) {
+                    is Decoded.Ok -> ImageLoad.Ok(decoded.bitmap.asImageBitmap())
+                    Decoded.TooLarge -> ImageLoad.TooLarge
+                    Decoded.Failed -> ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: IOException) {
+            ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
+        } catch (_: RuntimeException) {
             ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
         } finally {
             // The decoded bitmap is all the preview keeps; the copy goes at once.
-            scratch.delete()
+            scratch?.delete()
         }
     }
 
+    /**
+     * Download to a scratch copy first; only a complete file is written to [target], so a failed
+     * download never touches it. A failure deletes the document only when it was empty before
+     * (the one this flow's picker just created), never a file the user chose to overwrite.
+     */
     override suspend fun saveTo(files: WorkspaceFiles, entry: WorkspaceFileEntry, target: Uri): FilesResult<Long> = withContext(Dispatchers.IO) {
-        val resolver = context.contentResolver
-        val result = try {
-            // "wt": truncate whatever the provider already had at that document.
-            resolver.openOutputStream(target, "wt")?.use { out -> files.download(entry.path, BrowserLimits.MAX_EXPORT_BYTES, out) }
-                ?: FilesResult.Failed(SAVE_FAILED)
+        var scratch: File? = null
+        val wasEmpty = try {
+            documents.sizeOf(target) == 0L
+        } catch (_: RuntimeException) {
+            false
+        }
+        try {
+            val file = cache.newScratch("save").also { scratch = it }
+            val fetched = file.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_EXPORT_BYTES, out) }
+            if (fetched is FilesResult.Failed) {
+                discardCreated(target, wasEmpty)
+                return@withContext fetched
+            }
+            // Truncate only a document that had content; an empty one needs no "t" (not every provider supports it).
+            documents.openForWrite(target, truncate = !wasEmpty).use { out -> file.inputStream().use { it.copyTo(out) } }
+            fetched
+        } catch (e: CancellationException) {
+            discardCreated(target, wasEmpty)
+            throw e
         } catch (_: IOException) {
+            discardCreated(target, wasEmpty)
             FilesResult.Failed(SAVE_FAILED)
-        } catch (_: SecurityException) {
+        } catch (_: RuntimeException) {
+            // SecurityException (grant revoked), IllegalArgumentException / UnsupportedOperationException (mode).
+            discardCreated(target, wasEmpty)
             FilesResult.Failed(SAVE_FAILED)
+        } finally {
+            scratch?.delete()
         }
-        if (result is FilesResult.Failed) {
-            // Never leave a partial copy behind in the user's chosen folder.
-            runCatching { DocumentsContract.deleteDocument(resolver, target) }
+    }
+
+    private fun discardCreated(target: Uri, wasEmpty: Boolean) {
+        if (!wasEmpty) return
+        try {
+            documents.delete(target)
+        } catch (_: Exception) {
+            // Best effort: an empty document is all that can be left.
         }
-        result
     }
 
     override suspend fun shareCopy(files: WorkspaceFiles, entry: WorkspaceFileEntry): FilesResult<ShareReady> = withContext(Dispatchers.IO) {
         if (entry.size > BrowserLimits.MAX_EXPORT_BYTES) return@withContext FilesResult.Failed(FilesCopy.DOWNLOAD_TOO_LARGE, tooLarge = true)
-        val file = try {
-            cache.newShareFile(entry.name)
-        } catch (_: IOException) {
-            return@withContext FilesResult.Failed(SHARE_FAILED)
-        }
-        val result = try {
-            file.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_EXPORT_BYTES, out) }
+        var dir: File? = null
+        var handedOver = false
+        try {
+            val file = cache.newShareFile(entry.name)
+            val parent = checkNotNull(file.parentFile)
+            dir = parent
+            // Tracked from the start: a copy whose result is lost to a cancellation is still found.
+            unclaimed[parent.path] = parent
+            val result = file.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_EXPORT_BYTES, out) }
+            when (result) {
+                is FilesResult.Failed -> result
+                is FilesResult.Ok -> {
+                    val uri = FileProvider.getUriForFile(context, FileCache.authority(context), file)
+                    handedOver = true
+                    FilesResult.Ok(ShareReady(uri, mimeFor(file), file.name, parent.path))
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: IOException) {
             FilesResult.Failed(SHARE_FAILED)
-        }
-        when (result) {
-            is FilesResult.Failed -> {
-                file.parentFile?.deleteRecursively()
-                result
+        } catch (_: RuntimeException) {
+            FilesResult.Failed(SHARE_FAILED)
+        } finally {
+            if (!handedOver) {
+                dir?.let {
+                    unclaimed.remove(it.path)
+                    it.deleteRecursively()
+                }
             }
-            is FilesResult.Ok -> FilesResult.Ok(ShareReady(FileProvider.getUriForFile(context, FileCache.authority(context), file), mimeFor(file), file.name))
         }
     }
 
-    override fun sweep(keepRecentShares: Boolean) {
-        cache.sweep(keepSharesYoungerThanMs = if (keepRecentShares) FileCache.SHARE_GRACE_MS else null)
+    /** The share sheet has it: its window starts now, and only an expiry sweep removes it. */
+    override fun claimShare(share: ShareReady) {
+        val now = System.currentTimeMillis()
+        unclaimed.remove(share.id)?.walkTopDown()?.forEach { it.setLastModified(now) }
+    }
+
+    override fun discardShare(share: ShareReady) {
+        unclaimed.remove(share.id)?.let { dir -> background { dir.deleteRecursively() } }
+    }
+
+    override fun discardUnclaimedShares() {
+        val dirs = unclaimed.keys.toList().mapNotNull { unclaimed.remove(it) }
+        if (dirs.isNotEmpty()) background { dirs.forEach { it.deleteRecursively() } }
+    }
+
+    override fun sweep(mode: SweepMode) {
+        background {
+            when (mode) {
+                SweepMode.Expired -> cache.sweepExpired()
+                SweepMode.All -> cache.sweepAll()
+            }
+        }
     }
 
     companion object {

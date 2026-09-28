@@ -44,7 +44,7 @@ class FileBrowserStateTest {
         assertEquals(listOf("list $ROOT"), files.calls)
         assertFalse(s.loading)
         assertEquals(listOf("docs", "src", "package.json", "README.md"), s.listing!!.entries.map { it.name })
-        assertEquals(listOf("sweep keepRecentShares=false"), platform.calls)
+        assertEquals("by age only: a copy another app still reads stays", listOf("sweep Expired"), platform.calls)
     }
 
     @Test fun withoutASessionCwdNothingOpens() = runTest {
@@ -296,6 +296,36 @@ class FileBrowserStateTest {
         assertNull(s.uploading)
     }
 
+    @Test fun anUploadIsNamedLikeABrowsersFileNameAndAControlCharacterIsRefused() = runTest {
+        val s = browser()
+        s.open()
+        advanceUntilIdle()
+        s.upload(
+            listOf(
+                PickedUpload("C:\\fakepath\\report.pdf", bytesSource(byteArrayOf(1))),
+                PickedUpload("evil\u0000.txt", bytesSource(byteArrayOf(2))),
+                PickedUpload(null, bytesSource(byteArrayOf(3))),
+            ),
+        )
+        advanceUntilIdle()
+        assertEquals(listOf("list $ROOT", "upload $ROOT report.pdf", "upload $ROOT upload", "list $ROOT"), files.calls)
+        assertEquals("the refused one says why, in the server's words", UploadNames.INVALID, s.mutationError)
+    }
+
+    @Test fun closeLetsGoOfThePreview() = runTest {
+        files.texts[readme.path] = FilesResult.Ok(README_TEXT)
+        val s = browser()
+        s.open()
+        advanceUntilIdle()
+        s.selectFile(readme)
+        advanceUntilIdle()
+        assertEquals(README_TEXT, s.text)
+        s.close()
+        assertNull(s.text)
+        assertNull(s.image)
+        assertNull(s.selected)
+    }
+
     @Test fun closeAbortsAndSweepsButKeepsFreshSharedCopies() = runTest {
         val s = browser()
         s.open()
@@ -304,7 +334,7 @@ class FileBrowserStateTest {
         s.close()
         assertFalse(s.isOpen)
         assertNull(s.itemActions)
-        assertEquals("sweep keepRecentShares=true", platform.calls.last())
+        assertEquals(listOf("discardUnclaimed", "sweep Expired"), platform.calls.takeLast(2))
     }
 
     @Test fun fullscreenTogglesAndAFolderLoadLeavesIt() = runTest {

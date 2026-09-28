@@ -10,7 +10,13 @@
             android:name="com.tether.app.ui.files.WorkspaceFileProvider"
             android:authorities="${applicationId}.workspacefiles"
             android:exported="false"
-            android:grantUriPermissions="true" />
+            android:grantUriPermissions="true">
+            <!-- Also named here (the subclass passes it too) so getUriForFile resolves the paths
+                 even before this provider instance is attached. -->
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/workspace_file_paths" />
+        </provider>
     </application>
 
 </manifest>

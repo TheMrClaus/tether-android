@@ -13,11 +13,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +52,7 @@ fun rememberFileBrowserState(files: WorkspaceFiles): FileBrowserState {
     DisposableEffect(state) {
         onDispose {
             state.close()
-            platform.sweep(keepRecentShares = false)
+            platform.sweep(SweepMode.All)
         }
     }
     return state
@@ -62,25 +66,28 @@ fun rememberFileBrowserState(files: WorkspaceFiles): FileBrowserState {
  */
 @Composable
 fun WorkspaceFileBrowser(state: FileBrowserState) {
-    if (!state.isOpen) return
     val context = LocalContext.current
     val resolver = context.contentResolver
 
+    // Registered whether or not the browser is showing: a picker result can arrive in a new
+    // activity (rotation while the system picker is up), where the browser starts closed.
     val pickUploads = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         state.upload(
             uris.map { uri ->
                 val (name, size) = ContentUploadSource.describe(resolver, uri)
-                // The provider's display name is sent as the new file's name; the server validates it.
-                PickedUpload(name?.takeIf { it.isNotBlank() } ?: "upload", ContentUploadSource(resolver, uri, size))
+                // UploadNames checks the display name in the state before anything is sent.
+                PickedUpload(name, ContentUploadSource(resolver, uri, size))
             },
         )
     }
-    var saving by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
+    var saving by rememberPendingSave()
     val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val entry = saving
         saving = null
         if (uri != null && entry != null) state.saveTo(entry, uri)
     }
+
+    if (!state.isOpen) return
 
     state.pendingShare?.let { share ->
         LaunchedEffect(share) {
@@ -90,12 +97,14 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
                 clipData = ClipData.newRawUri(share.name, share.uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            try {
+            val started = try {
                 context.startActivity(Intent.createChooser(send, null))
+                true
             } catch (_: ActivityNotFoundException) {
-                // Nothing can receive it; the copy is swept with the rest of the cache.
+                false
             }
-            state.shareHandled()
+            // Started: the copy lives out its window for the receiving app. Not: it goes now.
+            state.shareHandled(started)
         }
     }
 
@@ -171,6 +180,17 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
         }
     }
 }
+
+/** The entry a "create document" picker is choosing a target for, kept across a configuration change. */
+@Composable
+fun rememberPendingSave(): MutableState<WorkspaceFileEntry?> = rememberSaveable(stateSaver = PendingSaveSaver) { mutableStateOf(null) }
+
+private val PendingSaveSaver: Saver<WorkspaceFileEntry?, Any> = listSaver(
+    save = { entry -> if (entry == null) emptyList() else listOf(entry.name, entry.path, entry.size, entry.mtime, entry.isDirectory) },
+    restore = { values ->
+        if (values.size != 5) null else WorkspaceFileEntry(values[0] as String, values[1] as String, values[2] as Long, values[3] as Double, values[4] as Boolean)
+    },
+)
 
 /** A `.confirm-dialog` over the browser: its own window, the skin's scrim, centred. */
 @Composable

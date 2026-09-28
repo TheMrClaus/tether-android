@@ -41,18 +41,29 @@ overlaps.
   Video would need a player that carries the credential (none is in the app), and there is no SVG
   renderer without a web view or a new dependency. Both show an explained panel pointing at Save
   to device / Share. Follow-up bead: video + SVG preview.
-- **Image preview is capped at 32 MB and sampled to 4096px a side.** The web's `<img>` has no cap.
-  The app downloads the image to a scratch file (deleted as soon as it is decoded) and decodes a
-  bounded bitmap, so a decompression bomb cannot exhaust memory.
+- **Image preview is bounded.** The web's `<img>` has no cap. The app downloads at most 32 MB to a
+  scratch file (deleted as soon as it is decoded), refuses a header claiming more than 100
+  megapixels before decoding a pixel, and samples the decode until each side is at most 4096px and
+  the bitmap is at most 64 MiB at the config the decoder reports (8 bytes a pixel for a 16-bit or
+  HDR source that decodes to RGBA_F16). A decoder failure or OOM is "could not be displayed" /
+  "too large", never a crash.
 - **Save to device… and Share… (files only) in the actions sheet.** PLAN T11.1 asks for
-  "download/share out"; the web has neither. Save goes through the system "create document" picker
-  and streams straight into the chosen document (512 MB cap; a failed save deletes the partial
-  document). Share streams one copy into `cache/workspace-files/share/<random>/<sanitised name>` and
-  hands it to the share sheet with a one-off read grant (`WorkspaceFileProvider`, not exported, one
-  cache subfolder only).
+  "download/share out"; the web has neither. Save goes through the system "create document" picker:
+  the file is downloaded to a scratch copy first (512 MB cap) and written to the chosen document only
+  once complete, so a failed download never touches it; a failure deletes the document only if it
+  was empty before (the one the picker just created), never a file the user chose to overwrite.
+  Share streams one copy into `cache/workspace-files/share/<random>/<sanitised name>` and hands it to
+  the share sheet with a one-off read grant (`WorkspaceFileProvider`, not exported, one cache
+  subfolder only). A copy lives 10 minutes from the hand-off for the receiving app; one that never
+  reaches a sheet (cancelled, failed, finished after the browser closed) is deleted at once. Sweeps
+  run off the main thread: at process start (every scratch copy, expired shares), on open and close
+  (only what is past its window), and on sign-out (everything).
 - **Upload feedback.** The web gives none during a PUT and clears its own upload error when it
   re-lists (`loadDirectory` resets `mutationError`), so a refused upload is never seen. The app shows
   "Uploading “name”…" and keeps the last refusal on screen after the re-list.
+- **Upload names.** Like a browser's `File.name`, only the provider's last path segment is sent; a
+  display name with a control character (NUL included) is refused before any request, with the
+  server's own copy ("Name must be a single name …"). The server validates every name again.
 - **Double-submit guard.** Confirm keys (Create/Rename, Delete, Move here/Copy here) disable while
   their request is in flight, so a double tap cannot send the same destructive request twice.
 - **Delete is not red.** `.file-browser-action-danger { color: var(--danger) }` loses the cascade to

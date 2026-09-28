@@ -86,6 +86,7 @@ class FakeFiles : WorkspaceFiles {
 
     override suspend fun upload(parent: String, name: String, source: UploadSource, overwrite: Boolean): FilesResult<WorkspaceMutation> {
         enter("upload", parent, name)
+        uploadThrows?.let { throw it }
         uploaded += name to source.open().use { it.readBytes() }
         return failures["upload:$name"] ?: FilesResult.Ok(WorkspaceMutation(parent))
     }
@@ -97,9 +98,15 @@ class FakeFiles : WorkspaceFiles {
         return texts[path] ?: FilesResult.Failed("This text file could not be opened.", 404)
     }
 
+    /** Bodies served by [download]; a path without one fails like a 404. */
+    val downloads = mutableMapOf<String, ByteArray>()
+    var uploadThrows: RuntimeException? = null
+
     override suspend fun download(path: String, maxBytes: Long, sink: OutputStream): FilesResult<Long> {
         enter("download", path)
-        return FilesResult.Failed("This file could not be opened.")
+        val body = downloads[path] ?: return FilesResult.Failed("This file could not be opened.", 404)
+        sink.write(body)
+        return FilesResult.Ok(body.size.toLong())
     }
 }
 
@@ -115,17 +122,35 @@ class FakePlatform : BrowserPlatform {
     }
 
     override suspend fun saveTo(files: WorkspaceFiles, entry: WorkspaceFileEntry, target: Uri): FilesResult<Long> {
-        calls += "saveTo ${entry.path} $target"
+        calls += "saveTo ${entry.path}"
+        saveFailure?.let { throw it }
         return FilesResult.Ok(entry.size)
     }
 
+    var share: FilesResult<ShareReady> = FilesResult.Failed("The file could not be prepared for sharing.")
+    var shareGate: CompletableDeferred<Unit>? = null
+    var saveFailure: Throwable? = null
+
     override suspend fun shareCopy(files: WorkspaceFiles, entry: WorkspaceFileEntry): FilesResult<ShareReady> {
         calls += "shareCopy ${entry.path}"
-        return FilesResult.Failed("The file could not be prepared for sharing.")
+        shareGate?.await()
+        return share
     }
 
-    override fun sweep(keepRecentShares: Boolean) {
-        calls += "sweep keepRecentShares=$keepRecentShares"
+    override fun claimShare(share: ShareReady) {
+        calls += "claim ${share.id}"
+    }
+
+    override fun discardShare(share: ShareReady) {
+        calls += "discard ${share.id}"
+    }
+
+    override fun discardUnclaimedShares() {
+        calls += "discardUnclaimed"
+    }
+
+    override fun sweep(mode: SweepMode) {
+        calls += "sweep $mode"
     }
 }
 

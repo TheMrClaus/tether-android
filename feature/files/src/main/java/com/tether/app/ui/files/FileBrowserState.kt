@@ -6,13 +6,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import com.tether.app.client.FilesCopy
 import com.tether.app.client.FilesResult
 import com.tether.app.client.UploadSource
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFileListing
 import com.tether.app.client.WorkspaceFiles
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** workspace-file-browser.tsx NamePromptMode. */
@@ -32,11 +35,17 @@ data class DestinationPicker(
     val error: String = "",
 )
 
-/** One document picked for upload: the name the server will get and its byte stream. */
-class PickedUpload(val name: String, val source: UploadSource)
+/**
+ * One document picked for upload: the provider's display name (checked by [UploadNames] before
+ * anything is sent) and its byte stream.
+ */
+class PickedUpload(val displayName: String?, val source: UploadSource)
 
-/** A downloaded copy ready to hand to the system share sheet. */
-data class ShareReady(val uri: Uri, val mimeType: String, val name: String)
+/** A downloaded copy ready to hand to the system share sheet; [id] names it to the platform. */
+data class ShareReady(val uri: Uri, val mimeType: String, val name: String, val id: String)
+
+/** [BrowserPlatform.sweep]: only what is past its window, or everything (sign-out). */
+enum class SweepMode { Expired, All }
 
 sealed interface ImageLoad {
     data class Ok(val image: ImageBitmap) : ImageLoad
@@ -53,7 +62,18 @@ interface BrowserPlatform {
     suspend fun loadImage(files: WorkspaceFiles, entry: WorkspaceFileEntry): ImageLoad
     suspend fun saveTo(files: WorkspaceFiles, entry: WorkspaceFileEntry, target: Uri): FilesResult<Long>
     suspend fun shareCopy(files: WorkspaceFiles, entry: WorkspaceFileEntry): FilesResult<ShareReady>
-    fun sweep(keepRecentShares: Boolean)
+
+    /** The share sheet took [share]: it now lives out its window. */
+    fun claimShare(share: ShareReady)
+
+    /** [share] will never reach a share sheet: delete it now. */
+    fun discardShare(share: ShareReady)
+
+    /** Delete every copy made but never claimed (a result lost to a cancellation included). */
+    fun discardUnclaimedShares()
+
+    /** Sweep the scratch cache, off the main thread. */
+    fun sweep(mode: SweepMode)
 }
 
 /**
@@ -68,8 +88,25 @@ interface BrowserPlatform {
 class FileBrowserState(
     private val files: WorkspaceFiles,
     private val platform: BrowserPlatform,
-    private val scope: CoroutineScope,
+    parent: CoroutineScope,
 ) {
+    /**
+     * The browser's jobs: a child of [parent] that one failure cannot take down, with a handler so
+     * nothing unexpected (a provider's SecurityException, a decoder's OOM…) ever reaches the thread's
+     * uncaught-exception handler and kills the app. It lands as the web's generic copy instead.
+     */
+    private val scope = CoroutineScope(
+        parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineExceptionHandler { _, _ -> onUnexpectedFailure() },
+    )
+
+    private fun onUnexpectedFailure() {
+        loading = false
+        previewLoading = false
+        uploading = null
+        submitting = false
+        mutationError = FilesCopy.ACTION_FALLBACK
+    }
+
     var cwd by mutableStateOf("")
     var sessionName by mutableStateOf("")
     var isOpen by mutableStateOf(false)
@@ -144,7 +181,8 @@ class FileBrowserState(
      */
     fun open(initialPath: String? = null) {
         if (cwd.isEmpty()) return
-        if (!isOpen) platform.sweep(keepRecentShares = false)
+        // By age only: a copy another app may still be reading stays for its window.
+        if (!isOpen) platform.sweep(SweepMode.Expired)
         isOpen = true
         val target = initialPath?.trim()?.takeIf { it.isNotEmpty() } ?: cwd
         if (target == cwd) {
@@ -160,18 +198,24 @@ class FileBrowserState(
         }
     }
 
-    /** The dialog closed: abort requests, leave fullscreen, drop preview scratch files. */
+    /**
+     * The dialog closed: abort requests, leave fullscreen, let go of the preview (a bitmap can be
+     * tens of MB), drop any shared copy that never reached a share sheet, sweep what has expired.
+     */
     fun close() {
         listingJob?.cancel()
         previewJob?.cancel()
         destJob?.cancel()
         isOpen = false
-        previewFullscreen = false
+        clearSelection()
         itemActions = null
         namePrompt = null
         deleteTarget = null
         destPicker = null
-        platform.sweep(keepRecentShares = true)
+        pendingShare?.let(platform::discardShare)
+        pendingShare = null
+        platform.discardUnclaimedShares()
+        platform.sweep(SweepMode.Expired)
     }
 
     /** web `loadDirectory(path)`; [then] gets whether it opened (false when it failed or was superseded). */
@@ -418,7 +462,10 @@ class FileBrowserState(
 
     // --- Upload (web handleUploadFiles) ---
 
-    /** One PUT per document, in order; the last failure is shown; then the folder re-lists. */
+    /**
+     * One PUT per document, in order; the last failure is shown; then the folder re-lists. A name
+     * a browser's File.name could never be (a control character) is refused without a request.
+     */
     fun upload(picked: List<PickedUpload>) {
         if (picked.isEmpty()) return
         mutationError = ""
@@ -426,8 +473,13 @@ class FileBrowserState(
         scope.launch {
             val dir = currentDir
             for (item in picked) {
-                uploading = item.name
-                val result = files.upload(dir, item.name, item.source)
+                val name = UploadNames.fromDisplayName(item.displayName)
+                if (name == null) {
+                    mutationError = UploadNames.INVALID
+                    continue
+                }
+                uploading = name
+                val result = files.upload(dir, name, item.source)
                 if (result is FilesResult.Failed) mutationError = result.message
             }
             uploading = null
@@ -457,14 +509,18 @@ class FileBrowserState(
         notice = ""
         scope.launch {
             when (val result = platform.shareCopy(files, entry)) {
-                is FilesResult.Ok -> pendingShare = result.value
+                // Closed meanwhile: no sheet will open, so the copy goes now.
+                is FilesResult.Ok -> if (isOpen) pendingShare = result.value else platform.discardShare(result.value)
                 is FilesResult.Failed -> mutationError = result.message
             }
         }
     }
 
-    fun shareHandled() {
+    /** The host tried the share sheet: [started] claims the copy for its window, else it goes. */
+    fun shareHandled(started: Boolean) {
+        val share = pendingShare ?: return
         pendingShare = null
+        if (started) platform.claimShare(share) else platform.discardShare(share)
     }
 
     private fun submit(block: suspend () -> Unit) {

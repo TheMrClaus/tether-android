@@ -224,6 +224,8 @@ class FileBrowserBehaviourTest {
         assertTrue(share.exists())
         shown = false
         rule.waitForIdle()
+        // The sweep runs off the main thread.
+        rule.waitUntil(5_000) { !share.exists() }
         assertFalse("sign-out leaves nothing a session downloaded", share.exists())
     }
 }

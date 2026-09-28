@@ -85,33 +85,56 @@ object FileFormat {
 /**
  * A server-supplied file name made safe to use as ONE local file name (a SAF "create document"
  * suggestion or a shared copy's name). The name is untrusted: it may carry separators, `..`,
- * control characters or be absurdly long. The result never contains a separator, is never
- * `.`/`..`/empty/hidden, and is at most [MAX_LOCAL_NAME] UTF-16 units; the extension survives.
+ * control or invisible characters, or be absurdly long. The result never contains a separator,
+ * is never `.`/`..`/empty/hidden, carries no control, bidi or zero-width character, and is at
+ * most [MAX_LOCAL_BYTES] bytes of UTF-8 (file systems count bytes, and a CJK or emoji name is
+ * three or four a character) without splitting a character; the extension survives.
  */
 object LocalNames {
-    const val MAX_LOCAL_NAME = 120
+    const val MAX_LOCAL_BYTES = 200
     private const val FALLBACK = "file"
+
+    /** Bidi overrides / isolates / marks can disguise an extension ("txt.exe" shown as "exe.txt"). */
+    private fun isBidi(ch: Char) = ch in '\u202A'..'\u202E' || ch in '\u2066'..'\u2069' || ch == '\u200E' || ch == '\u200F' || ch == '\u061C'
+
+    /** Zero-width characters make two names look alike; they are dropped. */
+    private fun isZeroWidth(ch: Char) = ch in '\u200B'..'\u200D' || ch == '\uFEFF'
 
     fun safe(serverName: String): String {
         // Only the last path segment, whichever separator the server used.
         val last = serverName.substringAfterLast('/').substringAfterLast('\\')
         val cleaned = buildString {
             for (ch in last) {
-                append(
-                    when {
-                        ch.code < 0x20 || ch.code == 0x7F -> '_'
-                        ch in "<>:\"|?*" -> '_'
-                        // Bidi overrides / isolates can disguise an extension ("txt.exe" shown as "exe.txt").
-                        ch in '\u202A'..'\u202E' || ch in '\u2066'..'\u2069' || ch == '\u200E' || ch == '\u200F' -> '_'
-                        else -> ch
-                    },
-                )
+                when {
+                    isZeroWidth(ch) -> Unit
+                    ch.code < 0x20 || ch.code == 0x7F || ch == '\u2028' || ch == '\u2029' -> append('_')
+                    ch in "<>:\"|?*" -> append('_')
+                    isBidi(ch) -> append('_')
+                    else -> append(ch)
+                }
             }
         }.trim().trimStart('.').trimEnd('.', ' ')
         if (cleaned.isEmpty()) return FALLBACK
-        if (cleaned.length <= MAX_LOCAL_NAME) return cleaned
+        if (utf8(cleaned) <= MAX_LOCAL_BYTES) return cleaned
         val dot = cleaned.lastIndexOf('.')
         val ext = if (dot > 0 && cleaned.length - dot <= 16) cleaned.substring(dot) else ""
-        return cleaned.take(MAX_LOCAL_NAME - ext.length).trimEnd('.', ' ') + ext
+        val stem = takeBytes(cleaned.substring(0, cleaned.length - ext.length), MAX_LOCAL_BYTES - utf8(ext)).trimEnd('.', ' ')
+        return (stem + ext).ifEmpty { FALLBACK }
+    }
+
+    private fun utf8(text: String) = text.toByteArray(Charsets.UTF_8).size
+
+    /** The longest prefix of whole code points that fits in [budget] bytes. */
+    private fun takeBytes(text: String, budget: Int): String {
+        var bytes = 0
+        var end = 0
+        while (end < text.length) {
+            val cp = text.codePointAt(end)
+            val size = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8).size
+            if (bytes + size > budget) break
+            bytes += size
+            end += Character.charCount(cp)
+        }
+        return text.substring(0, end)
     }
 }
