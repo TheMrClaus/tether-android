@@ -6,6 +6,7 @@ import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.model.LegacyProjectionAdapter
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,7 +17,7 @@ import org.junit.Test
 class ApprovalModelTest {
 
     private fun items(fixture: ChatFixtures.Folded, open: Boolean = false, showApprovals: Boolean = true) =
-        buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone, groupOpen = { _, d -> open || d }, showApprovals = showApprovals)
+        buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone, groupOpen = { _, d -> open || d }, showApprovals = showApprovals, consentOrigin = TEST_ORIGIN)
 
     private fun ChatItem.label(): String = when (this) {
         is ChatItem.Block -> "block:${block.blockId}"
@@ -109,7 +110,7 @@ class ApprovalModelTest {
     }
 
     @Test fun aChoiceSendsOnlyWhatItsGrantAllows() {
-        val view = pendingApprovals(ApprovalFixtures.grants.tree).single()
+        val view = pendingApprovals(ApprovalFixtures.grants.tree, TEST_ORIGIN).single()
         val (all, some, deny) = view.choices
         val requested = checkNotNull(view.requested)
         assertEquals(listOf("/srv/fixtures", "/srv/schema.sql"), requested.read)
@@ -122,10 +123,15 @@ class ApprovalModelTest {
         assertEquals(GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = null, networkEnabled = true), subset)
         assertEquals(ApprovalPick("some", subset), pickFor(view, some, exactConfirmed = false, subset = subset))
         assertEquals(ApprovalPick("deny", null), pickFor(view, deny, exactConfirmed = false, subset = subset))
+        // I5: a subset that ticks EVERYTHING (in any order) is the full expansion: it needs the confirmation.
+        val full = subsetGrant(linkedSetOf("/srv/schema.sql", "/srv/fixtures"), setOf("/w/report"), true)!!
+        assertNull(pickFor(view, some, exactConfirmed = false, subset = full))
+        assertEquals(ApprovalPick("some", full), pickFor(view, some, exactConfirmed = true, subset = full))
+        assertTrue(view.needsConfirm)
     }
 
     @Test fun approvalViewReadsTheWebsFields() {
-        val view = pendingApprovals(ApprovalFixtures.choices.tree).single()
+        val view = pendingApprovals(ApprovalFixtures.choices.tree, TEST_ORIGIN).single()
         assertEquals("command_execution", view.name)
         assertEquals("The command reaches outside the workspace sandbox.", view.reason)
         assertEquals("/w/pipeline", view.cwd)
@@ -136,7 +142,7 @@ class ApprovalModelTest {
     }
 
     @Test fun questionPagingHelpersFollowTheWeb() {
-        val q = pendingQuestions(ApprovalFixtures.question.tree).single()
+        val q = pendingQuestions(ApprovalFixtures.question.tree, TEST_ORIGIN).single()
         val (db, env) = q.prompts
         assertEquals(listOf("Postgres"), togglePick(emptyList(), db, "Postgres"))
         assertEquals(listOf("SQLite"), togglePick(listOf("Postgres"), db, "SQLite"))
@@ -144,6 +150,26 @@ class ApprovalModelTest {
         assertEquals(listOf("staging", "production"), togglePick(listOf("staging"), env, "production"))
         assertFalse(isPromptAnswered(db, emptyMap(), mapOf(Q_DB to "  ")))
         assertTrue(isPromptAnswered(db, emptyMap(), mapOf(Q_DB to "Mongo")))
+    }
+
+    @Test fun aNonStringRequestIdStillShowsItsCardUnderTheMapKey() {
+        // I4: the reducer keys the map by String(requestId); the card uses that key.
+        val tree = foldTree(ApprovalFixtures.write.tree, ev("approval_request", "t1", ts = 1) {
+            put("requestId", 42); put("toolId", "t-42"); put("name", "Bash"); putJsonObject("input") { put("command", "ls") }
+        })
+        val views = pendingApprovals(tree, TEST_ORIGIN)
+        assertEquals(listOf("req-w", "42"), views.map { it.requestId })
+    }
+
+    @Test fun theFingerprintFollowsTheRequestTheTurnAndTheServer() {
+        val a = pendingApprovals(ApprovalFixtures.write.tree, TEST_ORIGIN).single().fingerprint
+        assertEquals(a, pendingApprovals(ApprovalFixtures.write.tree, TEST_ORIGIN).single().fingerprint)
+        assertTrue(a != pendingApprovals(ApprovalFixtures.write.tree, "http://other:1").single().fingerprint)
+        val wider = foldTree(ApprovalFixtures.write.tree, ev("approval_request", "t1", ts = 1) {
+            put("requestId", "req-w"); put("toolId", "toolu_w"); put("name", "Write")
+            putJsonObject("input") { put("file_path", "/etc/passwd"); put("content", "x") }
+        })
+        assertTrue(a != pendingApprovals(wider, TEST_ORIGIN).single().fingerprint)
     }
 
     private companion object {

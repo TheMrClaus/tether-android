@@ -60,11 +60,12 @@ private fun fixtureFor(shot: ApprovalShot): ChatFixtures.Folded = when (shot) {
 /** Screenshot consent: actionable (or [lock]ed), every call answered Sent, nothing leaves the test. */
 private fun shotConsent(lock: ConsentLock?, decided: Set<String>) = ConsentActions(
     sessionId = "s1",
+    origin = TEST_ORIGIN,
     lock = lock,
     decided = decided,
     questionUnavailable = null,
-    onApproval = { _, _, _, _ -> ConsentResult.Sent },
-    onAnswer = { _, _, _ -> ConsentResult.Sent },
+    onApproval = { _, _, _, _, _ -> ConsentResult.Sent },
+    onAnswer = { _, _, _, _ -> ConsentResult.Sent },
     onOpenRun = {},
 )
 
@@ -74,7 +75,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
     val listState = LazyListState()
     val consent = shotConsent(
         lock = if (shot == ApprovalShot.Locked) ConsentLock.Offline else null,
-        decided = if (shot == ApprovalShot.Sent) setOf(consentKey("s1", "req-w")) else emptySet(),
+        decided = if (shot == ApprovalShot.Sent) setOf(consentKey("s1", "req-w", pendingApprovals(fixture.tree, TEST_ORIGIN).single().fingerprint)) else emptySet(),
     )
     setContent {
         ChatHost(skin, wellHeight, wellWidth) {

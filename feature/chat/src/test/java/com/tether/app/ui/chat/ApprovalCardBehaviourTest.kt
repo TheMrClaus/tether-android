@@ -41,6 +41,9 @@ import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.add
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -63,21 +66,38 @@ class ApprovalCardBehaviourTest {
     private val calls = mutableListOf<String>()
     private var verdict = ConsentResult.Sent
 
-    private fun actions(lock: ConsentLock? = null, decided: Set<String> = emptySet(), questionUnavailable: String? = null) = ConsentActions(
+    /** The fingerprints the cards sent with each call, in order. */
+    private val fingerprints = mutableListOf<String>()
+
+    private fun actions(
+        lock: ConsentLock? = null,
+        decided: Set<String> = emptySet(),
+        questionUnavailable: String? = null,
+        unconfirmed: Set<String> = emptySet(),
+    ) = ConsentActions(
         sessionId = "s1",
+        origin = TEST_ORIGIN,
         lock = lock,
         decided = decided,
         questionUnavailable = questionUnavailable,
-        onApproval = { requestId, choiceId, decision, granted ->
+        onApproval = { requestId, fingerprint, choiceId, decision, granted ->
             calls += "approval:$requestId:${choiceId ?: decision}" + (granted?.let { ":" + it.toJsonObject() } ?: "")
+            fingerprints += fingerprint
             verdict
         },
-        onAnswer = { requestId, answers, response ->
+        onAnswer = { requestId, fingerprint, answers, response ->
             calls += "question:$requestId:$answers" + (response?.let { ":$it" } ?: "")
+            fingerprints += fingerprint
             verdict
         },
         onOpenRun = { calls += "open-run:$it" },
+        unconfirmed = unconfirmed,
     )
+
+    /** The fingerprint the card renders for [requestId] of [f]. */
+    private fun fpOf(f: ChatFixtures.Folded, requestId: String): String =
+        (pendingApprovals(f.tree, TEST_ORIGIN).map { it.requestId to it.fingerprint } + pendingQuestions(f.tree, TEST_ORIGIN).map { it.requestId to it.fingerprint })
+            .first { it.first == requestId }.second
 
     private var fixture by mutableStateOf(ApprovalFixtures.write)
     private var consent by mutableStateOf(ConsentActions.Unavailable)
@@ -85,7 +105,7 @@ class ApprovalCardBehaviourTest {
     private var generation by mutableStateOf(0)
     private var hosted = false
 
-    private fun show(f: ChatFixtures.Folded, c: ConsentActions = actions()) {
+    private fun show(f: ChatFixtures.Folded, c: ConsentActions = actions(), armIt: Boolean = true) {
         if (hosted) {
             rule.runOnIdle {
                 fixture = f
@@ -93,6 +113,7 @@ class ApprovalCardBehaviourTest {
                 generation++
             }
             rule.waitForIdle()
+            if (armIt) arm()
             return
         }
         hosted = true
@@ -108,10 +129,22 @@ class ApprovalCardBehaviourTest {
                         onFetchTurns = { _, _ -> },
                         zone = ChatFixtures.zone,
                         consent = consent,
+                        listState = listState,
                     )
                 }
             }
+            hostView = androidx.compose.ui.platform.LocalView.current
         }
+        rule.waitForIdle()
+        if (armIt) arm()
+    }
+
+    private val listState = androidx.compose.foundation.lazy.LazyListState()
+    private var hostView: android.view.View? = null
+
+    /** I3: let the cards' arm delay pass (a fresh or changed card is disabled for 500 ms). */
+    private fun arm() {
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
         rule.waitForIdle()
     }
 
@@ -168,7 +201,7 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
         // The client's ledger now lists it: a fresh card for the same request (another tab, a
         // re-created list) renders it decided and cannot send.
-        show(ApprovalFixtures.write, actions(decided = setOf(consentKey("s1", "req-w"))))
+        show(ApprovalFixtures.write, actions(decided = setOf(consentKey("s1", "req-w", fpOf(ApprovalFixtures.write, "req-w")))))
         scrollTo("approval-allow")
         rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
         rule.onNodeWithTag("consent-sent").assertIsDisplayed()
@@ -238,7 +271,8 @@ class ApprovalCardBehaviourTest {
         val all = rule.onNodeWithText("ALLOW ALL", ignoreCase = true)
         val some = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true)
         all.assertIsNotEnabled()
-        some.assertIsEnabled() // everything requested starts ticked
+        // Everything requested starts ticked, which IS the full expansion: it needs the confirmation (I5).
+        some.assertIsNotEnabled()
         rule.onAllNodesWithTag("grant-read")[0].assertIsOn().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
         // Untick everything: a subset of nothing is not a grant.
         rule.onAllNodesWithTag("grant-read")[0].performClick()
@@ -339,6 +373,209 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("denial-origin-link").assertHeightIsAtLeast(44.dp).performClick()
         assertEquals(listOf("open-run:t1::task-1"), calls)
     }
+
+    // ---- round 2 -------------------------------------------------------------------------------
+
+    /** 25 finished turns, then the grants request: the card can scroll far out of the lazy list. */
+    private val grantsAfterHistory: ChatFixtures.Folded by lazy {
+        val history = (1..25).flatMap { n -> ChatFixtures.turn("h$n", "Prompt $n", "Reply $n", ApprovalFixtures.T).toList() }
+        val tree = foldTree(com.tether.app.protocol.reduce.foldTree(com.tether.app.protocol.reduce.freshTree(), *history.toTypedArray()), *grantsEvents())
+        ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    /** The grants fixture's events (re-folded on top of the history). */
+    private fun grantsEvents(): Array<com.tether.app.protocol.AgentEvent> {
+        val grants = ApprovalFixtures.grants.tree
+        val approval = ((((grants["turnsById"] as com.tether.app.protocol.tree.JsObj)["t1"] as com.tether.app.protocol.tree.JsObj)["pendingApprovals"]
+            as com.tether.app.protocol.tree.JsObj)["req-g"] as com.tether.app.protocol.tree.JsObj)
+        val raw = com.tether.app.protocol.tree.JsCodec.toJson(approval) as kotlinx.serialization.json.JsonObject
+        return arrayOf(
+            ev("turn_started", "g1", ts = 1) { put("idempotencyKey", "k-g1") },
+            ev("approval_request", "g1", ts = 1) { raw.forEach { (k, v) -> put(k, v) } },
+        )
+    }
+
+    private val narrowed = "approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()
+
+    private fun narrowTheGrant() {
+        scrollTo("grant-network")
+        rule.onAllNodesWithTag("grant-read")[0].performClick() // untick /srv/fixtures
+        rule.onNodeWithTag("grant-network").performClick() // untick network
+        rule.waitForIdle()
+    }
+
+    @Test fun aNarrowedGrantSurvivesScrollingTheCardAwayAndBack() {
+        show(grantsAfterHistory)
+        narrowTheGrant()
+        rule.runOnIdle { kotlinx.coroutines.runBlocking { listState.scrollToItem(0) } }
+        rule.waitForIdle()
+        rule.onAllNodesWithTag("approval-card").assertCountEquals(0) // disposed with its lazy row
+        scrollTo("approval-choice")
+        arm()
+        rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(narrowed), calls)
+    }
+
+    @Test fun aNarrowedGrantSurvivesStateRestoration() {
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
+        val c = actions()
+        tester.setContent {
+            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                ChatTranscript(projection = ApprovalFixtures.grants.projection, tree = ApprovalFixtures.grants.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        narrowTheGrant()
+        tester.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        arm()
+        scrollTo("approval-choice")
+        rule.onNodeWithTag("grant-network").assertIsOff()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(narrowed), calls)
+    }
+
+    @Test fun afterProcessDeathTheOperatorMayDecideAgain() {
+        // L3: no saved "sent" flag. The ledger (here: none) is the only memory of a decision, and it
+        // dies with the process, so a restored card is answerable again (SYNC_DESIGN §5.4).
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
+        val c = actions()
+        tester.setContent {
+            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+                ChatTranscript(projection = ApprovalFixtures.write.projection, tree = ApprovalFixtures.write.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        scrollTo("approval-allow")
+        rule.onNodeWithTag("approval-allow").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
+        tester.emulateSavedInstanceStateRestore()
+        rule.waitForIdle()
+        arm()
+        scrollTo("approval-allow")
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-w:allow", "approval:req-w:allow"), calls)
+    }
+
+    @Test fun aReRaisedRequestStartsOverWithItsNewFingerprint() {
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        val before = fpOf(ApprovalFixtures.grants, "req-g")
+        // Same id, a WIDER request (a new write path).
+        val wider = foldTree(ApprovalFixtures.grants.tree, ev("approval_request", "t1", ts = 1) {
+            put("requestId", "req-g"); put("toolId", "perm-1"); put("name", "permissions")
+            putJsonArray("choices") {
+                addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
+            }
+            putJsonObject("metadata") {
+                put("provider", "codex"); put("kind", "permissions")
+                putJsonObject("requestedPermissions") { putJsonObject("fileSystem") { putJsonArray("write") { add("/w/report"); add("/etc") } } }
+            }
+        })
+        val next = ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(wider)!!, wider)
+        rule.runOnIdle { fixture = next }
+        rule.waitForIdle()
+        val after = fpOf(next, "req-g")
+        assertTrue(before != after)
+        scrollTo("grant-confirm")
+        // The earlier confirmation belonged to the earlier request.
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        arm()
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(after), fingerprints)
+    }
+
+    @Test fun aCardIgnoresTapsUntilItsArmDelayPasses() {
+        show(ApprovalFixtures.write, armIt = false)
+        rule.mainClock.autoAdvance = false
+        val allow = rule.onNodeWithTag("approval-allow")
+        allow.assertIsNotEnabled()
+        allow.performClick()
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS - 100)
+        rule.waitForIdle()
+        allow.assertIsNotEnabled()
+        rule.mainClock.advanceTimeBy(200)
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = true
+        allow.assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-w:allow"), calls)
+    }
+
+    /** Tap [tag]'s centre with MotionEvents carrying [flags], straight into the host view. */
+    private fun tapWithFlags(tag: String, flags: Int) {
+        val bounds = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val x = bounds.center.x
+        val y = bounds.center.y
+        val view = checkNotNull(hostView)
+        rule.runOnUiThread {
+            val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_FINGER })
+            val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f })
+            for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                val e = android.view.MotionEvent.obtain(0L, 10L, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, flags)
+                view.dispatchTouchEvent(e)
+                e.recycle()
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    @Test fun aTouchThroughAnOverlayIsRefused() {
+        show(ApprovalFixtures.write)
+        scrollTo("approval-allow")
+        tapWithFlags("approval-allow", android.view.MotionEvent.FLAG_WINDOW_IS_OBSCURED)
+        tapWithFlags("approval-deny", FLAG_PARTIALLY_OBSCURED)
+        assertTrue("an obscured touch decided: $calls", calls.isEmpty())
+        // The same touch, unobscured, is a tap: the filter is what refused it.
+        tapWithFlags("approval-allow", 0)
+        assertEquals(listOf("approval:req-w:allow"), calls)
+    }
+
+    @Test fun anObscuredTouchCannotTickTheConfirmationOrAnOption() {
+        show(ApprovalFixtures.grants)
+        scrollTo("grant-confirm")
+        tapWithFlags("grant-confirm", android.view.MotionEvent.FLAG_WINDOW_IS_OBSCURED)
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        show(ApprovalFixtures.question)
+        scrollTo("question-option")
+        rule.onAllNodesWithTag("question-option")[0].assertIsOff()
+        val first = rule.onAllNodesWithTag("question-option")[0].fetchSemanticsNode().boundsInRoot.center
+        rule.runOnUiThread {
+            val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_FINGER })
+            val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = first.x; y = first.y; pressure = 1f; size = 1f })
+            for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                val e = android.view.MotionEvent.obtain(0L, 10L, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, FLAG_PARTIALLY_OBSCURED)
+                checkNotNull(hostView).dispatchTouchEvent(e)
+                e.recycle()
+            }
+        }
+        rule.waitForIdle()
+        rule.onAllNodesWithTag("question-option")[0].assertIsOff()
+    }
+
+    @Test fun aDecisionFromADroppedLinkSaysDeliveryIsUnconfirmed() {
+        val key = consentKey("s1", "req-w", fpOf(ApprovalFixtures.write, "req-w"))
+        show(ApprovalFixtures.write, actions(decided = setOf(key), unconfirmed = setOf(key)))
+        scrollTo("approval-allow")
+        rule.onNodeWithTag("consent-unconfirmed").assertIsDisplayed()
+        rule.onNodeWithText(UNCONFIRMED_COPY).assertIsDisplayed()
+        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
+        assertTrue(calls.isEmpty())
+    }
 }
 
 /**
@@ -371,7 +608,13 @@ class ApprovalScreenBehaviourTest {
             }
         }
         rule.waitForIdle()
+        arm()
         return vm
+    }
+
+    private fun arm() {
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
     }
 
     private fun scrollTo(tag: String) {
@@ -395,6 +638,9 @@ class ApprovalScreenBehaviourTest {
 
         rule.runOnIdle { client.live.value = setOf("s1") }
         rule.waitForIdle()
+        // A lock lifted is a card that just became answerable: armed after the delay only.
+        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
+        arm()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
@@ -409,6 +655,7 @@ class ApprovalScreenBehaviourTest {
         rule.waitForIdle()
         rule.runOnIdle { vm.selectRun("s1", "t1::task-9") }
         rule.waitForIdle()
+        arm()
         rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
         rule.onNodeWithTag("consent-sent").assertIsDisplayed()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)

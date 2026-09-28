@@ -20,7 +20,9 @@ choices, permission grants or denials), so these are built from the reducer corp
 - `approval-grants`: the T6.3 permission paths. The "Requested permission expansion" fieldset, a checkbox per
   requested read and write path and for network access (all ticked at first, editable only when a `subset`
   choice exists), the warning-coloured "Confirm the complete permission expansion shown above." box, Allow all
-  (exact, disabled until confirmed), Allow selected (subset, disabled once nothing is ticked), Deny.
+  (exact, disabled until confirmed), Allow selected (subset: disabled with nothing ticked, and, with every box
+  ticked, until confirmed, see below), Deny. Round 2 re-recorded these 8 goldens: with everything ticked at
+  first, Allow selected now renders disabled.
 - `approval-locked`: a saved copy (not connected): the card renders, every key is disabled, and the reason is
   in words, "Connect to answer. This is a saved copy." (SYNC_DESIGN §4.2).
 - `approval-sent`: after the operator's tap: keys disabled and "Decision sent. Waiting for the agent."
@@ -52,5 +54,14 @@ Divergences from the web, on purpose:
   adds space around the link.
 - Provider and agent text on a card is cut at 4,000 characters for display (the answer keys keep the full
   question text). The web does not cut.
+- "Allow selected" with every requested box ticked IS the full expansion, so it needs the same confirmation as
+  "Allow all"; the confirmation box therefore shows for a `subset` choice too (the web: `exact` only).
+- Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
+  `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
+  500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
+- Card state (ticks, confirmation, picks, page) survives scrolling and re-creation and is bound to the exact
+  request (its fingerprint): a re-raised request with the same id starts over. After process death a decision
+  may be made again (the in-memory ledger died with the process); a decision sent on a socket that then
+  dropped says "Sent before the connection dropped — delivery unconfirmed" and is never sent again.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.
