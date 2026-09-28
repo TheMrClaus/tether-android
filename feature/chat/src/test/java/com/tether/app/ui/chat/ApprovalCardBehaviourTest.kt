@@ -1073,6 +1073,18 @@ class ApprovalCardBehaviourTest {
         ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
     }
 
+    @Test fun theCardIdentityUsesTheClientsSessionNotTheTreesClaim() {
+        // I-1: the tree says it is session "zz"; the client shows it as "s1". The record is s1's.
+        val tree = ApprovalFixtures.grants.tree.put("tetherSessionId", com.tether.app.protocol.tree.JsStr("zz"))
+        show(ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
+        scrollTo("grant-network")
+        rule.onNodeWithTag("grant-network").performClick()
+        val request = com.tether.app.client.ConsentGuard.pendingApproval(tree, "req-g")!!
+        val turn = com.tether.app.client.ConsentGuard.activeTurnId(tree)!!
+        assertTrue(store.grant(com.tether.app.client.ConsentGuard.cardIdentity("s1", turn, request)).networkOff)
+        assertTrue(!store.grant(com.tether.app.client.ConsentGuard.cardIdentity("zz", turn, request)).networkOff)
+    }
+
     @Test fun pathsAreShownEscapedCutAndQuoted() {
         show(trickyPaths)
         scrollTo("grant-confirm")
