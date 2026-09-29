@@ -253,7 +253,8 @@ class StopKeySafetyTest {
         rule.waitForIdle()
         rule.runOnIdle { tree = longRun(61) }
         rule.waitForIdle()
-        rule.onAllNodesWithTag("tool-card").fetchSemanticsNodes().none { n -> n.config.toString().contains("e61") }.let { assertTrue("stayed where the reader is", it) }
+        // Following would have brought the new step on screen; staying put leaves it uncomposed.
+        rule.onAllNodes(hasText("\"e61\"", substring = true), useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test fun aDenialFocusIsHandedBackOnceItsStepIsShown() {
