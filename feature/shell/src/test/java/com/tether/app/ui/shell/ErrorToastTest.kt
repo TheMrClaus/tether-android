@@ -19,6 +19,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -73,6 +76,30 @@ class ErrorToastTest {
         show("The secure link is reconnecting. The turn was not interrupted.", fromServer = false)
         rule.onNodeWithContentDescription("Error: The secure link is reconnecting. The turn was not interrupted.").assert(assertive)
         rule.onNodeWithContentDescription("Server error:", substring = true).assertDoesNotExist()
+    }
+
+    /** r2: the toast is a surface: a tap on its body never reaches the control drawn under it. */
+    @Test
+    fun aTapOnTheToastsBodyNeverReachesWhatIsUnderIt() {
+        var under = 0
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Machine)) {
+                Box(Modifier.fillMaxWidth().height(200.dp)) {
+                    Box(Modifier.fillMaxWidth().height(200.dp).clickable { under++ }.testTag("under"))
+                    ErrorToast(message = "Session not found.", onClose = { closed++ }, fromServer = true, modifier = Modifier.align(Alignment.BottomCenter))
+                }
+            }
+        }
+        rule.waitForIdle()
+        // The body (its words), not the X.
+        rule.onNodeWithTag(ERROR_TOAST_TAG).performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.3f, height / 2f)) }
+        rule.waitForIdle()
+        assertEquals("a tap on the toast reached the control under it", 0, under)
+        assertEquals(0, closed)
+        // The control: outside the toast the same surface takes the tap.
+        rule.onNodeWithTag("under").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, 10f)) }
+        rule.waitForIdle()
+        assertEquals(1, under)
     }
 
     @Test

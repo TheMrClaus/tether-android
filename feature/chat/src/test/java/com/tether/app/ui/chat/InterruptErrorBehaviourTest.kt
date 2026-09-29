@@ -261,13 +261,41 @@ class InterruptErrorBehaviourTest {
         rule.waitForIdle()
     }
 
+    /**
+     * The text toolbar a selection opens (Compose's context menu), caught so a test can press its
+     * "Select all" and "Copy" as the operator would.
+     */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private class MenuSpy : androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider {
+        @Volatile var shown: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider? = null
+
+        override suspend fun showTextContextMenu(dataProvider: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider) {
+            shown = dataProvider
+            try {
+                kotlinx.coroutines.awaitCancellation()
+            } finally {
+                if (shown === dataProvider) shown = null
+            }
+        }
+
+        fun press(key: Any) {
+            val menu = checkNotNull(shown) { "no text toolbar is open" }
+            val item = menu.data().components.filterIsInstance<androidx.compose.foundation.text.contextmenu.data.TextContextMenuItem>().first { it.key == key }
+            item.onClick(object : androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession { override fun close() = Unit })
+        }
+    }
+
     private fun transcript(
         fixture: ChatFixtures.Folded,
         consent: ConsentActions = ConsentActions.Unavailable,
         notices: NoticeActions = NoticeActions.Unavailable,
         richCodex: Boolean = false,
+        menu: MenuSpy? = null,
     ) {
         rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides (menu ?: androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider.current),
+            ) {
             ChatHost(TetherSkin.Machine) {
                 Column {
                     ChatTranscript(
@@ -283,6 +311,7 @@ class InterruptErrorBehaviourTest {
                         richCodex = richCodex,
                     )
                 }
+            }
             }
         }
         rule.waitForIdle()
@@ -406,20 +435,31 @@ class InterruptErrorBehaviourTest {
         assertEquals(1, recorder.dismissed.size)
     }
 
-    /** r2 (verifier): a Codex turn diff's +/- column is `user-select: none` (codex-rich-renderers.module.css `.diffMarker`). */
+    /**
+     * r2 (verifier): a Codex turn diff's +/- column is `user-select: none` (codex-rich-renderers.module.css
+     * `.diffMarker`). The operator selects a word of the diff, then "Select all" and "Copy" from the
+     * toolbar: the copy is the diff's lines, never a lone marker, and never another row's words
+     * (the selection stays in its row).
+     */
     @Test
     fun aCodexDiffsMarkersAreNeverSelected() {
-        transcript(ToolFixtures.codexDetails, richCodex = true)
+        val menu = MenuSpy()
+        transcript(ToolFixtures.codexDetails, richCodex = true, menu = menu)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasContentDescription("Turn changes"))
-        val marker = rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
-            .indexOfFirst { node -> node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.joinToString("") == "+" }
-        assertTrue("a + marker is drawn", marker >= 0)
-        val node = rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true)[marker]
-        node.performTouchInput { longClick(center) }
+        rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true).onFirst().assertExists()
+        rule.onNodeWithText("export const config = { retries: 5 };", substring = true, useUnmergedTree = true).performTouchInput { longClick(center) }
         rule.waitForIdle()
-        node.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
         rule.waitForIdle()
-        assertNull("a diff marker was selected: ${clip()}", clip())
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
+        rule.waitForIdle()
+        val copied = checkNotNull(clip()) { "nothing was copied" }
+        assertTrue("the diff's lines are copied: $copied", copied.contains("export const config = { retries: 5 };"))
+        val lines = copied.lines().map { it.trim() }
+        assertFalse("a diff marker was part of the copy: $copied", lines.any { it == "+" || it == "-" })
+        // The rows around it are on screen (composed): a selection that ran across rows would take them.
+        rule.onNodeWithText("LGTM: the retry bump is covered by the tests.", substring = true).assertExists()
+        assertFalse("the selection ran into another row: $copied", copied.contains("LGTM") || copied.contains("Apply the patch and review it."))
     }
 
     @Test

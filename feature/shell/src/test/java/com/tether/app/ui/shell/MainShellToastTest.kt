@@ -88,16 +88,15 @@ class MainShellToastTest {
         rule.runOnIdle { vm.reportLocalError("Not connected — the setting was not changed.") }
         arm()
         val toast = rule.onNodeWithTag(ERROR_TOAST_TAG).fetchSemanticsNode().boundsInRoot
+        // On a phone the toast's X sits right over the Interrupt key.
         val under = key.intersect(toast)
         assertTrue("precondition: the toast covers the Interrupt key (key $key, toast $toast)", under.width > 0f && under.height > 0f)
 
         tapRootAt(under.center)
         assertTrue("a tap on the toast reached the key under it: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        rule.onNodeWithTag(ERROR_TOAST_TAG).assertDoesNotExist() // the tap was the X's: the toast closed
 
-        // The toast goes away: the key it uncovered re-arms before a tap can land on it.
-        rule.runOnIdle { vm.dismissToast() }
-        rule.mainClock.advanceTimeBy(48)
-        rule.waitForIdle()
+        // The toast went away: the key it uncovered re-arms before a second tap can land on it.
         tapRootAt(under.center)
         assertTrue("a tap aimed at the vanishing toast interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
 
