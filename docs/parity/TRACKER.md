@@ -24,36 +24,22 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-28 ~18:05 CEST, taken over from the clean handover):** `main` @ `4a41c8a`.
-**Merged + verified since the overnight run began (17):** T6.1 chat/markdown, T4.5 log dialog, T5.1 sidebar, ta-cdh, T11.1 file
-browser, ta-ouu push security, T5.2 resume, ta-u2n, T4.4 deep links, T5.3 search, ta-g04 (file-browser launch race - fixed the red
-CI), T7.1 composer, T13.1 encrypted journal mirror (3 verify + 2 security rounds), ta-s4r sign-in (P0), **T6.2 tool cards** (6 rounds;
-security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rewrite, media hash/magic-byte checks).
-**CI:** green on `4a41c8a` (T6.2 included).
-**Drafts (unpublished, same cert as 0.6.0):** 0.7.0 (`b60b0d4`), 0.7.1 (`dc9200d`, +composer +mirror), 0.7.2 (`391de70`, +sign-in fix),
-**0.7.3 (code 20, `4a41c8a`, +T6.2 tool cards)** - built 2026-09-28 18:03 CEST; apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's; versionCode 20.
-**S10.1 MERGED + DEPLOYED (2026-09-28):** [tether#208](https://github.com/TheMrClaus/tether/pull/208) merged as `d69b4e5`, deployed ~20:42 CEST
-(server now protocol **132**, `NATIVE_PROTOCOL_FLOOR = 129` = exactly what the app speaks - no headroom, see ta-koy). `/.well-known/assetlinks.json`
-serves 200 on the box; the **public URL still redirects to the SSO gateway** until the owner adds the one-path bypass rule.
-**v0.7.3 is PUBLISHED** (owner). Drafts 0.7.0-0.7.2 superseded.
-**Merged since takeover (2026-09-28/29):** ta-hra, ta-js0 + ta-epo, ta-koy (protocol **v132**), **T6.3** approvals/questions/denials,
-**T6.4** sub-agent runs / background commands / guarded Stop / todo bar / turn activity (`b4d378e`), **T7.2** Model/Effort/Mode row +
-Codex/OpenCode panels with confirmed escalation (`b8f94c8`, 4 rounds), **ta-41x + ta-jt9** cookie `Origin` + signed-out-boot mirror purge +
-sign-out races (`ecb6e7a`, 3 rounds), **T13.2** offline mode + stale indicators (`9219a2d`, 3 rounds: saved copies never actionable -
-cards, Stop, controls, Interrupt, End session locked unless Live; client-side origin + live-epoch checks on interrupt/kill). **T6.6**
-notices / rate limit / auto-continue / MCP health (`ccdb1a8`, 4 rounds; every key needs a live copy; 23 matrix rows verified). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
-#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22, `cf7bb0c`) built and checked - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's, versionCode 22, CI green. Draft **0.7.6** (code 23, `c22e8ca`, +T13.2 offline mode +T6.6 notices) built and checked - same cert, versionCode 23. Publishing is the owner's call.
-**Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
-**Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
-console origin + credentials forwarded upstream - needs an owner decision), #215 (proxy follow-ups).
-**Next frontier (`bd ready`):** T6.5-T6.7, T7.3-T7.4, T8.x, T10.x (T10.5 passkeys: server ready; needs the gateway bypass + JSON-typed POSTs), T13.2+.
-**Owner queue (report, not act):** (0) SSO gateway bypass for exactly `/.well-known/assetlinks.json` (rule prepared by Ops). Push is blocked on Firebase provisioning (production has no FCM config at all: create the
-Firebase project + register `com.tether.app`, service-account key, set all six `TETHER_FCM_*` values in a root-owned
-EnvironmentFile, rebuild + restart, restrict the API key). tether#204 is merged. Publishing any draft is the owner's call.
-Optional tether private-history scrub.
-**Next frontier (`bd ready`):** T6.3 approvals/questions, T6.4 subagents/background, T6.5-T6.7, T7.2-T7.4, T8.x, T10.x settings,
-T13.2+ offline/outbox, plus the filed follow-ups (ta-hra wipe residuals before T14.3, ta-js0 Conscrypt classifier, ta-epo mirror
-flake, ta-dhu/ta-cqf T6.2 lows, ta-854 login lows, ta-705, ta-w6z, ta-55u, ta-0lv, ta-3pf, ta-6z4, ta-hcj, ta-5wx).
+**Resume point (2026-09-29 ~21:30 CEST):** `main` @ `b65fb48` (code). No agents running.
+**Merged + verified 2026-09-29:** ta-hra, ta-js0 + ta-epo, ta-koy (protocol v132), **T6.3** approvals/questions/denials, **T6.4**
+sub-agent runs / background commands / guarded Stop / todo bar, **T7.2** Model/Effort/Mode + Codex/OpenCode panels, **ta-41x + ta-jt9**
+sign-in/sign-out hardening, **T13.2** offline mode + stale indicators (`9219a2d`; saved copies never actionable), **T6.6** notices /
+rate limit / auto-continue / MCP health (`ccdb1a8`; 23 rows), **T6.7** interrupt bound to its turn / server errors attributed /
+End session / per-row selection (`b65fb48`; 7 rows).
+**Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
+**#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
+protocol 134, native floor 129).
+**Drafts (unpublished, same cert as 0.6.0 `4f8c22de...b74d`):** 0.7.4 (code 21), 0.7.5 (code 22), **0.7.6 (code 23, `c22e8ca`,
++T13.2 +T6.6)**. v0.7.3 is the published build. Publishing is the owner's call.
+**Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
+**Owner queue:** deploy tether #224; publish a draft if wanted; tether goes public soon - review/redact private issues and PRs first.
+**Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
+ta-nrq (Firebase-free push alongside BYO-Firebase) and ta-31i (gateway-agnostic sign-in); ta-96z (accept the `__Host-` cookie name),
+ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9; beads scrub ta-l8k (quiet window).
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -137,14 +123,14 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | VERIFIED | TheMrClaus @ 2026-09-29 01:02 |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
-| T6.7 | Interrupt/kill/errors; selection & copy | TODO |  |  | from T13.2 review (coordinator): interrupt must be bound to the turn it was drawn for (SYNC_DESIGN: a late interrupt could stop a later tur… |
+| T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
-| T7.3 | Slash commands, run/background command, mentions | TODO |  |  |  |
+| T7.3 | Slash commands, run/background command, mentions | TODO |  |  | from T6.7 (coordinator): while a foreground command runs, the web relabels Interrupt to 'Stop' and shows a Background key - part of T7.3's … |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
@@ -169,7 +155,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T10.1 | Settings dialog, all tabs | TODO |  |  |  |
 | T10.2 | Session settings sheet | TODO |  |  |  |
-| T10.3 | Nodes settings | TODO |  |  |  |
+| T10.3 | Nodes settings | TODO |  |  | from T6.7 (coordinator): show NodeRequestOutcome.ServerError text cleaned through LabelText in Nodes settings. |
 | T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator (from the tether#216 review): once #216 lands, every cookie-authenticated POST from the app (incl. an app-passkey session) must… |
@@ -340,3 +326,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 16:30 | claude-main / Opus 5.5 (new coordinator session) | T13.2, T6.6 | Took over mid-flight (old session stopped by the owner; both makers had checkpointed). T13.2: verify + security review, 2 fix rounds (interrupt/End locked unless Live, origin-bound kill, fail-closed freshness), merged ff-only `9219a2d`, VERIFIED. T6.6: verify REFUTED on unrecorded matrix rows (coordinator brief error), security follow-ups fixed in r2; r3 rebases onto T13.2 and applies the live-copy lock to every notice key. Follow-ups filed: ta-tgs; notes on T6.7 (interrupt turn binding), T8.5 (limit-card take-over key). | (superseded below) |
 | 2026-09-29 19:00 | claude-main / Opus 5.5 | T6.6, ta-cyy | T6.6 merged ff-only `ccdb1a8`, VERIFIED (+23 matrix rows; M.ev.warning with --force past the verified blocker). Owner deployed tether #209/#212/#216 (server protocol 133, floor 129; ta-ylh filed). Owner decisions logged (push = BYO-Firebase + Firebase-free design ta-nrq; gateway-agnostic sign-in ta-31i; service pages see tether#220). tether#220 PR in progress (ta-cyy). | build 0.7.6 draft; beads scrub (ta-l8k); T6.5/T6.7 |
 | 2026-09-29 21:00 | claude-main / Opus 5.5 | ta-cyy, T6.7 | tether PR #224 (service pages, see tether#220) merged `81aa352` after 3 rounds (verify CONFIRMED; security follow-ups fixed) - **not deployed** (owner); deferred item tether#225. Android follow-up ta-96z (accept the __Host- cookie name). T6.7 verified-pending: verify CONFIRMED, security follow-ups in its fix round. | owner deploy of #224; T6.7 merge; beads scrub |
+| 2026-09-29 21:30 | claude-main / Opus 5.5 | T6.7 | T6.7 merged ff-only `b65fb48`, VERIFIED (+7 matrix rows, --force past the verified blocker). 3 rounds: verify CONFIRMED r1/r2; security follow-ups (toast X under touch slop, lock every interrupt while cancelling, re-arm on toast shrink) fixed in r3 and checked by the coordinator. RESUME HERE rewritten (neutral security wording). | beads scrub (ta-l8k); T6.5/T7.3 |
