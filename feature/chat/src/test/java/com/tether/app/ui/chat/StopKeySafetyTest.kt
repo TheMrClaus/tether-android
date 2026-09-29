@@ -181,6 +181,13 @@ class StopKeySafetyTest {
         assertEquals(listOf<String?>(TEST_ORIGIN), client.stopOrigins)
     }
 
+    @Test fun aCommandLabelIsItsFirstLineInsideABidiIsolate() {
+        assertEquals("\u2068npm test\u2069", commandLabel("npm test"))
+        assertEquals("\u2068set -e…\u2069", commandLabel("set -e  \nrm -rf build"))
+        assertEquals("\u2068a…\u2069", commandLabel("a\u2028b"))
+        assertEquals("\u2068\u202Eevil…\u2069", commandLabel("\u202Eevil\r\nx"))
+    }
+
     // ---- L2 ------------------------------------------------------------------------------------------
 
     @Test fun aCommandIdThatSpellsAnotherRowsKeyRendersBoth() {

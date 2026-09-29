@@ -138,6 +138,20 @@ class StopCommandTransmissionTest {
     }
 
     @Test
+    fun anOutputStreamPastTheIntakeCapIsTrimmedByTheClient() {
+        // L4: a server that exceeds its own 64 KiB stream cap cannot grow the folded output without bound.
+        val (client, ws) = connected()
+        val chunk = "z".repeat(60_000)
+        for (i in 0 until 6) ws.send(eventFrame("s1", 6L + i, "background_command_output", null, ""","commandId":"c-run","stream":"stdout","text":"#$i#$chunk""""))
+        h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("#5#") }
+        val command = ((client.projectionTrees.value.getValue("s1")["backgroundCommands"] as com.tether.app.protocol.tree.JsArr)
+            .first { ((it as com.tether.app.protocol.tree.JsObj)["commandId"] as com.tether.app.protocol.tree.JsStr).value == "c-run" }) as com.tether.app.protocol.tree.JsObj
+        val kept = (command["segments"] as com.tether.app.protocol.tree.JsArr).sumOf { (((it as com.tether.app.protocol.tree.JsObj)["text"]) as com.tether.app.protocol.tree.JsStr).value.length }
+        assertTrue("kept $kept", kept <= OutputIntakeCap.MAX_CHARS)
+        assertEquals(com.tether.app.protocol.tree.JsBool.TRUE, command["outputTruncated"])
+    }
+
+    @Test
     fun aStopDrawnForAnotherServerIsRefused() {
         // L3: the key was composed for another origin (or for none): refused under the lock.
         val (client, _) = connected()
