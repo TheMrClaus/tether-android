@@ -94,7 +94,7 @@ data class CodexSnapshot(
                     val id = m.s("id") ?: return@catalog null
                     CodexModel(
                         id = id,
-                        name = LabelText.label(m.s("name")).ifEmpty { LabelText.label(id) },
+                        name = LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(id) },
                         description = LabelText.hint(m.s("description")),
                         defaultReasoningEffort = m.s("defaultReasoningEffort").orEmpty(),
                         reasoningEfforts = (m["reasoningEfforts"] as? JsonArray).orEmpty().mapNotNull { e ->
@@ -104,30 +104,30 @@ data class CodexSnapshot(
                     )
                 },
                 collaborationModes = o.catalog("collaborationModes") { m ->
-                    CodexCollaboration(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("mode"), m.s("model"), m.s("reasoningEffort"))
+                    CodexCollaboration(m.s("id") ?: return@catalog null, m.s("id")!!.let { id -> LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(id) } }, m.s("mode"), m.s("model"), m.s("reasoningEffort"))
                 },
                 skills = o.catalog("skills") { m ->
-                    CodexSkill(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.hint(m.s("description")), LabelText.label(m.s("scope")), m.b("enabled") ?: return@catalog null)
+                    CodexSkill(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(m.s("id")) }, LabelText.hint(m.s("description")), LabelText.label(m.s("scope")), m.b("enabled") ?: return@catalog null)
                 },
                 hooks = o.catalog("hooks") { m ->
                     CodexHook(
-                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.label(m.s("event")), LabelText.label(m.s("handler")),
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(m.s("id")) }, LabelText.label(m.s("event")), LabelText.label(m.s("handler")),
                         LabelText.label(m.s("trust")), m.b("enabled") == true, m.b("managed") == true,
                     )
                 },
                 apps = o.catalog("apps") { m ->
                     CodexApp(
-                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.hint(m.s("description")), m.b("enabled") == true, m.b("accessible") == true,
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(m.s("id")) }, LabelText.hint(m.s("description")), m.b("enabled") == true, m.b("accessible") == true,
                         (m["plugins"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.let(LabelText::label) }.take(LabelText.MAX_ITEMS),
                     )
                 },
                 mcpServers = o.catalog("mcpServers") { m ->
-                    CodexMcpServer(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")), m.n("toolCount")?.toLong() ?: 0)
+                    CodexMcpServer(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(m.s("id")) }, m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")), m.n("toolCount")?.toLong() ?: 0)
                 },
                 rateLimits = o.catalog("rateLimits") { m ->
                     val credits = m["credits"] as? JsonObject
                     CodexRateLimit(
-                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")),
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")).ifEmpty { LabelText.visibleValue(m.s("id")) }, m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")),
                         window(m["primary"]), window(m["secondary"]), credits?.b("hasCredits"), credits?.b("unlimited"),
                     )
                 },
@@ -165,13 +165,13 @@ data class OpencodeSnapshot(
                     val value = m.s("value") ?: return@opencodeCatalog null
                     SessionModelOption(
                         value = value,
-                        displayName = LabelText.label(m.s("displayName")).ifEmpty { LabelText.label(value) },
+                        displayName = LabelText.label(m.s("displayName")).ifEmpty { LabelText.visibleValue(value) },
                         description = LabelText.hint(m.s("description")).ifEmpty { null },
                         providerLabel = LabelText.label(m.s("providerLabel")).ifEmpty { null },
                         variants = (m["variants"] as? JsonArray)?.mapNotNull { v ->
                             val vo = v as? JsonObject ?: return@mapNotNull null
                             val vv = vo.s("value") ?: return@mapNotNull null
-                            ModelVariantOption(vv, LabelText.label(vo.s("label")).ifEmpty { LabelText.label(vv) })
+                            ModelVariantOption(vv, LabelText.label(vo.s("label")).ifEmpty { LabelText.visibleValue(vv) })
                         }?.take(LabelText.MAX_ITEMS),
                     )
                 },

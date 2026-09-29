@@ -27,8 +27,13 @@ class ComposerControlsModelTest {
     private val legacyB = SessionModelOption("claude-sonnet-4", "Sonnet 4", legacy = true)
     private val claudeControls = controls(listOf(opus, sonnet, legacyA, legacyB), defaultModel = opus.value, defaultReasoningEffort = "high")
 
-    private fun derive(s: com.tether.app.protocol.model.AgentSession, c: com.tether.app.protocol.ServerMessage.SessionControls?, codex: ProviderControlsState<CodexSnapshot>? = null, pins: List<String> = emptyList()) =
-        ComposerControlsModel.derive(s, c, codex, pins)
+    private fun derive(
+        s: com.tether.app.protocol.model.AgentSession,
+        c: com.tether.app.protocol.ServerMessage.SessionControls?,
+        codex: ProviderControlsState<CodexSnapshot>? = null,
+        pins: List<String> = emptyList(),
+        opencode: ProviderControlsState<OpencodeSnapshot>? = null,
+    ) = ComposerControlsModel.derive(s, c, codex, pins, opencode)
 
     @Test
     fun claudeShowsTheAppliedDefaultModelEffortAndManual() {
@@ -95,6 +100,16 @@ class ComposerControlsModelTest {
         assertEquals("Review", ComposerControlsModel.opencodeAgentLabel("review", "Review"))
         assertEquals("Reviewer (review)", ComposerControlsModel.opencodeAgentLabel("review", "Reviewer"))
         assertEquals("review", ComposerControlsModel.opencodeAgentLabel("review", ""))
+        // Round 3 (N-M1): the built-in check is on the raw value; hidden characters are spelled out.
+        assertEquals("Plan (PLAN)", ComposerControlsModel.opencodeAgentLabel("PLAN", "Plan"))
+        assertEquals("Plan (plan\\u{200B})", ComposerControlsModel.opencodeAgentLabel("plan\u200B", "Plan"))
+        assertEquals("Custom agent (plan\\u{200B})", ComposerControlsModel.opencodeAgentLabel("plan\u200B", ""))
+        assertEquals("Plan (Plan)", ComposerControlsModel.opencodeAgentLabel("Plan", "Plan"))
+        assertEquals("Custom agent (PLAN)", ComposerControlsModel.opencodeAgentLabel("PLAN", ""))
+        assertEquals("plan", ComposerControlsModel.opencodeAgentLabel("plan", ""))
+        assertEquals("Review (review\\u{200B})", ComposerControlsModel.opencodeAgentLabel("review\u200B", "Review"))
+        val longValue = "plan" + "\u200B".repeat(200)
+        assertTrue(ComposerControlsModel.opencodeAgentLabel(longValue, "Plan").contains("\\u{200B}"))
         val row = derive(
             session("opencode"),
             controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("planx", "Plan", "Plans"))),
@@ -166,6 +181,47 @@ class ComposerControlsModelTest {
         assertFalse(readOnly.legacyCodexHint)
         assertEquals(RestoredSettings(null, null, "plan"), readOnly.restored)
         assertNull(derive(session("claude").copy(readOnly = true), claudeControls).restored)
+    }
+
+    @Test
+    fun rawServerValuesNeverReachALabel() {
+        // Round 3 (F1): the verifier's repro — an override character and 10k characters.
+        val evil = "\u202E" + "x".repeat(10_000)
+        val row = derive(session("claude").copy(model = evil), claudeControls)
+        assertEquals(evil, row.model!!.value) // the value itself is untouched
+        assertTrue(row.model!!.label.length <= LabelText.MAX_LABEL)
+        assertFalse(row.model!!.label.contains('\u202E'))
+        val effort = derive(session("claude").copy(reasoningEffort = evil), claudeControls).effort!!
+        assertTrue(effort.label.length <= LabelText.MAX_LABEL && !effort.label.contains('\u202E'))
+        val restored = derive(session("claude").copy(readOnly = true, model = evil, reasoningEffort = evil, permissionMode = evil), claudeControls).restored!!
+        for (v in listOf(restored.model!!, restored.effort!!, restored.mode!!)) {
+            assertTrue(v.length <= LabelText.MAX_LABEL)
+            assertFalse(v.contains('\u202E'))
+        }
+        val unknown = derive(session("claude").copy(permissionMode = "plan\u200B"), claudeControls)
+        assertEquals("Unknown mode (plan\\u{200B})", unknown.mode!!.label)
+    }
+
+    @Test
+    fun opencodePermissionModeAutoWithoutThePolicyIsUnknown() {
+        // Round 3 (N-L1): Auto for opencode is approvalPolicy "never", never a bare permissionMode.
+        val row = derive(session("opencode", engine = OPENCODE_V2).copy(permissionMode = "bypassPermissions"), null)
+        assertEquals("Unknown mode (bypassPermissions)", row.mode!!.label)
+        assertTrue(row.unknownMode)
+        assertTrue(row.hintDanger)
+        assertFalse(derive(session("opencode", engine = OPENCODE_V2).copy(permissionMode = "bypassPermissions", approvalPolicy = "never"), null).unknownMode)
+    }
+
+    @Test
+    fun theStaticOpencodeRowsTakeTheSameDangerRule() {
+        // Round 3 (N-L3): before the controls reply, a snapshot flagging plan styles the fallback row.
+        val flagged = OpencodeSnapshot.parse(
+            SessionControlsGuardTest.json("""{"revision":"r","models":{"status":"ready","items":[]},"modes":{"status":"ready","items":[{"value":"plan","label":"Plan","hint":"","danger":true}]}}"""),
+        )
+        val row = derive(session("opencode", engine = OPENCODE_V2), null, opencode = ProviderControlsState(flagged, false, null))
+        assertTrue(row.mode!!.options.single { it.value == "plan" }.danger)
+        assertFalse(row.mode!!.options.single { it.value == "default" }.danger)
+        assertFalse(derive(session("opencode"), null).mode!!.options.single { it.value == "plan" }.danger)
     }
 
     @Test

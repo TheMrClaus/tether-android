@@ -36,9 +36,13 @@ Codex / opencode-serve session's row):
 3. **Provider-controls panels live in the session sheet** (hub row "Provider controls", and a
    "Provider controls" key at the end of the tablet row). The web keeps them in Settings → Advanced,
    which the app does not have yet (T10.1).
-4. **Bare `/model`** opens the sheet's Model list; the web forwards it to the CLI as prompt text
-   (slash passthrough is T7.3). `/model <arg>` matches the web: a listed match, else a plausible id
-   (`looksLikeModelId`) pinned with the "not in the known list" notice, else refused.
+4. **Bare `/model`** on Claude opens the sheet's Model list; the web forwards it to the CLI as prompt
+   text (slash passthrough is T7.3; on the other engines a bare `/model` is sent as text, as on the
+   web). `/model <arg>` matches the web on every engine with a model select except Codex
+   (chat-view.tsx:3015-3024): a listed match, else a plausible id (`looksLikeModelId`) pinned with
+   the "not in the known list" notice, else refused with the reason. The client's guard allows a
+   typed id for exactly the same engines (`typedModelAllowed`), and a refused typed id says so in
+   its own words. On Codex `/model …` stays an ordinary message.
 5. **No pin/unpin affordance** on legacy models (the web's desktop select has one; its phone sheet
    does not). Pins set elsewhere are honoured (`groupModelOptions`).
 6. **No Shift+Tab mode cycling**: the web offers it only to a fine pointer with hover; the app is a
@@ -52,7 +56,12 @@ Codex / opencode-serve session's row):
    flagging it is enough), and shows "label (value)" when its label could pass for another agent's.
    Provider actions carry the catalog revision they were drawn from, and their keys are armed.
    Server-supplied names, hints and errors are cleaned (bidi / invisible characters, whitespace)
-   and bounded. The confirmation names the session.
+   and bounded. The confirmation names the session. Round 3: an agent's value is compared RAW
+   against the built-ins and shown with its invisible characters spelled out (`\u{200B}`), so
+   `PLAN` or `plan` + a zero-width space never displays as `plan`; every remaining server string
+   on a label (an unlisted model or effort, the restored row, Codex effort ids) is cleaned; a
+   confirmation whose words changed while it was open is shown again instead of being sent; the
+   dialog title isolates the label.
 9. **Fast from 64rem**: the web's desktop row has no Fast control (it lives only in the phone
    sheet); the app's wide row adds a "Fast: Off/On" key that opens the same Fast list
    (`controls-unknown-row` shows it).

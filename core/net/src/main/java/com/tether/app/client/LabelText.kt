@@ -49,12 +49,36 @@ object LabelText {
                     if (pendingSpace) out.append(' ')
                     pendingSpace = false
                     out.appendCodePoint(cp)
+                    // Round 3 (I-c): nothing past the bound is ever looked at.
+                    if (out.length > max) break
                 }
             }
         }
         if (out.length <= max) return out.toString()
         val cut = ConsentGuard.cutCodePoints(out.toString(), max - 1).trimEnd()
         return "$cut…"
+    }
+
+    /**
+     * Round 3 (N-M1): a server-supplied VALUE (an agent or model id) shown so it cannot pass for
+     * another: every bidi control and every invisible code point except U+0020 is written out as
+     * `\u{XXXX}`; nothing is collapsed or trimmed; cut to [MAX_LABEL] with "…".
+     */
+    fun visibleValue(value: String?): String {
+        if (value.isNullOrEmpty()) return ""
+        val out = StringBuilder()
+        var i = 0
+        while (i < value.length && out.length <= MAX_LABEL) {
+            val cp = value.codePointAt(i)
+            i += Character.charCount(cp)
+            if (cp != 0x20 && (bidiControl(cp) || invisibleCodePoint(cp) || Character.getType(cp) == Character.CONTROL.toInt())) {
+                out.append("\\u{").append(Integer.toHexString(cp).uppercase().padStart(4, '0')).append('}')
+            } else {
+                out.appendCodePoint(cp)
+            }
+        }
+        if (out.length <= MAX_LABEL && i >= value.length) return out.toString()
+        return ConsentGuard.cutCodePoints(out.toString(), MAX_LABEL - 1) + "…"
     }
 
     fun label(text: String?): String = clean(text, MAX_LABEL)

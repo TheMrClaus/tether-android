@@ -900,10 +900,11 @@ internal fun SheetHint(text: String, warning: Boolean = false) {
  */
 @Composable
 internal fun EscalationDialog(label: String, body: String, sessionName: String?, onConfirm: () -> Unit, onCancel: () -> Unit) {
-    val arming = rememberArmedControl("escalation" to label, true)
+    val arming = rememberArmedControl(Triple("escalation", label, body), true)
     TetherDialog(
         onDismiss = onCancel,
-        title = "Turn on $label?",
+        // Round 3 (I-b): the label isolated, so right-to-left text in it cannot reorder the question.
+        title = "Turn on \u2068$label\u2069?",
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel")
             TetherKey(

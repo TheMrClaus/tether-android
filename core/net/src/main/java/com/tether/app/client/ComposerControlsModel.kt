@@ -60,7 +60,7 @@ data class SelectControl(
     val legacyNote: String? = null,
 ) {
     /** The label of [value] in [options] or [legacy], else the raw value (session-settings-sheet.tsx findModelOptionLabel). */
-    val label: String get() = (options + legacy).firstOrNull { it.value == value }?.label ?: value
+    val label: String get() = (options + legacy).firstOrNull { it.value == value }?.label ?: LabelText.label(value).ifEmpty { LabelText.visibleValue(value) }
     val current: ControlOption? get() = (options + legacy).firstOrNull { it.value == value }
 }
 
@@ -117,10 +117,12 @@ object ComposerControlsModel {
                     opencodeAgentNeedsConfirmation(it.value, controls, opencode),
                 )
             }
+            // Round 3 (N-L3): the static fallback rows take the same danger rule.
+            val fallback = ModeVocabulary.OPENCODE.map { it.copy(danger = opencodeAgentNeedsConfirmation(it.value, controls, opencode)) }
             when {
-                discovered == null -> ModeVocabulary.OPENCODE
+                discovered == null -> fallback
                 // "default" is opencode's build agent even when the discovered list omits it.
-                discovered.none { it.value == "default" } -> listOf(ModeVocabulary.OPENCODE.first()) + discovered
+                discovered.none { it.value == "default" } -> listOf(fallback.first()) + discovered
                 else -> discovered
             }
         }
@@ -160,14 +162,22 @@ object ComposerControlsModel {
     /**
      * An agent's display name: its cleaned label, plus " (value)" whenever the value is not the label
      * or the label copies a built-in's, so an agent calling itself "Plan" that is not `plan` shows so.
+     * Round 3 (N-M1): the built-in check is on the RAW value (so `PLAN` or `plan` + U+200B is not
+     * `plan`), and the value is shown with [LabelText.visibleValue] (its invisible characters
+     * spelled out); with no label the collision rule applies to the value itself.
      */
     fun opencodeAgentLabel(value: String, label: String): String {
-        val clean = LabelText.label(label).ifEmpty { return LabelText.label(value) }
-        val v = value.lowercase()
+        val shown = LabelText.visibleValue(value)
+        val clean = LabelText.label(label)
+        if (clean.isEmpty()) {
+            if (value in OPENCODE_BUILTIN_AGENTS) return value
+            val looksBuiltIn = LabelText.label(value).lowercase() in OPENCODE_BUILTIN_LABELS
+            return if (looksBuiltIn) "Custom agent ($shown)" else shown
+        }
         val l = clean.lowercase()
-        if ((v to l) in OPENCODE_BUILTIN_PAIRS) return clean
+        if ((value to l) in OPENCODE_BUILTIN_PAIRS) return clean
         val collides = l in OPENCODE_BUILTIN_LABELS
-        return if (collides || l != v) "$clean (${LabelText.label(value)})" else clean
+        return if (collides || l != value.lowercase()) "$clean ($shown)" else clean
     }
 
     const val UNKNOWN_MODE_HINT = "This app doesn't know this mode; it may run tools without asking"
@@ -202,21 +212,25 @@ object ComposerControlsModel {
         val restored = if ((readOnly || (provider == "codex" && !codexV2)) &&
             (!session.model.isNullOrEmpty() || !session.reasoningEffort.isNullOrEmpty() || restoredMode != "default")
         ) {
-            RestoredSettings(session.model?.takeIf { it.isNotEmpty() }, session.reasoningEffort?.takeIf { it.isNotEmpty() }, restoredMode.takeIf { it != "default" })
+            // Round 3 (F1): display text, cleaned like every server value shown.
+            fun shown(v: String?) = v?.takeIf { it.isNotEmpty() }?.let { LabelText.label(it).ifEmpty { LabelText.visibleValue(it) } }
+            RestoredSettings(shown(session.model), shown(session.reasoningEffort), shown(restoredMode.takeIf { it != "default" }))
         } else {
             null
         }
         val modeProviders = provider in setOf("claude", "opencode", "reasonix", "pi")
         val offeredModes = modeOptions(session, controls, opencode?.snapshot)
-        val stored = if (provider == "opencode" && session.approvalPolicy == "never") ModeVocabulary.AUTO else session.permissionMode ?: "default"
+        // Round 3 (N-L1): Auto for opencode is the approval policy, never a bare permissionMode.
+        val autoByPolicy = provider == "opencode" && session.approvalPolicy == "never"
+        val stored = if (autoByPolicy) ModeVocabulary.AUTO else session.permissionMode ?: "default"
         // Round 2 (M1): a stored posture this app does not know is shown as exactly that, with a
         // warning — never as the safe default. Not selectable (the client would refuse it anyway).
         val unknownPolicy = session.approvalPolicy?.takeIf { provider == "opencode" && it != "never" }
         val unknown = when {
             !modeProviders -> null
             unknownPolicy != null -> ModeChoice(UNKNOWN_POLICY_VALUE, "Unknown approval policy (${LabelText.label(unknownPolicy)})", UNKNOWN_MODE_HINT, danger = true)
-            offeredModes.none { it.value == stored } && !(provider == "opencode" && stored == ModeVocabulary.AUTO) ->
-                ModeChoice(stored, "Unknown mode (${LabelText.label(stored)})", UNKNOWN_MODE_HINT, danger = true)
+            offeredModes.none { it.value == stored } && !autoByPolicy ->
+                ModeChoice(stored, "Unknown mode (${LabelText.visibleValue(stored)})", UNKNOWN_MODE_HINT, danger = true)
             else -> null
         }
         val modeChoices = if (unknown != null) offeredModes + unknown else offeredModes
@@ -249,18 +263,18 @@ object ComposerControlsModel {
             val selected = catalog?.let { c -> c.items.firstOrNull { it.id == session.model } ?: c.items.firstOrNull() }
             model = SelectControl(
                 value = selected?.id ?: "",
-                options = catalog?.items?.map { ControlOption(it.id, it.name, it.description.ifEmpty { null }) } ?: placeholder(snap?.models?.status),
+                options = catalog?.items?.map { ControlOption(it.id, it.name.ifEmpty { LabelText.visibleValue(it.id) }, it.description.ifEmpty { null }) } ?: placeholder(snap?.models?.status),
                 enabled = catalog != null,
             )
             effort = SelectControl(
                 value = session.reasoningEffort ?: selected?.defaultReasoningEffort ?: "",
-                options = selected?.reasoningEfforts?.map { ControlOption(it.id, it.id, it.description.ifEmpty { null }) } ?: placeholder(snap?.models?.status),
+                options = selected?.reasoningEfforts?.map { ControlOption(it.id, LabelText.label(it.id).ifEmpty { LabelText.visibleValue(it.id) }, it.description.ifEmpty { null }) } ?: placeholder(snap?.models?.status),
                 enabled = selected != null,
             )
             val collab = snap?.collaborationModes?.takeIf { it.ready }
             mode = SelectControl(
                 value = codexCollaborationId(session, collab),
-                options = collab?.items?.map { ControlOption(it.id, it.name, it.mode) } ?: placeholder(snap?.collaborationModes?.status),
+                options = collab?.items?.map { ControlOption(it.id, it.name.ifEmpty { LabelText.visibleValue(it.id) }, LabelText.label(it.mode).ifEmpty { null }) } ?: placeholder(snap?.collaborationModes?.status),
                 enabled = collab != null,
             )
         } else if (live) {
@@ -277,7 +291,7 @@ object ComposerControlsModel {
                 val defaultEffort = resolveDefaultEffort(controls?.defaultReasoningEffort, variants)
                 val effortValue = session.reasoningEffort?.takeIf { it.isNotEmpty() } ?: defaultEffort
                 if (variants.isNotEmpty()) {
-                    val rows = variants.take(LabelText.MAX_ITEMS).map { ControlOption(it.value, LabelText.label(it.label).ifEmpty { LabelText.label(it.value) }) }
+                    val rows = variants.take(LabelText.MAX_ITEMS).map { ControlOption(it.value, LabelText.label(it.label).ifEmpty { LabelText.label(it.value) }.ifEmpty { LabelText.visibleValue(it.value) }) }
                     effort = SelectControl(
                         value = effortValue,
                         options = if (effortValue.isNotEmpty()) rows else listOf(ControlOption("", "Default", "The model's default reasoning effort")) + rows,
@@ -340,7 +354,7 @@ object ComposerControlsModel {
     fun groupModelOptions(models: List<SessionModelOption>, pinned: List<String>): Pair<List<ControlOption>, List<ControlOption>> {
         fun toOption(m: SessionModelOption) = ControlOption(
             value = m.value,
-            label = LabelText.label(m.displayName).ifEmpty { LabelText.label(m.value) },
+            label = LabelText.label(m.displayName).ifEmpty { LabelText.label(m.value) }.ifEmpty { LabelText.visibleValue(m.value) },
             description = m.description?.let(LabelText::hint)?.ifEmpty { null } ?: if (m.value == "" || m.value == "default") "The CLI's default model" else null,
             tag = LabelText.label(m.providerLabel).ifEmpty { null },
         )

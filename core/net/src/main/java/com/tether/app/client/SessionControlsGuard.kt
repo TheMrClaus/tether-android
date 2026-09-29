@@ -145,8 +145,9 @@ object SessionControlsGuard {
                 if (provider !in MODEL_PROVIDERS) return ControlResult.NotOffered
                 if (control.value == LEGACY_GROUP_VALUE) return ControlResult.NotOffered
                 if (control.typed) {
-                    // The `/model <id>` passthrough exists only on the Claude composer (I2).
-                    if (provider == "claude" && looksLikeModelId(control.value)) null else ControlResult.NotOffered
+                    // chat-view.tsx:3015-3024: every engine with a model select but Codex pins a
+                    // plausible typed id (Codex's model is one paired catalog selection).
+                    if (typedModelAllowed(provider) && looksLikeModelId(control.value)) null else ControlResult.NotOffered
                 } else {
                     if (controls?.models.orEmpty().any { it.value == control.value }) null else ControlResult.NotOffered
                 }
@@ -325,6 +326,9 @@ object SessionControlsGuard {
 fun looksLikeModelId(arg: String): Boolean = MODEL_ID.matches(arg)
 
 private val MODEL_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$")
+
+/** Round 3 (F2): the providers whose composer pins a typed `/model <id>` — the same set as the UI. */
+fun typedModelAllowed(provider: String): Boolean = provider != "codex" && provider in setOf("claude", "opencode", "reasonix", "pi", "dsh")
 
 /** lib/model-picker.mjs LEGACY_GROUP_VALUE: the group row's sentinel, never a model id. */
 const val LEGACY_GROUP_VALUE = "__legacy_models__"

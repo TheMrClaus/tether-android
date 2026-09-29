@@ -107,10 +107,17 @@ class SessionControlsGuardTest {
     }
 
     @Test
-    fun aTypedModelIdIsClaudeOnly() {
-        assertNull(check(claude, null, SessionControl.Model("claude-haiku-9", typed = true)))
-        assertEquals(ControlResult.NotOffered, check(session("opencode"), null, SessionControl.Model("openai/gpt-9", typed = true)))
-        assertEquals(ControlResult.NotOffered, check(session("pi"), null, SessionControl.Model("pi-model", typed = true)))
+    fun aTypedModelIdIsPinnedOnEveryEngineButCodexAsTheWebDoes() {
+        // Round 3 (F2): chat-view.tsx:3015-3024 at 7d65611.
+        for (p in listOf("claude", "opencode", "reasonix", "pi", "dsh")) {
+            assertNull(p, check(session(p), null, SessionControl.Model("model-9", typed = true)))
+            assertEquals(p, ControlResult.NotOffered, check(session(p), null, SessionControl.Model("two words", typed = true)))
+        }
+        assertEquals(ControlResult.NotOffered, check(session("codex", engine = CODEX_V2), null, SessionControl.Model("gpt-9", typed = true)))
+        assertEquals(ControlResult.NotOffered, check(session("codex"), null, SessionControl.Model("gpt-9", typed = true)))
+        assertEquals(ControlResult.NotOffered, check(session("fake"), null, SessionControl.Model("gpt-9", typed = true)))
+        assertFalse(typedModelAllowed("codex"))
+        assertTrue(typedModelAllowed("opencode"))
     }
 
     @Test
@@ -121,6 +128,21 @@ class SessionControlsGuardTest {
         }
         val codex = session("codex", engine = CODEX_V2)
         assertEquals(ControlResult.NotOffered, check(codex, null, SessionControl.CodexReview(ReviewTarget.BaseBranch("-x"), "inline", "catalog-3"), codex = codexSnapshot()))
+    }
+
+    @Test
+    fun visibleValueSpellsOutWhatWouldBeInvisible() {
+        assertEquals("plan", LabelText.visibleValue("plan"))
+        assertEquals("plan\\u{200B}", LabelText.visibleValue("plan\u200B"))
+        assertEquals("\\u{202E}evil", LabelText.visibleValue("\u202Eevil"))
+        assertEquals("a b", LabelText.visibleValue("a b"))
+        assertEquals("a\\u{0009}b\\u{000A}", LabelText.visibleValue("a\tb\n"))
+        assertEquals("  x", LabelText.visibleValue("  x")) // nothing collapsed or trimmed
+        val long = LabelText.visibleValue("\u200B".repeat(1000))
+        assertEquals(LabelText.MAX_LABEL, long.length)
+        assertTrue(long.endsWith("…"))
+        // I-c: a huge input is not walked past the bound.
+        assertEquals(LabelText.MAX_LABEL, LabelText.label("y".repeat(5_000_000)).length)
     }
 
     @Test

@@ -70,6 +70,8 @@ import com.tether.app.client.LEGACY_GROUP_VALUE
 import com.tether.app.client.ModeVocabulary
 import com.tether.app.client.OPENCODE_V2
 import com.tether.app.client.SessionControl
+import com.tether.app.client.LabelText
+import com.tether.app.client.typedModelAllowed
 import com.tether.app.client.confirmedCopy
 import com.tether.app.client.looksLikeModelId
 import com.tether.app.protocol.reduce.composerCommandList
@@ -242,7 +244,7 @@ fun Composer(
         return when (control) {
             is SessionControl.Mode -> {
                 val option = c?.mode?.options?.firstOrNull { it.value == control.value }
-                Escalation(option?.label ?: if (control.value == ModeVocabulary.AUTO) "Auto" else control.value, escalationBody(option?.description ?: c?.auto?.hint), confirmed)
+                Escalation(option?.label ?: if (control.value == ModeVocabulary.AUTO) "Auto" else LabelText.visibleValue(control.value), escalationBody(option?.description ?: c?.auto?.hint), confirmed)
             }
             is SessionControl.OpencodeMode -> {
                 val agent = controlActions.opencode?.snapshot?.modes?.items?.firstOrNull { it.value == control.mode }
@@ -257,12 +259,14 @@ fun Composer(
      * T7.2: one operator choice to the client's guard; a refusal is said in words. Round 2 (L4): a
      * change the client wants confirmed opens the confirmation for exactly that control.
      */
-    fun sendControl(control: SessionControl): Boolean {
+    fun sendControl(control: SessionControl, notOfferedCopy: String? = null): Boolean {
         val result = controlActions.onControl(control)
         if (result == ControlResult.NeedsConfirmation) {
             escalationFor(control)?.let { escalation = it; return false }
         }
-        if (result != ControlResult.Sent) controlRefusalCopy(result)?.let(::flash)
+        if (result != ControlResult.Sent) {
+            (if (result == ControlResult.NotOffered && notOfferedCopy != null) notOfferedCopy else controlRefusalCopy(result))?.let(::flash)
+        }
         return result == ControlResult.Sent
     }
 
@@ -283,13 +287,18 @@ fun Composer(
         if (c.codexV2) return codexChooseModel(value)
         if (value == LEGACY_GROUP_VALUE) return
         val model = models.firstOrNull { it.value == value }
-        val displayName = model?.displayName?.ifEmpty { null } ?: value
-        if (sendControl(SessionControl.Model(value, typed = unlisted))) {
+        // Round 3 (F1): the confirmation reads the cleaned name, never raw server text.
+        val displayName = model?.displayName?.let { LabelText.label(it) }?.ifEmpty { null } ?: LabelText.label(value).ifEmpty { LabelText.visibleValue(value) }
+        val typedRefusal = if (unlisted) "“${LabelText.visibleValue(value)}” wasn’t accepted as a model id for this session — the model was not changed." else null
+        if (sendControl(SessionControl.Model(value, typed = unlisted), typedRefusal)) {
             // A model that cannot express the current effort clears it (never a mismatched
             // --variant) — round 2 (L3): only once the model itself went out.
             val effort = s.reasoningEffort
+            var effortRefusal: String? = null
             if (model != null && !effort.isNullOrEmpty() && model.variants.orEmpty().none { it.value == effort }) {
-                controlActions.onControl(SessionControl.Effort(""))
+                // Round 3 (I-d): a refused clear is said, not swallowed.
+                val cleared = controlActions.onControl(SessionControl.Effort(""))
+                if (cleared != ControlResult.Sent) effortRefusal = "The model changed, but its reasoning effort was not reset: " + (controlRefusalCopy(cleared) ?: "")
             }
             val isDefaultChoice = value.isEmpty() || value == "default"
             flash(
@@ -299,6 +308,7 @@ fun Composer(
                     else -> "Model set to $displayName."
                 },
             )
+            effortRefusal?.let(::flash)
             if (field.text.startsWith("/model")) setDraft("")
             onRequestControls()
         }
@@ -345,7 +355,7 @@ fun Composer(
         }
         // chat-view.tsx:2486-2495: the same set-mode the Mode row sends.
         if (auto.on) sendControl(SessionControl.Mode("default"))
-        else escalation = Escalation("Auto", escalationBody(auto.hint), SessionControl.Mode(ModeVocabulary.AUTO, confirmed = true))
+        else escalation = escalationFor(SessionControl.Mode(ModeVocabulary.AUTO))
     }
 
     val providerV2 = session != null && (composerControls?.codexV2 == true || (session.provider == "opencode" && session.engineGeneration == OPENCODE_V2))
@@ -372,6 +382,20 @@ fun Composer(
 
     // Native commands (currently /model) run in-app; everything else is flagged
     // terminal-only rather than sent as prompt text (the /model-as-text bug).
+    /** chat-view.tsx:3015-3027: a listed match, else a plausible id passed through (the CLI validates it), else refused. */
+    fun modelCommand(arg: String) {
+        val match = resolveModelArg(arg, models)
+        if (match != null) {
+            chooseModel(match.value)
+            return
+        }
+        if (looksLikeModelId(arg)) {
+            chooseModel(arg, unlisted = true)
+            return
+        }
+        flash("“${LabelText.label(arg)}” doesn’t look like a model id. Try /model to see what the CLI offers.")
+    }
+
     fun runSlashCommand(raw: String) {
         val body = raw.drop(1)
         val name = body.split(Regex("\\s+")).first()
@@ -384,18 +408,7 @@ fun Composer(
                 setDraft("")
                 return
             }
-            // chat-view.tsx:3015-3027: a listed match, else a plausible id passed through (the CLI
-            // validates it), else refused with the reason.
-            val match = resolveModelArg(arg, models)
-            if (match != null) {
-                chooseModel(match.value)
-                return
-            }
-            if (looksLikeModelId(arg)) {
-                chooseModel(arg, unlisted = true)
-                return
-            }
-            flash("“$arg” doesn’t look like a model id. Try /model to see what the CLI offers.")
+            modelCommand(arg)
             return
         }
         if (info != null && !info.supported) {
@@ -423,7 +436,16 @@ fun Composer(
 
     /** Slash commands are in-app control requests: never queued, no attachments. */
     fun trySlashCommand(text: String, hasAttachments: Boolean): Boolean {
-        if (!claude || !text.startsWith("/") || hasAttachments) return false
+        if (!text.startsWith("/") || hasAttachments) return false
+        if (!claude) {
+            // Round 3 (F2): `/model <arg>` pins a model on every engine with a model select but
+            // Codex, as the web does (chat-view.tsx:3015); the rest of the slash menu is T7.3's.
+            val arg = MODEL_ARG.find(text)?.groupValues?.get(1)?.trim().orEmpty()
+            val s = session ?: return false
+            if (arg.isEmpty() || !typedModelAllowed(s.provider) || composerControls?.model == null) return false
+            modelCommand(arg)
+            return true
+        }
         runSlashCommand(text)
         return true
     }
@@ -691,8 +713,17 @@ fun Composer(
             body = pending.body,
             sessionName = session?.name,
             onConfirm = {
-                escalation = null
-                sendControl(pending.control)
+                // Round 3 (I-a): what is confirmed is what is on screen now; if the row moved under
+                // the dialog (a new label or hint), show the new words instead of sending.
+                val fresh = escalationFor(pending.control)
+                if (fresh == null) {
+                    escalation = null
+                } else if (fresh.label != pending.label || fresh.body != pending.body) {
+                    escalation = fresh
+                } else {
+                    escalation = null
+                    sendControl(pending.control)
+                }
             },
             onCancel = { escalation = null },
         )
@@ -701,6 +732,9 @@ fun Composer(
 
 /** A most-permissive change waiting for the operator's confirmation (never saved: a restore drops it). */
 internal class Escalation(val label: String, val body: String, val control: SessionControl)
+
+/** `/model <arg>`: the argument after the command name. */
+private val MODEL_ARG = Regex("^/model\\s+(.+)$", RegexOption.DOT_MATCHES_ALL)
 
 internal fun escalationBody(hint: String?): String =
     (hint?.trimEnd('.')?.let { "$it." } ?: "The agent will run without asking, including destructive commands.") +

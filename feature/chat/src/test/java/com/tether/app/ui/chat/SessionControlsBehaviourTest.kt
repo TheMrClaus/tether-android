@@ -47,6 +47,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
     var codex by mutableStateOf<ProviderControlsState<CodexSnapshot>?>(null)
     var opencode by mutableStateOf<ProviderControlsState<OpencodeSnapshot>?>(null)
     val requests = mutableListOf<String>()
+    val prompts = mutableListOf<String>()
 
     fun show() {
         rule.mainClock.autoAdvance = false
@@ -57,7 +58,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
                     projection = ComposerFixtures.idle.projection,
                     controls = controls,
                     serverNow = { ComposerFixtures.BUSY_NOW },
-                    onSend = { _, _ -> true },
+                    onSend = { text, _ -> prompts += text; true },
                     onInterrupt = {},
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
@@ -202,7 +203,7 @@ class SessionControlsPhoneBehaviourTest {
         h.arm()
         h.click("opencode-apply-mode")
         rule.onNodeWithText("Confirm the change to continue.").assertDoesNotExist()
-        rule.onNodeWithText("Turn on Build?").assertExists()
+        rule.onNodeWithText("Turn on \u2068Build\u2069?").assertExists()
         h.arm()
         h.click("escalation-confirm")
         assertEquals(
@@ -226,7 +227,7 @@ class SessionControlsPhoneBehaviourTest {
         h.arm()
         h.click("opencode-apply-mode")
         assertTrue("confirmation first", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on Plan (planx)?").assertExists()
+        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
         rule.onNodeWithText("Plans only (really: everything). It stays on for this session until you switch it back.").assertExists()
         rule.onNodeWithText("Session: \u2068Sketch the sync outbox\u2069").assertExists()
         h.arm()
@@ -271,14 +272,14 @@ class SessionControlsPhoneBehaviourTest {
         h.arm()
         h.click("control-option-${ModeVocabulary.AUTO}")
         assertTrue("choosing Auto only asks", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on Auto?").assertExists()
+        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertExists()
         // The confirm key is armed too.
         h.click("escalation-confirm")
         assertTrue(h.recorder.sent.isEmpty())
         h.arm()
         h.click("escalation-confirm")
         assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO, confirmed = true)), h.recorder.sent)
-        rule.onNodeWithText("Turn on Auto?").assertDoesNotExist()
+        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
     }
 
     @Test
@@ -292,7 +293,7 @@ class SessionControlsPhoneBehaviourTest {
         rule.onNodeWithText("Cancel").performClick()
         h.arm()
         assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on Auto?").assertDoesNotExist()
+        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
     }
 
     @Test
@@ -336,6 +337,77 @@ class SessionControlsPhoneBehaviourTest {
         h.settle()
         assertEquals(1, h.recorder.sent.size)
         rule.onNodeWithText("“fix the tests” doesn’t look like a model id. Try /model to see what the CLI offers.").assertExists()
+    }
+
+    @Test
+    fun aTypedIdTheClientRefusesGetsItsOwnReason() {
+        h.recorder.result = ControlResult.NotOffered
+        h.show()
+        rule.onNodeWithContentDescription("Message the agent").performTextInput("/model claude-haiku-9")
+        h.settle()
+        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        h.settle()
+        rule.onNodeWithText("“claude-haiku-9” wasn’t accepted as a model id for this session — the model was not changed.").assertExists()
+        rule.onNodeWithText("That option is no longer offered — the setting was not changed.").assertDoesNotExist()
+    }
+
+    @Test
+    fun aTypedIdIsPinnedOnOpencodeToo() {
+        // Round 3 (F2): chat-view.tsx:3015 — every engine with a model select but Codex.
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.opencodeControls
+        h.show()
+        rule.onNodeWithContentDescription("Message the agent").performTextInput("/model gpt-9-preview")
+        h.settle()
+        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        h.settle()
+        assertEquals(listOf<SessionControl>(SessionControl.Model("gpt-9-preview", typed = true)), h.recorder.sent)
+    }
+
+    @Test
+    fun aTypedIdOnCodexIsAnOrdinaryMessage() {
+        h.session = SessionControlFixtures.codex
+        h.controls = null
+        h.codex = SessionControlFixtures.codexState
+        h.show()
+        rule.onNodeWithContentDescription("Message the agent").performTextInput("/model gpt-9")
+        h.settle()
+        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        h.settle()
+        assertTrue("no model control for Codex", h.recorder.sent.isEmpty())
+        assertEquals(listOf("/model gpt-9"), h.prompts)
+    }
+
+    @Test
+    fun aRefusedEffortClearIsSaid() {
+        h.session = SessionControlFixtures.claude.copy(reasoningEffort = "high")
+        h.recorder.resultFor = { c -> if (c is SessionControl.Effort) ControlResult.NotConnected else ControlResult.Sent }
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Model")
+        h.click("control-option-claude-sonnet-5")
+        rule.onNodeWithText("The model changed, but its reasoning effort was not reset: Not connected — the setting was not changed.").assertExists()
+    }
+
+    @Test
+    fun aConfirmationWhoseWordsChangedIsShownAgainNotSent() {
+        // Round 3 (I-a): the agent is renamed while the dialog is open.
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.sneakyOpencodeControls
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Mode")
+        h.arm()
+        h.click("control-option-planx")
+        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
+        h.controls = SessionControlFixtures.sneakyOpencodeControls.copy(modes = listOf(com.tether.app.protocol.ModeOption("planx", "Everything", "Runs every tool")))
+        h.arm()
+        h.click("escalation-confirm")
+        assertTrue("the changed words are shown first", h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Everything (planx)\u2069?").assertExists()
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(listOf<SessionControl>(SessionControl.Mode("planx", confirmed = true)), h.recorder.sent)
     }
 
     @Test
@@ -469,7 +541,7 @@ class SessionControlsTabletBehaviourTest {
         rule.onNodeWithTag("control-option-planx").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Plan (planx), Plans only (really: everything)")))
         h.click("control-option-planx")
         assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on Plan (planx)?").assertExists()
+        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
         h.arm()
         h.click("escalation-confirm")
         assertEquals(listOf<SessionControl>(SessionControl.Mode("planx", confirmed = true)), h.recorder.sent)
