@@ -618,7 +618,12 @@ class RealTetherClient(
     private suspend fun adoptCredential(base: HttpUrl, credential: Credential) {
         // ta-jt9 L-A2: the boot purge decides on the store as the boot found it, so no sign-in
         // may write the store (or bind the mirror) before it has decided and wiped.
-        awaitBootPurge()
+        if (!awaitBootPurge()) {
+            // It failed or is overdue, and this sign-in is about to change the store it decides
+            // on: a late decision could then keep the previous sign-in's copy for the next boot.
+            // So that copy is shredded now, off this call (the mirror is off for this process).
+            unbindMirrorForWipe()?.let { m -> scope.launch(Dispatchers.IO) { runCatching { m.wipe() } } }
+        }
         // Read BEFORE the URL moves: the server that unsent input filed before
         // the store was bound (a fresh process) was written for.
         val configuredBefore = try {

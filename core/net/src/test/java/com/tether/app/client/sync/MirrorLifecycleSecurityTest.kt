@@ -229,6 +229,68 @@ class MirrorLifecycleSecurityTest {
         assertNull("a full attach", h.expectFrame("attach")["afterSeq"])
     }
 
+    /**
+     * ta-jt9 L-A2: a boot purge that cannot decide (the store read throws) leaves this process
+     * without a mirror (nothing binds a copy nobody decided on) and deletes nothing: the next
+     * boot decides again and, still signed in, restores the copy.
+     */
+    @Test
+    fun aBootPurgeThatCannotDecideRunsTheProcessWithoutAMirrorAndKeepsTheCopy() {
+        mirroredThenKilled()
+        h.beforeCredentialState = {
+            h.beforeCredentialState = null
+            throw java.io.IOException("store unreadable")
+        }
+        h.boot(ready = ready("s1"))
+        assertFalse("undecided", runBlocking { kotlinx.coroutines.withTimeout(20_000) { h.client.bootPurgeOutcome.await() } })
+        assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
+        h.client.attach("s1")
+        assertNull("a full attach: nothing restored", h.expectFrame("attach")["afterSeq"])
+        assertTrue("nothing deleted", h.keyFile.exists() && h.dbFactory.existing().isNotEmpty())
+        h.kill(flushFirst = false)
+
+        h.boot(ready = ready("s1"))
+        assertEquals(5L, h.expectFrame("attach")["afterSeq"]!!.jsonPrimitive.longOrNull)
+    }
+
+    /**
+     * ta-jt9 L-A2: a boot purge that is still undecided when a sign-in arrives (its read held
+     * past the bound) never holds that sign-in for longer than the bound, the sign-in runs with
+     * no mirror, and the previous sign-in's copy is shredded anyway: the purge's late decision,
+     * made on the store the sign-in has changed, must not keep it for the next boot.
+     */
+    @Test
+    fun anOverdueBootPurgeNeverHoldsASignInAndThePreviousCopyIsStillShredded() {
+        h.close()
+        h = MirrorHarness(bindTimeoutMs = 1_000)
+        h.startServer()
+        mirroredThenKilled()
+        runBlocking { h.settings.clearCredential() }
+        val entered = CountDownLatch(1)
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        h.beforeCredentialState = {
+            h.beforeCredentialState = null
+            entered.countDown()
+            kotlinx.coroutines.withTimeout(20_000) { release.await() }
+        }
+        try {
+            h.bootSignedOut()
+            assertTrue("the purge's read is held", entered.await(20, TimeUnit.SECONDS))
+            h.received.clear()
+            loginAgain()
+            val started = System.currentTimeMillis()
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
+            assertTrue("the sign-in waited past the bound", System.currentTimeMillis() - started < 10_000)
+            handshakeNewSocket("s1")
+            assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
+            awaitTrue("the previous copy shredded") { !h.keyFile.exists() && h.dbFactory.existing().isEmpty() }
+        } finally {
+            release.complete(Unit)
+        }
+        assertTrue(runBlocking { kotlinx.coroutines.withTimeout(20_000) { h.client.bootPurgeOutcome.await() } })
+        assertFalse("the late decision minted or kept nothing", h.keyFile.exists())
+    }
+
     /** L-A with nothing configured at all (after a stop(): no URL either): still purged. */
     @Test
     fun aBootWithNoServerAndNoCredentialStillPurges() {

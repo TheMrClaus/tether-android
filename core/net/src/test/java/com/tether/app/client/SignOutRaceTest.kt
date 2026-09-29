@@ -273,6 +273,57 @@ class SignOutRaceTest {
     }
 
     /**
+     * L-B1: a sign-out with nothing in memory yet (the client never started: nothing to remember
+     * as forgotten), then a start() that reads the store before the sign-out's clear lands and
+     * takes the lock only after it has landed. The epoch moved again once the store was clear,
+     * so the stale snapshot is refused.
+     */
+    private fun aStartStraddlingTheClearOfASignOutWithNothingInMemory(signOut: (RealTetherClient) -> Unit) {
+        h.server.start()
+        val base = h.server.url("/").toString().trimEnd('/')
+        val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
+        val client = newClient(settings)
+        val hold = ClearHold(settings)
+        val clearLanded = CountDownLatch(1)
+        settings.afterClear = { clearLanded.countDown() }
+        val signingOut = Thread { signOut(client) }
+        val snapshotRead = CountDownLatch(1)
+        val resume = CompletableDeferred<Unit>()
+        var start: Job? = null
+        try {
+            signingOut.start()
+            assertTrue("the sign-out's clear is held", hold.entered.await(20, TimeUnit.SECONDS))
+            settings.afterSessionRead = {
+                settings.afterSessionRead = null
+                start = currentCoroutineContext()[Job]
+                snapshotRead.countDown()
+                withTimeout(20_000) { resume.await() }
+            }
+            client.start()
+            assertTrue(snapshotRead.await(20, TimeUnit.SECONDS))
+            hold.release.complete(Unit)
+            assertTrue(clearLanded.await(20, TimeUnit.SECONDS))
+            signingOut.join(20_000)
+            Thread.sleep(300) // the sign-out's own coroutine moves the epoch right after the clear
+        } finally {
+            hold.release.complete(Unit)
+            resume.complete(Unit)
+        }
+        runBlocking { withTimeout(20_000) { start!!.join() } }
+        assertSignedOutForGood(client)
+    }
+
+    @Test
+    fun aStartStraddlingALogoutsClearNeverAdoptsTheStoredCredential() = aStartStraddlingTheClearOfASignOutWithNothingInMemory { client ->
+        assertEquals(LogoutResult.LocalOnly, runBlocking { client.logout() })
+    }
+
+    @Test
+    fun aStartStraddlingAStopsClearNeverAdoptsTheStoredCredential() = aStartStraddlingTheClearOfASignOutWithNothingInMemory { client ->
+        client.stop()
+    }
+
+    /**
      * Verifier test gap: start() is called while signed out in memory (its coroutine has not run
      * yet) and a stop() lands before that coroutine is even dispatched. The epoch start() recorded
      * is the one before the stop, so the snapshot it then reads (the stop's clear still held) is
