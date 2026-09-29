@@ -39,7 +39,9 @@ serves 200 on the box; the **public URL still redirects to the SSO gateway** unt
 **Merged since takeover (2026-09-28/29):** ta-hra, ta-js0 + ta-epo, ta-koy (protocol **v132**), **T6.3** approvals/questions/denials,
 **T6.4** sub-agent runs / background commands / guarded Stop / todo bar / turn activity (`b4d378e`), **T7.2** Model/Effort/Mode row +
 Codex/OpenCode panels with confirmed escalation (`b8f94c8`, 4 rounds), **ta-41x + ta-jt9** cookie `Origin` + signed-out-boot mirror purge +
-sign-out races (`ecb6e7a`, 3 rounds). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
+sign-out races (`ecb6e7a`, 3 rounds), **T13.2** offline mode + stale indicators (`9219a2d`, 3 rounds: saved copies never actionable -
+cards, Stop, controls, Interrupt, End session locked unless Live; client-side origin + live-epoch checks on interrupt/kill). **T6.6**
+notices is in its rebase-onto-T13.2 round (verify + security re-review next). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
 #209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22, `cf7bb0c`) built and checked - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's, versionCode 22, CI green.
 **Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
 **Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
@@ -134,8 +136,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.3 | Approvals, questions, permission denials/paths | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | VERIFIED | TheMrClaus @ 2026-09-29 01:02 |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
-| T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | TODO |  |  |  |
-| T6.7 | Interrupt/kill/errors; selection & copy | TODO |  |  |  |
+| T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | DONE | TheMrClaus @ 2026-09-29 10:10 |  |  |
+| T6.7 | Interrupt/kill/errors; selection & copy | TODO |  |  | from T13.2 review (coordinator): interrupt must be bound to the turn it was drawn for (SYNC_DESIGN: a late interrupt could stop a later tur… |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -152,7 +154,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T8.2 | Folder picker, workspaces | TODO |  |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | TODO |  |  |  |
-| T8.5 | Metadata draft panel, handoff brief + claim | TODO |  |  |  |
+| T8.5 | Metadata draft panel, handoff brief + claim | TODO |  |  | from T6.6 verify (coordinator): the limit card's optional 'Take over in a new session' key (web chat-view limit card) is deferred here from… |
 | T8.6 | Browser pane (native frame stream) — scope per T0.5 | TODO |  |  |  |
 
 ### Phase 9 — Inspector, usage, scheduled actions
@@ -191,7 +193,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
 | T13.1 | Room journal mirror; UI reads Room; delta attach | VERIFIED | TheMrClaus @ 2026-09-27 23:48 |  |  |
-| T13.2 | Offline mode + stale indicators | TODO |  |  | design refinement (SYNC_DESIGN §4): freshness Live/CatchingUp/Saved/NotDownloaded, icon + text, no violet or red. Saved-copy run badges rea… |
+| T13.2 | Offline mode + stale indicators | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
 | T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | Gate update: S13.1 deployed (v130: AgentSession.lastSeq + {kind:sync} FCM hint + syncHints opt-in). Remaining gates: T13.1 (and T12.1 prefe… |
@@ -327,3 +329,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-27 19:15 | claude-main / Opus 5.5 (new coordinator session) | T5.1, T6.1 | Took over after the previous coordinator hit its 5-hour usage limit; RESUME HERE rewritten from disk (T12.1 r3 merged `98bf8ac`; T5.1 DONE unverified; T6.1 blocked P1) | T5.1 verifier; T6.1 allowlist fix → re-verify → merge |
 | 2026-09-28 04:55 | claude-main / Opus 5.5 | T6.1, T4.5, T5.1, ta-cdh, T11.1, ta-ouu; T4.4, T13.1, ta-u2n, T5.2 | Overnight: 6 verified + merged (T6.1 `19abfbc`, T4.5 `61f868a`, T5.1 `a41178a`, ta-cdh `fc3f820`, T11.1 `d39d5d5`, ta-ouu `80e9651`). All 4 lanes interrupted by an account usage limit ~04:00; T13.1 checkpointed as WIP `bf42bc4`, all 4 agents resumed in context | verify T4.4, T13.1, ta-u2n, T5.2 as they finish |
 | 2026-09-28 18:00 | claude-main / Opus 5.5 | T6.2, T7.1, T13.1, ta-g04, ta-s4r | Daytime: CI red→green (ta-g04), T7.1, T13.1, ta-s4r (P0 sign-in), T6.2 merged; drafts 0.7.0-0.7.2 built; three usage-limit interruptions and one server restart recovered by WIP checkpoints | build 0.7.3 draft; owner sign-in result; next frontier |
+| 2026-09-29 16:30 | claude-main / Opus 5.5 (new coordinator session) | T13.2, T6.6 | Took over mid-flight (old session stopped by the owner; both makers had checkpointed). T13.2: verify + security review, 2 fix rounds (interrupt/End locked unless Live, origin-bound kill, fail-closed freshness), merged ff-only `9219a2d`, VERIFIED. T6.6: verify REFUTED on unrecorded matrix rows (coordinator brief error), security follow-ups fixed in r2; r3 rebases onto T13.2 and applies the live-copy lock to every notice key. Follow-ups filed: ta-tgs; notes on T6.7 (interrupt turn binding), T8.5 (limit-card take-over key). | T6.6 r3 → verify + security re-review → merge; then T6.5/T6.7 |
