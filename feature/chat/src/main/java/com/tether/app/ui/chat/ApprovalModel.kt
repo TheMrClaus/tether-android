@@ -28,9 +28,12 @@ import com.tether.app.protocol.tree.JsValue
 /** Display bound for provider/agent text on a card (a key into `answers` always keeps the full text). */
 internal const val CARD_TEXT_MAX = 4_000
 
-/** Round 8: never splits a surrogate pair (a cut lands on a code-point boundary). */
-private fun cut(s: String, max: Int = CARD_TEXT_MAX): String =
-    if (s.length <= max) s else s.substring(0, if (Character.isHighSurrogate(s[max - 1])) max - 1 else max) + "…"
+/** Round 8: never splits a surrogate pair (a cut lands on a code-point boundary). Round 9: a bound of 0 or less keeps nothing. */
+private fun cut(s: String, max: Int = CARD_TEXT_MAX): String = when {
+    s.length <= max -> s
+    max <= 0 -> "…"
+    else -> s.substring(0, if (Character.isHighSurrogate(s[max - 1])) max - 1 else max) + "…"
+}
 
 private fun JsValue?.string(): String? = (this as? JsStr)?.value
 
@@ -308,7 +311,10 @@ private fun isDefaultIgnorable(cp: Int): Boolean =
 
 /**
  * Round 8: the whole card's display budget: the path rows (each path's shown text counted once,
- * read then write, in request order) may add up to [CARD_PATH_BUDGET] characters. Past it, the rest
+ * read then write, in request order) may add up to [CARD_PATH_BUDGET] characters. The count is the
+ * escaped, quoted, isolated text ([showPath]), not the zero-width break points `breakAnywhere` adds
+ * when drawing. A card at exactly the budget is shown whole; one character more and the row that
+ * crosses it is left out. Past it, the rest
  * is summarised ("+N more paths not shown") and, like an incomplete path, the card offers no grant.
  * The confirmation's words name only shown paths, and only on a grantable card (every row shown), so
  * the rows plus the summary stay within twice the budget. Measured in Robolectric (w412dp, round 8):
@@ -319,8 +325,9 @@ private fun isDefaultIgnorable(cp: Int): Boolean =
  */
 internal const val CARD_PATH_BUDGET = 16_000
 
-internal const val TOO_LONG_COPY = "A requested path is too long to show in full — only Deny is available."
-internal const val TOO_MANY_COPY = "Not every requested path can be shown — only Deny is available."
+// Round 9: what is true. Only the GRANTS are withdrawn; Deny and the provider's non-granting choices stay.
+internal const val TOO_LONG_COPY = "A requested path is too long to show in full, so these permissions can't be granted from this card."
+internal const val TOO_MANY_COPY = "Not every requested path can be shown, so these permissions can't be granted from this card."
 
 /** The grant card's rows as shown: the shown text of each path, how many were left out, and whether a grant may be offered. */
 @Immutable
@@ -332,7 +339,11 @@ internal data class GrantRows(
     /** A shown path is incomplete ([ShownPath.complete] false). */
     val tooLong: Boolean,
 ) {
-    /** Every requested path is shown in full: only then may a grant be offered (fail closed). */
+    /**
+     * Only then may a grant be offered (fail closed): no row is left out and no RELATIVE path is
+     * shortened. A plain path longer than [DISPLAY_PATH_MAX] code points is still cut in the middle
+     * (rounds 5/6: its head and its scope-deciding tail stay visible) and does not stop a grant.
+     */
     val grantable: Boolean get() = hidden == 0 && !tooLong
 
     /** Raw path -> its shown text (for the confirmation's words). */
@@ -548,7 +559,8 @@ internal const val DENIAL_TARGET_MAX = 300
 @Immutable
 internal data class DenialTarget(val label: String, val value: String)
 
-private fun truncateTarget(value: String): String = if (value.length > DENIAL_TARGET_MAX) value.substring(0, DENIAL_TARGET_MAX) + "…" else value
+/** Round 9: through the code-point-safe [cut]. */
+private fun truncateTarget(value: String): String = cut(value, DENIAL_TARGET_MAX)
 
 /** denial-target-model.mjs denialTarget. */
 internal fun denialTarget(input: JsValue?): DenialTarget? {

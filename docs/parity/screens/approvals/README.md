@@ -78,18 +78,23 @@ Divergences from the web, on purpose:
 - Round 8 bounds what a card draws and fails closed past the bound (the web draws everything). A path with a
   `.` or `..` segment is shown whole up to 1024 characters after escaping. Past that it is shown as its first
   400 and last 600 escaped characters around a "…", still quoted, isolated and marked, and the card says "A
-  requested path is too long to show in full — only Deny is available." Every card also has a budget of
-  16,000 shown characters for its path rows. Rows past it are summarised as "+N more paths not shown" and
-  the card says "Not every requested path can be shown — only Deny is available." Either way the grant keys
-  ("Allow all", "Allow selected") are disabled, the confirmation box is not drawn, and the path boxes cannot
-  be changed. Deny and the provider's other, non-granting choices still work. The confirmation names only
-  paths shown in full, so rows plus confirmation stay within twice the budget. In Robolectric the worst legal
-  card (64 + 64 paths of 4096 tag characters, relative or not) draws in about 0.4–0.75 s on its own and up
-  to about 1.3 s during the full parallel gate. The largest card that can still grant draws in about the same
-  time. The reason, working directory and network lines are escaped first,
-  then cut. The reason and host keep up to 2000 escaped characters and then a real "…". The working
-  directory is cut like a path, so a trailing `/../..` stays visible and marked. Every cut lands on a
-  code-point boundary. No golden changed.
+  requested path is too long to show in full, so these permissions can't be granted from this card." Every
+  card also has a budget of 16,000 shown characters for its path rows. The count is the escaped, quoted text,
+  not the zero-width break points added for line wrapping. A card at exactly 16,000 is shown whole. Rows past
+  the budget are summarised as "+N more paths not shown", and the card says "Not every requested path can be
+  shown, so these permissions can't be granted from this card." Either way the grant keys ("Allow all",
+  "Allow selected") are disabled, the confirmation box is not drawn, and the path boxes cannot be changed. On a
+  card with requested permissions but no provider choices, the plain "Approve" is disabled too (round 9), since
+  a bare "allow" may grant those permissions. Deny and the provider's non-granting choices still work. A card
+  can grant only when no row is left out and no relative path is shortened. A plain path over 160 code points
+  is still cut in the middle (rounds 5/6), with its head and its scope-deciding tail visible, and does not stop
+  a grant. The confirmation names only shown paths, so rows plus confirmation stay within twice the budget. In
+  Robolectric the worst legal card (64 + 64 paths of 4096 tag characters, relative or not) draws in about
+  0.4–0.75 s on its own and up to about 1.3 s during the full parallel gate. The largest card that can still
+  grant draws in about the same time. The reason, working directory and network lines are escaped first, then
+  cut. The reason and host keep up to 2000 escaped characters and then a real "…". The working directory is
+  cut like a path, so a trailing `/../..` stays visible and marked. Every cut lands on a code-point boundary.
+  No golden changed.
 - The confirmation only ever refers to words that were on screen: ticking it counts only if the ticks have not
   changed since the card was drawn, so a tick change, the confirmation and a grant key in the same instant
   send nothing; after the redraw the operator confirms the set now shown.

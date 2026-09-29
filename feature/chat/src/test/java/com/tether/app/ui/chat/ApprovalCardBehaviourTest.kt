@@ -1310,12 +1310,12 @@ class ApprovalCardBehaviourTest {
     // ---- Round 8: a bounded card, Deny-only when not every path can be shown in full ----
 
     /** A permissions request (exact / subset / deny) for [read] and [write], optionally with a working directory. */
-    private fun permissionCard(read: List<String>, write: List<String>, cwd: String? = null): ChatFixtures.Folded {
+    private fun permissionCard(read: List<String>, write: List<String>, cwd: String? = null, choices: Boolean = true): ChatFixtures.Folded {
         val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
             ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
             ev("approval_request", "t1", ts = 1) {
                 put("requestId", "req-b"); put("toolId", "perm-b"); put("name", "permissions")
-                putJsonArray("choices") {
+                if (choices) putJsonArray("choices") {
                     addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
                     addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") }
                     addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
@@ -1438,6 +1438,41 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
         assertEquals(1, calls.size)
         assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains("/w/out/report-63"))
+    }
+
+    // ---- Round 9 (Low-1): no provider choices, requested permissions: a bare "allow" may grant them ----
+
+    private fun assertOnlyDenyWithoutChoices(refusal: String) {
+        scrollTo("grant-refused")
+        rule.onNodeWithText(refusal).assertExists()
+        rule.onAllNodesWithTag("approval-choice").assertCountEquals(0)
+        rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue("sent $calls", calls.isEmpty())
+        rule.onNodeWithTag("approval-deny").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-b:deny"), calls)
+    }
+
+    @Test fun withoutChoicesATooLongPathLeavesOnlyDeny() {
+        show(permissionCard(listOf("/srv/a", "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 2)), emptyList(), choices = false))
+        assertOnlyDenyWithoutChoices(TOO_LONG_COPY)
+    }
+
+    @Test fun withoutChoicesAHiddenPathLeavesOnlyDeny() {
+        val (read, write) = worstPaths(relative = false)
+        show(permissionCard(read, write, choices = false))
+        rule.onNodeWithTag("grant-hidden").assertExists()
+        assertOnlyDenyWithoutChoices(TOO_MANY_COPY)
+    }
+
+    @Test fun withoutChoicesAGrantableCardStillApproves() {
+        show(permissionCard(listOf("/srv/a"), listOf("/w/b"), choices = false))
+        scrollTo("approval-allow")
+        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-b:allow"), calls)
     }
 
     @Test fun aLongWorkingDirectoryShowsItsRelativeTail() {

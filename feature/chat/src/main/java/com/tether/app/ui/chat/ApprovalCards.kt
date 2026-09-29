@@ -465,12 +465,15 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     )
                 }
             } else {
+                // Round 9 (Low-1): with requested permissions and no provider choices, a plain "allow"
+                // may grant them server-side; it is offered only when every one of them can be shown.
+                val canApprove = requested == null || grantable
                 TetherKey(
-                    onClick = { send(null, "allow", null) },
+                    onClick = { if (canApprove) send(null, "allow", null) },
                     classes = KeyClasses.ButtonPrimary,
                     label = "Approve",
                     icon = TetherIcons.Check,
-                    enabled = armed,
+                    enabled = armed && canApprove,
                     modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-allow"),
                 )
                 TetherKey(

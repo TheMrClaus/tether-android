@@ -385,6 +385,30 @@ class ApprovalModelTest {
         assertEquals(TOO_MANY_COPY, rows.refusal)
     }
 
+    @Test fun theBudgetBoundaryIsExact() {
+        // Round 9: 128 plain paths of 121 characters, each shown as 125 (+ quotes, FSI, PDI): exactly 16,000.
+        fun paths(side: Char, extra: Int = 0) = (0 until 64).map { i ->
+            val head = "/$side${"%03d".format(i)}/"
+            head + "a".repeat(121 - head.length + if (i == 63) extra else 0)
+        }
+        val at = grantRows(requested(paths('r'), paths('w')))
+        assertEquals(CARD_PATH_BUDGET, (at.read + at.write).sumOf { it.second.length })
+        assertEquals(0, at.hidden)
+        assertTrue(at.grantable)
+        // One character more, on the last row: that row crosses the budget and is left out.
+        val over = grantRows(requested(paths('r'), paths('w', extra = 1)))
+        assertEquals(1, over.hidden)
+        assertEquals(127, over.read.size + over.write.size)
+        assertTrue(!over.grantable)
+        assertEquals(TOO_MANY_COPY, over.refusal)
+    }
+
+    @Test fun aDenialTargetIsNeverCutInsideASurrogatePair() {
+        val target = denialTarget(com.tether.app.protocol.tree.JsStr("a".repeat(DENIAL_TARGET_MAX - 1) + "😀" + "b"))!!
+        assertEquals("a".repeat(DENIAL_TARGET_MAX - 1) + "…", target.value)
+        assertEquals("abc", denialTarget(com.tether.app.protocol.tree.JsStr("abc"))!!.value)
+    }
+
     @Test fun anIncompleteRelativePathMakesTheCardDenyOnly() {
         val rows = grantRows(requested(listOf("/srv/a", "../" + "a".repeat(1_022))))
         assertEquals(2, rows.read.size)
