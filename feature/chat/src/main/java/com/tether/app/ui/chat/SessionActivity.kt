@@ -138,7 +138,7 @@ internal fun TodoBar(progress: ProgressView, sessionKey: String?) {
             Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp).rotate(rotation))
         }
         if (expanded) {
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            run {
                 // `max-height: 40vh`: of the window, which the deck's constraints do not know — use the screen.
                 val cap = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.4f).dp
                 Column(
