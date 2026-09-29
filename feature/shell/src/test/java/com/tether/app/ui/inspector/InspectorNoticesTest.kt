@@ -98,6 +98,27 @@ class InspectorNoticesModelTest {
         assertEquals("Needs authentication", mcpStatusCopy("needs-auth"))
         assertEquals("Unknown", mcpStatusCopy("something-new"))
     }
+
+    @Test
+    fun aNameTheCleaningWouldChangeIsShownWithItsHiddenCodePointsWrittenOut() {
+        // "github" with a zero-width space, and one with a right-to-left override: neither may pass
+        // for the plain "github", and each keeps its own row state (keyed on the raw name).
+        val state = SessionView(
+            foldTree(
+                freshTree(),
+                evNullTurn("mcp_health_updated", seq = 1, ts = InspectorFixtures.NOW) { put("name", "github"); put("status", "ready") },
+                evNullTurn("mcp_health_updated", seq = 2, ts = InspectorFixtures.NOW) { put("name", "git​hub"); put("status", "failed"); put("error", "boom") },
+                evNullTurn("mcp_health_updated", seq = 3, ts = InspectorFixtures.NOW) { put("name", "‮buhtig"); put("status", "ready") },
+            ),
+        )
+        val servers = mcpServers(state)
+        val shown = servers.associate { it.key to it.name }
+        assertEquals("github", shown["github"])
+        assertEquals("git\\u{200B}hub", shown["git​hub"])
+        assertEquals("\\u{202E}buhtig", shown["‮buhtig"])
+        assertEquals(3, servers.map { it.name }.toSet().size)
+        assertEquals(3, servers.map { it.key }.toSet().size)
+    }
 }
 
 @RunWith(RobolectricTestRunner::class)

@@ -226,7 +226,47 @@ class NoticeTransmissionTest {
         val origin = client.consentOrigin.value
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
         assertTrue(frames("set-auto-continue-on-limit").isEmpty() && frames("rate-limit-resume").isEmpty())
+    }
+
+    @Test
+    fun aReadOnlySessionCannotEvenDeclineTheLimit() {
+        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume: every action, dismiss included.
+        val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+        val origin = client.consentOrigin.value
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        ws.send(eventFrame("s1", 6, "rate_limit_resume_scheduled", null, ""","resetsAt":3600000,"resumeAt":3720000"""))
+        h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("scheduled") }
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        assertTrue(frames("rate-limit-resume").isEmpty())
+    }
+
+    @Test
+    fun aHandedOffSourceMayStillDeclineAndCancelItsScheduledResume() {
+        // A resume left scheduled would start a turn in the source after the handoff: its cancel
+        // (dismiss) is the one control a handed-off session still takes; the server allows it.
+        val (client, ws) = connected(readyWithSessions("s1", extra = ""","handedOffTo":"s2""""))
+        val origin = client.consentOrigin.value
+        // Awaiting a choice: dismiss goes out, bound to the prompt like any other choice.
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_001, "dismiss"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        val sent = frames("rate-limit-resume")
+        assertEquals(1, sent.size)
+        assertEquals(setOf("type", "sessionId", "resetsAt", "action"), sent[0].keys)
+        assertEquals("dismiss", sent[0].str("action"))
+        // Scheduled (from another device): the row's cancel goes out; starting work stays locked.
+        ws.send(eventFrame("s1", 6, "rate_limit_resume_scheduled", null, ""","resetsAt":3600000,"resumeAt":3720000"""))
+        h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("scheduled") }
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        assertEquals(listOf("dismiss"), frames("rate-limit-resume").map { it.str("action") })
+        assertTrue(frames("set-auto-continue-on-limit").isEmpty())
+        // Still only for THIS server's live session: another origin sends nothing.
+        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), "https://other.example"))
+        assertTrue(frames("rate-limit-resume").isEmpty())
     }
 
     @Test

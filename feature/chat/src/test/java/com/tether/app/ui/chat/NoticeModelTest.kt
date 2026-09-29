@@ -16,6 +16,25 @@ class NoticeModelTest {
         buildChatItems(f.projection, f.tree, showThinking = false, zone = ChatFixtures.zone, richCodex = richCodex)
 
     @Test
+    fun noticeAndLimitKeysAreScopedToTheirSession() {
+        // r2: two sessions showing the same dismiss key / resetsAt never share a lazy slot.
+        fun keys(sessionId: String) = listOf(NoticeFixtures.sessionNotices, NoticeFixtures.limit, NoticeFixtures.scheduled, NoticeFixtures.codexNotices, NoticeFixtures.claudeFallback)
+            .flatMap { f ->
+                buildChatItems(f.projection, f.tree, showThinking = false, zone = ChatFixtures.zone, richCodex = true, consentSessionId = sessionId)
+                    .filter { it is ChatItem.SessionNotice || it is ChatItem.RateLimit || it is ChatItem.ProviderNotice || it is ChatItem.Compaction }
+                    .map { it.key }
+            }
+        val a = keys("sess-a")
+        val b = keys("sess-b")
+        assertTrue("every kind is present", a.size >= 8)
+        assertTrue("no shared key: ${a.intersect(b.toSet())}", a.intersect(b.toSet()).isEmpty())
+        // Without a client key the tree's own session id scopes them.
+        val own = buildChatItems(NoticeFixtures.limit.projection, NoticeFixtures.limit.tree, showThinking = false, zone = ChatFixtures.zone)
+            .filterIsInstance<ChatItem.RateLimit>().single()
+        assertEquals(NoticeFixtures.limit.projection.tetherSessionId, own.scope)
+    }
+
+    @Test
     fun claudeModelFallbackIsATurnNoticeWithTheClassAwareLeadIn() {
         val notices = items(NoticeFixtures.claudeFallback).filterIsInstance<ChatItem.ProviderNotice>()
         assertEquals(1, notices.size)

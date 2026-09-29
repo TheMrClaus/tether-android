@@ -232,7 +232,12 @@ fun Composer(
     // The web swaps the pill row for the sheet key below 64rem of VIEWPORT (globals.css:7347-7352).
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 1024
     var sheetAt by remember(session?.id) { mutableStateOf<SheetView?>(null) }
-    var escalation by remember(session?.id) { mutableStateOf<Escalation?>(null) }
+    // T6.6 r2: a pending confirmation belongs to the session, server and link it was opened on. A
+    // server switch re-keys it; any lock (the link dropping, catching up after a reconnect, read-only,
+    // handed off) closes it, so it never survives into another link and nothing is sent.
+    var escalation by remember(session?.id, controlActions.origin) { mutableStateOf<Escalation?>(null) }
+    val escalationLocked = controlActions.lock != null
+    LaunchedEffect(escalationLocked) { if (escalationLocked) escalation = null }
     val commands = remember(projection?.cliInventory, controls) {
         composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList())
     }
@@ -773,7 +778,7 @@ fun Composer(
             onDismiss = { sheetAt = null },
         )
     }
-    escalation?.let { pending ->
+    escalation?.takeIf { !escalationLocked }?.let { pending ->
         EscalationDialog(
             label = pending.label,
             body = pending.body,
@@ -783,7 +788,7 @@ fun Composer(
                 // Round 3 (I-a): what is confirmed is what is on screen now; if the row moved under
                 // the dialog (a new label or hint), show the new words instead of sending.
                 val fresh = escalationFor(pending.control)
-                if (fresh == null) {
+                if (controlActions.lock != null || fresh == null) {
                     escalation = null
                 } else if (fresh.label != pending.label || fresh.body != pending.body) {
                     escalation = fresh

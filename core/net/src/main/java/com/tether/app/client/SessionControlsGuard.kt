@@ -351,6 +351,16 @@ object SessionControlsGuard {
         }
     }
 
+    /**
+     * T6.6 r2: the one control a handed-off (but not read-only) session still takes — `dismiss` of
+     * its limit prompt, which also cancels a scheduled resume. The resume would otherwise start a
+     * turn in the source after the handoff; the web draws that X ungated and server.mjs refuses
+     * rate-limit-resume only for read-only sessions. `schedule` / `resume-now` (which start work
+     * there) and every other control stay locked.
+     */
+    fun allowedWhileHandedOff(control: SessionControl): Boolean =
+        control is SessionControl.RateLimitResume && control.action == "dismiss"
+
     /** protocol-validate.mjs "rate-limit-resume": the three actions it accepts. */
     val RATE_LIMIT_ACTIONS = setOf("dismiss", "schedule", "resume-now")
 

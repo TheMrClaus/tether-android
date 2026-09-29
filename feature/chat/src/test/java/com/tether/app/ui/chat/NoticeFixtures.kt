@@ -121,8 +121,8 @@ object NoticeFixtures {
         var controlResult: ControlResult = ControlResult.Sent
         val refusals = mutableListOf<String>()
 
-        fun actions(lock: NoticeLock? = null, controlLock: ConsentLock? = null, link: Any? = "link-1") = NoticeActions(
-            sessionId = "s1",
+        fun actions(lock: NoticeLock? = null, controlLock: ConsentLock? = null, link: Any? = "link-1", sessionId: String = "s1") = NoticeActions(
+            sessionId = sessionId,
             lock = lock,
             controlLock = controlLock,
             link = link,

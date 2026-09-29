@@ -116,6 +116,24 @@ class NoticeActions(
     /** Says a refusal in words (the screen's error toast). */
     internal val onRefused: (String) -> Unit = {},
 ) {
+    /**
+     * T6.6 r2: the lock on declining the limit prompt / cancelling a scheduled resume
+     * (`rate-limit-resume` `dismiss`). [controlLock] minus the handoff: a resume left scheduled
+     * would start a turn in the source after the handoff, the web draws that X ungated and the
+     * server refuses the frame only read-only. A handed-off session is still bound by the link
+     * ([lock], derived from the same connection and liveness as [controlLock]); read-only stays locked.
+     */
+    val cancelLock: ConsentLock?
+        get() = if (controlLock == ConsentLock.HandedOff) {
+            when (lock) {
+                NoticeLock.Offline -> ConsentLock.Offline
+                NoticeLock.CatchingUp -> ConsentLock.CatchingUp
+                null -> null
+            }
+        } else {
+            controlLock
+        }
+
     companion object {
         /** Fail closed: every X and key renders disabled and nothing is sent. */
         val Unavailable = NoticeActions(
@@ -169,10 +187,12 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
 internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val actions = LocalNoticeActions.current
-    var latched by remember(dismissKey, actions.link) { mutableStateOf(false) }
+    // Scoped to the session too (r2): another session's notice with the same key never inherits this latch or arming.
+    val identity = Triple(actions.sessionId, dismissKey, actions.link)
+    var latched by remember(identity) { mutableStateOf(false) }
     val lock = actions.lock
     // Armed like every operator control: not in its first 500 ms, again after it moved; no overlay taps.
-    val arming = rememberArmedControl(dismissKey to actions.link, lock == null && !latched)
+    val arming = rememberArmedControl(identity, lock == null && !latched)
     val enabled = lock == null && !latched && arming.armed
     val tap = {
         if (!latched && actions.lock == null && arming.armed) {
@@ -346,6 +366,7 @@ internal fun SessionNoticeRow(view: SessionNoticeView, modifier: Modifier = Modi
  * an approval (no tap on a card that just appeared), refused under an overlay, and sends once per
  * link: the card then says the choice was sent and waits for the server's event to remove it.
  * Stricter than the web, which re-enables its keys after 4 s; here a new link re-arms them.
+ * A handed-off source keeps only Dismiss ([NoticeActions.cancelLock]); read-only keeps none.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -355,18 +376,22 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     val actions = LocalNoticeActions.current
     val studio = isStudio(t)
     val shape = RoundedCornerShape(if (studio) 14.dp else t.radiusMd)
-    val identity = view.resetsAt to actions.link
+    // Scoped to the session too (r2): another session's prompt with the same resetsAt starts unarmed and unsent.
+    val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
     var sent by remember(identity) { mutableStateOf<String?>(null) }
     var overlayBlocked by remember(identity) { mutableStateOf(false) }
     val lock = actions.controlLock
-    val actionable = sent == null && lock == null
+    val cancelLock = actions.cancelLock
+    // Armed whenever any key could act (Dismiss alone on a handed-off source).
+    val actionable = sent == null && cancelLock == null
     val arming = rememberArmedControl(identity, actionable)
     val armed = arming.armed
     val resetClock = limitClockTime(view.resetsAt, locale, zone)
     val resumeClock = limitClockTime(view.resumeAt, locale, zone)
 
     fun choose(action: String) {
-        if (sent != null || !armed || actions.controlLock != null) return
+        val gate = if (action == "dismiss") actions.cancelLock else actions.controlLock
+        if (sent != null || !armed || gate != null) return
         sent = action
         val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, action))
         if (result != ControlResult.Sent) {
@@ -416,6 +441,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
             color = t.muted,
         )
         val status = when {
+            lock == ConsentLock.HandedOff && cancelLock == null && sent == null -> HANDED_OFF_LIMIT_COPY
             lock != null && sent == null -> lock.copy.replace("answer", "choose")
             overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
             sent != null -> "Choice sent. Waiting for the server."
@@ -442,7 +468,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 classes = KeyClasses.ButtonPrimary,
                 label = "Schedule auto-continue · $resumeClock",
                 icon = TetherIcons.Clock,
-                enabled = armed,
+                enabled = armed && lock == null,
                 modifier = keyModifier.testTag("rate-limit-schedule"),
             )
             TetherKey(
@@ -450,7 +476,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 classes = KeyClasses.ButtonSecondary,
                 label = "Resume now",
                 icon = TetherIcons.Play,
-                enabled = armed,
+                enabled = armed && lock == null,
                 modifier = keyModifier.testTag("rate-limit-resume-now"),
             )
             TetherKey(
@@ -458,31 +484,37 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 classes = KeyClasses.ButtonSecondary,
                 label = "Dismiss",
                 icon = TetherIcons.Ban,
-                enabled = armed,
+                enabled = armed && cancelLock == null,
                 modifier = keyModifier.testTag("rate-limit-dismiss"),
             )
         }
     }
 }
 
+/** A handed-off source's limit card: only Dismiss is live (the work continues elsewhere). */
+internal const val HANDED_OFF_LIMIT_COPY = "This session was handed off. Choose in the session it continued in — you can still dismiss this prompt here."
+
 /**
  * The scheduled resume (`.chat-continuation`, `role="status"`): Clock, "Automatic resume scheduled
  * for <time>.", and the cancel X ("Cancel scheduled resume"), which sends `dismiss` for this
- * prompt's `resetsAt` — it cancels a turn the server would start, so it takes T7.2's guarded path
- * and lock (a read-only or handed-off session cannot cancel from here).
+ * prompt's `resetsAt` — it cancels a turn the server would start, so it takes T7.2's guarded path.
+ * Its lock is [NoticeActions.cancelLock]: a read-only session cannot cancel from here, but a
+ * handed-off source can (r2 — otherwise the resume would start a turn there after the handoff).
  */
 @Composable
 internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = Modifier, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val actions = LocalNoticeActions.current
-    var latched by remember(view.resetsAt, actions.link) { mutableStateOf(false) }
-    val lock = actions.controlLock
-    val arming = rememberArmedControl(view.resetsAt to actions.link, lock == null && !latched)
+    // Scoped to the session too (r2), like the card.
+    val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
+    var latched by remember(identity) { mutableStateOf(false) }
+    val lock = actions.cancelLock
+    val arming = rememberArmedControl(identity, lock == null && !latched)
     val enabled = lock == null && !latched && arming.armed
     val label = "Cancel scheduled resume"
     val tap = {
-        if (!latched && actions.controlLock == null && arming.armed) {
+        if (!latched && actions.cancelLock == null && arming.armed) {
             latched = true
             val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
             if (result != ControlResult.Sent) {

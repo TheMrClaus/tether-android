@@ -192,15 +192,123 @@ class NoticeBehaviourTest {
     }
 
     @Test
-    fun aLockedLimitCardSaysWhyAndSendsNothing() {
-        actions = rec.actions(controlLock = ConsentLock.HandedOff)
+    fun aReadOnlyLimitCardSaysWhyAndSendsNothing() {
+        actions = rec.actions(controlLock = ConsentLock.ReadOnly)
         show(NoticeFixtures.limit)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
         arm()
         rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled().performClick()
         settle()
+        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume: even Dismiss is locked.
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
+        settle()
         rule.onNodeWithTag("rate-limit-status").assertExists()
         assertTrue(rec.controls.isEmpty())
+    }
+
+    @Test
+    fun aHandedOffLimitCardKeepsOnlyDismiss() {
+        actions = rec.actions(controlLock = ConsentLock.HandedOff)
+        show(NoticeFixtures.limit)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        // Armed like any choice: its first moment sends nothing.
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+        arm()
+        rule.onNodeWithTag("rate-limit-status")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString(HANDED_OFF_LIMIT_COPY))))
+        // Starting work in the source stays locked.
+        rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled().performClick()
+        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled().performClick()
+        settle()
+        rule.onNodeWithTag("rate-limit-dismiss").performClick()
+        settle()
+        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
+    }
+
+    @Test
+    fun aHandedOffSourceMayCancelItsScheduledResume() {
+        // A resume left scheduled would start a turn here after the handoff.
+        actions = rec.actions(controlLock = ConsentLock.HandedOff)
+        show(NoticeFixtures.scheduled)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+        arm()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
+        settle()
+        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
+    }
+
+    @Test
+    fun aHandedOffSourceStillNeedsTheLinkToCancel() {
+        actions = rec.actions(lock = NoticeLock.Offline, controlLock = ConsentLock.HandedOff)
+        show(NoticeFixtures.scheduled)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
+        arm()
+        rule.onNodeWithContentDescription("Cancel scheduled resume")
+            .assertIsNotEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, controlLockCopy(ConsentLock.Offline)!!))
+            .performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+    }
+
+    @Test
+    fun aReadOnlySessionCannotCancelAScheduledResume() {
+        actions = rec.actions(controlLock = ConsentLock.ReadOnly)
+        show(NoticeFixtures.scheduled)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
+        arm()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+    }
+
+    /** [f] as another session's (same dismiss keys, same resetsAt). */
+    private fun asSession(f: ChatFixtures.Folded, id: String) = f.copy(projection = f.projection.copy(tetherSessionId = id))
+
+    @Test
+    fun aSessionSwitchNeverInheritsTheLimitCardOrTheX() {
+        show(NoticeFixtures.limit)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        arm()
+        rule.onNodeWithTag("rate-limit-schedule").performClick()
+        settle()
+        rule.onNodeWithTag("rate-limit-status").assertExists()
+        // Switch to B on the same link: same resetsAt, same status.
+        fixture = asSession(NoticeFixtures.limit, "s2")
+        actions = rec.actions(sessionId = "s2")
+        settle()
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
+        // Not latched, and not armed: B's card just appeared.
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
+        settle()
+        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "schedule")), rec.controls)
+        arm()
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled()
+
+        // The notices' X likewise: A's armed, latched X is not B's.
+        fixture = NoticeFixtures.sessionNotices
+        actions = rec.actions()
+        arm()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
+        settle()
+        assertEquals(listOf("ext-1"), rec.dismissed)
+        fixture = asSession(NoticeFixtures.sessionNotices, "s2")
+        actions = rec.actions(sessionId = "s2")
+        settle()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice")
+            .assertIsNotEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        arm()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
     }
 
     @Test
@@ -218,6 +326,47 @@ class NoticeBehaviourTest {
         rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
         settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
+    }
+
+    @Test
+    fun theRowsOwnStateIsScopedToTheSessionEvenInOneSlot() {
+        // Drawn outside the list (one composition slot, as a reused lazy slot would be): switching
+        // the session behind the same resetsAt / dismiss key starts every control unarmed and unsent.
+        rule.mainClock.autoAdvance = false
+        val limit = rateLimitPrompt(NoticeFixtures.limit.tree)!!
+        val scheduled = rateLimitPrompt(NoticeFixtures.scheduled.tree)!!
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalNoticeActions provides actions) {
+                    // The card last: its "Choice sent" line would move (and so re-arm) anything below it.
+                    androidx.compose.foundation.layout.Column {
+                        NoticeDismissButton("ext-1", "Dismiss external-advancement notice")
+                        ScheduledResumeRow(scheduled, zone = ChatFixtures.zone)
+                        RateLimitCard(limit, zone = ChatFixtures.zone)
+                    }
+                }
+            }
+        }
+        settle()
+        arm()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
+        rule.onNodeWithTag("rate-limit-resume-now").performClick()
+        settle()
+        assertEquals(2, rec.controls.size)
+        assertEquals(listOf("ext-1"), rec.dismissed)
+        actions = rec.actions(sessionId = "s2")
+        settle()
+        rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
+        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsNotEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        arm()
+        rule.onNodeWithTag("rate-limit-resume-now").assertIsEnabled()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
     }
 
     @Test
@@ -330,6 +479,46 @@ class AutoContinueBehaviourTest {
         h.click("escalation-confirm")
         assertTrue(h.recorder.sent.isEmpty())
         rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+    }
+
+    @Test
+    fun aDroppedLinkClosesThePendingConfirmationAndSendsNothing() {
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        h.arm()
+        rule.onNodeWithText("On", useUnmergedTree = true).performClick()
+        h.settle()
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
+        // The link drops, then comes back (catching up, then live): the question asked on the old
+        // link is gone, and nothing was granted.
+        h.lock = ConsentLock.Offline
+        h.settle()
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+        h.lock = ConsentLock.CatchingUp
+        h.settle()
+        h.lock = null
+        h.arm()
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        assertTrue(h.recorder.sent.isEmpty())
+    }
+
+    @Test
+    fun aServerSwitchClosesThePendingConfirmationAndSendsNothing() {
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        h.arm()
+        rule.onNodeWithText("On", useUnmergedTree = true).performClick()
+        h.settle()
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
+        // Same session id, another server, never locked in between.
+        h.origin = "https://other.test"
+        h.arm()
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        assertTrue(h.recorder.sent.isEmpty())
     }
 
     @Test

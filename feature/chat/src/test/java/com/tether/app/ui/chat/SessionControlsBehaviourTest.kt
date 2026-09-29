@@ -46,6 +46,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
     var lock by mutableStateOf<ConsentLock?>(null)
     var codex by mutableStateOf<ProviderControlsState<CodexSnapshot>?>(null)
     var opencode by mutableStateOf<ProviderControlsState<OpencodeSnapshot>?>(null)
+    var origin by mutableStateOf("https://tether.test")
     val requests = mutableListOf<String>()
     val prompts = mutableListOf<String>()
 
@@ -64,7 +65,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
                     onQueueRemove = {},
                     onRequestControls = { requests += "session-controls" },
                     liveness = ComposerLiveness.Live,
-                    controlActions = recorder.actions(lock, codex, opencode),
+                    controlActions = recorder.actions(lock, codex, opencode, origin),
                 )
             }
         }

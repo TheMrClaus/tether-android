@@ -121,10 +121,10 @@ object SessionControlFixtures {
         val sent = mutableListOf<SessionControl>()
         var codexReads = 0
         var opencodeReads = 0
-        fun actions(lock: ConsentLock? = null, codex: ProviderControlsState<CodexSnapshot>? = null, opencode: ProviderControlsState<OpencodeSnapshot>? = null) =
+        fun actions(lock: ConsentLock? = null, codex: ProviderControlsState<CodexSnapshot>? = null, opencode: ProviderControlsState<OpencodeSnapshot>? = null, origin: String = "https://tether.test") =
             SessionControlActions(
                 sessionId = ComposerFixtures.SESSION_ID,
-                origin = "https://tether.test",
+                origin = origin,
                 lock = lock,
                 onControl = { sent += it; resultFor?.invoke(it) ?: result },
                 codex = codex,

@@ -131,9 +131,12 @@ fun InspectorLimitNotice(state: SessionView?, modifier: Modifier = Modifier, env
     )
 }
 
-/** One `McpHealthProjection`, cleaned for display. */
+/**
+ * One `McpHealthProjection`, cleaned for display. [key] is the server's raw name (the row's state
+ * identity): two names that display alike never share a row's state.
+ */
 @Immutable
-data class McpServerView(val name: String, val status: String, val error: String?) {
+data class McpServerView(val name: String, val status: String, val error: String?, val key: String = name) {
     val problem: Boolean get() = status == "failed" || status == "needs-auth"
 }
 
@@ -155,7 +158,11 @@ fun mcpServers(state: SessionView?): List<McpServerView> {
         val o = value as? JsObj ?: return@mapNotNull null
         val name = (o["name"] as? JsStr)?.value ?: return@mapNotNull null
         val error = ((o["error"] as? JsStr)?.value ?: (o["failureReason"] as? JsStr)?.value)?.let { LabelText.error(it) }?.ifEmpty { null }
-        McpServerView(LabelText.label(name).ifEmpty { LabelText.visibleValue(name) }, (o["status"] as? JsStr)?.value ?: "unknown", error)
+        // T6.6 r2: a name the cleaning would change (bidi / invisible code points, odd spacing) is
+        // written out with them visible, so one server can never pass for another.
+        val cleaned = LabelText.label(name)
+        val shown = if (cleaned == name) cleaned else LabelText.visibleValue(name)
+        McpServerView(shown, (o["status"] as? JsStr)?.value ?: "unknown", error, key = name)
     }.sortedWith(compareBy(java.text.Collator.getInstance()) { it.name }).take(LabelText.MAX_ITEMS)
 }
 
@@ -247,7 +254,7 @@ fun McpHealthCard(
 private fun McpServerRow(server: McpServerView, compact: Boolean, last: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    var errorOpen by rememberSaveable(server.name) { androidx.compose.runtime.mutableStateOf(false) }
+    var errorOpen by rememberSaveable(server.key) { androidx.compose.runtime.mutableStateOf(false) }
     val tint = t.tintSm
     val statusColor = if (server.problem) t.warning else t.muted
     Column(

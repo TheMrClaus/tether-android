@@ -39,9 +39,12 @@ error notices), `notice-session` (external advancement, background loss ×2), `n
   for the server." The web re-enables its keys after 4 s. Here a new connection re-arms them;
   nothing is ever retried automatically.
 - **Rate-limit choices and the scheduled resume's cancel** take T7.2's guarded `sessionControl`
-  path. They are bound to the prompt's exact `resetsAt`, and locked on a read-only session
-  (server `READ_ONLY_MUTATIONS`) and on a handed-off one (fail closed; the web shows the card
-  there). "Take over in a new session" is not offered (handoff is T8.5).
+  path. They are bound to the prompt's exact `resetsAt`. All are locked on a read-only session
+  (server `READ_ONLY_MUTATIONS`). On a handed-off source, Schedule and Resume now stay locked
+  (they would start work there), but Dismiss and the scheduled row's cancel stay live: a resume
+  left scheduled would otherwise start a turn in the source after the handoff (the web draws that
+  X ungated and the server allows it). The card then says the prompt can still be dismissed here.
+  "Take over in a new session" is not offered (handoff is T8.5).
 - **Dismiss X** is allowed read-only and handed off (the server and web allow it), but only on a
   live link. It sends once per connection, and the client re-checks that the projection still
   shows the key.
