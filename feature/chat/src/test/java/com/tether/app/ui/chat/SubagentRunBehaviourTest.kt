@@ -68,7 +68,14 @@ class SubagentRunBehaviourTest {
             }
         }
         rule.waitForIdle()
+        arm()
         return vm
+    }
+
+    /** T6.3's I3 delay: a Stop key arms [CONSENT_ARM_DELAY_MS] after it became actionable (or moved). */
+    private fun arm() {
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
     }
 
     private fun client(folded: ChatFixtures.Folded, shown: AgentSession = session) = ChatTestClient().also { it.show(shown, folded) }
@@ -227,7 +234,7 @@ class SubagentRunBehaviourTest {
         val client = client(SubagentFixtures.activity)
         host(client)
         rule.onAllNodesWithTag("bg-command-open").assertCountEquals(1)
-        rule.onNodeWithText("npm test -- --runInBand").assertIsDisplayed()
+        rule.onNodeWithText(commandLabel("npm test -- --runInBand")).assertIsDisplayed()
         val stop = rule.onNodeWithTag("bg-command-stop")
         stop.assertIsEnabled().assertHeightIsAtLeast(44.dp)
         assertTrue("nothing is sent before a tap", client.stopCalls.isEmpty())
@@ -236,7 +243,7 @@ class SubagentRunBehaviourTest {
         assertEquals(listOf("s1:bg-3"), client.stopCalls)
         // Sent: the key reads "Stopping…" and a second tap sends nothing more.
         rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled()
-        rule.onNodeWithTag("bg-command-stop").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping npm test -- --runInBand")))
+        rule.onNodeWithTag("bg-command-stop").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm test -- --runInBand")}")))
         rule.onNodeWithTag("bg-command-stop").performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:bg-3"), client.stopCalls)
@@ -299,7 +306,7 @@ class SubagentRunBehaviourTest {
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("bg-command-chip"))
         val chip = rule.onAllNodesWithTag("bg-command-chip")[0]
         chip.assertHeightIsAtLeast(44.dp)
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("View output of npm run build, exit 0")))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("View output of ${commandLabel("npm run build")}, exit 0")))
             .performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("command-output").assertIsDisplayed()
@@ -317,6 +324,7 @@ class SubagentRunBehaviourTest {
         host(client)
         rule.onNodeWithTag("bg-command-open").performClick()
         rule.waitForIdle()
+        arm()
         rule.onNodeWithText("PASS src/config.test.ts", substring = true).assertIsDisplayed()
         rule.onNodeWithText("warn: slow test", substring = true).assertIsDisplayed()
         assertTrue(client.stopCalls.isEmpty())

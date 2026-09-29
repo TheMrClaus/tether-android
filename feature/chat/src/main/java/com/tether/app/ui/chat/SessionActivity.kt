@@ -74,6 +74,17 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
 import java.util.Locale
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.withContext
 
 /*
  * T6.4: the composer deck's session activity (chat-view.tsx 3703-3830, 4520-4525): the v56 todo
@@ -209,14 +220,61 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
     ConsentLock.HandedOff -> "This session was handed off."
 }
 
+/**
+ * The display form of a command (Info): its FIRST line, "…" when it has more, isolated
+ * (FSI…PDI) so right-to-left text or bidi controls in it cannot reorder the words around it.
+ */
+internal fun commandLabel(command: String): String {
+    val nl = command.indexOfAny(charArrayOf('\n', '\r', '\u2028', '\u2029'))
+    val first = if (nl < 0) command else command.substring(0, nl).trimEnd() + "…"
+    return "\u2068$first\u2069"
+}
+
+/**
+ * Round 2: the "Stopping…" latch, ONE per command for the whole session screen (the bar's key and
+ * the output sheet's key read the same entry), keyed by commandId, never by position. A command
+ * id is never reused, so an entry never goes stale; survives a configuration change.
+ */
+@androidx.compose.runtime.Stable
+class StopLatches internal constructor(initial: Collection<String> = emptyList()) {
+    private val sent = androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { initial.forEach { put(it, true) } }
+
+    fun isSent(commandId: String): Boolean = sent[commandId] == true
+
+    internal fun mark(commandId: String) {
+        sent[commandId] = true
+    }
+
+    internal fun snapshot(): List<String> = sent.keys.toList()
+
+    companion object {
+        val Saver: androidx.compose.runtime.saveable.Saver<StopLatches, Any> = androidx.compose.runtime.saveable.Saver(
+            save = { ArrayList(it.snapshot()) },
+            restore = {
+                @Suppress("UNCHECKED_CAST")
+                StopLatches(it as List<String>)
+            },
+        )
+    }
+}
+
+/** One session's latches (per session: reset on a session switch). */
+@Composable
+internal fun rememberStopLatches(sessionKey: String?): StopLatches = rememberSaveable(sessionKey, saver = StopLatches.Saver) { StopLatches() }
+
 /** What the command surfaces may do: open a command's output, and stop a running one (a TAP only). */
 @androidx.compose.runtime.Immutable
 class CommandActions internal constructor(
     /** Why Stop cannot send right now (null: it can). */
     val stopLock: String?,
     val onOpen: (commandId: String) -> Unit,
-    /** Called from the Stop key's tap handler and nowhere else; the client re-checks everything. */
+    /**
+     * Called from an ARMED Stop key's tap handler and nowhere else; the client re-checks everything
+     * (L3: against the server origin captured here, the one this row was drawn for).
+     */
     val onStop: (commandId: String) -> com.tether.app.client.StopCommandResult,
+    /** Round 2: the session's shared "Stopping…" latches. */
+    val latches: StopLatches = StopLatches(),
 ) {
     companion object {
         val Unavailable = CommandActions("Connect to stop it. This is a saved copy.", {}, { com.tether.app.client.StopCommandResult.NotConnected })
@@ -224,16 +282,10 @@ class CommandActions internal constructor(
 }
 
 /**
- * The Stop key's state for one command: [sent] after a tap the client accepted (the key then
- * reads "Stopping…" and stays disabled while the command still runs), remembered per command.
- */
-@Composable
-private fun rememberStopSent(commandId: String) = rememberSaveable(commandId) { mutableStateOf(false) }
-
-/**
  * `.chat-bg-commands`: the RUNNING background commands above the composer (like the CLI's
  * `/bashes`). A row opens the live output; its Stop key (`--danger-wash` under `--danger-edge`)
- * stops the command. Rows are at least 44dp (the web's are one text line).
+ * stops the command. Rows are keyed by commandId (M1: a key's state never follows a position) and
+ * at least 44dp (the web's are one text line).
  */
 @Composable
 internal fun RunningCommandsBar(commands: List<BackgroundCommandView>, actions: CommandActions) {
@@ -243,7 +295,7 @@ internal fun RunningCommandsBar(commands: List<BackgroundCommandView>, actions: 
         Modifier.fillMaxWidth().semantics { contentDescription = "Running background commands" }.testTag("bg-commands"),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        commands.forEach { command -> RunningCommandRow(command, actions) }
+        commands.forEach { command -> key(command.commandId) { RunningCommandRow(command, actions) } }
     }
 }
 
@@ -253,6 +305,7 @@ private fun RunningCommandRow(command: BackgroundCommandView, actions: CommandAc
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
     val small = TextStyle(fontFamily = type.ui, fontSize = rem(0.72f))
+    val label = commandLabel(command.command)
     Row(
         Modifier
             .fillMaxWidth()
@@ -268,13 +321,13 @@ private fun RunningCommandRow(command: BackgroundCommandView, actions: CommandAc
                 .weight(1f)
                 .heightIn(min = 44.dp)
                 .clickable(role = Role.Button, onClickLabel = "View live output") { actions.onOpen(command.commandId) }
-                .semantics(mergeDescendants = true) { contentDescription = "View live output of ${command.command}, running" }
+                .semantics(mergeDescendants = true) { contentDescription = "View live output of $label, running" }
                 .testTag("bg-command-open"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
         ) {
             Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
-            Text(command.command, style = small.copy(fontFamily = type.mono), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(label, style = small.copy(fontFamily = type.mono), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 11.dp)
             Text("running", style = small, color = t.muted)
         }
@@ -282,51 +335,66 @@ private fun RunningCommandRow(command: BackgroundCommandView, actions: CommandAc
     }
 }
 
+/** M1: how far (dp) a Stop key may move in its window before it re-arms. */
+internal const val STOP_REARM_MOVE_DP = 4f
+
 /**
  * The Stop key: `.chat-bg-command-stop` (compact) / `.command-modal-stop`. Enabled only while the
- * command runs, the link is live and the session may be driven; a tap asks the client, which
- * re-checks all of it against the live projection before a frame leaves. A disabled key says why
- * in its accessible name.
+ * command runs, the link is live and the session may be driven, and — M1, T6.3's I3 rule — only
+ * [CONSENT_ARM_DELAY_MS] after it became so, and again after the key MOVED in its window (a row
+ * finishing, a queue draining, the todo bar appearing), so a tap aimed at another row cannot land
+ * on this one. Touches through an overlay are refused. A tap asks the client, which re-checks it
+ * all against the live projection. "Stopping…" is shared per command ([StopLatches]).
  */
 @Composable
 private fun StopKey(command: BackgroundCommandView, actions: CommandActions, compact: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    var sent by rememberStopSent(command.commandId)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val sent = actions.latches.isSent(command.commandId)
     val lock = actions.stopLock
-    val enabled = command.running && lock == null && !sent
+    val actionable = command.running && lock == null && !sent
+    // Every move of the key in its window re-arms it (the identity changes).
+    var moves by remember(command.commandId) { androidx.compose.runtime.mutableIntStateOf(0) }
+    val lastPosition = remember(command.commandId) { arrayOfNulls<Offset>(1) }
+    val armed = rememberArmed(command.commandId to moves, actionable)
     val shape = RoundedCornerShape(t.radiusSm)
     val label = if (sent) "Stopping…" else "Stop"
+    fun stop() {
+        // The ONE place a stop-command originates: a tap on an armed key.
+        if (armed && actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) actions.latches.mark(command.commandId)
+    }
     Box(
         Modifier
             .heightIn(min = 44.dp)
             .widthIn(min = 44.dp)
-            .then(
-                if (enabled) {
-                    Modifier.clickable(role = Role.Button) {
-                        // The ONE place a stop-command originates: this tap.
-                        if (actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) sent = true
-                    }
-                } else {
-                    Modifier
-                },
-            )
+            .onGloballyPositioned { coordinates ->
+                val now = coordinates.positionInWindow()
+                val before = lastPosition[0]
+                lastPosition[0] = now
+                val limit = with(density) { STOP_REARM_MOVE_DP.dp.toPx() }
+                if (before != null && (kotlin.math.abs(now.x - before.x) > limit || kotlin.math.abs(now.y - before.y) > limit)) moves++
+            }
+            .refuseObscuredTouches()
+            .then(if (armed) Modifier.clickable(role = Role.Button) { stop() } else Modifier)
+            // Its own node whether or not it is armed (a disabled key must not merge into its row).
+            .semantics(mergeDescendants = true) { }
             .clearAndSetSemantics {
                 role = Role.Button
                 contentDescription = when {
-                    sent -> "Stopping ${command.command}"
+                    sent -> "Stopping ${commandLabel(command.command)}"
                     lock != null -> "Stop this command, unavailable: $lock"
                     else -> if (compact) "Stop this background command" else "Stop this command"
                 }
-                if (!enabled) disabled()
-                if (enabled) onClick("Stop") { if (actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) sent = true; true }
+                if (!armed) disabled()
+                if (armed) onClick("Stop") { stop(); true }
                 testTag = "bg-command-stop"
             },
         contentAlignment = Alignment.Center,
     ) {
         Row(
             Modifier
-                .alpha(if (enabled) 1f else 0.55f)
+                .alpha(if (actionable) 1f else 0.55f)
                 .clip(shape)
                 .background(t.dangerWash)
                 .border(1.dp, t.dangerEdge, shape)
@@ -354,6 +422,7 @@ internal fun BackgroundCommandChip(command: BackgroundCommandView, onOpen: () ->
     val edge = if (failed) t.danger else t.muted
     val status = backgroundCommandStatusLabel(command)
     val small = TextStyle(fontFamily = type.ui, fontSize = rem(0.72f))
+    val label = commandLabel(command.command)
     Row(
         Modifier
             .fillMaxWidth()
@@ -362,7 +431,7 @@ internal fun BackgroundCommandChip(command: BackgroundCommandView, onOpen: () ->
             .border(1.dp, t.line, shape)
             .drawBehind { drawRect(edge, size = Size(2.dp.toPx(), size.height)) }
             .clickable(role = Role.Button, onClickLabel = "View output", onClick = onOpen)
-            .semantics(mergeDescendants = true) { contentDescription = "View output of ${command.command}, $status" }
+            .semantics(mergeDescendants = true) { contentDescription = "View output of $label, $status" }
             .heightIn(min = 44.dp)
             .padding(start = t.css.spaceSm + 1.dp, end = t.css.spaceSm, top = 5.6.dp, bottom = 5.6.dp)
             .testTag("bg-command-chip"),
@@ -370,7 +439,7 @@ internal fun BackgroundCommandChip(command: BackgroundCommandView, onOpen: () ->
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
         Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
-        Text(command.command, style = small.copy(fontFamily = type.mono), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(label, style = small.copy(fontFamily = type.mono), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Text(status, style = small, color = if (failed) t.danger else t.muted)
         Text("View output", style = small.copy(fontWeight = FontWeight(600)), color = t.violetStrong)
     }
@@ -389,7 +458,8 @@ internal fun CommandOutputDialog(command: BackgroundCommandView?, actions: Comma
             Modifier
                 .fillMaxSize()
                 .background(dialogScrim(t))
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClose)
+                // A tap outside closes (pointer-only: the close key and Back are the accessible ways).
+                .pointerInput(onClose) { detectTapGestures { onClose() } }
                 .padding(t.css.spaceMd),
             contentAlignment = Alignment.Center,
         ) {
@@ -398,11 +468,42 @@ internal fun CommandOutputDialog(command: BackgroundCommandView?, actions: Comma
     }
 }
 
+/** L4: how often a streaming sheet redraws its output at most (about 4 Hz). */
+internal const val COMMAND_SHEET_SAMPLE_MS = 250L
+
+/** One drawn line of the output: its pieces (a line can mix stdout and stderr). */
+@androidx.compose.runtime.Immutable
+internal data class OutputLine(val pieces: List<OutputSegment>)
+
+/** [tail] as lines (split at "\n"; the final newline makes no empty last line, as a `<pre>`). */
+internal fun outputLines(tail: OutputTail): List<OutputLine> {
+    val lines = ArrayList<OutputLine>()
+    var current = ArrayList<OutputSegment>()
+    for (seg in tail.segments) {
+        var start = 0
+        while (true) {
+            val nl = seg.text.indexOf('\n', start)
+            if (nl < 0) {
+                if (start < seg.text.length) current.add(OutputSegment(seg.stderr, seg.text.substring(start)))
+                break
+            }
+            if (nl > start) current.add(OutputSegment(seg.stderr, seg.text.substring(start, nl)))
+            lines.add(OutputLine(current))
+            current = ArrayList()
+            start = nl + 1
+        }
+    }
+    if (current.isNotEmpty()) lines.add(OutputLine(current))
+    return lines
+}
+
 /**
  * `.command-modal`: `--graphite`, `--radius-md`, a 2px top edge (violet running, `--danger`
  * failed); the head (terminal glyph, the command, its status, Stop while running, the 44dp close
- * key), the output (stderr in `--warning`; the tail of a very long capture, with a note), the log
- * file foot. Drawn inline by the goldens; [CommandOutputDialog] hosts it.
+ * key), the output (stderr in `--warning`), the log file foot. L4: the output is the capture's
+ * tail (64,000 characters, with a note when earlier output is not shown) as a lazy list of lines,
+ * and a streaming command redraws it at most every [COMMAND_SHEET_SAMPLE_MS], so a flood of chunks
+ * costs one rebuild per interval, off the main thread. Drawn inline by the goldens; [CommandOutputDialog] hosts it.
  */
 @Composable
 internal fun CommandOutputSurface(command: BackgroundCommandView, actions: CommandActions, onClose: () -> Unit, modifier: Modifier = Modifier) {
@@ -418,10 +519,25 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
     }
     val line = t.line
     val status = backgroundCommandStatusLabel(command)
-    val tail = remember(command.segments) { outputTail(outputSegments(command.segments)) }
-    val scroll = rememberScrollState()
+    val latestSegments by rememberUpdatedState(command.segments)
+    var lines by remember(command.commandId) { mutableStateOf(outputLines(outputTail(outputSegments(command.segments))) to outputTail(outputSegments(command.segments)).dropped) }
+    val observer by rememberUpdatedState(LocalChatRowObserver.current)
+    LaunchedEffect(command.commandId) {
+        snapshotFlow { latestSegments }
+            .conflate()
+            .collect { segments ->
+                val next = withContext(Dispatchers.Default) {
+                    val tail = outputTail(outputSegments(segments))
+                    outputLines(tail) to tail.dropped
+                }
+                lines = next
+                observer?.invoke("command-output-lines")
+                delay(COMMAND_SHEET_SAMPLE_MS)
+            }
+    }
+    val listState = rememberLazyListState()
     // Follow the tail while it streams, so a live command reads like a terminal.
-    LaunchedEffect(command.segments, running) { if (running) scroll.scrollTo(scroll.maxValue) }
+    LaunchedEffect(lines, running) { if (running && lines.first.isNotEmpty()) listState.scrollToItem(lines.first.size) }
     BoxWithConstraints(modifier) {
         Column(
             Modifier
@@ -432,8 +548,10 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                 .background(t.graphite)
                 .border(1.dp, t.line, shape)
                 .then(if (topEdge != null) Modifier.drawBehind { drawRect(topEdge, size = Size(size.width, 2.dp.toPx())) } else Modifier)
-                .clickable(remember { MutableInteractionSource() }, indication = null) { }
-                .semantics { paneTitle = "Output of ${command.command}" }
+                // A tap on the sheet must not reach the scrim (which closes it). Pointer-only, so the
+                // sheet's controls and lines stay their own accessibility nodes.
+                .pointerInput(Unit) { detectTapGestures { } }
+                .semantics { paneTitle = "Output of ${commandLabel(command.command)}" }
                 .testTag("command-output"),
         ) {
             Row(
@@ -445,7 +563,7 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
             ) {
                 Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-                Text(command.command, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(commandLabel(command.command), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (running) SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 12.dp)
                     Text(status, style = TextStyle(fontFamily = type.ui, fontSize = rem(0.74f)), color = if (failed) t.danger else t.muted)
@@ -463,22 +581,37 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                     Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
                 }
             }
-            val body = TextStyle(fontFamily = type.mono, fontSize = rem(0.8f), lineHeight = 1.5.em)
-            Box(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(scroll).padding(t.css.spaceMd)) {
-                if (tail.segments.isEmpty() && tail.dropped == 0) {
-                    Text(if (running) "waiting for output…" else "no output was captured", style = body, color = t.muted)
-                } else {
-                    val warning = t.warning
-                    val faint = t.faint
-                    val text = remember(tail, warning, faint) {
-                        val built = buildAnnotatedString {
-                            if (tail.dropped > 0) withStyle(SpanStyle(color = faint)) { append("… (earlier output not shown here — the full output is in the log file)\n") }
-                            for (seg in tail.segments) if (seg.stderr) withStyle(SpanStyle(color = warning)) { append(seg.text) } else append(seg.text)
+            // One Text per line: keep each line's full 1.5 leading (a single Text trims only its ends).
+            val body = TextStyle(
+                fontFamily = type.mono,
+                fontSize = rem(0.8f),
+                lineHeight = 1.5.em,
+                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                    androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                    androidx.compose.ui.text.style.LineHeightStyle.Trim.None,
+                ),
+            )
+            val (shown, dropped) = lines
+            val warning = t.warning
+            val faint = t.faint
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f, fill = false).fillMaxWidth().testTag("command-output-body"),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(t.css.spaceMd),
+            ) {
+                if (shown.isEmpty() && dropped == 0) {
+                    item(key = "empty") { Text(if (running) "waiting for output…" else "no output was captured", style = body, color = t.muted) }
+                }
+                if (dropped > 0) {
+                    item(key = "dropped") { Text("… (earlier output not shown here — the full output is in the log file)", style = body, color = faint) }
+                }
+                items(shown.size) { i ->
+                    val text = remember(shown[i], warning) {
+                        buildAnnotatedString {
+                            for (piece in shown[i].pieces) if (piece.stderr) withStyle(SpanStyle(color = warning)) { append(piece.text) } else append(piece.text)
                         }
-                        // A `<pre>` draws no line box for ONE trailing newline (preText).
-                        if (built.text.endsWith("\n")) built.subSequence(0, built.length - 1) else built
                     }
-                    Text(text, style = body, color = t.ink, modifier = Modifier.testTag("command-output-body"))
+                    Text(text, style = body, color = t.ink, modifier = Modifier.fillMaxWidth())
                 }
             }
             Text(
@@ -493,4 +626,3 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
         }
     }
 }
-

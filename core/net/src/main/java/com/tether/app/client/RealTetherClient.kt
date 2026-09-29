@@ -2269,7 +2269,7 @@ class RealTetherClient(
         if (buffered) return
         val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
         val next = try {
-            reduce(tree, JsCodec.fromJson(event.raw) as JsObj)
+            (JsCodec.fromJson(event.raw) as JsObj).let { e -> OutputIntakeCap.apply(reduce(tree, e), e) }
         } catch (e: RuntimeException) {
             // The fold is a line port of events.mjs and, like it, assumes the server's full
             // projection shape (a JS reduce throws on the same malformed base). Never let that
@@ -2759,15 +2759,19 @@ class RealTetherClient(
 
     /**
      * T6.4: the one path a background command's STOP takes to the wire. Under the lock, in order: a
-     * live, handshaken socket; the session confirmed live on it; not read-only or handed off (an
+     * live, handshaken socket of a running (not halted) client; the key drawn for THIS server
+     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; not read-only or handed off (an
      * unlisted session is refused: fail closed); the session's current projection lists the command
      * as running; then enqueued on that socket. Nothing is retried, held or persisted.
      */
-    override fun stopCommand(sessionId: String, commandId: String): StopCommandResult {
+    override fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): StopCommandResult {
         if (sessionId.isEmpty() || commandId.isEmpty()) return StopCommandResult.NotRunning
         val result = synchronized(lock) {
             val ws = socket
-            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone) return@synchronized StopCommandResult.NotConnected
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized StopCommandResult.NotConnected
+            // Bound to the server that drew the row: a key composed for another origin never stops here.
+            if (expectedOrigin != origin) return@synchronized StopCommandResult.NotLive
             if (sessionId !in liveThisEpoch) return@synchronized StopCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized StopCommandResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized StopCommandResult.Locked

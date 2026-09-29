@@ -319,7 +319,11 @@ internal fun collectSubagentRuns(state: JsObj?): List<SubagentRun> {
     }
     val ctx = Ctx(taskByToolUseId, turnsById)
     val flat = ArrayList<SubagentRun>()
+    // L2: a repeated runId (a duplicated block in a snapshot, a repeated order key) is one run, the
+    // first: tabs, lazy keys and selection are all built on runId (the web would render both).
+    val seenIds = HashSet<String>()
     fun visit(run: SubagentRun) {
+        if (!seenIds.add(run.runId)) return
         flat.add(run)
         run.children.forEach(::visit)
     }

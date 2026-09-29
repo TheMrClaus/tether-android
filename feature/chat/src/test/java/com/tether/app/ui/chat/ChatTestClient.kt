@@ -66,8 +66,12 @@ class ChatTestClient : TetherClient {
     /** What the next stop returns (the real client's verdict). */
     var stopResult: com.tether.app.client.StopCommandResult = com.tether.app.client.StopCommandResult.Sent
 
-    override fun stopCommand(sessionId: String, commandId: String): com.tether.app.client.StopCommandResult {
+    /** The origin each stop was bound to (L3), in call order. */
+    val stopOrigins = java.util.concurrent.CopyOnWriteArrayList<String?>()
+
+    override fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): com.tether.app.client.StopCommandResult {
         stopCalls += "$sessionId:$commandId"
+        stopOrigins += expectedOrigin
         return stopResult
     }
 

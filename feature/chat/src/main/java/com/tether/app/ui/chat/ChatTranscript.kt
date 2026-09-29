@@ -165,6 +165,9 @@ private fun ChatTranscriptBody(
     val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId) {
         buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve, showApprovals, consentSessionId)
     }
+    // L2: lazy keys must be unique or Compose throws; a repeated block id, run id or a command id
+    // that spells another row's key gets an ordinal (the first keeps its own key).
+    val lazyKeys = remember(items) { uniqueLazyKeys(items.map { it.key }) }
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
@@ -256,7 +259,7 @@ private fun ChatTranscriptBody(
             if (roster != null) {
                 item(key = "subagent-roster", contentType = "roster") { roster() }
             }
-            itemsIndexed(items, key = { _, item -> item.key }, contentType = { _, item -> item.contentType() }) { index, item ->
+            itemsIndexed(items, key = { index, _ -> lazyKeys[index] }, contentType = { _, item -> item.contentType() }) { index, item ->
                 val gap = when {
                     index + leading == 0 -> 0.dp
                     item.startsGroup -> spacing.scrollGap
@@ -465,3 +468,17 @@ fun isRichCodexSession(provider: String?, engineGeneration: String?): Boolean =
 
 fun isRichOpencodeSession(provider: String?, engineGeneration: String?): Boolean =
     provider == "opencode" && engineGeneration == "opencode-serve-v2"
+
+/** L2: [keys] made unique, in order: the first keeps its key, a repeat gets the lowest free "<key>#<n>". */
+internal fun uniqueLazyKeys(keys: List<String>): List<String> {
+    val used = HashSet<String>(keys.size * 2)
+    return keys.map { k -> uniqueKey(k, used) }
+}
+
+/** [key], or the lowest "<key>#<n>" not in [used]; records the result in [used]. */
+internal fun uniqueKey(key: String, used: MutableSet<String>): String {
+    if (used.add(key)) return key
+    var n = 1
+    while (!used.add("$key#$n")) n++
+    return "$key#$n"
+}

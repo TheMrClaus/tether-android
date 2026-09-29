@@ -122,7 +122,7 @@ class SessionStore {
         if (session == null || rebuilt == null) return HydrationOutcome.Failed
         var tree: JsObj = rebuilt
         try {
-            for (event in buffered) tree = reduce(tree, event)
+            for (event in buffered) tree = com.tether.app.client.OutputIntakeCap.apply(reduce(tree, event), event)
         } catch (_: RuntimeException) {
             return HydrationOutcome.Failed
         }

@@ -122,9 +122,13 @@ fun ChatScreen(
     val stopLock = stopLockCopy(
         consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, session?.id in liveSessions, session),
     )
-    val commandActions = remember(session?.id, stopLock, vm) {
+    // Round 2: one "Stopping…" latch per command for this session (the bar and the sheet share it);
+    // L3: the stop is bound to the server origin this row was drawn for.
+    val stopLatches = rememberStopLatches(session?.id)
+    val commandActions = remember(session?.id, stopLock, consentOrigin, vm, stopLatches) {
         val s = session
-        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand) { commandId -> vm.client.stopCommand(s.id, commandId) }
+        val drawnFor = consentOrigin
+        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) }, stopLatches)
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
@@ -222,6 +226,7 @@ fun ChatScreen(
                     consent = consent,
                     showApprovals = showApprovals,
                     focus = runFocus,
+                    onFocusShown = { runFocus = null },
                 )
 
                 else -> ChatTranscript(
@@ -310,13 +315,14 @@ private fun RunTab(
     consent: ConsentActions,
     showApprovals: Boolean,
     focus: RunFocus?,
+    onFocusShown: () -> Unit,
 ) {
     val state = remember(projection, tree) { cardTree(projection, tree) }
     val pending = remember(state, showApprovals, consent.sessionId) { if (showApprovals) pendingApprovals(state, consent.sessionId) else emptyList() }
     val pendingQ = remember(state, consent.sessionId) { pendingQuestions(state, consent.sessionId) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
     CompositionLocalProvider(LocalConsent provides consent) {
-        SubagentRunTab(run, showThinking, pending, pendingQ, answeredIds, focus)
+        SubagentRunTab(run, showThinking, pending, pendingQ, answeredIds, focus, onFocusShown)
     }
 }
 

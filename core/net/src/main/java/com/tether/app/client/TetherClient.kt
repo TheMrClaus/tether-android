@@ -221,10 +221,11 @@ interface TetherClient {
      * An operator control: call it ONLY from a tap on the command's Stop key, never in answer to
      * anything received. Sent only on a live, handshaken socket, for a session confirmed live on it
      * that is neither read-only nor handed off (the server refuses those too), and only while the
-     * session's CURRENT projection lists [commandId] as running. Otherwise nothing is sent or held.
-     * No retry, no queue: a refused stop is simply not sent.
+     * session's CURRENT projection lists [commandId] as running, on the server that drew the key
+     * ([expectedOrigin], the [consentOrigin] the row was composed with: a stop tapped on another
+     * server's row is refused). Otherwise nothing is sent or held: no retry, no queue.
      */
-    fun stopCommand(sessionId: String, commandId: String): StopCommandResult = StopCommandResult.NotConnected
+    fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): StopCommandResult = StopCommandResult.NotConnected
 
     fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)
@@ -620,7 +621,7 @@ enum class StopCommandResult {
     /** No live, handshaken socket. */
     NotConnected,
 
-    /** Connected, but the session is not confirmed live on this connection yet. */
+    /** Connected, but the session is not confirmed live on this connection yet, or the key was drawn for another server. */
     NotLive,
 
     /** The session is read-only or handed off (or unknown): the server would refuse it. */

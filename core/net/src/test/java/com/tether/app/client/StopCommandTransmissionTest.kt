@@ -58,7 +58,7 @@ class StopCommandTransmissionTest {
     @Test
     fun aTapOnARunningCommandSendsExactlyTheWebsFrame() {
         val (client, _) = connected()
-        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         val frames = stopFrames()
         assertEquals(1, frames.size)
         // use-tether.ts:1570: { type: "stop-command", sessionId, commandId } and nothing else.
@@ -70,10 +70,10 @@ class StopCommandTransmissionTest {
     @Test
     fun aFinishedUnknownOrEmptyCommandIsNotStopped() {
         val (client, _) = connected()
-        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-done"))
-        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-nope"))
-        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", ""))
-        assertEquals(StopCommandResult.NotRunning, client.stopCommand("", "c-run"))
+        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-done", client.consentOrigin.value))
+        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-nope", client.consentOrigin.value))
+        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "", client.consentOrigin.value))
+        assertEquals(StopCommandResult.NotRunning, client.stopCommand("", "c-run", client.consentOrigin.value))
         assertTrue(stopFrames().isEmpty())
     }
 
@@ -82,7 +82,7 @@ class StopCommandTransmissionTest {
         val (client, ws) = connected()
         ws.send(eventFrame("s1", 6, "background_command_updated", null, ""","commandId":"c-run","command":"npm run c-run","cwd":"/w","logFile":"/w/.tether/c-run.log","status":"stopped","startedAt":1,"endedAt":6"""))
         h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("\"stopped\"") }
-        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.NotRunning, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertTrue(stopFrames().isEmpty())
     }
 
@@ -103,48 +103,66 @@ class StopCommandTransmissionTest {
         h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
-        assertEquals(StopCommandResult.NotConnected, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.NotConnected, client.stopCommand("s1", "c-run", client.consentOrigin.value))
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1"))
         h.expectFrame("attach")
         // The saved tree still lists c-run as running: not live yet, refused.
-        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertTrue("the refused taps were not held for the new link", stopFrames().isEmpty())
 
         ws2.send(snapshotFrame("s1", 5, commandsState()))
         h.await(client.liveSessions) { "s1" in it }
         assertTrue("the snapshot sends nothing by itself", stopFrames().isEmpty())
-        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertEquals(1, stopFrames().size)
     }
 
     @Test
     fun aReadOnlyHandedOffOrUnlistedSessionIsLocked() {
         val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
-        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertTrue(stopFrames().isEmpty())
     }
 
     @Test
     fun anUnlistedSessionFailsClosed() {
         val (client, _) = connected(readyFrame())
-        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertTrue(stopFrames().isEmpty())
     }
 
     @Test
-    fun aRepeatedTapIsSentAgainWhileTheCommandStillRuns() {
-        // No ledger (unlike a consent decision): stopping twice is harmless on the server
-        // (session-manager.mjs stopCommand kills an existing handle or does nothing), and a
-        // repeated tap is the operator's way to retry. The UI disables its key after a Sent.
+    fun aStopDrawnForAnotherServerIsRefused() {
+        // L3: the key was composed for another origin (or for none): refused under the lock.
         val (client, _) = connected()
-        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run"))
-        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run"))
+        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", "https://other.example"))
+        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", null))
+        assertTrue(stopFrames().isEmpty())
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+    }
+
+    @Test
+    fun aHaltedClientSendsNoStop() {
+        val (client, _) = connected()
+        val origin = client.consentOrigin.value
+        client.stop()
+        assertEquals(StopCommandResult.NotConnected, client.stopCommand("s1", "c-run", origin))
+    }
+
+    @Test
+    fun aRepeatedCallIsSentAgainWhileTheCommandStillRuns() {
+        // No ledger in the client (unlike a consent decision): stopping twice is harmless on the
+        // server (session-manager.mjs stopCommand kills an existing handle or does nothing). The UI
+        // makes ONE stop per command: its shared "Stopping…" latch disables every key for it.
+        val (client, _) = connected()
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertEquals(2, stopFrames().size)
     }
 }

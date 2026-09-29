@@ -48,6 +48,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -480,6 +481,8 @@ internal fun SubagentRunTab(
     pendingQuestions: List<QuestionRequestView>,
     answeredIds: Set<String>,
     focus: RunFocus? = null,
+    /** Round 2: the [focus] request was used (its step is on screen): the caller clears it. */
+    onFocusShown: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -490,31 +493,58 @@ internal fun SubagentRunTab(
     val cardCount = pending.size + pendingQuestions.size
     val lastIndex = rows.size + cardCount - 1
     val focusKey = focus?.takeIf { it.runId == run.runId }
+    val running = run.status == RUN_RUNNING
 
-    LaunchedEffect(run.runId, entries.size, cardCount, run.status, focusKey) {
-        if (focusKey != null) return@LaunchedEffect
-        if (run.status == RUN_RUNNING) listState.scrollToItem(lastIndex.coerceAtLeast(0), scrollOffset = Int.MAX_VALUE / 2) else listState.scrollToItem(0)
+    // L1, the transcript's follow rule (chat-view.tsx:1825-1907): a running run follows its newest
+    // step only while the reader is at the bottom. A hand drag upward stops following (approval
+    // cards render here, so nothing may drift under a finger); reaching the end again resumes it.
+    var sticky by remember(run.runId) { mutableStateOf(true) }
+    val followGuard = remember(run.runId) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && available.y > 0f) sticky = false
+                return Offset.Zero
+            }
+        }
     }
+    LaunchedEffect(listState, run.runId) {
+        androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canForward) -> if (!scrolling && !canForward && !sticky && focusKey == null) sticky = true }
+    }
+    // A finished run parks at the top when it is shown or when it finishes, not on every change.
+    LaunchedEffect(run.runId, running) { if (!running && focusKey == null) listState.scrollToItem(0) }
+    LaunchedEffect(run.runId, entries.size, cardCount, running, sticky) {
+        if (running && sticky && focusKey == null) listState.scrollToItem(lastIndex.coerceAtLeast(0), scrollOffset = Int.MAX_VALUE / 2)
+    }
+    // A denial's origin link: bring the step to the middle, flash it, stop following, then hand the
+    // request back (round 2: it no longer pins the tab against following for good).
+    var flash by remember(run.runId) { mutableStateOf<RunFocus?>(null) }
     LaunchedEffect(focusKey) {
         val f = focusKey ?: return@LaunchedEffect
         val index = rows.indexOfFirst { it is PanelRow.Step && (it.entry["key"] as? JsStr)?.value == f.toolId }
-        if (index < 0) return@LaunchedEffect
-        listState.scrollToItem(index)
-        val info = listState.layoutInfo
-        val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return@LaunchedEffect
-        val viewport = info.viewportEndOffset - info.viewportStartOffset
-        listState.scrollToItem(index, scrollOffset = -((viewport - item.size) / 2).coerceAtLeast(0))
+        if (index >= 0) {
+            sticky = false
+            flash = f
+            listState.scrollToItem(index)
+            val info = listState.layoutInfo
+            info.visibleItemsInfo.firstOrNull { it.index == index }?.let { item ->
+                val viewport = info.viewportEndOffset - info.viewportStartOffset
+                listState.scrollToItem(index, scrollOffset = -((viewport - item.size) / 2).coerceAtLeast(0))
+            }
+        }
+        onFocusShown()
     }
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().background(chatWellColor(t)).testTag("subrun-panel"),
+        modifier = Modifier.fillMaxSize().background(chatWellColor(t)).nestedScroll(followGuard).testTag("subrun-panel"),
         contentPadding = spacing.padding,
         verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
     ) {
         items(rows, key = { it.key }, contentType = { row -> if (row is PanelRow.Step) "step/" + ((row.entry["kind"] as? JsStr)?.value ?: "") else row::class.java.simpleName }) { row ->
-            val flashing = row is PanelRow.Step && focusKey != null && (row.entry["key"] as? JsStr)?.value == focusKey.toolId
-            PanelRowView(row, showThinking, flashing, if (flashing) focusKey?.nonce else null)
+            val f = flash
+            val flashing = row is PanelRow.Step && f != null && (row.entry["key"] as? JsStr)?.value == f.toolId
+            PanelRowView(row, showThinking, flashing, if (flashing) f?.nonce else null)
         }
         items(pending, key = { "approval/${it.requestId}/${it.contentFp}" }) { ApprovalCard(it) }
         items(pendingQuestions, key = { "question/${it.requestId}/${it.contentFp}" }) { QuestionCard(it, answered = it.requestId in answeredIds) }
@@ -579,7 +609,12 @@ internal fun panelRows(run: SubagentRun, entries: List<JsObj>): List<PanelRow> {
         run.spawned != null -> rows.add(PanelRow.Spawned(run))
         run.source == RunSource.THREAD -> Unit
         entries.isEmpty() -> rows.add(PanelRow.Empty(run.status == RUN_RUNNING))
-        else -> entries.forEachIndexed { i, e -> rows.add(PanelRow.Step(e, "step/" + ((e["key"] as? JsStr)?.value ?: "#$i"))) }
+        // L2: a thread's `order` can repeat a key (FoldTurn appends it even for an unstored kind; a
+        // snapshot can carry one): each row still gets a unique lazy key (the web renders both).
+        else -> {
+            val used = hashSetOf("run-head", "run-prompt", "run-result")
+            entries.forEachIndexed { i, e -> rows.add(PanelRow.Step(e, uniqueKey("step/" + ((e["key"] as? JsStr)?.value ?: "#$i"), used))) }
+        }
     }
     if (run.status != RUN_RUNNING && (runResultText(run).isNotEmpty() || extractToolMedia(run.output).isNotEmpty())) rows.add(PanelRow.Result(run))
     return rows
