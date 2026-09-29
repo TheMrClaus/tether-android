@@ -16,7 +16,8 @@ import com.tether.app.protocol.tree.JsStr
  * A command keeps its NEWEST [MAX_CHARS] UTF-16 units in at most [MAX_SEGMENTS] segments (whole
  * segments, the oldest kept one cut at its start, never through a surrogate pair); empty or
  * malformed segments are dropped. Round 4 (B2): `outputTruncated` is the server's flag OR the kept
- * output being AT a bound ([MAX_CHARS] characters or [MAX_SEGMENTS] segments). That is data, not
+ * output being AT a bound ([MAX_CHARS] characters, less one when the cut had to step past a
+ * surrogate pair, or [MAX_SEGMENTS] segments). That is data, not
  * history: it survives the next `background_command_updated` (which carries the server's flag and
  * merges only the segments) and a restart from a checkpoint that holds exactly the capped output,
  * and a legitimate full snapshot from a conforming server (well under both bounds) clears it. No
@@ -103,7 +104,11 @@ object OutputIntakeCap {
             kept = JsArr.of(list)
             keptCount = list.size
         }
-        val flag = serverFlag || over || keptChars >= maxChars || keptCount >= maxSegments
+        // Round 5: surrogate-aware. A cut that would land between a surrogate pair moves one unit
+        // forward, so a command the client trimmed can hold maxChars - 1 units; that still reads
+        // "at the bound". Safe: a conforming server streams at most 64 KiB (<= 65,536 characters),
+        // far below maxChars - 1, so legitimate output never matches it.
+        val flag = serverFlag || over || keptChars >= maxChars - 1 || keptCount >= maxSegments
         if (kept === segments && flag == serverFlag) return command
         return command.with("segments" to kept, "outputTruncated" to JsBool.of(flag))
     }

@@ -51,6 +51,39 @@ class PublishCapTest {
         assertEquals(JsBool.TRUE, command(stored, "c")["outputTruncated"])
     }
 
+    private fun finished(id: String) = evNullTurn("background_command_updated", ts = 9) {
+        put("commandId", id); put("command", "yes"); put("cwd", "/w"); put("logFile", "/w/$id.log"); put("status", "finished")
+        put("exitCode", 0); put("startedAt", 1); put("endedAt", 9)
+    }.tree()
+
+    private fun keptChars(command: JsObj) = (command["segments"] as JsArr).sumOf { (((it as JsObj)["text"]) as JsStr).value.length }
+
+    @Test fun aCutThatStepsPastASurrogatePairStillReadsTruncatedAfterFinished() {
+        // Round 5: 2 x 70,000 U+1F600 on stdout, then "x" on stderr. The cut would split a pair, so
+        // it steps one unit forward and keeps MAX_CHARS - 1; the flag must hold across `finished`.
+        val store = SessionStore()
+        var tree = store.publish("s1", reduce(freshTree(), started("c")), null)
+        repeat(2) { tree = store.publish("s1", reduce(tree, out("c", "\uD83D\uDE00".repeat(70_000), "stdout")), null) }
+        tree = store.publish("s1", reduce(tree, out("c", "x", "stderr")), null)
+        assertEquals(OutputIntakeCap.MAX_CHARS - 1, keptChars(command(tree, "c")))
+        assertEquals(JsBool.TRUE, command(tree, "c")["outputTruncated"])
+        tree = store.publish("s1", reduce(tree, finished("c")), null)
+        assertEquals("finished", (command(tree, "c")["status"] as JsStr).value)
+        assertEquals(JsBool.TRUE, command(tree, "c")["outputTruncated"])
+    }
+
+    @Test fun aSegmentCountCutStillReadsTruncatedAfterFinished() {
+        // 10,000 alternating one-character segments: cut to MAX_SEGMENTS by count (far under MAX_CHARS).
+        val store = SessionStore()
+        var tree = store.publish("s1", reduce(freshTree(), started("c")), null)
+        for (i in 0 until 10_000) tree = reduce(tree, out("c", "y", if (i % 2 == 0) "stdout" else "stderr"))
+        tree = store.publish("s1", tree, null)
+        assertEquals(OutputIntakeCap.MAX_SEGMENTS, (command(tree, "c")["segments"] as JsArr).size)
+        assertEquals(JsBool.TRUE, command(tree, "c")["outputTruncated"])
+        tree = store.publish("s1", reduce(tree, finished("c")), null)
+        assertEquals(JsBool.TRUE, command(tree, "c")["outputTruncated"])
+    }
+
     @Test fun aPublishCostsWhatChangedNotWhatIsStored() {
         // 100 commands, each 65,536 one-character segments alternating stdout/stderr: the heaviest
         // legal stream a conforming 64 KiB server can produce, times 100.

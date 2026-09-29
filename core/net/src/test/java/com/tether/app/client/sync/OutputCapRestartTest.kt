@@ -44,6 +44,33 @@ class OutputCapRestartTest {
 
     private fun keptChars(command: JsObj) = (command["segments"] as JsArr).sumOf { (((it as JsObj)["text"]) as JsStr).value.length }
 
+    @Test fun anEmojiFloodKeepsItsFlagLiveAndAfterARestart() {
+        // Round 5: 5 x 30,000 U+1F600 then "x": the cut steps past a surrogate pair (MAX_CHARS - 1 kept).
+        h.startServer()
+        h.boot(ready = ready)
+        h.client.attach("s1")
+        h.expectFrame("attach")
+        val running = foldTree(freshTree(), evNullTurn("background_command_updated", ts = 1) {
+            put("commandId", "c"); put("command", "yes"); put("cwd", "/w"); put("logFile", "/w/c.log"); put("status", "running"); put("startedAt", 1)
+        })
+        h.ws.send(snapshotFrame("s1", 5, JsCodec.stringify(running)))
+        h.await(h.client.projectionTrees) { it.containsKey("s1") }
+        var seq = 5L
+        val emoji = "\\uD83D\\uDE00".repeat(30_000) // JSON escapes: the wire carries the pairs
+        repeat(5) { h.ws.send(event(++seq, "background_command_output", ""","commandId":"c","stream":"stdout","text":"$emoji"""")) }
+        h.ws.send(event(++seq, "background_command_output", ""","commandId":"c","stream":"stderr","text":"x""""))
+        h.ws.send(event(++seq, "background_command_updated", ""","commandId":"c","command":"yes","cwd":"/w","logFile":"/w/c.log","status":"finished","exitCode":0,"startedAt":1,"endedAt":$seq"""))
+        val live = h.await(h.client.projectionTrees) { trees -> trees["s1"]?.let { (command(it)["status"] as? JsStr)?.value } == "finished" }.getValue("s1")
+        assertEquals(OutputIntakeCap.MAX_CHARS - 1, keptChars(command(live)))
+        assertEquals("live", JsBool.TRUE, command(live)["outputTruncated"])
+        h.kill(flushFirst = true)
+        h.boot(ready = ready)
+        h.client.attach("s1")
+        val restored = h.await(h.client.projectionTrees) { it.containsKey("s1") }.getValue("s1")
+        assertEquals("finished", (command(restored)["status"] as JsStr).value)
+        assertEquals("after the restart", JsBool.TRUE, command(restored)["outputTruncated"])
+    }
+
     @Test fun theCappedFlagSurvivesACheckpointAFinishedUpdateAndARestart() {
         h.startServer()
         h.boot(ready = ready)

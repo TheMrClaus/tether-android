@@ -365,6 +365,11 @@ class StopKeySafetyTest {
         // … and a command with nothing visible still gets a name.
         assertEquals("\u2068(blank command)\u2069", commandLabel("\n \u200B\n\u202E"))
         assertEquals("\u2068(blank command)\u2069", commandLabel(""))
+        // Round 5: blank-looking letters, the braille blank, tag characters and variation selectors
+        // are invisible too: skipped as first lines, never the reason for a "…".
+        assertEquals("\u2068ls\u2069", commandLabel("\u3164\n\u2800\n\u115F\u1160\uFFA0\nls"))
+        assertEquals("\u2068ls\u2069", commandLabel("\uDB40\uDC41\uDB40\uDC7F\nls\n\uFE0F\u3164"))
+        assertEquals("\u2068(blank command)\u2069", commandLabel("\u3164\n\uDB40\uDC20"))
     }
 
     // ---- L3 ------------------------------------------------------------------------------------------

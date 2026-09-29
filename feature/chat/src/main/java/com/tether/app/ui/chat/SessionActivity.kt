@@ -227,24 +227,36 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
 internal fun commandLabel(command: String): String {
     // Round 3/4: embedding, override and isolate controls and the directional marks (U+200E/200F,
     // U+061C) are dropped (the FSI/PDI wrap is the only bidi control left), and leading lines that
-    // are blank or only invisible (format) characters are skipped, so the label is never just "…".
+    // are blank or only invisible characters are skipped, so the label is never just "…".
     val clean = command.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' }
-    fun invisible(c: Char) = c.isWhitespace() || Character.getType(c) == Character.FORMAT.toInt()
     val breaks = charArrayOf('\n', '\r', '\u2028', '\u2029')
+    fun blank(text: String) = text.codePoints().allMatch(::invisibleCodePoint)
     var start = 0
     while (true) {
         val nl = clean.indexOfAny(breaks, start)
         val line = if (nl < 0) clean.substring(start) else clean.substring(start, nl)
-        if (nl < 0 || !line.all(::invisible)) break
+        if (nl < 0 || !blank(line)) break
         start = nl + 1
     }
     val rest = clean.substring(start)
     val nl = rest.indexOfAny(breaks)
     val firstLine = (if (nl < 0) rest else rest.substring(0, nl)).trimEnd()
-    if (firstLine.all(::invisible)) return "\u2068(blank command)\u2069"
-    val more = nl >= 0 && rest.substring(nl).any { it !in breaks && !invisible(it) }
+    if (blank(firstLine)) return "\u2068(blank command)\u2069"
+    val more = nl >= 0 && !blank(rest.substring(nl).filterNot { it in breaks })
     return "\u2068" + firstLine + (if (more) "…" else "") + "\u2069"
 }
+
+/**
+ * A code point that draws nothing a reader can see: whitespace, FORMAT characters, and (round 5)
+ * the blank-looking letters and symbols (U+115F/1160, U+3164, U+FFA0 Hangul fillers, U+2800
+ * braille blank), tag characters (U+E0000-E007F), variation selectors and the other
+ * default-ignorable code points (U+034F, U+17B4/17B5, U+180B-180F, U+FE00-FE0F, U+E0100-E01EF).
+ */
+internal fun invisibleCodePoint(cp: Int): Boolean =
+    Character.isWhitespace(cp) || Character.isSpaceChar(cp) || Character.getType(cp) == Character.FORMAT.toInt() ||
+        cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 || cp == 0x2800 ||
+        cp in 0xE0000..0xE007F || cp == 0x034F || cp == 0x17B4 || cp == 0x17B5 || cp in 0x180B..0x180F ||
+        cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF
 
 /**
  * The "Stopping…" latch, ONE per command for the whole session screen (the bar's key and the output
