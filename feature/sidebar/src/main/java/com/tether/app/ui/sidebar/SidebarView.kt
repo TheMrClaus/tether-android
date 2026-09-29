@@ -33,6 +33,8 @@ data class SidebarState(
     /** Wall-clock "now" for the relative times (the web's Date.now()). */
     val now: Long = System.currentTimeMillis(),
     val scheduledActionCount: Int = 0,
+    /** T13.2: the client's per-session freshness (rows mark it only while not [connected]). */
+    val syncStates: Map<String, com.tether.app.client.SessionSync> = emptyMap(),
 )
 
 /** One workspace block as rendered (session-sidebar.tsx:997-1190). */

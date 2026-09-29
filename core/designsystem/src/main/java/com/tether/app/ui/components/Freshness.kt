@@ -205,7 +205,7 @@ fun FreshnessGlyph(sync: SessionSync?, now: Long, modifier: Modifier = Modifier)
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         MarkIcon(icon, t.faint, 12.dp)
-        if (short != null) Text(short, style = type.body.copy(fontSize = 10.9.sp, fontWeight = FontWeight(560)), color = t.faint, maxLines = 1)
+        if (short != null) Text(short, style = type.body.copy(fontSize = 10.9.sp, fontWeight = FontWeight(560)), color = t.faint, maxLines = 1, softWrap = false)
     }
 }
 

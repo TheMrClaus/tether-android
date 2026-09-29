@@ -129,6 +129,7 @@ object SidebarTags {
     const val NewSession = "sidebar-new-session"
     const val AddWorkspace = "sidebar-add-workspace"
     fun row(key: String) = "sidebar-row:$key"
+    fun freshness(key: String) = "sidebar-freshness:$key"
     fun handle(key: String) = "sidebar-handle:$key"
     fun end(key: String) = "sidebar-end:$key"
     fun archive(key: String) = "sidebar-archive:$key"
@@ -775,6 +776,8 @@ private fun WorkspaceBlock(
                             workspace = block.workspace,
                             active = SidebarViewModel.isActiveEntry(state, e),
                             now = state.now,
+                            // T13.2: offline, the row's status is from a saved list (SYNC_DESIGN §4.2).
+                            sync = if (state.connected) null else e.live?.id?.let { state.syncStates[it] },
                             armed = armedKey == e.key,
                             onArm = onArm,
                             phone = phone,

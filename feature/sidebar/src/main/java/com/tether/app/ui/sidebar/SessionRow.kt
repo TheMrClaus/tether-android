@@ -170,6 +170,8 @@ internal fun SessionRow(
     workspace: String,
     active: Boolean,
     now: Long,
+    /** T13.2: this row's freshness while the list is not live (null = the list is live). */
+    sync: com.tether.app.client.SessionSync? = null,
     armed: Boolean,
     onArm: (String?) -> Unit,
     phone: Boolean,
@@ -386,7 +388,7 @@ internal fun SessionRow(
                     .weight(1f)
                     .heightIn(min = 3.5f.rem)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location)
+                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, sync)
                         if (active) selected = true
                     }
                     .clickable(role = Role.Button) {
@@ -428,7 +430,7 @@ internal fun SessionRow(
                             ModeTag(mode)
                         }
                     }
-                    StatusLine(entry, now, updatedAt)
+                    StatusLine(entry, now, updatedAt, sync)
                     digest?.let { d ->
                         Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
                             if (d.newTurns > 0) {
@@ -499,15 +501,24 @@ private fun ModeTag(mode: String) {
  * AND the words — status is never colour alone. A history-only row shows "8m ago".
  */
 @Composable
-private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long) {
+private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, sync: com.tether.app.client.SessionSync? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val studio = t.studio
     val style = css(type.ui, if (studio) 0.68f else 0.68f, if (studio) 500 else 560)
     val live = entry.live
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.35f.rem)) {
-        if (live != null) {
+    // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap
+    // whole at a large font instead of squeezing. A live row keeps its single line.
+    StatusFlow(wrap = sync != null && live != null) {
+        val was = if (live != null && sync != null) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
+        if (live != null && was != null) {
+            // T13.2: a saved list never claims the agent is running or waiting on you now: the
+            // words say "was", on a faint still dot (no spinner, no violet ping).
+            StatusDot(t.faint, size = 0.4f.rem)
+            Text(was, style = style, color = t.faint, softWrap = false)
+            Text("· $rel", style = style, color = t.faint, softWrap = false)
+        } else if (live != null) {
             val color = when (live.status) {
                 "active" -> t.running
                 "waiting" -> t.violet
@@ -524,7 +535,24 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long) {
             SmallIcon(TetherIcons.History, t.faint, 12.dp)
             Text("$rel ago", style = style, color = t.faint)
         }
+        // T13.2 (SYNC_DESIGN §4.2): `history` + "12m" for a saved copy, `cloud-off` for none.
+        if (live != null && sync != null) com.tether.app.ui.components.FreshnessGlyph(sync, now, Modifier.testTag(SidebarTags.freshness(entry.key)))
     }
+}
+
+/** The status line's container: a Row, or (T13.2, [wrap]) a FlowRow whose pieces wrap whole. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun StatusFlow(wrap: Boolean, content: @Composable () -> Unit) {
+    if (!wrap) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.35f.rem)) { content() }
+        return
+    }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(0.35f.rem),
+        verticalArrangement = Arrangement.spacedBy(0.1f.rem),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) { content() }
 }
 
 /** What TalkBack reads for the row's nav button: name, unseen, mode, status in words, time, location. */
@@ -536,6 +564,7 @@ private fun rowDescription(
     now: Long,
     updatedAt: Long,
     location: String?,
+    sync: com.tether.app.client.SessionSync? = null,
 ): String = buildString {
     append(name)
     if (unseen) append(", changed since you last looked")
@@ -546,8 +575,11 @@ private fun rowDescription(
     }
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     val live = entry.live
-    if (live != null) append(", ${Format.statusCopy[live.status] ?: live.status}, $rel")
+    val was = if (live != null && sync != null) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
+    if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: live.status}, $rel")
     else append(", $rel ago")
+    // T13.2: the full sentence the row's glyph stands for.
+    if (live != null) com.tether.app.ui.components.FreshnessCopy.sessionLabel(sync, now)?.let { append(", $it") }
     entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
         append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
     }
