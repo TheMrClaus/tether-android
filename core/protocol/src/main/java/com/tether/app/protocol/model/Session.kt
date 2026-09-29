@@ -51,6 +51,8 @@ data class AgentSession(
     val collaborationMode: CollaborationMode? = null,
     /** Codex + OpenCode: "never" behind their Auto toggle; null keeps interactive prompts. */
     val approvalPolicy: String? = null,
+    /** v101 (T6.6): Claude / Codex "auto-continue when the limit resets" (set-auto-continue-on-limit). */
+    val autoContinueOnLimit: Boolean = false,
 )
 
 /** TS `AgentSession.collaborationMode`: `{ mode, settings: { model, reasoning_effort } }`. */

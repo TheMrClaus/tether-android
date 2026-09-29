@@ -251,6 +251,17 @@ interface TetherClient {
      */
     fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): StopCommandResult = StopCommandResult.NotConnected
 
+    /**
+     * T6.6: dismiss ONE notice instance for every device (`dismiss-notice`, v119; the server journals
+     * `notice_dismissed`, and the notice goes when that folds). Call it ONLY from a tap on the notice's
+     * X, never in answer to anything received. Sent only on a live, handshaken socket of the server
+     * that drew the X ([expectedOrigin]), for a listed session confirmed live on it, and only while its
+     * CURRENT projection still shows [dismissKey]. A read-only or handed-off session may dismiss (the
+     * server allows it: dismissal is presentation-only). At most once per key per connection; nothing
+     * is retried, queued or persisted.
+     */
+    fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): NoticeResult = NoticeResult.NotConnected
+
     fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)
     fun discover(cwd: String)
@@ -680,6 +691,26 @@ enum class InterruptResult {
 
     /** The session is read-only or handed off (or unknown): the server would refuse it. */
     Locked,
+}
+
+/** T6.6: what [TetherClient.dismissNotice] did. Only [Sent] put a frame on the wire. */
+enum class NoticeResult {
+    Sent,
+
+    /** No live, handshaken socket. */
+    NotConnected,
+
+    /** Connected, but the session is not confirmed live on this connection, or the X was drawn for another server. */
+    NotLive,
+
+    /** The session is not listed (fail closed). */
+    Locked,
+
+    /** The current projection no longer shows this notice (already dismissed, replaced, or never there). */
+    NotShown,
+
+    /** This connection already carried the dismissal; it is not sent twice. */
+    AlreadySent,
 }
 
 /** T6.4: what [TetherClient.stopCommand] did. Only [Sent] put a frame on the wire. */

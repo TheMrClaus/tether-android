@@ -4,6 +4,9 @@ import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionModelOption
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.tree.JsNum
+import com.tether.app.protocol.tree.JsObj
+import com.tether.app.protocol.tree.JsStr
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -45,6 +48,19 @@ sealed interface SessionControl {
 
     /** `set-fast-mode` (v95, Claude, a model that reports supportsFastMode). */
     data class FastMode(val enabled: Boolean) : SessionControl
+
+    /**
+     * T6.6 `set-auto-continue-on-limit` (v101, Claude / Codex): [enabled] is the flip of the value the
+     * toggle was drawn with, and is refused once the session already holds it (another device moved it).
+     */
+    data class AutoContinueOnLimit(val enabled: Boolean) : SessionControl
+
+    /**
+     * T6.6 `rate-limit-resume` (v88): one of the limit card's three choices, bound to the [resetsAt] of
+     * the prompt it was drawn for. `schedule` / `resume-now` only while that prompt awaits a choice;
+     * `dismiss` also cancels a scheduled resume (chat-view.tsx:3638-3652).
+     */
+    data class RateLimitResume(val resetsAt: Long, val action: String) : SessionControl
 
     /**
      * A provider action (Codex / opencode-serve): bound to the [revision] of the catalog snapshot the
@@ -114,6 +130,8 @@ object SessionControlsGuard {
         codex: CodexSnapshot?,
         opencode: OpencodeSnapshot?,
         control: SessionControl,
+        /** T6.6: the session's current projection tree (the rate-limit prompt lives only there). */
+        tree: JsObj? = null,
     ): ControlResult? {
         val offered = ComposerControlsModel.derive(session, controls, codex?.let { ProviderControlsState(it, false, null) }, emptyList())
         val provider = session.provider
@@ -160,6 +178,9 @@ object SessionControlsGuard {
             }
             is SessionControl.FastMode ->
                 if (provider == "claude" && ComposerControlsModel.activeModel(session, controls)?.supportsFastMode == true) null else ControlResult.NotOffered
+            is SessionControl.AutoContinueOnLimit ->
+                if (offered.autoContinue != null && control.enabled != session.autoContinueOnLimit) null else ControlResult.NotOffered
+            is SessionControl.RateLimitResume -> rateLimitResumeOffered(tree, control)
             is SessionControl.CodexModelSelection -> {
                 val snap = codexV2(session, codex) ?: return ControlResult.NotOffered
                 if (!snap.models.ready) return ControlResult.NotOffered
@@ -220,6 +241,8 @@ object SessionControlsGuard {
         is SessionControl.Model -> ClientMessage.SetModel(sessionId, control.value)
         is SessionControl.Effort -> ClientMessage.SetReasoningEffort(sessionId, control.value)
         is SessionControl.FastMode -> ClientMessage.SetFastMode(sessionId, control.enabled)
+        is SessionControl.AutoContinueOnLimit -> ClientMessage.SetAutoContinueOnLimit(sessionId, control.enabled)
+        is SessionControl.RateLimitResume -> ClientMessage.RateLimitResume(sessionId, control.resetsAt, control.action)
         is SessionControl.CodexModelSelection -> codexAction(sessionId, control.revision, operatorActionId, "set-model-selection") {
             put("modelId", control.modelId)
             put("reasoningEffortId", control.effortId)
@@ -303,6 +326,26 @@ object SessionControlsGuard {
         put("operatorAction", true)
         put("operatorActionId", operatorActionId)
     }
+
+    /**
+     * The prompt [control] was drawn for is still the one in [tree]: the same `resetsAt` (a positive
+     * whole number, exactly what goes on the wire), `awaiting_choice` for every action, `scheduled`
+     * for `dismiss` alone (the row's cancel). Anything else (fired, dismissed, replaced) sends nothing.
+     */
+    private fun rateLimitResumeOffered(tree: JsObj?, control: SessionControl.RateLimitResume): ControlResult? {
+        if (control.action !in RATE_LIMIT_ACTIONS || control.resetsAt <= 0) return ControlResult.NotOffered
+        val prompt = tree?.get("rateLimitResume") as? JsObj ?: return ControlResult.NotOffered
+        val resetsAt = (prompt["resetsAt"] as? JsNum)?.value ?: return ControlResult.NotOffered
+        if (resetsAt != control.resetsAt.toDouble()) return ControlResult.NotOffered
+        return when ((prompt["status"] as? JsStr)?.value) {
+            "awaiting_choice" -> null
+            "scheduled" -> if (control.action == "dismiss") null else ControlResult.NotOffered
+            else -> ControlResult.NotOffered
+        }
+    }
+
+    /** protocol-validate.mjs "rate-limit-resume": the three actions it accepts. */
+    val RATE_LIMIT_ACTIONS = setOf("dismiss", "schedule", "resume-now")
 
     private fun codexV2(session: AgentSession, codex: CodexSnapshot?): CodexSnapshot? =
         if (session.provider == "codex" && session.engineGeneration == CODEX_V2) codex else null

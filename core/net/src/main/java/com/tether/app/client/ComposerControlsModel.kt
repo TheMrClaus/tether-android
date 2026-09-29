@@ -70,6 +70,12 @@ data class AutoToggle(val on: Boolean, val hint: String)
 /** v95 Fast row. [state]: "off" | "cooldown" | "on". */
 data class FastModeControl(val state: String, val disabledReason: String?)
 
+/**
+ * v101 (T6.6): the "auto-continue when the limit resets" toggle (chat-view.tsx:2477-2482, Claude and
+ * Codex only). [on] is the session's stored value; a tap offers exactly its flip.
+ */
+data class AutoContinueControl(val on: Boolean)
+
 /** The row for a read-only or legacy-Codex session: what was restored from the native turn, never editable. */
 data class RestoredSettings(val model: String?, val effort: String?, val mode: String?)
 
@@ -92,6 +98,8 @@ data class ComposerControls(
     val modeAriaLabel: String,
     val auto: AutoToggle?,
     val fastMode: FastModeControl?,
+    /** T6.6: the Auto-continue toggle, only on the live row of a Claude or Codex session. */
+    val autoContinue: AutoContinueControl? = null,
     /** The flex-1 `.chat-mode-hint`. */
     val hint: String,
     val hintDanger: Boolean,
@@ -331,6 +339,8 @@ object ComposerControlsModel {
             modeAriaLabel = if (provider == "opencode" || provider == "reasonix" || codexV2) "Mode" else "Permission mode",
             auto = if (live) auto else null,
             fastMode = fastMode,
+            // chat-view.tsx:4331: inside the live row (never read-only), Claude and Codex only.
+            autoContinue = if (live && (provider == "claude" || provider == "codex")) AutoContinueControl(session.autoContinueOnLimit) else null,
             hint = hint,
             hintDanger = currentMode?.danger == true || autoOn,
             unknownMode = unknown != null,

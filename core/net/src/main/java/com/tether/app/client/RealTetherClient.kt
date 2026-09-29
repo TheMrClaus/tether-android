@@ -17,6 +17,7 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.fold.projectionHasNoticeKey
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.str
@@ -87,6 +88,12 @@ internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, Verd
 
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
 private const val MAX_CONTROL_MESSAGE = 500
+
+/** protocol-validate.mjs "dismiss-notice": `isNonEmptyString(dismissKey, 512)`. */
+private const val DISMISS_KEY_MAX = 512
+
+/** T6.6: how many sent dismissals the client remembers (per-connection dedupe). */
+private const val DISMISSALS_REMEMBERED = 200
 
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
@@ -3050,6 +3057,38 @@ class RealTetherClient(
         return result
     }
 
+    /**
+     * T6.6: the one path a notice's dismissal takes to the wire. Under the lock, in order: a live,
+     * handshaken socket of a running (not halted) client; the X drawn for THIS server; the session
+     * listed and confirmed live on it (read-only and handed-off sessions may dismiss: the server
+     * allows it); a bounded key the session's CURRENT projection still shows (the reducer's own
+     * [projectionHasNoticeKey]); not already sent on this connection; then enqueued on that socket.
+     * Nothing is retried, held or persisted.
+     */
+    override fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): NoticeResult {
+        if (sessionId.isEmpty() || dismissKey.isEmpty() || dismissKey.length > DISMISS_KEY_MAX) return NoticeResult.NotShown
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NoticeResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized NoticeResult.NotLive
+            if (sessionId !in liveThisEpoch) return@synchronized NoticeResult.NotLive
+            sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized NoticeResult.Locked
+            if (!projectionHasNoticeKey(sessionStore.tree(sessionId), dismissKey)) return@synchronized NoticeResult.NotShown
+            val sent = Triple(epoch, sessionId, dismissKey)
+            if (sent in dismissalsSent) return@synchronized NoticeResult.AlreadySent
+            if (!ws.send(ClientMessage.DismissNotice(sessionId, dismissKey).encode())) return@synchronized NoticeResult.NotConnected
+            if (dismissalsSent.size >= DISMISSALS_REMEMBERED) dismissalsSent.remove(dismissalsSent.first())
+            dismissalsSent.add(sent)
+            NoticeResult.Sent
+        }
+        if (result == NoticeResult.NotConnected) emitError("The secure link is reconnecting. The notice was not dismissed.")
+        return result
+    }
+
+    /** T6.6: the dismissals sent, per connection epoch (bounded; a new connection starts clean). Guarded by [lock]. */
+    private val dismissalsSent = LinkedHashSet<Triple<Long, String, String>>()
+
     /** `backgroundCommands` holds [commandId] with status "running" (the fold's own projection). */
     private fun isRunningCommand(tree: JsObj?, commandId: String): Boolean =
         (tree?.get("backgroundCommands") as? JsArr)?.any { value ->
@@ -3098,7 +3137,7 @@ class RealTetherClient(
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized ControlResult.Locked
             val codex = codexControlsState.value[sessionId]?.snapshot
             val opencode = opencodeControlsState.value[sessionId]?.snapshot
-            SessionControlsGuard.check(session, sessionControlsState.value[sessionId], codex, opencode, control)?.let { return@synchronized it }
+            SessionControlsGuard.check(session, sessionControlsState.value[sessionId], codex, opencode, control, sessionStore.tree(sessionId))?.let { return@synchronized it }
             val frame = SessionControlsGuard.frame(sessionId, control, java.util.UUID.randomUUID().toString())
             if (!ws.send(frame.encode())) return@synchronized ControlResult.NotConnected
             // use-tether.ts executeCodexControl: the panel shows the action in flight until its result.
