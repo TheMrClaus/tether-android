@@ -46,22 +46,30 @@ Divergences from the web, on purpose:
 - Stop is disabled, with its reason in its accessible name, when the app is offline (a saved copy), catching up,
   or the session is read-only or handed off (the server refuses `stop-command` on a read-only session anyway,
   `server.mjs` READ_ONLY_MUTATIONS). The web shows the key live. After a stop the client accepted, every Stop key
-  for that command (the bar's and the sheet's: one latch per command, round 2) reads "Stopping…" and stays
-  disabled while the command still runs; a refused stop leaves the keys as they were.
+  for that command (the bar's and the sheet's: one latch per command, round 2) reads "Stopping…"; a refused stop
+  leaves the keys as they were. Round 3: "accepted" only means queued, so the latch clears when the link drops,
+  the session's liveness flips or the server changes, and lapses after 10s while the command still runs (the
+  key then arms again); it is not saved, so switching sessions away and back starts clean.
 - Round 2 (M1): the running rows are keyed by command, and a Stop key arms 500ms after it becomes usable (T6.3's
   I3 delay) and again after it moves more than 4dp in its window (a command finishing, the queue draining, the
   todo bar appearing), so a tap aimed at one row cannot stop the command that slid under the finger. Touches
-  through an overlay are refused. The stop is bound to the server origin its row was drawn for.
-- Command labels show their first line ("…" when there are more) inside a bidi isolate.
+  through an overlay are refused. The stop is bound to the server origin its row was drawn for. Round 3: the
+  movement is measured from where the key stood when its arming began (a slow slide re-arms it too), and each
+  Stop key's accessible name carries its command ("Stop <command>").
+- The output sheet is anchored near the top of the window (the web centres it), so its head and Stop key stay
+  put while short output grows the sheet downward.
+- Command labels show their first non-blank line ("…" when there are more) inside a bidi isolate, with embedding,
+  override and isolate controls removed.
 - Every row of the running-commands bar, the Stop key, the finished chips, the todo bar's head, the roster rows,
   the tabs and the "+N more steps" key are at least 44dp tall (the web's command rows and chips are one text line).
 - The output sheet draws the tail of the capture (the last 64,000 characters, with "… earlier output not shown
   here — the full output is in the log file") as a lazy list of lines, rebuilt off the main thread at most every
   250ms while the command streams, so a runaway command cannot lay out an unbounded text or rebuild it per chunk;
   the web draws every folded segment. Every line keeps its full 1.5 leading as a `<pre>`'s line boxes do (round 2
-  re-recorded the 8 `subrun-output` goldens for this: the sheet is a few px taller). The client also caps a
-  command's folded output at 256K characters after the fold (4x the server's 64 KiB stream cap, so a conforming
-  server never reaches it; the fold itself stays the web's, which has no cap).
+  re-recorded the 8 `subrun-output` goldens for this: the sheet is a few px taller). The client also caps every
+  command's folded output at 256K characters in each tree it publishes (live folds, hydration, mirror rebuilds,
+  snapshots; 4x the server's 64 KiB stream cap, so a conforming server never reaches it; the fold itself stays
+  the web's, which has no cap), and a command it trimmed keeps reading "Live view truncated".
 - A run tab follows new steps only while the reader is at its bottom (a hand drag upward stops it; reaching the end
   again resumes it), the transcript's rule; the web's panel has no follow logic of its own.
 - A run tab is a lazy list, one row per step (the web renders the whole stream), and a sub-agent thread under

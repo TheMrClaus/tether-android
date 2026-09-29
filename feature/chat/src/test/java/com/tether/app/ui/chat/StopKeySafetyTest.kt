@@ -262,6 +262,7 @@ class StopKeySafetyTest {
         rule.mainClock.autoAdvance = false
         var tree = client.projectionTrees.value.getValue("s1")
         var armedAt = -1
+        var disarmedAgainAt = -1
         for (frame in 1..48) {
             if (frame % 12 == 0) {
                 val n = frame / 12
@@ -271,11 +272,24 @@ class StopKeySafetyTest {
                 }
             }
             rule.mainClock.advanceTimeByFrame()
+            Thread.sleep(8) // the sampled rebuild runs on a background dispatcher: let it land
             rule.waitForIdle()
             val sheetKey = rule.onAllNodesWithTag("bg-command-stop").fetchSemanticsNodes().last()
-            if (armedAt < 0 && !sheetKey.config.contains(SemanticsProperties.Disabled)) armedAt = frame
+            val disabled = sheetKey.config.contains(SemanticsProperties.Disabled)
+            if (armedAt < 0 && !disabled) armedAt = frame
+            if (armedAt > 0 && disabled) disarmedAgainAt = frame
         }
+        // The output really grew while we watched (each line lengthens the sheet): let the last
+        // sampled rebuild land, then every line is there.
+        repeat(20) {
+            rule.mainClock.advanceTimeByFrame()
+            Thread.sleep(8)
+            rule.waitForIdle()
+        }
+        rule.onNode(hasText("line 4"), useUnmergedTree = true).assertIsDisplayed()
         assertTrue("the sheet's Stop armed by frame 36 (armed at $armedAt)", armedAt in 1..36)
+        assertEquals("growing output never moved the armed key", -1, disarmedAgainAt)
+        rule.onAllNodesWithTag("bg-command-stop").fetchSemanticsNodes().last().let { assertTrue(!it.config.contains(SemanticsProperties.Disabled)) }
     }
 
     @Test fun aKeySlidingSlowlyRearmsOnceItMovedFourDpSinceItArmed() {
