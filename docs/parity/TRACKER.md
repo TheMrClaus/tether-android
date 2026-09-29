@@ -36,16 +36,15 @@ security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rew
 (server now protocol **132**, `NATIVE_PROTOCOL_FLOOR = 129` = exactly what the app speaks - no headroom, see ta-koy). `/.well-known/assetlinks.json`
 serves 200 on the box; the **public URL still redirects to the SSO gateway** until the owner adds the one-path bypass rule.
 **v0.7.3 is PUBLISHED** (owner). Drafts 0.7.0-0.7.2 superseded.
-**Merged since takeover (2026-09-28/29):** ta-hra, ta-js0 + ta-epo, ta-koy (protocol **v132**), **T6.3** approvals/questions/denials (`1127819`,
-9 rounds), **T6.4** sub-agent runs / background commands with a guarded, armed Stop / todo bar / turn activity (`b4d378e`, 5 rounds).
-Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed), #209 auth hardening, #212 service
-sessions scoped to the proxy, #216 same-origin rule for ambient-credential writes. Draft **0.7.4** (code 21, `1127819`) built and checked;
-a newer draft is due once the next Android work lands.
+**Merged since takeover (2026-09-28/29):** ta-hra, ta-js0 + ta-epo, ta-koy (protocol **v132**), **T6.3** approvals/questions/denials,
+**T6.4** sub-agent runs / background commands / guarded Stop / todo bar / turn activity (`b4d378e`), **T7.2** Model/Effort/Mode row +
+Codex/OpenCode panels with confirmed escalation (`b8f94c8`, 4 rounds), **ta-41x + ta-jt9** cookie `Origin` + signed-out-boot mirror purge +
+sign-out races (`ecb6e7a`, 3 rounds). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
+#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22) queued from `ecb6e7a` once CI is green.
 **Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
 **Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
 console origin + credentials forwarded upstream - needs an owner decision), #215 (proxy follow-ups).
-**Next frontier (`bd ready`):** ta-41x (Android sends Origin on cookie writes) + ta-jt9 (mirror purge on signed-out boot), T6.5-T6.7,
-T7.2-T7.4, T8.x, T10.x (T10.5 passkeys: server ready; needs the gateway bypass + JSON-typed POSTs), T13.2+.
+**Next frontier (`bd ready`):** T6.5-T6.7, T7.3-T7.4, T8.x, T10.x (T10.5 passkeys: server ready; needs the gateway bypass + JSON-typed POSTs), T13.2+.
 **Owner queue (report, not act):** (0) SSO gateway bypass for exactly `/.well-known/assetlinks.json` (rule prepared by Ops). Push is blocked on Firebase provisioning (production has no FCM config at all: create the
 Firebase project + register `com.tether.app`, service-account key, set all six `TETHER_FCM_*` values in a root-owned
 EnvironmentFile, rebuild + restart, restrict the API key). tether#204 is merged. Publishing any draft is the owner's call.
@@ -142,7 +141,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
-| T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | TODO |  |  |  |
+| T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
 | T7.3 | Slash commands, run/background command, mentions | TODO |  |  |  |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
 
