@@ -190,6 +190,30 @@ fun ChatScreen(
         }
     }
 
+    // T6.6: the notices' X (dismiss-notice: link + liveness only, the server allows it read-only)
+    // and the limit card (rate-limit-resume: T7.2's guarded path and lock). Taps only.
+    val noticeLink = Triple(connection, isLive, consentOrigin)
+    val noticeActions = remember(session?.id, noticeLink, controlLock, vm) {
+        val s = session
+        val drawnFor = consentOrigin
+        if (s == null) {
+            NoticeActions.Unavailable
+        } else {
+            NoticeActions(
+                sessionId = s.id,
+                lock = noticeLock(connection == com.tether.app.client.ConnectionState.Connected && drawnFor != null, isLive),
+                controlLock = controlLock,
+                link = noticeLink,
+                onDismiss = { key -> vm.client.dismissNotice(s.id, key, drawnFor) },
+                onRateLimit = { control -> vm.client.sessionControl(s.id, control, drawnFor) },
+                onRefused = { message -> vm.reportLocalError(message) },
+            )
+        }
+    }
+    // T6.6: a handed-off source names (and links to) the session it continued in.
+    val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
+    val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
+
     // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.
     val find = rememberChatFindState(session?.id)
     val findFocus = remember { FocusRequester() }
@@ -291,6 +315,7 @@ fun ChatScreen(
                     showThinking = showThinking,
                     onFetchTurns = { from, to -> vm.client.fetchTurns(session.id, from, to) },
                     consent = consent,
+                    notices = noticeActions,
                     showApprovals = showApprovals,
                     roster = if (runs.isNotEmpty()) {
                         {
@@ -332,6 +357,8 @@ fun ChatScreen(
             commandActions = commandActions,
             controlActions = controlActions,
             pinnedModels = pinnedModels,
+            handoffTarget = handoffTarget,
+            onOpenSession = { id -> vm.selectSession(id) },
         )
     }
     CommandOutputDialog(

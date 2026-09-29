@@ -177,6 +177,10 @@ fun Composer(
     controlActions: SessionControlActions = SessionControlActions.Unavailable,
     /** T7.2: the device's pinned legacy models (lib/model-picker.mjs groupModelOptions). */
     pinnedModels: List<String> = emptyList(),
+    /** T6.6: the session a handed-off source continued in (null: gone, or not handed off). */
+    handoffTarget: AgentSession? = null,
+    /** T6.6: open another session (the handoff lock's link). Navigation only, never a wire mutation. */
+    onOpenSession: (String) -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -398,6 +402,15 @@ fun Composer(
         toggleAuto = ::toggleAuto,
         setFast = { enabled -> sendControl(SessionControl.FastMode(enabled)) },
         setAutoApprove = { on -> if (on != composerControls?.auto?.on) toggleAuto() },
+        // T6.6 (chat-view.tsx:2480): exactly the flip of the value the toggle was drawn with.
+        setAutoContinue = { enabled ->
+            val ac = composerControls?.autoContinue
+            if (ac != null && enabled != ac.on) {
+                if (sendControl(SessionControl.AutoContinueOnLimit(enabled))) {
+                    flash(if (enabled) "Auto-continue is on — a limit hit schedules its own continuation." else "Auto-continue is off.")
+                }
+            }
+        },
         openProviderControls = if (providerV2) {
             {
                 if (composerControls?.codexV2 == true) controlActions.onRequestCodex() else controlActions.onRequestOpencode()
@@ -602,7 +615,11 @@ fun Composer(
                 // chat-view.tsx:3709-3776: sessions Tether does not set say so above the well.
                 if (session != null && composerControls != null) {
                     if (composerControls.legacyCodexHint) LegacyCodexHintRow(session.provider)
+                    // T6.6 (chat-view.tsx:3718-3723): a read-only session says why, in words.
+                    if (session.readOnly) ReadOnlyRow()
                     composerControls.restored?.let { RestoredSettingsRow(session.provider, it) }
+                } else if (session?.readOnly == true) {
+                    ReadOnlyRow()
                 }
                 notice?.let { ComposerNotice(it) }
                 // T6.4 (chat-view.tsx:3780-3830): the todo bar, then the RUNNING background commands.
@@ -610,6 +627,14 @@ fun Composer(
                 progress?.let { TodoBar(it, session?.id) }
                 val runningCommands = remember(tree) { runningBackgroundCommands(tree) }
                 if (session != null) RunningCommandsBar(runningCommands, commandActions)
+                // T6.6 (chat-view.tsx:3814-3833): a handed-off source's composer is replaced by
+                // "Continued in →"; a read-only session's by the replay-only flag. No input, no keys.
+                val handedOff = !session?.handedOffTo.isNullOrEmpty()
+                if (session != null && handedOff) {
+                    HandoffLockRow(handoffTarget, onOpenSession)
+                } else if (session?.readOnly == true) {
+                    ReplayOnlyFlag(session.provider)
+                } else {
                 if (menuOpen) {
                     SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
                 }
@@ -678,7 +703,7 @@ fun Composer(
                         },
                         settingsKey = if (liveControls != null && !wideRow) {
                             { mod ->
-                                val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || handlers.openProviderControls != null
+                                val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || liveControls.autoContinue != null || handlers.openProviderControls != null
                                 SessionSettingsTrigger(
                                     label = liveControls.model?.label?.ifEmpty { null } ?: "Select model",
                                     provider = session!!.provider,
@@ -707,6 +732,7 @@ fun Composer(
                             interruptLock = liveness.interruptLock,
                         )
                     }
+                }
                 }
             }
         }

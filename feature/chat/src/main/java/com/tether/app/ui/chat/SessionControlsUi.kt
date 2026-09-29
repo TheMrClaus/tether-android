@@ -203,6 +203,8 @@ internal class ControlHandlers(
     val requestProviderControls: () -> Unit = {},
     /** Opens the session sheet at a view (the wide row's Fast key, round 2 I6). */
     val openSheet: (SheetView) -> Unit = {},
+    /** T6.6: set-auto-continue-on-limit (the flip of the drawn value; the Composer checks it). */
+    val setAutoContinue: (Boolean) -> Unit = {},
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -289,6 +291,21 @@ internal fun ComposerOptionsRow(
                 stateDescription = controlLockCopy(lock),
                 onClick = { handlers.openSheet(SheetView.Fast) },
                 testTag = "control-fast",
+            )
+        }
+        // T6.6 (chat-view.tsx:4331-4348): the Auto-continue checkbox; Check when on, Clock when off.
+        controls.autoContinue?.let { ac ->
+            ControlPill(
+                label = "Auto-continue",
+                icon = if (ac.on) TetherIcons.Check else TetherIcons.Clock,
+                enabled = enabled,
+                active = ac.on,
+                chevron = false,
+                role = Role.Checkbox,
+                contentDescription = "Auto-continue when the limit resets",
+                stateDescription = controlLockCopy(lock) ?: if (ac.on) "On" else "Off",
+                onClick = { handlers.setAutoContinue(!ac.on) },
+                testTag = "control-auto-continue",
             )
         }
         handlers.openProviderControls?.let { open ->
@@ -670,7 +687,7 @@ internal fun SessionSettingsTrigger(
 }
 
 /** The sheet's views (session-settings-sheet.tsx SheetView, plus Android's provider-controls view). */
-enum class SheetView { Root, Model, Effort, Mode, Fast, Approval, Provider }
+enum class SheetView { Root, Model, Effort, Mode, Fast, Approval, Provider, AutoContinue }
 
 /**
  * `SessionSettingsSheet` (components/session-settings-sheet.tsx) for a live session: a hub of rows
@@ -699,6 +716,7 @@ internal fun SessionSettingsSheet(
         SheetView.Fast -> "Fast mode"
         SheetView.Approval -> "Auto approve"
         SheetView.Provider -> "Provider controls"
+        SheetView.AutoContinue -> "Auto-continue"
     }
     val enabled = lock == null
     TetherSheet(
@@ -742,6 +760,9 @@ internal fun SessionSettingsSheet(
                                 else -> fastModeReasonCopy(fast.disabledReason) ?: "Off"
                             }
                             HubRow(TetherIcons.Zap, "Fast", value) { view = SheetView.Fast }
+                        }
+                        controls.autoContinue?.let { ac ->
+                            HubRow(TetherIcons.Clock, "Auto-continue", if (ac.on) "On" else "Off") { view = SheetView.AutoContinue }
                         }
                         if (providerPanel != null) {
                             HubRow(TetherIcons.SlidersHorizontal, "Provider controls", "") {
@@ -807,6 +828,16 @@ internal fun SessionSettingsSheet(
                     }
                 }
                 SheetView.Provider -> providerPanel?.invoke()
+                // session-settings-sheet.tsx:632-658: an Off / On list, like Fast.
+                SheetView.AutoContinue -> controls.autoContinue?.let { ac ->
+                    SheetHint("When on, a rate/usage limit hit in this session schedules its own continuation for right after the reset instead of just showing the prompt.")
+                    listOf(false, true).forEach { on ->
+                        ControlOptionRow(ControlOption(on.toString(), if (on) "On" else "Off"), selected = ac.on == on, armedRow = false, divider = false) {
+                            if (enabled && ac.on != on) handlers.setAutoContinue(on)
+                            done()
+                        }
+                    }
+                }
             }
         }
     }

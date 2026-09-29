@@ -124,6 +124,8 @@ internal fun ChatTranscript(
      * is fail-closed: every card renders disabled with "Connect to answer" and nothing is sent.
      */
     consent: ConsentActions = ConsentActions.Unavailable,
+    /** T6.6: what the notices' X and the limit card may do (fail-closed default: nothing is sent). */
+    notices: NoticeActions = NoticeActions.Unavailable,
     /** T6.3: `capabilities?.interactiveApprovals !== false` (chat-view.tsx:1929). */
     showApprovals: Boolean = true,
     /** T6.4: open a finished background command's output (its transcript chip). Keep it stable. */
@@ -131,7 +133,7 @@ internal fun ChatTranscript(
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
-    CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates) {
+    CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
         ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand)
     }
 }
@@ -354,7 +356,11 @@ private fun ChatRow(
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
             is ChatItem.Approval -> ApprovalCard(item.approval)
             is ChatItem.Question -> QuestionCard(item.question, answered = item.answered)
-            is ChatItem.Outcome -> OutcomeBadge(item.turn)
+            is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt)
+            is ChatItem.ProviderNotice -> ProviderNoticeRow(item.notice)
+            is ChatItem.Compaction -> CompactionRow(item.compaction)
+            is ChatItem.SessionNotice -> SessionNoticeRow(item.notice)
+            is ChatItem.RateLimit -> if (item.prompt.status == "awaiting_choice") RateLimitCard(item.prompt) else ScheduledResumeRow(item.prompt)
             is ChatItem.ToolGroup -> ToolActivityHeader(
                 summary = item.summary,
                 running = item.running,

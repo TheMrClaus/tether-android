@@ -132,8 +132,31 @@ internal sealed interface ChatItem {
         override val startsGroup: Boolean get() = true
     }
 
-    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean) : ChatItem {
+    /** A non-ok outcome; T6.6 [interrupt]: the turn's `turn_interrupted` notice (issue #184), if any. */
+    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean, val interrupt: InterruptNoticeView? = null) : ChatItem {
         override val key: String get() = "${turn.turnId}/outcome"
+    }
+
+    /** T6.6: a provider notice (Codex, or Claude's model fallback) of a turn, or of the session ([turnId] null). */
+    data class ProviderNotice(val turnId: String?, val notice: ProviderNoticeView, override val startsGroup: Boolean, override val tight: Boolean) : ChatItem {
+        override val key: String get() = (if (turnId != null) "$turnId/notice/" else "session-notice/") + notice.noticeId
+    }
+
+    /** T6.6: a Codex turn's "Context compacted" record. */
+    data class Compaction(val turnId: String, val compaction: CompactionView, override val startsGroup: Boolean, override val tight: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/compaction/${compaction.itemId}"
+    }
+
+    /** T6.6: an external-advancement or background-loss notice at the transcript foot. */
+    data class SessionNotice(val notice: SessionNoticeView, val ordinal: Int) : ChatItem {
+        override val key: String get() = "notice/${notice.dismissKey ?: "${notice.kind}#$ordinal"}"
+        override val startsGroup: Boolean get() = true
+    }
+
+    /** T6.6: the limit prompt, as its card (awaiting a choice) or its scheduled row. */
+    data class RateLimit(val prompt: RateLimitPromptView) : ChatItem {
+        override val key: String get() = "rate-limit/${prompt.resetsAt}/${prompt.status}"
+        override val startsGroup: Boolean get() = true
     }
 
     /** T6.4: a finished background `!` command, anchored where it was launched (a `.chat-scroll` child). */
@@ -236,6 +259,10 @@ internal fun buildChatItems(
     val treeTurns = tree?.get("turnsById") as? JsObj
     val stateTurns = state["turnsById"] as? JsObj
     // T6.4 (chat-view.tsx:3480-3528): finished background commands join the turns by launch time.
+    // T6.6: whose provider notices show (a rich Codex session's, a Claude session's), and the
+    // turn_interrupted accounts by turn.
+    val noticeLabel = noticeProviderLabel(projection.provider, richCodex)
+    val interrupts = interruptNoticesByTurn(state)
     val finishedBg = finishedBackgroundCommands(state)
     var bgIndex = 0
     var lastTs = 0.0
@@ -326,16 +353,40 @@ internal fun buildChatItems(
                 items.add(ChatItem.TurnDiff(turnId, it, opens(), tight()))
             }
             reviews(turnObj).forEach { items.add(ChatItem.TurnReview(turnId, it, opens(), tight())) }
+            // T6.6: `CodexNotices` (compactions first, then the turn's provider notices), same stack.
+            compactions(turnObj).forEach { items.add(ChatItem.Compaction(turnId, it, opens(), tight())) }
+            providerNotices(turnObj["providerNotices"], "Codex").forEach { items.add(ChatItem.ProviderNotice(turnId, it, opens(), tight())) }
+        } else if (noticeLabel == "Claude" && turnObj != null) {
+            // issue #179 (chat-view.tsx:3438): a Claude CLI model fallback, one `.notices` stack.
+            var inStack = false
+            providerNotices(turnObj["providerNotices"], "Claude").forEach {
+                items.add(ChatItem.ProviderNotice(turnId, it, opens(), inStack))
+                inStack = true
+            }
         }
         turnDenials?.trailing?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
         val blocksById = cardTurn?.get("blocksById") as? JsObj
         answeredList.filter { blocksById?.has(it.toolId) != true }.forEach { items.add(ChatItem.Answered(turnId, it, opens())) }
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))
-        if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
+        if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) {
+            items.add(ChatItem.Outcome(turn, opens(), if (turn.outcome == Vocab.OUTCOME_CANCELLED) interrupts[turnId] else null))
+        }
     }
     flushBg(Double.POSITIVE_INFINITY) // any command launched after the last turn
+    // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
+    if (noticeLabel != null) {
+        var inStack = false
+        providerNotices(state["providerNotices"], noticeLabel).forEach {
+            items.add(ChatItem.ProviderNotice(null, it, startsGroup = !inStack, tight = inStack))
+            inStack = true
+        }
+    }
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
+    // T6.6 (chat-view.tsx:3555-3604): external advancement / background loss.
+    sessionNotices(state).forEachIndexed { i, n -> items.add(ChatItem.SessionNotice(n, i)) }
     if (showApprovals) pendingApprovals(state, consentSessionId).forEach { items.add(ChatItem.Approval(it)) }
+    // T6.6 (chat-view.tsx:3628-3652): the limit card or its scheduled row, before the questions.
+    rateLimitPrompt(state)?.let { items.add(ChatItem.RateLimit(it)) }
     val answeredIds = answeredRequestIds(state)
     pendingQuestions(state, consentSessionId).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items

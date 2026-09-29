@@ -256,7 +256,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         )
                     }
                 },
-                inspector = { session?.let { InterimTelemetry(it) } },
+                inspector = { session?.let { InterimTelemetry(it, sessionView) } },
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
                 gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
@@ -449,7 +449,7 @@ private fun copyToClipboard(context: Context, label: String, text: String) {
  * panel's body until the inspector (T9.1) fills the slot.
  */
 @Composable
-private fun InterimTelemetry(session: AgentSession) {
+private fun InterimTelemetry(session: AgentSession, state: SessionView? = null) {
     val t = LocalTetherTokens.current
     val rows = buildList {
         add("Provider" to session.provider)
@@ -474,6 +474,9 @@ private fun InterimTelemetry(session: AgentSession) {
             Text(value, color = t.ink, fontFamily = JetBrainsMono, fontSize = 11.8.sp, modifier = Modifier.weight(0.6f))
         }
     }
+    // T6.6 (inspector.tsx:520-556): the limit notice (Wrap-Up while it covers the turn) and MCP health.
+    com.tether.app.ui.inspector.InspectorLimitNotice(state)
+    com.tether.app.ui.inspector.InspectorMcpHealth(session.provider, session.engineGeneration, state)
 }
 
 /** Fixed-bottom error toast: danger-wash surface, 1px brick border. */

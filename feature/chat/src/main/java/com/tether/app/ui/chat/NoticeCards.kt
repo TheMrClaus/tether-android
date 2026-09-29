@@ -1,9 +1,7 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -35,7 +32,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -54,6 +50,8 @@ import com.tether.app.client.NoticeResult
 import com.tether.app.client.SessionControl
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
@@ -429,7 +427,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
-            val phone = currentLayoutClass() == com.tether.app.ui.theme.TetherLayoutClass.Phone
+            val phone = currentLayoutClass() == TetherLayoutClass.Phone
             // globals.css:8546 (phone): each key takes the full row.
             val keyModifier = (if (phone) Modifier.fillMaxWidth() else Modifier).refuseObscuredTouches(blocked)
             TetherKey(
@@ -517,19 +515,3 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
         }
     }
 }
-
-/** Unused-import guard for the shared border helper (kept for the Studio notice edge). */
-@Suppress("unused")
-private val borderRef: (Modifier) -> Modifier = { it.border(0.dp, androidx.compose.ui.graphics.Color.Transparent) }
-
-/** Keeps [ImageVector] referenced for the icon helpers above. */
-@Suppress("unused")
-private typealias NoticeIcon = ImageVector
-
-/** Semantics helper: an explicit click action for TalkBack (never a second path to the wire). */
-@Suppress("unused")
-private fun Modifier.noticeAction(label: String, action: () -> Unit): Modifier = semantics { onClick(label) { action(); true } }
-
-/** Keeps the interaction-source import honest for callers that pass one. */
-@Suppress("unused")
-private fun noticeInteraction(): MutableInteractionSource = MutableInteractionSource()
