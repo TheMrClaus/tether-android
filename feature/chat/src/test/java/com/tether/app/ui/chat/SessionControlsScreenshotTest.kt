@@ -28,9 +28,11 @@ import org.robolectric.annotation.Config
  * "Auto" spoken) and the danger hint; `codex-row` = the Codex catalogs' Model / Effort / Mode, Auto
  * off, and the Provider controls key; `unknown-row` (round 2) = a Claude session whose stored mode
  * this app does not know ("Unknown mode (dontAsk)", warning edge and hint) and the Fast key (I6).
+ * T6.6: `auto-continue-confirm` = the Android-only confirmation before Auto-continue goes on (a
+ * primary key with the Clock glyph: a grant, not a danger posture).
  * The idle Claude row is composer-idle's tablet golden.
  */
-enum class ControlsShot(val id: String) { Sheet("sheet"), Mode("mode"), Confirm("confirm"), CodexPanel("codex-panel") }
+enum class ControlsShot(val id: String) { Sheet("sheet"), Mode("mode"), Confirm("confirm"), CodexPanel("codex-panel"), AutoContinueConfirm("auto-continue-confirm") }
 
 enum class RowShot(val id: String) { Opencode("opencode-row"), Codex("codex-row"), Unknown("unknown-row") }
 
@@ -73,6 +75,10 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapSheet(shot: Control
             onNodeWithTag("control-option-${ModeVocabulary.AUTO}").performClick(); step(700)
         }
         ControlsShot.CodexPanel -> { onNodeWithTag("sheet-row-Provider controls").performClick(); step(700) }
+        ControlsShot.AutoContinueConfirm -> {
+            onNodeWithTag("sheet-row-Auto-continue").performClick(); step(700)
+            onNodeWithTag("control-option-true").performClick(); step(700)
+        }
     }
     captureScreenRoboImage("src/test/screenshots/$name/${skin.id}-$size.png", roborazziOptions = exact)
 }

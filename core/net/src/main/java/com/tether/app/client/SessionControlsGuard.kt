@@ -52,8 +52,10 @@ sealed interface SessionControl {
     /**
      * T6.6 `set-auto-continue-on-limit` (v101, Claude / Codex): [enabled] is the flip of the value the
      * toggle was drawn with, and is refused once the session already holds it (another device moved it).
+     * Turning it ON is a grant (the session will start a turn by itself after the reset): it needs
+     * [confirmed] (Android addition; the web toggles it without asking).
      */
-    data class AutoContinueOnLimit(val enabled: Boolean) : SessionControl
+    data class AutoContinueOnLimit(val enabled: Boolean, val confirmed: Boolean = false) : SessionControl
 
     /**
      * T6.6 `rate-limit-resume` (v88): one of the limit card's three choices, bound to the [resetsAt] of
@@ -101,6 +103,7 @@ fun SessionControl.confirmedCopy(): SessionControl? = when (this) {
     is SessionControl.Mode -> copy(confirmed = true)
     is SessionControl.CodexAutoApprove -> copy(confirmed = true)
     is SessionControl.OpencodeMode -> copy(confirmed = true)
+    is SessionControl.AutoContinueOnLimit -> if (enabled) copy(confirmed = true) else null
     else -> null
 }
 
@@ -179,7 +182,11 @@ object SessionControlsGuard {
             is SessionControl.FastMode ->
                 if (provider == "claude" && ComposerControlsModel.activeModel(session, controls)?.supportsFastMode == true) null else ControlResult.NotOffered
             is SessionControl.AutoContinueOnLimit ->
-                if (offered.autoContinue != null && control.enabled != session.autoContinueOnLimit) null else ControlResult.NotOffered
+                when {
+                    offered.autoContinue == null || control.enabled == session.autoContinueOnLimit -> ControlResult.NotOffered
+                    control.enabled && !control.confirmed -> ControlResult.NeedsConfirmation
+                    else -> null
+                }
             is SessionControl.RateLimitResume -> rateLimitResumeOffered(tree, control)
             is SessionControl.CodexModelSelection -> {
                 val snap = codexV2(session, codex) ?: return ControlResult.NotOffered

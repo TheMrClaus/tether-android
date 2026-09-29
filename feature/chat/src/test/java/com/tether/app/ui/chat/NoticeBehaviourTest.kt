@@ -278,16 +278,70 @@ class AutoContinueBehaviourTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
     private val h = ControlsHost(rule)
 
-    @Test
-    fun theSheetSendsExactlyTheFlipAndNothingElse() {
-        h.show()
-        h.arm()
+    private fun openAutoContinueSheet() {
         h.click("session-settings-trigger")
         rule.onNodeWithText("Auto-continue", useUnmergedTree = true).performClick()
         h.settle()
+    }
+
+    @Test
+    fun turningItOnOnlyAsksAndTheArmedConfirmationSendsTheGrant() {
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        h.arm()
         rule.onNodeWithText("On", useUnmergedTree = true).performClick()
         h.settle()
-        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
+        assertTrue("choosing On only asks", h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
+        rule.onNodeWithText(AUTO_CONTINUE_CONFIRM_BODY).assertExists()
+        // The confirm key is armed too.
+        h.click("escalation-confirm")
+        assertTrue(h.recorder.sent.isEmpty())
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true, confirmed = true)), h.recorder.sent)
+    }
+
+    @Test
+    fun theConfirmationIsBoundToTheToggleItWasOpenedFor() {
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        h.arm()
+        rule.onNodeWithText("On", useUnmergedTree = true).performClick()
+        h.settle()
+        // Another device turned it on under the dialog: confirming sends nothing, and it closes.
+        h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
+        h.arm()
+        h.click("escalation-confirm")
+        assertTrue(h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+    }
+
+    @Test
+    fun theSheetRowsAreArmed() {
+        h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        // A tap aimed at what was there before the list appeared lands on nothing.
+        rule.onNodeWithTag("control-option-false").assertIsNotEnabled().performClick()
+        h.settle(0)
+        assertTrue(h.recorder.sent.isEmpty())
+    }
+
+    @Test
+    fun turningItOffWithdrawsTheGrantWithoutAsking() {
+        h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
+        h.show()
+        h.arm()
+        openAutoContinueSheet()
+        h.arm()
+        rule.onNodeWithText("Off", useUnmergedTree = true).performClick()
+        h.settle()
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(false)), h.recorder.sent)
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
     }
 
     @Test
@@ -309,5 +363,32 @@ class AutoContinueBehaviourTest {
         h.arm()
         h.click("session-settings-trigger")
         rule.onNodeWithText("Auto-continue").assertDoesNotExist()
+    }
+}
+
+/** T6.6: the Auto-continue key in the wide row (from 64rem): armed, and a grant that asks first. */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class AutoContinueTabletBehaviourTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+    private val h = ControlsHost(rule)
+
+    @Test
+    fun theKeyIsArmedAndOnlyAsks() {
+        h.show()
+        h.click("control-auto-continue")
+        assertTrue("the key is armed", h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+        h.arm()
+        h.click("control-auto-continue")
+        assertTrue(h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true, confirmed = true)), h.recorder.sent)
+        h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
+        h.arm()
+        h.click("control-auto-continue")
+        assertEquals(SessionControl.AutoContinueOnLimit(false), h.recorder.sent.last())
     }
 }

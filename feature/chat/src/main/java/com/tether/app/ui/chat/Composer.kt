@@ -285,6 +285,9 @@ fun Composer(
                 Escalation(ComposerControlsModel.opencodeAgentLabel(control.mode, agent?.label ?: ""), escalationBody(agent?.hint?.ifEmpty { null }), confirmed)
             }
             is SessionControl.CodexAutoApprove -> Escalation("Auto approve", escalationBody(c?.auto?.hint), confirmed)
+            // T6.6: only while the toggle is still drawn "off" (the grant it offers).
+            is SessionControl.AutoContinueOnLimit ->
+                c?.autoContinue?.takeIf { !it.on && control.enabled }?.let { Escalation("Auto-continue", AUTO_CONTINUE_CONFIRM_BODY, confirmed, danger = false) }
             else -> null
         }
     }
@@ -403,11 +406,14 @@ fun Composer(
         setFast = { enabled -> sendControl(SessionControl.FastMode(enabled)) },
         setAutoApprove = { on -> if (on != composerControls?.auto?.on) toggleAuto() },
         // T6.6 (chat-view.tsx:2480): exactly the flip of the value the toggle was drawn with.
+        // Turning it on is a grant: it only asks (the confirmation sends); turning it off sends.
         setAutoContinue = { enabled ->
             val ac = composerControls?.autoContinue
             if (ac != null && enabled != ac.on) {
-                if (sendControl(SessionControl.AutoContinueOnLimit(enabled))) {
-                    flash(if (enabled) "Auto-continue is on — a limit hit schedules its own continuation." else "Auto-continue is off.")
+                if (enabled) {
+                    escalation = escalationFor(SessionControl.AutoContinueOnLimit(true))
+                } else if (sendControl(SessionControl.AutoContinueOnLimit(false))) {
+                    flash(AUTO_CONTINUE_OFF_FLASH)
                 }
             }
         },
@@ -771,6 +777,7 @@ fun Composer(
         EscalationDialog(
             label = pending.label,
             body = pending.body,
+            danger = pending.danger,
             sessionName = session?.name,
             onConfirm = {
                 // Round 3 (I-a): what is confirmed is what is on screen now; if the row moved under
@@ -782,7 +789,7 @@ fun Composer(
                     escalation = fresh
                 } else {
                     escalation = null
-                    sendControl(pending.control)
+                    if (sendControl(pending.control) && pending.control is SessionControl.AutoContinueOnLimit) flash(AUTO_CONTINUE_ON_FLASH)
                 }
             },
             onCancel = { escalation = null },
@@ -791,7 +798,13 @@ fun Composer(
 }
 
 /** A most-permissive change waiting for the operator's confirmation (never saved: a restore drops it). */
-internal class Escalation(val label: String, val body: String, val control: SessionControl)
+internal class Escalation(val label: String, val body: String, val control: SessionControl, val danger: Boolean = true)
+
+/** T6.6: the auto-continue grant's confirmation (the web's toggle title, said before it is on). */
+internal const val AUTO_CONTINUE_CONFIRM_BODY =
+    "A rate/usage limit hit in this session will schedule its own continuation for right after the reset, without asking. It stays on for this session until you switch it back."
+internal const val AUTO_CONTINUE_ON_FLASH = "Auto-continue is on — a limit hit schedules its own continuation."
+internal const val AUTO_CONTINUE_OFF_FLASH = "Auto-continue is off."
 
 /** `/model <arg>`: the argument after the command name. */
 private val MODEL_ARG = Regex("^/model\\s+(.+)$", RegexOption.DOT_MATCHES_ALL)

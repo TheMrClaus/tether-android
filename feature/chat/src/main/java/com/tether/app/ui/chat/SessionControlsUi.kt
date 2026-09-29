@@ -295,10 +295,13 @@ internal fun ComposerOptionsRow(
         }
         // T6.6 (chat-view.tsx:4331-4348): the Auto-continue checkbox; Check when on, Clock when off.
         controls.autoContinue?.let { ac ->
+            // Armed like the Auto chip: a tap aimed at what was there before lands on nothing.
+            val arming = rememberArmedControl("auto-continue" to ac.on, enabled)
             ControlPill(
                 label = "Auto-continue",
                 icon = if (ac.on) TetherIcons.Check else TetherIcons.Clock,
-                enabled = enabled,
+                enabled = enabled && arming.armed,
+                modifier = arming.modifier,
                 active = ac.on,
                 chevron = false,
                 role = Role.Checkbox,
@@ -832,7 +835,7 @@ internal fun SessionSettingsSheet(
                 SheetView.AutoContinue -> controls.autoContinue?.let { ac ->
                     SheetHint("When on, a rate/usage limit hit in this session schedules its own continuation for right after the reset instead of just showing the prompt.")
                     listOf(false, true).forEach { on ->
-                        ControlOptionRow(ControlOption(on.toString(), if (on) "On" else "Off"), selected = ac.on == on, armedRow = false, divider = false) {
+                        ControlOptionRow(ControlOption(on.toString(), if (on) "On" else "Off"), selected = ac.on == on, armedRow = true, divider = false) {
                             if (enabled && ac.on != on) handlers.setAutoContinue(on)
                             done()
                         }
@@ -930,7 +933,7 @@ internal fun SheetHint(text: String, warning: Boolean = false) {
  * only its tap sends, with the confirmation flag the client requires.
  */
 @Composable
-internal fun EscalationDialog(label: String, body: String, sessionName: String?, onConfirm: () -> Unit, onCancel: () -> Unit) {
+internal fun EscalationDialog(label: String, body: String, sessionName: String?, onConfirm: () -> Unit, onCancel: () -> Unit, danger: Boolean = true) {
     val arming = rememberArmedControl(Triple("escalation", label, body), true)
     TetherDialog(
         onDismiss = onCancel,
@@ -940,9 +943,9 @@ internal fun EscalationDialog(label: String, body: String, sessionName: String?,
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel")
             TetherKey(
                 onClick = { if (arming.armed) onConfirm() },
-                classes = KeyClasses.ButtonDanger,
+                classes = if (danger) KeyClasses.ButtonDanger else KeyClasses.ButtonPrimary,
                 label = "Turn on \u2068$label\u2069",
-                icon = TetherIcons.Zap,
+                icon = if (danger) TetherIcons.Zap else TetherIcons.Clock,
                 enabled = arming.armed,
                 modifier = arming.modifier.testTag("escalation-confirm"),
             )
