@@ -67,9 +67,12 @@ Divergences from the web, on purpose:
   250ms while the command streams, so a runaway command cannot lay out an unbounded text or rebuild it per chunk;
   the web draws every folded segment. Every line keeps its full 1.5 leading as a `<pre>`'s line boxes do (round 2
   re-recorded the 8 `subrun-output` goldens for this: the sheet is a few px taller). The client also caps every
-  command's folded output at 256K characters in each tree it publishes (live folds, hydration, mirror rebuilds,
-  snapshots; 4x the server's 64 KiB stream cap, so a conforming server never reaches it; the fold itself stays
-  the web's, which has no cap), and a command it trimmed keeps reading "Live view truncated".
+  command's folded output in each tree it publishes (live folds, hydration, mirror rebuilds, snapshots) at 256K
+  characters in at most 4,096 segments, dropping empty ones (4x the server's 64 KiB stream cap, so a conforming
+  server never reaches the character bound; the fold itself stays the web's, which has no cap). Only commands
+  that changed are scanned. "Live view truncated" shows when the server says so or the kept output is at a
+  bound, so it survives a restart and clears on a legitimate full snapshot.
+- A command label with nothing visible reads "(blank command)"; directional marks are removed too.
 - A run tab follows new steps only while the reader is at its bottom (a hand drag upward stops it; reaching the end
   again resumes it), the transcript's rule; the web's panel has no follow logic of its own.
 - A run tab is a lazy list, one row per step (the web renders the whole stream), and a sub-agent thread under
