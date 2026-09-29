@@ -170,7 +170,12 @@ internal fun SessionRow(
     workspace: String,
     active: Boolean,
     now: Long,
-    /** T13.2: this row's freshness while the list is not live (null = the list is live). */
+    /**
+     * T13.2 r2: the list is not live (no connection). The row's status then says "was" on a still
+     * dot whatever [sync] holds, and End session is disabled: a saved list never ends a session.
+     */
+    offline: Boolean,
+    /** T13.2: this row's freshness while the list is not live (null = none known): the glyph and age only. */
     sync: com.tether.app.client.SessionSync? = null,
     armed: Boolean,
     onArm: (String?) -> Unit,
@@ -196,10 +201,12 @@ internal fun SessionRow(
     val updatedAt = SidebarModel.rowUpdatedAt(entry)
     val mode = (Web.sidebarSessionMode(entry.js) as? com.tether.app.protocol.tree.JsStr)?.value
     val endable = live != null && !live.runtimeArchived
+    // T13.2 r2: shown but inert while offline (the client refuses an End session then, too).
+    val endLive = endable && !offline
     val location = SidebarModel.rowLocation(entry, workspace)
     val unseen = Web.hasUnseenWork(entry.js)
     val digest = entry.history?.digest?.takeIf { entry.js["digest"] != null }
-    val swipeEnabled = phone && endable
+    val swipeEnabled = phone && endLive
 
     // ── swipe (mobile shortcut; the X stays the primary end control, issue #175) ──
     val swipeX = remember { Animatable(if (swipedSeed && swipeEnabled) -ARCHIVE_WIDTH else 0f) }
@@ -388,7 +395,7 @@ internal fun SessionRow(
                     .weight(1f)
                     .heightIn(min = 3.5f.rem)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, sync)
+                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync)
                         if (active) selected = true
                     }
                     .clickable(role = Role.Button) {
@@ -430,7 +437,7 @@ internal fun SessionRow(
                             ModeTag(mode)
                         }
                     }
-                    StatusLine(entry, now, updatedAt, sync)
+                    StatusLine(entry, now, updatedAt, offline, sync)
                     digest?.let { d ->
                         Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
                             if (d.newTurns > 0) {
@@ -454,10 +461,15 @@ internal fun SessionRow(
                         .size(if (phone) 2.75f.rem else 1.75f.rem)
                         .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
                         .semantics {
-                            contentDescription = if (armed) "Tap again to end $name" else "End $name"
+                            contentDescription = when {
+                                !endLive -> "End $name, unavailable: connect to end it"
+                                armed -> "Tap again to end $name"
+                                else -> "End $name"
+                            }
                             role = Role.Button
                         }
-                        .clickable {
+                        .alpha(if (endLive) 1f else 0.55f)
+                        .clickable(enabled = endLive) {
                             if (armed) {
                                 onArm(null)
                                 actions.onEndSession(live.id)
@@ -465,11 +477,11 @@ internal fun SessionRow(
                                 onArm(entry.key)
                             }
                         }
-                        .then(if (armed) Modifier.background(t.dangerWash, endShape) else Modifier)
+                        .then(if (armed && endLive) Modifier.background(t.dangerWash, endShape) else Modifier)
                         .testTag(SidebarTags.end(entry.key)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (armed) {
+                    if (armed && endLive) {
                         Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
                     } else {
                         SmallIcon(TetherIcons.X, t.faint, 11.dp)
@@ -501,7 +513,7 @@ private fun ModeTag(mode: String) {
  * AND the words — status is never colour alone. A history-only row shows "8m ago".
  */
 @Composable
-private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, sync: com.tether.app.client.SessionSync? = null) {
+private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val studio = t.studio
@@ -510,8 +522,9 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, sync: co
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap
     // whole at a large font instead of squeezing. A live row keeps its single line.
-    StatusFlow(wrap = sync != null && live != null) {
-        val was = if (live != null && sync != null) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
+    StatusFlow(wrap = offline && live != null) {
+        // r2: offline, "was" whether or not the client has an entry for the row.
+        val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
         if (live != null && was != null) {
             // T13.2: a saved list never claims the agent is running or waiting on you now: the
             // words say "was", on a faint still dot (no spinner, no violet ping).
@@ -564,7 +577,8 @@ private fun rowDescription(
     now: Long,
     updatedAt: Long,
     location: String?,
-    sync: com.tether.app.client.SessionSync? = null,
+    offline: Boolean,
+    sync: com.tether.app.client.SessionSync?,
 ): String = buildString {
     append(name)
     if (unseen) append(", changed since you last looked")
@@ -575,7 +589,7 @@ private fun rowDescription(
     }
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     val live = entry.live
-    val was = if (live != null && sync != null) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
+    val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
     if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: live.status}, $rel")
     else append(", $rel ago")
     // T13.2: the full sentence the row's glyph stands for.

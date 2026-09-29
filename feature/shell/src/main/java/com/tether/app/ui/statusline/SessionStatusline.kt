@@ -67,10 +67,16 @@ fun SessionStatusline(
     horizontalArrangement: Arrangement.Horizontal = Arrangement.End,
     wrap: Boolean = true,
     env: () -> ReadingEnv = ReadingEnv::current,
+    /**
+     * T13.2 r2 (SYNC_DESIGN §4.2): the words qualifying readings from a copy that is not live;
+     * null while live. The strip is then frozen (no re-read on its own clock), its values neutral,
+     * and TalkBack hears the qualifier with the group.
+     */
+    stale: String? = null,
 ) {
-    val tick = rememberWrapUpExpiry(state, env)
+    val tick = rememberWrapUpExpiry(state.takeIf { stale == null }, env)
     val segments = remember(metrics, state, tick) { buildStatusSegments(metrics, state, env()) }
-    StatuslineSegments(segments, modifier, horizontalArrangement, wrap)
+    StatuslineSegments(segments, modifier, horizontalArrangement, wrap, stale)
 }
 
 /**
@@ -97,6 +103,8 @@ fun StatuslineSegments(
     modifier: Modifier = Modifier,
     horizontalArrangement: Arrangement.Horizontal = Arrangement.End,
     wrap: Boolean = true,
+    /** T13.2 r2: see [SessionStatusline]'s `stale`. */
+    stale: String? = null,
 ) {
     if (segments.isEmpty()) return
     val t = LocalTetherTokens.current
@@ -105,7 +113,7 @@ fun StatuslineSegments(
         modifier
             // `.statusline { min-width: 4.5rem }`
             .widthIn(min = (4.5f * TetherTypography.SP_PER_REM).dp)
-            .semantics { isTraversalGroup = true; contentDescription = "Session telemetry" },
+            .semantics { isTraversalGroup = true; contentDescription = if (stale == null) "Session telemetry" else "Session telemetry, $stale" },
     ) {
         // Container queries read the strip's own width in rem (1rem = 16sp: scales with the font).
         val widthRem = if (constraints.hasBoundedWidth) maxWidth.value / (TetherTypography.SP_PER_REM * fontScale) else Float.MAX_VALUE
@@ -118,10 +126,10 @@ fun StatuslineSegments(
                 horizontalArrangement = gap,
                 verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
                 itemVerticalAlignment = Alignment.CenterVertically,
-            ) { shown.forEach { Segment(it, fit.showTrack, t, elasticWeight = false) } }
+            ) { shown.forEach { Segment(it, fit.showTrack, t, elasticWeight = false, stale = stale != null) } }
         } else {
             Row(Modifier.fillMaxWidth().clipToBounds(), horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
-                shown.forEach { Segment(it, fit.showTrack, t, elasticWeight = true) }
+                shown.forEach { Segment(it, fit.showTrack, t, elasticWeight = true, stale = stale != null) }
             }
         }
     }
@@ -147,11 +155,14 @@ private val StatuslineText = TextStyle(
  * unabbreviated reading (its web `title`), plus the bar's level when it has one.
  */
 @Composable
-private fun RowScope.Segment(segment: StatusSegment, showTrack: Boolean, t: TetherTokens, elasticWeight: Boolean) {
-    val valueColor = when (segment.effectiveTone) {
-        UsageTone.None -> t.ink
-        UsageTone.High -> t.warning
-        UsageTone.Critical -> t.danger
+private fun RowScope.Segment(segment: StatusSegment, showTrack: Boolean, t: TetherTokens, elasticWeight: Boolean, stale: Boolean = false) {
+    val valueColor = when {
+        stale -> t.faint
+        else -> when (segment.effectiveTone) {
+            UsageTone.None -> t.ink
+            UsageTone.High -> t.warning
+            UsageTone.Critical -> t.danger
+        }
     }
     Row(
         modifier = (if (segment.elastic && elasticWeight) Modifier.weight(1f, fill = false) else Modifier)

@@ -30,3 +30,27 @@ enum class Freshness {
  * A saved copy must never claim the agent is doing anything NOW: only [Freshness.Live] may.
  */
 data class SessionSync(val freshness: Freshness, val lastVerifiedAt: Long?, val partial: Boolean = false)
+
+/**
+ * T13.2 r2 (SYNC_DESIGN §4.2 wired into T6.3's lock): the ONE rule for whether a session's shown
+ * copy may drive a live action (an approval or question card, a Stop or Interrupt key, a session
+ * control, End session). Every screen asks this; the client re-checks its own live set under its
+ * lock before any frame leaves, so this only decides what is enabled.
+ */
+object LiveCopy {
+    /**
+     * Live only when the client confirmed [sessionId] on this connection ([liveSessions]) AND its
+     * freshness says so:
+     * - an entry ([sync]) must be [Freshness.Live]; every other value (Saved, CatchingUp,
+     *   NotDownloaded, and any added later) is not live;
+     * - a MISSING entry is not live whenever the client reports freshness at all
+     *   ([reportsFreshness]): "nothing known" never unlocks a control;
+     * - a client that reports no freshness ([reportsFreshness] false, the interface default) keeps
+     *   the T6.3 rule: [liveSessions] alone decides.
+     */
+    fun isLive(sessionId: String?, liveSessions: Set<String>, sync: SessionSync?, reportsFreshness: Boolean): Boolean {
+        if (sessionId == null || sessionId !in liveSessions) return false
+        if (sync != null) return sync.freshness == Freshness.Live
+        return !reportsFreshness
+    }
+}

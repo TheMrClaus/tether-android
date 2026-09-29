@@ -75,6 +75,12 @@ fun ContextGauge(
     title: String? = null,
     interactionSource: MutableInteractionSource? = null,
     env: () -> ReadingEnv = ReadingEnv::current,
+    /**
+     * T13.2 r2 (SYNC_DESIGN §4.2): the words qualifying a reading from a copy that is not live
+     * ("Saved copy · updated 12 min ago"); null while live. The needle turns neutral and TalkBack
+     * hears the qualifier after the reading, so a saved copy's gauge never reads as now.
+     */
+    stale: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -109,7 +115,7 @@ fun ContextGauge(
             .cssSurface(shape, face, shadows = shadows)
             .then(interactive)
             .semantics {
-                contentDescription = reading.text
+                contentDescription = if (stale == null) reading.text else "${reading.text}, $stale"
                 if (pressed != null) stateDescription = if (pressed) "Pressed" else "Not pressed"
             }
             .defaultMinSize(minWidth = TetherDimens.touchTargetDp, minHeight = TetherDimens.touchTargetDp)
@@ -118,7 +124,7 @@ fun ContextGauge(
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GaugeDial(reading, t, Modifier.size(GaugeGlyphSize))
+        GaugeDial(reading, t, Modifier.size(GaugeGlyphSize), stale = stale != null)
         if (showLabel) {
             Text(
                 label,
@@ -142,11 +148,15 @@ fun ContextGauge(
  * `--slate`; the needle is drawn only for a reading above 0.
  */
 @Composable
-private fun GaugeDial(reading: GaugeReading, t: TetherTokens, modifier: Modifier) {
-    val needle = when (reading.tone) {
+private fun GaugeDial(reading: GaugeReading, t: TetherTokens, modifier: Modifier, stale: Boolean = false) {
+    val needle = when {
+        // T13.2 r2: a saved copy's reading is neutral ink (stale is neither focus nor an alarm).
+        stale -> t.faint
+        else -> when (reading.tone) {
         UsageTone.None -> t.violet
         UsageTone.High -> t.warning
         UsageTone.Critical -> t.danger
+        }
     }
     Canvas(modifier) {
         val unit = size.minDimension / 24f

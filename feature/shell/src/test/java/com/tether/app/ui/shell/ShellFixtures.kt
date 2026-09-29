@@ -76,6 +76,7 @@ fun ShellUnderTest(
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
+          LiveUnlessProvided(session) {
             PhoneShell(
                 state = state,
                 session = session,
@@ -100,6 +101,27 @@ fun ShellUnderTest(
                 ),
                 slots = placeholderSlots(),
             )
+          }
         }
     }
 }
+
+/**
+ * T13.2 r2: the shell's own default ([ShellFreshness.None]) claims nothing (no live list, no live
+ * session). A shell under test is the live one unless the test provides its freshness itself.
+ */
+@Composable
+fun LiveUnlessProvided(session: AgentSession?, content: @Composable () -> Unit) {
+    if (LocalShellFreshness.current !== ShellFreshness.None) {
+        content()
+        return
+    }
+    CompositionLocalProvider(LocalShellFreshness provides liveShellFreshness(session?.id), content = content)
+}
+
+/** A live link with [sessionId] confirmed and Live on it. */
+fun liveShellFreshness(sessionId: String?) = ShellFreshness(
+    syncStates = sessionId?.let { mapOf(it to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null)) }.orEmpty(),
+    listLive = true,
+    liveSessions = setOfNotNull(sessionId),
+)

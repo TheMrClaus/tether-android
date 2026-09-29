@@ -451,7 +451,17 @@ class FakeTetherClient : TetherClient {
         }
     }
 
-    override fun interrupt(sessionId: String) {
+    // T13.2 r2: the real client's contract: bound to the (demo) server the key was drawn for, and
+    // only for a listed session that may be driven (every listed demo session is live).
+    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult {
+        if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.InterruptResult.NotLive
+        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return com.tether.app.client.InterruptResult.Locked
+        if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return com.tether.app.client.InterruptResult.Locked
+        interruptTurn(sessionId)
+        return com.tether.app.client.InterruptResult.Sent
+    }
+
+    private fun interruptTurn(sessionId: String) {
         streamJob?.cancel()
         updateProjection(sessionId) { p ->
             val turnId = p.activeTurnId ?: return@updateProjection p
@@ -635,7 +645,9 @@ class FakeTetherClient : TetherClient {
         _sessions.update { list -> list.filterNot { it.id == sessionId } }
     }
 
-    override fun kill(sessionId: String) {
+    override fun kill(sessionId: String, requireLive: Boolean) {
+        // The demo is always connected and every listed session live: only an unlisted one is refused.
+        if (_sessions.value.none { it.id == sessionId }) return
         val ts = System.currentTimeMillis()
         _sessions.update { list ->
             // The server archives a killed session (the sidebar's "Archived" group, T5.1).

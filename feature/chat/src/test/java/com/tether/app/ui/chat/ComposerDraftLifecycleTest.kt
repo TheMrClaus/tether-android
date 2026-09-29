@@ -101,6 +101,7 @@ class ComposerDraftLifecycleTest {
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
                         onRequestControls = {},
+                        liveness = ComposerLiveness.Live,
                         initialDraft = model.loadedDraft(id),
                         awaitDraft = { model.awaitDraft(id) },
                         onDraftChange = { model.setDraft(id, it) },

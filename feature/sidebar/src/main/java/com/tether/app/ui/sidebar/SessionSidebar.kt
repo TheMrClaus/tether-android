@@ -130,6 +130,7 @@ object SidebarTags {
     const val AddWorkspace = "sidebar-add-workspace"
     fun row(key: String) = "sidebar-row:$key"
     fun freshness(key: String) = "sidebar-freshness:$key"
+    fun blockDot(workspace: String) = "sidebar-block-dot:$workspace"
     fun handle(key: String) = "sidebar-handle:$key"
     fun end(key: String) = "sidebar-end:$key"
     fun archive(key: String) = "sidebar-archive:$key"
@@ -763,7 +764,7 @@ private fun WorkspaceBlock(
             .semantics { contentDescription = block.name },
         verticalArrangement = Arrangement.spacedBy(0.15f.rem),
     ) {
-        BlockHeader(block, actions)
+        BlockHeader(block, actions, offline = !state.connected)
         if (!block.collapsed) {
             Column(
                 Modifier.padding(start = if (studio) 0.dp else 0.3f.rem, top = if (studio) 0.3f.rem else 0.dp, bottom = if (studio) 0.1f.rem else 0.dp),
@@ -776,7 +777,10 @@ private fun WorkspaceBlock(
                             workspace = block.workspace,
                             active = SidebarViewModel.isActiveEntry(state, e),
                             now = state.now,
-                            // T13.2: offline, the row's status is from a saved list (SYNC_DESIGN §4.2).
+                            // T13.2: offline, the row's status is from a saved list (SYNC_DESIGN §4.2):
+                            // r2: it says "was" whether or not the client has an entry for it; the
+                            // entry only adds the copy's glyph and age.
+                            offline = !state.connected,
                             sync = if (state.connected) null else e.live?.id?.let { state.syncStates[it] },
                             armed = armedKey == e.key,
                             onArm = onArm,
@@ -833,7 +837,7 @@ private fun WorkspaceBlock(
 
 /** `.workspace-block-header` (globals.css 3035-3137; studio.css 317-322). */
 @Composable
-private fun BlockHeader(block: BlockView, actions: SidebarActions) {
+private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val studio = t.studio
@@ -859,7 +863,13 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions) {
                         append(if (block.collapsed) "Collapsed" else "Expanded")
                         if (block.isCurrent) append(", current workspace")
                         block.activity?.let { a ->
-                            if (a.waiting > 0) append(", ${a.waiting} waiting") else if (a.active > 0) append(", ${a.active} active")
+                            // T13.2 r2: from a saved list the counts are what WAS, never "waiting" now.
+                            when {
+                                offline && a.waiting > 0 -> append(", ${a.waiting} ${if (a.waiting == 1) "was" else "were"} waiting")
+                                offline && a.active > 0 -> append(", ${a.active} ${if (a.active == 1) "was" else "were"} active")
+                                a.waiting > 0 -> append(", ${a.waiting} waiting")
+                                a.active > 0 -> append(", ${a.active} active")
+                            }
                         }
                     }
                 }
@@ -894,7 +904,10 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions) {
             }
             block.activity?.let { a ->
                 // .project-dot: waiting (violet, radar ping) or active (running); the count is in words above.
-                if (a.waiting > 0) {
+                // T13.2 r2: offline, a faint still dot (no ping, no running tone): a saved list claims nothing now.
+                if (offline && (a.waiting > 0 || a.active > 0)) {
+                    StatusDot(t.faint, size = 0.5f.rem, modifier = Modifier.testTag(SidebarTags.blockDot(block.workspace)))
+                } else if (a.waiting > 0) {
                     // `.project-dot-waiting { box-shadow: 0 0 0 3px var(--violet-wash) }` — the ring the
                     // radar ping animates away from; it is what remains under reduced motion.
                     val reduced = com.tether.app.ui.theme.LocalReducedMotion.current

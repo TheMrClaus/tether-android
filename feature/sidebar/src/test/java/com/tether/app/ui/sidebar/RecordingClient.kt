@@ -65,7 +65,6 @@ class RecordingClient(
     override fun queueAdd(sessionId: String, text: String) = Unit
     override fun queueEdit(sessionId: String, queueId: String, text: String) = Unit
     override fun queueRemove(sessionId: String, queueId: String) = Unit
-    override fun interrupt(sessionId: String) = Unit
     override fun approval(
         sessionId: String,
         requestId: String,
@@ -87,7 +86,13 @@ class RecordingClient(
     override fun pin(sessionId: String, pinned: Boolean) = record(ClientMessage.Pin(sessionId, pinned))
     override fun rename(sessionId: String, name: String) = record(ClientMessage.Rename(sessionId, name))
     override fun archive(sessionId: String) = record(ClientMessage.Archive(sessionId))
-    override fun kill(sessionId: String) = record(ClientMessage.Kill(sessionId))
+    override fun kill(sessionId: String, requireLive: Boolean) {
+        killScopes += requireLive
+        record(ClientMessage.Kill(sessionId))
+    }
+
+    /** T13.2 r2: [kill]'s requireLive, per call (a sidebar row passes false). */
+    val killScopes = mutableListOf<Boolean>()
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

@@ -79,6 +79,7 @@ class ComposerBehaviourTest {
                     onQueueEdit = { id, text -> edits += id to text },
                     onQueueRemove = { removes += it },
                     onRequestControls = {},
+                    liveness = ComposerLiveness.Live,
                     initialDraft = initialDraft,
                     onDraftChange = { drafts += it },
                 )

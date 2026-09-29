@@ -87,7 +87,6 @@ class ShellConsentClient : TetherClient {
     override fun queueRemove(sessionId: String, queueId: String) {
         outbox += "queue-remove:$queueId"
     }
-    override fun interrupt(sessionId: String) = Unit
     override fun approval(
         sessionId: String,
         requestId: String,
@@ -128,7 +127,7 @@ class ShellConsentClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    override fun kill(sessionId: String) = Unit
+    override fun kill(sessionId: String, requireLive: Boolean) = Unit
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

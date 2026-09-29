@@ -29,7 +29,7 @@ class ChatTestClient : TetherClient {
     override val projectionTrees = MutableStateFlow<Map<String, JsObj>>(emptyMap())
     override val histories: StateFlow<List<HistorySession>> = MutableStateFlow(emptyList())
     override val directories: StateFlow<DirectoryListing?> = MutableStateFlow(null)
-    override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = MutableStateFlow(emptyMap())
+    override val sessionControls = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
     override val errors: SharedFlow<String> = MutableSharedFlow()
     override val configured: StateFlow<Boolean> = MutableStateFlow(true)
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
@@ -48,6 +48,13 @@ class ChatTestClient : TetherClient {
     /** T13.2: per-session freshness (empty = none reported, as before). */
     val sync = MutableStateFlow<Map<String, com.tether.app.client.SessionSync>>(emptyMap())
     override val syncStates: StateFlow<Map<String, com.tether.app.client.SessionSync>> get() = sync
+
+    /**
+     * T13.2 r2: whether this client reports freshness at all. Off by default, so every earlier test
+     * keeps T6.3's rule (the live set alone); on, a session with no [sync] entry is NOT live.
+     */
+    var reports = false
+    override val reportsFreshness: Boolean get() = reports
     override val decidedRequests: StateFlow<Set<String>> get() = decided
     val unconfirmed = MutableStateFlow<Set<String>>(emptySet())
     override val unconfirmedRequests: StateFlow<Set<String>> get() = unconfirmed
@@ -106,7 +113,19 @@ class ChatTestClient : TetherClient {
     override fun queueRemove(sessionId: String, queueId: String) {
         outbox += "queue-remove:$queueId"
     }
-    override fun interrupt(sessionId: String) = Unit
+    /** T13.2 r2: every interrupt the UI asked for (`<session>@<origin>`), NOT de-duplicated. */
+    val interruptCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult {
+        interruptCalls += "$sessionId@$expectedOrigin"
+        return com.tether.app.client.InterruptResult.Sent
+    }
+
+    /** T13.2 r2: every session control the UI asked for (`<session>:<control>`). */
+    val controlCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun sessionControl(sessionId: String, control: com.tether.app.client.SessionControl, expectedOrigin: String?): com.tether.app.client.ControlResult {
+        controlCalls += "$sessionId:$control"
+        return com.tether.app.client.ControlResult.Sent
+    }
     override fun approval(
         sessionId: String,
         requestId: String,
@@ -147,7 +166,11 @@ class ChatTestClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    override fun kill(sessionId: String) = Unit
+    /** T13.2 r2: every End session the UI asked for (`<session>:<requireLive>`). */
+    val killCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun kill(sessionId: String, requireLive: Boolean) {
+        killCalls += "$sessionId:$requireLive"
+    }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

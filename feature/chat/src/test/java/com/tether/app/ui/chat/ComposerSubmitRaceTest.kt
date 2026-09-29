@@ -76,6 +76,7 @@ class ComposerSubmitRaceTest {
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
                         onRequestControls = {},
+                        liveness = ComposerLiveness.Live,
                     )
                 }
             }

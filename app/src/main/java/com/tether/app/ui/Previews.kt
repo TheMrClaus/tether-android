@@ -123,6 +123,7 @@ private fun ComposerIdlePreview() {
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
             onRequestControls = {},
+            liveness = com.tether.app.ui.chat.ComposerLiveness.Live,
         )
     }
 }
@@ -158,6 +159,7 @@ private fun ComposerBusyPreview() {
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
             onRequestControls = {},
+            liveness = com.tether.app.ui.chat.ComposerLiveness.Live,
         )
     }
 }

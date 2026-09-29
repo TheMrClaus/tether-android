@@ -54,6 +54,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapSheet(shot: Control
                 onQueueEdit = { _, _ -> },
                 onQueueRemove = {},
                 onRequestControls = {},
+                liveness = ComposerLiveness.Live,
                 controlActions = actions,
             )
         }
@@ -136,6 +137,7 @@ class SessionControlsTabletScreenshotTest(private val shot: RowShot, private val
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},
+                    liveness = ComposerLiveness.Live,
                     controlActions = SessionControlFixtures.Recorder().actions(codex = if (shot == RowShot.Codex) SessionControlFixtures.codexState else null),
                 )
             }

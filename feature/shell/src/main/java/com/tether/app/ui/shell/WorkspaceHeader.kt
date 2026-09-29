@@ -232,16 +232,18 @@ fun WorkspaceHeader(
             // `.end-session`: the brick key, glyph only below 48rem. 2.35rem tall in the instrument
             // skins (`:root .end-session`, globals.css 11196); Studio's rail forces 2.75rem
             // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
-            // prints "End session" at 0.66rem (4117-4121, 11196).
+            // prints "End session" at 0.66rem (4117-4121, 11196). T13.2 r2: also disabled unless the
+            // link is up and this session's copy is live (a saved copy never ends a session).
+            val endable = session.status != "exited" && freshness.sessionLive(session.id)
             TetherKey(
-                onClick = actions.onEndSession,
+                onClick = { if (endable) actions.onEndSession() },
                 classes = KeyClasses.EndSession,
                 label = if (expanded) "End session" else null,
                 icon = TetherIcons.CircleStop,
                 iconSize = 16.dp,
                 fontSize = if (expanded) 10.56.sp else TextUnit.Unspecified,
                 contentDescription = "End session",
-                enabled = session.status != "exited",
+                enabled = endable,
                 minHeight = if (studio) 44.dp else 37.6.dp,
                 modifier = Modifier.testTag(ShellTags.EndSessionKey),
             )

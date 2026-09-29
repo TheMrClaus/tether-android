@@ -63,6 +63,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = { requests += "session-controls" },
+                    liveness = ComposerLiveness.Live,
                     controlActions = recorder.actions(lock, codex, opencode),
                 )
             }

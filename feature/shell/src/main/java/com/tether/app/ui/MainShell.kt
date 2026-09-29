@@ -135,13 +135,18 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
     val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
+    val liveSessions by vm.client.liveSessions.collectAsStateWithLifecycle()
     val freshnessNow = com.tether.app.ui.components.rememberTickingNow()
     val shellFreshness = com.tether.app.ui.shell.ShellFreshness(
         banner = com.tether.app.ui.shell.ShellFreshness.bannerFor(connection),
         syncStates = syncStates,
         listLive = connected,
         now = freshnessNow,
+        liveSessions = liveSessions,
+        reportsFreshness = vm.client.reportsFreshness,
     )
+    // r2 (SYNC_DESIGN §4.2): the gauge and the statusline read the session's copy; qualified while it is not live.
+    val staleReading = session?.let { shellFreshness.staleLabel(it.id) }
 
     var showLog by remember { mutableStateOf(false) }
     // The web's <dialog> stays mounted, so its filters and last stats survive a close and reopen.
@@ -247,9 +252,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 },
                 inspector = { session?.let { InterimTelemetry(it) } },
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
-                gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle) },
+                gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
-                    SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End)
+                    SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
             )
         CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness) {
@@ -398,6 +403,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     confirmEnd?.let { target ->
+        // T13.2 r2: the confirmation acts only while the session is still live (a link that dropped
+        // under the open dialog disables it; the client refuses it too).
+        val endable = shellFreshness.sessionLive(target.id)
         TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
             Text(
                 "Stop the agent process for \"${target.name}\"?",
@@ -412,11 +420,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 TetherKey(
                     onClick = {
                         confirmEnd = null
-                        vm.client.kill(target.id)
+                        if (endable) vm.client.kill(target.id, requireLive = true)
                     },
                     classes = KeyClasses.ButtonDanger,
                     label = "End session",
                     icon = TetherIcons.CircleStop,
+                    enabled = endable,
                 )
             }
         }

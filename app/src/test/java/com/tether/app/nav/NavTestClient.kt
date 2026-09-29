@@ -55,7 +55,7 @@ class NavTestClient(
     override fun queueAdd(sessionId: String, text: String) { stateChanges += "queueAdd" }
     override fun queueEdit(sessionId: String, queueId: String, text: String) { stateChanges += "queueEdit" }
     override fun queueRemove(sessionId: String, queueId: String) { stateChanges += "queueRemove" }
-    override fun interrupt(sessionId: String) { stateChanges += "interrupt" }
+    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult { stateChanges += "interrupt"; return com.tether.app.client.InterruptResult.Sent }
     override fun approval(
         sessionId: String,
         requestId: String,
@@ -83,7 +83,7 @@ class NavTestClient(
     override fun pin(sessionId: String, pinned: Boolean) { stateChanges += "pin" }
     override fun rename(sessionId: String, name: String) { stateChanges += "rename" }
     override fun archive(sessionId: String) { stateChanges += "archive" }
-    override fun kill(sessionId: String) { stateChanges += "kill" }
+    override fun kill(sessionId: String, requireLive: Boolean) { stateChanges += "kill" }
     override fun setSessionOrder(cwd: String, order: List<String>): Boolean { stateChanges += "setSessionOrder"; return true }
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean { stateChanges += "setPinnedWorkspaces"; return true }
 

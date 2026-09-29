@@ -38,14 +38,23 @@ internal object ChatFreshness {
     const val OLDER_TURNS_TAG = "chat-older-turns-not-downloaded"
 
     /**
-     * SYNC_DESIGN §4.2 wired into T6.3's lock: a session is "live" for its cards, stop keys and
-     * controls only when the client confirmed it on this connection ([liveSessions]) AND its
+     * SYNC_DESIGN §4.2 wired into T6.3's lock: a session is "live" for its cards, Stop and Interrupt
+     * keys and controls only when the client confirmed it on this connection ([liveSessions]) AND its
      * freshness says Live. The two agree except for an instant after a change; taking both is
-     * strictly more restrictive, so a saved or catching-up copy is never actionable. A client that
-     * reports no freshness for the session ([sync] null) leaves the T6.3 rule as it was.
+     * strictly more restrictive, so a saved, catching-up or not-downloaded copy is never actionable.
+     * r2: a missing entry is locked whenever the client [reportsFreshness]; only a client that
+     * reports none keeps the T6.3 rule alone ([LiveCopy.isLive]).
      */
-    fun isLive(sessionId: String?, liveSessions: Set<String>, sync: SessionSync?): Boolean =
-        sessionId != null && sessionId in liveSessions && (sync == null || sync.freshness == Freshness.Live)
+    fun isLive(sessionId: String?, liveSessions: Set<String>, sync: SessionSync?, reportsFreshness: Boolean): Boolean =
+        com.tether.app.client.LiveCopy.isLive(sessionId, liveSessions, sync, reportsFreshness)
+
+    /**
+     * r2 (SYNC_DESIGN §4.2): what the composer's turn readings stand on. Null while the copy is live;
+     * otherwise the copy's freshness (a missing entry reads as a saved copy of unknown age), so the
+     * run row says "Was running" on a still dot and its timer stops.
+     */
+    fun staleCopy(live: Boolean, sync: SessionSync?): SessionSync? =
+        if (live) null else sync?.takeIf { it.freshness != Freshness.Live } ?: SessionSync(Freshness.Saved, sync?.lastVerifiedAt)
 
     /** A saved copy cannot fetch its trimmed turns ("Older turns not downloaded"). */
     fun olderTurnsUnavailable(sync: SessionSync?): Boolean =

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,6 +47,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextRange
@@ -98,9 +100,35 @@ import kotlinx.coroutines.withContext
 import kotlin.math.max
 
 /** Server caps (lib/protocol-validate.mjs LIMITS): 10 files, 9 MiB each, 18 MiB total. */
+/** T13.2 r2: the composer's Interrupt key. */
+internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
+
+/** T13.2 r2: the run row of a copy that is not live ("Was running", still, not ticking). */
+internal const val STALE_RUN_TAG = "composer-run-stale"
+
 private const val MAX_ATTACHMENTS = 10
 private const val MAX_ATTACHMENT_BYTES = 9L * 1024 * 1024
 private const val MAX_TOTAL_ATTACHMENT_BYTES = 18L * 1024 * 1024
+
+/**
+ * T13.2 r2 (SYNC_DESIGN §4.2): what the composer's turn controls and readings stand on. There is no
+ * default: every host says whether its copy is live.
+ */
+@androidx.compose.runtime.Immutable
+class ComposerLiveness(
+    /**
+     * Why Interrupt (the key and a queued row's "Interrupt now") cannot send ([stopLockCopy]'s words);
+     * null = it can. A saved or catching-up copy's "busy" is not a turn that is running now.
+     */
+    val interruptLock: String?,
+    /** Null while the copy is Live; else its freshness: the run row reads "Was running" and stops ticking. */
+    val stale: com.tether.app.client.SessionSync?,
+) {
+    companion object {
+        /** A live copy that may be driven (previews, and tests of the live composer). */
+        val Live = ComposerLiveness(interruptLock = null, stale = null)
+    }
+}
 
 /** A file the operator picked, held in memory until the next idle send. */
 private data class PickedAttachment(val attachment: Attachment, val sizeBytes: Long)
@@ -134,6 +162,8 @@ fun Composer(
     onQueueEdit: (queueId: String, text: String) -> Unit,
     onQueueRemove: (queueId: String) -> Unit,
     onRequestControls: () -> Unit,
+    /** T13.2 r2: whether the copy is live (Interrupt's lock, the run row's freshness). Required. */
+    liveness: ComposerLiveness,
     modifier: Modifier = Modifier,
     onAttachError: (String) -> Unit = {},
     initialDraft: String? = null,
@@ -566,7 +596,7 @@ fun Composer(
                 }
 
                 if (projection != null && session != null) {
-                    TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Run)
+                    TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Run, stale = liveness.stale)
                 }
 
                 // chat-view.tsx:3709-3776: sessions Tether does not set say so above the well.
@@ -591,6 +621,7 @@ fun Composer(
                         onSave = onQueueEdit,
                         onRemove = onQueueRemove,
                         onInterruptNow = onInterrupt,
+                        interruptLock = liveness.interruptLock,
                     )
                 }
 
@@ -635,7 +666,7 @@ fun Composer(
                         // The web keeps the paperclip live while a turn runs; submit() asks the operator to wait.
                         attachEnabled = session != null,
                         totals = if (projection != null && session != null) {
-                            { TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Totals) }
+                            { TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Totals, stale = liveness.stale) }
                         } else {
                             null
                         },
@@ -673,6 +704,7 @@ fun Composer(
                             canSend = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                             onSubmit = ::submit,
                             onInterrupt = onInterrupt,
+                            interruptLock = liveness.interruptLock,
                         )
                     }
                 }
@@ -828,6 +860,8 @@ private fun ComposerActions(
     canSend: Boolean,
     onSubmit: () -> Unit,
     onInterrupt: () -> Unit,
+    /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
+    interruptLock: String?,
 ) {
     val height = if (metrics.studio || metrics.touchKeys) TetherDimens.touchTargetDp else 33.6.dp
     val labelled = !metrics.phone
@@ -856,17 +890,19 @@ private fun ComposerActions(
                 contentDescription = "Queue message",
             )
         }
+        // T13.2 r2: a copy that is not live cannot interrupt (its "busy" is not a turn running now).
         TetherKey(
-            onClick = onInterrupt,
+            onClick = { if (interruptLock == null) onInterrupt() },
             classes = KeyClasses.ChatInterrupt,
             label = if (labelled) "Interrupt" else null,
             icon = TetherIcons.CircleStop,
             iconSize = 18.dp,
             fontSize = fontSize,
+            enabled = interruptLock == null,
             minHeight = height,
-            modifier = keyModifier,
+            modifier = keyModifier.testTag(INTERRUPT_KEY_TAG),
             contentPadding = padding,
-            contentDescription = "Interrupt the current turn",
+            contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
         )
     } else {
         TetherKey(
@@ -980,6 +1016,36 @@ private fun readAttachments(
     return Pair(loaded, failures)
 }
 
+/**
+ * T13.2 r2: the run row of a copy that is not live: a still faint dot and "Was running · 12 min ago"
+ * (neutral ink, no spinner, no ticking readings). TalkBack reads the words.
+ */
+@Composable
+private fun StaleRunRow(stale: com.tether.app.client.SessionSync) {
+    val t = LocalTetherTokens.current
+    val wall = com.tether.app.ui.components.rememberTickingNow()
+    val words = com.tether.app.ui.components.FreshnessCopy.qualifiedStatus("active", stale.lastVerifiedAt, wall) ?: "Was running"
+    Row(
+        Modifier
+            .heightIn(min = 20.dp)
+            .testTag(STALE_RUN_TAG)
+            .clearAndSetSemantics { contentDescription = words },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        com.tether.app.ui.components.StatusDot(t.faint, size = 6.4.dp)
+        Text(
+            words,
+            color = t.faint,
+            fontFamily = Manrope,
+            fontWeight = TetherWeights.label,
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 /** components/turn-activity.tsx `part`: the run row above the well, the totals in its toolbar. */
 enum class TurnActivityPart { Both, Run, Totals }
 
@@ -996,14 +1062,21 @@ fun TurnActivity(
     session: AgentSession,
     serverNow: () -> Long,
     part: TurnActivityPart = TurnActivityPart.Both,
+    /**
+     * T13.2 r2 (SYNC_DESIGN §4.2): null while the copy is live. Otherwise the run row claims nothing
+     * about now: a still faint dot and "Was running · 12 min ago" instead of the spinner, the verb and
+     * the ticking elapsed/token readings, and the session total stops counting.
+     */
+    stale: com.tether.app.client.SessionSync? = null,
 ) {
     val t = LocalTetherTokens.current
     val activeTurn = projection.activeTurnId?.let { projection.turnsById[it] }
     val run = activeTurn?.run
 
     var now by remember { mutableLongStateOf(serverNow()) }
-    LaunchedEffect(activeTurn?.turnId, run?.index) {
-        while (run != null) {
+    LaunchedEffect(activeTurn?.turnId, run?.index, stale != null) {
+        // A saved copy's clock is frozen where it stood: its run is not known to be running now.
+        while (run != null && stale == null) {
             now = serverNow()
             delay(1000)
         }
@@ -1033,7 +1106,9 @@ fun TurnActivity(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
-        if (run != null) {
+        if (run != null && stale != null) {
+            StaleRunRow(stale)
+        } else if (run != null) {
             val rawElapsed = now - run.startedAt
             val runSeconds = if (rawElapsed < 0) null else rawElapsed / 1000
             val runTokens = activeTurn.liveTokens?.let { max(0L, it - run.tokensStart) }

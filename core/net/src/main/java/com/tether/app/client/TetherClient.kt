@@ -160,7 +160,15 @@ interface TetherClient {
     fun queueEdit(sessionId: String, queueId: String, text: String)
     fun queueRemove(sessionId: String, queueId: String)
 
-    fun interrupt(sessionId: String)
+    /**
+     * T13.2 r2: INTERRUPT the session's current turn (`interrupt`). An operator control: call it ONLY
+     * from a tap on the composer's Interrupt key or a queued row's "Interrupt now", never in answer to
+     * anything received. Sent only on a live, handshaken socket of the server that drew the key
+     * ([expectedOrigin], the [consentOrigin] the key was composed with), for a session confirmed live
+     * on it ([liveSessions]) that is neither read-only nor handed off. Otherwise nothing is sent or
+     * held: no retry, no queue. (Which turn it stops is the server's; binding it to a turn is T6.7.)
+     */
+    fun interrupt(sessionId: String, expectedOrigin: String?): InterruptResult = InterruptResult.NotConnected
 
     /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
@@ -206,10 +214,17 @@ interface TetherClient {
     /**
      * T13.2 (SYNC_DESIGN §2.5, §4.1): per session, how current the shown copy is (Live /
      * CatchingUp / Saved / NotDownloaded), derived from the connection, attach and verify state.
-     * An absent session means "nothing known": screens then show no freshness mark, but never
-     * treat that as live (consent still follows [liveSessions]). The default knows nothing.
+     * An absent session means "nothing known": screens then show no freshness mark, and a client
+     * that [reportsFreshness] never treats it as live ([LiveCopy.isLive]). The default knows nothing.
      */
     val syncStates: StateFlow<Map<String, SessionSync>> get() = NO_SYNC_STATES
+
+    /**
+     * T13.2 r2: whether this client reports freshness at all. True for any client with its own
+     * [syncStates] (a missing entry is then NOT live); false only for one that keeps the interface's
+     * empty default, whose locks follow [liveSessions] alone (the T6.3 rule, [LiveCopy.isLive]).
+     */
+    val reportsFreshness: Boolean get() = syncStates !== NO_SYNC_STATES
 
     /** T6.3: the server origin of the live, handshaken socket (the fingerprints' origin); null when there is none. */
     val consentOrigin: StateFlow<String?>
@@ -270,7 +285,15 @@ interface TetherClient {
     fun pin(sessionId: String, pinned: Boolean)
     fun rename(sessionId: String, name: String)
     fun archive(sessionId: String)
-    fun kill(sessionId: String)
+
+    /**
+     * End the session (`kill`). An operator control, called only from a confirmed tap. Sent only on a
+     * live, handshaken socket for a session the server listed. [requireLive] (the default: a session
+     * header's End session, drawn from the session's own copy) also needs the session confirmed live
+     * on this connection ([liveSessions]); a sidebar row, drawn from the live session LIST, passes
+     * false. Otherwise nothing is sent or held (T13.2 r2).
+     */
+    fun kill(sessionId: String, requireLive: Boolean = true)
 
     /**
      * Called by network observers (and the local-network grant) to reconnect now
@@ -640,6 +663,20 @@ sealed interface PairResult {
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
     data object LocalNetworkBlocked : PairResult
+}
+
+/** T13.2 r2: what [TetherClient.interrupt] did. Only [Sent] put a frame on the wire. */
+enum class InterruptResult {
+    Sent,
+
+    /** No live, handshaken socket (or the client is halted). */
+    NotConnected,
+
+    /** Connected, but the session is not confirmed live on this connection, or the key was drawn for another server. */
+    NotLive,
+
+    /** The session is read-only or handed off (or unknown): the server would refuse it. */
+    Locked,
 }
 
 /** T6.4: what [TetherClient.stopCommand] did. Only [Sent] put a frame on the wire. */

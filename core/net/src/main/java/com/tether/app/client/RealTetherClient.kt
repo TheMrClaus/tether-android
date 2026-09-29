@@ -2888,8 +2888,29 @@ class RealTetherClient(
         sendFrame(ClientMessage.Attach(sessionId, afterSeq.first))
     }
 
-    override fun interrupt(sessionId: String) {
-        sendFrame(ClientMessage.Interrupt(sessionId))
+    /**
+     * T13.2 r2: the one path an INTERRUPT takes to the wire, under the same rules as [stopCommand].
+     * Under the lock, in order: a live, handshaken socket of a running (not halted) client; the key
+     * drawn for THIS server ([expectedOrigin] = the socket's origin); the session confirmed live on it
+     * ([liveThisEpoch]: a saved or catching-up copy's stale "busy" never interrupts a real turn);
+     * listed, and neither read-only nor handed off (fail closed); then enqueued on that socket.
+     * Nothing is retried, held or persisted.
+     */
+    override fun interrupt(sessionId: String, expectedOrigin: String?): InterruptResult {
+        if (sessionId.isEmpty()) return InterruptResult.Locked
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized InterruptResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized InterruptResult.NotLive
+            if (sessionId !in liveThisEpoch) return@synchronized InterruptResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized InterruptResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized InterruptResult.Locked
+            if (!ws.send(ClientMessage.Interrupt(sessionId).encode())) return@synchronized InterruptResult.NotConnected
+            InterruptResult.Sent
+        }
+        if (result == InterruptResult.NotConnected) emitError("The secure link is reconnecting. The turn was not interrupted.")
+        return result
     }
 
     override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {
@@ -3132,8 +3153,21 @@ class RealTetherClient(
         sendFrame(ClientMessage.Archive(sessionId))
     }
 
-    override fun kill(sessionId: String) {
-        sendFrame(ClientMessage.Kill(sessionId))
+    /**
+     * T13.2 r2: End session. Under the lock: a live, handshaken socket of a running (not halted)
+     * client; the session listed on it; and, for a key drawn from the session's own copy
+     * ([requireLive]), confirmed live on it ([liveThisEpoch]). Nothing is retried, held or persisted.
+     */
+    override fun kill(sessionId: String, requireLive: Boolean) {
+        if (sessionId.isEmpty()) return
+        val sent = synchronized(lock) {
+            val ws = socket
+            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            if (requireLive && sessionId !in liveThisEpoch) return@synchronized null
+            if (sessionsState.value.none { it.id == sessionId }) return@synchronized null
+            ws.send(ClientMessage.Kill(sessionId).encode())
+        }
+        if (sent == false) emitError("The secure link is reconnecting. The session was not ended.")
     }
 
     // T5.1 sidebar sync (SidebarSync.kt): the exact frames, sent on the current handshaken socket.

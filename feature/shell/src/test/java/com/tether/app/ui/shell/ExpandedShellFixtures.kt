@@ -96,6 +96,7 @@ fun ExpandedShellUnderTest(
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
+          LiveUnlessProvided(session) {
             ExpandedShell(
                 state = state,
                 panels = persisted?.panels ?: store.panels,
@@ -122,6 +123,7 @@ fun ExpandedShellUnderTest(
                 ),
                 slots = expandedSlots(),
             )
+          }
         }
     }
 }

@@ -55,6 +55,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onQueueEdit = { _, _ -> },
                 onQueueRemove = {},
                 onRequestControls = {},
+                liveness = ComposerLiveness.Live,
                 initialDraft = draft,
                 controlActions = SessionControlFixtures.Recorder().actions(),
             )

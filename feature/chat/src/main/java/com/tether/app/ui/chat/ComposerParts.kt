@@ -1,6 +1,8 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -204,6 +206,9 @@ internal fun ComposerWell(
     Column(modifier.fillMaxWidth().then(surface)) { content() }
 }
 
+/** T13.2 r2: a queued row's "Interrupt now". */
+internal const val QUEUE_INTERRUPT_TAG = "queue-interrupt-now"
+
 /**
  * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place. Labelled
  * "Queued messages" for TalkBack, as the web's `aria-label`.
@@ -214,6 +219,8 @@ internal fun QueuedMessages(
     onSave: (queueId: String, text: String) -> Unit,
     onRemove: (queueId: String) -> Unit,
     onInterruptNow: () -> Unit,
+    /** T13.2 r2: why "Interrupt now" cannot send (a copy that is not live); null = it can. */
+    interruptLock: String?,
 ) {
     val t = LocalTetherTokens.current
     Column(
@@ -228,6 +235,7 @@ internal fun QueuedMessages(
                     onSave = { onSave(message.queueId, it) },
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
+                    interruptLock = interruptLock,
                 )
             }
         }
@@ -268,6 +276,7 @@ internal fun QueuedMessageRow(
     onSave: (String) -> Unit,
     onRemove: () -> Unit,
     onInterruptNow: () -> Unit,
+    interruptLock: String?,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -323,7 +332,7 @@ internal fun QueuedMessageRow(
             decorationBox = { inner -> Box(Modifier.padding(vertical = t.css.spaceXs)) { inner() } },
         )
         if (atToolBoundary) {
-            QueueInterruptNow(onInterruptNow)
+            QueueInterruptNow(onInterruptNow, interruptLock)
         }
         Box(
             Modifier
@@ -366,17 +375,21 @@ private fun Modifier.queueEdge(color: Color): Modifier = drawWithContent {
  * on a row waiting for a tool boundary. 1.9rem tall, 2.75rem under a coarse pointer.
  */
 @Composable
-private fun QueueInterruptNow(onClick: () -> Unit) {
+private fun QueueInterruptNow(onClick: () -> Unit, lock: String?) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
+    val what = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
     Row(
         Modifier
             .heightIn(min = 44.dp)
+            // T13.2 r2: a copy that is not live cannot interrupt: shown, dimmed, and inert.
+            .alpha(if (lock == null) 1f else 0.55f)
             .cssSurface(shape, Color.Transparent, CssBorder(1.dp, t.lineStrong))
-            .clickable(onClick = onClick)
+            .clickable(enabled = lock == null, onClick = onClick)
             .semantics(mergeDescendants = true) {
-                contentDescription = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
+                contentDescription = if (lock == null) what else "$what, unavailable: $lock"
             }
+            .testTag(QUEUE_INTERRUPT_TAG)
             .padding(horizontal = t.css.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.8.dp),

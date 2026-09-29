@@ -110,7 +110,9 @@ fun ChatScreen(
     // T13.2: how current this session's copy is (SYNC_DESIGN §4); it also narrows "live" below.
     val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
     val sync = session?.let { syncStates[it.id] }
-    val liveNow = ChatFreshness.isLive(session?.id, liveSessions, sync)
+    // r2: a client that reports freshness at all never unlocks a session it has no entry for.
+    val reportsFreshness = vm.client.reportsFreshness
+    val liveNow = ChatFreshness.isLive(session?.id, liveSessions, sync, reportsFreshness)
     // T6.4: a denial's origin link opens the run's tab AND lands on the refused step.
     var runFocus by remember(session?.id) { mutableStateOf<RunFocus?>(null) }
     val onFocusCall: (String, String) -> Unit = remember(session?.id, vm) {
@@ -119,8 +121,8 @@ fun ChatScreen(
             runFocus = RunFocus(runId, toolId, (runFocus?.nonce ?: 0) + 1)
         }
     }
-    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall, sync) {
-        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall, sync)
+    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall, sync, reportsFreshness) {
+        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall, sync, reportsFreshness)
     }
     // T6.4: background commands — open one's output; STOP one (a tap on its Stop key, and only then).
     var openCommandId by remember(session?.id) { mutableStateOf<String?>(null) }
@@ -136,6 +138,16 @@ fun ChatScreen(
         val s = session
         val drawnFor = consentOrigin
         if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) }, stopLatches)
+    }
+    // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock:
+    // a saved or catching-up copy's "busy" never interrupts a real turn. Bound to the server the key
+    // was drawn for; the client re-checks it all under its lock.
+    val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync))
+    val onInterrupt: () -> Unit = remember(session?.id, consentOrigin, vm) {
+        val s = session
+        val drawnFor = consentOrigin
+        val interrupt: () -> Unit = { if (s != null) vm.client.interrupt(s.id, drawnFor) }
+        interrupt
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
@@ -212,7 +224,7 @@ fun ChatScreen(
     ) {
     Column(Modifier.fillMaxSize().background(t.mineralDeep)) {
         if (session != null && showWorkspaceHeader) {
-            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot)
+            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow)
         }
 
         if (session != null && runs.isNotEmpty()) {
@@ -234,8 +246,10 @@ fun ChatScreen(
                     TetherKey(onClick = onOpenDrawer, classes = KeyClasses.ButtonSecondary, label = "Sessions")
                 }
 
-                // T13.2: offline with nothing on the device: say so, not "Connecting…".
-                projection == null && sync?.freshness == com.tether.app.client.Freshness.NotDownloaded -> SessionNotDownloaded()
+                // T13.2: offline with nothing on the device: say so, not "Connecting…". r2: only while
+                // not connected; connected, the attach is on its way and the loading state below shows.
+                projection == null && sync?.freshness == com.tether.app.client.Freshness.NotDownloaded &&
+                    connection != com.tether.app.client.ConnectionState.Connected -> SessionNotDownloaded()
 
                 projection == null -> Column(
                     Modifier.fillMaxSize(),
@@ -304,10 +318,11 @@ fun ChatScreen(
             controls = session?.let { controlsMap[it.id] },
             serverNow = { vm.serverNow(session?.id) },
             onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
-            onInterrupt = { session?.let { vm.client.interrupt(it.id) } },
+            onInterrupt = onInterrupt,
             onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
             onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
             onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
+            liveness = liveness,
             onAttachError = { message -> vm.reportLocalError(message) },
             // A plain read, not a subscription: only the opening value matters here.
             initialDraft = session?.let { vm.loadedDraft(it.id) },
@@ -382,13 +397,15 @@ internal fun consentActionsFor(
     onFocusCall: ((runId: String, toolId: String) -> Unit)? = null,
     /** T13.2: the session's freshness; a copy that is not Live is never actionable. */
     sync: com.tether.app.client.SessionSync? = null,
+    /** r2: the client reports freshness at all (a missing entry is then not live). */
+    reportsFreshness: Boolean = true,
 ): ConsentActions {
     val s = session ?: return ConsentActions.Unavailable
     return ConsentActions(
         sessionId = s.id,
         origin = origin,
         // No live socket origin = no live socket: the fingerprints would name no server.
-        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync), s),
+        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync, reportsFreshness), s),
         decided = decided,
         unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
@@ -445,9 +462,12 @@ private fun EmptyCentered(
     }
 }
 
-/** Workspace header: session name + status badge + actions; mono path line. */
+/**
+ * Workspace header: session name + status badge + actions; mono path line. [endAllowed] (T13.2 r2):
+ * the link is up and this session's copy is live, so End session may send.
+ */
 @Composable
-private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?) {
+private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean) {
     val t = LocalTetherTokens.current
     var showTelemetry by remember { mutableStateOf(false) }
     var confirmEnd by remember { mutableStateOf(false) }
@@ -489,11 +509,12 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             }
             if (session.status != "exited") {
                 TetherKey(
-                    onClick = { confirmEnd = true },
+                    onClick = { if (endAllowed) confirmEnd = true },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
                     contentDescription = "End session",
+                    enabled = endAllowed,
                     wear = false,
                 )
             }
@@ -586,11 +607,12 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 TetherKey(
                     onClick = {
                         confirmEnd = false
-                        vm.client.kill(session.id)
+                        if (endAllowed) vm.client.kill(session.id, requireLive = true)
                     },
                     classes = KeyClasses.ButtonDanger,
                     label = "End session",
                     icon = TetherIcons.CircleStop,
+                    enabled = endAllowed,
                 )
             }
         }
