@@ -35,6 +35,7 @@ import com.composables.icons.lucide.CircleStop
 import com.composables.icons.lucide.ClipboardCheck
 import com.composables.icons.lucide.ClipboardPaste
 import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.CloudOff
 import com.composables.icons.lucide.Clock3
 import com.composables.icons.lucide.Coins
 import com.composables.icons.lucide.Copy
@@ -130,6 +131,7 @@ import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.Upload
 import com.composables.icons.lucide.UserRound
 import com.composables.icons.lucide.Wrench
+import com.composables.icons.lucide.WifiOff
 import com.composables.icons.lucide.X
 import com.composables.icons.lucide.Zap
 import com.composables.icons.lucide.ZoomIn
@@ -280,6 +282,11 @@ object TetherIcons {
     val UserRound: ImageVector get() = Lucide.UserRound
     val Wrench: ImageVector get() = Lucide.Wrench
     val X: ImageVector get() = Lucide.X
+
+    // Native-only glyphs (not in [byWebName]: the web has no offline mode). T13.2's freshness
+    // marks (SYNC_DESIGN §4.1): a session not downloaded, and the link down.
+    val CloudOff: ImageVector get() = Lucide.CloudOff
+    val WifiOff: ImageVector get() = Lucide.WifiOff
     val Zap: ImageVector get() = Lucide.Zap
     val ZoomIn: ImageVector get() = Lucide.ZoomIn
     val ZoomOut: ImageVector get() = Lucide.ZoomOut
