@@ -118,7 +118,7 @@ class RealTetherClientTreeTest {
         val errors = java.util.concurrent.LinkedBlockingQueue<String>()
         val errorJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch(
             start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED,
-        ) { h.client.serverErrors.collect { errors.put(it) } }
+        ) { h.client.serverErrors.collect { errors.put(it.text) } }
         ws.send("""{"type":"event","sessionId":"s1","event":{"type":"message_delta","turnId":"t1","blockId":"b1","text":"x","seq":3,"ts":3000}}""")
         ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_end","turnId":"t1","seq":4,"ts":4000}}""")
         ws.send("""{"type":"error","message":"barrier"}""")

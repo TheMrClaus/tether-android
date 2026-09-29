@@ -465,7 +465,10 @@ private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String, limit:
                             .drawBehind { drawRect(line, topLeft = Offset(size.width - 1.dp.toPx(), 0f), size = Size(1.dp.toPx(), size.height)) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(row.marker, style = style, color = t.faint, softWrap = false)
+                        // T6.7 r2: `.diffMarker { user-select: none }`: a copied diff is its lines, not the +/- column.
+                        androidx.compose.foundation.text.selection.DisableSelection {
+                            Text(row.marker, style = style, color = t.faint, softWrap = false, modifier = Modifier.testTag(DIFF_MARKER_TAG))
+                        }
                     }
                 }
             }
@@ -635,3 +638,6 @@ private fun OpencodeTaskCard(block: JsObj, nested: Boolean) {
 
 /** Padding between the cards of one turn's rich details (`.turnDetails { gap: space-sm }`). */
 internal val RichDetailsGap: Dp @Composable get() = LocalTetherTokens.current.css.spaceSm
+
+/** T6.7 r2: a Codex diff row's +/- marker (never selected). */
+internal const val DIFF_MARKER_TAG = "codex-diff-marker"

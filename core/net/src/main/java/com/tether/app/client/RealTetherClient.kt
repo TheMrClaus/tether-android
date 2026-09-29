@@ -410,7 +410,7 @@ class RealTetherClient(
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
     // T6.7: the server's own error text, cleaned, apart from the client's words (TetherClient.serverErrors).
-    private val serverErrorsFlow = MutableSharedFlow<String>(
+    private val serverErrorsFlow = MutableSharedFlow<ServerErrorText>(
         extraBufferCapacity = 16,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
@@ -440,7 +440,7 @@ class RealTetherClient(
     override val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = gitFileDiffsState
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val errors: SharedFlow<String> = errorsFlow
-    override val serverErrors: SharedFlow<String> = serverErrorsFlow
+    override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
 
@@ -2255,7 +2255,7 @@ class RealTetherClient(
                 // Every error of the live link is shown, as the web does (use-tether.ts setError),
                 // T6.7: cleaned and attributed to the server; one that echoes a node request's
                 // requestId also ends that request.
-                if (isCurrent(webSocket)) emitServerError(message.message)
+                emitServerErrorIfCurrent(webSocket, message.message)
                 message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
@@ -2966,6 +2966,10 @@ class RealTetherClient(
      */
     private fun onInterruptResult(webSocket: WebSocket, message: ServerMessage.InterruptResult) {
         var reachedLater = false
+        if (message.status == "failed") {
+            // r2: checked current and emitted in one step (a socket let go in between says nothing).
+            if (!emitServerErrorIfCurrent(webSocket, message.error, fallback = INTERRUPT_NOT_DELIVERED)) return
+        }
         synchronized(lock) {
             if (socket !== webSocket) return
             val bound = interruptsBound[message.sessionId]
@@ -2978,23 +2982,24 @@ class RealTetherClient(
                 if (bound.isEmpty()) interruptsBound.remove(message.sessionId)
             }
         }
-        when {
-            message.status == "failed" -> emitServerError(message.error, fallback = INTERRUPT_NOT_DELIVERED)
-            reachedLater -> emitError(INTERRUPT_REACHED_LATER_TURN)
-        }
+        if (reachedLater) emitError(INTERRUPT_REACHED_LATER_TURN)
     }
-
-    /** T6.7: under [lock], [webSocket] is the client's current socket. */
-    private fun isCurrent(webSocket: WebSocket): Boolean = synchronized(lock) { socket === webSocket }
 
     /**
      * T6.7: a server's error text, cleaned ([LabelText.error]) and kept apart from the client's own
-     * words ([TetherClient.serverErrors]). Nothing visible left: the client's [fallback], if any.
+     * words ([TetherClient.serverErrors]); nothing visible left: the client's [fallback], if any.
+     * r2: only while [webSocket] is the current socket, checked and emitted under [lock] in one step
+     * (no window for a server switch between them), and tagged with that socket's origin. False when
+     * the socket was already let go (nothing emitted).
      */
-    private fun emitServerError(text: String?, fallback: String? = null) {
-        val cleaned = LabelText.error(text)
-        if (cleaned.isNotEmpty()) serverErrorsFlow.tryEmit(cleaned) else fallback?.let(::emitError)
-    }
+    private fun emitServerErrorIfCurrent(webSocket: WebSocket, text: String?, fallback: String? = null): Boolean =
+        synchronized(lock) {
+            val origin = socketOrigin
+            if (socket !== webSocket || origin == null) return@synchronized false
+            val cleaned = LabelText.error(text)
+            if (cleaned.isNotEmpty()) serverErrorsFlow.tryEmit(ServerErrorText(cleaned, origin)) else fallback?.let(::emitError)
+            true
+        }
 
     override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {
         sendFrame(ClientMessage.FetchTurns(sessionId, fromIndex, toIndex))

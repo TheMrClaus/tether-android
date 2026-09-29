@@ -39,7 +39,7 @@ class ServerErrorTransmissionTest {
     private fun connected(): Pair<RealTetherClient, WebSocket> {
         val client = h.newClient()
         jobs += h.scope.launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { local.put(it) } }
-        jobs += h.scope.launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { server.put(it) } }
+        jobs += h.scope.launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { server.put(it.text) } }
         h.enqueueConnect()
         client.start()
         val ws = h.nextSocket()

@@ -13,6 +13,10 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -257,7 +261,12 @@ class InterruptErrorBehaviourTest {
         rule.waitForIdle()
     }
 
-    private fun transcript(fixture: ChatFixtures.Folded, consent: ConsentActions = ConsentActions.Unavailable) {
+    private fun transcript(
+        fixture: ChatFixtures.Folded,
+        consent: ConsentActions = ConsentActions.Unavailable,
+        notices: NoticeActions = NoticeActions.Unavailable,
+        richCodex: Boolean = false,
+    ) {
         rule.setContent {
             ChatHost(TetherSkin.Machine) {
                 Column {
@@ -270,6 +279,8 @@ class InterruptErrorBehaviourTest {
                         listState = LazyListState(),
                         showTimeline = false,
                         consent = consent,
+                        notices = notices,
+                        richCodex = richCodex,
                     )
                 }
             }
@@ -315,11 +326,105 @@ class InterruptErrorBehaviourTest {
         assertNull("chrome is never selected: ${clip()}", clip())
     }
 
-    private fun queuedOn(turnId: String): ChatFixtures.Folded = ChatFixtures.fold(
-        ev("turn_started", turnId, ts = ComposerFixtures.T_START) { put("idempotencyKey", "k-$turnId") },
-        ev("user_message_accepted", turnId, ts = ComposerFixtures.T_START) { put("text", "Run the test suite.") },
-        ev("queued_message_added", null, ts = ComposerFixtures.T_START) {
-            put("queueId", "q-$turnId"); put("text", "Also bump the changelog."); put("flushMode", "next-call")
-        },
+    private fun queuedOn(turnId: String, queueId: String = "q-$turnId", cancelling: Boolean = false): ChatFixtures.Folded = ChatFixtures.fold(
+        *listOfNotNull(
+            ev("turn_started", turnId, ts = ComposerFixtures.T_START) { put("idempotencyKey", "k-$turnId") },
+            ev("user_message_accepted", turnId, ts = ComposerFixtures.T_START) { put("text", "Run the test suite.") },
+            ev("queued_message_added", null, ts = ComposerFixtures.T_START) {
+                put("queueId", queueId); put("text", "Also bump the changelog."); put("flushMode", "next-call")
+            },
+            if (cancelling) ev("cancel_requested", turnId, ts = ComposerFixtures.T_START) else null,
+        ).toTypedArray(),
     )
+
+    // ---- r2 ------------------------------------------------------------------------------------------
+
+    /**
+     * r2 (security M, until ta-yw0): while the turn is already being interrupted, the head row's
+     * message flushes into a new turn the moment it stops, which this client may not have seen yet
+     * when a second tap lands; the head row's "Interrupt now" stays locked, says why, and sends nothing.
+     */
+    @Test
+    fun theHeadRowsInterruptNowIsLockedWhileTheTurnIsBeingInterrupted() {
+        val client = liveClient(busy, queuedOn("t1", cancelling = true))
+        rule.mainClock.autoAdvance = false
+        host(client)
+        arm()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
+        arm()
+        assertTrue("an Interrupt now after the turn was already interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        rule.onNodeWithContentDescription(
+            "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this, unavailable: $QUEUE_HEAD_CANCELLING_COPY",
+        ).assertExists()
+    }
+
+    /**
+     * r2 (verifier): the same queued message across a turn change. Its "Interrupt now" re-arms for
+     * the new turn (the arming identity carries the turn, not only the queueId): a tap before it
+     * re-arms sends nothing; once armed it interrupts the new turn.
+     */
+    @Test
+    fun theSameQueuedRowReArmsWhenTheTurnChanges() {
+        val client = liveClient(busy, queuedOn("t1", queueId = "q-same"))
+        rule.mainClock.autoAdvance = false
+        host(client)
+        arm()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled()
+        rule.runOnIdle { client.show(busy, queuedOn("t2", queueId = "q-same")) }
+        frames()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
+        frames()
+        assertTrue("the row armed for t1 sent for t2 before re-arming: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        arm()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
+    }
+
+    /** r2: the notices (each with its armed X) are not selectable; a selection elsewhere never swallows or doubles the X's tap. */
+    @Test
+    fun theNoticeXStaysOneTapWhileASelectionIsActive() {
+        val recorder = NoticeFixtures.Recorder()
+        val fixture = NoticeFixtures.sessionNotices
+        buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone).forEach { item ->
+            if (item is ChatItem.SessionNotice || item is ChatItem.ProviderNotice || item is ChatItem.Compaction) assertFalse("$item is selectable", item.selectableText)
+        }
+        transcript(fixture, notices = recorder.actions())
+        arm()
+        // A word of the prompt is selected ...
+        copyFrom(text = "Summarize the README in one line.")
+        assertTrue(clip() != null && "Summarize the README in one line.".contains(clip()!!))
+        // ... and the notice's X, tapped once, dismisses once.
+        rule.onAllNodesWithTag("notice-dismiss").onFirst().performClick()
+        rule.waitForIdle()
+        assertEquals(1, recorder.dismissed.size)
+        // A long press on the X selects nothing and dismisses nothing more: the copy keeps the prompt's word.
+        val before = clip()
+        rule.onAllNodesWithTag("notice-dismiss").onFirst().performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        assertEquals(before, clip())
+        assertEquals(1, recorder.dismissed.size)
+    }
+
+    /** r2 (verifier): a Codex turn diff's +/- column is `user-select: none` (codex-rich-renderers.module.css `.diffMarker`). */
+    @Test
+    fun aCodexDiffsMarkersAreNeverSelected() {
+        transcript(ToolFixtures.codexDetails, richCodex = true)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasContentDescription("Turn changes"))
+        val marker = rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
+            .indexOfFirst { node -> node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.joinToString("") == "+" }
+        assertTrue("a + marker is drawn", marker >= 0)
+        val node = rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true)[marker]
+        node.performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        node.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }
+        rule.waitForIdle()
+        assertNull("a diff marker was selected: ${clip()}", clip())
+    }
+
+    @Test
+    fun theSessionErrorRowSaysWhatItIs() {
+        transcript(InterruptErrorFixtures.errors)
+        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)").assertExists()
+    }
 }

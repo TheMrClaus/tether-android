@@ -555,6 +555,6 @@ private fun CoroutineScope.launchCollect(
 ) = // UNDISPATCHED: subscribe before returning, or a frame sent right after can be missed (no replay).
     launch(start = CoroutineStart.UNDISPATCHED) {
         // T6.7: the server's words arrive on serverErrors, the client's on errors: both are toasts.
-        launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { onError(it) } }
+        launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { onError(it.text) } }
         client.errors.collect { onError(it) }
     }

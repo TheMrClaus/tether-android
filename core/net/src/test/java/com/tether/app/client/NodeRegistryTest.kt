@@ -48,7 +48,7 @@ class NodeRegistryTest {
 
     /** T6.7: every toast, the client's words and the server's (the server's arrive on serverErrors). */
     private suspend fun collectToasts(): Nothing = kotlinx.coroutines.coroutineScope {
-        launch(start = CoroutineStart.UNDISPATCHED) { h.client.serverErrors.collect { errors += it } }
+        launch(start = CoroutineStart.UNDISPATCHED) { h.client.serverErrors.collect { errors += it.text } }
         h.client.errors.collect { errors += it }
     }
 

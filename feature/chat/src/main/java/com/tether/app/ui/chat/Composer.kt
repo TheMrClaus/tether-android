@@ -691,6 +691,7 @@ fun Composer(
                         interruptTurnId = interruptTurnId,
                         onInterruptNow = ::interruptTurn,
                         interruptLock = liveness.interruptLock,
+                        turnCancelling = activeTurn?.status == Vocab.TURN_CANCELLING,
                     )
                 }
 

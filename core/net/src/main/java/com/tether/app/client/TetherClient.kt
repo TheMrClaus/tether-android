@@ -63,9 +63,11 @@ interface TetherClient {
      * T6.7: text a SERVER wrote that the web shows as its global error (`{type:"error"}` frames, a
      * failed `interrupt_result`), from the live socket only, already cleaned ([LabelText.error]: no
      * line breaks, bidi controls or invisible code points, bounded). Kept apart from [errors] so it
-     * is shown attributed to the server and can never pass for the app's own words.
+     * is shown attributed to the server and can never pass for the app's own words. r2: each carries
+     * the server origin of the socket it came in on (checked current in the same step it was
+     * emitted), so a view can drop it once that server is no longer the one it shows.
      */
-    val serverErrors: SharedFlow<String> get() = NoServerErrors
+    val serverErrors: SharedFlow<ServerErrorText> get() = NoServerErrors
 
     /**
      * Validate + persist server config from the first-launch screen:
@@ -179,8 +181,10 @@ interface TetherClient {
      * T6.7: bound to the turn the key was drawn for. The wire `interrupt` names no turn (the server
      * stops whichever turn is running when it arrives), so the client refuses
      * ([InterruptResult.NotCurrentTurn]) unless the session's current projection still has
-     * [expectedTurnId] as its open active turn: a late tap after that turn ended and another began
-     * never stops the other one.
+     * [expectedTurnId] as its open active turn: it never stops a turn the client has already seen
+     * replace it. It cannot know of a turn the server started that has not reached it yet (a queued
+     * message flushed at the boundary): that window is the server's to close (ta-yw0); until then
+     * "Interrupt now" stays locked while its turn is already being interrupted.
      */
     fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult = InterruptResult.NotConnected
 
@@ -713,8 +717,11 @@ enum class InterruptResult {
     NotCurrentTurn,
 }
 
+/** T6.7: a server's error words, cleaned ([LabelText.error]), and the origin of the socket they came in on. */
+data class ServerErrorText(val text: String, val origin: String)
+
 /** T6.7: [TetherClient.serverErrors] of a client that has none. */
-private val NoServerErrors: SharedFlow<String> = kotlinx.coroutines.flow.MutableSharedFlow()
+private val NoServerErrors: SharedFlow<ServerErrorText> = kotlinx.coroutines.flow.MutableSharedFlow()
 
 /** T6.6: what [TetherClient.dismissNotice] did. Only [Sent] put a frame on the wire. */
 enum class NoticeResult {

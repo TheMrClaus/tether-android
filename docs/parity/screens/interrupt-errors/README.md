@@ -68,7 +68,21 @@ web code:
 - **The End session confirmation is armed and closes itself.** It closes when the link drops or
   the copy stops being live, on a server switch, and when the app stops. The web's `<dialog>`
   stays open.
-- **The consent and limit cards are not selectable.** No long press or drag should compete with
-  their armed keys. The web lets their text be selected.
+- **Only reading rows are selectable (r2: an allowlist).** Selectable: blocks, denials, answered
+  questions, outcome and session-error rows, a Codex turn's plan, diff and review, and the
+  continuation and retry markers. Not selectable: every row with an armed key (the consent and
+  limit cards, and the notices with their X), and the single-control rows. The web lets the cards'
+  and notices' text be selected. The X itself is never part of a selection. As on the web, the
+  +/- column of a Codex diff (`.diffMarker`) and of an edit diff (`.diff-gutter`) is left out of a
+  copy.
+- **"Interrupt now" is locked while the turn is already being interrupted (r2).** This applies to
+  the head row. Its message flushes into a new turn the moment the turn stops, and this client may
+  not have seen that turn yet. The row says "Interrupting — this message sends as soon as the turn
+  stops." The server-side fix is ta-yw0.
+- **The toast is a surface (r2).** A touch on it never reaches the composer's keys underneath. When
+  it goes away, every armed key re-arms. A server's toast is tagged with the server it came from,
+  and is dropped when the configured or linked server changes.
+- **The session error row** is read as "Session error: …". The web's row has only the glyph, so no
+  caption is drawn.
 - **No drag across rows.** Android cannot extend one selection across lazy rows without the
   runaway the web fixed, so copying spans one row at a time.

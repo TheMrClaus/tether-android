@@ -960,6 +960,31 @@ class OriginKeyedPendingTest {
         awaitCondition("deleted once told") { runBlocking { orphan.readUnattributedPendingInput() } == null }
     }
 
+    /**
+     * T6.7 r2: an error frame A's socket admitted but had not handled when the sign-in to B let that
+     * socket go is never shown: the "still current" check and the emit are one step under the lock.
+     * B's own error comes through, tagged with B's origin (the view drops any other).
+     */
+    @Test
+    fun aLateErrorFromTheOldServerIsNeverShownAfterTheSwitch() {
+        val aws = connectedToA()
+        val seen = CopyOnWriteArrayList<ServerErrorText>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes += it }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { seen += it } }
+        val hold = Hold(RacePoint.FrameAdmitted) { it is com.tether.app.protocol.ServerMessage.ErrorFrame && it.message == "late words from A" }
+        aws.send("""{"type":"error","message":"late words from A"}""")
+        hold.awaitReached() // admitted by A's listener, not yet handled...
+        loginTo(b) // ...when the sign-in to B lets A's socket go
+        hold.release()
+        hold.awaitHandled()
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        bws.send("""{"type":"error","message":"words from B"}""")
+        awaitCondition("B's error is shown") { seen.any { it.text == "words from B" } }
+        assertTrue("A's late words reached the toast after the switch: $seen", seen.none { it.text == "late words from A" })
+        assertEquals(listOf(ServerErrorText("words from B", b.origin())), seen.toList())
+    }
+
     @Test
     fun aLateReadyFromTheOldServerNeverShowsItsSessionsOnTheNewOne() {
         processOnA()

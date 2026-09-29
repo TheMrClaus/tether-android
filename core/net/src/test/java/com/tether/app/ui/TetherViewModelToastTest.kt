@@ -1,6 +1,9 @@
 package com.tether.app.ui
 
+import com.tether.app.client.ServerErrorText
 import com.tether.app.ui.prefs.InMemoryDraftStore
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -34,9 +37,13 @@ class TetherViewModelToastTest {
 
     private class ToastClient : StubClient() {
         val local = MutableSharedFlow<String>(extraBufferCapacity = 8)
-        val server = MutableSharedFlow<String>(extraBufferCapacity = 8)
+        val server = MutableSharedFlow<ServerErrorText>(extraBufferCapacity = 8)
+        val url = MutableStateFlow<String?>(A)
+        val live = MutableStateFlow<String?>(A)
         override val errors: SharedFlow<String> get() = local
-        override val serverErrors: SharedFlow<String> get() = server
+        override val serverErrors: SharedFlow<ServerErrorText> get() = server
+        override val serverUrl: StateFlow<String?> get() = url
+        override val consentOrigin: StateFlow<String?> get() = live
     }
 
     private fun TestScope.vm(client: ToastClient) =
@@ -47,9 +54,9 @@ class TetherViewModelToastTest {
         val client = ToastClient()
         val vm = vm(client)
         advanceUntilIdle()
-        client.server.tryEmit("Session not found.")
+        client.server.tryEmit(ServerErrorText("Session not found.", A))
         advanceUntilIdle()
-        assertEquals(Toast("Session not found.", fromServer = true), vm.toast.value)
+        assertEquals(Toast("Session not found.", fromServer = true, origin = A), vm.toast.value)
         assertEquals("Session not found.", vm.activeToast.value)
     }
 
@@ -58,7 +65,7 @@ class TetherViewModelToastTest {
         val client = ToastClient()
         val vm = vm(client)
         advanceUntilIdle()
-        client.server.tryEmit("from the server")
+        client.server.tryEmit(ServerErrorText("from the server", A))
         advanceUntilIdle()
         client.local.tryEmit("The secure link is reconnecting. The turn was not interrupted.")
         advanceUntilIdle()
@@ -68,5 +75,57 @@ class TetherViewModelToastTest {
         vm.dismissToast()
         assertNull(vm.toast.value)
         assertNull(vm.activeToast.value)
+    }
+
+    /** r2: a server's words never survive the switch to another server (configured or linked). */
+    @Test
+    fun aServerToastIsDroppedWhenTheServerChanges() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        client.server.tryEmit(ServerErrorText("Session not found.", A))
+        advanceUntilIdle()
+        assertEquals(A, vm.toast.value?.origin)
+        client.url.value = B
+        advanceUntilIdle()
+        assertNull("A's words on B's screen", vm.toast.value)
+
+        // The link moved (same configured server, another origin on the socket): dropped too.
+        client.url.value = A
+        advanceUntilIdle()
+        client.server.tryEmit(ServerErrorText("Forbidden.", A))
+        advanceUntilIdle()
+        assertEquals("Forbidden.", vm.toast.value?.text)
+        client.live.value = B
+        advanceUntilIdle()
+        assertNull(vm.toast.value)
+    }
+
+    @Test
+    fun aServerToastFromAnotherServerIsNeverShown() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        client.server.tryEmit(ServerErrorText("late words from A", B))
+        advanceUntilIdle()
+        assertNull(vm.toast.value)
+    }
+
+    @Test
+    fun theAppsOwnToastSurvivesAServerSwitch() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        client.local.tryEmit("1 unsent message was not sent to this server.")
+        advanceUntilIdle()
+        client.url.value = B
+        client.live.value = B
+        advanceUntilIdle()
+        assertEquals("1 unsent message was not sent to this server.", vm.toast.value?.text)
+    }
+
+    private companion object {
+        const val A = "https://a.example:443"
+        const val B = "https://b.example:443"
     }
 }

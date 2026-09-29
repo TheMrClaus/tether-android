@@ -134,6 +134,12 @@ class ShellConsentClient : TetherClient {
     override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
         killCalls += "$sessionId@$expectedOrigin:$requireLive"
     }
+    /** T6.7 r2: every interrupt the shell asked for (`<session>@<origin>#<turn>`). */
+    val interruptCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): com.tether.app.client.InterruptResult {
+        interruptCalls += "$sessionId@$expectedOrigin#$expectedTurnId"
+        return com.tether.app.client.InterruptResult.Sent
+    }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

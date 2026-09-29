@@ -133,6 +133,8 @@ class TetherViewModel(
     /** Another server is configured: its drafts are its own (read on demand from its namespace). */
     private fun onServerUrl(url: String?) {
         val origin = serverOrigin(url)
+        // T6.7 r2: a server's words never outlive the switch to another server.
+        dropServerToastUnless(origin)
         if (origin == draftOrigin) return
         draftOrigin = origin
         draftLoads.clear()
@@ -182,9 +184,27 @@ class TetherViewModel(
      */
     val toast: StateFlow<Toast?> = _toast.asStateFlow()
 
-    private fun showToast(text: String, fromServer: Boolean) {
-        _toast.value = Toast(text, fromServer)
+    private fun showToast(text: String, fromServer: Boolean, origin: String? = null) {
+        _toast.value = Toast(text, fromServer, origin)
         _activeToast.value = text
+    }
+
+    /** T6.7 r2: a server toast from anywhere but [origin] (null: no server) is closed. */
+    private fun dropServerToastUnless(origin: String?) {
+        val shown = _toast.value ?: return
+        if (shown.fromServer && shown.origin != origin) dismissToast()
+    }
+
+    /**
+     * T6.7 r2: a server's words are shown only while their server is the one configured and (when
+     * connected) the one the socket is on; they are tagged with the socket they came in on.
+     */
+    private fun onServerError(error: com.tether.app.client.ServerErrorText) {
+        val configured = serverOrigin(client.serverUrl.value)
+        val live = client.consentOrigin.value
+        if (configured != null && configured != error.origin) return
+        if (live != null && live != error.origin) return
+        showToast(error.text, fromServer = true, origin = error.origin)
     }
 
     /**
@@ -223,7 +243,11 @@ class TetherViewModel(
             client.errors.collect { message -> showToast(message, fromServer = false) }
         }
         viewModelScope.launch {
-            client.serverErrors.collect { message -> showToast(message, fromServer = true) }
+            client.serverErrors.collect { error -> onServerError(error) }
+        }
+        viewModelScope.launch {
+            // T6.7 r2: the link moved to another server: that server's words are not this one's.
+            client.consentOrigin.collect { origin -> if (origin != null) dropServerToastUnless(origin) }
         }
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
@@ -482,4 +506,4 @@ class TetherViewModelFactory(
 }
 
 /** T6.7: an error toast's words, and whether a server wrote them ([TetherViewModel.toast]). */
-data class Toast(val text: String, val fromServer: Boolean)
+data class Toast(val text: String, val fromServer: Boolean, val origin: String? = null)

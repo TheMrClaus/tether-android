@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -269,7 +270,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
             )
-        CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness) {
+        // T6.7 r2: when the toast goes away, every armed key re-arms (a tap aimed at the toast as it
+        // vanished never lands on the key that was under it).
+        val armEpoch = rememberToastArmEpoch(toast != null)
+        CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
                 state = shell,
@@ -476,6 +480,20 @@ private fun InterimTelemetry(session: AgentSession, state: SessionView? = null) 
     com.tether.app.ui.inspector.InspectorMcpHealth(session.provider, session.engineGeneration, state)
 }
 
+/** T6.7 r2: counts the toast's disappearances (the arm epoch every armed key re-arms on). */
+@Composable
+internal fun rememberToastArmEpoch(shown: Boolean): Int {
+    var epoch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var wasShown by remember { mutableStateOf(false) }
+    if (shown) {
+        wasShown = true
+    } else if (wasShown) {
+        wasShown = false
+        epoch++
+    }
+    return epoch
+}
+
 /** T6.7: the caption over an error toast whose words a server wrote. */
 const val SERVER_ERROR_CAPTION = "From the server"
 
@@ -498,6 +516,15 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             .widthIn(max = 480.dp)
             .fillMaxWidth()
             .heightIn(min = 56.dp)
+            // T6.7 r2: the toast is a surface, not a hole: every touch on it stops here, so none
+            // reaches the composer's keys (Interrupt, Send) underneath. Its X is still a tap.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final).changes.forEach { it.consume() }
+                    }
+                }
+            }
             .background(t.dangerWash, RoundedCornerShape(TetherDimens.radiusSm))
             .border(1.dp, t.brick, RoundedCornerShape(TetherDimens.radiusSm))
             .padding(12.dp)

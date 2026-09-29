@@ -184,8 +184,10 @@ internal const val CONSENT_ARM_DELAY_MS = 500L
 @Composable
 internal fun rememberArmed(identity: Any, actionable: Boolean): Boolean {
     // L2: [identity] includes whatever moves the controls under the finger (the question page).
-    var armed by remember(identity, actionable) { mutableStateOf(false) }
-    LaunchedEffect(identity, actionable) {
+    // T6.7 r2: and the screen's arm epoch: something that covered the controls went away.
+    val epoch = LocalArmEpoch.current
+    var armed by remember(identity, actionable, epoch) { mutableStateOf(false) }
+    LaunchedEffect(identity, actionable, epoch) {
         armed = false
         if (actionable) {
             kotlinx.coroutines.delay(CONSENT_ARM_DELAY_MS)
@@ -194,6 +196,13 @@ internal fun rememberArmed(identity: Any, actionable: Boolean): Boolean {
     }
     return armed && actionable
 }
+
+/**
+ * T6.7 r2: bumped by the host when something drawn over the controls (the error toast) goes away,
+ * so every armed control re-arms: a tap aimed at the toast as it vanished cannot land on the key
+ * that was under it.
+ */
+val LocalArmEpoch = androidx.compose.runtime.compositionLocalOf { 0 }
 
 /**
  * I3 (tapjacking): a touch that reached us through another window drawn over ours

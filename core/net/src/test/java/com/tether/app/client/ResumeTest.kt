@@ -123,7 +123,7 @@ class ResumeTest {
         assertEquals("error", refusal["type"]!!.jsonPrimitive.content)
         runBlocking {
             // T6.7: the server's words are a SERVER toast (serverErrors), cleaned and attributed.
-            val toast = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { withTimeout(20_000) { h.client.serverErrors.first() } }
+            val toast = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { withTimeout(20_000) { h.client.serverErrors.first().text } }
             ws.send(refusal.toString())
             assertEquals("That saved session is no longer available.", toast.await())
         }

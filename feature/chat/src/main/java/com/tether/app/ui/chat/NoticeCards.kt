@@ -190,6 +190,12 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
  */
 @Composable
 internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Modifier = Modifier) {
+    // T6.7 r2: never part of a text selection, wherever it is drawn.
+    androidx.compose.foundation.text.selection.DisableSelection { NoticeDismissButtonBody(dismissKey, label, modifier) }
+}
+
+@Composable
+private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val actions = LocalNoticeActions.current
     // Scoped to the session too (r2): another session's notice with the same key never inherits this latch or arming.

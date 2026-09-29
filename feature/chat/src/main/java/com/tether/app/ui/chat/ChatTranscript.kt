@@ -349,17 +349,22 @@ private fun ChatRow(
 }
 
 /**
- * T6.7: whether a row's words take part in text selection. Not the consent and limit cards (armed
- * decisions: no long-press or drag competes with their keys), nor rows that are a single control
- * (Load earlier, an activity group's summary, a background command chip: `.chat-activity-summary`
- * is `user-select: none` on the web too).
+ * T6.7: whether a row's words take part in text selection. r2: an ALLOWLIST of the rows that are
+ * reading and hold no armed control: the blocks (bubbles, thinking, tool cards), denials, answered
+ * questions, outcome and session-error rows, a Codex turn's plan / diff / review, and the
+ * continuation and retry markers. Everything else stays out, including every row that carries an
+ * armed key: the approval, question and limit cards and the notices with their X (the web lets a
+ * notice's words be selected; here no long press or drag shares a row with an armed key), and the
+ * single-control rows (Load earlier, an activity group's summary — `user-select: none` on the web
+ * too — and a background command chip). A new row kind is out until it is added here.
  */
 internal val ChatItem.selectableText: Boolean
     get() = when (this) {
-        is ChatItem.Approval, is ChatItem.Question, is ChatItem.RateLimit,
-        is ChatItem.LoadEarlier, is ChatItem.ToolGroup, is ChatItem.BgCommand,
-        -> false
-        else -> true
+        is ChatItem.Block, is ChatItem.Denial, is ChatItem.Answered, is ChatItem.Outcome, is ChatItem.SessionError,
+        is ChatItem.TurnPlan, is ChatItem.TurnDiff, is ChatItem.TurnReview,
+        is ChatItem.Continuation, is ChatItem.Retry,
+        -> true
+        else -> false
     }
 
 @Composable
