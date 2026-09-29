@@ -3,6 +3,7 @@ package com.tether.app.ui.sidebar
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import com.tether.app.client.Freshness
 import com.tether.app.client.SessionSync
 import com.tether.app.ui.components.TetherLayoutClass
@@ -92,6 +93,11 @@ class SidebarSyncTest {
         // Offline, nothing reads as live now.
         rule.onNodeWithContentDescription("chat, Active", substring = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("chat, Needs you", substring = true).assertDoesNotExist()
+        // ...and the visible words say so too (not only the TalkBack sentence).
+        rule.onNodeWithText("Was running", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was waiting on you", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Active", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Needs you", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
