@@ -45,9 +45,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Cpu
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
-import com.tether.app.protocol.reduce.RUN_RUNNING
-import com.tether.app.protocol.reduce.collectSubagentRuns
-import com.tether.app.protocol.reduce.subagentRosterSummary
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinningIcon
@@ -94,7 +91,9 @@ fun ChatScreen(
     val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl) }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
-    val runs = remember(projection) { collectSubagentRuns(projection) }
+    val tree = session?.let { trees[it.id] }
+    // T6.4: the runs read the TREE (background tasks and spawned runs are not in the typed projection).
+    val runs = remember(projection, tree) { projection?.let { collectSubagentRuns(cardTree(it, tree)) } ?: emptyList() }
     // Resolve by lookup, never by trusting the stored id: a run that vanished
     // from a re-snapshot degrades to the Session tab on its own.
     val activeRun = session?.let { selectedRunIds[it.id] }?.let { id -> runs.firstOrNull { it.runId == id } }
@@ -106,8 +105,26 @@ fun ChatScreen(
     val unconfirmed by vm.client.unconfirmedRequests.collectAsStateWithLifecycle()
     val consentOrigin by vm.client.consentOrigin.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
-    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm) {
-        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed)
+    // T6.4: a denial's origin link opens the run's tab AND lands on the refused step.
+    var runFocus by remember(session?.id) { mutableStateOf<RunFocus?>(null) }
+    val onFocusCall: (String, String) -> Unit = remember(session?.id, vm) {
+        { runId, toolId ->
+            session?.let { vm.selectRun(it.id, runId) }
+            runFocus = RunFocus(runId, toolId, (runFocus?.nonce ?: 0) + 1)
+        }
+    }
+    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall) {
+        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall)
+    }
+    // T6.4: background commands — open one's output; STOP one (a tap on its Stop key, and only then).
+    var openCommandId by remember(session?.id) { mutableStateOf<String?>(null) }
+    val onOpenCommand: (String) -> Unit = remember(session?.id) { { id -> openCommandId = id } }
+    val stopLock = stopLockCopy(
+        consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, session?.id in liveSessions, session),
+    )
+    val commandActions = remember(session?.id, stopLock, vm) {
+        val s = session
+        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand) { commandId -> vm.client.stopCommand(s.id, commandId) }
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
@@ -199,11 +216,12 @@ fun ChatScreen(
 
                 activeRun != null -> RunTab(
                     projection = projection,
-                    tree = trees[session.id],
+                    tree = tree,
                     run = activeRun,
                     showThinking = showThinking,
                     consent = consent,
                     showApprovals = showApprovals,
+                    focus = runFocus,
                 )
 
                 else -> ChatTranscript(
@@ -218,7 +236,6 @@ fun ChatScreen(
                         {
                             SubagentRoster(
                                 runs = runs,
-                                summary = subagentRosterSummary(runs),
                                 activeRunId = null,
                                 onSelect = { runId -> vm.selectRun(session.id, runId) },
                             )
@@ -226,6 +243,7 @@ fun ChatScreen(
                     } else {
                         null
                     },
+                    onOpenCommand = onOpenCommand,
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                 )
@@ -251,8 +269,15 @@ fun ChatScreen(
             initialDraft = session?.let { vm.loadedDraft(it.id) },
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
+            tree = tree,
+            commandActions = commandActions,
         )
     }
+    CommandOutputDialog(
+        command = openCommandId?.let { id -> backgroundCommands(tree).firstOrNull { it.commandId == id } },
+        actions = commandActions,
+        onClose = { openCommandId = null },
+    )
     if (find.open && session != null) {
         ChatFindBar(
             query = find.query,
@@ -280,49 +305,18 @@ fun ChatScreen(
 private fun RunTab(
     projection: SessionProjection,
     tree: com.tether.app.protocol.tree.JsObj?,
-    run: com.tether.app.protocol.reduce.SubagentRun,
+    run: SubagentRun,
     showThinking: Boolean,
     consent: ConsentActions,
     showApprovals: Boolean,
+    focus: RunFocus?,
 ) {
-    val listState = rememberLazyListState()
     val state = remember(projection, tree) { cardTree(projection, tree) }
     val pending = remember(state, showApprovals, consent.sessionId) { if (showApprovals) pendingApprovals(state, consent.sessionId) else emptyList() }
     val pendingQ = remember(state, consent.sessionId) { pendingQuestions(state, consent.sessionId) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
-
-    // Web parity: a running run follows the newest activity as its thread
-    // grows (steps stream in, pending cards arrive); a finished run parks at
-    // the top. Re-key on the growing content so the effect re-fires, and read
-    // the current last index inside the effect so it tracks new items.
-    LaunchedEffect(run.runId, run.steps, pending.size, pendingQ.size, run.status) {
-        val lastIndex = pending.size + pendingQ.size // panel is item 0; cards follow
-        if (run.status == RUN_RUNNING) {
-            listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
-        } else {
-            listState.scrollToItem(0)
-        }
-    }
-
     CompositionLocalProvider(LocalConsent provides consent) {
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 12.dp, end = 12.dp, top = 12.dp, bottom = 16.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "run-panel") {
-            SubagentRunPanel(run = run, showThinking = showThinking)
-        }
-        pending.forEach { approval ->
-            item(key = "approval/${approval.requestId}/${approval.contentFp}") { ApprovalCard(approval) }
-        }
-        pendingQ.forEach { question ->
-            item(key = "question/${question.requestId}/${question.contentFp}") { QuestionCard(question, answered = question.requestId in answeredIds) }
-        }
-    }
+        SubagentRunTab(run, showThinking, pending, pendingQ, answeredIds, focus)
     }
 }
 
@@ -338,6 +332,7 @@ internal fun consentActionsFor(
     liveSessions: Set<String>,
     decided: Set<String>,
     unconfirmed: Set<String> = emptySet(),
+    onFocusCall: ((runId: String, toolId: String) -> Unit)? = null,
 ): ConsentActions {
     val s = session ?: return ConsentActions.Unavailable
     return ConsentActions(
@@ -351,6 +346,7 @@ internal fun consentActionsFor(
         onApproval = { requestId, fingerprint, choiceId, decision, granted -> vm.client.approval(s.id, requestId, fingerprint, choiceId, decision, granted) },
         onAnswer = { requestId, fingerprint, picks, skipped -> vm.client.answerQuestion(s.id, requestId, fingerprint, picks, skipped) },
         onOpenRun = { runId -> vm.selectRun(s.id, runId) },
+        onFocusCall = onFocusCall ?: { runId, _ -> vm.selectRun(s.id, runId) },
     )
 }
 

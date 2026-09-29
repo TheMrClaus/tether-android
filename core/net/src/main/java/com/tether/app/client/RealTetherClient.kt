@@ -20,8 +20,10 @@ import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.str
+import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
+import com.tether.app.protocol.tree.JsStr
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.UUID
@@ -2754,6 +2756,36 @@ class RealTetherClient(
         decidedState.value = consentLedger.keysFor(origin)
         unconfirmedState.value = consentLedger.unconfirmedFor(origin, epoch)
     }
+
+    /**
+     * T6.4: the one path a background command's STOP takes to the wire. Under the lock, in order: a
+     * live, handshaken socket; the session confirmed live on it; not read-only or handed off (an
+     * unlisted session is refused: fail closed); the session's current projection lists the command
+     * as running; then enqueued on that socket. Nothing is retried, held or persisted.
+     */
+    override fun stopCommand(sessionId: String, commandId: String): StopCommandResult {
+        if (sessionId.isEmpty() || commandId.isEmpty()) return StopCommandResult.NotRunning
+        val result = synchronized(lock) {
+            val ws = socket
+            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone) return@synchronized StopCommandResult.NotConnected
+            if (sessionId !in liveThisEpoch) return@synchronized StopCommandResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized StopCommandResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized StopCommandResult.Locked
+            if (!isRunningCommand(sessionStore.tree(sessionId), commandId)) return@synchronized StopCommandResult.NotRunning
+            if (!ws.send(ClientMessage.StopCommand(sessionId, commandId).encode())) return@synchronized StopCommandResult.NotConnected
+            StopCommandResult.Sent
+        }
+        if (result == StopCommandResult.NotConnected) emitError("The secure link is reconnecting. The command was not stopped.")
+        return result
+    }
+
+    /** `backgroundCommands` holds [commandId] with status "running" (the fold's own projection). */
+    private fun isRunningCommand(tree: JsObj?, commandId: String): Boolean =
+        (tree?.get("backgroundCommands") as? JsArr)?.any { value ->
+            val command = value as? JsObj
+            (command?.get("commandId") as? JsStr)?.value == commandId &&
+                (command["status"] as? JsStr)?.value == "running"
+        } == true
 
     override fun createSession(provider: String, cwd: String?, name: String?) {
         sendFrame(ClientMessage.Create(provider = provider, cwd = cwd, name = name))

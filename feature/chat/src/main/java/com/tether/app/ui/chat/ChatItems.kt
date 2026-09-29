@@ -6,7 +6,6 @@ import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnBlock
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
-import com.tether.app.protocol.reduce.collectSubagentRuns
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
@@ -137,6 +136,12 @@ internal sealed interface ChatItem {
         override val key: String get() = "${turn.turnId}/outcome"
     }
 
+    /** T6.4: a finished background `!` command, anchored where it was launched (a `.chat-scroll` child). */
+    data class BgCommand(val command: BackgroundCommandView) : ChatItem {
+        override val key: String get() = "bg-${command.commandId}"
+        override val startsGroup: Boolean get() = true
+    }
+
     companion object {
         const val LOAD_EARLIER_KEY = "load-earlier"
 
@@ -218,10 +223,10 @@ internal fun buildChatItems(
     // T6.3: the cards read the tree (the typed projection's when there is none).
     val state = cardTree(projection, tree)
     val placement = placeDenials(state)
-    val runs by lazy(LazyThreadSafetyMode.NONE) { collectSubagentRuns(projection) }
+    val runs by lazy(LazyThreadSafetyMode.NONE) { collectSubagentRuns(state) }
     val denialKeys = HashMap<String, Int>()
     fun runFor(d: DenialView): RunRef? =
-        if (!d.subagent) null else runs.firstOrNull { it.thread?.entries?.containsKey(d.toolId) == true }?.let { RunRef(it.runId, it.title) }
+        if (!d.subagent) null else runForToolId(runs, d.toolId)?.let { RunRef(it.runId, it.title, d.toolId) }
     fun denialItem(turnId: String?, turnObj: JsObj?, d: DenialView, nested: Boolean, startsGroup: Boolean, tight: Boolean): ChatItem.Denial {
         val base = (if (turnId != null) "$turnId/denial/" else "late-denial/") + d.toolId
         val ordinal = denialKeys.getOrDefault(base, 0).also { denialKeys[base] = it + 1 }
@@ -230,10 +235,21 @@ internal fun buildChatItems(
     }
     val treeTurns = tree?.get("turnsById") as? JsObj
     val stateTurns = state["turnsById"] as? JsObj
+    // T6.4 (chat-view.tsx:3480-3528): finished background commands join the turns by launch time.
+    val finishedBg = finishedBackgroundCommands(state)
+    var bgIndex = 0
+    var lastTs = 0.0
+    fun flushBg(ts: Double) {
+        while (bgIndex < finishedBg.size && finishedBg[bgIndex].startedAt <= ts) items.add(ChatItem.BgCommand(finishedBg[bgIndex++]))
+    }
     projection.turnOrder.forEachIndexed { turnIndex, turnId ->
         if (turnIndex < trimmed) return@forEachIndexed
         val turn = projection.turnsById[turnId] ?: return@forEachIndexed
         val turnObj = treeTurns?.get(turnId) as? JsObj
+        // Monotonic clamp: a turn with no startedAt inherits the last known stamp.
+        val startedAt = (turnObj?.get("startedAt") as? JsNum)?.value ?: turn.startedAt?.toDouble()
+        lastTs = maxOf(lastTs, startedAt ?: lastTs)
+        flushBg(lastTs)
         val treeBlocks = turnObj?.get("blocksById") as? JsObj
         fun rawFor(blockId: String): JsObj? =
             treeBlocks?.get(blockId) as? JsObj ?: turn.blocksById[blockId]?.asTree()
@@ -317,6 +333,7 @@ internal fun buildChatItems(
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) items.add(ChatItem.Outcome(turn, opens()))
     }
+    flushBg(Double.POSITIVE_INFINITY) // any command launched after the last turn
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
     if (showApprovals) pendingApprovals(state, consentSessionId).forEach { items.add(ChatItem.Approval(it)) }
     val answeredIds = answeredRequestIds(state)

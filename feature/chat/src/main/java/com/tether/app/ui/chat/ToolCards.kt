@@ -126,7 +126,7 @@ internal fun toolStateOf(block: JsObj): ToolState = when {
  * 0.75rem card with no shadow. Children clip to the rounded inner edge.
  */
 @Composable
-internal fun ToolFrame(state: ToolState, modifier: Modifier = Modifier, nested: Boolean = false, content: @Composable () -> Unit) {
+internal fun ToolFrame(state: ToolState, modifier: Modifier = Modifier, nested: Boolean = false, fullWidth: Boolean = false, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
     val studio = isStudio(t)
     val radius = if (studio) 12.dp else t.radiusMd
@@ -140,7 +140,7 @@ internal fun ToolFrame(state: ToolState, modifier: Modifier = Modifier, nested: 
     Box(modifier.fillMaxWidth()) {
         Column(
             Modifier
-                .maxWidthFraction(cardFraction(nested))
+                .maxWidthFraction(if (fullWidth) 1f else cardFraction(nested))
                 .fillMaxWidth()
                 .cssSurface(
                     shape,
@@ -433,12 +433,12 @@ fun ToolCard(block: TurnBlock, modifier: Modifier = Modifier) {
  * command / MCP cards).
  */
 @Composable
-internal fun ToolCard(block: JsObj, showThinking: Boolean, modifier: Modifier = Modifier, nested: Boolean = false) {
+internal fun ToolCard(block: JsObj, showThinking: Boolean, modifier: Modifier = Modifier, nested: Boolean = false, fullWidth: Boolean = false) {
     val t = LocalTetherTokens.current
     val state = toolStateOf(block)
     val name = block.toolName()
     val output = block["output"]
-    ToolFrame(state, modifier.testTag("tool-card"), nested) {
+    ToolFrame(state, modifier.testTag("tool-card"), nested, fullWidth) {
         ToolHead(
             icon = { ToolStateIcon(state) },
             name = name,

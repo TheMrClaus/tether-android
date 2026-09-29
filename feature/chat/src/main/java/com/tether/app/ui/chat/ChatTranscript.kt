@@ -126,11 +126,13 @@ internal fun ChatTranscript(
     consent: ConsentActions = ConsentActions.Unavailable,
     /** T6.3: `capabilities?.interactiveApprovals !== false` (chat-view.tsx:1929). */
     showApprovals: Boolean = true,
+    /** T6.4: open a finished background command's output (its transcript chip). Keep it stable. */
+    onOpenCommand: (commandId: String) -> Unit = {},
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand)
     }
 }
 
@@ -150,6 +152,7 @@ private fun ChatTranscriptBody(
     richOpencode: Boolean,
     showApprovals: Boolean,
     consentSessionId: String?,
+    onOpenCommand: (String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -272,6 +275,7 @@ private fun ChatTranscriptBody(
                     find = marks,
                     toolRender = toolRender,
                     onToggleGroup = onToggleGroup,
+                    onOpenCommand = onOpenCommand,
                 )
             }
         }
@@ -323,6 +327,7 @@ private fun ChatRow(
     find: FindMarks? = null,
     toolRender: ToolRenderFlags = ToolRenderFlags.Default,
     onToggleGroup: (ChatItem.ToolGroup) -> Unit = {},
+    onOpenCommand: (String) -> Unit = {},
 ) {
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
@@ -356,6 +361,7 @@ private fun ChatRow(
             is ChatItem.TurnPlan -> CodexPlanCard(item.plan)
             is ChatItem.TurnDiff -> CodexUnifiedDiff(item.unifiedDiff)
             is ChatItem.TurnReview -> CodexReviewCard(item.review)
+            is ChatItem.BgCommand -> BackgroundCommandChip(item.command) { onOpenCommand(item.command.commandId) }
         }
     }
 }

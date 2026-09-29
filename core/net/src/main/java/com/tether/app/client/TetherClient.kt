@@ -216,6 +216,16 @@ interface TetherClient {
      */
     val unconfirmedRequests: StateFlow<Set<String>> get() = NO_UNCONFIRMED
 
+    /**
+     * T6.4: STOP a running background `!` command (`stop-command`, v54; the server fully kills it).
+     * An operator control: call it ONLY from a tap on the command's Stop key, never in answer to
+     * anything received. Sent only on a live, handshaken socket, for a session confirmed live on it
+     * that is neither read-only nor handed off (the server refuses those too), and only while the
+     * session's CURRENT projection lists [commandId] as running. Otherwise nothing is sent or held.
+     * No retry, no queue: a refused stop is simply not sent.
+     */
+    fun stopCommand(sessionId: String, commandId: String): StopCommandResult = StopCommandResult.NotConnected
+
     fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)
     fun discover(cwd: String)
@@ -601,4 +611,21 @@ sealed interface PairResult {
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
     data object LocalNetworkBlocked : PairResult
+}
+
+/** T6.4: what [TetherClient.stopCommand] did. Only [Sent] put a frame on the wire. */
+enum class StopCommandResult {
+    Sent,
+
+    /** No live, handshaken socket. */
+    NotConnected,
+
+    /** Connected, but the session is not confirmed live on this connection yet. */
+    NotLive,
+
+    /** The session is read-only or handed off (or unknown): the server would refuse it. */
+    Locked,
+
+    /** The current projection holds no RUNNING command with this id (finished, evicted, unknown). */
+    NotRunning,
 }

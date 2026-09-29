@@ -138,6 +138,8 @@ class ConsentActions(
     val onOpenRun: (runId: String) -> Unit,
     /** L4: decided keys sent on an earlier socket (delivery unconfirmed). */
     val unconfirmed: Set<String> = emptySet(),
+    /** T6.4: open [runId]'s tab AND land on its step [toolId] (chat-view.tsx focusSubagentCall). */
+    val onFocusCall: (runId: String, toolId: String) -> Unit = { runId, _ -> onOpenRun(runId) },
 ) {
     fun isDecided(requestId: String, fingerprint: String): Boolean = sessionId != null && consentKey(sessionId, requestId, fingerprint) in decided
 
@@ -936,7 +938,7 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
 
 /** A denied call's owner: a resolved sub-agent run (a real link to its tab), or none. */
 @Immutable
-internal data class RunRef(val runId: String, val title: String)
+internal data class RunRef(val runId: String, val title: String, val toolId: String = "")
 
 /**
  * `.chat-denial`: already closed, so no controls and no waiting styling. `--mineral-deep` inside a
@@ -977,7 +979,7 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                     denial.subagent && run != null -> Row(
                         Modifier
                             .heightIn(min = TetherDimens.touchTargetDp)
-                            .clickable(role = Role.Button, onClickLabel = "Open “${run.title}”") { consent.onOpenRun(run.runId) }
+                            .clickable(role = Role.Button, onClickLabel = "Open “${run.title}”") { if (run.toolId.isNotEmpty()) consent.onFocusCall(run.runId, run.toolId) else consent.onOpenRun(run.runId) }
                             .testTag("denial-origin-link"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.8.dp),

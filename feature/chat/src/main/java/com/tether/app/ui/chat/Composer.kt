@@ -133,6 +133,10 @@ fun Composer(
     initialDraft: String? = null,
     awaitDraft: suspend () -> String = { "" },
     onDraftChange: (String) -> Unit = {},
+    /** T6.4: the session's projection tree (the todo bar, the running background commands). */
+    tree: com.tether.app.protocol.tree.JsObj? = null,
+    /** T6.4: open / stop a background command (Stop is a tap-only operator control). */
+    commandActions: CommandActions = CommandActions.Unavailable,
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -408,6 +412,11 @@ fun Composer(
                     )
                 }
                 notice?.let { ComposerNotice(it) }
+                // T6.4 (chat-view.tsx:3780-3830): the todo bar, then the RUNNING background commands.
+                val progress = remember(tree) { selectProgress(tree) }
+                progress?.let { TodoBar(it, session?.id) }
+                val runningCommands = remember(tree) { runningBackgroundCommands(tree) }
+                if (session != null) RunningCommandsBar(runningCommands, commandActions)
                 if (menuOpen) {
                     SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
                 }
