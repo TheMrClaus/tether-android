@@ -471,10 +471,12 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                     val warning = t.warning
                     val faint = t.faint
                     val text = remember(tail, warning, faint) {
-                        buildAnnotatedString {
+                        val built = buildAnnotatedString {
                             if (tail.dropped > 0) withStyle(SpanStyle(color = faint)) { append("… (earlier output not shown here — the full output is in the log file)\n") }
                             for (seg in tail.segments) if (seg.stderr) withStyle(SpanStyle(color = warning)) { append(seg.text) } else append(seg.text)
                         }
+                        // A `<pre>` draws no line box for ONE trailing newline (preText).
+                        if (built.text.endsWith("\n")) built.subSequence(0, built.length - 1) else built
                     }
                     Text(text, style = body, color = t.ink, modifier = Modifier.testTag("command-output-body"))
                 }

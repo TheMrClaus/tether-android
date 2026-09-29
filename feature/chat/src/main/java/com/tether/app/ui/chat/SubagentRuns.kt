@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -65,6 +66,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.animateScrollBy
+import kotlinx.coroutines.flow.first
 import com.tether.app.protocol.helpers.Elapsed
 import com.tether.app.protocol.helpers.Format
 import com.tether.app.protocol.model.TurnBlock
@@ -104,8 +107,13 @@ private fun RunStatusIcon(status: String, size: Dp, tint: Color) {
 @Composable
 private fun RunHarness(run: SubagentRun, tint: Color) {
     if (run.provider.isNullOrEmpty() || harnessLabel(run) == null) return
-    Box(Modifier.size(17.6.dp), contentAlignment = Alignment.Center) {
-        ProviderLogo(run.provider, fallback = Format.providerGlyph(run.provider), color = tint, markSize = 15.dp, letterSize = 10.sp)
+    val t = LocalTetherTokens.current
+    // `.provider-glyph` at 1.1rem: the molded round cap (key face, `--line-strong` edge), the mark at 58%.
+    Box(
+        Modifier.size(17.6.dp).background(t.keyFace, CircleShape).border(1.dp, t.lineStrong, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        ProviderLogo(run.provider, fallback = Format.providerGlyph(run.provider), color = tint, markSize = 10.2.dp, letterSize = 8.sp)
     }
 }
 
@@ -146,10 +154,20 @@ fun SubagentTabs(
     val runningCount = runs.count { it.status == RUN_RUNNING }
     val runsById = remember(runs) { runs.associateBy { it.runId } }
     val listState = rememberLazyListState()
-    // Keep the selected tab in view when it changes off-screen.
+    // Keep the selected tab in view when it changes off-screen (`scrollIntoView({ inline: "nearest" })`:
+    // a tab already fully shown does not move the strip).
     LaunchedEffect(activeRunId) {
         val index = activeRunId?.let { id -> runs.indexOfFirst { it.runId == id } + 1 } ?: 0
-        if (index >= 0) listState.animateScrollToItem(index)
+        if (index < 0) return@LaunchedEffect
+        // The effect runs before the strip's first layout: judge against a laid-out strip.
+        androidx.compose.runtime.snapshotFlow { listState.layoutInfo.visibleItemsInfo.isNotEmpty() }.first { it }
+        val info = listState.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+        when {
+            item == null -> listState.animateScrollToItem(index)
+            item.offset < info.viewportStartOffset -> listState.animateScrollBy((item.offset - info.viewportStartOffset).toFloat())
+            item.offset + item.size > info.viewportEndOffset -> listState.animateScrollBy((item.offset + item.size - info.viewportEndOffset).toFloat())
+        }
     }
     val gap = t.css.spaceXs
     LazyRow(
