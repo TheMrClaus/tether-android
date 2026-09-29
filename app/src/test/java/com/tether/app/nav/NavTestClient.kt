@@ -55,7 +55,7 @@ class NavTestClient(
     override fun queueAdd(sessionId: String, text: String) { stateChanges += "queueAdd" }
     override fun queueEdit(sessionId: String, queueId: String, text: String) { stateChanges += "queueEdit" }
     override fun queueRemove(sessionId: String, queueId: String) { stateChanges += "queueRemove" }
-    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult { stateChanges += "interrupt"; return com.tether.app.client.InterruptResult.Sent }
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): com.tether.app.client.InterruptResult { stateChanges += "interrupt"; return com.tether.app.client.InterruptResult.Sent }
     override fun approval(
         sessionId: String,
         requestId: String,

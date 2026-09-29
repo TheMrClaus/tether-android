@@ -218,7 +218,10 @@ internal fun QueuedMessages(
     queued: List<QueuedMessage>,
     onSave: (queueId: String, text: String) -> Unit,
     onRemove: (queueId: String) -> Unit,
-    onInterruptNow: () -> Unit,
+    sessionId: String?,
+    /** T6.7: the turn "Interrupt now" is drawn for (the active turn); null = none runs. */
+    interruptTurnId: String?,
+    onInterruptNow: (turnId: String) -> Unit,
     /** T13.2 r2: why "Interrupt now" cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
 ) {
@@ -236,6 +239,8 @@ internal fun QueuedMessages(
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
                     interruptLock = interruptLock,
+                    interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
+                    interruptTurnId = interruptTurnId,
                 )
             }
         }
@@ -275,8 +280,12 @@ internal fun QueuedMessageRow(
     atToolBoundary: Boolean,
     onSave: (String) -> Unit,
     onRemove: () -> Unit,
-    onInterruptNow: () -> Unit,
+    onInterruptNow: (turnId: String) -> Unit,
     interruptLock: String?,
+    /** T6.7: what "Interrupt now" is armed for (session, queued message, turn): a change re-arms it. */
+    interruptIdentity: Any = Unit,
+    /** T6.7: the turn "Interrupt now" is drawn for; null = none runs, so it cannot send. */
+    interruptTurnId: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -332,7 +341,7 @@ internal fun QueuedMessageRow(
             decorationBox = { inner -> Box(Modifier.padding(vertical = t.css.spaceXs)) { inner() } },
         )
         if (atToolBoundary) {
-            QueueInterruptNow(onInterruptNow, interruptLock)
+            QueueInterruptNow(onInterruptNow, interruptLock, interruptIdentity, interruptTurnId)
         }
         Box(
             Modifier
@@ -375,17 +384,22 @@ private fun Modifier.queueEdge(color: Color): Modifier = drawWithContent {
  * on a row waiting for a tool boundary. 1.9rem tall, 2.75rem under a coarse pointer.
  */
 @Composable
-private fun QueueInterruptNow(onClick: () -> Unit, lock: String?) {
+private fun QueueInterruptNow(onClick: (turnId: String) -> Unit, lock: String?, identity: Any, turnId: String?) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
     val what = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
+    // T6.7: bound to the turn it is drawn for and armed like the composer's Interrupt key (500 ms,
+    // re-armed by a new turn or a move, no overlay touches); drawn as before while it arms.
+    val arming = rememberArmedControl(identity, lock == null && turnId != null)
+    val armed = arming.armed && lock == null && turnId != null
     Row(
         Modifier
             .heightIn(min = 44.dp)
+            .then(arming.modifier)
             // T13.2 r2: a copy that is not live cannot interrupt: shown, dimmed, and inert.
             .alpha(if (lock == null) 1f else 0.55f)
             .cssSurface(shape, Color.Transparent, CssBorder(1.dp, t.lineStrong))
-            .clickable(enabled = lock == null, onClick = onClick)
+            .clickable(enabled = armed, onClick = { if (armed && turnId != null) onClick(turnId) })
             .semantics(mergeDescendants = true) {
                 contentDescription = if (lock == null) what else "$what, unavailable: $lock"
             }

@@ -46,10 +46,16 @@ class NodeRegistryTest {
         h.close()
     }
 
+    /** T6.7: every toast, the client's words and the server's (the server's arrive on serverErrors). */
+    private suspend fun collectToasts(): Nothing = kotlinx.coroutines.coroutineScope {
+        launch(start = CoroutineStart.UNDISPATCHED) { h.client.serverErrors.collect { errors += it } }
+        h.client.errors.collect { errors += it }
+    }
+
     private fun connected(deviceToken: String? = null): WebSocket {
         h.enqueueConnect()
         h.newClient(deviceToken = deviceToken)
-        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { collectToasts() }
         h.client.start()
         val ws = h.nextSocket()
         h.handshake(ws)
@@ -483,7 +489,7 @@ class NodeRegistryTest {
         h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
         h.server.enqueue(MockResponse().withWebSocketUpgrade(silent))
         h.newClient()
-        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { collectToasts() }
         h.client.start()
         val serverSide = h.nextSocket()
         try {
@@ -646,7 +652,7 @@ class NodeRegistryTest {
     @Test
     fun withoutALiveLinkNothingIsSentAndTheWebsRefusalIsShown() {
         h.newClient(configured = false)
-        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { collectToasts() }
         assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode("node-a") })
         assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.addNode(NodeCredential("parity-fake-bundle")) })
         awaitErrors(2)

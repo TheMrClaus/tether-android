@@ -169,7 +169,23 @@ class TetherViewModel(
         maxOf(0, warnCount(log) - if (seen.generation == log.generation) seen.count else 0)
 
     private val _activeToast = MutableStateFlow<String?>(null)
+
+    /** The toast's words (whoever wrote them); [toast] also says who. */
     val activeToast: StateFlow<String?> = _activeToast.asStateFlow()
+
+    private val _toast = MutableStateFlow<Toast?>(null)
+
+    /**
+     * T6.7: the one error toast (the web's `.error-toast`), and whether a SERVER wrote its words
+     * ([TetherClient.serverErrors]: cleaned by the client, shown attributed so they cannot pass for
+     * the app's own).
+     */
+    val toast: StateFlow<Toast?> = _toast.asStateFlow()
+
+    private fun showToast(text: String, fromServer: Boolean) {
+        _toast.value = Toast(text, fromServer)
+        _activeToast.value = text
+    }
 
     /**
      * Event-anchored clock (visual-spec §4 TurnActivity): elapsed readings anchor
@@ -204,9 +220,10 @@ class TetherViewModel(
             }
         }
         viewModelScope.launch {
-            client.errors.collect { message ->
-                _activeToast.value = message
-            }
+            client.errors.collect { message -> showToast(message, fromServer = false) }
+        }
+        viewModelScope.launch {
+            client.serverErrors.collect { message -> showToast(message, fromServer = true) }
         }
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
@@ -329,10 +346,11 @@ class TetherViewModel(
 
     /** Client-side failure that never hit the server (e.g. unreadable attachment). */
     fun reportLocalError(message: String) {
-        _activeToast.value = message
+        showToast(message, fromServer = false)
     }
 
     fun dismissToast() {
+        _toast.value = null
         _activeToast.value = null
     }
 
@@ -462,3 +480,6 @@ class TetherViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client, draftStore) as T
 }
+
+/** T6.7: an error toast's words, and whether a server wrote them ([TetherViewModel.toast]). */
+data class Toast(val text: String, val fromServer: Boolean)

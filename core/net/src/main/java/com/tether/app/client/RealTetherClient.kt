@@ -17,6 +17,7 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.fold.isOpenCurrentTurn
 import com.tether.app.protocol.fold.projectionHasNoticeKey
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.SessionProjection
@@ -94,6 +95,16 @@ private const val DISMISS_KEY_MAX = 512
 
 /** T6.6: how many sent dismissals the client remembers (per-connection dedupe). */
 private const val DISMISSALS_REMEMBERED = 200
+
+/** T6.7: how many sent interrupts per session a socket remembers the turns of. */
+private const val INTERRUPTS_REMEMBERED = 8
+
+/** use-tether.ts:1169: a failed `interrupt_result` without the server's own words. */
+internal const val INTERRUPT_NOT_DELIVERED = "The interrupt request could not be delivered."
+
+/** T6.7: the server stopped a turn other than the one the Interrupt key was drawn for. */
+internal const val INTERRUPT_REACHED_LATER_TURN =
+    "The interrupt reached a turn that started after you tapped: the turn you tapped for had already ended."
 
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
@@ -398,6 +409,11 @@ class RealTetherClient(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
+    // T6.7: the server's own error text, cleaned, apart from the client's words (TetherClient.serverErrors).
+    private val serverErrorsFlow = MutableSharedFlow<String>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     private val configuredState = MutableStateFlow(false)
     private val signedOutReasonState = MutableStateFlow<SignedOutReason?>(null)
     private val serverUrlState = MutableStateFlow<String?>(null)
@@ -424,6 +440,7 @@ class RealTetherClient(
     override val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = gitFileDiffsState
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val errors: SharedFlow<String> = errorsFlow
+    override val serverErrors: SharedFlow<String> = serverErrorsFlow
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
 
@@ -2104,6 +2121,8 @@ class RealTetherClient(
                 // A new epoch: nothing is attached on this socket yet.
                 epoch++
                 attachedThisEpoch.clear()
+                // T6.7: interrupts sent on the previous socket are answered there, if at all.
+                interruptsBound.clear()
                 publishAttachedLocked()
                 clearLiveLocked()
                 // A probe from the previous socket must not judge this one.
@@ -2231,14 +2250,12 @@ class RealTetherClient(
             is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
             is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
-            is ServerMessage.InterruptResult ->
-                if (message.status == "failed") {
-                    emitError(message.error ?: "The interrupt request could not be delivered.")
-                }
+            is ServerMessage.InterruptResult -> onInterruptResult(webSocket, message)
             is ServerMessage.ErrorFrame -> {
-                // Every error is shown, as the web does (use-tether.ts setError);
-                // one that echoes a node request's requestId also ends that request.
-                emitError(message.message)
+                // Every error of the live link is shown, as the web does (use-tether.ts setError),
+                // T6.7: cleaned and attributed to the server; one that echoes a node request's
+                // requestId also ends that request.
+                if (isCurrent(webSocket)) emitServerError(message.message)
                 message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
@@ -2903,10 +2920,12 @@ class RealTetherClient(
      * Under the lock, in order: a live, handshaken socket of a running (not halted) client; the key
      * drawn for THIS server ([expectedOrigin] = the socket's origin); the session confirmed live on it
      * ([liveThisEpoch]: a saved or catching-up copy's stale "busy" never interrupts a real turn);
-     * listed, and neither read-only nor handed off (fail closed); then enqueued on that socket.
-     * Nothing is retried, held or persisted.
+     * listed, and neither read-only nor handed off (fail closed); T6.7: the key's turn
+     * ([expectedTurnId]) still the open active turn of the session's current projection (the
+     * reducer's own [isOpenCurrentTurn]); then enqueued on that socket. Nothing is retried, held or
+     * persisted.
      */
-    override fun interrupt(sessionId: String, expectedOrigin: String?): InterruptResult {
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult {
         if (sessionId.isEmpty()) return InterruptResult.Locked
         val result = synchronized(lock) {
             val ws = socket
@@ -2916,11 +2935,65 @@ class RealTetherClient(
             if (sessionId !in liveThisEpoch) return@synchronized InterruptResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized InterruptResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized InterruptResult.Locked
+            // T6.7: the frame names no turn, so the server would stop whichever one runs now.
+            if (!isCurrentTurn(sessionStore.tree(sessionId), expectedTurnId)) return@synchronized InterruptResult.NotCurrentTurn
             if (!ws.send(ClientMessage.Interrupt(sessionId).encode())) return@synchronized InterruptResult.NotConnected
+            val bound = interruptsBound.getOrPut(sessionId) { ArrayDeque() }
+            if (bound.size >= INTERRUPTS_REMEMBERED) bound.removeFirst()
+            bound.addLast(expectedTurnId)
             InterruptResult.Sent
         }
         if (result == InterruptResult.NotConnected) emitError("The secure link is reconnecting. The turn was not interrupted.")
         return result
+    }
+
+    /** T6.7: [turnId] is [tree]'s open active turn (`activeTurnId`, its status not "done"). */
+    private fun isCurrentTurn(tree: JsObj?, turnId: String): Boolean =
+        tree != null && turnId.isNotEmpty() && isOpenCurrentTurn(tree, JsStr(turnId))
+
+    /**
+     * T6.7: per session, the turns this socket's sent interrupts were bound to, oldest first (bounded;
+     * a new socket starts clean). An `interrupt_result` that names another turn means the server
+     * stopped a turn that began after the tap: said, never acted on. Guarded by [lock].
+     */
+    private val interruptsBound = HashMap<String, ArrayDeque<String>>()
+
+    /**
+     * `interrupt_result` (use-tether.ts:1163-1170): `cancel_requested` / `turn_end` carry the state,
+     * so only a failure is shown (the server's text, cleaned and attributed); `no_active_turn` is a
+     * stale tap, not a fault. T6.7: a `requested` for a turn other than the one the tap was bound to
+     * is said in the client's words.
+     */
+    private fun onInterruptResult(webSocket: WebSocket, message: ServerMessage.InterruptResult) {
+        var reachedLater = false
+        synchronized(lock) {
+            if (socket !== webSocket) return
+            val bound = interruptsBound[message.sessionId]
+            if (bound != null && bound.isNotEmpty()) {
+                val turnId = message.turnId
+                if (turnId == null || !bound.remove(turnId)) {
+                    bound.removeFirst()
+                    reachedLater = message.status == "requested" && turnId != null
+                }
+                if (bound.isEmpty()) interruptsBound.remove(message.sessionId)
+            }
+        }
+        when {
+            message.status == "failed" -> emitServerError(message.error, fallback = INTERRUPT_NOT_DELIVERED)
+            reachedLater -> emitError(INTERRUPT_REACHED_LATER_TURN)
+        }
+    }
+
+    /** T6.7: under [lock], [webSocket] is the client's current socket. */
+    private fun isCurrent(webSocket: WebSocket): Boolean = synchronized(lock) { socket === webSocket }
+
+    /**
+     * T6.7: a server's error text, cleaned ([LabelText.error]) and kept apart from the client's own
+     * words ([TetherClient.serverErrors]). Nothing visible left: the client's [fallback], if any.
+     */
+    private fun emitServerError(text: String?, fallback: String? = null) {
+        val cleaned = LabelText.error(text)
+        if (cleaned.isNotEmpty()) serverErrorsFlow.tryEmit(cleaned) else fallback?.let(::emitError)
     }
 
     override fun fetchTurns(sessionId: String, fromIndex: Int, toIndex: Int) {

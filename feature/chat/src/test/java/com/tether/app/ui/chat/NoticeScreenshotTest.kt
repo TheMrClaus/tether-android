@@ -67,7 +67,7 @@ fun ComposeContentTestRule.snapNotice(shot: NoticeShot, skin: TetherSkin, name: 
                     controls = null,
                     serverNow = { ComposerFixtures.BUSY_NOW },
                     onSend = { _, _ -> false },
-                    onInterrupt = {},
+                    onInterrupt = { com.tether.app.client.InterruptResult.Sent },
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},

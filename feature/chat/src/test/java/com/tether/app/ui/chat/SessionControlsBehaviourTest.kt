@@ -62,7 +62,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
                     controls = controls,
                     serverNow = { ComposerFixtures.BUSY_NOW },
                     onSend = { text, _ -> prompts += text; true },
-                    onInterrupt = {},
+                    onInterrupt = { com.tether.app.client.InterruptResult.Sent },
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = { requests += "session-controls" },

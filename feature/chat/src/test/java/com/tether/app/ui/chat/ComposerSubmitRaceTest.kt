@@ -72,7 +72,7 @@ class ComposerSubmitRaceTest {
                             sends += text to attachments
                             true
                         },
-                        onInterrupt = {},
+                        onInterrupt = { com.tether.app.client.InterruptResult.Sent },
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
                         onRequestControls = {},

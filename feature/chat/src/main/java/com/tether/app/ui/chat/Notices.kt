@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -64,6 +65,30 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
         )
     }
 }
+
+/**
+ * T6.7: the session's `lastError` (chat-view.tsx:3534-3536, `.chat-outcome.chat-outcome-error`):
+ * an error that belongs to no turn, after the turns, in the outcome row's `--danger` behind the
+ * warning triangle. [text] is the engine's words, already cleaned ([sessionErrorText]).
+ */
+@Composable
+internal fun SessionErrorRow(text: String, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    Row(
+        modifier
+            .background(t.tintXs, RoundedCornerShape(TetherDimens.radiusSm))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag(SESSION_ERROR_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(13.dp))
+        Text(text, color = t.danger, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.48.sp)
+    }
+}
+
+/** T6.7: the session error row's tag. */
+internal const val SESSION_ERROR_TAG = "chat-session-error"
 
 /** "continued (background task finished)" marker on continuation turns. */
 @Composable

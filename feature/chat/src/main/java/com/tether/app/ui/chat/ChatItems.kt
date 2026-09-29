@@ -165,6 +165,15 @@ internal sealed interface ChatItem {
         override val startsGroup: Boolean get() = true
     }
 
+    /**
+     * T6.7: the session's `lastError` (an `error` event with no turn, events.mjs:2729), after the
+     * turns (chat-view.tsx:3534-3536). [text] is the engine's words, cleaned.
+     */
+    data class SessionError(val scope: String, val text: String) : ChatItem {
+        override val key: String get() = "$scope/last-error"
+        override val startsGroup: Boolean get() = true
+    }
+
     /** T6.4: a finished background `!` command, anchored where it was launched (a `.chat-scroll` child). */
     data class BgCommand(val command: BackgroundCommandView) : ChatItem {
         override val key: String get() = "bg-${command.commandId}"
@@ -381,6 +390,8 @@ internal fun buildChatItems(
         }
     }
     flushBg(Double.POSITIVE_INFINITY) // any command launched after the last turn
+    // T6.7 (chat-view.tsx:3534-3536): an error that belongs to no turn, as a `.chat-outcome-error` row.
+    sessionErrorText(projection.lastError)?.let { items.add(ChatItem.SessionError(scope, it)) }
     // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
     if (noticeLabel != null) {
         var inStack = false
@@ -399,3 +410,7 @@ internal fun buildChatItems(
     pendingQuestions(state, consentSessionId).forEach { items.add(ChatItem.Question(it, answered = it.requestId in answeredIds)) }
     return items
 }
+
+/** T6.7: the session's `lastError` as the row shows it (cleaned, bounded), or null when nothing is left. */
+internal fun sessionErrorText(lastError: String?): String? =
+    com.tether.app.client.LabelText.clean(lastError, NOTICE_BODY_MAX).ifEmpty { null }

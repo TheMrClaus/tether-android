@@ -408,7 +408,8 @@ private fun DiffLine(gutter: String, text: String, bg: Color, gutterInk: Color, 
                 .clearAndSetSemantics { },
             contentAlignment = Alignment.TopCenter,
         ) {
-            Text(gutter, style = style, color = gutterInk)
+            // T6.7: `.diff-gutter { user-select: none }`: a copied diff is the lines, not the +/- marks.
+            androidx.compose.foundation.text.selection.DisableSelection { Text(gutter, style = style, color = gutterInk) }
         }
         Text(text, style = style, color = ink, modifier = Modifier.weight(1f).padding(horizontal = t.css.spaceSm))
     }

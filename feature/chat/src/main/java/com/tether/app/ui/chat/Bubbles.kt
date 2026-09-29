@@ -346,7 +346,10 @@ fun ThinkingCard(block: TurnBlock, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(t.css.spaceSm))
             Icon(TetherIcons.Brain, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
             Spacer(Modifier.width(t.css.spaceSm))
-            Text("Thinking", style = type.codeBlock.copy(fontSize = 12.48.sp, lineHeight = TextUnit.Unspecified), color = t.muted, modifier = Modifier.weight(1f))
+            // T6.7: `.chat-thinking-head { user-select: none }`.
+            androidx.compose.foundation.text.selection.DisableSelection {
+                Text("Thinking", style = type.codeBlock.copy(fontSize = 12.48.sp, lineHeight = TextUnit.Unspecified), color = t.muted, modifier = Modifier.weight(1f))
+            }
         }
         if (open) {
             val bodyStyle = type.chatBody.copy(fontSize = 13.12.sp, lineHeight = 1.6.em)

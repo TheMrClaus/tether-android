@@ -1,5 +1,7 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.reduce.freshTree
+import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.TetherJson
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -34,7 +36,8 @@ class InterruptKillTransmissionTest {
     @After
     fun tearDown() = h.close()
 
-    private fun connected(ready: String = readyWithSessions("s1", "s2")): Pair<RealTetherClient, WebSocket> {
+    /** Connected, s1 attached and live; T6.7: its turn [T1] running (seq 6), unless [turn] is false. */
+    private fun connected(ready: String = readyWithSessions("s1", "s2"), turn: Boolean = true): Pair<RealTetherClient, WebSocket> {
         val client = h.newClient()
         h.enqueueConnect()
         client.start()
@@ -42,9 +45,17 @@ class InterruptKillTransmissionTest {
         h.handshake(ws, ready)
         client.attach("s1")
         h.expectFrame("attach")
-        ws.send(snapshotFrame("s1", 5))
+        ws.send(snapshotFrame("s1", 5, FULL_STATE))
         h.await(client.liveSessions) { "s1" in it }
+        if (turn) {
+            ws.send(turnStartedEvent("s1", T1, 6))
+            awaitActive(client, T1)
+        }
         return client to ws
+    }
+
+    private fun awaitActive(client: RealTetherClient, turnId: String?) {
+        h.await(client.projectionTrees) { trees -> ConsentGuard.activeTurnId(trees["s1"]) == turnId && trees["s1"] != null }
     }
 
     private fun framesOf(type: String): List<JsonObject> = h.framesUntilBarrier().filter { it.type() == type }
@@ -56,7 +67,7 @@ class InterruptKillTransmissionTest {
     @Test
     fun aLiveSessionsInterruptSendsExactlyTheFrame() {
         val (client, _) = connected()
-        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value))
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value, T1))
         val frames = framesOf("interrupt")
         assertEquals(1, frames.size)
         assertEquals(setOf("type", "sessionId"), frames[0].keys)
@@ -71,53 +82,55 @@ class InterruptKillTransmissionTest {
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
         // A saved copy: the turn it shows as running is not known to run now.
-        assertEquals(InterruptResult.NotConnected, client.interrupt("s1", origin))
+        assertEquals(InterruptResult.NotConnected, client.interrupt("s1", origin, T1))
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1", "s2"))
         h.expectFrame("attach")
         // Catching up: connected and attached, the snapshot not in yet.
-        assertEquals(InterruptResult.NotLive, client.interrupt("s1", client.consentOrigin.value))
+        assertEquals(InterruptResult.NotLive, client.interrupt("s1", client.consentOrigin.value, T1))
         assertTrue("the refused taps were not held for the new link", framesOf("interrupt").isEmpty())
 
-        ws2.send(snapshotFrame("s1", 5))
+        ws2.send(snapshotFrame("s1", 5, FULL_STATE))
         h.await(client.liveSessions) { "s1" in it }
+        ws2.send(turnStartedEvent("s1", T1, 6))
+        awaitActive(client, T1)
         assertTrue("going live sends nothing by itself", framesOf("interrupt").isEmpty())
-        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value))
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value, T1))
         assertEquals(1, framesOf("interrupt").size)
     }
 
     @Test
     fun aListedSessionThatIsNotLiveOnThisConnectionIsNotInterrupted() {
         val (client, _) = connected()
-        assertEquals(InterruptResult.NotLive, client.interrupt("s2", client.consentOrigin.value))
+        assertEquals(InterruptResult.NotLive, client.interrupt("s2", client.consentOrigin.value, T1))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 
     @Test
     fun anInterruptDrawnForAnotherServerIsRefused() {
         val (client, _) = connected()
-        assertEquals(InterruptResult.NotLive, client.interrupt("s1", "https://other.example"))
-        assertEquals(InterruptResult.NotLive, client.interrupt("s1", null))
+        assertEquals(InterruptResult.NotLive, client.interrupt("s1", "https://other.example", T1))
+        assertEquals(InterruptResult.NotLive, client.interrupt("s1", null, T1))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 
     @Test
     fun aReadOnlyHandedOffUnlistedOrEmptySessionIsLocked() {
         val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
-        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value))
+        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value, T1))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s9"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s9" } }
-        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value))
-        assertEquals(InterruptResult.Locked, client.interrupt("", client.consentOrigin.value))
+        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value, T1))
+        assertEquals(InterruptResult.Locked, client.interrupt("", client.consentOrigin.value, T1))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 
     @Test
     fun anUnlistedSessionFailsClosed() {
-        val (client, _) = connected(readyFrame())
-        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value))
+        val (client, _) = connected(readyFrame(), turn = false)
+        assertEquals(InterruptResult.Locked, client.interrupt("s1", client.consentOrigin.value, T1))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 
@@ -126,17 +139,74 @@ class InterruptKillTransmissionTest {
         val (client, _) = connected()
         val origin = client.consentOrigin.value
         client.stop()
-        assertEquals(InterruptResult.NotConnected, client.interrupt("s1", origin))
+        assertEquals(InterruptResult.NotConnected, client.interrupt("s1", origin, T1))
     }
 
     @Test
     fun nothingReceivedEverProducesAnInterrupt() {
-        val (client, ws) = connected()
+        val (client, ws) = connected(turn = false)
         ws.send("""{"type":"interrupt","sessionId":"s1"}""")
         ws.send(turnStartedEvent("s1", "t1", 6))
         // Every frame above was handled before the barrier session showed up.
         h.serverBarrier(ws)
         assertTrue("no frame the operator did not tap for", framesOf("interrupt").isEmpty())
+    }
+
+    // ---- T6.7: bound to the turn the key was drawn for ----------------------------------------------
+
+    /**
+     * The late tap: the key was drawn for turn A; A ended and turn B began (a queued message flushed
+     * at the boundary) before the tap was handled. The wire `interrupt` names no turn, so sending it
+     * now would stop B: nothing is sent. The same tap bound to B (a key drawn for B) goes out.
+     */
+    @Test
+    fun aLateTapAfterTurnAEndedAndTurnBStartedSendsNothing() {
+        val (client, ws) = connected()
+        val origin = client.consentOrigin.value
+        ws.send(eventFrame("s1", 7, "turn_end", T1, ""","outcome":"ok""""))
+        ws.send(turnStartedEvent("s1", T2, 8))
+        awaitActive(client, T2)
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s1", origin, T1))
+        assertTrue("a key drawn for turn A never stops turn B", framesOf("interrupt").isEmpty())
+        // The control: a key drawn for B.
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", origin, T2))
+        assertEquals(1, framesOf("interrupt").size)
+    }
+
+    @Test
+    fun aTapAfterItsTurnEndedWithNothingRunningSendsNothing() {
+        val (client, ws) = connected()
+        ws.send(eventFrame("s1", 7, "cancelled", T1))
+        awaitActive(client, null)
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s1", client.consentOrigin.value, T1))
+        assertTrue(framesOf("interrupt").isEmpty())
+    }
+
+    @Test
+    fun aTurnThatIsNotTheActiveOneOrNoTurnAtAllIsRefused() {
+        val (client, _) = connected()
+        val origin = client.consentOrigin.value
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s1", origin, T2))
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s1", origin, ""))
+        assertTrue(framesOf("interrupt").isEmpty())
+    }
+
+    @Test
+    fun aTurnBeingCancelledIsStillItsOwnOpenTurn() {
+        val (client, ws) = connected()
+        ws.send(eventFrame("s1", 7, "cancel_requested", T1))
+        h.await(client.projections) { it["s1"]?.turnsById?.get(T1)?.status == "cancelling" }
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value, T1))
+        assertEquals(1, framesOf("interrupt").size)
+    }
+
+    @Test
+    fun theTurnCheckComesAfterTheLinkOriginAndLiveChecks() {
+        val (client, _) = connected()
+        // A wrong turn on another server's key is refused for the server first (nothing to say about turns).
+        assertEquals(InterruptResult.NotLive, client.interrupt("s1", "https://other.example", T2))
+        assertEquals(InterruptResult.NotLive, client.interrupt("s2", client.consentOrigin.value, T2))
+        assertTrue(framesOf("interrupt").isEmpty())
     }
 
     // ---- kill -------------------------------------------------------------------------------------
@@ -170,7 +240,7 @@ class InterruptKillTransmissionTest {
         client.kill("s1", client.consentOrigin.value)
         assertTrue("nothing refused was held for the new link", framesOf("kill").isEmpty())
 
-        ws2.send(snapshotFrame("s1", 5))
+        ws2.send(snapshotFrame("s1", 5, FULL_STATE))
         h.await(client.liveSessions) { "s1" in it }
         assertTrue(framesOf("kill").isEmpty())
         client.kill("s1", client.consentOrigin.value)
@@ -229,7 +299,7 @@ class InterruptKillTransmissionTest {
             // B's own s1, live on B: every other precondition for an End holds.
             client.attach("s1")
             b.frameOf("attach")
-            bws.send(snapshotFrame("s1", 5))
+            bws.send(snapshotFrame("s1", 5, FULL_STATE))
             h.await(client.liveSessions) { "s1" in it }
             assertTrue(b.framesUntilBarrier(client).isEmpty())
 
@@ -269,6 +339,14 @@ class InterruptKillTransmissionTest {
         assertFalse(stub.reportsFreshness)
         assertTrue(LiveCopy.isLive("s1", setOf("s1"), null, stub.reportsFreshness))
         assertFalse(LiveCopy.isLive("s1", emptySet(), null, stub.reportsFreshness))
+    }
+
+    private companion object {
+        const val T1 = "turn-a"
+        const val T2 = "turn-b"
+
+        /** A whole initial projection (a minimal one is a base no event can fold onto). */
+        val FULL_STATE: String = JsCodec.toJson(freshTree()).toString()
     }
 
     /** A second "Tether" to sign in to: healthz, password login, auth probe, upgrade (as NodeRegistryTest's). */

@@ -402,7 +402,7 @@ class ComposerLockBehaviourTest {
                     controls = null,
                     serverNow = { ComposerFixtures.BUSY_NOW },
                     onSend = { text, _ -> prompts += text; true },
-                    onInterrupt = { interrupts += session.id },
+                    onInterrupt = { interrupts += session.id; com.tether.app.client.InterruptResult.Sent },
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},

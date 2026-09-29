@@ -143,10 +143,13 @@ fun ChatScreen(
     // a saved or catching-up copy's "busy" never interrupts a real turn. Bound to the server the key
     // was drawn for; the client re-checks it all under its lock.
     val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync))
-    val onInterrupt: () -> Unit = remember(session?.id, consentOrigin, vm) {
+    // T6.7: and to the turn the tapped key was drawn for (the Composer passes it).
+    val onInterrupt: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
         val s = session
         val drawnFor = consentOrigin
-        val interrupt: () -> Unit = { if (s != null) vm.client.interrupt(s.id, drawnFor) }
+        val interrupt: (String) -> com.tether.app.client.InterruptResult = { turnId ->
+            if (s != null) vm.client.interrupt(s.id, drawnFor, turnId) else com.tether.app.client.InterruptResult.Locked
+        }
         interrupt
     }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
@@ -630,29 +633,18 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
     }
 
     confirmEnd?.let { drawn ->
+        // T13.2 r2/r3: only while the link is up, this session's copy live, and on the server the
+        // confirmation was opened for. T6.7: it closes itself the moment that stops holding.
         val endable = endAllowed && drawn.sessionId == session.id && drawn.drawnFor != null && drawn.drawnFor == origin
-        TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
-            Text(
-                "Stop the agent process for \"${session.name}\"?",
-                color = t.ink,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.body,
-                fontSize = 13.6.sp,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(onClick = { confirmEnd = null }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
-                TetherKey(
-                    onClick = {
-                        confirmEnd = null
-                        if (endable) vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = true)
-                    },
-                    classes = KeyClasses.ButtonDanger,
-                    label = "End session",
-                    icon = TetherIcons.CircleStop,
-                    enabled = endable,
-                )
-            }
-        }
+        EndSessionDialog(
+            sessionName = session.name,
+            identity = drawn,
+            endable = endable,
+            onConfirm = {
+                confirmEnd = null
+                vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = true)
+            },
+            onCancel = { confirmEnd = null },
+        )
     }
 }

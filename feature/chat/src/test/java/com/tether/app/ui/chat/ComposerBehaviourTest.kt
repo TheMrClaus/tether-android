@@ -59,7 +59,8 @@ class ComposerBehaviourTest {
     private val edits = mutableListOf<Pair<String, String>>()
     private val removes = mutableListOf<String>()
     private val drafts = mutableListOf<String>()
-    private var interrupts = 0
+    /** T6.7: the turn each Interrupt tap was drawn for. */
+    private val interrupts = mutableListOf<String>()
     private var projection by mutableStateOf<SessionProjection?>(null)
 
     private fun show(fixture: ChatFixtures.Folded, initialDraft: String = "", accept: Boolean = true) {
@@ -75,7 +76,7 @@ class ComposerBehaviourTest {
                         sends += text
                         accept
                     },
-                    onInterrupt = { interrupts++ },
+                    onInterrupt = { turnId -> interrupts += turnId; com.tether.app.client.InterruptResult.Sent },
                     onQueueEdit = { id, text -> edits += id to text },
                     onQueueRemove = { removes += it },
                     onRequestControls = {},
@@ -157,8 +158,11 @@ class ComposerBehaviourTest {
         rule.onNodeWithText(PLACEHOLDER_BUSY).assertExists()
         // Phone: an empty Queue key is hidden (globals.css:11944), Interrupt stays.
         rule.onAllNodesWithContentDescription("Queue message").assertCountEquals(0)
+        // T6.7: armed like every operator control, then bound to the turn it is drawn for.
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
         rule.onNodeWithContentDescription("Interrupt the current turn").performClick()
-        assertEquals(1, interrupts)
+        assertEquals(listOf("t1"), interrupts)
         input().performTextInput("after this turn")
         rule.onNodeWithContentDescription("Queue message").assertIsEnabled()
         input().performKeyInput { pressKey(Key.Enter) }
@@ -254,8 +258,10 @@ class ComposerBehaviourTest {
         rule.onAllNodesWithContentDescription("Queued — sends at the next tool boundary.").assertCountEquals(1)
         val interruptNow = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
         rule.onAllNodesWithContentDescription(interruptNow).assertCountEquals(1)
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
         rule.onNodeWithContentDescription(interruptNow).performClick()
-        assertEquals(1, interrupts)
+        assertEquals(listOf("t1"), interrupts)
         rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()
         assertEquals(listOf("parity-queue-2"), removes)
         rule.onNodeWithContentDescription("Queued messages").assertExists()

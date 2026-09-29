@@ -97,7 +97,7 @@ class ComposerDraftLifecycleTest {
                         controls = null,
                         serverNow = { ComposerFixtures.BUSY_NOW },
                         onSend = { text, attachments -> model.sendOrQueue(id, text, attachments) },
-                        onInterrupt = {},
+                        onInterrupt = { com.tether.app.client.InterruptResult.Sent },
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
                         onRequestControls = {},

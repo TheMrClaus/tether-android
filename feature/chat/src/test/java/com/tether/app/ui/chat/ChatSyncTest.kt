@@ -227,7 +227,7 @@ class ChatSyncTest {
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsEnabled().performClick()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("${busy.id}@$TEST_ORIGIN", "${busy.id}@$TEST_ORIGIN"), client.interruptCalls)
+        assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1", "${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
 
     @Test
@@ -294,14 +294,21 @@ class ChatSyncTest {
         host(client, running, header = true)
         rule.onNodeWithContentDescription("End session").assertIsNotEnabled().performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("Stop the agent process for \"s1\"?").assertDoesNotExist()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
 
         rule.runOnIdle { client.sync.value = live("s1") }
         arm()
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
-        // The confirmation's key (the header key is an icon with no printed word).
-        rule.onAllNodesWithText("End session").filterToOne(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button)).performClick()
+        // T6.7: the web's words (dashboard.tsx:1904-1905), the name isolated.
+        rule.onNodeWithText("End session?").assertExists()
+        rule.onNodeWithText("\u2068s1\u2069 — its running process will stop.").assertExists()
+        // T6.7: armed — a tap in its first 500 ms ends nothing.
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue(client.killCalls.isEmpty())
+        arm()
+        confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
     }
@@ -316,23 +323,23 @@ class ChatSyncTest {
         host(client, running, header = true)
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
+        arm()
+        confirmKey().assertIsEnabled()
         // Signed in to another server that lists (and has live) a session with the same id.
         rule.runOnIdle { client.origin.value = "https://other.example" }
         arm()
-        confirmKey().assertIsNotEnabled().performClick()
-        rule.waitForIdle()
+        // T6.7: a pending confirmation closes on a server switch: nothing is left to tap.
+        rule.onNodeWithText("End session?").assertDoesNotExist()
         assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
 
         // Opened afresh on the current server: it ends there, bound to that origin.
-        rule.onNodeWithText("Cancel").performClick()
-        rule.waitForIdle()
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
+        arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@https://other.example:true"), client.killCalls)
     }
 
-    private fun confirmKey() =
-        rule.onAllNodesWithText("End session").filterToOne(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button))
+    private fun confirmKey() = rule.onNodeWithTag(END_SESSION_CONFIRM_TAG)
 }

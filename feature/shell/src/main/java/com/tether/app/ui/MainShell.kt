@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +44,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import com.tether.app.ui.search.GlobalSearchHost
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -130,7 +136,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val connection by vm.client.connection.collectAsStateWithLifecycle()
     val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
-    val toast by vm.activeToast.collectAsStateWithLifecycle()
+    val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
 
     val session = sessions.firstOrNull { it.id == selectedId }
@@ -308,7 +314,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 vm.dismissToast()
             }
             ErrorToast(
-                message = message,
+                message = message.text,
+                fromServer = message.fromServer,
                 onClose = { vm.dismissToast() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -408,34 +415,24 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
 
-    confirmEnd?.let { (target, drawnFor) ->
+    confirmEnd?.let { drawn ->
+        val (target, drawnFor) = drawn
         // T13.2 r2: the confirmation acts only while the session is still live (a link that dropped
         // under the open dialog disables it; the client refuses it too). r3: and only on the server
         // it was opened for (a switch under the open dialog disables it; the client refuses it too).
+        // T6.7: the shared confirmation closes itself the moment either stops holding.
         val endable = shellFreshness.sessionLive(target.id) && drawnFor != null && drawnFor == consentOrigin
-        TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
-            Text(
-                "Stop the agent process for \"${target.name}\"?",
-                color = t.ink,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.body,
-                fontSize = 13.6.sp,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(onClick = { confirmEnd = null }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
-                TetherKey(
-                    onClick = {
-                        confirmEnd = null
-                        if (endable) vm.client.kill(target.id, drawnFor, requireLive = true)
-                    },
-                    classes = KeyClasses.ButtonDanger,
-                    label = "End session",
-                    icon = TetherIcons.CircleStop,
-                    enabled = endable,
-                )
-            }
-        }
+        com.tether.app.ui.chat.EndSessionDialog(
+            sessionName = target.name,
+            // The session and server it was opened for (not the row itself, which moves on every update).
+            identity = target.id to drawnFor,
+            endable = endable,
+            onConfirm = {
+                confirmEnd = null
+                vm.client.kill(target.id, drawnFor, requireLive = true)
+            },
+            onCancel = { confirmEnd = null },
+        )
     }
 }
 
@@ -479,9 +476,22 @@ private fun InterimTelemetry(session: AgentSession, state: SessionView? = null) 
     com.tether.app.ui.inspector.InspectorMcpHealth(session.provider, session.engineGeneration, state)
 }
 
-/** Fixed-bottom error toast: danger-wash surface, 1px brick border. */
+/** T6.7: the caption over an error toast whose words a server wrote. */
+const val SERVER_ERROR_CAPTION = "From the server"
+
+/** T6.7: the error toast's tag (its words are its semantics). */
+const val ERROR_TOAST_TAG = "error-toast"
+
+/**
+ * `.error-toast` (dashboard.tsx:1940-1946): fixed at the bottom, danger-wash surface, 1px brick
+ * border, the AlertCircle glyph, the words, and the 44dp "Dismiss error" X. `role="alert"`: TalkBack
+ * reads it the moment it appears. T6.7: words a SERVER wrote ([fromServer]; the client cleaned them)
+ * sit under a "From the server" caption and are read as "Server error: …", so a server's text can
+ * never pass for the app's own ("The secure link is reconnecting…"). Android addition: the web's
+ * toast shows the server's text bare.
+ */
 @Composable
-fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifier, fromServer: Boolean = false) {
     val t = LocalTetherTokens.current
     Row(
         modifier = modifier
@@ -490,21 +500,41 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             .heightIn(min = 56.dp)
             .background(t.dangerWash, RoundedCornerShape(TetherDimens.radiusSm))
             .border(1.dp, t.brick, RoundedCornerShape(TetherDimens.radiusSm))
-            .padding(12.dp),
+            .padding(12.dp)
+            .testTag(ERROR_TOAST_TAG),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Icon(TetherIcons.CircleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(18.dp))
-        Text(
-            text = message,
-            color = t.white,
-            fontFamily = Manrope,
-            fontWeight = TetherWeights.body,
-            fontSize = 12.5.sp,
-            modifier = Modifier.weight(1f),
-        )
+        Column(
+            Modifier
+                .weight(1f)
+                .clearAndSetSemantics {
+                    contentDescription = if (fromServer) "Server error: $message" else "Error: $message"
+                    liveRegion = LiveRegionMode.Assertive
+                },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (fromServer) {
+                Text(
+                    text = SERVER_ERROR_CAPTION.uppercase(),
+                    color = t.faint,
+                    fontFamily = Manrope,
+                    fontWeight = TetherWeights.strong,
+                    fontSize = 9.9.sp,
+                    letterSpacing = 0.06.em,
+                )
+            }
+            Text(
+                text = message,
+                color = t.white,
+                fontFamily = Manrope,
+                fontWeight = TetherWeights.body,
+                fontSize = 12.5.sp,
+            )
+        }
         IconButton(onClick = onClose, modifier = Modifier.size(TetherDimens.touchTargetDp)) {
-            Icon(TetherIcons.X, contentDescription = "Dismiss", tint = t.muted, modifier = Modifier.size(16.dp))
+            Icon(TetherIcons.X, contentDescription = "Dismiss error", tint = t.muted, modifier = Modifier.size(16.dp))
         }
     }
 }

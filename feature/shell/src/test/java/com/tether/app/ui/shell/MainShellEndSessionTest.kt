@@ -3,14 +3,9 @@ package com.tether.app.ui.shell
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -57,7 +52,13 @@ class MainShellEndSessionTest {
         ev("user_message_accepted", "t1", ts = 1) { put("text", "Keep going.") },
     )
 
-    private fun confirmKey() = rule.onAllNodesWithText("End session").filterToOne(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+    private fun confirmKey() = rule.onNodeWithTag(com.tether.app.ui.chat.END_SESSION_CONFIRM_TAG)
+
+    /** T6.7: the confirmation's key is armed like every operator control (500 ms). */
+    private fun arm() {
+        rule.mainClock.advanceTimeBy(700)
+        rule.waitForIdle()
+    }
 
     private fun host(client: ShellConsentClient) {
         val vm = TetherViewModel(client)
@@ -69,40 +70,66 @@ class MainShellEndSessionTest {
         rule.waitForIdle()
     }
 
+    /** T6.7: the web's words; the key does nothing in its first 500 ms, then ends the session once. */
     @Test
-    fun theConfirmationStopsActingWhenTheCopyStopsBeingLive() {
+    fun theConfirmationIsTheWebsAndItsKeyIsArmed() {
         val client = ShellConsentClient().also { it.show(session, tree) }
         host(client)
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
-        confirmKey().assertIsEnabled()
-
-        // The link drops under the open dialog: the saved copy cannot end the session.
-        rule.runOnIdle {
-            client.link.value = ConnectionState.Disconnected
-            client.live.value = emptySet()
-        }
-        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertExists()
+        rule.onNodeWithText("\u2068ends\u2069 — its running process will stop.").assertExists()
+        rule.mainClock.autoAdvance = false
         confirmKey().assertIsNotEnabled().performClick()
         rule.waitForIdle()
-        assertTrue("nothing from a saved copy: ${client.killCalls}", client.killCalls.isEmpty())
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
-
-        // Back, but not yet confirmed on the new link (catching up): still disabled.
-        rule.runOnIdle { client.link.value = ConnectionState.Connected }
-        rule.waitForIdle()
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
-
-        rule.runOnIdle { client.live.value = setOf("s1") }
-        rule.waitForIdle()
+        assertTrue("an unarmed key ended the session: ${client.killCalls}", client.killCalls.isEmpty())
+        arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
     }
 
     /**
-     * r3: the confirmation carries the server it was opened for. A switch to another server under
-     * the open dialog, even one where a same-id session is live, disables it and ends nothing.
+     * T13.2 r2 / T6.7: a link that drops under the open dialog closes it (a saved copy never ends a
+     * session, and the question never outlives the link it was asked on); the header key stays
+     * disabled until the copy is live again, and a fresh confirmation then ends it once.
+     */
+    @Test
+    fun theConfirmationClosesWhenTheCopyStopsBeingLive() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client)
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        arm()
+        confirmKey().assertIsEnabled()
+
+        rule.runOnIdle {
+            client.link.value = ConnectionState.Disconnected
+            client.live.value = emptySet()
+        }
+        arm()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
+        assertTrue("nothing from a saved copy: ${client.killCalls}", client.killCalls.isEmpty())
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
+
+        // Back, but not yet confirmed on the new link (catching up): still disabled.
+        rule.runOnIdle { client.link.value = ConnectionState.Connected }
+        arm()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
+
+        rule.runOnIdle { client.live.value = setOf("s1") }
+        arm()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        arm()
+        confirmKey().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+    }
+
+    /**
+     * r3 / T6.7: the confirmation carries the server it was opened for. A switch to another server
+     * under the open dialog, even one where a same-id session is live, closes it and ends nothing.
      */
     @Test
     fun theConfirmationIsBoundToTheServerItWasOpenedFor() {
@@ -110,19 +137,18 @@ class MainShellEndSessionTest {
         host(client)
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
+        arm()
         confirmKey().assertIsEnabled()
 
         rule.runOnIdle { client.origin.value = OTHER_ORIGIN }
-        rule.waitForIdle()
-        confirmKey().assertIsNotEnabled().performClick()
-        rule.waitForIdle()
+        arm()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
         assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
 
         // Opened afresh on the current server: it ends there, bound to that origin.
-        rule.onNodeWithText("Cancel").performClick()
-        rule.waitForIdle()
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
+        arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$OTHER_ORIGIN:true"), client.killCalls)

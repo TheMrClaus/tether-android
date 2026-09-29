@@ -452,11 +452,17 @@ class FakeTetherClient : TetherClient {
     }
 
     // T13.2 r2: the real client's contract: bound to the (demo) server the key was drawn for, and
-    // only for a listed session that may be driven (every listed demo session is live).
-    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult {
+    // only for a listed session that may be driven (every listed demo session is live). T6.7: and to
+    // the turn the key was drawn for, still the session's open active turn.
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): com.tether.app.client.InterruptResult {
         if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.InterruptResult.NotLive
         val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return com.tether.app.client.InterruptResult.Locked
         if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return com.tether.app.client.InterruptResult.Locked
+        val projection = _projections.value[sessionId]
+        val active = projection?.activeTurnId
+        if (active == null || active != expectedTurnId || projection.turnsById[active]?.status == Vocab.TURN_DONE) {
+            return com.tether.app.client.InterruptResult.NotCurrentTurn
+        }
         interruptTurn(sessionId)
         return com.tether.app.client.InterruptResult.Sent
     }

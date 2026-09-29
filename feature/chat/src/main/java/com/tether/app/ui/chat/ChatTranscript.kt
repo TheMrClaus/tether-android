@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -339,6 +340,39 @@ private fun ChatRow(
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
     Box(modifier.fillMaxWidth()) {
+        // T6.7: the transcript's words are selectable and copyable, as on the web, one row at a time:
+        // a selection can never run across the transcript or into the header and composer (the
+        // runaway selection the web fixed, globals.css:136-160). Rows that are controls, not
+        // reading, stay out of it.
+        if (item.selectableText) SelectionContainer { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) } else ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone)
+    }
+}
+
+/**
+ * T6.7: whether a row's words take part in text selection. Not the consent and limit cards (armed
+ * decisions: no long-press or drag competes with their keys), nor rows that are a single control
+ * (Load earlier, an activity group's summary, a background command chip: `.chat-activity-summary`
+ * is `user-select: none` on the web too).
+ */
+internal val ChatItem.selectableText: Boolean
+    get() = when (this) {
+        is ChatItem.Approval, is ChatItem.Question, is ChatItem.RateLimit,
+        is ChatItem.LoadEarlier, is ChatItem.ToolGroup, is ChatItem.BgCommand,
+        -> false
+        else -> true
+    }
+
+@Composable
+private fun ChatRowContent(
+    item: ChatItem,
+    onFetchTurns: (Int, Int) -> Unit,
+    find: FindMarks?,
+    toolRender: ToolRenderFlags,
+    onToggleGroup: (ChatItem.ToolGroup) -> Unit,
+    onOpenCommand: (String) -> Unit,
+    zone: ZoneId,
+) {
+    run {
         when (item) {
             // T13.2: a saved copy cannot fetch them: say so instead of offering a dead key.
             is ChatItem.LoadEarlier -> if (LocalOlderTurnsUnavailable.current) OlderTurnsNotDownloaded() else LoadEarlierKey(item.count) {
@@ -374,6 +408,7 @@ private fun ChatRow(
             is ChatItem.TurnDiff -> CodexUnifiedDiff(item.unifiedDiff)
             is ChatItem.TurnReview -> CodexReviewCard(item.review)
             is ChatItem.BgCommand -> BackgroundCommandChip(item.command) { onOpenCommand(item.command.commandId) }
+            is ChatItem.SessionError -> SessionErrorRow(item.text)
         }
     }
 }

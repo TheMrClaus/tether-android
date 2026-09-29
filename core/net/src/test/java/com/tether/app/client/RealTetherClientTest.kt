@@ -553,4 +553,8 @@ private fun CoroutineScope.launchCollect(
     client: RealTetherClient,
     onError: (String) -> Unit,
 ) = // UNDISPATCHED: subscribe before returning, or a frame sent right after can be missed (no replay).
-    launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { onError(it) } }
+    launch(start = CoroutineStart.UNDISPATCHED) {
+        // T6.7: the server's words arrive on serverErrors, the client's on errors: both are toasts.
+        launch(start = CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { onError(it) } }
+        client.errors.collect { onError(it) }
+    }

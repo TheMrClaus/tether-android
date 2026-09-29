@@ -113,11 +113,14 @@ class ChatTestClient : TetherClient {
     override fun queueRemove(sessionId: String, queueId: String) {
         outbox += "queue-remove:$queueId"
     }
-    /** T13.2 r2: every interrupt the UI asked for (`<session>@<origin>`), NOT de-duplicated. */
+    /** T13.2 r2 / T6.7: every interrupt the UI asked for (`<session>@<origin>#<turn>`), NOT de-duplicated. */
     val interruptCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
-    override fun interrupt(sessionId: String, expectedOrigin: String?): com.tether.app.client.InterruptResult {
-        interruptCalls += "$sessionId@$expectedOrigin"
-        return com.tether.app.client.InterruptResult.Sent
+
+    /** T6.7: what [interrupt] answers (the real client's refusals are its own tests). */
+    @Volatile var interruptResult: com.tether.app.client.InterruptResult = com.tether.app.client.InterruptResult.Sent
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): com.tether.app.client.InterruptResult {
+        interruptCalls += "$sessionId@$expectedOrigin#$expectedTurnId"
+        return interruptResult
     }
 
     /** T6.6 r3: every notice dismissal the UI asked for (`<session>:<key>@<origin>`), NOT de-duplicated. */

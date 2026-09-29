@@ -51,7 +51,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 controls = SessionControlFixtures.claudeIdleControls,
                 serverNow = { ComposerFixtures.BUSY_NOW },
                 onSend = { _, _ -> true },
-                onInterrupt = {},
+                onInterrupt = { com.tether.app.client.InterruptResult.Sent },
                 onQueueEdit = { _, _ -> },
                 onQueueRemove = {},
                 onRequestControls = {},

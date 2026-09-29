@@ -56,8 +56,16 @@ interface TetherClient {
     /** Latest session-controls reply per session (models + slash commands for the composer). */
     val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>>
 
-    /** Uncorrelated server error frames + client-side failures — show as toasts. */
+    /** The client's own failures and notices, in its own words — show as toasts. */
     val errors: SharedFlow<String>
+
+    /**
+     * T6.7: text a SERVER wrote that the web shows as its global error (`{type:"error"}` frames, a
+     * failed `interrupt_result`), from the live socket only, already cleaned ([LabelText.error]: no
+     * line breaks, bidi controls or invisible code points, bounded). Kept apart from [errors] so it
+     * is shown attributed to the server and can never pass for the app's own words.
+     */
+    val serverErrors: SharedFlow<String> get() = NoServerErrors
 
     /**
      * Validate + persist server config from the first-launch screen:
@@ -166,9 +174,15 @@ interface TetherClient {
      * anything received. Sent only on a live, handshaken socket of the server that drew the key
      * ([expectedOrigin], the [consentOrigin] the key was composed with), for a session confirmed live
      * on it ([liveSessions]) that is neither read-only nor handed off. Otherwise nothing is sent or
-     * held: no retry, no queue. (Which turn it stops is the server's; binding it to a turn is T6.7.)
+     * held: no retry, no queue.
+     *
+     * T6.7: bound to the turn the key was drawn for. The wire `interrupt` names no turn (the server
+     * stops whichever turn is running when it arrives), so the client refuses
+     * ([InterruptResult.NotCurrentTurn]) unless the session's current projection still has
+     * [expectedTurnId] as its open active turn: a late tap after that turn ended and another began
+     * never stops the other one.
      */
-    fun interrupt(sessionId: String, expectedOrigin: String?): InterruptResult = InterruptResult.NotConnected
+    fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult = InterruptResult.NotConnected
 
     /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
@@ -691,7 +705,16 @@ enum class InterruptResult {
 
     /** The session is read-only or handed off (or unknown): the server would refuse it. */
     Locked,
+
+    /**
+     * T6.7: the turn the key was drawn for is no longer the session's open active turn (it ended,
+     * or another turn replaced it, or none is running): the turn running now is not interrupted.
+     */
+    NotCurrentTurn,
 }
+
+/** T6.7: [TetherClient.serverErrors] of a client that has none. */
+private val NoServerErrors: SharedFlow<String> = kotlinx.coroutines.flow.MutableSharedFlow()
 
 /** T6.6: what [TetherClient.dismissNotice] did. Only [Sent] put a frame on the wire. */
 enum class NoticeResult {

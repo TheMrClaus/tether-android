@@ -50,6 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -70,6 +72,7 @@ import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
 import com.tether.app.client.ComposerControlsModel
 import com.tether.app.client.ControlResult
+import com.tether.app.client.InterruptResult
 import com.tether.app.client.LEGACY_GROUP_VALUE
 import com.tether.app.client.ModeVocabulary
 import com.tether.app.client.OPENCODE_V2
@@ -104,6 +107,17 @@ import kotlin.math.max
 /** Server caps (lib/protocol-validate.mjs LIMITS): 10 files, 9 MiB each, 18 MiB total. */
 /** T13.2 r2: the composer's Interrupt key. */
 internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
+
+/**
+ * T6.7: what the operator is told when an Interrupt tap sent nothing (null: it was sent, or the
+ * client already said why: [InterruptResult.NotConnected] toasts "The secure link is reconnecting").
+ */
+internal fun interruptRefusalCopy(result: InterruptResult): String? = when (result) {
+    InterruptResult.Sent, InterruptResult.NotConnected -> null
+    InterruptResult.NotLive -> "Catching up — the turn was not interrupted. Try again in a moment."
+    InterruptResult.Locked -> "This session can’t be interrupted from here."
+    InterruptResult.NotCurrentTurn -> "That turn already ended — the turn running now was not interrupted."
+}
 
 /** T13.2 r2: the run row of a copy that is not live ("Was running", still, not ticking). */
 internal const val STALE_RUN_TAG = "composer-run-stale"
@@ -160,7 +174,11 @@ fun Composer(
     controls: ServerMessage.SessionControls?,
     serverNow: () -> Long,
     onSend: (String, List<Attachment>) -> Boolean,
-    onInterrupt: () -> Unit,
+    /**
+     * T6.7: interrupt the turn the tapped key was drawn for (its id): the ONE way an Interrupt (the
+     * key or a queued row's "Interrupt now") reaches the client, which re-checks it all.
+     */
+    onInterrupt: (turnId: String) -> InterruptResult,
     onQueueEdit: (queueId: String, text: String) -> Unit,
     onQueueRemove: (queueId: String) -> Unit,
     onRequestControls: () -> Unit,
@@ -224,6 +242,12 @@ fun Composer(
     fun flash(message: String) {
         noticeSeq += 1
         notice = message
+    }
+
+    // T6.7: the turn the Interrupt keys are drawn for; a tap interrupts exactly that turn or nothing.
+    val interruptTurnId = if (activeTurn != null) projection?.activeTurnId else null
+    fun interruptTurn(drawnFor: String) {
+        interruptRefusalCopy(onInterrupt(drawnFor))?.let(::flash)
     }
 
     val models = controls?.models ?: emptyList()
@@ -663,7 +687,9 @@ fun Composer(
                         queued = queued,
                         onSave = onQueueEdit,
                         onRemove = onQueueRemove,
-                        onInterruptNow = onInterrupt,
+                        sessionId = session?.id,
+                        interruptTurnId = interruptTurnId,
+                        onInterruptNow = ::interruptTurn,
                         interruptLock = liveness.interruptLock,
                     )
                 }
@@ -746,7 +772,9 @@ fun Composer(
                             canQueue = draft.isNotBlank(),
                             canSend = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                             onSubmit = ::submit,
-                            onInterrupt = onInterrupt,
+                            sessionId = session?.id,
+                            interruptTurnId = interruptTurnId,
+                            onInterrupt = ::interruptTurn,
                             interruptLock = liveness.interruptLock,
                         )
                     }
@@ -910,7 +938,10 @@ private fun ComposerActions(
     canQueue: Boolean,
     canSend: Boolean,
     onSubmit: () -> Unit,
-    onInterrupt: () -> Unit,
+    sessionId: String?,
+    /** T6.7: the turn the Interrupt key is drawn for (the active turn); null = none runs. */
+    interruptTurnId: String?,
+    onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
 ) {
@@ -942,8 +973,14 @@ private fun ComposerActions(
             )
         }
         // T13.2 r2: a copy that is not live cannot interrupt (its "busy" is not a turn running now).
+        // T6.7: bound to the turn it is drawn for, and armed like every operator control: not in
+        // the first 500 ms after it appeared for that turn (a new turn re-arms it), again after it
+        // moved, and never through an overlay. Drawn as before while it arms; it just does nothing.
+        val drawnFor = interruptTurnId
+        val arming = rememberArmedControl(Triple("interrupt", sessionId, drawnFor), interruptLock == null && drawnFor != null)
+        val armed = arming.armed && interruptLock == null && drawnFor != null
         TetherKey(
-            onClick = { if (interruptLock == null) onInterrupt() },
+            onClick = { if (armed && drawnFor != null) onInterrupt(drawnFor) },
             classes = KeyClasses.ChatInterrupt,
             label = if (labelled) "Interrupt" else null,
             icon = TetherIcons.CircleStop,
@@ -951,7 +988,10 @@ private fun ComposerActions(
             fontSize = fontSize,
             enabled = interruptLock == null,
             minHeight = height,
-            modifier = keyModifier.testTag(INTERRUPT_KEY_TAG),
+            modifier = keyModifier
+                .then(arming.modifier)
+                .semantics { if (!armed) disabled() }
+                .testTag(INTERRUPT_KEY_TAG),
             contentPadding = padding,
             contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
         )
