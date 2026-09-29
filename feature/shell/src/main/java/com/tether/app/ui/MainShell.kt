@@ -95,6 +95,9 @@ import com.tether.app.ui.statusline.TelemetryMetrics
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
 
+/** T13.2 r3: an open End session confirmation: the session, and the server origin it was opened for. */
+private data class EndTarget(val session: AgentSession, val drawnFor: String?)
+
 /**
  * The signed-in app wired to the view model: below the 840dp layout cutoff the phone shell (the
  * web's mobile layout, [PhoneShell]); at or above it the expanded shell (the web's desktop layout,
@@ -136,6 +139,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
     val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
     val liveSessions by vm.client.liveSessions.collectAsStateWithLifecycle()
+    // r3: the server the header's End session is drawn for (bound into its confirmation).
+    val consentOrigin by vm.client.consentOrigin.collectAsStateWithLifecycle()
     val freshnessNow = com.tether.app.ui.components.rememberTickingNow()
     val shellFreshness = com.tether.app.ui.shell.ShellFreshness(
         banner = com.tether.app.ui.shell.ShellFreshness.bannerFor(connection),
@@ -163,7 +168,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
-    var confirmEnd by remember { mutableStateOf<AgentSession?>(null) }
+    var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     var copiedPath by remember { mutableStateOf(false) }
     var copiedTetherId by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
@@ -206,7 +211,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             )
         val headerActions = WorkspaceHeaderActions(
                 onRename = { renaming = session },
-                onEndSession = { confirmEnd = session },
+                // r3: the confirmation is bound to the session AND the server it was opened for.
+                onEndSession = { confirmEnd = session?.let { EndTarget(it, consentOrigin) } },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
                 onCopyPath = {
                     session?.let {
@@ -402,10 +408,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
 
-    confirmEnd?.let { target ->
+    confirmEnd?.let { (target, drawnFor) ->
         // T13.2 r2: the confirmation acts only while the session is still live (a link that dropped
-        // under the open dialog disables it; the client refuses it too).
-        val endable = shellFreshness.sessionLive(target.id)
+        // under the open dialog disables it; the client refuses it too). r3: and only on the server
+        // it was opened for (a switch under the open dialog disables it; the client refuses it too).
+        val endable = shellFreshness.sessionLive(target.id) && drawnFor != null && drawnFor == consentOrigin
         TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
             Text(
                 "Stop the agent process for \"${target.name}\"?",
@@ -420,7 +427,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 TetherKey(
                     onClick = {
                         confirmEnd = null
-                        if (endable) vm.client.kill(target.id, requireLive = true)
+                        if (endable) vm.client.kill(target.id, drawnFor, requireLive = true)
                     },
                     classes = KeyClasses.ButtonDanger,
                     label = "End session",

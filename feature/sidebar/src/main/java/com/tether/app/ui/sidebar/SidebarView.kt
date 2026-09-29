@@ -35,6 +35,11 @@ data class SidebarState(
     val scheduledActionCount: Int = 0,
     /** T13.2: the client's per-session freshness (rows mark it only while not [connected]). */
     val syncStates: Map<String, com.tether.app.client.SessionSync> = emptyMap(),
+    /**
+     * T13.2 r3: the server origin the rows are drawn for ([com.tether.app.client.TetherClient.consentOrigin]).
+     * A row's End session carries the origin captured when it was armed (or swiped open).
+     */
+    val origin: String? = null,
 )
 
 /** One workspace block as rendered (session-sidebar.tsx:997-1190). */

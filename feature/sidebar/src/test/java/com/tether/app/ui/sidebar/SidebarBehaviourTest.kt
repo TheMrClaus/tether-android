@@ -37,7 +37,7 @@ class SidebarBehaviourTest {
     private val actions = SidebarActions(
         onSelectSession = { events += "select:$it" },
         onReopenHistory = { events += "reopen:${it.historyId}" },
-        onEndSession = { events += "end:$it" },
+        onEndSession = { id, _ -> events += "end:$id" },
         onReorderSessions = { ws, order -> events += "order:$ws:${order.joinToString(",")}" },
         onToggleActiveOnly = { events += "active" },
         onToggleUnreadOnly = { events += "unread" },

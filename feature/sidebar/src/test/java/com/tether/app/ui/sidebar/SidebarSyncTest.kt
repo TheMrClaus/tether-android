@@ -1,5 +1,8 @@
 package com.tether.app.ui.sidebar
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -157,7 +160,7 @@ class SidebarSyncTest {
     @Test
     fun offlineARowsEndControlIsInertAndItsSwipeIsGone() {
         val ended = mutableListOf<String>()
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { ended += it })) }
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, _ -> ended += id })) }
         rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsNotEnabled().performClick()
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
         rule.waitForIdle()
@@ -169,11 +172,57 @@ class SidebarSyncTest {
     @Test
     fun aLiveListsRowStillEndsWithItsTwoTaps() {
         val ended = mutableListOf<String>()
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { ended += it })) }
+        val state = SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A)
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
         rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
         rule.waitForIdle()
-        assertEquals(listOf("a1"), ended)
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+    }
+
+    /**
+     * r3: the second tap carries the server the control was ARMED for, not the one the list shows
+     * by then: armed on A, tapped after a switch to B (where a same-id row is listed), the client is
+     * asked to end it on A, so it refuses it. Re-armed on B, it carries B.
+     */
+    @Test
+    fun anArmedRowCarriesTheOriginItWasArmedFor() {
+        val ended = mutableListOf<String>()
+        var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        rule.runOnIdle { state = state.copy(origin = ORIGIN_B) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("a1@$ORIGIN_A", "a1@$ORIGIN_B"), ended)
+    }
+
+    /** r3: the swipe is step one of the end: it carries the server it was opened on. */
+    @Test
+    fun aSwipedRowCarriesTheOriginItWasOpenedFor() {
+        val ended = mutableListOf<String>()
+        var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
+        rule.setContent {
+            SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(swipedKey = "live:a1"), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" }))
+        }
+        rule.runOnIdle { state = state.copy(origin = ORIGIN_B) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(SidebarTags.archive("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+    }
+
+    private companion object {
+        const val ORIGIN_A = "https://a.example"
+        const val ORIGIN_B = "https://b.example"
     }
 }

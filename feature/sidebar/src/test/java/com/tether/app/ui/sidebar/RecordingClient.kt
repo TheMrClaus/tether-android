@@ -77,6 +77,8 @@ class RecordingClient(
         com.tether.app.client.ConsentResult.NotConnected
     override val consentOrigin: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override val liveSessions: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
+    /** T13.2 r3: keeps the interface's empty syncStates, so it reports no freshness. */
+    override val reportsFreshness: Boolean = false
     override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) = record(ClientMessage.Create(provider = provider, cwd = cwd, name = name))
     override fun resumeHistory(historyId: String, cwd: String) = record(ClientMessage.Resume(historyId, cwd))
@@ -86,13 +88,16 @@ class RecordingClient(
     override fun pin(sessionId: String, pinned: Boolean) = record(ClientMessage.Pin(sessionId, pinned))
     override fun rename(sessionId: String, name: String) = record(ClientMessage.Rename(sessionId, name))
     override fun archive(sessionId: String) = record(ClientMessage.Archive(sessionId))
-    override fun kill(sessionId: String, requireLive: Boolean) {
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
         killScopes += requireLive
+        killOrigins += expectedOrigin
         record(ClientMessage.Kill(sessionId))
     }
 
     /** T13.2 r2: [kill]'s requireLive, per call (a sidebar row passes false). */
     val killScopes = mutableListOf<Boolean>()
+    /** T13.2 r3: [kill]'s expectedOrigin, per call (the origin the row was armed for). */
+    val killOrigins = mutableListOf<String?>()
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

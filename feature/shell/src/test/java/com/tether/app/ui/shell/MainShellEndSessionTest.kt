@@ -12,6 +12,7 @@ import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
@@ -96,6 +97,38 @@ class MainShellEndSessionTest {
         rule.waitForIdle()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:true"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+    }
+
+    /**
+     * r3: the confirmation carries the server it was opened for. A switch to another server under
+     * the open dialog, even one where a same-id session is live, disables it and ends nothing.
+     */
+    @Test
+    fun theConfirmationIsBoundToTheServerItWasOpenedFor() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client)
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        confirmKey().assertIsEnabled()
+
+        rule.runOnIdle { client.origin.value = OTHER_ORIGIN }
+        rule.waitForIdle()
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
+
+        // Opened afresh on the current server: it ends there, bound to that origin.
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        confirmKey().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1@$OTHER_ORIGIN:true"), client.killCalls)
+    }
+
+    private companion object {
+        const val OTHER_ORIGIN = "https://other.example"
     }
 }

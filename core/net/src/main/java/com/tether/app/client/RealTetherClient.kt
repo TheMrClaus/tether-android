@@ -448,6 +448,9 @@ class RealTetherClient(
         verifiedAt = verifiedAtState.value,
     )
 
+    /** T13.2 r3: this client derives [syncStates], so a session without an entry is never live. */
+    override val reportsFreshness: Boolean = true
+
     /**
      * Derived, not stored: recomputed whenever any input changes. The consent gate never reads it
      * (it re-checks [liveThisEpoch] under the lock), so the one-dispatch lag of this derivation can
@@ -3155,14 +3158,18 @@ class RealTetherClient(
 
     /**
      * T13.2 r2: End session. Under the lock: a live, handshaken socket of a running (not halted)
-     * client; the session listed on it; and, for a key drawn from the session's own copy
-     * ([requireLive]), confirmed live on it ([liveThisEpoch]). Nothing is retried, held or persisted.
+     * client; the key drawn for THIS server (r3: [expectedOrigin] = the socket's origin, so an End
+     * armed before a server switch never ends a same-id session on the new one); the session listed
+     * on it; and, for a key drawn from the session's own copy ([requireLive]), confirmed live on it
+     * ([liveThisEpoch]). Nothing is retried, held or persisted.
      */
-    override fun kill(sessionId: String, requireLive: Boolean) {
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
         if (sessionId.isEmpty()) return
         val sent = synchronized(lock) {
             val ws = socket
-            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            if (expectedOrigin != origin) return@synchronized null
             if (requireLive && sessionId !in liveThisEpoch) return@synchronized null
             if (sessionsState.value.none { it.id == sessionId }) return@synchronized null
             ws.send(ClientMessage.Kill(sessionId).encode())

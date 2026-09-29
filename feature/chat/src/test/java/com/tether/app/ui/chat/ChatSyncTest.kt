@@ -303,6 +303,36 @@ class ChatSyncTest {
         // The confirmation's key (the header key is an icon with no printed word).
         rule.onAllNodesWithText("End session").filterToOne(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button)).performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:true"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
     }
+
+    /** r3: the confirmation is bound to the server it was opened for; a switch under it ends nothing. */
+    @Test
+    fun theChatHeadersEndSessionIsBoundToTheServerItWasOpenedFor() {
+        val running = session.copy(status = "active")
+        val client = ChatTestClient().also { it.reports = true }
+        client.show(running, ApprovalFixtures.write, live = true)
+        client.sync.value = live("s1")
+        host(client, running, header = true)
+        rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        // Signed in to another server that lists (and has live) a session with the same id.
+        rule.runOnIdle { client.origin.value = "https://other.example" }
+        arm()
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
+
+        // Opened afresh on the current server: it ends there, bound to that origin.
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        confirmKey().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1@https://other.example:true"), client.killCalls)
+    }
+
+    private fun confirmKey() =
+        rule.onAllNodesWithText("End session").filterToOne(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button))
 }

@@ -220,11 +220,12 @@ interface TetherClient {
     val syncStates: StateFlow<Map<String, SessionSync>> get() = NO_SYNC_STATES
 
     /**
-     * T13.2 r2: whether this client reports freshness at all. True for any client with its own
+     * T13.2: whether this client reports freshness at all. True for a client that derives its own
      * [syncStates] (a missing entry is then NOT live); false only for one that keeps the interface's
      * empty default, whose locks follow [liveSessions] alone (the T6.3 rule, [LiveCopy.isLive]).
+     * r3: declared by every client, never inferred, so a new client cannot get it wrong by default.
      */
-    val reportsFreshness: Boolean get() = syncStates !== NO_SYNC_STATES
+    val reportsFreshness: Boolean
 
     /** T6.3: the server origin of the live, handshaken socket (the fingerprints' origin); null when there is none. */
     val consentOrigin: StateFlow<String?>
@@ -288,12 +289,14 @@ interface TetherClient {
 
     /**
      * End the session (`kill`). An operator control, called only from a confirmed tap. Sent only on a
-     * live, handshaken socket for a session the server listed. [requireLive] (the default: a session
-     * header's End session, drawn from the session's own copy) also needs the session confirmed live
-     * on this connection ([liveSessions]); a sidebar row, drawn from the live session LIST, passes
-     * false. Otherwise nothing is sent or held (T13.2 r2).
+     * live, handshaken socket of the server that drew the control ([expectedOrigin], the
+     * [consentOrigin] captured when the key was armed or its confirmation opened: an End drawn for
+     * another server is refused, even for a same-id session), for a session the server listed.
+     * [requireLive] (the default: a session header's End session, drawn from the session's own copy)
+     * also needs the session confirmed live on this connection ([liveSessions]); a sidebar row, drawn
+     * from the live session LIST, passes false. Otherwise nothing is sent or held (T13.2 r2, r3).
      */
-    fun kill(sessionId: String, requireLive: Boolean = true)
+    fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean = true)
 
     /**
      * Called by network observers (and the local-network grant) to reconnect now

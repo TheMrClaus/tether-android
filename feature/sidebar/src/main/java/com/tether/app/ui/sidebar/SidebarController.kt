@@ -241,7 +241,8 @@ class SidebarController(
         // dashboard.tsx:1311-1314 — the row's own two-tap arm (or the swipe) IS the confirmation.
         // T13.2 r2: drawn from the live session LIST (the row is inert offline), not from a copy of
         // the session, so it needs no attach; the client still refuses it without a live link.
-        onEndSession = { id -> client.kill(id, requireLive = false) },
+        // r3: bound to the server the row was armed for (a switch in between is refused).
+        onEndSession = { id, drawnFor -> client.kill(id, drawnFor, requireLive = false) },
         onReorderSessions = { workspace, order -> client.setSessionOrder(workspace, order) },
         onResetSessionOrder = { workspace -> client.setSessionOrder(workspace, emptyList()) },
         onOpenSettings = onOpenSettings,

@@ -166,10 +166,10 @@ class ChatTestClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    /** T13.2 r2: every End session the UI asked for (`<session>:<requireLive>`). */
+    /** T13.2 r2/r3: every End session the UI asked for (`<session>@<origin>:<requireLive>`). */
     val killCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
-    override fun kill(sessionId: String, requireLive: Boolean) {
-        killCalls += "$sessionId:$requireLive"
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
+        killCalls += "$sessionId@$expectedOrigin:$requireLive"
     }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit

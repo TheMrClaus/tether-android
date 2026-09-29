@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -178,6 +179,10 @@ internal fun SessionRow(
     /** T13.2: this row's freshness while the list is not live (null = none known): the glyph and age only. */
     sync: com.tether.app.client.SessionSync? = null,
     armed: Boolean,
+    /** T13.2 r3: the server origin the end control was armed for (its second tap ends there only). */
+    armedOrigin: String?,
+    /** T13.2 r3: the server origin the row is drawn for; a swipe captures it when it opens. */
+    origin: String?,
     onArm: (String?) -> Unit,
     phone: Boolean,
     swipedSeed: Boolean,
@@ -211,6 +216,9 @@ internal fun SessionRow(
     // ── swipe (mobile shortcut; the X stays the primary end control, issue #175) ──
     val swipeX = remember { Animatable(if (swipedSeed && swipeEnabled) -ARCHIVE_WIDTH else 0f) }
     var swipeOpen by remember { mutableStateOf(swipedSeed && swipeEnabled) }
+    // T13.2 r3: the swipe is step one of the end: the server it was opened for is the one it ends on.
+    val latestOrigin by rememberUpdatedState(origin)
+    var swipeOrigin by remember { mutableStateOf(if (swipedSeed && swipeEnabled) origin else null) }
     var swipeActive by remember { mutableStateOf(false) }
     var suppressClick by remember { mutableStateOf(false) }
     var onHandle by remember { mutableStateOf(false) }
@@ -224,6 +232,7 @@ internal fun SessionRow(
     val snapSpec = if (reduced) snap() else tween<Float>(240, easing = t.css.easeOut.toEasing())
     fun snapTo(open: Boolean) {
         swipeOpen = open
+        swipeOrigin = if (open) latestOrigin else null
         scope.launch { swipeX.animateTo(if (open) -ARCHIVE_WIDTH else 0f, snapSpec) }
     }
 
@@ -270,8 +279,9 @@ internal fun SessionRow(
                         role = Role.Button
                     }
                     .clickable(enabled = swipeOpen) {
+                        val drawnFor = swipeOrigin
                         snapTo(false)
-                        actions.onEndSession(live.id)
+                        actions.onEndSession(live.id, drawnFor)
                     }
                     .testTag(SidebarTags.archive(entry.key)),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -472,7 +482,7 @@ internal fun SessionRow(
                         .clickable(enabled = endLive) {
                             if (armed) {
                                 onArm(null)
-                                actions.onEndSession(live.id)
+                                actions.onEndSession(live.id, armedOrigin)
                             } else {
                                 onArm(entry.key)
                             }

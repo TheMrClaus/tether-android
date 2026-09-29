@@ -83,7 +83,7 @@ class NavTestClient(
     override fun pin(sessionId: String, pinned: Boolean) { stateChanges += "pin" }
     override fun rename(sessionId: String, name: String) { stateChanges += "rename" }
     override fun archive(sessionId: String) { stateChanges += "archive" }
-    override fun kill(sessionId: String, requireLive: Boolean) { stateChanges += "kill" }
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) { stateChanges += "kill" }
     override fun setSessionOrder(cwd: String, order: List<String>): Boolean { stateChanges += "setSessionOrder"; return true }
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean { stateChanges += "setPinnedWorkspaces"; return true }
 

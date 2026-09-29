@@ -493,7 +493,8 @@ class FakeTetherClient : TetherClient {
         .stateIn(scope, SharingStarted.Eagerly, _sessions.value.mapTo(HashSet()) { it.id })
 
     // T13.2 (SYNC_DESIGN §2.5): the demo is always connected, so every listed session is Live and
-    // previews and screenshots show no freshness mark.
+    // previews and screenshots show no freshness mark. r3: it reports freshness (declared, not inferred).
+    override val reportsFreshness: Boolean = true
     override val syncStates: StateFlow<Map<String, com.tether.app.client.SessionSync>> = _sessions
         .map { list -> list.associate { it.id to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null) } }
         .stateIn(scope, SharingStarted.Eagerly, _sessions.value.associate { it.id to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null) })
@@ -645,8 +646,10 @@ class FakeTetherClient : TetherClient {
         _sessions.update { list -> list.filterNot { it.id == sessionId } }
     }
 
-    override fun kill(sessionId: String, requireLive: Boolean) {
-        // The demo is always connected and every listed session live: only an unlisted one is refused.
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
+        // The demo is always connected and every listed session live: only an End drawn for another
+        // server (r3) or an unlisted session is refused.
+        if (expectedOrigin != DEMO_ORIGIN) return
         if (_sessions.value.none { it.id == sessionId }) return
         val ts = System.currentTimeMillis()
         _sessions.update { list ->

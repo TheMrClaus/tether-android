@@ -224,7 +224,7 @@ fun ChatScreen(
     ) {
     Column(Modifier.fillMaxSize().background(t.mineralDeep)) {
         if (session != null && showWorkspaceHeader) {
-            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow)
+            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow, origin = consentOrigin)
         }
 
         if (session != null && runs.isNotEmpty()) {
@@ -462,15 +462,20 @@ private fun EmptyCentered(
     }
 }
 
+/** T13.2 r3: an open End session confirmation: the session and the server origin it was opened for. */
+private data class ChatEndDraw(val sessionId: String, val drawnFor: String?)
+
 /**
  * Workspace header: session name + status badge + actions; mono path line. [endAllowed] (T13.2 r2):
- * the link is up and this session's copy is live, so End session may send.
+ * the link is up and this session's copy is live, so End session may send. [origin] (r3): the
+ * server ([com.tether.app.client.TetherClient.consentOrigin]) the header is drawn for; the confirmation is bound to the
+ * session and the origin it was opened for, and acts only while both still hold.
  */
 @Composable
-private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean) {
+private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean, origin: String?) {
     val t = LocalTetherTokens.current
     var showTelemetry by remember { mutableStateOf(false) }
-    var confirmEnd by remember { mutableStateOf(false) }
+    var confirmEnd by remember { mutableStateOf<ChatEndDraw?>(null) }
 
     Column(Modifier.fillMaxWidth().background(t.graphite)) {
         Row(
@@ -509,7 +514,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             }
             if (session.status != "exited") {
                 TetherKey(
-                    onClick = { if (endAllowed) confirmEnd = true },
+                    onClick = { if (endAllowed) confirmEnd = ChatEndDraw(session.id, origin) },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
@@ -592,8 +597,9 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
         }
     }
 
-    if (confirmEnd) {
-        TetherDialog(onDismiss = { confirmEnd = false }, title = "End session") {
+    confirmEnd?.let { drawn ->
+        val endable = endAllowed && drawn.sessionId == session.id && drawn.drawnFor != null && drawn.drawnFor == origin
+        TetherDialog(onDismiss = { confirmEnd = null }, title = "End session") {
             Text(
                 "Stop the agent process for \"${session.name}\"?",
                 color = t.ink,
@@ -603,16 +609,16 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 modifier = Modifier.padding(bottom = 12.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(onClick = { confirmEnd = false }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
+                TetherKey(onClick = { confirmEnd = null }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
                 TetherKey(
                     onClick = {
-                        confirmEnd = false
-                        if (endAllowed) vm.client.kill(session.id, requireLive = true)
+                        confirmEnd = null
+                        if (endable) vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = true)
                     },
                     classes = KeyClasses.ButtonDanger,
                     label = "End session",
                     icon = TetherIcons.CircleStop,
-                    enabled = endAllowed,
+                    enabled = endable,
                 )
             }
         }

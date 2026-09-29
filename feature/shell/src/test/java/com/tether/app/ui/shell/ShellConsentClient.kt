@@ -45,6 +45,8 @@ class ShellConsentClient : TetherClient {
     val live = MutableStateFlow<Set<String>>(emptySet())
     val decided = MutableStateFlow<Set<String>>(emptySet())
     override val liveSessions: StateFlow<Set<String>> get() = live
+    /** T13.2 r3: keeps the interface's empty syncStates, so it reports no freshness (the T6.3 rule). */
+    override val reportsFreshness: Boolean = false
     override val decidedRequests: StateFlow<Set<String>> get() = decided
     val unconfirmed = MutableStateFlow<Set<String>>(emptySet())
     override val unconfirmedRequests: StateFlow<Set<String>> get() = unconfirmed
@@ -127,10 +129,10 @@ class ShellConsentClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    /** T13.2 r2: every End session the shell asked for (`<session>:<requireLive>`). */
+    /** T13.2 r2/r3: every End session the shell asked for (`<session>@<origin>:<requireLive>`). */
     val killCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
-    override fun kill(sessionId: String, requireLive: Boolean) {
-        killCalls += "$sessionId:$requireLive"
+    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
+        killCalls += "$sessionId@$expectedOrigin:$requireLive"
     }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit

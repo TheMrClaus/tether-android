@@ -56,6 +56,7 @@ fun SessionDrawer(
     val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     val syncStates by client.syncStates.collectAsStateWithLifecycle()
+    val consentOrigin by client.consentOrigin.collectAsStateWithLifecycle()
 
     val latestPrefs by rememberUpdatedState(preferences)
     val controller = remember(vm, prefs) {
@@ -120,6 +121,7 @@ fun SessionDrawer(
         sessionOrders = sessionOrders,
         now = now,
         syncStates = syncStates,
+        origin = consentOrigin,
     )
 
     // T5.3 dashboard.tsx:835-844 — debounce the typed filter into a server-side content search;

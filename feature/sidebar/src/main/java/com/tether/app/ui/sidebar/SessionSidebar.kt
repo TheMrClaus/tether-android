@@ -101,7 +101,8 @@ data class SidebarActions(
     val onSortModeChange: (SidebarSort) -> Unit = {},
     val onSelectSession: (String) -> Unit = {},
     val onReopenHistory: (HistorySession) -> Unit = {},
-    val onEndSession: (String) -> Unit = {},
+    /** (session id, the server origin the control was armed for: T13.2 r3). */
+    val onEndSession: (String, String?) -> Unit = { _, _ -> },
     val onReorderSessions: (String, List<String>) -> Unit = { _, _ -> },
     val onResetSessionOrder: (String) -> Unit = {},
     val onOpenSettings: () -> Unit = {},
@@ -176,6 +177,9 @@ private fun SidebarContent(
 
     var visibleCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var armedKey by remember { mutableStateOf(seed.armedKey) }
+    // T13.2 r3: the server the armed end control was armed for; its second tap ends on that server only.
+    val latestOrigin by rememberUpdatedState(state.origin)
+    var armedOrigin by remember { mutableStateOf(if (seed.armedKey != null) state.origin else null) }
     var drag by remember { mutableStateOf<DragSession?>(seed.drag?.let { DragSession(it.key, "", it.order, it.order, engaged = true) }) }
     var harnessOpen by remember { mutableStateOf(seed.harnessMenuOpen) }
     var sortOpen by remember { mutableStateOf(seed.sortMenuOpen) }
@@ -279,7 +283,11 @@ private fun SidebarContent(
                         phone = phone,
                         first = position == 0,
                         armedKey = armedKey,
-                        onArm = { key -> armedKey = key },
+                        armedOrigin = armedOrigin,
+                        onArm = { key ->
+                            armedKey = key
+                            armedOrigin = if (key != null) latestOrigin else null
+                        },
                         swipedSeed = seed.swipedKey,
                         dragController = dragController,
                         draggingKey = drag?.takeIf { it.engaged }?.key,
@@ -744,6 +752,7 @@ private fun WorkspaceBlock(
     phone: Boolean,
     first: Boolean,
     armedKey: String?,
+    armedOrigin: String?,
     onArm: (String?) -> Unit,
     swipedSeed: String?,
     dragController: DragController,
@@ -783,6 +792,8 @@ private fun WorkspaceBlock(
                             offline = !state.connected,
                             sync = if (state.connected) null else e.live?.id?.let { state.syncStates[it] },
                             armed = armedKey == e.key,
+                            armedOrigin = armedOrigin,
+                            origin = state.origin,
                             onArm = onArm,
                             phone = phone,
                             swipedSeed = swipedSeed == e.key,
