@@ -192,7 +192,9 @@ class InterruptKillTransmissionTest {
         val (client, _) = connected()
         assertTrue(client.reportsFreshness)
         assertFalse("s1 is live, but with no entry it is not", LiveCopy.isLive("s1", client.liveSessions.value, null, client.reportsFreshness))
-        assertTrue(LiveCopy.isLive("s1", client.liveSessions.value, client.syncStates.value["s1"], client.reportsFreshness))
+        // syncStates is derived from the live set a dispatch later: wait for its Live entry.
+        val sync = h.await(client.syncStates) { it["s1"]?.freshness == Freshness.Live }["s1"]
+        assertTrue(LiveCopy.isLive("s1", client.liveSessions.value, sync, client.reportsFreshness))
     }
 
     @Test
