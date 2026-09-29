@@ -40,7 +40,7 @@ serves 200 on the box; the **public URL still redirects to the SSO gateway** unt
 **T6.4** sub-agent runs / background commands / guarded Stop / todo bar / turn activity (`b4d378e`), **T7.2** Model/Effort/Mode row +
 Codex/OpenCode panels with confirmed escalation (`b8f94c8`, 4 rounds), **ta-41x + ta-jt9** cookie `Origin` + signed-out-boot mirror purge +
 sign-out races (`ecb6e7a`, 3 rounds). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
-#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22) queued from `ecb6e7a` once CI is green.
+#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22, `cf7bb0c`) built and checked - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's, versionCode 22, CI green.
 **Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
 **Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
 console origin + credentials forwarded upstream - needs an owner decision), #215 (proxy follow-ups).
