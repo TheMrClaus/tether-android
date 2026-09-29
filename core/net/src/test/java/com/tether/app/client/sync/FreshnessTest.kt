@@ -102,7 +102,9 @@ class FreshnessTest {
                 live = if (live) setOf("s1") else emptySet(),
             )
             val got = derive(inputs)?.freshness
+            val known = listed || hasTree || saved || (connected && attached)
             val expected = when {
+                !known -> null
                 connected && live && hasTree -> Freshness.Live
                 connected && (attached || live) -> Freshness.CatchingUp
                 hasTree || saved -> Freshness.Saved
