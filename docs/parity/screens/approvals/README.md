@@ -84,8 +84,9 @@ Divergences from the web, on purpose:
   ("Allow all", "Allow selected") are disabled, the confirmation box is not drawn, and the path boxes cannot
   be changed. Deny and the provider's other, non-granting choices still work. The confirmation names only
   paths shown in full, so rows plus confirmation stay within twice the budget. In Robolectric the worst legal
-  card (64 + 64 paths of 4096 tag characters, relative or not) draws in about 0.4–0.75 s, and so does the
-  largest card that can still grant. The reason, working directory and network lines are escaped first,
+  card (64 + 64 paths of 4096 tag characters, relative or not) draws in about 0.4–0.75 s on its own and up
+  to about 1.3 s during the full parallel gate. The largest card that can still grant draws in about the same
+  time. The reason, working directory and network lines are escaped first,
   then cut. The reason and host keep up to 2000 escaped characters and then a real "…". The working
   directory is cut like a path, so a trailing `/../..` stays visible and marked. Every cut lands on a
   code-point boundary. No golden changed.

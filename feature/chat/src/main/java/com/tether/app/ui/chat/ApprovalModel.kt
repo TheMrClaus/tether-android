@@ -313,8 +313,9 @@ private fun isDefaultIgnorable(cp: Int): Boolean =
  * The confirmation's words name only shown paths, and only on a grantable card (every row shown), so
  * the rows plus the summary stay within twice the budget. Measured in Robolectric (w412dp, round 8):
  * the worst legal card (64 + 64 paths of 4096 tag-character code points), relative or not, draws in
- * ~0.4-0.75 s; the largest grantable one (15 relative paths at the cap, rows + summary ~32k
- * characters) in ~0.4-0.75 s. The tests hold both under 5 s.
+ * ~0.4-0.75 s run alone (up to ~1.3 s inside the full, parallel gate); the largest grantable one
+ * (15 relative paths at the cap, rows + summary ~32k characters) likewise. The tests hold all three
+ * under 5 s.
  */
 internal const val CARD_PATH_BUDGET = 16_000
 
