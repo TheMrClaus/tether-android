@@ -6,30 +6,49 @@ import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 
 /**
- * T6.4 (L4): a defensive cap on a background command's folded output, applied by the CLIENT after
- * the fold, never inside it. The web's fold (events.mjs `background_command_output`) appends
- * without a bound and relies on the server, which streams at most 64 KiB per command
+ * T6.4 (L4): a defensive cap on background commands' folded output, applied by the CLIENT to every
+ * tree it publishes (SessionStore.publish: live folds, hydration, a mirror rebuild, snapshots),
+ * never inside the fold. The web's fold (events.mjs `background_command_output`) appends without a
+ * bound and relies on the server, which streams at most 64 KiB per command
  * (session-manager.mjs BACKGROUND_COMMAND_LIVE_STREAM_CAP_BYTES); the reducer port stays
  * line-for-line conformant with it. [MAX_CHARS] sits well above what a conforming server can
- * stream, so the cap only acts on a server that exceeds its own limit: the command then keeps
- * its NEWEST [MAX_CHARS] UTF-16 units (whole segments, the oldest one cut at its start, never
- * through a surrogate pair) and reads `outputTruncated: true`, which the sheet already words.
+ * stream, so the cap only acts on a server that exceeds its own limit: a command then keeps its
+ * NEWEST [MAX_CHARS] UTF-16 units (whole segments, the oldest one cut at its start, never through a
+ * surrogate pair) and reads `outputTruncated: true`, which the sheet words.
+ *
+ * Round 3: the whole tree is scanned, so no event id is looked up at all (an id the fold bounds is
+ * found as the fold stored it, L-1), and `outputTruncated` only goes false -> true: a command the
+ * PREVIOUS tree marked truncated stays so, although the next `background_command_updated` merges
+ * only the segments and carries the server's own flag (L-2).
  */
 object OutputIntakeCap {
-    /** 4× the server's 64 KiB byte cap (one UTF-16 unit is at least one UTF-8 byte). */
+    /** 4x the server's 64 KiB byte cap (one UTF-16 unit is at least one UTF-8 byte). */
     const val MAX_CHARS = 256 * 1024
 
-    fun apply(tree: JsObj, event: JsObj, max: Int = MAX_CHARS): JsObj {
-        if ((event["type"] as? JsStr)?.value != "background_command_output") return tree
-        val commandId = (event["commandId"] as? JsStr)?.value ?: return tree
-        val commands = tree["backgroundCommands"] as? JsArr ?: return tree
-        val index = commands.indexOfFirst { ((it as? JsObj)?.get("commandId") as? JsStr)?.value == commandId }
-        if (index < 0) return tree
-        val command = commands[index] as JsObj
-        val segments = command["segments"] as? JsArr ?: return tree
+    /** [next] with every command capped at [max], and every command [previous] marked truncated still marked. */
+    fun capTree(previous: JsObj?, next: JsObj, max: Int = MAX_CHARS): JsObj {
+        val commands = next["backgroundCommands"] as? JsArr ?: return next
+        val wasTruncated = (previous?.get("backgroundCommands") as? JsArr)
+            ?.mapNotNull { c -> (c as? JsObj)?.takeIf { it["outputTruncated"] == JsBool.TRUE }?.let { (it["commandId"] as? JsStr)?.value } }
+            ?.toHashSet()
+            .orEmpty()
+        var out = commands
+        for (i in commands.indices) {
+            val command = commands[i] as? JsObj ?: continue
+            var capped = capCommand(command, max)
+            val id = (command["commandId"] as? JsStr)?.value
+            if (id != null && id in wasTruncated && capped["outputTruncated"] != JsBool.TRUE) capped = capped.put("outputTruncated", JsBool.TRUE)
+            if (capped !== command) out = out.set(i, capped)
+        }
+        return if (out === commands) next else next.put("backgroundCommands", out)
+    }
+
+    /** One command's segments capped at [max] (the same instance when under it). */
+    fun capCommand(command: JsObj, max: Int = MAX_CHARS): JsObj {
+        val segments = command["segments"] as? JsArr ?: return command
         var total = 0L
         for (s in segments) total += (((s as? JsObj)?.get("text") as? JsStr)?.value?.length ?: 0)
-        if (total <= max) return tree
+        if (total <= max) return command
         val kept = ArrayDeque<JsObj>()
         var budget = max
         for (i in segments.indices.reversed()) {
@@ -46,7 +65,6 @@ object OutputIntakeCap {
                 budget = 0
             }
         }
-        val capped = command.with("segments" to JsArr.of(kept), "outputTruncated" to JsBool.TRUE)
-        return tree.put("backgroundCommands", commands.set(index, capped))
+        return command.with("segments" to JsArr.of(kept), "outputTruncated" to JsBool.TRUE)
     }
 }

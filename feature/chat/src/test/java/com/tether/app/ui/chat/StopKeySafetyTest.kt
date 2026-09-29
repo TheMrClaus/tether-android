@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -170,6 +171,145 @@ class StopKeySafetyTest {
         assertEquals("one stop per command, whichever key was tapped", listOf("s1:a"), client.stopCalls)
     }
 
+    // ---- round 3: the latch's lifetime ----------------------------------------------------------------
+
+    private fun stopName(command: String) = listOf("Stop ${commandLabel(command)}")
+
+    @Test fun theLatchClearsWhenTheLinkDropsAndStopWorksAgainOnTheNewLink() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        arm()
+        stopOf(0).performClick()
+        rule.waitForIdle()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm run a")}")))
+        rule.runOnIdle {
+            client.link.value = com.tether.app.client.ConnectionState.Disconnected
+            client.live.value = emptySet()
+        }
+        rule.waitForIdle()
+        // The frame was only queued on the lost link: no longer "Stopping…", just locked while offline.
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm run a")}, unavailable: ${stopLockCopy(ConsentLock.Offline)}")))
+        rule.runOnIdle {
+            client.link.value = com.tether.app.client.ConnectionState.Connected
+            client.live.value = setOf("s1")
+        }
+        rule.waitForIdle()
+        arm()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
+    }
+
+    @Test fun theLatchExpiresWhileTheCommandStillRunsAndTheKeyArmsAgain() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        arm()
+        stopOf(0).performClick()
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(STOP_LATCH_MS - 1_000)
+        rule.waitForIdle()
+        stopOf(0).assertIsNotEnabled().performClick()
+        assertEquals(listOf("s1:a"), client.stopCalls)
+        rule.mainClock.advanceTimeBy(1_100)
+        rule.waitForIdle()
+        // Lapsed: named for its command again, and disarmed for the usual delay before it may send.
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsNotEnabled()
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
+        stopOf(0).assertIsEnabled().performClick()
+        rule.mainClock.advanceTimeBy(64)
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
+    }
+
+    @Test fun switchingAwayAndBackStartsWithoutALatch() {
+        // P4 (intended): latches live with the session's screen, not saved; back on s1 the key is
+        // named for its command and arms normally.
+        val other = session.copy(id = "s2", name = "Other")
+        val client = ChatTestClient().also {
+            it.show(other, folded())
+            it.show(session, folded(cmd("a", "running", 2_000)))
+        }
+        val vm = TetherViewModel(client)
+        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        var shown by mutableStateOf(session)
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Machine)) {
+                val projections by client.projections.collectAsStateWithLifecycle()
+                ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        stopOf(0).performClick()
+        rule.waitForIdle()
+        rule.runOnIdle { shown = other }
+        rule.waitForIdle()
+        rule.runOnIdle { shown = session }
+        rule.waitForIdle()
+        arm()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled()
+    }
+
+    // ---- round 3: the sheet's key while output grows; a slow slide ------------------------------
+
+    @Test fun theSheetsStopArmsWhileShortOutputKeepsGrowing() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        rule.onNodeWithTag("bg-command-open").performClick()
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = false
+        var tree = client.projectionTrees.value.getValue("s1")
+        var armedAt = -1
+        for (frame in 1..48) {
+            if (frame % 12 == 0) {
+                val n = frame / 12
+                rule.runOnIdle {
+                    tree = foldTree(tree, evNullTurn("background_command_output", ts = 9) { put("commandId", "a"); put("stream", "stdout"); put("text", "line $n\n") })
+                    client.show(session, ChatFixtures.Folded(checkNotNull(LegacyProjectionAdapter.adaptOnce(tree)), tree))
+                }
+            }
+            rule.mainClock.advanceTimeByFrame()
+            rule.waitForIdle()
+            val sheetKey = rule.onAllNodesWithTag("bg-command-stop").fetchSemanticsNodes().last()
+            if (armedAt < 0 && !sheetKey.config.contains(SemanticsProperties.Disabled)) armedAt = frame
+        }
+        assertTrue("the sheet's Stop armed by frame 36 (armed at $armedAt)", armedAt in 1..36)
+    }
+
+    @Test fun aKeySlidingSlowlyRearmsOnceItMovedFourDpSinceItArmed() {
+        var offset by mutableStateOf(0)
+        val command = BackgroundCommandView("a", "npm run a", "/w", "/w/a.log", "running", null, null, 1.0, false, JsArr.EMPTY)
+        val calls = mutableListOf<String>()
+        val actions = CommandActions(null, {}, { id -> calls += id; com.tether.app.client.StopCommandResult.Sent })
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.offset(y = androidx.compose.ui.unit.Dp(offset.toFloat()))) {
+                    RunningCommandsBar(listOf(command), actions)
+                }
+            }
+        }
+        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.waitForIdle()
+        stopOf(0).assertIsEnabled()
+        // 1dp a frame: no single frame moves it 4dp, but five frames do.
+        repeat(5) {
+            rule.runOnIdle { offset += 1 }
+            rule.mainClock.advanceTimeByFrame()
+            rule.waitForIdle()
+        }
+        stopOf(0).assertIsNotEnabled().performClick()
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun aLabelDropsBidiControlsAndLeadingBlankLines() {
+        assertEquals("\u2068rm -rf build\u2069", commandLabel("\n  \n\u202Erm -rf build\u2069"))
+        assertEquals("\u2068ls…\u2069", commandLabel("\r\nls\n\u2066pwd"))
+        assertEquals("\u2068echo\u2069", commandLabel("echo\n\n"))
+    }
+
     // ---- L3 ------------------------------------------------------------------------------------------
 
     @Test fun aStopIsBoundToTheOriginItsRowWasDrawnFor() {
@@ -185,7 +325,7 @@ class StopKeySafetyTest {
         assertEquals("\u2068npm test\u2069", commandLabel("npm test"))
         assertEquals("\u2068set -e…\u2069", commandLabel("set -e  \nrm -rf build"))
         assertEquals("\u2068a…\u2069", commandLabel("a\u2028b"))
-        assertEquals("\u2068\u202Eevil…\u2069", commandLabel("\u202Eevil\r\nx"))
+        assertEquals("\u2068evil…\u2069", commandLabel("\u202Eevil\r\nx"))
     }
 
     // ---- L2 ------------------------------------------------------------------------------------------

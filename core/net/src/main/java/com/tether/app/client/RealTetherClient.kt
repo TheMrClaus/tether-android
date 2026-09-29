@@ -2269,7 +2269,7 @@ class RealTetherClient(
         if (buffered) return
         val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
         val next = try {
-            (JsCodec.fromJson(event.raw) as JsObj).let { e -> OutputIntakeCap.apply(reduce(tree, e), e) }
+            reduce(tree, JsCodec.fromJson(event.raw) as JsObj)
         } catch (e: RuntimeException) {
             // The fold is a line port of events.mjs and, like it, assumes the server's full
             // projection shape (a JS reduce throws on the same malformed base). Never let that

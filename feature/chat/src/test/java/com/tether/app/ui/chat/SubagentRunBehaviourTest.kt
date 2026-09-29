@@ -265,7 +265,7 @@ class SubagentRunBehaviourTest {
         host(client)
         val stop = rule.onNodeWithTag("bg-command-stop")
         stop.assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop this command, unavailable: Connect to stop it. This is a saved copy.")))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}, unavailable: Connect to stop it. This is a saved copy.")))
         stop.performClick()
         rule.runOnIdle {
             client.link.value = ConnectionState.Connected

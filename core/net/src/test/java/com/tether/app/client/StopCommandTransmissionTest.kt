@@ -152,6 +152,21 @@ class StopCommandTransmissionTest {
     }
 
     @Test
+    fun anOversizedSnapshotIsCappedWhenPublished() {
+        // P4 (r3): snapshots (and mirror rebuilds) reach the screens through the same publish as live folds.
+        val big = foldTree(
+            JsCodec.parse(commandsState()) as com.tether.app.protocol.tree.JsObj,
+            ev("background_command_output", null, seq = 3, ts = 3) { put("commandId", "c-run"); put("stream", "stdout"); put("text", "q".repeat(OutputIntakeCap.MAX_CHARS + 5_000)) },
+        )
+        val (client, _) = connected(state = JsCodec.toJson(big).toString())
+        val command = ((client.projectionTrees.value.getValue("s1")["backgroundCommands"] as com.tether.app.protocol.tree.JsArr)
+            .first { ((it as com.tether.app.protocol.tree.JsObj)["commandId"] as com.tether.app.protocol.tree.JsStr).value == "c-run" }) as com.tether.app.protocol.tree.JsObj
+        val kept = (command["segments"] as com.tether.app.protocol.tree.JsArr).sumOf { (((it as com.tether.app.protocol.tree.JsObj)["text"]) as com.tether.app.protocol.tree.JsStr).value.length }
+        assertEquals(OutputIntakeCap.MAX_CHARS, kept)
+        assertEquals(com.tether.app.protocol.tree.JsBool.TRUE, command["outputTruncated"])
+    }
+
+    @Test
     fun aStopDrawnForAnotherServerIsRefused() {
         // L3: the key was composed for another origin (or for none): refused under the lock.
         val (client, _) = connected()

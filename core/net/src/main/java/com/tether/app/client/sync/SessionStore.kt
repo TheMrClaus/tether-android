@@ -53,7 +53,11 @@ class SessionStore {
 
     /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). */
     fun publish(sessionId: String, tree: JsObj, typed: SessionProjection?) {
-        treesState.value = treesState.value + (sessionId to tree)
+        // T6.4 (L4, r3): every tree the screens see passes here (live folds, hydration, a mirror
+        // rebuild, snapshots), so the client's output cap applies to all of them, against the
+        // tree it replaces (a flag the client set stays set).
+        val capped = com.tether.app.client.OutputIntakeCap.capTree(treesState.value[sessionId], tree)
+        treesState.value = treesState.value + (sessionId to capped)
         projectionsState.value = if (typed != null) projectionsState.value + (sessionId to typed) else projectionsState.value - sessionId
     }
 
@@ -122,7 +126,7 @@ class SessionStore {
         if (session == null || rebuilt == null) return HydrationOutcome.Failed
         var tree: JsObj = rebuilt
         try {
-            for (event in buffered) tree = com.tether.app.client.OutputIntakeCap.apply(reduce(tree, event), event)
+            for (event in buffered) tree = reduce(tree, event)
         } catch (_: RuntimeException) {
             return HydrationOutcome.Failed
         }

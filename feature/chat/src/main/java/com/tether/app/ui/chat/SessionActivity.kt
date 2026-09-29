@@ -225,42 +225,68 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
  * (FSI…PDI) so right-to-left text or bidi controls in it cannot reorder the words around it.
  */
 internal fun commandLabel(command: String): String {
-    val nl = command.indexOfAny(charArrayOf('\n', '\r', '\u2028', '\u2029'))
-    val first = if (nl < 0) command else command.substring(0, nl).trimEnd() + "…"
+    // Round 3: embedding / override / isolate controls are dropped (the wrap is the only isolate),
+    // and leading blank lines skipped, so the label is never just "…".
+    val clean = command.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' }
+    val breaks = charArrayOf('\n', '\r', '\u2028', '\u2029')
+    var start = 0
+    while (true) {
+        val nl = clean.indexOfAny(breaks, start)
+        if (nl < 0 || clean.substring(start, nl).isNotBlank()) break
+        start = nl + 1
+    }
+    val rest = clean.substring(start)
+    val nl = rest.indexOfAny(breaks)
+    val more = nl >= 0 && rest.substring(nl).any { it !in breaks && !it.isWhitespace() }
+    val first = (if (nl < 0) rest else rest.substring(0, nl)).trimEnd() + if (more) "…" else ""
     return "\u2068$first\u2069"
 }
 
 /**
- * Round 2: the "Stopping…" latch, ONE per command for the whole session screen (the bar's key and
- * the output sheet's key read the same entry), keyed by commandId, never by position. A command
- * id is never reused, so an entry never goes stale; survives a configuration change.
+ * The "Stopping…" latch, ONE per command for the whole session screen (the bar's key and the output
+ * sheet's key read the same entry), keyed by commandId, never by position. Round 3 (L-3): `Sent`
+ * only means the frame was queued, so a latch never outlives the link it was sent on ([clear] on a
+ * drop, a liveness change or another server) and expires after [STOP_LATCH_MS] while the command
+ * still runs; the key then arms again and the operator can stop it anew. Not saved (a restored
+ * screen has no link yet), and per session: switching away and back starts clean.
  */
 @androidx.compose.runtime.Stable
-class StopLatches internal constructor(initial: Collection<String> = emptyList()) {
-    private val sent = androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { initial.forEach { put(it, true) } }
+class StopLatches internal constructor() {
+    private val sent = androidx.compose.runtime.mutableStateMapOf<String, Int>()
+    private var tokens = 0
 
-    fun isSent(commandId: String): Boolean = sent[commandId] == true
+    fun isSent(commandId: String): Boolean = sent.containsKey(commandId)
+
+    /** The token of [commandId]'s latch (null: none): [expire] only clears that same latch. */
+    fun tokenOf(commandId: String): Int? = sent[commandId]
 
     internal fun mark(commandId: String) {
-        sent[commandId] = true
+        sent[commandId] = ++tokens
     }
 
-    internal fun snapshot(): List<String> = sent.keys.toList()
+    internal fun expire(commandId: String, token: Int) {
+        if (sent[commandId] == token) sent.remove(commandId)
+    }
 
-    companion object {
-        val Saver: androidx.compose.runtime.saveable.Saver<StopLatches, Any> = androidx.compose.runtime.saveable.Saver(
-            save = { ArrayList(it.snapshot()) },
-            restore = {
-                @Suppress("UNCHECKED_CAST")
-                StopLatches(it as List<String>)
-            },
-        )
+    internal fun clear() {
+        if (sent.isNotEmpty()) sent.clear()
     }
 }
 
-/** One session's latches (per session: reset on a session switch). */
+/** How long "Stopping…" holds a still-running command's keys before they may stop it again. */
+internal const val STOP_LATCH_MS = 10_000L
+
+/**
+ * One session's latches, cleared whenever [link] changes (the connection, this session's
+ * liveness, the server origin): a stop that was only queued on a lost link must not leave the
+ * command unstoppable.
+ */
 @Composable
-internal fun rememberStopLatches(sessionKey: String?): StopLatches = rememberSaveable(sessionKey, saver = StopLatches.Saver) { StopLatches() }
+internal fun rememberStopLatches(sessionKey: String?, link: Any?): StopLatches {
+    val latches = remember(sessionKey) { StopLatches() }
+    LaunchedEffect(latches, link) { latches.clear() }
+    return latches
+}
 
 /** What the command surfaces may do: open a command's output, and stop a running one (a TAP only). */
 @androidx.compose.runtime.Immutable
@@ -351,13 +377,23 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val sent = actions.latches.isSent(command.commandId)
+    val latchToken = actions.latches.tokenOf(command.commandId)
+    val sent = latchToken != null
     val lock = actions.stopLock
     val actionable = command.running && lock == null && !sent
-    // Every move of the key in its window re-arms it (the identity changes).
+    // L-3: a latch on a command that still runs lapses after STOP_LATCH_MS.
+    if (latchToken != null && command.running) {
+        LaunchedEffect(command.commandId, latchToken) {
+            delay(STOP_LATCH_MS)
+            actions.latches.expire(command.commandId, latchToken)
+        }
+    }
+    // M1 / Info 7: the key re-arms once it has moved more than STOP_REARM_MOVE_DP from where it
+    // stood when its current arming began (cumulative, so a slow slide cannot creep past it).
     var moves by remember(command.commandId) { androidx.compose.runtime.mutableIntStateOf(0) }
-    val lastPosition = remember(command.commandId) { arrayOfNulls<Offset>(1) }
+    val anchor = remember(command.commandId) { arrayOfNulls<Offset>(1) }
     val armed = rememberArmed(command.commandId to moves, actionable)
+    val name = commandLabel(command.command)
     val shape = RoundedCornerShape(t.radiusSm)
     val label = if (sent) "Stopping…" else "Stop"
     fun stop() {
@@ -370,10 +406,14 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
             .widthIn(min = 44.dp)
             .onGloballyPositioned { coordinates ->
                 val now = coordinates.positionInWindow()
-                val before = lastPosition[0]
-                lastPosition[0] = now
+                val since = anchor[0]
                 val limit = with(density) { STOP_REARM_MOVE_DP.dp.toPx() }
-                if (before != null && (kotlin.math.abs(now.x - before.x) > limit || kotlin.math.abs(now.y - before.y) > limit)) moves++
+                if (since == null) {
+                    anchor[0] = now
+                } else if (kotlin.math.abs(now.x - since.x) > limit || kotlin.math.abs(now.y - since.y) > limit) {
+                    anchor[0] = now
+                    moves++
+                }
             }
             .refuseObscuredTouches()
             .then(if (armed) Modifier.clickable(role = Role.Button) { stop() } else Modifier)
@@ -382,9 +422,9 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
             .clearAndSetSemantics {
                 role = Role.Button
                 contentDescription = when {
-                    sent -> "Stopping ${commandLabel(command.command)}"
-                    lock != null -> "Stop this command, unavailable: $lock"
-                    else -> if (compact) "Stop this background command" else "Stop this command"
+                    sent -> "Stopping $name"
+                    lock != null -> "Stop $name, unavailable: $lock"
+                    else -> "Stop $name"
                 }
                 if (!armed) disabled()
                 if (armed) onClick("Stop") { stop(); true }
@@ -461,12 +501,17 @@ internal fun CommandOutputDialog(command: BackgroundCommandView?, actions: Comma
                 // A tap outside closes (pointer-only: the close key and Back are the accessible ways).
                 .pointerInput(onClose) { detectTapGestures { onClose() } }
                 .padding(t.css.spaceMd),
-            contentAlignment = Alignment.Center,
+            // P3 (r3): top-anchored, not centred like the web's, so the sheet's head (and its Stop
+            // key) stays put while short output grows the sheet downward, and the key stays armed.
+            contentAlignment = Alignment.TopCenter,
         ) {
-            CommandOutputSurface(command, actions, onClose)
+            CommandOutputSurface(command, actions, onClose, Modifier.padding(top = SHEET_TOP_INSET))
         }
     }
 }
+
+/** Where the top-anchored output sheet starts below the window's top edge. */
+private val SHEET_TOP_INSET = 48.dp
 
 /** L4: how often a streaming sheet redraws its output at most (about 4 Hz). */
 internal const val COMMAND_SHEET_SAMPLE_MS = 250L

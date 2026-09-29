@@ -124,7 +124,8 @@ fun ChatScreen(
     )
     // Round 2: one "Stopping…" latch per command for this session (the bar and the sheet share it);
     // L3: the stop is bound to the server origin this row was drawn for.
-    val stopLatches = rememberStopLatches(session?.id)
+    // L-3 (r3): a stop sent on one link never latches the keys past it.
+    val stopLatches = rememberStopLatches(session?.id, Triple(connection, session?.id in liveSessions, consentOrigin))
     val commandActions = remember(session?.id, stopLock, consentOrigin, vm, stopLatches) {
         val s = session
         val drawnFor = consentOrigin
