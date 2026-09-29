@@ -472,7 +472,6 @@ internal fun SubagentRunTab(
     val cardCount = pending.size + pendingQuestions.size
     val lastIndex = rows.size + cardCount - 1
     val focusKey = focus?.takeIf { it.runId == run.runId }
-    val observer = LocalChatRowObserver.current
 
     LaunchedEffect(run.runId, entries.size, cardCount, run.status, focusKey) {
         if (focusKey != null) return@LaunchedEffect
@@ -495,23 +494,28 @@ internal fun SubagentRunTab(
         contentPadding = spacing.padding,
         verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
     ) {
-        items(rows, key = { it.key }, contentType = { it::class.java.simpleName }) { row ->
-            if (observer != null) SideEffect { observer(row.key) }
-            when (row) {
-                is PanelRow.Head -> RunHead(row.run)
-                is PanelRow.Prompt -> RunPrompt(row.runId, row.prompt)
-                is PanelRow.ThreadNote -> ThreadNote(row.run)
-                is PanelRow.Spawned -> SpawnedRunOutput(row.run)
-                is PanelRow.Empty -> RunEmpty(row.running)
-                is PanelRow.Step -> {
-                    val flashing = focusKey != null && (row.entry["key"] as? JsStr)?.value == focusKey.toolId
-                    StepFlash(flashing, focusKey?.nonce) { RunStep(row.entry, showThinking) }
-                }
-                is PanelRow.Result -> RunResult(row.run)
-            }
+        items(rows, key = { it.key }, contentType = { row -> if (row is PanelRow.Step) "step/" + ((row.entry["kind"] as? JsStr)?.value ?: "") else row::class.java.simpleName }) { row ->
+            val flashing = row is PanelRow.Step && focusKey != null && (row.entry["key"] as? JsStr)?.value == focusKey.toolId
+            PanelRowView(row, showThinking, flashing, if (flashing) focusKey?.nonce else null)
         }
         items(pending, key = { "approval/${it.requestId}/${it.contentFp}" }) { ApprovalCard(it) }
         items(pendingQuestions, key = { "question/${it.requestId}/${it.contentFp}" }) { QuestionCard(it, answered = it.requestId in answeredIds) }
+    }
+}
+
+/** One panel row. Skippable: an equal [row] (a step whose entry kept its instance) does not recompose. */
+@Composable
+private fun PanelRowView(row: PanelRow, showThinking: Boolean, flashing: Boolean, nonce: Int?) {
+    val observer = LocalChatRowObserver.current
+    if (observer != null) SideEffect { observer(row.key) }
+    when (row) {
+        is PanelRow.Head -> RunHead(row.run)
+        is PanelRow.Prompt -> RunPrompt(row.runId, row.prompt)
+        is PanelRow.ThreadNote -> ThreadNote(row.run)
+        is PanelRow.Spawned -> SpawnedRunOutput(row.run)
+        is PanelRow.Empty -> RunEmpty(row.running)
+        is PanelRow.Step -> StepFlash(flashing, nonce) { RunStep(row.entry, showThinking) }
+        is PanelRow.Result -> RunResult(row.run)
     }
 }
 

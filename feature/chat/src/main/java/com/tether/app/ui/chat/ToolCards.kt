@@ -451,11 +451,13 @@ internal fun ToolCard(block: JsObj, showThinking: Boolean, modifier: Modifier = 
         val running = state == ToolState.Running
         // The thread's <details> state lives here so a CLOSED thread gives its tile share back
         // to the card's own result (its steps load nothing while closed).
-        val window = remember(subagent, showThinking, running) { subagent?.let { subagentWindow(it, showThinking, newest = running) } }
-        val threadHasMedia = remember(window) { window?.entries?.any { asString(it["kind"]) == "tool" && extractToolMedia(it["output"]).isNotEmpty() } == true }
-        val threadOpen = rememberDetailsOpen(running || threadHasMedia)
-        val plan = remember(block, showThinking, threadOpen.value) { cardMediaPlan(if (threadOpen.value) subagent else null, block, showThinking) }
-        if (window != null) SubagentThread(window, threadOpen, showThinking = showThinking, tileLimits = plan.byEntry)
+        // ta-cqf: "+N more / earlier steps" pages SUBAGENT_ROWS_MAX more at a time (reset when the run starts or ends).
+        var limit by rememberSaveable(asString(block["blockId"]), running) { mutableStateOf(SUBAGENT_ROWS_MAX) }
+        val window = remember(subagent, showThinking, running, limit) { subagent?.let { subagentWindow(it, showThinking, newest = running, max = limit) } }
+        // The web opens a finished thread when ANY step's result carries media (not only the drawn ones).
+        val threadOpen = rememberDetailsOpen(running || window?.hasMedia == true)
+        val plan = remember(block, showThinking, threadOpen.value, limit) { cardMediaPlan(if (threadOpen.value) subagent else null, block, showThinking, limit) }
+        if (window != null) SubagentThread(window, threadOpen, showThinking = showThinking, tileLimits = plan.byEntry, onMore = { limit += SUBAGENT_ROWS_MAX })
         if (state == ToolState.Interrupted) InterruptedEvidence(output)
         if (block.isDone() && state != ToolState.Interrupted && !output.isNullish()) {
             val media = remember(output) { extractToolMedia(output) }
@@ -502,7 +504,7 @@ internal fun InterruptedEvidence(output: com.tether.app.protocol.tree.JsValue?) 
  * indented `space-md` behind a 2px `--line-strong` rail.
  */
 @Composable
-internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThinking: Boolean, tileLimits: Map<String, Int> = emptyMap()) {
+internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThinking: Boolean, tileLimits: Map<String, Int> = emptyMap(), onMore: () -> Unit = {}) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     // R5-M1: at most SUBAGENT_ROWS_MAX steps are drawn (the caller's [window]) — the newest while
@@ -537,7 +539,7 @@ internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThink
                     .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
                 verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             ) {
-                if (window.earlier > 0) StepsMore("+${localeCount(window.earlier)} earlier step${if (window.earlier == 1) "" else "s"}")
+                if (window.earlier > 0) StepsMore("+${localeCount(window.earlier)} earlier step${if (window.earlier == 1) "" else "s"}", onMore)
                 entries.forEach { entry ->
                     when (asString(entry["kind"])) {
                         "message" -> asString(entry["text"])?.takeIf { it.isNotEmpty() }?.let { text ->
@@ -548,7 +550,7 @@ internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThink
                         else -> SubagentToolCard(entry, tileLimits[asString(entry["key"])] ?: 0)
                     }
                 }
-                if (window.later > 0) StepsMore("+${localeCount(window.later)} more step${if (window.later == 1) "" else "s"}")
+                if (window.later > 0) StepsMore("+${localeCount(window.later)} more step${if (window.later == 1) "" else "s"}", onMore)
             }
         }
     }
@@ -599,8 +601,8 @@ private fun SubagentToolCard(entry: JsObj, tileLimit: Int) {
     }
 }
 
-/** The steps a thread draws, and how many it holds before and after them. */
-internal class SubagentWindow(val entries: List<JsObj>, val total: Int, val earlier: Int, val later: Int)
+/** The steps a thread draws, how many it holds before and after them, and whether ANY step's result carries media. */
+internal class SubagentWindow(val entries: List<JsObj>, val total: Int, val earlier: Int, val later: Int, val hasMedia: Boolean = false)
 
 /** Sub-agent steps one thread draws before "+N earlier/more steps" (the web draws them all). */
 internal const val SUBAGENT_ROWS_MAX = 50
@@ -615,11 +617,13 @@ internal fun subagentWindow(thread: JsObj, showThinking: Boolean, newest: Boolea
     val byKey = thread["entries"] as? JsObj ?: JsObj.EMPTY
     val kept = ArrayDeque<JsObj>(minOf(max, 64))
     var total = 0
+    var hasMedia = false
     for (k in order) {
         val key = (k as? JsStr)?.value ?: continue
         val e = byKey[key] as? JsObj ?: continue
         if (asString(e["kind"]) == "thinking" && !(showThinking && !asString(e["text"]).isNullOrEmpty())) continue
         total++
+        if (!hasMedia && asString(e["kind"]) == "tool" && extractToolMedia(e["output"]).isNotEmpty()) hasMedia = true
         if (newest) {
             kept.addLast(e)
             if (kept.size > max) kept.removeFirst()
@@ -628,14 +632,24 @@ internal fun subagentWindow(thread: JsObj, showThinking: Boolean, newest: Boolea
         }
     }
     val drawn = kept.toList()
-    return if (newest) SubagentWindow(drawn, total, total - drawn.size, 0) else SubagentWindow(drawn, total, 0, total - drawn.size)
+    return if (newest) SubagentWindow(drawn, total, total - drawn.size, 0, hasMedia) else SubagentWindow(drawn, total, 0, total - drawn.size, hasMedia)
 }
 
+/** "+N more steps": a 44dp key that draws the next [SUBAGENT_ROWS_MAX] (ta-cqf). */
 @Composable
-private fun StepsMore(text: String) {
+private fun StepsMore(text: String, onMore: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    Text(text, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.faint, modifier = Modifier.testTag("steps-more"))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clickable(role = Role.Button, onClickLabel = "Show $SUBAGENT_ROWS_MAX more steps", onClick = onMore)
+            .testTag("steps-more"),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(text, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.faint)
+    }
 }
 
 /** The thread's shown entries, in order (a thinking entry only when shown and non-empty). */
@@ -654,9 +668,9 @@ internal class CardMediaPlan(val byEntry: Map<String, Int>, val card: Int)
  * R3-M1: one [MediaLimits.MAX_TILES] budget per card, in screen order — the sub-agent entries
  * (which render first), then the card's own result.
  */
-internal fun cardMediaPlan(subagent: JsObj?, block: JsObj, showThinking: Boolean): CardMediaPlan {
+internal fun cardMediaPlan(subagent: JsObj?, block: JsObj, showThinking: Boolean, max: Int = SUBAGENT_ROWS_MAX): CardMediaPlan {
     // Over the DRAWN steps only (R5-M1): a step past the window loads nothing.
-    val entries = subagent?.let { subagentWindow(it, showThinking, newest = !block.isDone()).entries } ?: emptyList()
+    val entries = subagent?.let { subagentWindow(it, showThinking, newest = !block.isDone(), max = max).entries } ?: emptyList()
     fun shows(o: JsObj) = o.isDone() && !o.isInterrupted() && !o["output"].isNullish()
     val keyed = entries.filter { asString(it["kind"]) != "message" && asString(it["kind"]) != "thinking" && shows(it) }
         .map { (asString(it["key"]) ?: "") to extractToolMedia(it["output"]).size }
