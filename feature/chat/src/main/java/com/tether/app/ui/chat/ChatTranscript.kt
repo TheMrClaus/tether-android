@@ -281,6 +281,7 @@ private fun ChatTranscriptBody(
                     toolRender = toolRender,
                     onToggleGroup = onToggleGroup,
                     onOpenCommand = onOpenCommand,
+                    zone = zone,
                 )
             }
         }
@@ -333,6 +334,7 @@ private fun ChatRow(
     toolRender: ToolRenderFlags = ToolRenderFlags.Default,
     onToggleGroup: (ChatItem.ToolGroup) -> Unit = {},
     onOpenCommand: (String) -> Unit = {},
+    zone: ZoneId = ZoneId.systemDefault(),
 ) {
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
@@ -356,11 +358,11 @@ private fun ChatRow(
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
             is ChatItem.Approval -> ApprovalCard(item.approval)
             is ChatItem.Question -> QuestionCard(item.question, answered = item.answered)
-            is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt)
+            is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt, zone = zone)
             is ChatItem.ProviderNotice -> ProviderNoticeRow(item.notice)
             is ChatItem.Compaction -> CompactionRow(item.compaction)
             is ChatItem.SessionNotice -> SessionNoticeRow(item.notice)
-            is ChatItem.RateLimit -> if (item.prompt.status == "awaiting_choice") RateLimitCard(item.prompt) else ScheduledResumeRow(item.prompt)
+            is ChatItem.RateLimit -> if (item.prompt.status == "awaiting_choice") RateLimitCard(item.prompt, zone = zone) else ScheduledResumeRow(item.prompt, zone = zone)
             is ChatItem.ToolGroup -> ToolActivityHeader(
                 summary = item.summary,
                 running = item.running,

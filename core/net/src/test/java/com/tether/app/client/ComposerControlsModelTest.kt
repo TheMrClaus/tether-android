@@ -237,4 +237,16 @@ class ComposerControlsModelTest {
         assertNull(row.mode)
         assertNull(row.auto)
     }
+
+    /** T6.6 (chat-view.tsx:2477-2482, 4331): Auto-continue rides the live row of Claude and Codex v2 only. */
+    @Test
+    fun autoContinueIsOnTheLiveRowOfClaudeAndCodexOnly() {
+        assertEquals(AutoContinueControl(false), derive(session("claude"), claudeControls).autoContinue)
+        assertEquals(AutoContinueControl(true), derive(session("claude").copy(autoContinueOnLimit = true), claudeControls).autoContinue)
+        assertEquals(AutoContinueControl(false), derive(session("codex", CODEX_V2), null).autoContinue)
+        // A legacy Codex thread has no live row; a read-only session none either.
+        assertNull(derive(session("codex"), null).autoContinue)
+        assertNull(derive(session("claude").copy(readOnly = true), claudeControls).autoContinue)
+        for (other in listOf("opencode", "reasonix", "pi", "dsh")) assertNull(other, derive(session(other), null).autoContinue)
+    }
 }

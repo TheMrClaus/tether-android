@@ -155,7 +155,9 @@ internal fun rateLimitRefusalCopy(result: ControlResult): String? = when (result
 internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(), zone: ZoneId = ZoneId.systemDefault()): String {
     val pattern = DateTimeFormatterBuilder.getLocalizedDateTimePattern(null, FormatStyle.SHORT, IsoChronology.INSTANCE, locale)
     val formatter = DateTimeFormatter.ofPattern("$pattern z", locale)
-    return formatter.format(Instant.ofEpochMilli(epochMs).atZone(zone))
+    // A bare UTC offset prints its id ("Z"); Intl names it "UTC".
+    val shown = if (zone == java.time.ZoneOffset.UTC) ZoneId.of("UTC") else zone
+    return formatter.format(Instant.ofEpochMilli(epochMs).atZone(shown))
 }
 
 /**
