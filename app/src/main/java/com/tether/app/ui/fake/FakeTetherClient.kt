@@ -482,6 +482,12 @@ class FakeTetherClient : TetherClient {
         .map { list -> list.mapTo(HashSet()) { it.id } }
         .stateIn(scope, SharingStarted.Eagerly, _sessions.value.mapTo(HashSet()) { it.id })
 
+    // T13.2 (SYNC_DESIGN §2.5): the demo is always connected, so every listed session is Live and
+    // previews and screenshots show no freshness mark.
+    override val syncStates: StateFlow<Map<String, com.tether.app.client.SessionSync>> = _sessions
+        .map { list -> list.associate { it.id to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null) } }
+        .stateIn(scope, SharingStarted.Eagerly, _sessions.value.associate { it.id to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null) })
+
     private fun decide(sessionId: String, requestId: String, expectedFingerprint: String, question: Boolean, check: (JsObj) -> ConsentResult?): ConsentResult {
         val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return ConsentResult.Locked
         if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return ConsentResult.Locked

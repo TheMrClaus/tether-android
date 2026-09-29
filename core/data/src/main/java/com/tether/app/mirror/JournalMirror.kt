@@ -39,6 +39,11 @@ class MirrorIndex(
     val sessions: List<StoredSession>,
     /** Sessions whose base + tail are usable for a delta attach (a non-null persisted cursor). */
     val cursors: Map<String, Long>,
+    /**
+     * T13.2: every session with a saved copy (a full base, with or without a cursor), mapped to
+     * its `last_verified_at` (null = never verified): what offline reading can show (§4.1).
+     */
+    val saved: Map<String, Long?> = emptyMap(),
 )
 
 /** One session's persisted base, turn details and tail (§2.4 hydration). */
@@ -637,8 +642,12 @@ class JournalMirror(
             sessions += StoredSession(row.sessionId, json, row.pinned, row.lastOpenedAt, row.goneFromServer)
         }
         val cursors = HashMap<String, Long>()
-        for (state in d.syncStates()) state.cursor?.let { cursors[state.sessionId] = it }
-        return MirrorIndex(sessions, cursors)
+        val saved = HashMap<String, Long?>()
+        for (state in d.syncStates()) {
+            state.cursor?.let { cursors[state.sessionId] = it }
+            if (state.level == LEVEL_FULL) saved[state.sessionId] = state.lastVerifiedAt
+        }
+        return MirrorIndex(sessions, cursors, saved)
     }
 
     private fun closeDb() {

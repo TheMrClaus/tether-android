@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -428,6 +429,43 @@ class RealTetherClient(
     override val liveSessions: StateFlow<Set<String>> = liveSessionsState
     override val decidedRequests: StateFlow<Set<String>> = decidedState
 
+    // T13.2 (SYNC_DESIGN §4.1): the freshness inputs no other flow carries. Written under [lock].
+    // [attachedState] mirrors [attachedThisEpoch]; [savedCopiesState] = sessions with a copy in the
+    // mirror (their persisted last_verified_at); [verifiedAtState] = this process's own verification
+    // times (a snapshot that made a session live, or the moment a live session stopped being live).
+    private val attachedState = MutableStateFlow<Set<String>>(emptySet())
+    private val savedCopiesState = MutableStateFlow<Map<String, Long?>>(emptyMap())
+    private val verifiedAtState = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    private fun freshnessInputs() = com.tether.app.client.sync.FreshnessRules.Inputs(
+        connected = connectionState.value == ConnectionState.Connected,
+        listed = sessionsState.value.map { it.id },
+        trees = sessionStore.trees.value,
+        trimmedBefore = sessionStore.trimmedBefore.value,
+        saved = savedCopiesState.value,
+        attached = attachedState.value,
+        live = liveSessionsState.value,
+        verifiedAt = verifiedAtState.value,
+    )
+
+    /**
+     * Derived, not stored: recomputed whenever any input changes. The consent gate never reads it
+     * (it re-checks [liveThisEpoch] under the lock), so the one-dispatch lag of this derivation can
+     * only delay an indicator, never let a decision through.
+     */
+    override val syncStates: StateFlow<Map<String, SessionSync>> = kotlinx.coroutines.flow.combine(
+        listOf<kotlinx.coroutines.flow.Flow<Any?>>(
+            connectionState, sessionsState, sessionStore.trees, sessionStore.trimmedBefore,
+            savedCopiesState, attachedState, liveSessionsState, verifiedAtState,
+        ),
+    ) { com.tether.app.client.sync.FreshnessRules.derive(freshnessInputs()) }
+        .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, com.tether.app.client.sync.FreshnessRules.derive(freshnessInputs()))
+
+    /** T13.2: [attachedThisEpoch] changed. Caller holds [lock]. */
+    private fun publishAttachedLocked() {
+        attachedState.value = attachedThisEpoch.toSet()
+    }
+
     // T5.1 sidebar sync (SidebarSync.kt).
     private val sidebarSync = SidebarSync()
     override val historiesByCwd: StateFlow<Map<String, List<HistorySession>>> = sidebarSync.historiesByCwd
@@ -790,7 +828,9 @@ class RealTetherClient(
         tracker.clear()
         reconciledSessions.clear()
         attachedThisEpoch.clear()
+        publishAttachedLocked()
         clearLiveLocked()
+        verifiedAtState.value = emptyMap()
         decidedState.value = emptySet()
         unconfirmedState.value = emptySet()
         consentOriginState.value = null
@@ -800,7 +840,10 @@ class RealTetherClient(
     /** T6.3: [sessionId] is (or is no longer) confirmed on the current socket. Caller holds [lock]. */
     private fun setLiveLocked(sessionId: String, live: Boolean) {
         val changed = if (live) liveThisEpoch.add(sessionId) else liveThisEpoch.remove(sessionId)
-        if (changed) liveSessionsState.value = liveThisEpoch.toSet()
+        if (!changed) return
+        // T13.2: confirmed now, or current until now (it stops being live here).
+        verifiedAtState.value = verifiedAtState.value + (sessionId to clock())
+        liveSessionsState.value = liveThisEpoch.toSet()
     }
 
     /** T6.3: nothing is live (the socket, its epoch or the server went). Caller holds [lock]. */
@@ -810,6 +853,10 @@ class RealTetherClient(
         if (codexControlsState.value.isNotEmpty()) codexControlsState.value = emptyMap()
         if (opencodeControlsState.value.isNotEmpty()) opencodeControlsState.value = emptyMap()
         if (liveThisEpoch.isEmpty()) return
+        // T13.2: a live copy was current as of the last frame the socket delivered (every event
+        // before it arrived, in order), not as of whenever the drop was noticed.
+        val until = lastInboundAt.takeIf { it > 0 }?.coerceAtMost(clock()) ?: clock()
+        verifiedAtState.value = verifiedAtState.value + liveThisEpoch.associateWith { until }
         liveThisEpoch.clear()
         liveSessionsState.value = emptySet()
     }
@@ -819,6 +866,12 @@ class RealTetherClient(
         seededFromMirror.clear()
         lastOpenedAt.clear()
         sessionStore.clearMirrorState()
+        savedCopiesState.value = emptyMap()
+    }
+
+    /** T13.2: [sessionId]'s saved copy is gone (dropped, corrupt, or unreadable). Caller holds [lock]. */
+    private fun forgetSavedCopyLocked(sessionId: String) {
+        if (savedCopiesState.value.containsKey(sessionId)) savedCopiesState.value = savedCopiesState.value - sessionId
     }
 
     /** The published per-server views: another server's sessions must never show. */
@@ -1077,6 +1130,8 @@ class RealTetherClient(
                 seededFromMirror.add(sessionId)
             }
             for (stored in index.sessions) stored.lastOpenedAt?.let { lastOpenedAt.putIfAbsent(stored.sessionId, it) }
+            // T13.2: what offline reading can show before any hydration (§4.1 Saved vs NotDownloaded).
+            if (index.saved.isNotEmpty()) savedCopiesState.value = index.saved + savedCopiesState.value
             if (sessionsState.value.isEmpty() && sessions.isNotEmpty()) {
                 sessionsState.value = sessions.sortedByDescending { it.updatedAt }
                 sessions.mapTo(listedSessionIds) { it.id }
@@ -1155,6 +1210,8 @@ class RealTetherClient(
                 // A snapshot with state won, or a projection exists already.
                 SessionStore.HydrationOutcome.Cancelled -> return
                 SessionStore.HydrationOutcome.Failed -> {
+                    // T13.2: whatever the index said, there is no copy this process can show.
+                    forgetSavedCopyLocked(sessionId)
                     // No saved copy and no cursor: nothing to recover (the attach is a full one).
                     // A cursor with no tree, though (restored from the mirror, possibly confirmed by
                     // a stateless reply, and the read came back empty: a dead or stuck writer), would
@@ -1168,10 +1225,13 @@ class RealTetherClient(
                     tracker.forget(sessionId)
                     seededFromMirror.remove(sessionId)
                     sessionStore.forgetMirrored(sessionId)
+                    forgetSavedCopyLocked(sessionId)
                     setLiveLocked(sessionId, false)
                     if (sessionId in attachedThisEpoch && socketOpen && handshakeDone && socketOrigin == origin) fullAttachOn = socket
                 }
                 is SessionStore.HydrationOutcome.Ready -> {
+                    // T13.2: the copy's own verification time, unless the index already said.
+                    if (!savedCopiesState.value.containsKey(sessionId)) savedCopiesState.value = savedCopiesState.value + (sessionId to session?.lastVerifiedAt)
                     sessionStore.setTrimmedBefore(sessionId, session?.trimmedBefore)
                     sessionStore.publish(sessionId, outcome.tree, sessionStore.adapt(sessionId, outcome.tree))
                 }
@@ -1275,6 +1335,7 @@ class RealTetherClient(
             toAttach = pendingStore.records.map { it.sessionId }.distinct()
                 .filter { attachedThisEpoch.add(it) }
                 .map { it to afterSeqForLocked(it) }
+            publishAttachedLocked()
         }
         for ((sessionId, afterSeq) in toAttach) {
             sendFrameOn(ws, ClientMessage.Attach(sessionId, afterSeq))
@@ -2033,6 +2094,7 @@ class RealTetherClient(
                 // A new epoch: nothing is attached on this socket yet.
                 epoch++
                 attachedThisEpoch.clear()
+                publishAttachedLocked()
                 clearLiveLocked()
                 // A probe from the previous socket must not judge this one.
                 pingTask?.cancel()
@@ -2272,6 +2334,7 @@ class RealTetherClient(
             // handler (from any thread) is then a no-op instead of a second
             // attach (T0.3 verify).
             attachedThisEpoch.addAll(ids)
+            publishAttachedLocked()
             toAttach = ids.map { it to afterSeqForLocked(it) }
         }
         // On THIS socket only: if it is gone by now, the next one re-attaches.
@@ -2455,6 +2518,7 @@ class RealTetherClient(
                 setLiveLocked(message.sessionId, false)
                 // The reducer is the arbiter (§10 C5): the mirrored base goes too.
                 mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
+                forgetSavedCopyLocked(message.sessionId)
             }
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
@@ -2815,6 +2879,7 @@ class RealTetherClient(
                 // Offline (or attached already): the saved copy, if there is one (§4.2).
                 null
             } else {
+                publishAttachedLocked()
                 afterSeqForLocked(sessionId) to true
             }
         }

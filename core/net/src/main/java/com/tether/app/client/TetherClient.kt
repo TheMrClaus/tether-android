@@ -203,6 +203,14 @@ interface TetherClient {
      */
     val liveSessions: StateFlow<Set<String>>
 
+    /**
+     * T13.2 (SYNC_DESIGN §2.5, §4.1): per session, how current the shown copy is (Live /
+     * CatchingUp / Saved / NotDownloaded), derived from the connection, attach and verify state.
+     * An absent session means "nothing known": screens then show no freshness mark, but never
+     * treat that as live (consent still follows [liveSessions]). The default knows nothing.
+     */
+    val syncStates: StateFlow<Map<String, SessionSync>> get() = NO_SYNC_STATES
+
     /** T6.3: the server origin of the live, handshaken socket (the fingerprints' origin); null when there is none. */
     val consentOrigin: StateFlow<String?>
 
@@ -517,6 +525,7 @@ sealed interface ConnectionState {
 private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow(null)
 private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
 private val NO_UNCONFIRMED: StateFlow<Set<String>> = MutableStateFlow(emptySet())
+private val NO_SYNC_STATES: StateFlow<Map<String, SessionSync>> = MutableStateFlow(emptyMap())
 private val NO_CODEX_CONTROLS: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = MutableStateFlow(emptyMap())
 private val NO_OPENCODE_CONTROLS: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = MutableStateFlow(emptyMap())
 private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)
