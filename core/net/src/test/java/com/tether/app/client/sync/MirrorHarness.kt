@@ -92,6 +92,29 @@ class MirrorHarness(
     /** The client's bound on a hydration read (generous by default, for the same reason). */
     var hydrateTimeoutMs: Long = 30_000,
 ) {
+    /**
+     * ta-jt9 L-A1: the next processes read the stored credential as a transient Keystore error
+     * leaves it: [RealTetherClient] sees no credential, and the store reports Unknown.
+     */
+    @Volatile var credentialUnreadable = false
+
+    /** ta-jt9 L-A2: runs before the store answers storedCredentialState() (the boot purge's read). */
+    @Volatile var beforeCredentialState: (suspend () -> Unit)? = null
+
+    /** [settings] as every process sees it, behind the two seams above. */
+    private inner class SeamedSettings(private val inner: InMemorySettings) : com.tether.app.client.SettingsStore by inner {
+        override val credential: kotlinx.coroutines.flow.Flow<com.tether.app.client.Credential?>
+            get() = if (credentialUnreadable) kotlinx.coroutines.flow.flowOf(null) else inner.credential
+
+        override suspend fun session(): com.tether.app.client.Session =
+            inner.session().let { if (credentialUnreadable) it.copy(credential = null) else it }
+
+        override suspend fun storedCredentialState(): com.tether.app.client.StoredCredentialState {
+            beforeCredentialState?.invoke()
+            return if (credentialUnreadable) com.tether.app.client.StoredCredentialState.Unknown else inner.storedCredentialState()
+        }
+    }
+
     /** The client's logout hook (push unregister in production), for every process. */
     @Volatile var onLogout: suspend (String, com.tether.app.client.Credential) -> Unit = { _, _ -> }
 
@@ -136,7 +159,7 @@ class MirrorHarness(
         )
         val mirror: JournalMirror get() = mirrorOrNull!!
         val client = RealTetherClient(
-            settings = settings,
+            settings = SeamedSettings(settings),
             httpClient = noDelayHttp,
             scope = scope,
             clock = { now.get() },

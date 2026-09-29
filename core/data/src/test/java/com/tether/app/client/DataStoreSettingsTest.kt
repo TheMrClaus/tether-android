@@ -587,6 +587,91 @@ class DataStoreSettingsTest {
         third.close()
     }
 
+    /**
+     * ta-jt9 L-A1: [SettingsStore.storedCredentialState] keeps "cannot read it now" apart from
+     * "nothing stored": the boot purge deletes data only on Absent.
+     */
+    @Test
+    fun aTransientKeystoreErrorIsUnknownNotAbsentAndAReadThatWorksIsPresentAgain() = runBlocking {
+        val first = open()
+        assertEquals(StoredCredentialState.Absent, first.store.storedCredentialState())
+        first.store.setServer(serverA, Credential.DeviceToken(token))
+        assertEquals(StoredCredentialState.Present, first.store.storedCredentialState())
+        first.close()
+
+        keys.failure = java.security.KeyStoreException("keystore busy")
+        val second = open()
+        assertNull("reads as no credential", second.store.credential.first())
+        assertEquals(StoredCredentialState.Unknown, second.store.storedCredentialState())
+        keys.failure = null
+        assertEquals(StoredCredentialState.Present, second.store.storedCredentialState())
+        assertEquals(Credential.DeviceToken(token), second.store.credential.first())
+        second.store.clearCredential()
+        assertEquals(StoredCredentialState.Absent, second.store.storedCredentialState())
+        second.close()
+    }
+
+    /** A dead key is not a transient error: the blob is deleted and nothing is stored. */
+    @Test
+    fun anUnrecoverableKeyIsAbsent() = runBlocking {
+        val first = open()
+        first.store.setServer(serverA, Credential.Cookie(cookie))
+        first.close()
+        keys.failure = java.security.UnrecoverableKeyException("gone")
+        val second = open()
+        assertEquals(StoredCredentialState.Absent, second.store.storedCredentialState())
+        second.close()
+    }
+
+    /** ta-jt9 L-X: compare-and-clear. Only the expected credential goes; any other one stays. */
+    @Test
+    fun clearCredentialIfClearsOnlyTheExpectedCredential() = runBlocking {
+        val opened = open()
+        opened.store.setServer(serverA, Credential.Cookie(cookie))
+        assertFalse(opened.store.clearCredentialIf(Credential.Cookie("another-cookie")))
+        assertFalse(opened.store.clearCredentialIf(Credential.DeviceToken(cookie)))
+        assertEquals(Credential.Cookie(cookie), opened.store.credential.first())
+        assertTrue(opened.store.clearCredentialIf(Credential.Cookie(cookie)))
+        assertNull(opened.store.credential.first())
+        assertEquals(serverA, opened.store.baseUrl.first())
+        assertFalse("nothing left to clear", opened.store.clearCredentialIf(Credential.Cookie(cookie)))
+        opened.close()
+        val reopened = open()
+        assertNull("the clear reached disk", reopened.store.credential.first())
+        reopened.close()
+    }
+
+    /**
+     * ta-jt9 L-X: the check and the clear are ONE step under the store's lock. A setServer that
+     * is queued behind the compare-and-clear lands after it, and one queued before it makes it
+     * a no-op; never "checked old, then cleared new".
+     */
+    @Test
+    fun clearCredentialIfAndASetServerNeverInterleave() = runBlocking {
+        repeat(20) { round ->
+            val opened = open()
+            opened.store.setServer(serverA, Credential.Cookie("old-$round"))
+            val clear = async(Dispatchers.IO) { opened.store.clearCredentialIf(Credential.Cookie("old-$round")) }
+            val login = async(Dispatchers.IO) { opened.store.setServer(serverA, Credential.Cookie("new-$round")) }
+            val cleared = clear.await()
+            login.await()
+            assertEquals("round $round (cleared=$cleared)", Credential.Cookie("new-$round"), opened.store.credential.first())
+            opened.store.clear()
+            opened.close()
+        }
+    }
+
+    @Test
+    fun theInMemoryStoreHasTheSameTwoRules() = runBlocking {
+        val store = InMemorySettings(initialBaseUrl = serverA, initialCookie = cookie)
+        assertEquals(StoredCredentialState.Present, store.storedCredentialState())
+        assertFalse(store.clearCredentialIf(Credential.Cookie("another-cookie")))
+        assertEquals(Credential.Cookie(cookie), store.credential.first())
+        assertTrue(store.clearCredentialIf(Credential.Cookie(cookie)))
+        assertEquals(StoredCredentialState.Absent, store.storedCredentialState())
+        assertEquals(serverA, store.baseUrl.first())
+    }
+
     @Test
     fun anUnrecoverableKeyIsDestroyedAndReadsAsLoggedOut() = runBlocking {
         val first = open()

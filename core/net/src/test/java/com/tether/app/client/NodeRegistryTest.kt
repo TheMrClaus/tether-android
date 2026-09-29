@@ -362,10 +362,12 @@ class NodeRegistryTest {
     }
 
     @Test
-    fun stopThenStartWhileAProbeIsInFlightStillConnects() {
-        // stop() launches settings.clear() asynchronously; a start() that runs
-        // before it lands reloads the stored credential (a NEW object) and must
-        // connect, even though the probe of the stopped attempt is still out.
+    fun stopThenASignInWhileAProbeIsInFlightStillConnects() {
+        // The stopped attempt's probe is still out when the next attempt starts:
+        // it must not keep the connect slot (no self-lockout). The next attempt is
+        // a sign-in: since ta-jt9 L-B1 a start() right after stop() never re-adopts
+        // what the store still holds before stop()'s async clear lands (that would
+        // undo the sign-out), so only a new login connects again.
         val probes = java.util.concurrent.atomic.AtomicInteger()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
@@ -385,6 +387,9 @@ class NodeRegistryTest {
                 "/api/auth/session" -> MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
                     .setHeadersDelay(if (probes.getAndIncrement() == 0) 1_500L else 0L, TimeUnit.MILLISECONDS)
                 "/ws" -> MockResponse().withWebSocketUpgrade(listener)
+                "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_132)
+                "/api/auth/login" -> MockResponse().setResponseCode(200)
+                    .addHeader("Set-Cookie", "tether_session=parity-fake-cookie-2; Path=/").setBody("{}")
                 else -> MockResponse().setResponseCode(404)
             }
         }
@@ -407,7 +412,7 @@ class NodeRegistryTest {
             while (probes.get() == 0 && System.nanoTime() < deadline) Thread.sleep(5)
             assertEquals("the first probe is out", 1, probes.get())
             h.client.stop()
-            h.client.start()
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
             // Connected through a fresh attempt, well before the stopped one's
             // probe (1.5 s) returns; and that stale probe changes nothing after.
             val ws = h.sockets.poll(10, TimeUnit.SECONDS)

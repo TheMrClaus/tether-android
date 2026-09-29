@@ -161,6 +161,74 @@ class MirrorLifecycleSecurityTest {
         assertNull("a full attach: no cursor restored from the old copy", h.expectFrame("attach")["afterSeq"])
     }
 
+    /**
+     * ta-jt9 L-A1: a transient Keystore error at boot reads as "no credential" (the sealed one
+     * is kept for a retry), so the boot is signed out. That user never signed out: the purge must
+     * keep their copy, and once the store reads again the next start restores it.
+     */
+    @Test
+    fun aTransientKeystoreErrorAtBootKeepsTheMirrorAndALaterReadRestoresIt() {
+        mirroredThenKilled()
+        h.credentialUnreadable = true
+        val p = h.bootSignedOut()
+        assertTrue("the purge decided", runBlocking { kotlinx.coroutines.withTimeout(20_000) { p.client.bootPurgeOutcome.await() } })
+        assertTrue("the key survives an unreadable credential", h.keyFile.exists())
+        assertTrue("the copy survives an unreadable credential", h.dbFactory.existing().isNotEmpty())
+        assertEquals(0, h.kek.destroyed)
+        h.kill(flushFirst = false)
+
+        h.credentialUnreadable = false
+        h.boot(ready = ready("s1"))
+        // The restored cursor asks for a delta: the copy was kept and is read again.
+        val attach = h.expectFrame("attach")
+        assertEquals("s1", attach["sessionId"]!!.jsonPrimitive.content)
+        assertEquals(5L, attach["afterSeq"]!!.jsonPrimitive.longOrNull)
+        assertNotNull(h.dbSession("s1"))
+    }
+
+    /**
+     * ta-jt9 L-A2 (verifier R1): the boot purge's store read is held while a sign-in to the same
+     * server goes through. The sign-in must wait for the purge: it neither binds nor writes the
+     * store first, so the purge still sees the signed-out store, shreds the old copy, and the new
+     * sign-in gets an empty mirror (no old copy, no delta attach).
+     */
+    @Test
+    fun aSignInRacingTheBootPurgeWaitsForItAndNeverReadsTheOldCopy() {
+        mirroredThenKilled()
+        runBlocking { h.settings.clearCredential() }
+        val entered = CountDownLatch(1)
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        h.beforeCredentialState = {
+            h.beforeCredentialState = null
+            entered.countDown()
+            kotlinx.coroutines.withTimeout(20_000) { release.await() }
+        }
+        var login: Thread? = null
+        try {
+            h.bootSignedOut()
+            assertTrue("the purge's read is held", entered.await(20, TimeUnit.SECONDS))
+            assertTrue(h.keyFile.exists())
+            h.received.clear()
+            loginAgain()
+            login = Thread { assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") }) }
+            login.start()
+            while (true) {
+                val request = h.server.takeRequest(20, TimeUnit.SECONDS) ?: throw AssertionError("no login request")
+                if (request.path == "/api/auth/login") break
+            }
+            Thread.sleep(300) // the sign-in is past the server and would adopt and bind now
+        } finally {
+            release.complete(Unit)
+        }
+        login!!.join(20_000)
+        handshakeNewSocket("s1")
+        assertTrue("the old key was shredded", h.kek.destroyed >= 1)
+        assertNull("the previous sign-in's copy was readable by the next one", h.dbSession("s1"))
+        assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
+        h.client.attach("s1")
+        assertNull("a full attach", h.expectFrame("attach")["afterSeq"])
+    }
+
     /** L-A with nothing configured at all (after a stop(): no URL either): still purged. */
     @Test
     fun aBootWithNoServerAndNoCredentialStillPurges() {
@@ -191,6 +259,7 @@ class MirrorLifecycleSecurityTest {
         try {
             logout.start()
             assertTrue("the logout is inside the Keystore delete", inShred.await(20, TimeUnit.SECONDS))
+            assertEquals("never Connected while signing out", ConnectionState.Disconnected, h.client.connection.value)
             h.received.clear()
             assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
             handshakeNewSocket("s1")

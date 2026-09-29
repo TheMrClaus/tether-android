@@ -51,6 +51,18 @@ sealed interface Credential {
 /** A consistent (server, credential) pair; see [SettingsStore.session]. */
 data class Session(val baseUrl: String?, val credential: Credential?)
 
+/** What the store holds as a credential; see [SettingsStore.storedCredentialState]. */
+enum class StoredCredentialState {
+    /** Nothing stored (never signed in, signed out, or a dead blob that was deleted). */
+    Absent,
+
+    /** A credential is stored and readable. */
+    Present,
+
+    /** A credential is stored but cannot be read right now (a transient Keystore error): kept, retried. */
+    Unknown,
+}
+
 /**
  * The canonical server ORIGIN: `scheme://host:port` as OkHttp canonicalises a URL
  * (scheme and host lower-cased, IDN in punycode, the default port written out,
@@ -180,6 +192,22 @@ interface SettingsStore {
      * the credential is dead (device revoked), where re-pairing is the next step.
      */
     suspend fun clearCredential()
+
+    /**
+     * ta-jt9 L-X: [clearCredential], but only while the credential in force is still [expected].
+     * The check and the clear happen under the store's own lock, so a late verdict on an OLD
+     * credential can never delete the credential a newer sign-in has just stored. True = cleared.
+     */
+    suspend fun clearCredentialIf(expected: Credential): Boolean
+
+    /**
+     * ta-jt9 L-A1: whether a credential is stored, keeping "cannot tell right now" apart from
+     * "nothing": [credential] reads null for a sealed credential that a transient Keystore error
+     * left unopened (it is kept and retried), which is [StoredCredentialState.Unknown] here.
+     * Anything that destroys data because nobody is signed in must act on
+     * [StoredCredentialState.Absent] only.
+     */
+    suspend fun storedCredentialState(): StoredCredentialState
 
     suspend fun clear()
 
@@ -544,6 +572,26 @@ class DataStoreSettings(
         mutex.withLock { forgetCredentialsLocked(extra = {}) }
     }
 
+    override suspend fun clearCredentialIf(expected: Credential): Boolean = mutex.withLock {
+        if (credentials.value == null || retryPending) loadLocked()
+        // A credential that cannot be read right now is not [expected] as far as anyone can
+        // tell: it is kept (the worst case is a dead credential that the next probe rejects).
+        val current = credentials.value?.let { credentialInForce(it.cookie, it.deviceToken) }
+        if (current != expected) return@withLock false
+        forgetCredentialsLocked(extra = {})
+        true
+    }
+
+    override suspend fun storedCredentialState(): StoredCredentialState = mutex.withLock {
+        if (credentials.value == null || retryPending) loadLocked()
+        val loaded = credentials.value
+        when {
+            loaded != null && credentialInForce(loaded.cookie, loaded.deviceToken) != null -> StoredCredentialState.Present
+            retryPending -> StoredCredentialState.Unknown
+            else -> StoredCredentialState.Absent
+        }
+    }
+
     override suspend fun clear() {
         mutex.withLock {
             forgetCredentialsLocked { prefs ->
@@ -752,6 +800,20 @@ class InMemorySettings(
             cookieState.value = null
             deviceTokenState.value = null
         }
+    }
+
+    override suspend fun clearCredentialIf(expected: Credential): Boolean = synchronized(lock) {
+        if (credentialInForce(cookieState.value, deviceTokenState.value) != expected) {
+            false
+        } else {
+            cookieState.value = null
+            deviceTokenState.value = null
+            true
+        }
+    }
+
+    override suspend fun storedCredentialState(): StoredCredentialState = synchronized(lock) {
+        if (credentialInForce(cookieState.value, deviceTokenState.value) != null) StoredCredentialState.Present else StoredCredentialState.Absent
     }
 
     override suspend fun clear() {

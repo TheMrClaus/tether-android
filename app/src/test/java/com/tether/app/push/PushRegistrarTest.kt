@@ -252,7 +252,7 @@ class PushRegistrarTest {
         val result = r.unregister(server.url("/").toString(), Credential.DeviceToken(token))
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
         assertTrue("$result", result is PushRegistrarResult.Error)
-        assertTrue("the unregister waited $elapsedMs ms", elapsedMs < com.tether.app.client.LOGOUT_CALL_TIMEOUT_MS + 10_000)
+        assertTrue("the unregister waited $elapsedMs ms", elapsedMs < com.tether.app.client.LOGOUT_CALL_TIMEOUT_MS + 2_000)
         assertEquals("DELETE", server.takeRequest().method)
     }
 }
