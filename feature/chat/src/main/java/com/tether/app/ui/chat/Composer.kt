@@ -119,6 +119,9 @@ internal fun interruptRefusalCopy(result: InterruptResult): String? = when (resu
     InterruptResult.NotCurrentTurn -> "That turn already ended — the turn running now was not interrupted."
 }
 
+/** T6.7 r3: why every interrupt control is locked while the turn is already being interrupted. */
+internal const val INTERRUPTING_LOCK_COPY = "Interrupting… the turn is already stopping."
+
 /** T13.2 r2: the run row of a copy that is not live ("Was running", still, not ticking). */
 internal const val STALE_RUN_TAG = "composer-run-stale"
 
@@ -139,6 +142,11 @@ class ComposerLiveness(
     val interruptLock: String?,
     /** Null while the copy is Live; else its freshness: the run row reads "Was running" and stops ticking. */
     val stale: com.tether.app.client.SessionSync?,
+    /**
+     * T6.7 r3: the turn whose interrupt the server reported failed ([com.tether.app.client.TetherClient.failedInterrupts]);
+     * while it is still "cancelling", that failure unlocks the interrupt controls for a retry.
+     */
+    val failedInterruptTurn: String? = null,
 ) {
     companion object {
         /** A live copy that may be driven (previews, and tests of the live composer). */
@@ -246,6 +254,11 @@ fun Composer(
 
     // T6.7: the turn the Interrupt keys are drawn for; a tap interrupts exactly that turn or nothing.
     val interruptTurnId = if (activeTurn != null) projection?.activeTurnId else null
+    // T6.7 r3: once the turn is being interrupted, every interrupt control of the session is locked
+    // (a second tap could reach the turn the queue flushes into next, before this client sees it),
+    // unless the server said that interrupt failed: then they unlock for a retry.
+    val interruptLock = liveness.interruptLock
+        ?: if (activeTurn?.status == Vocab.TURN_CANCELLING && liveness.failedInterruptTurn != interruptTurnId) INTERRUPTING_LOCK_COPY else null
     fun interruptTurn(drawnFor: String) {
         interruptRefusalCopy(onInterrupt(drawnFor))?.let(::flash)
     }
@@ -690,8 +703,7 @@ fun Composer(
                         sessionId = session?.id,
                         interruptTurnId = interruptTurnId,
                         onInterruptNow = ::interruptTurn,
-                        interruptLock = liveness.interruptLock,
-                        turnCancelling = activeTurn?.status == Vocab.TURN_CANCELLING,
+                        interruptLock = interruptLock,
                     )
                 }
 
@@ -776,7 +788,7 @@ fun Composer(
                             sessionId = session?.id,
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
-                            interruptLock = liveness.interruptLock,
+                            interruptLock = interruptLock,
                         )
                     }
                 }

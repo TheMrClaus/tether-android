@@ -32,6 +32,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -272,7 +274,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             )
         // T6.7 r2: when the toast goes away, every armed key re-arms (a tap aimed at the toast as it
         // vanished never lands on the key that was under it).
-        val armEpoch = rememberToastArmEpoch(toast != null)
+        var toastBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+        val armEpoch = rememberToastArmEpoch(toast != null, toastBounds)
         CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
@@ -325,7 +328,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(12.dp)
-                    .zIndex(20f),
+                    .zIndex(20f)
+                    .onGloballyPositioned { toastBounds = it.boundsInWindow() },
             )
         }
     }
@@ -480,19 +484,31 @@ private fun InterimTelemetry(session: AgentSession, state: SessionView? = null) 
     com.tether.app.ui.inspector.InspectorMcpHealth(session.provider, session.engineGeneration, state)
 }
 
-/** T6.7 r2: counts the toast's disappearances (the arm epoch every armed key re-arms on). */
+/**
+ * T6.7 r2/r3: the arm epoch every armed key re-arms on. It moves when the toast uncovers something:
+ * it goes away, or its bounds ([bounds], in the window) no longer cover what they covered (it shrank
+ * or moved). A toast that grows or keeps its bounds (new words, same size) moves nothing, so a
+ * server's stream of text changes cannot keep the keys disarmed.
+ */
 @Composable
-internal fun rememberToastArmEpoch(shown: Boolean): Int {
+internal fun rememberToastArmEpoch(shown: Boolean, bounds: androidx.compose.ui.geometry.Rect?): Int {
     var epoch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    var wasShown by remember { mutableStateOf(false) }
-    if (shown) {
-        wasShown = true
-    } else if (wasShown) {
-        wasShown = false
-        epoch++
+    val covered = remember { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
+    LaunchedEffect(shown, bounds) {
+        val before = covered[0]
+        if (!shown) {
+            if (before != null) epoch++
+            covered[0] = null
+        } else if (bounds != null) {
+            if (before != null && !bounds.covers(before)) epoch++
+            covered[0] = bounds
+        }
     }
     return epoch
 }
+
+private fun androidx.compose.ui.geometry.Rect.covers(other: androidx.compose.ui.geometry.Rect): Boolean =
+    left <= other.left && top <= other.top && right >= other.right && bottom >= other.bottom
 
 /** T6.7: the caption over an error toast whose words a server wrote. */
 const val SERVER_ERROR_CAPTION = "From the server"
@@ -516,13 +532,13 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             .widthIn(max = 480.dp)
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            // T6.7 r2: the toast is a surface, not a hole: every touch on it stops here, so none
-            // reaches the composer's keys (Interrupt, Send) underneath. Its X is still a tap.
+            // T6.7 r2/r3: the toast is a surface, not a hole. A pointer handler here makes the toast
+            // the hit target, so no touch on it reaches the composer's keys (Interrupt, Send)
+            // underneath. It only observes: consuming would cancel the X's own tap on the first
+            // move between down and up (the Final pass runs parent-first).
             .pointerInput(Unit) {
                 awaitPointerEventScope {
-                    while (true) {
-                        awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final).changes.forEach { it.consume() }
-                    }
+                    while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
                 }
             }
             .background(t.dangerWash, RoundedCornerShape(TetherDimens.radiusSm))

@@ -12,9 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -80,8 +81,10 @@ internal fun SessionErrorRow(text: String, modifier: Modifier = Modifier) {
             .background(t.tintXs, RoundedCornerShape(TetherDimens.radiusSm))
             .padding(horizontal = 8.dp, vertical = 4.dp)
             // T6.7 r2: said as what it is (the web's row has only the glyph; no caption is added).
-            .semantics(mergeDescendants = true) { contentDescription = "Session error: $text" }
-            .testTag(SESSION_ERROR_TAG),
+            .clearAndSetSemantics {
+                contentDescription = "Session error: $text"
+                testTag = SESSION_ERROR_TAG
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

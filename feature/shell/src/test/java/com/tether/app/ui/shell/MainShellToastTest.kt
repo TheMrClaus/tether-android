@@ -8,6 +8,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.unit.IntSize
@@ -104,5 +106,31 @@ class MainShellToastTest {
         rule.onNodeWithTag(interruptKey).performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN#t1"), client.interruptCalls)
+    }
+
+    /**
+     * r3: a toast that shrinks uncovers what was under its old bounds: the keys re-arm. New words at
+     * the same size move nothing, so a stream of text changes cannot keep the keys disarmed.
+     */
+    @Test
+    fun aShrinkingToastReArmsTheKeysButSameSizeWordsDoNot() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client)
+        val long = "The server could not complete the request: " + "the session store is busy, try again in a moment. ".repeat(3)
+        rule.runOnIdle { vm.reportLocalError(long) }
+        arm()
+        rule.onNodeWithTag(interruptKey).assertIsEnabled()
+        // Same bounds, new words: still armed.
+        rule.runOnIdle { vm.reportLocalError(long.replace("busy", "full")) }
+        rule.mainClock.advanceTimeBy(48)
+        rule.waitForIdle()
+        rule.onNodeWithTag(interruptKey).assertIsEnabled()
+        // It shrinks to one line: the key re-arms before it can be tapped.
+        rule.runOnIdle { vm.reportLocalError("Not connected.") }
+        rule.mainClock.advanceTimeBy(48)
+        rule.waitForIdle()
+        rule.onNodeWithTag(interruptKey).assertIsNotEnabled()
+        arm()
+        rule.onNodeWithTag(interruptKey).assertIsEnabled()
     }
 }

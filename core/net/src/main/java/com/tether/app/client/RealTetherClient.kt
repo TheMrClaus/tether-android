@@ -441,6 +441,10 @@ class RealTetherClient(
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val errors: SharedFlow<String> = errorsFlow
     override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
+
+    // T6.7 r3: per session, the turn whose interrupt the server reported failed (TetherClient.failedInterrupts).
+    private val failedInterruptsState = MutableStateFlow<Map<String, String>>(emptyMap())
+    override val failedInterrupts: StateFlow<Map<String, String>> = failedInterruptsState
     override val configured: StateFlow<Boolean> = configuredState
     override val trimmedBefore: StateFlow<Map<String, Int>> = sessionStore.trimmedBefore
 
@@ -913,6 +917,7 @@ class RealTetherClient(
         sessionControlsState.value = emptyMap()
         gitFileDiffsState.value = emptyMap()
         worktreeDiffsState.value = emptyMap()
+        failedInterruptsState.value = emptyMap()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
@@ -2969,6 +2974,12 @@ class RealTetherClient(
         if (message.status == "failed") {
             // r2: checked current and emitted in one step (a socket let go in between says nothing).
             if (!emitServerErrorIfCurrent(webSocket, message.error, fallback = INTERRUPT_NOT_DELIVERED)) return
+            // r3: the turn stays "cancelling"; its interrupt controls unlock so the operator can retry.
+            message.turnId?.takeIf { it.isNotEmpty() }?.let { turnId ->
+                synchronized(lock) {
+                    if (socket === webSocket && message.sessionId.isNotEmpty()) failedInterruptsState.value = failedInterruptsState.value + (message.sessionId to turnId)
+                }
+            }
         }
         synchronized(lock) {
             if (socket !== webSocket) return

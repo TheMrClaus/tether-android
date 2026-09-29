@@ -189,6 +189,13 @@ interface TetherClient {
     fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult = InterruptResult.NotConnected
 
     /**
+     * T6.7 r3: per session, the turn whose interrupt the server reported `failed` (the turn stays
+     * "cancelling" in the projection). While a turn is cancelling every interrupt control of its
+     * session is locked; a failure recorded here for THAT turn unlocks them so the operator can retry.
+     */
+    val failedInterrupts: StateFlow<Map<String, String>> get() = NoFailedInterrupts
+
+    /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
      * received may ever produce one). Exactly one of [choiceId] or [decision] ("allow"|"deny");
      * [grantedPermissions] only with a permission-granting [choiceId]. [expectedFingerprint] is the
@@ -719,6 +726,9 @@ enum class InterruptResult {
 
 /** T6.7: a server's error words, cleaned ([LabelText.error]), and the origin of the socket they came in on. */
 data class ServerErrorText(val text: String, val origin: String)
+
+/** T6.7 r3: [TetherClient.failedInterrupts] of a client that records none. */
+private val NoFailedInterrupts: StateFlow<Map<String, String>> = MutableStateFlow(emptyMap())
 
 /** T6.7: [TetherClient.serverErrors] of a client that has none. */
 private val NoServerErrors: SharedFlow<ServerErrorText> = kotlinx.coroutines.flow.MutableSharedFlow()

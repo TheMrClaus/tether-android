@@ -111,6 +111,22 @@ class TetherViewModelToastTest {
         assertNull(vm.toast.value)
     }
 
+    /** r3 (verifier): with no configured server, the live link alone decides: another origin's words are not shown. */
+    @Test
+    fun withNoConfiguredServerTheLiveOriginAloneFilters() = runTest(dispatcher) {
+        val client = ToastClient()
+        client.url.value = null
+        client.live.value = B
+        val vm = vm(client)
+        advanceUntilIdle()
+        client.server.tryEmit(ServerErrorText("words from A", A))
+        advanceUntilIdle()
+        assertNull("A's words shown on B's link", vm.toast.value)
+        client.server.tryEmit(ServerErrorText("words from B", B))
+        advanceUntilIdle()
+        assertEquals(Toast("words from B", fromServer = true, origin = B), vm.toast.value)
+    }
+
     @Test
     fun theAppsOwnToastSurvivesAServerSwitch() = runTest(dispatcher) {
         val client = ToastClient()

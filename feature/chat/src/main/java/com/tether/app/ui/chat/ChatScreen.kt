@@ -142,7 +142,9 @@ fun ChatScreen(
     // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock:
     // a saved or catching-up copy's "busy" never interrupts a real turn. Bound to the server the key
     // was drawn for; the client re-checks it all under its lock.
-    val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync))
+    // T6.7 r3: a failed interrupt of the turn that is still cancelling unlocks the keys for a retry.
+    val failedInterrupts by vm.client.failedInterrupts.collectAsStateWithLifecycle()
+    val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync), failedInterruptTurn = session?.let { failedInterrupts[it.id] })
     // T6.7: and to the turn the tapped key was drawn for (the Composer passes it).
     val onInterrupt: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
         val s = session

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -235,7 +236,7 @@ class InterruptErrorBehaviourTest {
         host(client)
         rule.onNodeWithText("Engine exited before the turn finished: rate limited by the provider.").assertExists()
         rule.onNodeWithTag(SESSION_ERROR_TAG).assertExists()
-        rule.onNodeWithText("The Claude CLI could not start: command not found (claude)").assertExists()
+        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)").assertExists()
         // process_exit folds (turn.exit) but draws nothing, as on the web.
         rule.onNodeWithText("exit code", substring = true, ignoreCase = true).assertDoesNotExist()
         rule.onNodeWithText("signal", substring = true, ignoreCase = true).assertDoesNotExist()
@@ -366,25 +367,59 @@ class InterruptErrorBehaviourTest {
         ).toTypedArray(),
     )
 
+    private fun queuedTwoOn(turnId: String, cancelling: Boolean): ChatFixtures.Folded = ChatFixtures.fold(
+        *listOfNotNull(
+            ev("turn_started", turnId, ts = ComposerFixtures.T_START) { put("idempotencyKey", "k-$turnId") },
+            ev("user_message_accepted", turnId, ts = ComposerFixtures.T_START) { put("text", "Run the test suite.") },
+            ev("queued_message_added", null, ts = ComposerFixtures.T_START) {
+                put("queueId", "q-1"); put("text", "Then fix the snapshot test."); put("flushMode", "next-call")
+            },
+            ev("queued_message_added", null, ts = ComposerFixtures.T_START) {
+                put("queueId", "q-2"); put("text", "Also bump the changelog."); put("flushMode", "next-call")
+            },
+            if (cancelling) ev("cancel_requested", turnId, ts = ComposerFixtures.T_START) else null,
+        ).toTypedArray(),
+    )
+
     // ---- r2 ------------------------------------------------------------------------------------------
 
     /**
-     * r2 (security M, until ta-yw0): while the turn is already being interrupted, the head row's
-     * message flushes into a new turn the moment it stops, which this client may not have seen yet
-     * when a second tap lands; the head row's "Interrupt now" stays locked, says why, and sends nothing.
+     * r2/r3 (security, until ta-yw0): while the turn is already being interrupted, the queue's head
+     * message flushes into a new turn the moment it stops, which this client may not have seen when
+     * a second tap lands. Every interrupt control of the session is locked (the composer's key and
+     * each row's "Interrupt now"), says why, and sends nothing, until the server reports that
+     * interrupt failed: then they unlock for a retry. A failure of some other turn unlocks nothing.
      */
     @Test
-    fun theHeadRowsInterruptNowIsLockedWhileTheTurnIsBeingInterrupted() {
-        val client = liveClient(busy, queuedOn("t1", cancelling = true))
+    fun everyInterruptControlIsLockedWhileTheTurnIsBeingInterruptedUntilItFails() {
+        val client = liveClient(busy, queuedTwoOn("t1", cancelling = true))
         rule.mainClock.autoAdvance = false
         host(client)
         arm()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(2)
+        interruptKey().assertIsNotEnabled().performClick()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[0].assertIsNotEnabled().performClick()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[1].assertIsNotEnabled().performClick()
         arm()
-        assertTrue("an Interrupt now after the turn was already interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        rule.onNodeWithContentDescription(
-            "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this, unavailable: $QUEUE_HEAD_CANCELLING_COPY",
-        ).assertExists()
+        assertTrue("an interrupt after the turn was already being interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        rule.onNodeWithContentDescription("Interrupt the current turn, unavailable: $INTERRUPTING_LOCK_COPY").assertExists()
+        rule.onAllNodesWithContentDescription(
+            "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this, unavailable: $INTERRUPTING_LOCK_COPY",
+        ).assertCountEquals(2)
+
+        // Another turn's failure is not this one's.
+        rule.runOnIdle { client.failed.value = mapOf(busy.id to "t0") }
+        arm()
+        interruptKey().assertIsNotEnabled()
+
+        // The server reports this turn's interrupt failed: the controls unlock (armed again) for a retry.
+        rule.runOnIdle { client.failed.value = mapOf(busy.id to "t1") }
+        arm()
+        interruptKey().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[1].assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1", "${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
 
     /**
@@ -466,5 +501,7 @@ class InterruptErrorBehaviourTest {
     fun theSessionErrorRowSaysWhatItIs() {
         transcript(InterruptErrorFixtures.errors)
         rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)").assertExists()
+        // r3: said once: the words are not a second node TalkBack would read after the description.
+        rule.onNodeWithText("The Claude CLI could not start: command not found (claude)").assertDoesNotExist()
     }
 }

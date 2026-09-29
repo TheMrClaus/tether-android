@@ -105,6 +105,8 @@ class ServerErrorTransmissionTest {
         assertEquals("control channel closed", next(server, "the failed interrupt's words"))
         drain(ws)
         assertTrue(local.isEmpty())
+        // r3: the failure is recorded for its turn, so the locked interrupt controls unlock for a retry.
+        assertEquals(mapOf("s1" to T1), client.failedInterrupts.value)
     }
 
     @Test
@@ -123,6 +125,7 @@ class ServerErrorTransmissionTest {
         ws.send("""{"type":"interrupt_result","sessionId":"s1","turnId":null,"status":"no_active_turn"}""")
         drain(ws)
         assertTrue("an acknowledged or stale interrupt is not a fault: $local", local.isEmpty())
+        assertTrue("r3: nothing unlocks on an acknowledged interrupt", client.failedInterrupts.value.isEmpty())
     }
 
     /**

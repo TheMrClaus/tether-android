@@ -19,6 +19,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** T5.3: an inert [TetherClient] for ChatScreen behaviour tests: sessions + projections only. */
 class ChatTestClient : TetherClient {
+    /** T6.7 r3: the turns whose interrupt the server reported failed, per session. */
+    val failed = MutableStateFlow<Map<String, String>>(emptyMap())
+    override val failedInterrupts: StateFlow<Map<String, String>> get() = failed
+
     /** T6.3: the link state the consent cards read. */
     val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
     override val connection: StateFlow<ConnectionState> get() = link

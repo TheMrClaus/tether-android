@@ -209,8 +209,6 @@ internal fun ComposerWell(
 /** T13.2 r2: a queued row's "Interrupt now". */
 internal const val QUEUE_INTERRUPT_TAG = "queue-interrupt-now"
 
-/** T6.7 r2: why the head row's "Interrupt now" is locked while the turn is being interrupted. */
-internal const val QUEUE_HEAD_CANCELLING_COPY = "Interrupting — this message sends as soon as the turn stops."
 
 /**
  * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place. Labelled
@@ -227,19 +225,13 @@ internal fun QueuedMessages(
     onInterruptNow: (turnId: String) -> Unit,
     /** T13.2 r2: why "Interrupt now" cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
-    /**
-     * T6.7 r2: the active turn is already being interrupted. The head row's message flushes into a
-     * new turn the moment it stops, which this client may not see before the server has started it;
-     * an "Interrupt now" tapped then could stop that new turn, so the head row's key stays locked.
-     */
-    turnCancelling: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     Column(
         Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" },
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        for ((index, message) in queued.withIndex()) {
+        for (message in queued) {
             androidx.compose.runtime.key(message.queueId) {
                 QueuedMessageRow(
                     text = message.text,
@@ -247,7 +239,7 @@ internal fun QueuedMessages(
                     onSave = { onSave(message.queueId, it) },
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
-                    interruptLock = interruptLock ?: if (index == 0 && turnCancelling) QUEUE_HEAD_CANCELLING_COPY else null,
+                    interruptLock = interruptLock,
                     interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
                     interruptTurnId = interruptTurnId,
                 )

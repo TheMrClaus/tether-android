@@ -19,6 +19,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.foundation.clickable
@@ -100,6 +102,56 @@ class ErrorToastTest {
         rule.onNodeWithTag("under").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, 10f)) }
         rule.waitForIdle()
         assertEquals(1, under)
+    }
+
+    /**
+     * r3: a real finger moves a few pixels between down and up. The toast only observes touches (it
+     * consumes none), so its X still takes that tap; a consuming parent would cancel it on the move.
+     */
+    @Test
+    fun theXTakesATapThatMovesBelowTheTouchSlop() {
+        show("Session not found.", fromServer = true)
+        rule.onNodeWithContentDescription("Dismiss error").performTouchInput {
+            down(center)
+            moveBy(androidx.compose.ui.geometry.Offset(2f, 1f))
+            moveBy(androidx.compose.ui.geometry.Offset(1f, 1f))
+            up()
+        }
+        rule.waitForIdle()
+        assertEquals(1, closed)
+    }
+
+    /** r3: the arm epoch moves when the toast uncovers something, never for words that keep (or grow) its bounds. */
+    @Test
+    fun theArmEpochMovesWhenTheToastShrinksMovesOrGoesButNotForNewWords() {
+        var shown by androidx.compose.runtime.mutableStateOf(true)
+        var bounds by androidx.compose.runtime.mutableStateOf<androidx.compose.ui.geometry.Rect?>(androidx.compose.ui.geometry.Rect(0f, 800f, 400f, 900f))
+        var epoch = -1
+        rule.setContent { epoch = com.tether.app.ui.rememberToastArmEpoch(shown, bounds) }
+        rule.waitForIdle()
+        assertEquals(0, epoch)
+        // New words, same bounds (a server re-sending text): nothing moves.
+        repeat(3) {
+            rule.runOnIdle { bounds = androidx.compose.ui.geometry.Rect(0f, 800f, 400f, 900f) }
+            rule.waitForIdle()
+        }
+        assertEquals(0, epoch)
+        // It grows: it still covers everything it covered.
+        rule.runOnIdle { bounds = androidx.compose.ui.geometry.Rect(0f, 760f, 400f, 900f) }
+        rule.waitForIdle()
+        assertEquals(0, epoch)
+        // It shrinks: what it uncovered re-arms.
+        rule.runOnIdle { bounds = androidx.compose.ui.geometry.Rect(0f, 840f, 400f, 900f) }
+        rule.waitForIdle()
+        assertEquals(1, epoch)
+        // It moves.
+        rule.runOnIdle { bounds = androidx.compose.ui.geometry.Rect(20f, 840f, 420f, 900f) }
+        rule.waitForIdle()
+        assertEquals(2, epoch)
+        // It goes away.
+        rule.runOnIdle { shown = false }
+        rule.waitForIdle()
+        assertEquals(3, epoch)
     }
 
     @Test

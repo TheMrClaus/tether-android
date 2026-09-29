@@ -75,12 +75,15 @@ web code:
   and notices' text be selected. The X itself is never part of a selection. As on the web, the
   +/- column of a Codex diff (`.diffMarker`) and of an edit diff (`.diff-gutter`) is left out of a
   copy.
-- **"Interrupt now" is locked while the turn is already being interrupted (r2).** This applies to
-  the head row. Its message flushes into a new turn the moment the turn stops, and this client may
-  not have seen that turn yet. The row says "Interrupting — this message sends as soon as the turn
-  stops." The server-side fix is ta-yw0.
-- **The toast is a surface (r2).** A touch on it never reaches the composer's keys underneath. When
-  it goes away, every armed key re-arms. A server's toast is tagged with the server it came from,
+- **Every interrupt control is locked while the turn is already being interrupted (r2/r3).** That
+  is the composer's Interrupt key and every row's "Interrupt now". The queue's head message flushes
+  into a new turn the moment the turn stops, and this client may not have seen that turn yet when
+  a second tap lands. The controls say "Interrupting… the turn is already stopping." They unlock
+  when the server reports that this turn's interrupt failed, so the operator can retry. The
+  server-side fix is ta-yw0.
+- **The toast is a surface (r2/r3).** A touch on it never reaches the composer's keys underneath.
+  It only observes touches, so its own X still takes a finger that moves a little. When it goes
+  away, shrinks or moves, every armed key re-arms. New words at the same size re-arm nothing. A server's toast is tagged with the server it came from,
   and is dropped when the configured or linked server changes.
 - **The session error row** is read as "Session error: …". The web's row has only the glyph, so no
   caption is drawn.
