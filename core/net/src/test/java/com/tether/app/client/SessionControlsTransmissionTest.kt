@@ -85,7 +85,7 @@ class SessionControlsTransmissionTest {
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.Mode("dontAsk"), origin))
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.Model("claude-evil"), origin))
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.Effort("max"), origin))
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction, origin))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-3"), origin))
         assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.Mode("bypassPermissions"), origin))
         assertTrue(controlFrames().isEmpty())
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("bypassPermissions", confirmed = true), origin))
@@ -168,13 +168,13 @@ class SessionControlsTransmissionTest {
         val (client, ws) = connected(ready("codex", CODEX_V2), controls = null)
         val origin = client.consentOrigin.value
         // Before any catalog: nothing to bind an action to.
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction, origin))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-3"), origin))
         assertTrue(client.requestCodexControls("s1"))
         assertEquals("codex-controls", h.expectFrame("codex-controls").type())
         assertEquals(true, client.codexControls.value["s1"]?.busy)
         ws.send("""{"type":"codex-controls","sessionId":"s1","snapshot":${codexRaw()}}""")
         h.await(client.codexControls) { it["s1"]?.snapshot != null }
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexModelSelection("gpt-5.5", "high"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexModelSelection("gpt-5.5", "high", "catalog-3"), origin))
         assertEquals(true, client.codexControls.value["s1"]?.busy)
         val frame = controlFrames().single()
         val action = frame["action"]!!.jsonObject
@@ -197,8 +197,23 @@ class SessionControlsTransmissionTest {
         h.expectFrame("attach")
         ws2.send(snapshotFrame("s1", 5))
         h.await(client.liveSessions) { "s1" in it }
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction, client.consentOrigin.value))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-3"), client.consentOrigin.value))
         assertTrue(controlFrames().isEmpty())
+    }
+
+    @Test
+    fun aDrawFromTheCatalogBeforeTheLatestSendsNothing() {
+        val (client, ws) = connected(ready("codex", CODEX_V2), controls = null)
+        ws.send("""{"type":"codex-controls","sessionId":"s1","snapshot":${codexRaw()}}""")
+        h.await(client.codexControls) { it["s1"]?.snapshot?.revision == "catalog-3" }
+        // The engine re-read its catalogs while the panel was on screen.
+        ws.send("""{"type":"codex-controls","sessionId":"s1","snapshot":${codexRaw().toString().replace("catalog-3", "catalog-4")}}""")
+        h.await(client.codexControls) { it["s1"]?.snapshot?.revision == "catalog-4" }
+        val origin = client.consentOrigin.value
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-3"), origin))
+        assertTrue(controlFrames().isEmpty())
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-4"), origin))
+        assertEquals("catalog-4", controlFrames().single()["action"]!!.jsonObject.str("revision"))
     }
 
     @Test
@@ -207,9 +222,9 @@ class SessionControlsTransmissionTest {
         ws.send("""{"type":"codex-controls","sessionId":"s1","snapshot":${codexRaw()}}""")
         h.await(client.codexControls) { it["s1"]?.snapshot != null }
         val origin = client.consentOrigin.value
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.CodexAutoApprove(true), origin))
+        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, "catalog-3"), origin))
         assertTrue(controlFrames().isEmpty())
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, confirmed = true), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true), origin))
         assertEquals("never", controlFrames().single()["action"]!!.jsonObject.str("approvalPolicy"))
     }
 
@@ -219,9 +234,9 @@ class SessionControlsTransmissionTest {
         ws.send("""{"type":"opencode-controls","sessionId":"s1","snapshot":${opencodeRaw()}}""")
         h.await(client.opencodeControls) { it["s1"]?.snapshot != null }
         val origin = client.consentOrigin.value
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "max"), origin))
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.OpencodeMode("yolo"), origin))
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "high"), origin))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "max", "oc-1"), origin))
+        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.OpencodeMode("yolo", "oc-1"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "high", "oc-1"), origin))
         val action = controlFrames().single()["action"]!!.jsonObject
         assertEquals("oc-1", action.str("revision"))
         assertEquals("high", action.str("variantId"))

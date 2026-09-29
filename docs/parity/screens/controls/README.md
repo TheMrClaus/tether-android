@@ -44,5 +44,17 @@ Codex / opencode-serve session's row):
 6. **No Shift+Tab mode cycling**: the web offers it only to a fine pointer with hover; the app is a
    touch client.
 7. The sheet is also used on a tablet narrower than 64rem (portrait), as the web's viewport rule does.
+8. **Round 2 (security review, fail closed).** A stored mode the app does not know (a removed
+   `dontAsk`, a newer CLI mode, an opencode agent not yet listed, an opencode approval policy other
+   than none / "never") shows as "Unknown mode (value)" with a warning hint, the warning edge and
+   the word "Unknown" on the phone key; the web shows it as Manual. An opencode agent outside
+   `default` / `build` / `plan` is confirmed unless a source explicitly marks it safe (either source
+   flagging it is enough), and shows "label (value)" when its label could pass for another agent's.
+   Provider actions carry the catalog revision they were drawn from, and their keys are armed.
+   Server-supplied names, hints and errors are cleaned (bidi / invisible characters, whitespace)
+   and bounded. The confirmation names the session.
+9. **Fast from 64rem**: the web's desktop row has no Fast control (it lives only in the phone
+   sheet); the app's wide row adds a "Fast: Off/On" key that opens the same Fast list
+   (`controls-unknown-row` shows it).
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.

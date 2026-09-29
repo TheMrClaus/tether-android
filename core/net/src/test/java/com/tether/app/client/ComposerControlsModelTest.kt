@@ -60,9 +60,49 @@ class ComposerControlsModelTest {
     }
 
     @Test
-    fun aPersistedLockedModeShowsAsManual() {
-        // dontAsk is no longer offered: the select shows Manual rather than a phantom row.
-        assertEquals("default", derive(session("claude").copy(permissionMode = "dontAsk"), claudeControls).mode!!.value)
+    fun anUnknownStoredModeIsShownAsUnknownWithAWarningNeverAsManual() {
+        // Round 2 (M1): a removed (dontAsk) or newer mode keeps its value and warns.
+        for (stored in listOf("dontAsk", "someFutureMode")) {
+            val row = derive(session("claude").copy(permissionMode = stored), claudeControls)
+            assertEquals(stored, row.mode!!.value)
+            assertEquals("Unknown mode ($stored)", row.mode!!.label)
+            assertTrue(row.mode!!.current!!.danger)
+            assertTrue("shown, never selectable", row.mode!!.current!!.disabled)
+            assertEquals(ComposerControlsModel.UNKNOWN_MODE_HINT, row.hint)
+            assertTrue(row.hintDanger)
+            assertTrue(row.unknownMode)
+        }
+        // An opencode agent the static fallback (no controls reply yet) does not list.
+        val run = derive(session("opencode").copy(permissionMode = "review"), null)
+        assertEquals("Unknown mode (review)", run.mode!!.label)
+        assertTrue(run.unknownMode)
+        // An opencode approval policy that is neither null nor "never".
+        val policy = derive(session("opencode", engine = OPENCODE_V2).copy(approvalPolicy = "on-request"), null)
+        assertEquals("Unknown approval policy (on-request)", policy.mode!!.label)
+        assertTrue(policy.hintDanger)
+        assertTrue(policy.unknownMode)
+        // Known values stay as they were.
+        assertFalse(derive(session("claude").copy(permissionMode = "plan"), claudeControls).unknownMode)
+        assertFalse(derive(session("opencode", engine = OPENCODE_V2).copy(approvalPolicy = "never"), null).unknownMode)
+    }
+
+    @Test
+    fun opencodeAgentsShowTheirValueWhenTheLabelCouldMislead() {
+        assertEquals("Build", ComposerControlsModel.opencodeAgentLabel("default", "Build"))
+        assertEquals("Plan", ComposerControlsModel.opencodeAgentLabel("plan", "Plan"))
+        assertEquals("Plan (planx)", ComposerControlsModel.opencodeAgentLabel("planx", "Plan"))
+        assertEquals("Build (yolo)", ComposerControlsModel.opencodeAgentLabel("yolo", "Build"))
+        assertEquals("Review", ComposerControlsModel.opencodeAgentLabel("review", "Review"))
+        assertEquals("Reviewer (review)", ComposerControlsModel.opencodeAgentLabel("review", "Reviewer"))
+        assertEquals("review", ComposerControlsModel.opencodeAgentLabel("review", ""))
+        val row = derive(
+            session("opencode"),
+            controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("planx", "Plan", "Plans"))),
+        )
+        val planx = row.mode!!.options.single { it.value == "planx" }
+        assertEquals("Plan (planx)", planx.label)
+        assertTrue("absent danger on a custom agent reads as danger", planx.danger)
+        assertFalse(row.mode!!.options.single { it.value == "default" }.danger)
     }
 
     @Test

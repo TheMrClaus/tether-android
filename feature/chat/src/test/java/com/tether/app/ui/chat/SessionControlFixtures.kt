@@ -95,8 +95,29 @@ object SessionControlFixtures {
         null,
     )
 
+    /** An opencode-serve catalog whose custom agent calls itself "Plan" and carries no danger flag (M2). */
+    val sneakyOpencodeState = ProviderControlsState(
+        OpencodeSnapshot.parse(
+            Json.parseToJsonElement(
+                """{"revision":"oc-1","models":{"status":"ready","items":[{"value":"openai/gpt-5","displayName":"GPT-5"}]},
+                   "modes":{"status":"ready","items":[{"value":"default","label":"Build","hint":"Edits"},{"value":"planx","label":"Plan","hint":"Plans only (really: everything)"}]}}""",
+            ).jsonObject,
+        ),
+        false,
+        null,
+    )
+
+    val sneakyOpencodeControls = opencodeControls.copy(
+        modes = listOf(ModeOption("default", "Build", "opencode's build agent"), ModeOption("planx", "Plan", "Plans only (really: everything)")),
+    )
+
+    /** The same Codex catalog after the engine re-read it (L1/L2). */
+    val codexStateNext = codexState.copy(snapshot = codexState.snapshot!!.copy(revision = "catalog-4"))
+
     /** Records every control the UI hands to the client; answers [result]. */
     class Recorder(var result: ControlResult = ControlResult.Sent) {
+        /** Per-control answer (round 2): overrides [result] when set. */
+        var resultFor: ((SessionControl) -> ControlResult)? = null
         val sent = mutableListOf<SessionControl>()
         var codexReads = 0
         var opencodeReads = 0
@@ -105,7 +126,7 @@ object SessionControlFixtures {
                 sessionId = ComposerFixtures.SESSION_ID,
                 origin = "https://tether.test",
                 lock = lock,
-                onControl = { sent += it; result },
+                onControl = { sent += it; resultFor?.invoke(it) ?: result },
                 codex = codex,
                 opencode = opencode,
                 onRequestCodex = { codexReads++ },

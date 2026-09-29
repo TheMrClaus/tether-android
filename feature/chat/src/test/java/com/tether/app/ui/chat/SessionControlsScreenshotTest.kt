@@ -26,11 +26,13 @@ import org.robolectric.annotation.Config
  * `codex-panel` = the Codex provider-controls view. Tablet (the web's desktop row from 64rem):
  * `opencode-row` = Model (with a provider tag) / Effort / Mode / the Auto toggle ON (warning edge,
  * "Auto" spoken) and the danger hint; `codex-row` = the Codex catalogs' Model / Effort / Mode, Auto
- * off, and the Provider controls key. The idle Claude row is composer-idle's tablet golden.
+ * off, and the Provider controls key; `unknown-row` (round 2) = a Claude session whose stored mode
+ * this app does not know ("Unknown mode (dontAsk)", warning edge and hint) and the Fast key (I6).
+ * The idle Claude row is composer-idle's tablet golden.
  */
 enum class ControlsShot(val id: String) { Sheet("sheet"), Mode("mode"), Confirm("confirm"), CodexPanel("codex-panel") }
 
-enum class RowShot(val id: String) { Opencode("opencode-row"), Codex("codex-row") }
+enum class RowShot(val id: String) { Opencode("opencode-row"), Codex("codex-row"), Unknown("unknown-row") }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
 
@@ -113,21 +115,28 @@ class SessionControlsTabletScreenshotTest(private val shot: RowShot, private val
 
     @Test fun row() {
         rule.mainClock.autoAdvance = false
-        val opencode = shot == RowShot.Opencode
-        val session = if (opencode) SessionControlFixtures.opencode.copy(approvalPolicy = "never", reasoningEffort = "high") else SessionControlFixtures.codex
+        val session = when (shot) {
+            RowShot.Opencode -> SessionControlFixtures.opencode.copy(approvalPolicy = "never", reasoningEffort = "high")
+            RowShot.Codex -> SessionControlFixtures.codex
+            RowShot.Unknown -> SessionControlFixtures.claude.copy(permissionMode = "dontAsk")
+        }
         rule.setContent {
             ComposerHost(skin, WellWidthTablet) {
                 Composer(
                     session = session,
                     projection = ComposerFixtures.idle.projection,
-                    controls = if (opencode) SessionControlFixtures.opencodeControls else null,
+                    controls = when (shot) {
+                        RowShot.Opencode -> SessionControlFixtures.opencodeControls
+                        RowShot.Codex -> null
+                        RowShot.Unknown -> SessionControlFixtures.claudeControls
+                    },
                     serverNow = { ComposerFixtures.BUSY_NOW },
                     onSend = { _, _ -> true },
                     onInterrupt = {},
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},
-                    controlActions = SessionControlFixtures.Recorder().actions(codex = if (opencode) null else SessionControlFixtures.codexState),
+                    controlActions = SessionControlFixtures.Recorder().actions(codex = if (shot == RowShot.Codex) SessionControlFixtures.codexState else null),
                 )
             }
         }

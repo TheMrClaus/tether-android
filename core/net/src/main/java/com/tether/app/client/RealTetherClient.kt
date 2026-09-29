@@ -2057,7 +2057,7 @@ class RealTetherClient(
                 synchronized(lock) {
                     val current = codexControlsState.value[message.sessionId]
                     codexControlsState.value = codexControlsState.value +
-                        (message.sessionId to ProviderControlsState(current?.snapshot, false, message.message.take(MAX_CONTROL_MESSAGE)))
+                        (message.sessionId to ProviderControlsState(current?.snapshot, false, LabelText.clean(message.message, MAX_CONTROL_MESSAGE)))
                 }
             }
             is ServerMessage.OpencodeControls -> ifCurrent(webSocket) {
@@ -2071,7 +2071,7 @@ class RealTetherClient(
                 synchronized(lock) {
                     val current = opencodeControlsState.value[message.sessionId]
                     opencodeControlsState.value = opencodeControlsState.value +
-                        (message.sessionId to ProviderControlsState(current?.snapshot, false, message.message.take(MAX_CONTROL_MESSAGE)))
+                        (message.sessionId to ProviderControlsState(current?.snapshot, false, LabelText.clean(message.message, MAX_CONTROL_MESSAGE)))
                 }
             }
             // T6.2: use-tether.ts:909-921. A fresh summary drops the session's cached hunks.
@@ -2877,7 +2877,7 @@ class RealTetherClient(
             val codex = codexControlsState.value[sessionId]?.snapshot
             val opencode = opencodeControlsState.value[sessionId]?.snapshot
             SessionControlsGuard.check(session, sessionControlsState.value[sessionId], codex, opencode, control)?.let { return@synchronized it }
-            val frame = SessionControlsGuard.frame(sessionId, control, codex, opencode, java.util.UUID.randomUUID().toString())
+            val frame = SessionControlsGuard.frame(sessionId, control, java.util.UUID.randomUUID().toString())
             if (!ws.send(frame.encode())) return@synchronized ControlResult.NotConnected
             // use-tether.ts executeCodexControl: the panel shows the action in flight until its result.
             if (SessionControlsGuard.isCodexAction(control)) {

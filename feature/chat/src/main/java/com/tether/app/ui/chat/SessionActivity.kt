@@ -252,11 +252,7 @@ internal fun commandLabel(command: String): String {
  * braille blank), tag characters (U+E0000-E007F), variation selectors and the other
  * default-ignorable code points (U+034F, U+17B4/17B5, U+180B-180F, U+FE00-FE0F, U+E0100-E01EF).
  */
-internal fun invisibleCodePoint(cp: Int): Boolean =
-    Character.isWhitespace(cp) || Character.isSpaceChar(cp) || Character.getType(cp) == Character.FORMAT.toInt() ||
-        cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 || cp == 0x2800 ||
-        cp in 0xE0000..0xE007F || cp == 0x034F || cp == 0x17B4 || cp == 0x17B5 || cp in 0x180B..0x180F ||
-        cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF
+internal fun invisibleCodePoint(cp: Int): Boolean = com.tether.app.client.LabelText.invisibleCodePoint(cp)
 
 /**
  * The "Stopping…" latch, ONE per command for the whole session screen (the bar's key and the output

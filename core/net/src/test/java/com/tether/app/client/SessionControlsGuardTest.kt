@@ -60,7 +60,9 @@ class SessionControlsGuardTest {
     fun opencodeModesAreTheDiscoveredAgentsAndAutoOnlyOnServeV2() {
         val discovered = controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("review", "Review", ""), ModeOption("yolo", "YOLO", "", danger = true)))
         val run = session("opencode")
-        assertNull(check(run, discovered, SessionControl.Mode("review")))
+        // Round 2 (M2): a non-built-in agent no source calls safe is confirmed.
+        assertEquals(ControlResult.NeedsConfirmation, check(run, discovered, SessionControl.Mode("review")))
+        assertNull(check(run, discovered, SessionControl.Mode("review", confirmed = true)))
         assertEquals(ControlResult.NotOffered, check(run, discovered, SessionControl.Mode("plan")))
         assertEquals(ControlResult.NeedsConfirmation, check(run, discovered, SessionControl.Mode("yolo")))
         // Without the reply, the static Build / Plan fallback.
@@ -70,6 +72,73 @@ class SessionControlsGuardTest {
         val serve = session("opencode", engine = OPENCODE_V2)
         assertEquals(ControlResult.NeedsConfirmation, check(serve, null, SessionControl.Mode("bypassPermissions")))
         assertNull(check(serve, null, SessionControl.Mode("bypassPermissions", confirmed = true)))
+    }
+
+    @Test
+    fun anOpencodeAgentCallingItselfPlanWithNoDangerFlagIsConfirmedOnBothPaths() {
+        val serve = session("opencode", engine = OPENCODE_V2)
+        val sneaky = controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("planx", "Plan", "Plans only (really: everything)")))
+        val snap = OpencodeSnapshot.parse(json("""{"revision":"oc-1","models":{"status":"ready","items":[]},"modes":{"status":"ready","items":[{"value":"planx","label":"Plan","hint":"Plans only"}]}}"""))!!
+        // The composer row / sheet path (set-mode) and the panel path (opencode-control-action).
+        assertEquals(ControlResult.NeedsConfirmation, check(serve, sneaky, SessionControl.Mode("planx"), opencode = snap))
+        assertEquals(ControlResult.NeedsConfirmation, check(serve, sneaky, SessionControl.OpencodeMode("planx", "oc-1"), opencode = snap))
+        // The real built-ins stay one tap unless a source flags them.
+        assertNull(check(serve, sneaky, SessionControl.Mode("default"), opencode = snap))
+        val flagged = OpencodeSnapshot.parse(json("""{"revision":"oc-1","models":{"status":"ready","items":[]},"modes":{"status":"ready","items":[{"value":"plan","label":"Plan","hint":"","danger":true}]}}"""))!!
+        assertEquals(ControlResult.NeedsConfirmation, check(serve, controls(modes = listOf(ModeOption("plan", "Plan", "", danger = false))), SessionControl.Mode("plan"), opencode = flagged))
+        assertEquals(ControlResult.NeedsConfirmation, check(serve, null, SessionControl.OpencodeMode("plan", "oc-1"), opencode = flagged))
+        // Either source flagging it is enough; an explicit false on a custom agent is honoured.
+        assertNull(check(serve, controls(modes = listOf(ModeOption("review", "Review", "", danger = false))), SessionControl.Mode("review")))
+        assertEquals(true, ComposerControlsModel.opencodeAgentDanger("plan", controls(modes = listOf(ModeOption("plan", "Plan", "", danger = false))), flagged))
+    }
+
+    @Test
+    fun aProviderActionDrawnFromAnOlderCatalogIsNotSent() {
+        val codex = session("codex", engine = CODEX_V2)
+        val snap = codexSnapshot()
+        assertNull(check(codex, null, SessionControl.CodexCompaction("catalog-3"), codex = snap))
+        assertEquals(ControlResult.NotOffered, check(codex, null, SessionControl.CodexCompaction("catalog-2"), codex = snap))
+        assertEquals(ControlResult.NotOffered, check(codex, null, SessionControl.CodexModelSelection("gpt-5.5", "high", "catalog-4"), codex = snap))
+        val serve = session("opencode", engine = OPENCODE_V2)
+        assertEquals(ControlResult.NotOffered, check(serve, null, SessionControl.OpencodeMode("plan", "oc-0"), opencode = opencodeSnapshot()))
+        // The frame carries the control's own revision.
+        val frame = Json.parseToJsonElement(SessionControlsGuard.frame("s1", SessionControl.CodexCompaction("catalog-3"), "op").encode()).jsonObject
+        assertEquals("catalog-3", frame["action"]!!.jsonObject["revision"]!!.toString().trim('"'))
+    }
+
+    @Test
+    fun aTypedModelIdIsClaudeOnly() {
+        assertNull(check(claude, null, SessionControl.Model("claude-haiku-9", typed = true)))
+        assertEquals(ControlResult.NotOffered, check(session("opencode"), null, SessionControl.Model("openai/gpt-9", typed = true)))
+        assertEquals(ControlResult.NotOffered, check(session("pi"), null, SessionControl.Model("pi-model", typed = true)))
+    }
+
+    @Test
+    fun baseBranchesFollowGitRefNameRules() {
+        for (ok in listOf("main", "release/2026.09", "feature/T7.2-x", "v1.0")) assertTrue(ok, SessionControlsGuard.validBranchName(ok))
+        for (bad in listOf("-main", "--upload-pack=x", "a b", "a\tb", "a\nb", "a..b", "a~1", "a^", "a:b", "a?", "a*", "a[b", "a\\b", "@", "a@{1}", "/a", "a/", "a//b", "a.", ".a", "a/.b", "a.lock", "a/b.lock", "\u0001x", "")) {
+            assertFalse(bad, SessionControlsGuard.validBranchName(bad))
+        }
+        val codex = session("codex", engine = CODEX_V2)
+        assertEquals(ControlResult.NotOffered, check(codex, null, SessionControl.CodexReview(ReviewTarget.BaseBranch("-x"), "inline", "catalog-3"), codex = codexSnapshot()))
+    }
+
+    @Test
+    fun serverTextIsCleanedAndCatalogsAreBounded() {
+        assertEquals("Opus nimda", LabelText.label("Opus\u202E nimda\u202C"))
+        assertEquals("a b c", LabelText.label("a\n\n b\u200B\t c"))
+        assertEquals("safe", LabelText.label("\u2066safe\u2069\u200E"))
+        assertEquals("", LabelText.label("\u3164\u2800\uFE0F"))
+        val long = LabelText.label("x".repeat(500))
+        assertEquals(LabelText.MAX_LABEL, long.length)
+        assertTrue(long.endsWith("…"))
+        val many = (0 until 500).joinToString(",") { """{"id":"s$it","name":"S$it","description":"","scope":"repo","enabled":true}""" }
+        val snap = CodexSnapshot.parse(json("""{"revision":"r","skills":{"status":"ready","items":[$many]}}"""))!!
+        assertEquals(LabelText.MAX_ITEMS, snap.skills.items.size)
+        val bidi = OpencodeSnapshot.parse(json("""{"revision":"r","modes":{"status":"ready","items":[{"value":"x","label":"\u202Eyolo","hint":"line1\nline2"}]},"models":{"status":"error","items":[],"error":"${"e".repeat(900)}"}}"""))!!
+        assertEquals("yolo", bidi.modes.items.single().label)
+        assertEquals("line1 line2", bidi.modes.items.single().hint)
+        assertEquals(LabelText.MAX_ERROR, bidi.models.error!!.length)
     }
 
     @Test
@@ -119,34 +188,34 @@ class SessionControlsGuardTest {
         val codex = session("codex", engine = CODEX_V2)
         val snap = codexSnapshot()
         fun c(control: SessionControl, s: CodexSnapshot? = snap) = check(codex, null, control, codex = s)
-        assertNull(c(SessionControl.CodexModelSelection("gpt-5.5", "high")))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexModelSelection("gpt-5.5", "xhigh"))) // not THIS model's effort
-        assertNull(c(SessionControl.CodexModelSelection("gpt-5.5-mini", "xhigh")))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexModelSelection("gpt-9", "high")))
-        assertNull(c(SessionControl.CodexCollaboration("plan")))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCollaboration("nope")))
-        assertNull(c(SessionControl.CodexSkill("skill-a", false)))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexSkill("skill-z", true)))
-        assertNull(c(SessionControl.CodexCompaction))
-        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.CodexAutoApprove(true)))
-        assertNull(c(SessionControl.CodexAutoApprove(true, confirmed = true)))
-        assertNull(c(SessionControl.CodexAutoApprove(false)))
+        assertNull(c(SessionControl.CodexModelSelection("gpt-5.5", "high", "catalog-3")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexModelSelection("gpt-5.5", "xhigh", "catalog-3"))) // not THIS model's effort
+        assertNull(c(SessionControl.CodexModelSelection("gpt-5.5-mini", "xhigh", "catalog-3")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexModelSelection("gpt-9", "high", "catalog-3")))
+        assertNull(c(SessionControl.CodexCollaboration("plan", "catalog-3")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCollaboration("nope", "catalog-3")))
+        assertNull(c(SessionControl.CodexSkill("skill-a", false, "catalog-3")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexSkill("skill-z", true, "catalog-3")))
+        assertNull(c(SessionControl.CodexCompaction("catalog-3")))
+        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.CodexAutoApprove(true, "catalog-3")))
+        assertNull(c(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)))
+        assertNull(c(SessionControl.CodexAutoApprove(false, "catalog-3")))
         // No snapshot (none on this socket) = nothing to bind an action to.
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCompaction, null))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexAutoApprove(false), null))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCompaction("catalog-3"), null))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexAutoApprove(false, "catalog-3"), null))
         // A legacy Codex thread has no control channel.
-        assertEquals(ControlResult.NotOffered, check(session("codex"), null, SessionControl.CodexCompaction, codex = snap))
+        assertEquals(ControlResult.NotOffered, check(session("codex"), null, SessionControl.CodexCompaction("catalog-3"), codex = snap))
         // Actions the snapshot reports unavailable.
         val offline = CodexSnapshot.parse(codexRaw(review = "unavailable", compaction = "unsupported"))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCompaction, offline))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexReview(ReviewTarget.UncommittedChanges, "inline"), offline))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCompaction("catalog-3"), offline))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.CodexReview(ReviewTarget.UncommittedChanges, "inline", "catalog-3"), offline))
     }
 
     @Test
     fun reviewTargetsTakeTheServersShapeOnly() {
         val codex = session("codex", engine = CODEX_V2)
         val snap = codexSnapshot()
-        fun r(target: ReviewTarget, delivery: String = "inline") = check(codex, null, SessionControl.CodexReview(target, delivery), codex = snap)
+        fun r(target: ReviewTarget, delivery: String = "inline") = check(codex, null, SessionControl.CodexReview(target, delivery, "catalog-3"), codex = snap)
         assertNull(r(ReviewTarget.UncommittedChanges))
         assertNull(r(ReviewTarget.UncommittedChanges, "detached"))
         assertEquals(ControlResult.NotOffered, r(ReviewTarget.UncommittedChanges, "elsewhere"))
@@ -166,21 +235,21 @@ class SessionControlsGuardTest {
         val serve = session("opencode", engine = OPENCODE_V2)
         val snap = opencodeSnapshot()
         fun c(control: SessionControl) = check(serve, null, control, opencode = snap)
-        assertNull(c(SessionControl.OpencodeModelSelection("openai/gpt-5", null)))
-        assertNull(c(SessionControl.OpencodeModelSelection("openai/gpt-5", "high")))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("openai/gpt-5", "max")))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("anthropic/x", null)))
-        assertNull(c(SessionControl.OpencodeMode("plan")))
-        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.OpencodeMode("yolo")))
-        assertNull(c(SessionControl.OpencodeMode("yolo", confirmed = true)))
-        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeMode("unknown")))
-        assertEquals(ControlResult.NotOffered, check(session("opencode"), null, SessionControl.OpencodeMode("plan"), opencode = snap))
+        assertNull(c(SessionControl.OpencodeModelSelection("openai/gpt-5", null, "oc-1")))
+        assertNull(c(SessionControl.OpencodeModelSelection("openai/gpt-5", "high", "oc-1")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("openai/gpt-5", "max", "oc-1")))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("anthropic/x", null, "oc-1")))
+        assertNull(c(SessionControl.OpencodeMode("plan", "oc-1")))
+        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.OpencodeMode("yolo", "oc-1")))
+        assertNull(c(SessionControl.OpencodeMode("yolo", "oc-1", confirmed = true)))
+        assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeMode("unknown", "oc-1")))
+        assertEquals(ControlResult.NotOffered, check(session("opencode"), null, SessionControl.OpencodeMode("plan", "oc-1"), opencode = snap))
     }
 
     @Test
     fun framesAreExactlyTheValidatorsShapes() {
         val snap = codexSnapshot()
-        fun frame(control: SessionControl) = Json.parseToJsonElement(SessionControlsGuard.frame("s1", control, snap, opencodeSnapshot(), "op-1").encode()).jsonObject
+        fun frame(control: SessionControl) = Json.parseToJsonElement(SessionControlsGuard.frame("s1", control, "op-1").encode()).jsonObject
         assertEquals(json("""{"type":"set-mode","sessionId":"s1","permissionMode":"plan"}"""), frame(SessionControl.Mode("plan")))
         assertEquals(json("""{"type":"set-model","sessionId":"s1","model":"claude-sonnet-5"}"""), frame(SessionControl.Model("claude-sonnet-5")))
         assertEquals(json("""{"type":"set-reasoning-effort","sessionId":"s1","reasoningEffort":""}"""), frame(SessionControl.Effort("")))
@@ -188,31 +257,31 @@ class SessionControlsGuardTest {
         val envelope = """"revision":"catalog-3","operatorAction":true,"operatorActionId":"op-1""""
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"set-model-selection","modelId":"gpt-5.5","reasoningEffortId":"high",$envelope}}"""),
-            frame(SessionControl.CodexModelSelection("gpt-5.5", "high")),
+            frame(SessionControl.CodexModelSelection("gpt-5.5", "high", "catalog-3")),
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"set-approval-policy","approvalPolicy":null,$envelope}}"""),
-            frame(SessionControl.CodexAutoApprove(false)),
+            frame(SessionControl.CodexAutoApprove(false, "catalog-3")),
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"set-approval-policy","approvalPolicy":"never",$envelope}}"""),
-            frame(SessionControl.CodexAutoApprove(true, confirmed = true)),
+            frame(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)),
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"start-review","target":{"type":"commit","sha":"abc1234","title":null},"delivery":"detached",$envelope}}"""),
-            frame(SessionControl.CodexReview(ReviewTarget.Commit("abc1234"), "detached")),
+            frame(SessionControl.CodexReview(ReviewTarget.Commit("abc1234"), "detached", "catalog-3")),
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"start-compaction",$envelope}}"""),
-            frame(SessionControl.CodexCompaction),
+            frame(SessionControl.CodexCompaction("catalog-3")),
         )
         assertEquals(
             json("""{"type":"opencode-control-action","sessionId":"s1","action":{"type":"set-model-selection","modelId":"openai/gpt-5","variantId":null,"revision":"oc-1","operatorAction":true,"operatorActionId":"op-1"}}"""),
-            frame(SessionControl.OpencodeModelSelection("openai/gpt-5", null)),
+            frame(SessionControl.OpencodeModelSelection("openai/gpt-5", null, "oc-1")),
         )
         assertEquals(
             json("""{"type":"opencode-control-action","sessionId":"s1","action":{"type":"set-mode","mode":"plan","revision":"oc-1","operatorAction":true,"operatorActionId":"op-1"}}"""),
-            frame(SessionControl.OpencodeMode("plan")),
+            frame(SessionControl.OpencodeMode("plan", "oc-1")),
         )
     }
 

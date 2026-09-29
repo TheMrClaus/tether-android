@@ -201,6 +201,8 @@ internal class ControlHandlers(
     val openProviderControls: (() -> Unit)?,
     /** Re-reads the provider catalogs (a read, never an action) as the panel opens in the sheet. */
     val requestProviderControls: () -> Unit = {},
+    /** Opens the session sheet at a view (the wide row's Fast key, round 2 I6). */
+    val openSheet: (SheetView) -> Unit = {},
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -269,6 +271,25 @@ internal fun ComposerOptionsRow(
         }
         controls.auto?.let { auto ->
             AutoChip(on = auto.on, enabled = enabled, lockCopy = controlLockCopy(lock), onToggle = handlers.toggleAuto)
+        }
+        // Round 2 (I6): the web's desktop row has no Fast control at all; from 64rem the app offers it
+        // as a key that opens the sheet's Fast list (the only place the web sets it).
+        controls.fastMode?.let { fast ->
+            val value = when (fast.state) {
+                "on" -> "On"
+                "cooldown" -> "Cooldown"
+                else -> "Off"
+            }
+            ControlPill(
+                label = "Fast: $value",
+                icon = TetherIcons.Zap,
+                enabled = enabled,
+                active = fast.state == "on",
+                contentDescription = "Fast mode: $value",
+                stateDescription = controlLockCopy(lock),
+                onClick = { handlers.openSheet(SheetView.Fast) },
+                testTag = "control-fast",
+            )
         }
         handlers.openProviderControls?.let { open ->
             ControlPill(
@@ -590,6 +611,8 @@ internal fun SessionSettingsTrigger(
     label: String,
     provider: String,
     autoOn: Boolean,
+    /** Round 2 (M1): the stored mode is unknown to the app — the warning edge and the word "Unknown". */
+    unknownMode: Boolean = false,
     lock: ConsentLock?,
     hasOtherSettings: Boolean,
     onOpen: () -> Unit,
@@ -601,7 +624,12 @@ internal fun SessionSettingsTrigger(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val shape = RoundedCornerShape(if (studio) 10.dp else t.radiusKey)
-    val name = if (hasOtherSettings) "Session settings: $label${if (autoOn) ", Auto approve on" else ""}" else "Choose provider and model"
+    val warn = autoOn || unknownMode
+    val name = if (hasOtherSettings) {
+        "Session settings: $label${if (autoOn) ", Auto approve on" else ""}${if (unknownMode) ", unknown mode" else ""}"
+    } else {
+        "Choose provider and model"
+    }
     Row(
         modifier
             .heightIn(min = 44.dp)
@@ -617,7 +645,7 @@ internal fun SessionSettingsTrigger(
             .cssSurface(
                 shape,
                 if (studio) t.graphiteRaised else if (pressed) t.keyFaceHover else t.keyFace,
-                if (studio) null else CssBorder(1.dp, if (autoOn) t.warning else t.line),
+                if (studio) null else CssBorder(1.dp, if (warn) t.warning else t.line),
                 if (studio) emptyList() else t.css.bevelRaisedSm + t.css.shadowKeySm,
             )
             .padding(horizontal = t.css.spaceSm),
@@ -636,6 +664,7 @@ internal fun SessionSettingsTrigger(
             modifier = Modifier.weight(1f),
         )
         if (autoOn) Text("Auto", style = type.body.copy(fontSize = 9.92.sp, fontWeight = FontWeight(600)), color = t.warning)
+        if (unknownMode) Text("Unknown", style = type.body.copy(fontSize = 9.92.sp, fontWeight = FontWeight(600)), color = t.warning)
         Icon(TetherIcons.SlidersHorizontal, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
     }
 }
@@ -870,7 +899,7 @@ internal fun SheetHint(text: String, warning: Boolean = false) {
  * only its tap sends, with the confirmation flag the client requires.
  */
 @Composable
-internal fun EscalationDialog(label: String, body: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
+internal fun EscalationDialog(label: String, body: String, sessionName: String?, onConfirm: () -> Unit, onCancel: () -> Unit) {
     val arming = rememberArmedControl("escalation" to label, true)
     TetherDialog(
         onDismiss = onCancel,
@@ -887,6 +916,10 @@ internal fun EscalationDialog(label: String, body: String, onConfirm: () -> Unit
             )
         },
     ) {
+        // L5: name the session the change is for, cleaned like every server-supplied label.
+        sessionName?.let { com.tether.app.client.LabelText.label(it) }?.takeIf { it.isNotEmpty() }?.let {
+            TetherDialogText("Session: \u2068$it\u2069", Modifier.padding(bottom = 8.dp))
+        }
         TetherDialogText(body)
     }
 }

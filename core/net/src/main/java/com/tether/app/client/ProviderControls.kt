@@ -94,40 +94,40 @@ data class CodexSnapshot(
                     val id = m.s("id") ?: return@catalog null
                     CodexModel(
                         id = id,
-                        name = m.s("name") ?: id,
-                        description = m.s("description").orEmpty(),
+                        name = LabelText.label(m.s("name")).ifEmpty { LabelText.label(id) },
+                        description = LabelText.hint(m.s("description")),
                         defaultReasoningEffort = m.s("defaultReasoningEffort").orEmpty(),
                         reasoningEfforts = (m["reasoningEfforts"] as? JsonArray).orEmpty().mapNotNull { e ->
                             val eo = e as? JsonObject ?: return@mapNotNull null
-                            CodexEffort(eo.s("id") ?: return@mapNotNull null, eo.s("description").orEmpty())
-                        },
+                            CodexEffort(eo.s("id") ?: return@mapNotNull null, LabelText.hint(eo.s("description")))
+                        }.take(LabelText.MAX_ITEMS),
                     )
                 },
                 collaborationModes = o.catalog("collaborationModes") { m ->
-                    CodexCollaboration(m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("mode"), m.s("model"), m.s("reasoningEffort"))
+                    CodexCollaboration(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("mode"), m.s("model"), m.s("reasoningEffort"))
                 },
                 skills = o.catalog("skills") { m ->
-                    CodexSkill(m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("description").orEmpty(), m.s("scope").orEmpty(), m.b("enabled") ?: return@catalog null)
+                    CodexSkill(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.hint(m.s("description")), LabelText.label(m.s("scope")), m.b("enabled") ?: return@catalog null)
                 },
                 hooks = o.catalog("hooks") { m ->
                     CodexHook(
-                        m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("event").orEmpty(), m.s("handler").orEmpty(),
-                        m.s("trust").orEmpty(), m.b("enabled") == true, m.b("managed") == true,
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.label(m.s("event")), LabelText.label(m.s("handler")),
+                        LabelText.label(m.s("trust")), m.b("enabled") == true, m.b("managed") == true,
                     )
                 },
                 apps = o.catalog("apps") { m ->
                     CodexApp(
-                        m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("description").orEmpty(), m.b("enabled") == true, m.b("accessible") == true,
-                        (m["plugins"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content },
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), LabelText.hint(m.s("description")), m.b("enabled") == true, m.b("accessible") == true,
+                        (m["plugins"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.let(LabelText::label) }.take(LabelText.MAX_ITEMS),
                     )
                 },
                 mcpServers = o.catalog("mcpServers") { m ->
-                    CodexMcpServer(m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("status").orEmpty(), m.s("statusLabel").orEmpty(), m.n("toolCount")?.toLong() ?: 0)
+                    CodexMcpServer(m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")), m.n("toolCount")?.toLong() ?: 0)
                 },
                 rateLimits = o.catalog("rateLimits") { m ->
                     val credits = m["credits"] as? JsonObject
                     CodexRateLimit(
-                        m.s("id") ?: return@catalog null, m.s("name").orEmpty(), m.s("status").orEmpty(), m.s("statusLabel").orEmpty(),
+                        m.s("id") ?: return@catalog null, LabelText.label(m.s("name")), m.s("status").orEmpty(), LabelText.label(m.s("statusLabel")),
                         window(m["primary"]), window(m["secondary"]), credits?.b("hasCredits"), credits?.b("unlimited"),
                     )
                 },
@@ -165,18 +165,18 @@ data class OpencodeSnapshot(
                     val value = m.s("value") ?: return@opencodeCatalog null
                     SessionModelOption(
                         value = value,
-                        displayName = m.s("displayName") ?: value,
-                        description = m.s("description"),
-                        providerLabel = m.s("providerLabel"),
+                        displayName = LabelText.label(m.s("displayName")).ifEmpty { LabelText.label(value) },
+                        description = LabelText.hint(m.s("description")).ifEmpty { null },
+                        providerLabel = LabelText.label(m.s("providerLabel")).ifEmpty { null },
                         variants = (m["variants"] as? JsonArray)?.mapNotNull { v ->
                             val vo = v as? JsonObject ?: return@mapNotNull null
                             val vv = vo.s("value") ?: return@mapNotNull null
-                            ModelVariantOption(vv, vo.s("label") ?: vv)
-                        },
+                            ModelVariantOption(vv, LabelText.label(vo.s("label")).ifEmpty { LabelText.label(vv) })
+                        }?.take(LabelText.MAX_ITEMS),
                     )
                 },
                 modes = o.opencodeCatalog("modes") { m ->
-                    ModeOption(m.s("value") ?: return@opencodeCatalog null, m.s("label").orEmpty(), m.s("hint").orEmpty(), m.b("danger"))
+                    ModeOption(m.s("value") ?: return@opencodeCatalog null, LabelText.label(m.s("label")), LabelText.hint(m.s("hint")), m.b("danger"))
                 },
             )
         }
@@ -190,18 +190,18 @@ private fun status(value: String?): String = when (value) {
 
 private fun <T> JsonObject.catalog(key: String, item: (JsonObject) -> T?): CodexCatalog<T> {
     val c = this[key] as? JsonObject ?: return CodexCatalog("unavailable", emptyList())
-    val items = (c["items"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(item) }
+    val items = (c["items"] as? JsonArray).orEmpty().asSequence().mapNotNull { (it as? JsonObject)?.let(item) }.take(LabelText.MAX_ITEMS).toList()
     return CodexCatalog(status(c.s("status")), items)
 }
 
 private fun <T> JsonObject.opencodeCatalog(key: String, item: (JsonObject) -> T?): OpencodeCatalog<T> {
     val c = this[key] as? JsonObject ?: return OpencodeCatalog("unavailable", emptyList(), null)
-    val items = (c["items"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(item) }
+    val items = (c["items"] as? JsonArray).orEmpty().asSequence().mapNotNull { (it as? JsonObject)?.let(item) }.take(LabelText.MAX_ITEMS).toList()
     val st = when (val s = c.s("status")) {
         "ready", "error", "unavailable", "unsupported" -> s
         else -> "unavailable"
     }
-    return OpencodeCatalog(st, items, c.s("error"))
+    return OpencodeCatalog(st, items, c.s("error")?.let(LabelText::error)?.ifEmpty { null })
 }
 
 private fun JsonObject.s(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content

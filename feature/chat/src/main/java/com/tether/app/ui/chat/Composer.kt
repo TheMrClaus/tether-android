@@ -70,6 +70,7 @@ import com.tether.app.client.LEGACY_GROUP_VALUE
 import com.tether.app.client.ModeVocabulary
 import com.tether.app.client.OPENCODE_V2
 import com.tether.app.client.SessionControl
+import com.tether.app.client.confirmedCopy
 import com.tether.app.client.looksLikeModelId
 import com.tether.app.protocol.reduce.composerCommandList
 import com.tether.app.protocol.reduce.resolveModelArg
@@ -189,8 +190,8 @@ fun Composer(
 
     val models = controls?.models ?: emptyList()
     // T7.2: the row's state, derived from the session, its controls reply and the Codex catalog.
-    val composerControls = remember(session, controls, controlActions.codex, pinnedModels) {
-        session?.let { ComposerControlsModel.derive(it, controls, controlActions.codex, pinnedModels) }
+    val composerControls = remember(session, controls, controlActions.codex, controlActions.opencode, pinnedModels) {
+        session?.let { ComposerControlsModel.derive(it, controls, controlActions.codex, pinnedModels, controlActions.opencode) }
     }
     // The web swaps the pill row for the sheet key below 64rem of VIEWPORT (globals.css:7347-7352).
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 1024
@@ -234,20 +235,45 @@ fun Composer(
         menuDismissed = true
     }
 
-    /** T7.2: one operator choice to the client's guard; a refusal is said in words. */
+    /** The dialog's words for a control that needs the operator's confirmation. */
+    fun escalationFor(control: SessionControl): Escalation? {
+        val confirmed = control.confirmedCopy() ?: return null
+        val c = composerControls
+        return when (control) {
+            is SessionControl.Mode -> {
+                val option = c?.mode?.options?.firstOrNull { it.value == control.value }
+                Escalation(option?.label ?: if (control.value == ModeVocabulary.AUTO) "Auto" else control.value, escalationBody(option?.description ?: c?.auto?.hint), confirmed)
+            }
+            is SessionControl.OpencodeMode -> {
+                val agent = controlActions.opencode?.snapshot?.modes?.items?.firstOrNull { it.value == control.mode }
+                Escalation(ComposerControlsModel.opencodeAgentLabel(control.mode, agent?.label ?: ""), escalationBody(agent?.hint?.ifEmpty { null }), confirmed)
+            }
+            is SessionControl.CodexAutoApprove -> Escalation("Auto approve", escalationBody(c?.auto?.hint), confirmed)
+            else -> null
+        }
+    }
+
+    /**
+     * T7.2: one operator choice to the client's guard; a refusal is said in words. Round 2 (L4): a
+     * change the client wants confirmed opens the confirmation for exactly that control.
+     */
     fun sendControl(control: SessionControl): Boolean {
         val result = controlActions.onControl(control)
+        if (result == ControlResult.NeedsConfirmation) {
+            escalationFor(control)?.let { escalation = it; return false }
+        }
         if (result != ControlResult.Sent) controlRefusalCopy(result)?.let(::flash)
         return result == ControlResult.Sent
     }
 
     fun codexChooseModel(modelId: String) {
         val s = session ?: return
-        val model = controlActions.codex?.snapshot?.models?.items?.firstOrNull { it.id == modelId } ?: return
+        val snapshot = controlActions.codex?.snapshot ?: return
+        val model = snapshot.models.items.firstOrNull { it.id == modelId } ?: return
         // chat-view.tsx:2368-2372: keep the effort when the new model supports it, else its default.
         val wanted = s.reasoningEffort ?: model.defaultReasoningEffort
         val effortId = if (model.reasoningEfforts.any { it.id == wanted }) wanted else model.defaultReasoningEffort
-        sendControl(SessionControl.CodexModelSelection(modelId, effortId))
+        sendControl(SessionControl.CodexModelSelection(modelId, effortId, snapshot.revision))
     }
 
     /** chat-view.tsx:2896-2921. [unlisted]: a typed `/model` id the list does not carry. */
@@ -258,12 +284,13 @@ fun Composer(
         if (value == LEGACY_GROUP_VALUE) return
         val model = models.firstOrNull { it.value == value }
         val displayName = model?.displayName?.ifEmpty { null } ?: value
-        // A model that cannot express the current effort clears it (never a mismatched --variant).
-        val effort = s.reasoningEffort
-        if (model != null && !effort.isNullOrEmpty() && model.variants.orEmpty().none { it.value == effort }) {
-            controlActions.onControl(SessionControl.Effort(""))
-        }
         if (sendControl(SessionControl.Model(value, typed = unlisted))) {
+            // A model that cannot express the current effort clears it (never a mismatched
+            // --variant) — round 2 (L3): only once the model itself went out.
+            val effort = s.reasoningEffort
+            if (model != null && !effort.isNullOrEmpty() && model.variants.orEmpty().none { it.value == effort }) {
+                controlActions.onControl(SessionControl.Effort(""))
+            }
             val isDefaultChoice = value.isEmpty() || value == "default"
             flash(
                 when {
@@ -281,7 +308,8 @@ fun Composer(
         val c = composerControls ?: return
         if (c.codexV2) {
             val modelId = c.model?.value?.takeIf { it.isNotEmpty() } ?: return
-            sendControl(SessionControl.CodexModelSelection(modelId, value))
+            val revision = controlActions.codex?.snapshot?.revision ?: return
+            sendControl(SessionControl.CodexModelSelection(modelId, value, revision))
             return
         }
         if (sendControl(SessionControl.Effort(value))) {
@@ -292,13 +320,15 @@ fun Composer(
     fun chooseMode(value: String) {
         val c = composerControls ?: return
         if (c.codexV2) {
-            sendControl(SessionControl.CodexCollaboration(value))
+            val revision = controlActions.codex?.snapshot?.revision ?: return
+            sendControl(SessionControl.CodexCollaboration(value, revision))
             return
         }
         val option = c.mode?.options?.firstOrNull { it.value == value }
+        if (option?.disabled == true) return
         if (option?.danger == true || value == ModeVocabulary.AUTO) {
             if (c.mode?.value == value) return
-            escalation = Escalation(option?.label ?: "Auto", escalationBody(option?.description), SessionControl.Mode(value, confirmed = true))
+            escalation = escalationFor(SessionControl.Mode(value))
             return
         }
         sendControl(SessionControl.Mode(value))
@@ -308,8 +338,9 @@ fun Composer(
         val c = composerControls ?: return
         val auto = c.auto ?: return
         if (c.codexV2) {
-            if (auto.on) sendControl(SessionControl.CodexAutoApprove(false))
-            else escalation = Escalation("Auto approve", escalationBody(auto.hint), SessionControl.CodexAutoApprove(true, confirmed = true))
+            val revision = controlActions.codex?.snapshot?.revision ?: return
+            if (auto.on) sendControl(SessionControl.CodexAutoApprove(false, revision))
+            else escalation = escalationFor(SessionControl.CodexAutoApprove(true, revision))
             return
         }
         // chat-view.tsx:2486-2495: the same set-mode the Mode row sends.
@@ -333,6 +364,7 @@ fun Composer(
         } else {
             null
         },
+        openSheet = { view -> sheetAt = view },
         requestProviderControls = {
             if (composerControls?.codexV2 == true) controlActions.onRequestCodex() else controlActions.onRequestOpencode()
         },
@@ -595,7 +627,8 @@ fun Composer(
                                 SessionSettingsTrigger(
                                     label = liveControls.model?.label?.ifEmpty { null } ?: "Select model",
                                     provider = session!!.provider,
-                                    autoOn = liveControls.auto?.on == true || (liveControls.mode?.current?.danger == true),
+                                    autoOn = liveControls.auto?.on == true || (liveControls.mode?.current?.danger == true && !liveControls.unknownMode),
+                                    unknownMode = liveControls.unknownMode,
                                     lock = controlActions.lock,
                                     hasOtherSettings = hasOther,
                                     onOpen = {
@@ -626,7 +659,7 @@ fun Composer(
     if (sheetEntry != null && session != null && composerControls != null) {
         val locked = controlActions.lock != null
         val panel: (@Composable () -> Unit)? = when {
-            composerControls.codexV2 -> { { CodexControlsPanel(controlActions.codex, locked) { sendControl(it) } } }
+            composerControls.codexV2 -> { { CodexControlsPanel(controlActions.codex, locked, { sendControl(it) }) } }
             session.provider == "opencode" && session.engineGeneration == OPENCODE_V2 -> {
                 {
                     OpencodeControlsPanel(
@@ -636,9 +669,8 @@ fun Composer(
                         selectedMode = if (session.approvalPolicy == "never") "default" else session.permissionMode ?: "default",
                         locked = locked,
                         onControl = { sendControl(it) },
-                        onDangerMode = { mode, label ->
-                            escalation = Escalation(label, escalationBody(null), SessionControl.OpencodeMode(mode, confirmed = true))
-                        },
+                        needsConfirmation = { mode -> ComposerControlsModel.opencodeAgentNeedsConfirmation(mode, controls, controlActions.opencode?.snapshot) },
+                        onDangerMode = { control -> escalation = escalationFor(control) },
                     )
                 }
             }
@@ -657,6 +689,7 @@ fun Composer(
         EscalationDialog(
             label = pending.label,
             body = pending.body,
+            sessionName = session?.name,
             onConfirm = {
                 escalation = null
                 sendControl(pending.control)

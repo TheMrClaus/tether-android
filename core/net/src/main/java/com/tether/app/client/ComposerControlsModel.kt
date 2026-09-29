@@ -95,17 +95,82 @@ data class ComposerControls(
     /** The flex-1 `.chat-mode-hint`. */
     val hint: String,
     val hintDanger: Boolean,
+    /** Round 2 (M1): the stored mode / approval policy is one this app does not know. */
+    val unknownMode: Boolean = false,
 )
 
 object ComposerControlsModel {
 
-    /** chat-view.tsx:2136-2142 (+ the v62 discovered opencode agents). */
-    fun modeOptions(session: AgentSession, controls: ServerMessage.SessionControls?): List<ModeChoice> = when (session.provider) {
-        "opencode" -> controls?.modes?.takeIf { it.isNotEmpty() }?.map { ModeChoice(it.value, it.label, it.hint, it.danger == true) } ?: ModeVocabulary.OPENCODE
+    /**
+     * chat-view.tsx:2136-2142 (+ the v62 discovered opencode agents). Round 2 (M2): a discovered
+     * agent is shown as "label (value)" unless it is a built-in pair, and marked dangerous by
+     * [opencodeAgentNeedsConfirmation] (either source's flag, or a non-built-in with no `false`);
+     * [opencode] is the provider-controls snapshot, the second source.
+     */
+    fun modeOptions(session: AgentSession, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot? = null): List<ModeChoice> = when (session.provider) {
+        "opencode" -> {
+            val discovered = controls?.modes?.takeIf { it.isNotEmpty() }?.take(LabelText.MAX_ITEMS)?.map {
+                ModeChoice(
+                    it.value,
+                    opencodeAgentLabel(it.value, it.label),
+                    LabelText.hint(it.hint),
+                    opencodeAgentNeedsConfirmation(it.value, controls, opencode),
+                )
+            }
+            when {
+                discovered == null -> ModeVocabulary.OPENCODE
+                // "default" is opencode's build agent even when the discovered list omits it.
+                discovered.none { it.value == "default" } -> listOf(ModeVocabulary.OPENCODE.first()) + discovered
+                else -> discovered
+            }
+        }
         "reasonix" -> ModeVocabulary.REASONIX
         "pi" -> ModeVocabulary.PI
         else -> ModeVocabulary.PERMISSION
     }
+
+    /** opencode's own agents: never escalations unless a source flags them. */
+    val OPENCODE_BUILTIN_AGENTS: Set<String> = setOf("default", "build", "plan")
+
+    private val OPENCODE_BUILTIN_PAIRS = setOf("default" to "build", "build" to "build", "plan" to "plan")
+    private val OPENCODE_BUILTIN_LABELS = setOf("build", "plan", "default", "auto", "manual")
+
+    /**
+     * The merged `danger` of an opencode agent over both sources that may list it (the
+     * `session-controls` modes and the `opencode-controls` snapshot): true when either flags it,
+     * false when one says false and none true, null when neither says.
+     */
+    fun opencodeAgentDanger(value: String, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot?): Boolean? {
+        val flags = controls?.modes.orEmpty().filter { it.value == value }.map { it.danger } +
+            opencode?.modes?.items.orEmpty().filter { it.value == value }.map { it.danger }
+        return when {
+            flags.any { it == true } -> true
+            flags.any { it == false } -> false
+            else -> null
+        }
+    }
+
+    /** Round 2 (M2): confirmed unless a built-in agent, or one no source flags and one says `false`. Auto always. */
+    fun opencodeAgentNeedsConfirmation(value: String, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot?): Boolean {
+        if (value == ModeVocabulary.AUTO) return true
+        val danger = opencodeAgentDanger(value, controls, opencode)
+        return danger == true || (value !in OPENCODE_BUILTIN_AGENTS && danger != false)
+    }
+
+    /**
+     * An agent's display name: its cleaned label, plus " (value)" whenever the value is not the label
+     * or the label copies a built-in's, so an agent calling itself "Plan" that is not `plan` shows so.
+     */
+    fun opencodeAgentLabel(value: String, label: String): String {
+        val clean = LabelText.label(label).ifEmpty { return LabelText.label(value) }
+        val v = value.lowercase()
+        val l = clean.lowercase()
+        if ((v to l) in OPENCODE_BUILTIN_PAIRS) return clean
+        val collides = l in OPENCODE_BUILTIN_LABELS
+        return if (collides || l != v) "$clean (${LabelText.label(value)})" else clean
+    }
+
+    const val UNKNOWN_MODE_HINT = "This app doesn't know this mode; it may run tools without asking"
 
     /**
      * chat-view.tsx:2278-2289: the row in force — the operator's pin, else the CLI default the
@@ -127,6 +192,7 @@ object ComposerControlsModel {
         controls: ServerMessage.SessionControls?,
         codex: ProviderControlsState<CodexSnapshot>?,
         pinnedModels: List<String>,
+        opencode: ProviderControlsState<OpencodeSnapshot>? = null,
     ): ComposerControls {
         val provider = session.provider
         val codexV2 = provider == "codex" && session.engineGeneration == CODEX_V2
@@ -141,9 +207,24 @@ object ComposerControlsModel {
             null
         }
         val modeProviders = provider in setOf("claude", "opencode", "reasonix", "pi")
-        val modeChoices = modeOptions(session, controls)
+        val offeredModes = modeOptions(session, controls, opencode?.snapshot)
         val stored = if (provider == "opencode" && session.approvalPolicy == "never") ModeVocabulary.AUTO else session.permissionMode ?: "default"
-        val effectiveMode = if (modeChoices.any { it.value == stored }) stored else "default"
+        // Round 2 (M1): a stored posture this app does not know is shown as exactly that, with a
+        // warning — never as the safe default. Not selectable (the client would refuse it anyway).
+        val unknownPolicy = session.approvalPolicy?.takeIf { provider == "opencode" && it != "never" }
+        val unknown = when {
+            !modeProviders -> null
+            unknownPolicy != null -> ModeChoice(UNKNOWN_POLICY_VALUE, "Unknown approval policy (${LabelText.label(unknownPolicy)})", UNKNOWN_MODE_HINT, danger = true)
+            offeredModes.none { it.value == stored } && !(provider == "opencode" && stored == ModeVocabulary.AUTO) ->
+                ModeChoice(stored, "Unknown mode (${LabelText.label(stored)})", UNKNOWN_MODE_HINT, danger = true)
+            else -> null
+        }
+        val modeChoices = if (unknown != null) offeredModes + unknown else offeredModes
+        val effectiveMode = when {
+            unknown != null -> unknown.value
+            modeChoices.any { it.value == stored } -> stored
+            else -> "default"
+        }
         val currentMode = modeChoices.firstOrNull { it.value == effectiveMode }
 
         val autoSupported = provider == "claude" || (provider == "opencode" && session.engineGeneration == OPENCODE_V2) || codexV2
@@ -196,7 +277,7 @@ object ComposerControlsModel {
                 val defaultEffort = resolveDefaultEffort(controls?.defaultReasoningEffort, variants)
                 val effortValue = session.reasoningEffort?.takeIf { it.isNotEmpty() } ?: defaultEffort
                 if (variants.isNotEmpty()) {
-                    val rows = variants.map { ControlOption(it.value, it.label.ifEmpty { it.value }) }
+                    val rows = variants.take(LabelText.MAX_ITEMS).map { ControlOption(it.value, LabelText.label(it.label).ifEmpty { LabelText.label(it.value) }) }
                     effort = SelectControl(
                         value = effortValue,
                         options = if (effortValue.isNotEmpty()) rows else listOf(ControlOption("", "Default", "The model's default reasoning effort")) + rows,
@@ -207,7 +288,7 @@ object ComposerControlsModel {
             if (modeProviders) {
                 mode = SelectControl(
                     value = effectiveMode,
-                    options = modeChoices.map { ControlOption(it.value, it.label, it.hint, danger = it.danger) },
+                    options = modeChoices.map { ControlOption(it.value, it.label, it.hint, danger = it.danger, disabled = it === unknown) },
                 )
             }
         }
@@ -237,6 +318,7 @@ object ComposerControlsModel {
             fastMode = fastMode,
             hint = hint,
             hintDanger = currentMode?.danger == true || autoOn,
+            unknownMode = unknown != null,
         )
     }
 
@@ -258,12 +340,12 @@ object ComposerControlsModel {
     fun groupModelOptions(models: List<SessionModelOption>, pinned: List<String>): Pair<List<ControlOption>, List<ControlOption>> {
         fun toOption(m: SessionModelOption) = ControlOption(
             value = m.value,
-            label = m.displayName.ifEmpty { m.value },
-            description = m.description ?: if (m.value == "" || m.value == "default") "The CLI's default model" else null,
-            tag = m.providerLabel?.takeIf { it.isNotEmpty() },
+            label = LabelText.label(m.displayName).ifEmpty { LabelText.label(m.value) },
+            description = m.description?.let(LabelText::hint)?.ifEmpty { null } ?: if (m.value == "" || m.value == "default") "The CLI's default model" else null,
+            tag = LabelText.label(m.providerLabel).ifEmpty { null },
         )
-        val live = models.filter { it.legacy != true }.map(::toOption)
-        val legacy = models.filter { it.legacy == true }
+        val live = models.take(LabelText.MAX_ITEMS).filter { it.legacy != true }.map(::toOption)
+        val legacy = models.take(LabelText.MAX_ITEMS).filter { it.legacy == true }
         val pinnedRows = legacy.filter { it.value in pinned }.map(::toOption)
         val unpinned = legacy.filter { it.value !in pinned }.map(::toOption)
         return (live + pinnedRows) to unpinned
@@ -275,6 +357,9 @@ object ComposerControlsModel {
         if (effort.isEmpty()) return ""
         return if (variants.any { it.value == effort }) effort else ""
     }
+
+    /** The synthetic row's value for an unknown opencode approval policy (never a real mode). */
+    const val UNKNOWN_POLICY_VALUE = "__unknown_approval_policy__"
 
     const val LEGACY_NOTE = "Not advertised by your CLI, so this list can be out of date and may include " +
         "models your account cannot use — the CLI validates on the next turn."

@@ -46,29 +46,46 @@ sealed interface SessionControl {
     /** `set-fast-mode` (v95, Claude, a model that reports supportsFastMode). */
     data class FastMode(val enabled: Boolean) : SessionControl
 
+    /**
+     * A provider action (Codex / opencode-serve): bound to the [revision] of the catalog snapshot the
+     * row or panel was drawn from. The client refuses it when the snapshot has moved on (round 2, L1)
+     * and sends exactly this revision.
+     */
+    sealed interface ProviderAction : SessionControl {
+        val revision: String
+    }
+
     /** Codex `set-model-selection`: a catalog model and one of ITS efforts. */
-    data class CodexModelSelection(val modelId: String, val effortId: String) : SessionControl
+    data class CodexModelSelection(val modelId: String, val effortId: String, override val revision: String) : ProviderAction
 
     /** Codex `set-collaboration-mode`: a catalog item id. */
-    data class CodexCollaboration(val collaborationId: String) : SessionControl
+    data class CodexCollaboration(val collaborationId: String, override val revision: String) : ProviderAction
 
     /** Codex `set-approval-policy`: Auto approve on ("never") or off (null). On needs [confirmed]. */
-    data class CodexAutoApprove(val enabled: Boolean, val confirmed: Boolean = false) : SessionControl
+    data class CodexAutoApprove(val enabled: Boolean, override val revision: String, val confirmed: Boolean = false) : ProviderAction
 
     /** Codex `set-skill-enabled`: a catalog skill. */
-    data class CodexSkill(val skillId: String, val enabled: Boolean) : SessionControl
+    data class CodexSkill(val skillId: String, val enabled: Boolean, override val revision: String) : ProviderAction
 
     /** Codex `start-review`. */
-    data class CodexReview(val target: ReviewTarget, val delivery: String) : SessionControl
+    data class CodexReview(val target: ReviewTarget, val delivery: String, override val revision: String) : ProviderAction
 
     /** Codex `start-compaction`. */
-    data object CodexCompaction : SessionControl
+    data class CodexCompaction(override val revision: String) : ProviderAction
 
     /** opencode-serve `set-model-selection`: a catalog model and null or one of ITS variants. */
-    data class OpencodeModelSelection(val modelId: String, val variantId: String?) : SessionControl
+    data class OpencodeModelSelection(val modelId: String, val variantId: String?, override val revision: String) : ProviderAction
 
-    /** opencode-serve `set-mode`: a catalog agent. A danger agent needs [confirmed]. */
-    data class OpencodeMode(val mode: String, val confirmed: Boolean = false) : SessionControl
+    /** opencode-serve `set-mode`: a catalog agent. A possibly-permissive agent needs [confirmed]. */
+    data class OpencodeMode(val mode: String, override val revision: String, val confirmed: Boolean = false) : ProviderAction
+}
+
+/** [this] re-issued as confirmed by the operator (the confirmation dialog), or null when it has no such flag. */
+fun SessionControl.confirmedCopy(): SessionControl? = when (this) {
+    is SessionControl.Mode -> copy(confirmed = true)
+    is SessionControl.CodexAutoApprove -> copy(confirmed = true)
+    is SessionControl.OpencodeMode -> copy(confirmed = true)
+    else -> null
 }
 
 /** codex-control-action `start-review` targets (validateCodexReviewTarget). */
@@ -100,20 +117,36 @@ object SessionControlsGuard {
     ): ControlResult? {
         val offered = ComposerControlsModel.derive(session, controls, codex?.let { ProviderControlsState(it, false, null) }, emptyList())
         val provider = session.provider
+        if (control is SessionControl.ProviderAction) {
+            val current = when (control) {
+                is SessionControl.OpencodeModelSelection, is SessionControl.OpencodeMode -> opencode?.revision
+                else -> codex?.revision
+            }
+            // Drawn from a catalog that has since been replaced (or from none on this socket).
+            if (current == null || current != control.revision) return ControlResult.NotOffered
+        }
         return when (control) {
             is SessionControl.Mode -> {
                 if (provider !in MODE_PROVIDERS) return ControlResult.NotOffered
-                val options = ComposerControlsModel.modeOptions(session, controls)
+                val options = ComposerControlsModel.modeOptions(session, controls, opencode)
                 val option = options.firstOrNull { it.value == control.value }
                 val auto = control.value == ModeVocabulary.AUTO && offered.auto != null
                 if (option == null && !auto) return ControlResult.NotOffered
-                if (((option?.danger == true) || control.value == ModeVocabulary.AUTO) && !control.confirmed) ControlResult.NeedsConfirmation else null
+                // Round 2 (M2): an opencode agent is confirmed unless it is a built-in or BOTH
+                // sources that list it leave it undangerous; the static vocabularies by their flag.
+                val escalates = if (provider == "opencode") {
+                    ComposerControlsModel.opencodeAgentNeedsConfirmation(control.value, controls, opencode)
+                } else {
+                    option?.danger == true || control.value == ModeVocabulary.AUTO
+                }
+                if (escalates && !control.confirmed) ControlResult.NeedsConfirmation else null
             }
             is SessionControl.Model -> {
                 if (provider !in MODEL_PROVIDERS) return ControlResult.NotOffered
                 if (control.value == LEGACY_GROUP_VALUE) return ControlResult.NotOffered
                 if (control.typed) {
-                    if (looksLikeModelId(control.value)) null else ControlResult.NotOffered
+                    // The `/model <id>` passthrough exists only on the Claude composer (I2).
+                    if (provider == "claude" && looksLikeModelId(control.value)) null else ControlResult.NotOffered
                 } else {
                     if (controls?.models.orEmpty().any { it.value == control.value }) null else ControlResult.NotOffered
                 }
@@ -153,7 +186,7 @@ object SessionControlsGuard {
                 if (control.delivery != "inline" && control.delivery != "detached") return ControlResult.NotOffered
                 if (validReviewTarget(control.target)) null else ControlResult.NotOffered
             }
-            SessionControl.CodexCompaction -> {
+            is SessionControl.CodexCompaction -> {
                 val snap = codexV2(session, codex) ?: return ControlResult.NotOffered
                 if (snap.compactionStatus == "ready") null else ControlResult.NotOffered
             }
@@ -168,9 +201,10 @@ object SessionControlsGuard {
             is SessionControl.OpencodeMode -> {
                 val snap = opencodeV2(session, opencode) ?: return ControlResult.NotOffered
                 if (!snap.modes.ready) return ControlResult.NotOffered
-                val option = snap.modes.items.firstOrNull { it.value == control.mode } ?: return ControlResult.NotOffered
+                snap.modes.items.firstOrNull { it.value == control.mode } ?: return ControlResult.NotOffered
                 if (!bounded(control.mode, 200)) return ControlResult.NotOffered
-                if ((option.danger == true || control.mode == ModeVocabulary.AUTO) && !control.confirmed) ControlResult.NeedsConfirmation else null
+                val escalates = ComposerControlsModel.opencodeAgentNeedsConfirmation(control.mode, controls, snap)
+                if (escalates && !control.confirmed) ControlResult.NeedsConfirmation else null
             }
         }
     }
@@ -180,47 +214,45 @@ object SessionControlsGuard {
      * (protocol-validate.mjs validateCodexControlAction): the revision of the snapshot the value was
      * checked against, `operatorAction: true`, and a fresh [operatorActionId].
      */
-    fun frame(sessionId: String, control: SessionControl, codex: CodexSnapshot?, opencode: OpencodeSnapshot?, operatorActionId: String): ClientMessage = when (control) {
+    fun frame(sessionId: String, control: SessionControl, operatorActionId: String): ClientMessage = when (control) {
         is SessionControl.Mode -> ClientMessage.SetMode(sessionId, control.value)
         is SessionControl.Model -> ClientMessage.SetModel(sessionId, control.value)
         is SessionControl.Effort -> ClientMessage.SetReasoningEffort(sessionId, control.value)
         is SessionControl.FastMode -> ClientMessage.SetFastMode(sessionId, control.enabled)
-        is SessionControl.CodexModelSelection -> codexAction(sessionId, codex!!, operatorActionId, "set-model-selection") {
+        is SessionControl.CodexModelSelection -> codexAction(sessionId, control.revision, operatorActionId, "set-model-selection") {
             put("modelId", control.modelId)
             put("reasoningEffortId", control.effortId)
         }
-        is SessionControl.CodexCollaboration -> codexAction(sessionId, codex!!, operatorActionId, "set-collaboration-mode") {
+        is SessionControl.CodexCollaboration -> codexAction(sessionId, control.revision, operatorActionId, "set-collaboration-mode") {
             put("collaborationId", control.collaborationId)
         }
-        is SessionControl.CodexAutoApprove -> codexAction(sessionId, codex!!, operatorActionId, "set-approval-policy") {
+        is SessionControl.CodexAutoApprove -> codexAction(sessionId, control.revision, operatorActionId, "set-approval-policy") {
             if (control.enabled) put("approvalPolicy", "never") else put("approvalPolicy", JsonNull)
         }
-        is SessionControl.CodexSkill -> codexAction(sessionId, codex!!, operatorActionId, "set-skill-enabled") {
+        is SessionControl.CodexSkill -> codexAction(sessionId, control.revision, operatorActionId, "set-skill-enabled") {
             put("skillId", control.skillId)
             put("enabled", control.enabled)
         }
-        is SessionControl.CodexReview -> codexAction(sessionId, codex!!, operatorActionId, "start-review") {
+        is SessionControl.CodexReview -> codexAction(sessionId, control.revision, operatorActionId, "start-review") {
             put("target", reviewTargetJson(control.target))
             put("delivery", control.delivery)
         }
-        SessionControl.CodexCompaction -> codexAction(sessionId, codex!!, operatorActionId, "start-compaction") {}
+        is SessionControl.CodexCompaction -> codexAction(sessionId, control.revision, operatorActionId, "start-compaction") {}
         is SessionControl.OpencodeModelSelection -> ClientMessage.OpencodeControlAction(
             sessionId,
-            envelope(opencode!!.revision, operatorActionId, "set-model-selection") {
+            envelope(control.revision, operatorActionId, "set-model-selection") {
                 put("modelId", control.modelId)
                 if (control.variantId != null) put("variantId", control.variantId) else put("variantId", JsonNull)
             },
         )
         is SessionControl.OpencodeMode -> ClientMessage.OpencodeControlAction(
             sessionId,
-            envelope(opencode!!.revision, operatorActionId, "set-mode") { put("mode", control.mode) },
+            envelope(control.revision, operatorActionId, "set-mode") { put("mode", control.mode) },
         )
     }
 
     /** True for controls that travel as `codex-control-action` (their state shows busy until the result). */
-    fun isCodexAction(control: SessionControl): Boolean = control is SessionControl.CodexModelSelection ||
-        control is SessionControl.CodexCollaboration || control is SessionControl.CodexAutoApprove ||
-        control is SessionControl.CodexSkill || control is SessionControl.CodexReview || control == SessionControl.CodexCompaction
+    fun isCodexAction(control: SessionControl): Boolean = control is SessionControl.ProviderAction && !isOpencodeAction(control)
 
     fun isOpencodeAction(control: SessionControl): Boolean =
         control is SessionControl.OpencodeModelSelection || control is SessionControl.OpencodeMode
@@ -228,9 +260,22 @@ object SessionControlsGuard {
     /** validateCodexReviewTarget: branch 1-200 units, a 7-64 hex sha (title null), instructions 1-4096. */
     fun validReviewTarget(target: ReviewTarget): Boolean = when (target) {
         ReviewTarget.UncommittedChanges -> true
-        is ReviewTarget.BaseBranch -> bounded(target.branch, 200)
+        is ReviewTarget.BaseBranch -> bounded(target.branch, 200) && validBranchName(target.branch)
         is ReviewTarget.Commit -> SHA.matches(target.sha)
         is ReviewTarget.Custom -> bounded(target.instructions, 4096)
+    }
+
+    /**
+     * I3: a base branch the way `git check-ref-format --branch` accepts one: no leading "-" (never
+     * read as an option), no whitespace, control or `~^:?*[\\` characters, no "..", "@{" or "//", not
+     * "@", no leading/trailing "/" or ".", no component starting with "." or ending in ".lock".
+     */
+    fun validBranchName(name: String): Boolean {
+        if (name.isEmpty() || name.startsWith("-") || name == "@") return false
+        if (name.any { it.isWhitespace() || it.isISOControl() || it == '\u007f' || it in "~^:?*[\\" }) return false
+        if (name.contains("..") || name.contains("@{") || name.contains("//")) return false
+        if (name.startsWith("/") || name.endsWith("/") || name.endsWith(".")) return false
+        return name.split('/').none { it.startsWith(".") || it.endsWith(".lock") }
     }
 
     private fun reviewTargetJson(target: ReviewTarget): JsonObject = buildJsonObject {
@@ -244,11 +289,11 @@ object SessionControlsGuard {
 
     private fun codexAction(
         sessionId: String,
-        snapshot: CodexSnapshot,
+        revision: String,
         operatorActionId: String,
         type: String,
         fields: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
-    ): ClientMessage = ClientMessage.CodexControlAction(sessionId, envelope(snapshot.revision, operatorActionId, type, fields))
+    ): ClientMessage = ClientMessage.CodexControlAction(sessionId, envelope(revision, operatorActionId, type, fields))
 
     private fun envelope(revision: String, operatorActionId: String, type: String, fields: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject {
         put("type", type)

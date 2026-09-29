@@ -136,7 +136,102 @@ class SessionControlsPhoneBehaviourTest {
         h.click("session-settings-trigger")
         h.click("sheet-row-Model")
         h.click("control-option-claude-sonnet-5")
-        assertEquals(listOf(SessionControl.Effort(""), SessionControl.Model("claude-sonnet-5")), h.recorder.sent)
+        // Round 2 (L3): the effort is cleared only once the model itself went out.
+        assertEquals(listOf(SessionControl.Model("claude-sonnet-5"), SessionControl.Effort("")), h.recorder.sent)
+    }
+
+    @Test
+    fun aRefusedModelLeavesTheEffortAlone() {
+        h.session = SessionControlFixtures.claude.copy(reasoningEffort = "high")
+        h.recorder.result = ControlResult.NotOffered
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Model")
+        h.click("control-option-claude-sonnet-5")
+        assertEquals(listOf<SessionControl>(SessionControl.Model("claude-sonnet-5")), h.recorder.sent)
+    }
+
+    @Test
+    fun anUnknownStoredModeWarnsOnTheKeyAndIsNotSelectable() {
+        h.session = SessionControlFixtures.claude.copy(permissionMode = "dontAsk")
+        h.show()
+        rule.onNodeWithTag("session-settings-trigger").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Session settings: Opus (1M context), unknown mode")),
+        )
+        rule.onNodeWithText("Unknown", useUnmergedTree = true).assertExists()
+        h.click("session-settings-trigger")
+        rule.onNodeWithTag("sheet-row-Mode").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Mode: Unknown mode (dontAsk)")))
+        h.click("sheet-row-Mode")
+        h.arm()
+        rule.onNodeWithTag("control-option-dontAsk").assertIsNotEnabled()
+        assertTrue(h.recorder.sent.isEmpty())
+    }
+
+    @Test
+    fun providerKeysReArmWhenTheCatalogIsReplaced() {
+        h.session = SessionControlFixtures.codex
+        h.controls = null
+        h.codex = SessionControlFixtures.codexState
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Provider controls")
+        h.click("codex-compact")
+        assertTrue("armed: the first tap as the panel appears lands on nothing", h.recorder.sent.isEmpty())
+        h.arm()
+        h.click("codex-compact")
+        assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-3")), h.recorder.sent)
+        // The catalog is re-read: the keys re-arm for the new snapshot.
+        h.codex = SessionControlFixtures.codexStateNext
+        h.settle(16)
+        h.click("codex-compact")
+        assertEquals(1, h.recorder.sent.size)
+        h.arm()
+        h.click("codex-compact")
+        assertEquals(SessionControl.CodexCompaction("catalog-4"), h.recorder.sent.last())
+    }
+
+    @Test
+    fun aClientAskingForConfirmationOpensTheDialogForThatControl() {
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.opencodeControls
+        h.opencode = SessionControlFixtures.opencodeState
+        h.recorder.resultFor = { c -> if (c is SessionControl.OpencodeMode && !c.confirmed) ControlResult.NeedsConfirmation else ControlResult.Sent }
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Provider controls")
+        h.arm()
+        h.click("opencode-apply-mode")
+        rule.onNodeWithText("Confirm the change to continue.").assertDoesNotExist()
+        rule.onNodeWithText("Turn on Build?").assertExists()
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(
+            listOf<SessionControl>(SessionControl.OpencodeMode("default", "oc-1"), SessionControl.OpencodeMode("default", "oc-1", confirmed = true)),
+            h.recorder.sent,
+        )
+    }
+
+    @Test
+    fun aPermissiveAgentCalledPlanIsConfirmedFromThePanel() {
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.sneakyOpencodeControls
+        h.opencode = SessionControlFixtures.sneakyOpencodeState
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Provider controls")
+        rule.onNodeWithContentDescription("opencode agent/mode").performClick()
+        h.settle()
+        rule.onNodeWithContentDescription("Plan (planx), Plans only (really: everything)").performClick()
+        h.settle()
+        h.arm()
+        h.click("opencode-apply-mode")
+        assertTrue("confirmation first", h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on Plan (planx)?").assertExists()
+        rule.onNodeWithText("Plans only (really: everything). It stays on for this session until you switch it back.").assertExists()
+        rule.onNodeWithText("Session: \u2068Sketch the sync outbox\u2069").assertExists()
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("planx", "oc-1", confirmed = true)), h.recorder.sent)
     }
 
     @Test
@@ -284,9 +379,10 @@ class SessionControlsPhoneBehaviourTest {
         h.click("session-settings-trigger")
         h.click("sheet-row-Provider controls")
         assertEquals("opening the panel re-reads the catalogs", 1, h.recorder.codexReads)
+        h.arm()
         rule.onNodeWithTag("codex-compact").performClick()
         h.settle()
-        assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-3")), h.recorder.sent)
     }
 
     @Test
@@ -302,7 +398,7 @@ class SessionControlsPhoneBehaviourTest {
         assertTrue(h.recorder.sent.isEmpty())
         h.arm()
         h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.CodexAutoApprove(true, confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)), h.recorder.sent)
     }
 }
 
@@ -358,9 +454,35 @@ class SessionControlsTabletBehaviourTest {
         h.click("control-effort")
         h.click("control-option-medium")
         assertEquals(
-            listOf<SessionControl>(SessionControl.CodexModelSelection("gpt-5.5-mini", "low"), SessionControl.CodexModelSelection("gpt-5.5", "medium")),
+            listOf<SessionControl>(SessionControl.CodexModelSelection("gpt-5.5-mini", "low", "catalog-3"), SessionControl.CodexModelSelection("gpt-5.5", "medium", "catalog-3")),
             h.recorder.sent,
         )
+    }
+
+    @Test
+    fun aPermissiveAgentCalledPlanIsConfirmedFromTheRow() {
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.sneakyOpencodeControls
+        h.show()
+        h.click("control-mode")
+        h.arm()
+        rule.onNodeWithTag("control-option-planx").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Plan (planx), Plans only (really: everything)")))
+        h.click("control-option-planx")
+        assertTrue(h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on Plan (planx)?").assertExists()
+        h.arm()
+        h.click("escalation-confirm")
+        assertEquals(listOf<SessionControl>(SessionControl.Mode("planx", confirmed = true)), h.recorder.sent)
+    }
+
+    @Test
+    fun fastModeIsReachableFromTheWideRow() {
+        h.show()
+        h.click("control-fast")
+        assertTrue("opening is a read", h.recorder.sent.isEmpty())
+        h.arm()
+        h.click("control-option-on")
+        assertEquals(listOf<SessionControl>(SessionControl.FastMode(true)), h.recorder.sent)
     }
 
     @Test

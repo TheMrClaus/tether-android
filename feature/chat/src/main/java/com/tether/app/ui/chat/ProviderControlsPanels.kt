@@ -84,27 +84,21 @@ internal fun CodexControlsPanel(state: ProviderControlsState<CodexSnapshot>?, lo
                 )
             }
             ReviewForm(snapshot, enabled = !busy && !locked, onControl = onControl)
-            TetherKey(
-                onClick = { onControl(SessionControl.CodexCompaction) },
-                classes = KeyClasses.ButtonSecondary,
-                label = "Compact context",
-                icon = TetherIcons.RotateCcw,
-                enabled = !busy && !locked && snapshot.compactionStatus == "ready",
-                modifier = Modifier.testTag("codex-compact"),
-            )
+            ArmedPanelKey(
+                snapshot.revision, "compact", "Compact context", icon = TetherIcons.RotateCcw,
+                enabled = !busy && !locked && snapshot.compactionStatus == "ready", tag = "codex-compact",
+            ) { onControl(SessionControl.CodexCompaction(snapshot.revision)) }
         }
         PanelSection("Skills", TetherIcons.PackageCheck) {
             if (snapshot.skills.ready && snapshot.skills.items.isNotEmpty()) {
                 snapshot.skills.items.forEach { skill ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ItemCopy(skill.name, skill.description, "${skill.scope} · ${if (skill.enabled) "Enabled" else "Disabled"}", Modifier.weight(1f))
-                        TetherKey(
-                            onClick = { onControl(SessionControl.CodexSkill(skill.id, !skill.enabled)) },
-                            classes = KeyClasses.ButtonSecondary,
-                            label = if (skill.enabled) "Disable" else "Enable",
-                            enabled = !busy && !locked,
+                        ArmedPanelKey(
+                            snapshot.revision, "skill:${skill.id}:${skill.enabled}", if (skill.enabled) "Disable" else "Enable",
+                            enabled = !busy && !locked, tag = "codex-skill-${skill.id}",
                             contentDescription = "${if (skill.enabled) "Disable" else "Enable"} ${skill.name} skill",
-                        )
+                        ) { onControl(SessionControl.CodexSkill(skill.id, !skill.enabled, snapshot.revision)) }
                     }
                 }
             } else {
@@ -214,13 +208,9 @@ private fun ReviewForm(snapshot: CodexSnapshot, enabled: Boolean, onControl: (Se
         enabled = enabled,
         contentDescription = "Review delivery",
     )
-    TetherKey(
-        onClick = { if (ready) onControl(SessionControl.CodexReview(target, delivery)) },
-        classes = KeyClasses.ButtonSecondary,
-        label = "Start review",
-        enabled = enabled && ready,
-        modifier = Modifier.testTag("codex-start-review"),
-    )
+    ArmedPanelKey(snapshot.revision, "review", "Start review", enabled = enabled && ready, tag = "codex-start-review") {
+        if (ready) onControl(SessionControl.CodexReview(target, delivery, snapshot.revision))
+    }
 }
 
 /**
@@ -236,7 +226,9 @@ internal fun OpencodeControlsPanel(
     selectedMode: String,
     locked: Boolean,
     onControl: (SessionControl) -> Unit,
-    onDangerMode: (String, String) -> Unit,
+    /** Round 2 (M2): the one rule the row, the sheet and the client share. */
+    needsConfirmation: (String) -> Boolean,
+    onDangerMode: (SessionControl) -> Unit,
 ) {
     val snapshot = state?.snapshot
     val busy = state?.busy == true
@@ -278,15 +270,9 @@ internal fun OpencodeControlsPanel(
                     enabled = !busy && !locked && variants.isNotEmpty(),
                     contentDescription = "opencode reasoning-effort variant",
                 )
-                TetherKey(
-                    onClick = {
-                        onControl(SessionControl.OpencodeModelSelection(modelDraft, if (variants.isNotEmpty() && variantDraft.isNotEmpty()) variantDraft else null))
-                    },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = "Apply model settings",
-                    enabled = !busy && !locked && modelDraft.isNotEmpty(),
-                    modifier = Modifier.testTag("opencode-apply-model"),
-                )
+                ArmedPanelKey(snapshot.revision, "apply-model", "Apply model settings", enabled = !busy && !locked && modelDraft.isNotEmpty(), tag = "opencode-apply-model") {
+                    onControl(SessionControl.OpencodeModelSelection(modelDraft, if (variants.isNotEmpty() && variantDraft.isNotEmpty()) variantDraft else null, snapshot.revision))
+                }
             }
         }
         PanelSection("Agent / mode", TetherIcons.Bot) {
@@ -295,27 +281,56 @@ internal fun OpencodeControlsPanel(
             } else {
                 FieldLabel("Agent (--agent)")
                 TetherSelect(
-                    options = snapshot.modes.items.map { TetherSelectOption(it.value, it.label.ifEmpty { it.value }, description = it.hint.ifEmpty { null }, danger = it.danger == true) },
+                    options = snapshot.modes.items.map {
+                        TetherSelectOption(
+                            it.value,
+                            com.tether.app.client.ComposerControlsModel.opencodeAgentLabel(it.value, it.label),
+                            description = it.hint.ifEmpty { null },
+                            danger = needsConfirmation(it.value),
+                        )
+                    },
                     selectedValue = modeDraft,
                     onSelect = { modeDraft = it.value },
                     style = SelectTriggerStyle.Field,
                     enabled = !busy && !locked,
                     contentDescription = "opencode agent/mode",
                 )
-                TetherKey(
-                    onClick = {
-                        val option = snapshot.modes.items.firstOrNull { it.value == modeDraft }
-                        if (option?.danger == true) onDangerMode(modeDraft, option.label.ifEmpty { modeDraft }) else onControl(SessionControl.OpencodeMode(modeDraft))
-                    },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = "Apply agent / mode",
-                    enabled = !busy && !locked && modeDraft.isNotEmpty(),
-                    modifier = Modifier.testTag("opencode-apply-mode"),
-                )
+                ArmedPanelKey(snapshot.revision, "apply-mode", "Apply agent / mode", enabled = !busy && !locked && modeDraft.isNotEmpty(), tag = "opencode-apply-mode") {
+                    val control = SessionControl.OpencodeMode(modeDraft, snapshot.revision)
+                    if (needsConfirmation(modeDraft)) onDangerMode(control) else onControl(control)
+                }
             }
         }
         Feedback(if (busy) "Applying operator action…" else state.message)
     }
+}
+
+/**
+ * Round 2 (L2): a provider action key, armed for the snapshot it was drawn from (T6.3/T6.4): usable
+ * [CONSENT_ARM_DELAY_MS] after the panel (or a new catalog revision) appears, and again after it
+ * moves; touches through an overlay are refused. Only its tap calls [onTap].
+ */
+@Composable
+private fun ArmedPanelKey(
+    revision: String,
+    id: String,
+    label: String,
+    enabled: Boolean,
+    tag: String,
+    icon: ImageVector? = null,
+    contentDescription: String? = null,
+    onTap: () -> Unit,
+) {
+    val arming = rememberArmedControl(revision to id, enabled)
+    TetherKey(
+        onClick = { if (arming.armed) onTap() },
+        classes = KeyClasses.ButtonSecondary,
+        label = label,
+        icon = icon,
+        enabled = enabled && arming.armed,
+        contentDescription = contentDescription,
+        modifier = arming.modifier.testTag(tag),
+    )
 }
 
 @Composable
