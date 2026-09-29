@@ -5,14 +5,15 @@ web reference (Chromium headless, phone 412×915 @DPR 2.625, tablet 1280×800, s
 composer goldens in `feature/chat/src/test/screenshots/composer-*`.
 
 The goldens render `Composer` alone: 412dp at 420dpi on a phone, the web desktop chat column's 950dp at
-mdpi on a tablet. The app still draws the legacy mode row (Mode pill + model chip) ABOVE the well; the
-web seats Model / Effort / Mode inside the well's toolbar, and that row is T7.2's. So the pairs are
-bottom-aligned bands: the whole well on a phone, the toolbar's footer row on a tablet.
+mdpi on a tablet. The pairs are bottom-aligned bands: the whole well on a phone, the toolbar's footer
+row on a tablet. Since T7.2 the goldens carry the web scenario's controls: the phone well has the
+combined Model/settings key and the tablet toolbar the Model / Mode row above its footer (see
+`../controls/README.md`); the legacy mode row above the well is gone.
 
 | Montage | Web scenario | What matches | Explained differences |
 |---|---|---|---|
-| `idle-<skin>-phone.png` | idle-session | ONE recessed well (`.chat-composer-well`): the text field on top at 1rem / line-height 1.5 with the 0.6rem·`space-md` padding, the key bank at its foot (`space-xs` gap, `xs sm sm` padding), the 44dp paperclip key with the key radius, the icon-only 44dp Send key disabled while the draft is empty, the placeholder in Chromium's default `#757575` (Studio: `--faint`), the well's `--well` shadow and `--line-strong` edge, Studio's raised graphite card (1rem radius, soft drop shadow) | (1) The web's toolbar also holds the browser-pane key (T8.6) and the combined Model/settings key (T7.2), which the app does not have yet; the space between the paperclip and Send is empty until T7.2. (2) Glyph rasterization. |
-| `busy-<skin>-phone.png` | streaming | the busy placeholder "Agent is working — message queues", Interrupt as the only action key (an empty Queue key is hidden on a phone, globals.css:11944), the brick Interrupt face | As above. The run row ("Working… 9m · 960 tokens" on the web) sits above the mode row in the app, so it is outside the band; its verb is `spinnerWordFor(turnId, run)`, which differs with the fixture's turn id. |
+| `idle-<skin>-phone.png` | idle-session | ONE recessed well (`.chat-composer-well`): the text field on top at 1rem / line-height 1.5 with the 0.6rem·`space-md` padding, the key bank at its foot (`space-xs` gap, `xs sm sm` padding), the 44dp paperclip key with the key radius, the icon-only 44dp Send key disabled while the draft is empty, the placeholder in Chromium's default `#757575` (Studio: `--faint`), the well's `--well` shadow and `--line-strong` edge, Studio's raised graphite card (1rem radius, soft drop shadow) | (1) The web's toolbar also holds the browser-pane key (T8.6), so the app's Model/settings key (T7.2) starts one key earlier and is wider. (2) Glyph rasterization. |
+| `busy-<skin>-phone.png` | streaming | the busy placeholder "Agent is working — message queues", Interrupt as the only action key (an empty Queue key is hidden on a phone, globals.css:11944), the brick Interrupt face | As above. The run row ("Working… 9m · 960 tokens" on the web) sits above the well, outside the band; its verb is `spinnerWordFor(turnId, run)`, which differs with the fixture's turn id. |
 | `idle-<skin>-tablet.png` | idle-session | the desktop footer: the 1.9rem round paperclip (a 2.75rem soft square in Studio), the `SESSION` readout beside it (0.56rem/700 tracked label, JetBrains Mono 0.66rem values; Studio "Session" in the UI face), the labelled 2.1rem Send key (2.75rem in Studio) on the right | (1) The web's idle turn settled with one token of usage; the fixture's turn settled with none, so the app reads "0 tokens" where the web reads "1 token". (2) The web footer has the browser-pane key (T8.6). |
 
 States with goldens but no web counterpart (the seeder has no draft or queue scene):

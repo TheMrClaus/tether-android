@@ -8,8 +8,8 @@
 # (parity-corpus/screens/web, tools/parity/sync-corpus.sh).
 #
 # The goldens render the composer deck alone (Composer at 412dp / 420dpi on a phone, 950dp / mdpi
-# on a tablet). The legacy mode row above the app's well has no web counterpart (the web seats
-# Model / Mode inside the well's toolbar; that row is T7.2), so the pairs are BOTTOM-aligned bands:
+# on a tablet). The pairs are BOTTOM-aligned bands (since T7.2 the well carries the web's Model /
+# settings key on a phone and the Model / Mode row above the footer on a tablet):
 # - phone: the well and the deck padding under it, the bottom 288px of both images;
 # - tablet: the toolbar's footer row (attach, SESSION readout, Send) and the padding under it, the
 #   bottom 60px of the golden against the same band of the web desktop frame's deck.

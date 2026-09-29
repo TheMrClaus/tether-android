@@ -47,7 +47,8 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
             Composer(
                 session = ComposerFixtures.session,
                 projection = fixture.projection,
-                controls = null,
+                // T7.2: the web idle-session's controls (Opus (1M context), Manual) on a live session.
+                controls = SessionControlFixtures.claudeIdleControls,
                 serverNow = { ComposerFixtures.BUSY_NOW },
                 onSend = { _, _ -> true },
                 onInterrupt = {},
@@ -55,6 +56,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onQueueRemove = {},
                 onRequestControls = {},
                 initialDraft = draft,
+                controlActions = SessionControlFixtures.Recorder().actions(),
             )
         }
     }
