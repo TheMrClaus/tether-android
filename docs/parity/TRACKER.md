@@ -320,7 +320,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 | **Next draft is 0.7.6, built after T6.6 merges** (T13.2 + T6.6); 0.7.4/0.7.5 stay unpublished drafts | Owner choice | owner |
 | 2026-09-29 | **Owner deploying tether #209, #212, #216** (then reopen each running service once from the Services panel) | Owner action | owner |
 | 2026-09-29 | **No SSO bypass here: the owner disables the SSO gateway on this box.** The app must still work for self-hosters behind their OWN SSO/reverse-proxy gateway (design task filed), including passkeys, which need `/.well-known/assetlinks.json` reachable | Self-hosting; gateway-agnostic | owner |
-| 2026-09-29 | **Skip Firebase entirely (reverses PLAN "FCM stays a hard dependency").** Push gets a Firebase-free design first (e.g. UnifiedPush/ntfy or a self-hosted distributor); FCM-only work is parked until that design is reviewed | Self-hosters should not need a Google project | owner |
+| 2026-09-29 | **Push supports BOTH bring-your-own-Firebase per instance AND a Firebase-free path** (corrects an earlier "skip Firebase entirely" reading; tether `docs/self-hosting-push.md` covers BYO-Firebase). FCM work continues; ta-nrq designs the Firebase-free path (e.g. UnifiedPush with a self-hosted distributor) alongside it | Self-hosters choose; nobody is forced onto a Google project | owner |
 
 ## Session log (append-only)
 

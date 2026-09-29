@@ -43,7 +43,7 @@ background catch-up) so the app behaves *better* than a browser tab on a phone.
 - iOS / KMP multiplatform. (Keep `:core:*` modules free of Android APIs where cheap, so
   KMP stays possible later, but do not pay for it now.)
 - ~~De-Googled devices: FCM stays a hard dependency for push (prior owner decision).~~ **Superseded 2026-09-29:**
-  the owner decided to skip Firebase entirely; push gets a Firebase-free design first (bead ta-nrq, TRACKER Decision log).
+  push supports BOTH bring-your-own-Firebase per instance AND a Firebase-free path (design: bead ta-nrq; TRACKER Decision log).
 - Play Store distribution. Distribution stays APK via GitHub Releases / Obtainium
   (existing `.github/workflows/android-release.yml`).
 
