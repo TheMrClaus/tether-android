@@ -304,7 +304,7 @@ fun Composer(
             flash(
                 when {
                     isDefaultChoice -> "Model reset to the CLI default."
-                    unlisted -> "Model set to $value — not in the known list, so the CLI validates it on the next turn."
+                    unlisted -> "Model set to ${LabelText.visibleValue(value)} — not in the known list, so the CLI validates it on the next turn."
                     else -> "Model set to $displayName."
                 },
             )
@@ -323,7 +323,9 @@ fun Composer(
             return
         }
         if (sendControl(SessionControl.Effort(value))) {
-            flash(if (value.isNotEmpty()) "Reasoning effort set to $value." else "Reasoning effort reset to the model's default.")
+            // Round 4 (F1): the chosen option's cleaned label, never the raw value.
+            val shown = c.effort?.options?.firstOrNull { it.value == value }?.label ?: LabelText.label(value).ifEmpty { LabelText.visibleValue(value) }
+            flash(if (value.isNotEmpty()) "Reasoning effort set to $shown." else "Reasoning effort reset to the model's default.")
         }
     }
 
@@ -412,7 +414,7 @@ fun Composer(
             return
         }
         if (info != null && !info.supported) {
-            flash("/${info.name} isn’t available in Tether yet — run it from a terminal (claude --resume …).")
+            flash("/${LabelText.label(info.name)} isn’t available in Tether yet — run it from a terminal (claude --resume …).")
             setDraft("")
             return
         }
@@ -427,7 +429,7 @@ fun Composer(
             return
         }
         if (!command.supported) {
-            flash("/${command.name} isn’t available in Tether yet — run it from a terminal.")
+            flash("/${LabelText.label(command.name)} isn’t available in Tether yet — run it from a terminal.")
             setDraft("")
             return
         }

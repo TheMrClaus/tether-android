@@ -97,7 +97,12 @@ class ComposerControlsModelTest {
         assertEquals("Plan", ComposerControlsModel.opencodeAgentLabel("plan", "Plan"))
         assertEquals("Plan (planx)", ComposerControlsModel.opencodeAgentLabel("planx", "Plan"))
         assertEquals("Build (yolo)", ComposerControlsModel.opencodeAgentLabel("yolo", "Build"))
-        assertEquals("Review", ComposerControlsModel.opencodeAgentLabel("review", "Review"))
+        // Round 4 (P3): case-sensitive — only an exact label/value match stays bare.
+        assertEquals("Review (review)", ComposerControlsModel.opencodeAgentLabel("review", "Review"))
+        assertEquals("Review (REVIEW)", ComposerControlsModel.opencodeAgentLabel("REVIEW", "Review"))
+        assertEquals("review", ComposerControlsModel.opencodeAgentLabel("review", "review"))
+        assertTrue(ComposerControlsModel.opencodeAgentLabel("review", "Review") != ComposerControlsModel.opencodeAgentLabel("REVIEW", "Review"))
+        assertEquals("Unknown approval policy (on\\u{200B}request)", derive(session("opencode", engine = OPENCODE_V2).copy(approvalPolicy = "on\u200Brequest"), null).mode!!.label)
         assertEquals("Reviewer (review)", ComposerControlsModel.opencodeAgentLabel("review", "Reviewer"))
         assertEquals("review", ComposerControlsModel.opencodeAgentLabel("review", ""))
         // Round 3 (N-M1): the built-in check is on the raw value; hidden characters are spelled out.

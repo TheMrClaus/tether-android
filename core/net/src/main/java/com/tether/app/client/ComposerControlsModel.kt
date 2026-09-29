@@ -177,7 +177,8 @@ object ComposerControlsModel {
         val l = clean.lowercase()
         if ((value to l) in OPENCODE_BUILTIN_PAIRS) return clean
         val collides = l in OPENCODE_BUILTIN_LABELS
-        return if (collides || l != value.lowercase()) "$clean ($shown)" else clean
+        // Round 4 (P3): case-sensitive, so two values that differ only in case never look alike.
+        return if (collides || clean != value) "$clean ($shown)" else clean
     }
 
     const val UNKNOWN_MODE_HINT = "This app doesn't know this mode; it may run tools without asking"
@@ -228,7 +229,7 @@ object ComposerControlsModel {
         val unknownPolicy = session.approvalPolicy?.takeIf { provider == "opencode" && it != "never" }
         val unknown = when {
             !modeProviders -> null
-            unknownPolicy != null -> ModeChoice(UNKNOWN_POLICY_VALUE, "Unknown approval policy (${LabelText.label(unknownPolicy)})", UNKNOWN_MODE_HINT, danger = true)
+            unknownPolicy != null -> ModeChoice(UNKNOWN_POLICY_VALUE, "Unknown approval policy (${LabelText.visibleValue(unknownPolicy)})", UNKNOWN_MODE_HINT, danger = true)
             offeredModes.none { it.value == stored } && !autoByPolicy ->
                 ModeChoice(stored, "Unknown mode (${LabelText.visibleValue(stored)})", UNKNOWN_MODE_HINT, danger = true)
             else -> null

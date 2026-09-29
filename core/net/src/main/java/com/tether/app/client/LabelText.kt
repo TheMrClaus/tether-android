@@ -71,14 +71,21 @@ object LabelText {
         while (i < value.length && out.length <= MAX_LABEL) {
             val cp = value.codePointAt(i)
             i += Character.charCount(cp)
-            if (cp != 0x20 && (bidiControl(cp) || invisibleCodePoint(cp) || Character.getType(cp) == Character.CONTROL.toInt())) {
+            if (cp == '\\'.code) {
+                // Round 4 (P3): a literal backslash is doubled, so "\\u{200B}" typed out can never pass for an escape.
+                out.append("\\\\")
+            } else if (cp != 0x20 && (bidiControl(cp) || invisibleCodePoint(cp) || Character.getType(cp) == Character.CONTROL.toInt())) {
                 out.append("\\u{").append(Integer.toHexString(cp).uppercase().padStart(4, '0')).append('}')
             } else {
                 out.appendCodePoint(cp)
             }
         }
         if (out.length <= MAX_LABEL && i >= value.length) return out.toString()
-        return ConsentGuard.cutCodePoints(out.toString(), MAX_LABEL - 1) + "…"
+        // Round 4 (P3): a cut value keeps a stable tag of the WHOLE value, so two long values that
+        // share their first characters never display identically.
+        val tag = java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }.take(6)
+        return ConsentGuard.cutCodePoints(out.toString(), MAX_LABEL - 8) + "…#" + tag
     }
 
     fun label(text: String?): String = clean(text, MAX_LABEL)

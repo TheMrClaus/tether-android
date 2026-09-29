@@ -140,7 +140,16 @@ class SessionControlsGuardTest {
         assertEquals("  x", LabelText.visibleValue("  x")) // nothing collapsed or trimmed
         val long = LabelText.visibleValue("\u200B".repeat(1000))
         assertEquals(LabelText.MAX_LABEL, long.length)
-        assertTrue(long.endsWith("…"))
+        assertTrue(long, Regex("…#[0-9a-f]{6}$").containsMatchIn(long))
+        // Round 4 (P3): distinct values never display alike — a literal backslash escape, a shared
+        // 80-character prefix, a difference only in case.
+        assertEquals("\\\\u{200B}", LabelText.visibleValue("\\u{200B}"))
+        assertTrue(LabelText.visibleValue("\\u{200B}") != LabelText.visibleValue("\u200B"))
+        val a = "agent-" + "x".repeat(100) + "-one"
+        val b = "agent-" + "x".repeat(100) + "-two"
+        assertTrue(LabelText.visibleValue(a) != LabelText.visibleValue(b))
+        assertEquals(LabelText.MAX_LABEL, LabelText.visibleValue(a).length)
+        assertEquals("the tag is stable", LabelText.visibleValue(a), LabelText.visibleValue(a))
         // I-c: a huge input is not walked past the bound.
         assertEquals(LabelText.MAX_LABEL, LabelText.label("y".repeat(5_000_000)).length)
     }

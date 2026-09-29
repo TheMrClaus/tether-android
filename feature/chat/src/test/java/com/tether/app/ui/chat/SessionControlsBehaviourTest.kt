@@ -379,6 +379,27 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
+    fun theEffortConfirmationNeverCarriesRawServerText() {
+        // Round 4 (F1): a listed effort of U+202E + 10k characters.
+        val evil = "\u202E" + "e".repeat(10_000)
+        h.controls = SessionControlFixtures.claudeControls.copy(
+            models = SessionControlFixtures.claudeControls.models.map {
+                if (it.value == "claude-opus-5[1m]") it.copy(variants = listOf(com.tether.app.protocol.ModelVariantOption(evil, evil), com.tether.app.protocol.ModelVariantOption("high", "high"))) else it
+            },
+        )
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Effort")
+        rule.onNodeWithTag("control-option-$evil").performClick()
+        h.settle()
+        assertEquals(listOf<SessionControl>(SessionControl.Effort(evil)), h.recorder.sent)
+        val notice = rule.onAllNodes(androidx.compose.ui.test.hasText("Reasoning effort set to", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNodes().single().config[SemanticsProperties.Text].joinToString("") { it.text }
+        assertTrue("${notice.length} chars", notice.length <= 105)
+        assertTrue(!notice.contains('\u202E'))
+    }
+
+    @Test
     fun aRefusedEffortClearIsSaid() {
         h.session = SessionControlFixtures.claude.copy(reasoningEffort = "high")
         h.recorder.resultFor = { c -> if (c is SessionControl.Effort) ControlResult.NotConnected else ControlResult.Sent }

@@ -910,7 +910,7 @@ internal fun EscalationDialog(label: String, body: String, sessionName: String?,
             TetherKey(
                 onClick = { if (arming.armed) onConfirm() },
                 classes = KeyClasses.ButtonDanger,
-                label = "Turn on $label",
+                label = "Turn on \u2068$label\u2069",
                 icon = TetherIcons.Zap,
                 enabled = arming.armed,
                 modifier = arming.modifier.testTag("escalation-confirm"),
