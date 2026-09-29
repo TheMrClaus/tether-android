@@ -1361,7 +1361,7 @@ class RealTetherClient(
                     .newCall(
                         Request.Builder()
                             .url(base.resolve("/api/auth/logout")!!)
-                            .authorize(credential)
+                            .authorize(credential, base)
                             .post(ByteArray(0).toRequestBody("application/json".toMediaType()))
                             .build(),
                     ).execute().use { response ->
@@ -1426,7 +1426,7 @@ class RealTetherClient(
         if (base == null || credential == null) return@withContext StatsResult.Failed(STATS_FALLBACK_ERROR)
         if (blockedBeforeConnect(base)) return@withContext StatsResult.Failed("Local network access is blocked.")
         val url = base.newBuilder().encodedPath("/").addPathSegment("api").addPathSegment("stats").build()
-        val request = Request.Builder().url(url).authorize(credential).header("Cache-Control", "no-store").get().build()
+        val request = Request.Builder().url(url).authorize(credential, base).header("Cache-Control", "no-store").get().build()
         try {
             authHttp.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@use StatsResult.Failed("stats request failed (${response.code})")
@@ -1461,7 +1461,7 @@ class RealTetherClient(
         if (credential !is Credential.Cookie) return@withContext SignInSessionsResult.OwnerGradeRequired
         if (blockedBeforeConnect(base)) return@withContext SignInSessionsResult.Failed("Local network access is blocked.")
         val url = base.newBuilder().encodedPath("/").apply { segments.forEach { addPathSegment(it) } }.build()
-        val request = Request.Builder().url(url).authorize(credential)
+        val request = Request.Builder().url(url).authorize(credential, base)
             .apply { if (method == "DELETE") delete() else get() }
             .build()
         try {
@@ -1774,7 +1774,7 @@ class RealTetherClient(
     private fun authProbe(base: HttpUrl, credential: Credential): ProbeVerdict {
         val request = Request.Builder()
             .url(base.resolve("/api/auth/session")!!)
-            .authorize(credential)
+            .authorize(credential, base)
             .build()
         authHttp.newCall(request).execute().use { response ->
             if (response.code in 300..399 || response.code == 401 || response.code == 403) return ProbeVerdict.Refused
@@ -1793,14 +1793,11 @@ class RealTetherClient(
         // Origin's host(+port) MUST equal the Host header or the server
         // destroys the upgrade with a raw 401. OkHttp never sets it itself. An
         // IPv6 literal keeps its brackets: the server parses this as a URL.
-        val origin = buildString {
-            append(base.scheme).append("://").append(bracketedHost(base.host))
-            if (base.port != HttpUrl.defaultPort(base.scheme)) append(':').append(base.port)
-        }
+        // Sent with either credential here (a cookie request carries it anyway).
         val request = Request.Builder()
             .url(base.resolve("/ws")!!)
-            .authorize(credential)
-            .header("Origin", origin)
+            .authorize(credential, base)
+            .header("Origin", consoleOrigin(base))
             .build()
         val listener = SocketListener()
         synchronized(lock) {
@@ -2646,7 +2643,7 @@ class RealTetherClient(
         when {
             base == null || credential == null -> FilesAuthority.SignedOut
             blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
-            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential) }
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
         }
     })
 
@@ -2656,7 +2653,7 @@ class RealTetherClient(
         when {
             base == null || credential == null -> FilesAuthority.SignedOut
             blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
-            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential) }
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
         }
     })
 
@@ -3150,9 +3147,16 @@ class RealTetherClient(
     /**
      * Attach whatever credential is in force. This is the ONLY place the two auth
      * modes differ, so nothing downstream has to know which one is in use.
+     *
+     * ta-41x: a session cookie is an ambient credential, and the server accepts a write made with
+     * one only from its own origin (tether#216). So a cookie always travels with the [server]'s
+     * [consoleOrigin], the same Origin the `/ws` upgrade sends: every cookie request looks like
+     * the console's own, and none relies on the server's allowance for a request with no Origin.
+     * [server] is the base the request is addressed to (every caller resolves its URL on it). A
+     * device token is not ambient (no page can attach it) and is sent as before.
      */
-    private fun Request.Builder.authorize(credential: Credential?): Request.Builder = when (credential) {
-        is Credential.Cookie -> header("Cookie", "tether_session=${credential.value}")
+    private fun Request.Builder.authorize(credential: Credential?, server: HttpUrl): Request.Builder = when (credential) {
+        is Credential.Cookie -> header("Cookie", "tether_session=${credential.value}").header("Origin", consoleOrigin(server))
         is Credential.DeviceToken -> header("Authorization", "Bearer ${credential.value}")
         null -> this
     }
@@ -3180,7 +3184,7 @@ class RealTetherClient(
         }
         val request = Request.Builder()
             .url(base.resolve("/healthz")!!)
-            .authorize(credential)
+            .authorize(credential, base)
             .build()
         authHttp.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("healthz returned HTTP ${response.code}")
