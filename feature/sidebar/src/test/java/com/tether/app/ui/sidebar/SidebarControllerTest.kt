@@ -185,6 +185,9 @@ class SidebarControllerTest {
         // dashboard.tsx:1311-1314: the two-tap arm (or the swipe) is the confirmation.
         actions().onEndSession("g2")
         assertEquals(listOf(frame("""{"type":"kill","sessionId":"g2"}""")), client.frames)
+        // T13.2 r2: a row is drawn from the live LIST, so the client checks the link and the listing
+        // (the row is inert offline), not an attach of that session.
+        assertEquals(listOf(false), client.killScopes)
     }
 
     @Test fun selectingARowFollowsItsBlockAndMarksItSeen() {

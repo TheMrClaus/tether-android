@@ -127,7 +127,11 @@ class ShellConsentClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    override fun kill(sessionId: String, requireLive: Boolean) = Unit
+    /** T13.2 r2: every End session the shell asked for (`<session>:<requireLive>`). */
+    val killCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun kill(sessionId: String, requireLive: Boolean) {
+        killCalls += "$sessionId:$requireLive"
+    }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

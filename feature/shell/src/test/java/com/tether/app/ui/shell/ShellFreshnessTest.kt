@@ -5,9 +5,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -17,7 +23,9 @@ import com.tether.app.client.SessionSync
 import com.tether.app.ui.components.LinkBanner
 import com.tether.app.ui.theme.TetherSkin
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -135,5 +143,77 @@ class ShellFreshnessTest {
         rule.setContent { WithFreshness(catching) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession) } }
         rule.onNodeWithTag(ShellTags.FreshnessChip).assert(description("Catching up…"))
         rule.onNodeWithTag(ShellTags.StatusPill).assert(description("Active"))
+    }
+
+    // ---- r2 ----------------------------------------------------------------------------------------
+
+    @Test
+    fun theDefaultKnowsNothingSoItClaimsNothing() {
+        // Item 4: an unprovided freshness never takes the list or a session as live.
+        assertFalse(ShellFreshness.None.listLive)
+        assertFalse(ShellFreshness.None.sessionLive(offlineSession.id))
+        assertEquals(com.tether.app.ui.components.FreshnessCopy.SAVED, ShellFreshness.None.staleLabel(offlineSession.id))
+    }
+
+    @Test
+    fun offlineTheRedEndSessionKeyIsDisabled() {
+        val ends = mutableListOf<String>()
+        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Tactile, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue("no End session from a saved copy: $ends", "end" !in ends)
+    }
+
+    @Test
+    fun connectedEndSessionNeedsTheSessionsCopyToBeLive() {
+        val ends = mutableListOf<String>()
+        var freshness by androidx.compose.runtime.mutableStateOf(liveShellFreshness(offlineSession.id))
+        rule.setContent { WithFreshness(freshness) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled()
+        val cases = Freshness.entries.filter { it != Freshness.Live }.map { it.name to mapOf(offlineSession.id to SessionSync(it, VERIFIED)) } +
+            ("missing entry" to emptyMap())
+        for ((name, sync) in cases) {
+            rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id).copy(syncStates = sync) }
+            rule.waitForIdle()
+            rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
+            rule.waitForIdle()
+            assertTrue("$name: no End session from a copy that is not live: $ends", "end" !in ends)
+        }
+        // Live freshness, but not (or no longer) in the client's live set: still disabled.
+        rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id).copy(liveSessions = emptySet()) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
+        rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("end"), ends.filter { it == "end" })
+    }
+
+    @Test
+    fun aClientThatReportsNoFreshnessKeepsTheLiveSetRuleForEndSession() {
+        val none = ShellFreshness(listLive = true, liveSessions = setOf(offlineSession.id), reportsFreshness = false)
+        assertTrue(none.sessionLive(offlineSession.id))
+        assertFalse(none.copy(liveSessions = emptySet()).sessionLive(offlineSession.id))
+        assertFalse("never without a live list", none.copy(listLive = false).sessionLive(offlineSession.id))
+    }
+
+    @Test
+    fun aSavedCopysGaugeAndStatuslineSayWhatTheyReadFrom() {
+        val metrics = com.tether.app.ui.statusline.TelemetryMetrics(contextPercent = 45.0)
+        val label = offlineFreshness().staleLabel(offlineSession.id)
+        assertEquals("Saved copy · updated 12 min ago", label)
+        rule.setContent {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+                androidx.compose.foundation.layout.Column {
+                    com.tether.app.ui.statusline.ContextGauge(metrics, onClick = {}, stale = label, modifier = androidx.compose.ui.Modifier.testTag("gauge"))
+                    com.tether.app.ui.statusline.SessionStatusline(metrics, null, stale = label)
+                }
+            }
+        }
+        val gauge = rule.onNodeWithTag("gauge").fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+        assertTrue(gauge, gauge.endsWith(", Saved copy · updated 12 min ago"))
+        rule.onNode(description("Session telemetry, Saved copy · updated 12 min ago")).assertExists()
+        assertNull("live: nothing qualifies the readings", liveShellFreshness(offlineSession.id).staleLabel(offlineSession.id))
     }
 }

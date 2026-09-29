@@ -1,6 +1,12 @@
 package com.tether.app.ui.sidebar
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -8,6 +14,8 @@ import com.tether.app.client.Freshness
 import com.tether.app.client.SessionSync
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.theme.TetherSkin
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -106,5 +114,66 @@ class SidebarSyncTest {
         rule.onNodeWithTag(SidebarTags.freshness("live:a1"), useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Active", substring = true).assertExists()
         rule.onNodeWithContentDescription("Saved copy", substring = true).assertDoesNotExist()
+    }
+
+    // ---- r2 ----------------------------------------------------------------------------------------
+
+    @Test
+    fun offlineARowWithNoFreshnessEntryStillNeverSaysItNeedsYou() {
+        // Item 3: the "was" words and the still dot follow the link, not the entry.
+        val bare = SidebarSyncFixtures.offline().copy(syncStates = emptyMap())
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, bare, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.onNodeWithContentDescription("Refactor the retry loop, chat, Was running", substring = true).assertExists()
+        rule.onNodeWithContentDescription("Approve the lint fix, chat, Was waiting on you", substring = true).assertExists()
+        rule.onNodeWithText("Was running", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was waiting on you", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Needs you", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Active", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithContentDescription("chat, Needs you", substring = true).assertDoesNotExist()
+        // No entry: no glyph, no age, and no sentence claiming one.
+        rule.onNodeWithTag(SidebarTags.freshness("live:a1"), useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithContentDescription("Saved copy", substring = true).assertDoesNotExist()
+    }
+
+    private fun stateContains(text: String) = SemanticsMatcher("stateDescription contains '$text'") {
+        it.config.getOrNull(SemanticsProperties.StateDescription)?.contains(text) == true
+    }
+
+    @Test
+    fun offlineTheWorkspaceHeaderSaysWasOnAStillDot() {
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline().copy(syncStates = emptyMap()), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.onNode(stateContains(", 1 was waiting")).assertExists()
+        rule.onAllNodes(stateContains(", 1 waiting")).fetchSemanticsNodes().let { assertTrue("offline: no '1 waiting' now", it.isEmpty()) }
+        rule.onNodeWithTag(SidebarTags.blockDot(SidebarFixtures.ROOT), useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun aLiveListsWorkspaceHeaderKeepsItsLiveCountAndDot() {
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.onNode(stateContains(", 1 waiting")).assertExists()
+        rule.onNodeWithTag(SidebarTags.blockDot(SidebarFixtures.ROOT), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun offlineARowsEndControlIsInertAndItsSwipeIsGone() {
+        val ended = mutableListOf<String>()
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { ended += it })) }
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsNotEnabled().performClick()
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertTrue("a saved list never ends a session: $ended", ended.isEmpty())
+        rule.onNodeWithContentDescription("End Refactor the retry loop, unavailable: connect to end it").assertExists()
+        rule.onNodeWithTag(SidebarTags.archive("live:a1")).assertDoesNotExist()
+    }
+
+    @Test
+    fun aLiveListsRowStillEndsWithItsTwoTaps() {
+        val ended = mutableListOf<String>()
+        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { ended += it })) }
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("a1"), ended)
     }
 }
