@@ -42,7 +42,7 @@ Codex/OpenCode panels with confirmed escalation (`b8f94c8`, 4 rounds), **ta-41x 
 sign-out races (`ecb6e7a`, 3 rounds), **T13.2** offline mode + stale indicators (`9219a2d`, 3 rounds: saved copies never actionable -
 cards, Stop, controls, Interrupt, End session locked unless Live; client-side origin + live-epoch checks on interrupt/kill). **T6.6**
 notices / rate limit / auto-continue / MCP health (`ccdb1a8`, 4 rounds; every key needs a live copy; 23 matrix rows verified). Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed),
-#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22, `cf7bb0c`) built and checked - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's, versionCode 22, CI green.
+#209, #212, #216. Draft **0.7.4** (code 21, `1127819`) built; draft **0.7.5** (code 22, `cf7bb0c`) built and checked - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's, versionCode 22, CI green. Draft **0.7.6** (code 23, `c22e8ca`, +T13.2 offline mode +T6.6 notices) built and checked - same cert, versionCode 23. Publishing is the owner's call.
 **Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
 **Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
 console origin + credentials forwarded upstream - needs an owner decision), #215 (proxy follow-ups).
