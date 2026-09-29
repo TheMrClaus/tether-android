@@ -49,28 +49,37 @@ class SignOutRaceTest {
         onLogout = onLogout,
     ).also { h.client = it }
 
-    private fun connect(client: RealTetherClient) {
+    private fun connect(client: RealTetherClient): okhttp3.WebSocket {
         h.enqueueConnect()
         client.start()
-        h.handshake(h.nextSocket())
+        val ws = h.nextSocket()
+        h.handshake(ws)
         assertEquals("/api/auth/session", take().path)
         assertEquals("/ws", take().path)
+        return ws
+    }
+
+    private fun awaitNoStoredCredential(settings: SettingsStore) {
+        val deadline = System.currentTimeMillis() + 20_000
+        while (runBlocking { settings.session().credential } != null) {
+            assertTrue("the store still holds the credential", System.currentTimeMillis() < deadline)
+            Thread.sleep(10)
+        }
     }
 
     /**
      * L-B: start() runs again (an activity re-creation) and reads the store's snapshot while the
-     * device is signed in; a logout lands before that start() acts on it. The start must not
+     * device is signed in; [signOut] lands before that start() acts on it. The start must not
      * re-adopt the forgotten device token: nothing may carry it afterwards, and a later start()
      * must not reconnect with it (a device-token logout is local only, so the token still works
      * server-side and a re-adoption would be a silent re-sign-in).
      */
-    @Test
-    fun aStartWhoseSnapshotPredatesALogoutNeverReadoptsTheForgottenCredential() {
+    private fun aStaleStartNeverUndoes(signOut: (RealTetherClient, okhttp3.WebSocket) -> Unit) {
         h.server.start()
         val base = h.server.url("/").toString().trimEnd('/')
         val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
         val client = newClient(settings)
-        connect(client)
+        val ws = connect(client)
 
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -83,7 +92,8 @@ class SignOutRaceTest {
         }
         client.start()
         assertTrue("the second start() read its snapshot", entered.await(20, TimeUnit.SECONDS))
-        assertEquals(LogoutResult.LocalOnly, runBlocking { client.logout() })
+        signOut(client, ws)
+        awaitNoStoredCredential(settings)
         release.countDown()
         runBlocking { withTimeout(20_000) { staleStart!!.join() } }
 
@@ -92,7 +102,6 @@ class SignOutRaceTest {
         assertEquals(FilesResult.Failed(FilesCopy.NOT_SIGNED_IN), runBlocking { client.files.list("/w") })
         assertTrue("the stale start left no credential in force", runBlocking { client.fetchStats() } is StatsResult.Failed)
         assertEquals("nothing carried the forgotten token", before, h.server.requestCount)
-        assertNull(runBlocking { settings.session().credential })
 
         // The next start() (the UI coming back) does not sign back in either.
         h.enqueueConnect()
@@ -100,6 +109,22 @@ class SignOutRaceTest {
         h.await(client.connection) { it == ConnectionState.AuthRequired }
         Thread.sleep(500)
         assertEquals("no probe, no socket", before, h.server.requestCount)
+    }
+
+    @Test
+    fun aStartWhoseSnapshotPredatesALogoutNeverReadoptsTheForgottenCredential() = aStaleStartNeverUndoes { client, _ ->
+        assertEquals(LogoutResult.LocalOnly, runBlocking { client.logout() })
+    }
+
+    @Test
+    fun aStartWhoseSnapshotPredatesAStopNeverReadoptsTheClearedServerOrCredential() = aStaleStartNeverUndoes { client, _ ->
+        client.stop()
+    }
+
+    @Test
+    fun aStartWhoseSnapshotPredatesARevocationNeverReadoptsTheRevokedCredential() = aStaleStartNeverUndoes { client, ws ->
+        ws.close(4001, "device revoked")
+        h.await(client.signedOutReason) { it == SignedOutReason.DeviceUnpaired }
     }
 
     /**

@@ -245,9 +245,9 @@ class PushRegistrarTest {
      */
     @Test
     fun theLogoutUnregisterIsBoundedWhenTheServerNeverAnswers() = runBlocking {
-        val patient = OkHttpClient.Builder().readTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
+        val patient = OkHttpClient.Builder().readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
         val r = PushRegistrar(InMemorySettings(), patient, FirebaseTokenProvider { "fcm" })
-        server.enqueue(MockResponse().setResponseCode(200).setHeadersDelay(120, java.util.concurrent.TimeUnit.SECONDS))
+        server.enqueue(MockResponse().setResponseCode(200).setHeadersDelay(30, java.util.concurrent.TimeUnit.SECONDS))
         val started = System.nanoTime()
         val result = r.unregister(server.url("/").toString(), Credential.DeviceToken(token))
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
