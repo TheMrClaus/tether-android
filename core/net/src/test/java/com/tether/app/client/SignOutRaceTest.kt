@@ -388,6 +388,32 @@ class SignOutRaceTest {
     }
 
     /**
+     * L-1: a stop() whose store clear throws still ends its "clear in flight": a later sign-in
+     * does not wait for it, and a start() is not blocked for the rest of the process.
+     */
+    @Test
+    fun aStopWhoseClearThrowsStillReleasesTheNextSignIn() {
+        h.server.start()
+        val base = h.server.url("/").toString().trimEnd('/')
+        val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
+        val client = newClient(settings)
+        client.signOutClearWaitMs = 15_000
+        connect(client)
+        settings.beforeClear = {
+            settings.beforeClear = null
+            throw java.io.IOException("disk full")
+        }
+        client.stop()
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
+        h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
+        h.enqueueConnect()
+        val started = System.currentTimeMillis()
+        assertEquals(LoginResult.Success, runBlocking { client.login(base, "pw") })
+        assertTrue("the sign-in waited for a clear that had failed", System.currentTimeMillis() - started < 5_000)
+        assertEquals(Credential.Cookie("cookie-b"), runBlocking { settings.session().credential })
+    }
+
+    /**
      * L-X (pre-existing): a revocation verdict on the OLD cookie clears the store while a NEW
      * sign-in lands. The clear is a compare-and-clear under the store's lock, so it never
      * deletes the new sign-in's credential (which would flip configured and sign the next boot out).

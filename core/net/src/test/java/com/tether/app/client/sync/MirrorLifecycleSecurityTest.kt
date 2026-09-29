@@ -305,12 +305,17 @@ class MirrorLifecycleSecurityTest {
     }
 
     /**
-     * ta-jt9 I-3: the server has minted a session, then the caller of login() is cancelled
-     * while the sign-in waits for the boot purge. The credential is adopted and stored anyway
-     * (else a live cookie session is never revoked, or a claimed device token is orphaned).
+     * ta-jt9 I-3: the server has minted a credential (a session cookie, or a device token for a
+     * single-use code now spent), then the caller of login() / pair() is cancelled while the
+     * sign-in waits for the boot purge. The credential is adopted and stored anyway: otherwise a
+     * live cookie session is never revoked, or the claimed device token is orphaned.
      */
-    @Test
-    fun aSignInWhoseCallerIsCancelledAfterTheServerAnsweredIsStillAdopted() {
+    private fun aSignInWhoseCallerIsCancelledAfterTheServerAnswered(
+        route: String,
+        enqueue: () -> Unit,
+        signIn: suspend () -> Unit,
+        minted: com.tether.app.client.Credential,
+    ) {
         mirroredThenKilled()
         runBlocking { h.settings.clearCredential() }
         val entered = CountDownLatch(1)
@@ -325,23 +330,41 @@ class MirrorLifecycleSecurityTest {
             h.bootSignedOut()
             assertTrue("the purge's read is held", entered.await(20, TimeUnit.SECONDS))
             h.received.clear()
-            loginAgain()
-            val job = caller.launch { h.client.login(h.server.url("/").toString(), "pw") }
+            enqueue()
+            val job = caller.launch { signIn() }
             while (true) {
-                val request = h.server.takeRequest(20, TimeUnit.SECONDS) ?: throw AssertionError("no login request")
-                if (request.path == "/api/auth/login") break
+                val request = h.server.takeRequest(20, TimeUnit.SECONDS) ?: throw AssertionError("no $route request")
+                if (request.path == route) break
             }
             Thread.sleep(300) // past the server's 200: waiting for the purge now
             job.cancel()
         } finally {
             release.complete(Unit)
         }
-        awaitTrue("the minted cookie was stored") {
-            runBlocking { h.settings.session().credential } == com.tether.app.client.Credential.Cookie("again")
-        }
+        awaitTrue("the minted credential was stored") { runBlocking { h.settings.session().credential } == minted }
         handshakeNewSocket("s1")
         caller.cancel()
     }
+
+    @Test
+    fun aLoginWhoseCallerIsCancelledAfterTheServerAnsweredIsStillAdopted() = aSignInWhoseCallerIsCancelledAfterTheServerAnswered(
+        route = "/api/auth/login",
+        enqueue = { loginAgain() },
+        signIn = { h.client.login(h.server.url("/").toString(), "pw") },
+        minted = com.tether.app.client.Credential.Cookie("again"),
+    )
+
+    @Test
+    fun aPairingWhoseCallerIsCancelledAfterTheServerAnsweredIsStillAdopted() = aSignInWhoseCallerIsCancelledAfterTheServerAnswered(
+        route = "/api/devices/claim",
+        enqueue = {
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129,"pairing":true}"""))
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"tthr_minted"}"""))
+            h.enqueueConnect()
+        },
+        signIn = { h.client.pair(h.server.url("/").toString(), "123456", "test phone") },
+        minted = com.tether.app.client.Credential.DeviceToken("tthr_minted"),
+    )
 
     /** L-A with nothing configured at all (after a stop(): no URL either): still purged. */
     @Test
