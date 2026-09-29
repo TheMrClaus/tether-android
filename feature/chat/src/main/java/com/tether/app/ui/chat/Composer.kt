@@ -333,6 +333,9 @@ fun Composer(
         } else {
             null
         },
+        requestProviderControls = {
+            if (composerControls?.codexV2 == true) controlActions.onRequestCodex() else controlActions.onRequestOpencode()
+        },
     )
 
     // Native commands (currently /model) run in-app; everything else is flagged

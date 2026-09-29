@@ -199,6 +199,8 @@ internal class ControlHandlers(
     val setAutoApprove: (Boolean) -> Unit,
     /** Opens the provider-controls panel (Codex v2 / opencode-serve v2), or null. */
     val openProviderControls: (() -> Unit)?,
+    /** Re-reads the provider catalogs (a read, never an action) as the panel opens in the sheet. */
+    val requestProviderControls: () -> Unit = {},
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -712,7 +714,12 @@ internal fun SessionSettingsSheet(
                             }
                             HubRow(TetherIcons.Zap, "Fast", value) { view = SheetView.Fast }
                         }
-                        if (providerPanel != null) HubRow(TetherIcons.SlidersHorizontal, "Provider controls", "") { view = SheetView.Provider }
+                        if (providerPanel != null) {
+                            HubRow(TetherIcons.SlidersHorizontal, "Provider controls", "") {
+                                handlers.requestProviderControls()
+                                view = SheetView.Provider
+                            }
+                        }
                     }
                 }
                 SheetView.Model -> controls.model?.let { model ->

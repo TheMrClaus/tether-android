@@ -1,0 +1,139 @@
+package com.tether.app.client
+
+import com.tether.app.client.SessionControlsGuardTest.Companion.codexSnapshot
+import com.tether.app.client.SessionControlsGuardTest.Companion.controls
+import com.tether.app.client.SessionControlsGuardTest.Companion.session
+import com.tether.app.protocol.ModeOption
+import com.tether.app.protocol.ModelVariantOption
+import com.tether.app.protocol.SessionModelOption
+import com.tether.app.protocol.model.CollaborationMode
+import com.tether.app.protocol.model.CollaborationSettings
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** T7.2: the row derivations (chat-view.tsx:2128-2495, 2886-2955, 3704-3776 at tether 7d65611). */
+class ComposerControlsModelTest {
+
+    private val opus = SessionModelOption(
+        "claude-opus-5[1m]", "Opus (1M context)",
+        variants = listOf(ModelVariantOption("low", "low"), ModelVariantOption("high", "high")), supportsFastMode = true,
+    )
+    private val sonnet = SessionModelOption("claude-sonnet-5", "Sonnet")
+    private val legacyA = SessionModelOption("claude-opus-4-1", "Opus 4.1", legacy = true)
+    private val legacyB = SessionModelOption("claude-sonnet-4", "Sonnet 4", legacy = true)
+    private val claudeControls = controls(listOf(opus, sonnet, legacyA, legacyB), defaultModel = opus.value, defaultReasoningEffort = "high")
+
+    private fun derive(s: com.tether.app.protocol.model.AgentSession, c: com.tether.app.protocol.ServerMessage.SessionControls?, codex: ProviderControlsState<CodexSnapshot>? = null, pins: List<String> = emptyList()) =
+        ComposerControlsModel.derive(s, c, codex, pins)
+
+    @Test
+    fun claudeShowsTheAppliedDefaultModelEffortAndManual() {
+        val row = derive(session("claude"), claudeControls)
+        assertTrue(row.live)
+        assertEquals(opus.value, row.model!!.value)
+        assertEquals("Opus (1M context)", row.model!!.label)
+        // v44: the applied default effort, no synthesized "Default" row when it is known.
+        assertEquals("high", row.effort!!.value)
+        assertEquals(listOf("low", "high"), row.effort!!.options.map { it.value })
+        assertEquals("default", row.mode!!.value)
+        assertEquals(listOf("default", "acceptEdits", "plan", "bypassPermissions"), row.mode!!.options.map { it.value })
+        assertEquals(listOf(false, false, false, true), row.mode!!.options.map { it.danger })
+        assertEquals("Prompts before every gated tool (Bash, Write, Edit…)", row.hint)
+        assertFalse(row.hintDanger)
+        assertNull("Claude's Auto is a Mode row (v100), no toggle", row.auto)
+        assertEquals("Permission mode", row.modeAriaLabel)
+        assertEquals(FastModeControl("off", null), row.fastMode)
+    }
+
+    @Test
+    fun anUnknownEffortGetsTheDefaultRowAndBypassReadsAsDanger() {
+        val row = derive(session("claude").copy(permissionMode = "bypassPermissions"), controls(listOf(opus), defaultModel = opus.value))
+        assertEquals("", row.effort!!.value)
+        assertEquals(listOf("", "low", "high"), row.effort!!.options.map { it.value })
+        assertEquals("Default", row.effort!!.label)
+        assertEquals("Auto", row.mode!!.label)
+        assertTrue(row.hintDanger)
+    }
+
+    @Test
+    fun aPersistedLockedModeShowsAsManual() {
+        // dontAsk is no longer offered: the select shows Manual rather than a phantom row.
+        assertEquals("default", derive(session("claude").copy(permissionMode = "dontAsk"), claudeControls).mode!!.value)
+    }
+
+    @Test
+    fun legacyModelsGroupUnlessPinned() {
+        val row = derive(session("claude"), claudeControls, pins = listOf(legacyB.value))
+        assertEquals(listOf(opus.value, sonnet.value, legacyB.value), row.model!!.options.map { it.value })
+        assertEquals(listOf(legacyA.value), row.model!!.legacy.map { it.value })
+        assertEquals(ComposerControlsModel.LEGACY_NOTE, row.model!!.legacyNote)
+        // The label of the selected row is found in the legacy group too.
+        assertEquals("Opus 4.1", derive(session("claude").copy(model = legacyA.value), claudeControls).model!!.label)
+    }
+
+    @Test
+    fun fastModeFollowsTheSelectedModelAndTheSessionsReport() {
+        assertNull(derive(session("claude").copy(model = sonnet.value), claudeControls).fastMode)
+        assertEquals(
+            FastModeControl("cooldown", "network_error"),
+            derive(session("claude").copy(fastModeState = "cooldown", fastModeDisabledReason = "network_error"), claudeControls).fastMode,
+        )
+    }
+
+    @Test
+    fun opencodeServeV2HasTheAutoToggle() {
+        val serve = session("opencode", engine = OPENCODE_V2).copy(approvalPolicy = "never")
+        val row = derive(serve, controls(modes = listOf(ModeOption("default", "Build", "b"), ModeOption("plan", "Plan", "p"))))
+        assertEquals(AutoToggle(true, "Auto-approves permission requests that are not explicitly denied"), row.auto)
+        assertEquals("default", row.mode!!.value) // Auto is not a Mode row for opencode
+        assertEquals(row.auto!!.hint, row.hint)
+        assertTrue(row.hintDanger)
+        assertEquals("Mode", row.modeAriaLabel)
+        assertNull("opencode run-v1 has no toggle", derive(session("opencode"), null).auto)
+    }
+
+    @Test
+    fun codexV2UsesItsCatalogsWithPlaceholdersBeforeTheyArrive() {
+        val codex = session("codex", engine = CODEX_V2)
+        val loading = derive(codex, null, ProviderControlsState(null, true, null))
+        assertEquals(listOf("Loading…"), loading.model!!.options.map { it.label })
+        assertFalse(loading.model!!.enabled)
+        assertFalse(loading.mode!!.enabled)
+        val row = derive(codex.copy(model = "gpt-5.5-mini"), null, ProviderControlsState(codexSnapshot(), false, null))
+        assertEquals("gpt-5.5-mini", row.model!!.value)
+        assertEquals("low", row.effort!!.value) // the selected model's default effort
+        assertEquals(listOf("low", "xhigh"), row.effort!!.options.map { it.value })
+        assertEquals("default", row.mode!!.value) // no applied mode: Default, not the first row (Plan)
+        assertEquals(AutoToggle(false, "Runs everything without asking (never prompts)"), row.auto)
+        assertEquals("", row.hint)
+        val planned = derive(codex.copy(collaborationMode = CollaborationMode("plan", CollaborationSettings(null, null))), null, ProviderControlsState(codexSnapshot(), false, null))
+        assertEquals("plan", planned.mode!!.value)
+    }
+
+    @Test
+    fun legacyCodexAndReadOnlySessionsShowWhatWasRestored() {
+        val legacy = derive(session("codex").copy(model = "gpt-5", reasoningEffort = "high"), null)
+        assertFalse(legacy.live)
+        assertTrue(legacy.legacyCodexHint)
+        assertEquals(RestoredSettings("gpt-5", "high", null), legacy.restored)
+        assertNull(legacy.model)
+        val readOnly = derive(session("claude").copy(readOnly = true, permissionMode = "plan"), claudeControls)
+        assertFalse(readOnly.live)
+        assertFalse(readOnly.legacyCodexHint)
+        assertEquals(RestoredSettings(null, null, "plan"), readOnly.restored)
+        assertNull(derive(session("claude").copy(readOnly = true), claudeControls).restored)
+    }
+
+    @Test
+    fun dshHasOnlyAModelSelect() {
+        val row = derive(session("dsh"), controls(listOf(SessionModelOption("dsh-1", "DSH"))))
+        assertNotNull(row.model)
+        assertNull(row.effort)
+        assertNull(row.mode)
+        assertNull(row.auto)
+    }
+}
