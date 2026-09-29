@@ -39,7 +39,7 @@ protocol 134, native floor 129).
 **Owner queue:** deploy tether #224; publish a draft if wanted; tether goes public soon - review/redact private issues and PRs first.
 **Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
 ta-nrq (Firebase-free push alongside BYO-Firebase) and ta-31i (gateway-agnostic sign-in); ta-96z (accept the `__Host-` cookie name),
-ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9; beads scrub ta-l8k (quiet window).
+ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -327,3 +327,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 19:00 | claude-main / Opus 5.5 | T6.6, ta-cyy | T6.6 merged ff-only `ccdb1a8`, VERIFIED (+23 matrix rows; M.ev.warning with --force past the verified blocker). Owner deployed tether #209/#212/#216 (server protocol 133, floor 129; ta-ylh filed). Owner decisions logged (push = BYO-Firebase + Firebase-free design ta-nrq; gateway-agnostic sign-in ta-31i; service pages see tether#220). tether#220 PR in progress (ta-cyy). | build 0.7.6 draft; beads scrub (ta-l8k); T6.5/T6.7 |
 | 2026-09-29 21:00 | claude-main / Opus 5.5 | ta-cyy, T6.7 | tether PR #224 (service pages, see tether#220) merged `81aa352` after 3 rounds (verify CONFIRMED; security follow-ups fixed) - **not deployed** (owner); deferred item tether#225. Android follow-up ta-96z (accept the __Host- cookie name). T6.7 verified-pending: verify CONFIRMED, security follow-ups in its fix round. | owner deploy of #224; T6.7 merge; beads scrub |
 | 2026-09-29 21:30 | claude-main / Opus 5.5 | T6.7 | T6.7 merged ff-only `b65fb48`, VERIFIED (+7 matrix rows, --force past the verified blocker). 3 rounds: verify CONFIRMED r1/r2; security follow-ups (toast X under touch slop, lock every interrupt while cancelling, re-arm on toast shrink) fixed in r3 and checked by the coordinator. RESUME HERE rewritten (neutral security wording). | beads scrub (ta-l8k); T6.5/T7.3 |
+| 2026-09-29 22:00 | claude-main / Opus 5.5 | ta-l8k | Beads scrub done in a quiet window: store rebuilt from a neutralised export (461/461 ids, 37 field changes across 17 ids, 0 unexpected; ready/blocked sets identical), history flattened, `refs/dolt/data` deleted and re-pushed as a 2-commit orphan; a fresh clone of the published ref verifies. Event timeline dropped (owner-accepted); offline backup kept outside the repo. Merged worktrees removed. | T6.5 / T7.3 / ta-96z next |
