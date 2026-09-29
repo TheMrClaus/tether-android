@@ -83,8 +83,6 @@ class RecordingClient(
     override fun resumeHistory(historyId: String, cwd: String) = record(ClientMessage.Resume(historyId, cwd))
     override fun discover(cwd: String) = record(ClientMessage.Discover(cwd))
     override fun browse(cwd: String?) = record(ClientMessage.Browse(cwd))
-    override fun setMode(sessionId: String, permissionMode: String) = Unit
-    override fun setModel(sessionId: String, model: String): Boolean = true
     override fun requestSessionControls(sessionId: String) = Unit
     override fun pin(sessionId: String, pinned: Boolean) = record(ClientMessage.Pin(sessionId, pinned))
     override fun rename(sessionId: String, name: String) = record(ClientMessage.Rename(sessionId, name))

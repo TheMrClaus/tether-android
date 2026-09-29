@@ -66,6 +66,9 @@ fun TetherSheetSurface(
     modifier: Modifier = Modifier,
     docked: Boolean = currentLayoutClass() == TetherLayoutClass.Phone,
     onClose: (() -> Unit)? = null,
+    /** T7.2: a leading back key (`.settings-sheet-back`, "Back to …"); null = none. */
+    onBack: (() -> Unit)? = null,
+    backLabel: String = "Back",
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -105,6 +108,9 @@ fun TetherSheetSurface(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             ) {
+                if (onBack != null) {
+                    TetherKey(onClick = onBack, classes = KeyClasses.IconButton, icon = TetherIcons.ChevronLeft, iconSize = 18.dp, contentDescription = backLabel)
+                }
                 Text(
                     title,
                     color = t.white,
@@ -179,6 +185,8 @@ fun TetherSheetRow(
 fun TetherSheet(
     onDismiss: () -> Unit,
     title: String,
+    onBack: (() -> Unit)? = null,
+    backLabel: String = "Back",
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -191,6 +199,8 @@ fun TetherSheet(
                 title = title,
                 docked = docked,
                 onClose = onDismiss,
+                onBack = onBack,
+                backLabel = backLabel,
                 content = content,
                 modifier = Modifier
                     .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})

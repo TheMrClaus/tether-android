@@ -124,8 +124,6 @@ class ShellConsentClient : TetherClient {
     override fun resumeHistory(historyId: String, cwd: String) = Unit
     override fun discover(cwd: String) = Unit
     override fun browse(cwd: String?) = Unit
-    override fun setMode(sessionId: String, permissionMode: String) = Unit
-    override fun setModel(sessionId: String, model: String): Boolean = true
     override fun requestSessionControls(sessionId: String) = Unit
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit

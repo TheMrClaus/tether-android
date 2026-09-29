@@ -506,7 +506,11 @@ data class SearchHit(
     )
 }
 
-/** TS ModelOption (the fields the composer uses; `variants`, `legacy`, … ignored). */
+/**
+ * TS ModelOption (the fields the composer uses). T7.2: [variants] (v41, the model's selectable
+ * reasoning-effort levels, one provider-neutral field), [legacy] (v49, the "Legacy models" tier),
+ * [providerLabel] (v51, the upstream provider tag) and [supportsFastMode] (v95, Claude only).
+ */
 @Serializable
 data class SessionModelOption(
     val value: String,
@@ -514,7 +518,15 @@ data class SessionModelOption(
     val description: String? = null,
     val current: Boolean? = null,
     val resolvedModel: String? = null,
+    val variants: List<ModelVariantOption>? = null,
+    val legacy: Boolean? = null,
+    val providerLabel: String? = null,
+    val supportsFastMode: Boolean? = null,
 )
+
+/** TS ModelVariantOption: `value` is what the engine accepts, `label` the display string. */
+@Serializable
+data class ModelVariantOption(val value: String, val label: String = "")
 
 /** TS SlashCommandInfo. */
 @Serializable

@@ -615,9 +615,6 @@ class FakeTetherClient : TetherClient {
             entries = listOf("aidash", "tether-android", "dotfiles").map { DirectoryEntry(it, "$current/$it") },
         )
     }
-    override fun setMode(sessionId: String, permissionMode: String) {}
-
-    override fun setModel(sessionId: String, model: String): Boolean = true
     override fun requestSessionControls(sessionId: String) {}
 
     override fun pin(sessionId: String, pinned: Boolean) {

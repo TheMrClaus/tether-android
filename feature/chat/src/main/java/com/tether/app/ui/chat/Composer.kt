@@ -64,9 +64,14 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
-import com.tether.app.protocol.reduce.activeModel
+import com.tether.app.client.ComposerControlsModel
+import com.tether.app.client.ControlResult
+import com.tether.app.client.LEGACY_GROUP_VALUE
+import com.tether.app.client.ModeVocabulary
+import com.tether.app.client.OPENCODE_V2
+import com.tether.app.client.SessionControl
+import com.tether.app.client.looksLikeModelId
 import com.tether.app.protocol.reduce.composerCommandList
-import com.tether.app.protocol.reduce.pickerModels
 import com.tether.app.protocol.reduce.resolveModelArg
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyWear
@@ -125,8 +130,6 @@ fun Composer(
     onInterrupt: () -> Unit,
     onQueueEdit: (queueId: String, text: String) -> Unit,
     onQueueRemove: (queueId: String) -> Unit,
-    onSetMode: (String) -> Unit,
-    onSetModel: (String) -> Boolean,
     onRequestControls: () -> Unit,
     modifier: Modifier = Modifier,
     onAttachError: (String) -> Unit = {},
@@ -137,6 +140,10 @@ fun Composer(
     tree: com.tether.app.protocol.tree.JsObj? = null,
     /** T6.4: open / stop a background command (Stop is a tap-only operator control). */
     commandActions: CommandActions = CommandActions.Unavailable,
+    /** T7.2: the session controls (Model / Effort / Mode / Fast, provider panels): tap-only, guarded. */
+    controlActions: SessionControlActions = SessionControlActions.Unavailable,
+    /** T7.2: the device's pinned legacy models (lib/model-picker.mjs groupModelOptions). */
+    pinnedModels: List<String> = emptyList(),
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -163,7 +170,6 @@ fun Composer(
     val hasQuestion = activeTurn?.pendingQuestions?.isNotEmpty() == true
 
     val claude = session?.provider == "claude"
-    var showModelPicker by remember(session?.id) { mutableStateOf(false) }
     var menuDismissed by remember(session?.id) { mutableStateOf(false) }
     var notice by remember(session?.id) { mutableStateOf<String?>(null) }
     var noticeSeq by remember(session?.id) { mutableStateOf(0) }
@@ -182,9 +188,14 @@ fun Composer(
     }
 
     val models = controls?.models ?: emptyList()
-    val picker = remember(models, session?.model) { pickerModels(models, session?.model) }
-    val active = remember(models, picker, session?.model) { activeModel(models, picker, session?.model) }
-    val modelLabel = active?.displayName ?: (session?.model ?: "Default")
+    // T7.2: the row's state, derived from the session, its controls reply and the Codex catalog.
+    val composerControls = remember(session, controls, controlActions.codex, pinnedModels) {
+        session?.let { ComposerControlsModel.derive(it, controls, controlActions.codex, pinnedModels) }
+    }
+    // The web swaps the pill row for the sheet key below 64rem of VIEWPORT (globals.css:7347-7352).
+    val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 1024
+    var sheetAt by remember(session?.id) { mutableStateOf<SheetView?>(null) }
+    var escalation by remember(session?.id) { mutableStateOf<Escalation?>(null) }
     val commands = remember(projection?.cliInventory, controls) {
         composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList())
     }
@@ -217,20 +228,112 @@ fun Composer(
     }
 
     fun openModelPicker() {
-        if (!claude) return
+        if (composerControls?.model == null) return
         onRequestControls() // refresh to the live list if the session has since warmed
-        showModelPicker = true
+        sheetAt = SheetView.Model
         menuDismissed = true
     }
 
-    fun chooseModel(model: SessionModelOption) {
-        if (onSetModel(model.value)) {
-            val isDefaultChoice = model.value.isEmpty() || model.value == "default"
-            flash(if (isDefaultChoice) "Model reset to the CLI default." else "Model set to ${model.displayName}.")
-            showModelPicker = false
+    /** T7.2: one operator choice to the client's guard; a refusal is said in words. */
+    fun sendControl(control: SessionControl): Boolean {
+        val result = controlActions.onControl(control)
+        if (result != ControlResult.Sent) controlRefusalCopy(result)?.let(::flash)
+        return result == ControlResult.Sent
+    }
+
+    fun codexChooseModel(modelId: String) {
+        val s = session ?: return
+        val model = controlActions.codex?.snapshot?.models?.items?.firstOrNull { it.id == modelId } ?: return
+        // chat-view.tsx:2368-2372: keep the effort when the new model supports it, else its default.
+        val wanted = s.reasoningEffort ?: model.defaultReasoningEffort
+        val effortId = if (model.reasoningEfforts.any { it.id == wanted }) wanted else model.defaultReasoningEffort
+        sendControl(SessionControl.CodexModelSelection(modelId, effortId))
+    }
+
+    /** chat-view.tsx:2896-2921. [unlisted]: a typed `/model` id the list does not carry. */
+    fun chooseModel(value: String, unlisted: Boolean = false) {
+        val s = session ?: return
+        val c = composerControls ?: return
+        if (c.codexV2) return codexChooseModel(value)
+        if (value == LEGACY_GROUP_VALUE) return
+        val model = models.firstOrNull { it.value == value }
+        val displayName = model?.displayName?.ifEmpty { null } ?: value
+        // A model that cannot express the current effort clears it (never a mismatched --variant).
+        val effort = s.reasoningEffort
+        if (model != null && !effort.isNullOrEmpty() && model.variants.orEmpty().none { it.value == effort }) {
+            controlActions.onControl(SessionControl.Effort(""))
+        }
+        if (sendControl(SessionControl.Model(value, typed = unlisted))) {
+            val isDefaultChoice = value.isEmpty() || value == "default"
+            flash(
+                when {
+                    isDefaultChoice -> "Model reset to the CLI default."
+                    unlisted -> "Model set to $value — not in the known list, so the CLI validates it on the next turn."
+                    else -> "Model set to $displayName."
+                },
+            )
             if (field.text.startsWith("/model")) setDraft("")
+            onRequestControls()
         }
     }
+
+    fun chooseEffort(value: String) {
+        val c = composerControls ?: return
+        if (c.codexV2) {
+            val modelId = c.model?.value?.takeIf { it.isNotEmpty() } ?: return
+            sendControl(SessionControl.CodexModelSelection(modelId, value))
+            return
+        }
+        if (sendControl(SessionControl.Effort(value))) {
+            flash(if (value.isNotEmpty()) "Reasoning effort set to $value." else "Reasoning effort reset to the model's default.")
+        }
+    }
+
+    fun chooseMode(value: String) {
+        val c = composerControls ?: return
+        if (c.codexV2) {
+            sendControl(SessionControl.CodexCollaboration(value))
+            return
+        }
+        val option = c.mode?.options?.firstOrNull { it.value == value }
+        if (option?.danger == true || value == ModeVocabulary.AUTO) {
+            if (c.mode?.value == value) return
+            escalation = Escalation(option?.label ?: "Auto", escalationBody(option?.description), SessionControl.Mode(value, confirmed = true))
+            return
+        }
+        sendControl(SessionControl.Mode(value))
+    }
+
+    fun toggleAuto() {
+        val c = composerControls ?: return
+        val auto = c.auto ?: return
+        if (c.codexV2) {
+            if (auto.on) sendControl(SessionControl.CodexAutoApprove(false))
+            else escalation = Escalation("Auto approve", escalationBody(auto.hint), SessionControl.CodexAutoApprove(true, confirmed = true))
+            return
+        }
+        // chat-view.tsx:2486-2495: the same set-mode the Mode row sends.
+        if (auto.on) sendControl(SessionControl.Mode("default"))
+        else escalation = Escalation("Auto", escalationBody(auto.hint), SessionControl.Mode(ModeVocabulary.AUTO, confirmed = true))
+    }
+
+    val providerV2 = session != null && (composerControls?.codexV2 == true || (session.provider == "opencode" && session.engineGeneration == OPENCODE_V2))
+    val handlers = ControlHandlers(
+        chooseModel = { chooseModel(it) },
+        chooseEffort = ::chooseEffort,
+        chooseMode = ::chooseMode,
+        toggleAuto = ::toggleAuto,
+        setFast = { enabled -> sendControl(SessionControl.FastMode(enabled)) },
+        setAutoApprove = { on -> if (on != composerControls?.auto?.on) toggleAuto() },
+        openProviderControls = if (providerV2) {
+            {
+                if (composerControls?.codexV2 == true) controlActions.onRequestCodex() else controlActions.onRequestOpencode()
+                sheetAt = SheetView.Provider
+            }
+        } else {
+            null
+        },
+    )
 
     // Native commands (currently /model) run in-app; everything else is flagged
     // terminal-only rather than sent as prompt text (the /model-as-text bug).
@@ -246,14 +349,18 @@ fun Composer(
                 setDraft("")
                 return
             }
+            // chat-view.tsx:3015-3027: a listed match, else a plausible id passed through (the CLI
+            // validates it), else refused with the reason.
             val match = resolveModelArg(arg, models)
             if (match != null) {
-                chooseModel(match)
+                chooseModel(match.value)
                 return
             }
-            flash("No model matches “$arg”. Choose one from the list.")
-            openModelPicker()
-            setDraft("")
+            if (looksLikeModelId(arg)) {
+                chooseModel(arg, unlisted = true)
+                return
+            }
+            flash("“$arg” doesn’t look like a model id. Try /model to see what the CLI offers.")
             return
         }
         if (info != null && !info.supported) {
@@ -403,13 +510,10 @@ fun Composer(
                     TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Run)
                 }
 
-                if (claude) {
-                    ChatModeRow(
-                        permissionMode = session.permissionMode,
-                        modelLabel = modelLabel,
-                        onSetMode = onSetMode,
-                        onModelClick = { openModelPicker() },
-                    )
+                // chat-view.tsx:3709-3776: sessions Tether does not set say so above the well.
+                if (session != null && composerControls != null) {
+                    if (composerControls.legacyCodexHint) LegacyCodexHintRow(session.provider)
+                    composerControls.restored?.let { RestoredSettingsRow(session.provider, it) }
                 }
                 notice?.let { ComposerNotice(it) }
                 // T6.4 (chat-view.tsx:3780-3830): the todo bar, then the RUNNING background commands.
@@ -419,14 +523,6 @@ fun Composer(
                 if (session != null) RunningCommandsBar(runningCommands, commandActions)
                 if (menuOpen) {
                     SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
-                }
-                if (showModelPicker) {
-                    ModelPickerPanel(
-                        pickerModels = picker,
-                        sessionModel = session?.model,
-                        onChoose = { chooseModel(it) },
-                        onClose = { showModelPicker = false },
-                    )
                 }
 
                 val queued = projection?.queuedMessages.orEmpty()
@@ -453,6 +549,7 @@ fun Composer(
                     }
                 }
 
+                val liveControls = composerControls?.takeIf { it.live && session != null }
                 ComposerWell(metrics = metrics, inputFocused = inputFocused) {
                     ComposerInput(
                         value = field,
@@ -483,6 +580,31 @@ fun Composer(
                         } else {
                             null
                         },
+                        // T7.2: from 64rem the pill row sits above the footer; below it, one sheet key.
+                        options = if (liveControls != null && wideRow) {
+                            { ComposerOptionsRow(liveControls, session!!.provider, controlActions.lock, handlers) }
+                        } else {
+                            null
+                        },
+                        settingsKey = if (liveControls != null && !wideRow) {
+                            { mod ->
+                                val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || handlers.openProviderControls != null
+                                SessionSettingsTrigger(
+                                    label = liveControls.model?.label?.ifEmpty { null } ?: "Select model",
+                                    provider = session!!.provider,
+                                    autoOn = liveControls.auto?.on == true || (liveControls.mode?.current?.danger == true),
+                                    lock = controlActions.lock,
+                                    hasOtherSettings = hasOther,
+                                    onOpen = {
+                                        onRequestControls()
+                                        sheetAt = if (hasOther) SheetView.Root else SheetView.Model
+                                    },
+                                    modifier = mod,
+                                )
+                            }
+                        } else {
+                            null
+                        },
                     ) {
                         ComposerActions(
                             metrics = metrics,
@@ -497,7 +619,56 @@ fun Composer(
             }
         }
     }
+    val sheetEntry = sheetAt
+    if (sheetEntry != null && session != null && composerControls != null) {
+        val locked = controlActions.lock != null
+        val panel: (@Composable () -> Unit)? = when {
+            composerControls.codexV2 -> { { CodexControlsPanel(controlActions.codex, locked) { sendControl(it) } } }
+            session.provider == "opencode" && session.engineGeneration == OPENCODE_V2 -> {
+                {
+                    OpencodeControlsPanel(
+                        state = controlActions.opencode,
+                        selectedModel = session.model ?: "",
+                        selectedVariant = session.reasoningEffort ?: "",
+                        selectedMode = if (session.approvalPolicy == "never") "default" else session.permissionMode ?: "default",
+                        locked = locked,
+                        onControl = { sendControl(it) },
+                        onDangerMode = { mode, label ->
+                            escalation = Escalation(label, escalationBody(null), SessionControl.OpencodeMode(mode, confirmed = true))
+                        },
+                    )
+                }
+            }
+            else -> null
+        }
+        SessionSettingsSheet(
+            entry = sheetEntry,
+            controls = composerControls,
+            lock = controlActions.lock,
+            handlers = handlers,
+            providerPanel = panel,
+            onDismiss = { sheetAt = null },
+        )
+    }
+    escalation?.let { pending ->
+        EscalationDialog(
+            label = pending.label,
+            body = pending.body,
+            onConfirm = {
+                escalation = null
+                sendControl(pending.control)
+            },
+            onCancel = { escalation = null },
+        )
+    }
 }
+
+/** A most-permissive change waiting for the operator's confirmation (never saved: a restore drops it). */
+internal class Escalation(val label: String, val body: String, val control: SessionControl)
+
+internal fun escalationBody(hint: String?): String =
+    (hint?.trimEnd('.')?.let { "$it." } ?: "The agent will run without asking, including destructive commands.") +
+        " It stays on for this session until you switch it back."
 
 private data class DeckPadding(val start: Dp, val top: Dp, val end: Dp, val bottom: Dp)
 
@@ -528,6 +699,8 @@ private fun ComposerToolbar(
     onAttach: () -> Unit,
     attachEnabled: Boolean,
     totals: (@Composable () -> Unit)?,
+    options: (@Composable () -> Unit)? = null,
+    settingsKey: (@Composable (Modifier) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -541,8 +714,10 @@ private fun ComposerToolbar(
     } else {
         Modifier.padding(start = t.css.spaceSm, top = t.css.spaceXs, end = t.css.spaceSm, bottom = t.css.spaceSm)
     }
+    Column(Modifier.fillMaxWidth().then(padding)) {
+    options?.invoke()
     Row(
-        modifier = Modifier.fillMaxWidth().then(padding),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
@@ -557,9 +732,14 @@ private fun ComposerToolbar(
             modifier = Modifier.size(attachSize),
             contentDescription = "Add attachment",
         )
+        // Phone (globals.css:11936): the sheet key takes the free width; wider it sits at content width.
+        if (settingsKey != null) {
+            settingsKey(if (metrics.phone) Modifier.weight(1f) else Modifier.widthIn(max = 280.dp))
+        }
         if (totals != null && !metrics.phone && width >= 448.dp) totals()
-        Spacer(Modifier.weight(1f))
+        if (settingsKey == null || !metrics.phone) Spacer(Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs), verticalAlignment = Alignment.CenterVertically, content = actions)
+    }
     }
 }
 

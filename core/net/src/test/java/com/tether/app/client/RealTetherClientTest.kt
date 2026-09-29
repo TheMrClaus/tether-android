@@ -543,11 +543,9 @@ class RealTetherClientTest {
         assertEquals("claude-opus-4-8", controls.models[0].resolvedModel)
         assertEquals("claude-opus-4-8", controls.model)
 
-        // set-model sends the verbatim id ("" / "default" = reset, server's mapping).
-        client.setModel("s1", "claude-opus-4-8")
-        val setModel = nextFrame()
-        assertEquals("set-model", setModel["type"]!!.jsonPrimitive.content)
-        assertEquals("claude-opus-4-8", setModel["model"]!!.jsonPrimitive.content)
+        // T7.2: a model choice for a session that is not listed / live here sends nothing
+        // (SessionControlsClientTest covers the guarded path end to end).
+        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Model("claude-opus-4-8"), client.consentOrigin.value))
     }
 }
 

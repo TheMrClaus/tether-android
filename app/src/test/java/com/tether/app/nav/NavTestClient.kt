@@ -76,8 +76,10 @@ class NavTestClient(
     override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
     override fun createSession(provider: String, cwd: String?, name: String?) { stateChanges += "createSession" }
     override fun resumeHistory(historyId: String, cwd: String) { stateChanges += "resumeHistory" }
-    override fun setMode(sessionId: String, permissionMode: String) { stateChanges += "setMode" }
-    override fun setModel(sessionId: String, model: String): Boolean { stateChanges += "setModel"; return true }
+    override fun sessionControl(sessionId: String, control: com.tether.app.client.SessionControl, expectedOrigin: String?): com.tether.app.client.ControlResult {
+        stateChanges += "sessionControl"
+        return com.tether.app.client.ControlResult.Sent
+    }
     override fun pin(sessionId: String, pinned: Boolean) { stateChanges += "pin" }
     override fun rename(sessionId: String, name: String) { stateChanges += "rename" }
     override fun archive(sessionId: String) { stateChanges += "archive" }

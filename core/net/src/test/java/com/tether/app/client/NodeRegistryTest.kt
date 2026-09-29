@@ -473,7 +473,7 @@ class NodeRegistryTest {
         try {
             h.handshake(serverSide)
 
-            assertFalse("OkHttp refuses the oversized frame", h.client.setModel("x".repeat(17 * 1024 * 1024), "m"))
+            assertFalse("OkHttp refuses the oversized frame", h.client.markSeen("x".repeat(17 * 1024 * 1024), 1L))
             assertEquals(ConnectionState.Connected, h.client.connection.value)
 
             assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode("node-a") })

@@ -232,13 +232,30 @@ interface TetherClient {
     fun discover(cwd: String)
     fun browse(cwd: String? = null)
 
-    fun setMode(sessionId: String, permissionMode: String)
-
     /**
-     * Claude only: switch the session's model ("" or "default" resets to the CLI default).
-     * Returns false when the frame could not be sent — callers must not confirm then.
+     * T7.2: the ONE path an operator's session-control choice takes to the wire (`set-mode`,
+     * `set-model`, `set-reasoning-effort`, `set-fast-mode`, `codex-control-action`,
+     * `opencode-control-action`). Call it ONLY from a tap or an accessibility action on the control,
+     * never in answer to anything received, restored or recomposed. Sent only on a live, handshaken
+     * socket of the server that drew the control ([expectedOrigin], the [consentOrigin] the row was
+     * composed with), for a session confirmed live on it that is neither read-only nor handed off,
+     * and only with a value the session's CURRENT state offers ([SessionControlsGuard]); the most
+     * permissive postures also need their confirmation. Otherwise nothing is sent or held: no retry,
+     * no queue, nothing persisted.
      */
-    fun setModel(sessionId: String, model: String): Boolean
+    fun sessionControl(sessionId: String, control: SessionControl, expectedOrigin: String?): ControlResult = ControlResult.NotConnected
+
+    /** T7.2: per session, the Codex v2 provider-control snapshot received on the current socket. */
+    val codexControls: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> get() = NO_CODEX_CONTROLS
+
+    /** T7.2: per session, the opencode-serve v2 provider-control snapshot received on the current socket. */
+    val opencodeControls: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> get() = NO_OPENCODE_CONTROLS
+
+    /** T7.2: ask for a Codex v2 session's catalogs (a read; reply `codex-controls`). False when not sent. */
+    fun requestCodexControls(sessionId: String): Boolean = false
+
+    /** T7.2: ask for an opencode-serve v2 session's catalogs (a read; reply `opencode-controls`). */
+    fun requestOpencodeControls(sessionId: String): Boolean = false
 
     /** Ask for the session's available models + slash-command list. Cheap + idempotent. */
     fun requestSessionControls(sessionId: String)
@@ -500,6 +517,8 @@ sealed interface ConnectionState {
 private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow(null)
 private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
 private val NO_UNCONFIRMED: StateFlow<Set<String>> = MutableStateFlow(emptySet())
+private val NO_CODEX_CONTROLS: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = MutableStateFlow(emptyMap())
+private val NO_OPENCODE_CONTROLS: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = MutableStateFlow(emptyMap())
 private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)
 
 /** Why the server ended the sign-in; the login screen explains it. */

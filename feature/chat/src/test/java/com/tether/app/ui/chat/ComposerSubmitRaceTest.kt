@@ -75,8 +75,6 @@ class ComposerSubmitRaceTest {
                         onInterrupt = {},
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
-                        onSetMode = {},
-                        onSetModel = { true },
                         onRequestControls = {},
                     )
                 }

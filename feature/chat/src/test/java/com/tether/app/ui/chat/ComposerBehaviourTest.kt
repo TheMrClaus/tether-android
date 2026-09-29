@@ -78,8 +78,6 @@ class ComposerBehaviourTest {
                     onInterrupt = { interrupts++ },
                     onQueueEdit = { id, text -> edits += id to text },
                     onQueueRemove = { removes += it },
-                    onSetMode = {},
-                    onSetModel = { true },
                     onRequestControls = {},
                     initialDraft = initialDraft,
                     onDraftChange = { drafts += it },

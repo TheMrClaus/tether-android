@@ -83,6 +83,9 @@ internal fun displayHost(origin: String, versus: String? = null): String {
 /** See RealTetherClient.raceHook (tests only). */
 internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted, OriginSwitched }
 
+/** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
+private const val MAX_CONTROL_MESSAGE = 500
+
 /** Application close code: the server revoked this device (see server.mjs §disconnectDeviceSockets). */
 private const val CLOSE_DEVICE_REVOKED = 4001
 
@@ -353,6 +356,9 @@ class RealTetherClient(
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
+    // T7.2: provider-control snapshots received on the CURRENT socket (cleared with the live set).
+    private val codexControlsState = MutableStateFlow<Map<String, ProviderControlsState<CodexSnapshot>>>(emptyMap())
+    private val opencodeControlsState = MutableStateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>>(emptyMap())
     // T6.2: per-file git hunks (git-diff-file) and diff summaries (worktree-diff), per session.
     private val gitFileDiffsState = MutableStateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>>(emptyMap())
     private val worktreeDiffsState = MutableStateFlow<Map<String, JsonObject?>>(emptyMap())
@@ -384,6 +390,8 @@ class RealTetherClient(
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
+    override val codexControls: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = codexControlsState
+    override val opencodeControls: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = opencodeControlsState
     override val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = gitFileDiffsState
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val errors: SharedFlow<String> = errorsFlow
@@ -751,6 +759,10 @@ class RealTetherClient(
 
     /** T6.3: nothing is live (the socket, its epoch or the server went). Caller holds [lock]. */
     private fun clearLiveLocked() {
+        // T7.2: a provider-control snapshot names one engine read on one socket; an action is never
+        // bound to a snapshot from a socket that went.
+        if (codexControlsState.value.isNotEmpty()) codexControlsState.value = emptyMap()
+        if (opencodeControlsState.value.isNotEmpty()) opencodeControlsState.value = emptyMap()
         if (liveThisEpoch.isEmpty()) return
         liveThisEpoch.clear()
         liveSessionsState.value = emptySet()
@@ -2032,6 +2044,36 @@ class RealTetherClient(
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             }
+            // T7.2: use-tether.ts:1076-1111. A snapshot replaces the catalog and ends "busy"; a result
+            // keeps the snapshot and shows its message. Display state only: nothing here sends.
+            is ServerMessage.CodexControls -> ifCurrent(webSocket) {
+                synchronized(lock) {
+                    val current = codexControlsState.value[message.sessionId]
+                    codexControlsState.value = codexControlsState.value +
+                        (message.sessionId to ProviderControlsState(CodexSnapshot.parse(message.snapshot), false, current?.message))
+                }
+            }
+            is ServerMessage.CodexControlResult -> ifCurrent(webSocket) {
+                synchronized(lock) {
+                    val current = codexControlsState.value[message.sessionId]
+                    codexControlsState.value = codexControlsState.value +
+                        (message.sessionId to ProviderControlsState(current?.snapshot, false, message.message.take(MAX_CONTROL_MESSAGE)))
+                }
+            }
+            is ServerMessage.OpencodeControls -> ifCurrent(webSocket) {
+                synchronized(lock) {
+                    val current = opencodeControlsState.value[message.sessionId]
+                    opencodeControlsState.value = opencodeControlsState.value +
+                        (message.sessionId to ProviderControlsState(OpencodeSnapshot.parse(message.snapshot), false, current?.message))
+                }
+            }
+            is ServerMessage.OpencodeControlResult -> ifCurrent(webSocket) {
+                synchronized(lock) {
+                    val current = opencodeControlsState.value[message.sessionId]
+                    opencodeControlsState.value = opencodeControlsState.value +
+                        (message.sessionId to ProviderControlsState(current?.snapshot, false, message.message.take(MAX_CONTROL_MESSAGE)))
+                }
+            }
             // T6.2: use-tether.ts:909-921. A fresh summary drops the session's cached hunks.
             is ServerMessage.WorktreeDiff -> ifCurrent(webSocket) {
                 worktreeDiffsState.value = worktreeDiffsState.value + (message.sessionId to message.diff)
@@ -2814,12 +2856,57 @@ class RealTetherClient(
         sendFrame(ClientMessage.Browse(cwd))
     }
 
-    override fun setMode(sessionId: String, permissionMode: String) {
-        sendFrame(ClientMessage.SetMode(sessionId, permissionMode))
+    /**
+     * T7.2: the one path a session control takes to the wire. Under the lock, in order: a live,
+     * handshaken socket of a running (not halted) client; the control drawn for THIS server
+     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; listed, and neither
+     * read-only nor handed off (fail closed); the value one the session's current state offers, and
+     * a most-permissive posture confirmed ([SessionControlsGuard.check]); then enqueued on that
+     * socket. Nothing is retried, held or persisted.
+     */
+    override fun sessionControl(sessionId: String, control: SessionControl, expectedOrigin: String?): ControlResult {
+        if (sessionId.isEmpty()) return ControlResult.NotOffered
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ControlResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized ControlResult.NotLive
+            if (sessionId !in liveThisEpoch) return@synchronized ControlResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ControlResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized ControlResult.Locked
+            val codex = codexControlsState.value[sessionId]?.snapshot
+            val opencode = opencodeControlsState.value[sessionId]?.snapshot
+            SessionControlsGuard.check(session, sessionControlsState.value[sessionId], codex, opencode, control)?.let { return@synchronized it }
+            val frame = SessionControlsGuard.frame(sessionId, control, codex, opencode, java.util.UUID.randomUUID().toString())
+            if (!ws.send(frame.encode())) return@synchronized ControlResult.NotConnected
+            // use-tether.ts executeCodexControl: the panel shows the action in flight until its result.
+            if (SessionControlsGuard.isCodexAction(control)) {
+                codexControlsState.value = codexControlsState.value + (sessionId to ProviderControlsState(codex, true, null))
+            } else if (SessionControlsGuard.isOpencodeAction(control)) {
+                opencodeControlsState.value = opencodeControlsState.value + (sessionId to ProviderControlsState(opencode, true, null))
+            }
+            ControlResult.Sent
+        }
+        if (result == ControlResult.NotConnected) emitError("The secure link is reconnecting. The setting was not changed.")
+        return result
     }
 
-    override fun setModel(sessionId: String, model: String): Boolean =
-        sendFrame(ClientMessage.SetModel(sessionId, model))
+    /** T7.2: use-tether.ts:1693 requestCodexControls (a read). Busy until the snapshot lands. */
+    override fun requestCodexControls(sessionId: String): Boolean = synchronized(lock) {
+        val sent = sendFrame(ClientMessage.CodexControlsRequest(sessionId))
+        val current = codexControlsState.value[sessionId]
+        codexControlsState.value = codexControlsState.value +
+            (sessionId to ProviderControlsState(current?.snapshot, sent, if (sent) null else "The provider catalogs were not requested."))
+        sent
+    }
+
+    override fun requestOpencodeControls(sessionId: String): Boolean = synchronized(lock) {
+        val sent = sendFrame(ClientMessage.OpencodeControlsRequest(sessionId))
+        val current = opencodeControlsState.value[sessionId]
+        opencodeControlsState.value = opencodeControlsState.value +
+            (sessionId to ProviderControlsState(current?.snapshot, sent, if (sent) null else "The provider catalogs were not requested."))
+        sent
+    }
 
     override fun requestGitFileDiff(sessionId: String, path: String): Boolean {
         requestedGitFileDiffs.add(sessionId to path)

@@ -53,8 +53,6 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onInterrupt = {},
                 onQueueEdit = { _, _ -> },
                 onQueueRemove = {},
-                onSetMode = {},
-                onSetModel = { true },
                 onRequestControls = {},
                 initialDraft = draft,
             )

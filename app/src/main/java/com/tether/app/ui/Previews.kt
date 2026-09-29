@@ -122,8 +122,6 @@ private fun ComposerIdlePreview() {
             onInterrupt = {},
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
-            onSetMode = {},
-            onSetModel = { _ -> true },
             onRequestControls = {},
         )
     }
@@ -159,8 +157,6 @@ private fun ComposerBusyPreview() {
             onInterrupt = {},
             onQueueEdit = { _, _ -> },
             onQueueRemove = {},
-            onSetMode = {},
-            onSetModel = { _ -> true },
             onRequestControls = {},
         )
     }

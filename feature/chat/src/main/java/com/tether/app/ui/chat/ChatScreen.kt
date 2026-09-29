@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import com.composables.icons.lucide.Cpu
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
@@ -136,9 +138,40 @@ fun ChatScreen(
     // H1: above the layout switch), or one saved here when nobody provides it.
     val cardStates = rememberCardStates()
 
-    LaunchedEffect(session?.id, session?.provider) {
+    // T7.2: the session controls (chat-view.tsx:2299-2319). Reads only: the models / commands reply
+    // for every live-row engine, and the Codex v2 catalogs, re-read as the session warms (a turn
+    // starts or ends) and once it is live on a (new) connection. Nothing here sends a control.
+    val isLive = session?.id in liveSessions
+    val activeTurnId = projection?.activeTurnId
+    LaunchedEffect(session?.id, session?.provider, session?.readOnly, activeTurnId, isLive) {
         val s = session
-        if (s != null && s.provider == "claude") vm.client.requestSessionControls(s.id)
+        if (s != null && !s.readOnly && isLive) {
+            vm.client.requestSessionControls(s.id)
+            if (s.provider == "codex" && s.engineGeneration == com.tether.app.client.CODEX_V2) vm.client.requestCodexControls(s.id)
+        }
+    }
+    val codexMap by vm.client.codexControls.collectAsStateWithLifecycle()
+    val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
+    val pinnedModels by remember(prefs) { prefs.preferences.map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
+    val controlLock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, isLive, session)
+    val controlActions = remember(session?.id, controlLock, consentOrigin, vm, codexMap[session?.id], opencodeMap[session?.id]) {
+        val s = session
+        // Bound to the server this row was drawn for: a tap on another server's row is refused.
+        val drawnFor = consentOrigin
+        if (s == null) {
+            SessionControlActions.Unavailable
+        } else {
+            SessionControlActions(
+                sessionId = s.id,
+                origin = drawnFor,
+                lock = controlLock,
+                onControl = { control -> vm.client.sessionControl(s.id, control, drawnFor) },
+                codex = codexMap[s.id],
+                opencode = opencodeMap[s.id],
+                onRequestCodex = { vm.client.requestCodexControls(s.id) },
+                onRequestOpencode = { vm.client.requestOpencodeControls(s.id) },
+            )
+        }
     }
 
     // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.
@@ -267,8 +300,6 @@ fun ChatScreen(
             onInterrupt = { session?.let { vm.client.interrupt(it.id) } },
             onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
             onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
-            onSetMode = { mode -> session?.let { vm.client.setMode(it.id, mode) } },
-            onSetModel = { model -> session?.let { vm.client.setModel(it.id, model) } ?: false },
             onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
             onAttachError = { message -> vm.reportLocalError(message) },
             // A plain read, not a subscription: only the opening value matters here.
@@ -277,6 +308,8 @@ fun ChatScreen(
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
             tree = tree,
             commandActions = commandActions,
+            controlActions = controlActions,
+            pinnedModels = pinnedModels,
         )
     }
     CommandOutputDialog(

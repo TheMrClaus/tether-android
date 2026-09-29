@@ -41,6 +41,29 @@ data class AgentSession(
     val handedOffTo: String? = null,
     // T6.3: lib/protocol.ts:1723 — an imported replay (or replay-only provider) Tether does not drive.
     val readOnly: Boolean = false,
+    // T7.2 (lib/protocol.ts:1733-1768): the session settings the composer row reads.
+    /** The operator-selected reasoning effort (opencode `--variant`, Claude SDK `effort`). */
+    val reasoningEffort: String? = null,
+    /** v95: Claude fast mode, the CLI's own report: "off" | "cooldown" | "on". */
+    val fastModeState: String? = null,
+    val fastModeDisabledReason: String? = null,
+    /** Codex: the applied collaboration mode (matched against the catalog's items). */
+    val collaborationMode: CollaborationMode? = null,
+    /** Codex + OpenCode: "never" behind their Auto toggle; null keeps interactive prompts. */
+    val approvalPolicy: String? = null,
+)
+
+/** TS `AgentSession.collaborationMode`: `{ mode, settings: { model, reasoning_effort } }`. */
+@Serializable
+data class CollaborationMode(
+    val mode: String? = null,
+    val settings: CollaborationSettings? = null,
+)
+
+@Serializable
+data class CollaborationSettings(
+    val model: String? = null,
+    @kotlinx.serialization.SerialName("reasoning_effort") val reasoningEffort: String? = null,
 )
 
 @Serializable

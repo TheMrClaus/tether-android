@@ -100,8 +100,6 @@ class ComposerDraftLifecycleTest {
                         onInterrupt = {},
                         onQueueEdit = { _, _ -> },
                         onQueueRemove = {},
-                        onSetMode = {},
-                        onSetModel = { true },
                         onRequestControls = {},
                         initialDraft = model.loadedDraft(id),
                         awaitDraft = { model.awaitDraft(id) },
