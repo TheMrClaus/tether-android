@@ -120,6 +120,7 @@ const synthetic = {
         tool("bg-live", "Agent", { description: "Live one", run_in_background: true }, { output: "launched" }),
         tool("bg-done", "Agent", { description: "Done one", run_in_background: true }),
         tool("bg-failed", "Task", { subagent_type: "reviewer", run_in_background: true }),
+        tool("bg-stale", "Agent", { description: "Dropped from the level set", run_in_background: true }, { output: "launched" }),
         tool("fg", "Agent", { prompt: "   \nsecond line" }, { isError: true }),
         tool("fg-running", "Agent", { prompt: "x".repeat(80) }, { done: false, elapsedSeconds: 12.4 }),
       ]),
@@ -129,6 +130,7 @@ const synthetic = {
       { taskId: "b", toolUseId: "bg-done", status: "completed", live: false },
       { taskId: "c", toolUseId: "bg-failed", status: "killed", live: false },
       { taskId: "d", toolUseId: null, status: "running", live: true },
+      { taskId: "e", toolUseId: "bg-stale", status: "running", live: false },
     ],
   },
   // Issue #172: codex lifecycle-only threads, a spawnAgent claiming its thread (row before the launcher), interacted-only drop.
@@ -143,7 +145,14 @@ const synthetic = {
         tool("act2", "subagent_activity", { kind: "interacted", agentThreadId: "th-z" }),
         tool("act3", "subagent_activity", { kind: "completed", agentThreadId: "th-c", agentPath: "/root/helper" }),
       ]),
-      t2: turn([tool("act4", "subagent_activity", { kind: "interrupted", agentThreadId: "th-d" }), tool("act5", "subagent_activity", { kind: "completed", agentThreadId: "th-a" })], "running"),
+      t2: turn([
+        tool("act4", "subagent_activity", { kind: "interrupted", agentThreadId: "th-d" }),
+        tool("act5", "subagent_activity", { kind: "completed", agentThreadId: "th-a" }),
+        tool("act6", "subagent_activity", { kind: "started", agentThreadId: "th-e", agentPath: "/root/second" }),
+        tool("act7", "subagent_activity", { kind: "completed", agentThreadId: "th-e" }),
+        // The parent hands the finished child more work: it re-opens as running.
+        tool("act8", "subagent_activity", { kind: "interacted", agentThreadId: "th-e" }),
+      ], "running"),
     },
   },
   // Delegates (object and JSON-string results), reasonix profiles, opencode task envelopes, nesting and inheritance.
