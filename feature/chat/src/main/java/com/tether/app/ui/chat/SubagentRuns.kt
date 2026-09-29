@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -264,9 +265,9 @@ private fun RunTab(
                 this.selected = selected
                 contentDescription = description
                 if (isError) stateDescription = "error"
+                testTag = tag
             }
-            .padding(start = if (nested || phone) t.css.spaceSm else t.css.spaceMd, end = if (phone) t.css.spaceSm else t.css.spaceMd)
-            .testTag(tag),
+            .padding(start = if (nested || phone) t.css.spaceSm else t.css.spaceMd, end = if (phone) t.css.spaceSm else t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.4.dp),
     ) {
@@ -293,7 +294,7 @@ private fun SubrunChip(
         Modifier
             .then(if (muted) Modifier.dashedBorder(t.line, t.radiusSm) else Modifier.border(1.dp, border ?: t.line, shape))
             .padding(horizontal = 7.2.dp, vertical = 2.4.dp)
-            .then(if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier),
+            .then(if (description != null) Modifier.semantics(mergeDescendants = true) { contentDescription = description } else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

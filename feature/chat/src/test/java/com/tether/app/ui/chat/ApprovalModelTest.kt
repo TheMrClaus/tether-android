@@ -91,7 +91,7 @@ class ApprovalModelTest {
         assertEquals(open.indexOf("block:task-1") + 1, open.indexOf("denial:child-read:nested"))
         val denial = items(ApprovalFixtures.denials, open = true).filterIsInstance<ChatItem.Denial>()
         val child = denial.first { it.denial.toolId == "child-read" }
-        assertEquals(RunRef("t1::task-1", "Check fixtures"), child.run)
+        assertEquals(RunRef("t1::task-1", "Check fixtures", "child-read"), child.run)
         assertEquals(DenialTarget("File", "/srv/fixtures/secret.env"), child.target)
         assertEquals(DenialTarget("Command", "rm -rf build/ && git clean -fdx"), denial.first { it.denial.toolId == "toolu_b" }.target)
         assertNull(denial.first { it.denial.toolId == "toolu_b" }.run)

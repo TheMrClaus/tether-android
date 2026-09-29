@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -50,6 +52,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -104,7 +107,9 @@ internal fun TodoBar(progress: ProgressView, sessionKey: String?) {
             .clip(shape)
             .background(t.graphite)
             .border(1.dp, t.line, shape)
-            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = toggle)
+            // Issue #9: a tap anywhere on the bar toggles it. Pointer-only, like the web's container
+            // handler (the head stays the one assistive control, so the items keep their own nodes).
+            .pointerInput(Unit) { detectTapGestures { expanded = !expanded } }
             .testTag("todo-bar"),
     ) {
         Row(
@@ -116,6 +121,7 @@ internal fun TodoBar(progress: ProgressView, sessionKey: String?) {
                     contentDescription = "$summary, ${progress.completed} of ${progress.total} tasks complete"
                     stateDescription = if (expanded) "Expanded" else "Collapsed"
                     onClick(if (expanded) "Collapse task list" else "Expand task list") { toggle(); true }
+                    testTag = "todo-bar-head"
                 }
                 .heightIn(min = 44.dp)
                 .padding(horizontal = t.css.spaceSm),
@@ -160,7 +166,10 @@ private fun TodoItemRow(item: ProgressItem) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clearAndSetSemantics { contentDescription = "${item.label}, $word" }
+            .clearAndSetSemantics {
+                contentDescription = "${item.label}, $word"
+                testTag = "todo-item"
+            }
             .padding(vertical = 3.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -311,8 +320,8 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
                 }
                 if (!enabled) disabled()
                 if (enabled) onClick("Stop") { if (actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) sent = true; true }
-            }
-            .testTag("bg-command-stop"),
+                testTag = "bg-command-stop"
+            },
         contentAlignment = Alignment.Center,
     ) {
         Row(

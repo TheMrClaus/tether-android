@@ -60,6 +60,17 @@ class ChatTestClient : TetherClient {
      */
     val consentCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+    /** T6.4: every stop-command the UI asked for (`<session>:<commandId>`), NOT de-duplicated. */
+    val stopCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    /** What the next stop returns (the real client's verdict). */
+    var stopResult: com.tether.app.client.StopCommandResult = com.tether.app.client.StopCommandResult.Sent
+
+    override fun stopCommand(sessionId: String, commandId: String): com.tether.app.client.StopCommandResult {
+        stopCalls += "$sessionId:$commandId"
+        return stopResult
+    }
+
     /** What the next consent call returns (the real client's verdict). */
     var consentResult: com.tether.app.client.ConsentResult = com.tether.app.client.ConsentResult.Sent
 
