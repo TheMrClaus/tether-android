@@ -36,13 +36,16 @@ security clear: per-card tile/diff/step budgets, bounded parsing, deep-frame rew
 (server now protocol **132**, `NATIVE_PROTOCOL_FLOOR = 129` = exactly what the app speaks - no headroom, see ta-koy). `/.well-known/assetlinks.json`
 serves 200 on the box; the **public URL still redirects to the SSO gateway** until the owner adds the one-path bypass rule.
 **v0.7.3 is PUBLISHED** (owner). Drafts 0.7.0-0.7.2 superseded.
-**Merged since takeover (2026-09-28/29):** ta-hra (`6f587f7`), ta-js0 + ta-epo (`6ac7822`), ta-koy protocol **v132** (`0883813`; the app now
-speaks 132, floor 129 - refused by servers at 129-131, see ta-bjw), **T6.3 approvals/questions/denials** (`1127819`, 9 rounds; every
-grant needs an unsaved confirmation bound to the drawn ticks; Deny-only when a path can't be shown). tether#208 + **tether#209**
-(`9fe90ce`, auth hardening ta-4sx/ta-06a/ta-eh2) merged - #209 awaits the owner's deploy. **Draft 0.7.4 (code 21, `1127819`) built** - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's; versionCode 21; CI green on `04c4d16`.
-Filed follow-ups: ta-jt9, ta-dto, ta-705 note, ta-194 (flake), ta-bjw, ta-842, ta-57l, ta-bul; upstream tether ta-8m1 + ta-ej3 (P1,
-service-origin isolation; ta-ej3 needs an owner decision), ta-9qt, ta-28x (path truncation can grant an ancestor dir).
-**Next frontier (`bd ready`):** T6.4 subagents/background, T6.5-T6.7, T7.2-T7.4, T8.x, T10.x (T10.5 passkeys now server-ready), T13.2+.
+**Merged since takeover (2026-09-28/29):** ta-hra, ta-js0 + ta-epo, ta-koy (protocol **v132**), **T6.3** approvals/questions/denials (`1127819`,
+9 rounds), **T6.4** sub-agent runs / background commands with a guarded, armed Stop / todo bar / turn activity (`b4d378e`, 5 rounds).
+Tether (merged by the coordinator, owner-authorised; **deploys are the owner's**): #208 (deployed), #209 auth hardening, #212 service
+sessions scoped to the proxy, #216 same-origin rule for ambient-credential writes. Draft **0.7.4** (code 21, `1127819`) built and checked;
+a newer draft is due once the next Android work lands.
+**Incident 2026-09-29:** a verifier's probe cleared the host `gh` login (see Decision log; PLAN 6.3 isolation rule). Owner re-authenticated.
+**Open security (private tether issues; public beads carry pointers only):** #213 follow-ups, #214 (High; path-form service pages on the
+console origin + credentials forwarded upstream - needs an owner decision), #215 (proxy follow-ups).
+**Next frontier (`bd ready`):** ta-41x (Android sends Origin on cookie writes) + ta-jt9 (mirror purge on signed-out boot), T6.5-T6.7,
+T7.2-T7.4, T8.x, T10.x (T10.5 passkeys: server ready; needs the gateway bypass + JSON-typed POSTs), T13.2+.
 **Owner queue (report, not act):** (0) SSO gateway bypass for exactly `/.well-known/assetlinks.json` (rule prepared by Ops). Push is blocked on Firebase provisioning (production has no FCM config at all: create the
 Firebase project + register `com.tether.app`, service-account key, set all six `TETHER_FCM_*` values in a root-owned
 EnvironmentFile, rebuild + restart, restrict the API key). tether#204 is merged. Publishing any draft is the owner's call.
@@ -130,7 +133,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.1 | Turns/blocks, streaming, thinking, markdown, code, paging, perf | VERIFIED | claude-main @ 2026-09-27 16:58 |  |  |
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | VERIFIED | TheMrClaus @ 2026-09-28 04:21 |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
-| T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | TODO |  |  |  |
+| T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | VERIFIED | TheMrClaus @ 2026-09-29 01:02 |  |  |
 | T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | TODO |  |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | TODO |  |  |  |
@@ -168,7 +171,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T10.3 | Nodes settings | TODO |  |  |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
-| T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator: S10.1 (tether#208) merged to tether main d69b4e5 on 2026-09-28; the server side of passkeys is in main (deployment not confirm… |
+| T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator (from the tether#216 review): once #216 lands, every cookie-authenticated POST from the app (incl. an app-passkey session) must… |
 | T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
 
 ### Phase 11 — Files
