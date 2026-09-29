@@ -270,6 +270,10 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
     val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
     val network = requested?.network == true && !selection.networkOff
+    // Round 8: the rows as shown, within the card's display budget. A path that cannot be shown in
+    // full, or a row left out, makes the card Deny-only (grants fail closed in [pickFor]).
+    val rows = remember(view.request) { requested?.let(::grantRows) }
+    val grantable = rows?.grantable ?: true
     // The "Confirm these permissions" tick, required by EVERY grant (round 4). Never saved. Round 5
     // (F1): it records the store generation it was made at; it counts only while the record is still
     // at that generation, and the key re-checks that against the store AT TAP TIME, so an untick in
@@ -311,7 +315,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         val liveRead = readList.filter { readList.indexOf(it) !in live.offRead }.distinct()
         val liveWrite = writeList.filter { writeList.indexOf(it) !in live.offWrite }.distinct()
         val liveNetwork = requested?.network == true && !live.networkOff
-        val pick = pickFor(view, choice, confirmed = true, subset = subsetGrant(liveRead, liveWrite, liveNetwork)) ?: return
+        val pick = pickFor(view, choice, confirmed = true, subset = subsetGrant(liveRead, liveWrite, liveNetwork), grantable = grantable) ?: return
         send(pick.choiceId, null, pick.granted)
     }
 
@@ -360,36 +364,45 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         )
         // Round 7: server text on the card goes through the same display escaping as the paths.
         view.reason?.let { ContextLine(null, displayText(it)) }
+        // Round 8 (Low-2): escaped FIRST, then bounded (head…tail for the directory, a trailing "…" for text).
         view.cwd?.let { ContextLine("Working directory", displayPath(it)) }
         view.network?.let { ContextLine("Network", displayText(it)) }
         if (view.input != null) {
             Column(Modifier.fillMaxWidth()) { ToolInputView(view.name, view.input) }
         }
 
-        if (requested != null) {
+        if (requested != null && rows != null) {
             GrantFieldset {
-                requested.read.forEach { path ->
+                rows.read.forEach { (path, shown) ->
                     GrantCheckbox(
                         checked = readList.indexOf(path) !in selection.offRead,
-                        enabled = !frozen && view.allowsSubset,
+                        enabled = !frozen && view.allowsSubset && grantable,
                         onChange = { toggle(read = true, path = path) },
                         tag = "grant-read",
                         onBlocked = blocked,
-                    ) { GrantPathText("Read", path) }
+                    ) { GrantPathText("Read", shown) }
                 }
-                requested.write.forEach { path ->
+                rows.write.forEach { (path, shown) ->
                     GrantCheckbox(
                         checked = writeList.indexOf(path) !in selection.offWrite,
-                        enabled = !frozen && view.allowsSubset,
+                        enabled = !frozen && view.allowsSubset && grantable,
                         onChange = { toggle(read = false, path = path) },
                         tag = "grant-write",
                         onBlocked = blocked,
-                    ) { GrantPathText("Write", path) }
+                    ) { GrantPathText("Write", shown) }
+                }
+                if (rows.hidden > 0) {
+                    Text(
+                        "+${rows.hidden} more ${if (rows.hidden == 1) "path" else "paths"} not shown",
+                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
+                        color = t.muted,
+                        modifier = Modifier.testTag("grant-hidden"),
+                    )
                 }
                 if (requested.network) {
                     GrantCheckbox(
                         checked = network,
-                        enabled = !frozen && view.allowsSubset,
+                        enabled = !frozen && view.allowsSubset && grantable,
                         onChange = { store.setGrant(cfp, store.grant(cfp).let { it.copy(networkOff = !it.networkOff) }) },
                         tag = "grant-network",
                         onBlocked = blocked,
@@ -397,7 +410,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         Text("Network access", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)), color = t.muted)
                     }
                 }
-                if (view.needsConfirm) {
+                rows.refusal?.let { StatusLine(it, t.ink, "grant-refused") }
+                if (view.needsConfirm && grantable) {
                     Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
                         GrantCheckbox(
                             checked = confirmed,
@@ -413,7 +427,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                             onBlocked = blocked,
                         ) {
                             Text(
-                                grantSummary(readPaths, writePaths, network),
+                                grantSummary(readPaths, writePaths, network, rows.shown),
                                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
                                 color = t.warning,
                             )
@@ -437,7 +451,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         ) {
             if (view.choices.isNotEmpty()) {
                 view.choices.forEach { choice ->
-                    val pick = pickFor(view, choice, confirmed, subset)
+                    val pick = pickFor(view, choice, confirmed, subset, grantable)
                     TetherKey(
                         // The captured [pick] only draws the key; the tap re-reads the store (F1).
                         onClick = { if (pick != null) choose(choice) },
@@ -523,14 +537,14 @@ private fun GrantFieldset(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun GrantPathText(verb: String, path: String) {
+private fun GrantPathText(verb: String, shown: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Text(
         buildAnnotatedString {
             append("$verb ")
-            // L-3: escaped, cut and quoted for display; the grant itself carries the raw path.
-            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(displayPath(path).breakAnywhere()) }
+            // L-3: escaped, cut and quoted for display ([showPath], computed once per request); the grant carries the raw path.
+            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(shown.breakAnywhere()) }
         },
         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
         color = t.muted,

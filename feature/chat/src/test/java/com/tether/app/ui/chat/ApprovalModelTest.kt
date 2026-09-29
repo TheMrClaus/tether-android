@@ -295,6 +295,116 @@ class ApprovalModelTest {
         assertEquals(iso("host\\u202E.example"), displayText("host\u202E.example"))
     }
 
+    // ---- Round 8: a bounded display, and a grant only for what is shown in full ----
+
+    private val tag = "󠁁" // U+E0041, escaped as the 9 characters \u{E0041}
+
+    @Test fun aRelativePathIsWholeUpToTheCapMeasuredAfterEscaping() {
+        // "../" (3) + 113 tag characters (1017) + "aaaa" (4) = 1024 escaped characters: shown whole.
+        val under = "../" + tag.repeat(113) + "aaaa"
+        val atCap = showPath(under)
+        assertTrue(atCap.complete)
+        assertTrue(!atCap.text.contains("…"))
+        assertEquals(iso("“../" + "\\u{E0041}".repeat(113) + "aaaa”") + RELATIVE_MARKER, atCap.text)
+        // One more character: over the cap, head…tail, still quoted, isolated and marked; incomplete.
+        val over = showPath(under + "b")
+        assertTrue(!over.complete)
+        assertTrue(over.text, over.text.startsWith("$FSI“../\\u{E0041}"))
+        assertTrue(over.text, over.text.endsWith("\\u{E0041}aaaab”$PDI$RELATIVE_MARKER"))
+        assertTrue(over.text, over.text.contains("…"))
+        // Cut at escape boundaries: every escape shown is whole.
+        val body = over.text.removePrefix("$FSI“").substringBefore("”$PDI")
+        for (half in body.split("…")) assertTrue(half, half.replace("\\u{E0041}", "").replace("../", "").replace("aaaab", "").isEmpty())
+        assertTrue(body.length <= DISPLAY_PATH_RELATIVE_HEAD + 1 + DISPLAY_PATH_RELATIVE_TAIL)
+        // In plain characters too (the cap is not in code points).
+        assertTrue(showPath("../" + "a".repeat(1_021)).complete)
+        assertTrue(!showPath("../" + "a".repeat(1_022)).complete)
+    }
+
+    @Test fun aLongWorkingDirectoryKeepsItsRelativeTail() {
+        val cwd = "/w/" + "d".repeat(4_000) + "/../.."
+        val shown = displayPath(cwd)
+        assertTrue(shown, shown.endsWith("dd/../..”$PDI$RELATIVE_MARKER"))
+        assertTrue(shown, shown.startsWith("$FSI“/w/ddd"))
+        assertTrue(shown.length < DISPLAY_PATH_RELATIVE_MAX + 100)
+    }
+
+    @Test fun contextTextIsEscapedFirstThenCutWithARealEllipsis() {
+        // 300 tag characters escape to 2700 characters: cut to the last whole escape within 2000 (222 of them).
+        val shown = displayText(tag.repeat(300))
+        assertEquals("$FSI" + "\\u{E0041}".repeat(DISPLAY_TEXT_MAX / 9) + "…$PDI", shown)
+        // Astral characters shown as themselves are never split, whatever the budget (here an odd one).
+        val emoji = displayText("😀".repeat(1_500), max = 1_999)
+        val body = emoji.removePrefix("$FSI").removeSuffix("…$PDI")
+        assertEquals(999 * 2, body.length)
+        assertTrue(body.codePoints().allMatch { it == 0x1F600 })
+        // A literal "…" in the text is escaped, so the real one is the only ellipsis.
+        assertEquals("$FSI\\u2026$PDI", displayText("…"))
+        assertEquals("$FSI${"a".repeat(DISPLAY_TEXT_MAX)}$PDI", displayText("a".repeat(DISPLAY_TEXT_MAX)))
+    }
+
+    @Test fun aReasonAndAWorkingDirectoryReachTheViewUncut() {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "r"); put("toolId", "x"); put("name", "command_execution")
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "command")
+                    put("reason", "r".repeat(2_000)); put("cwd", "/w/" + "d".repeat(4_000) + "/../..")
+                }
+            },
+        )
+        val view = pendingApprovals(tree).single()
+        // The reducer's own bounds (2000 / 4096) are the only cut before the card escapes them.
+        assertEquals("r".repeat(2_000), view.reason)
+        assertEquals("/w/" + "d".repeat(4_000) + "/../..", view.cwd)
+    }
+
+    private fun requested(read: List<String>, write: List<String> = emptyList()) =
+        RequestedPermissionsView(read = read, write = write, network = false, exact = GrantedPermissions())
+
+    @Test fun rowsWithinTheBudgetAreAllShownAndGrantable() {
+        val rows = grantRows(requested((0 until 64).map { "/srv/data/file-$it" }, (0 until 64).map { "/w/out/report-$it" }))
+        assertEquals(64, rows.read.size)
+        assertEquals(64, rows.write.size)
+        assertEquals(0, rows.hidden)
+        assertTrue(rows.grantable)
+        assertEquals(null, rows.refusal)
+        assertEquals(displayPath("/srv/data/file-3"), rows.shown["/srv/data/file-3"])
+    }
+
+    @Test fun rowsPastTheBudgetAreCountedAndTheCardIsDenyOnly() {
+        // Plain (non-relative) 4096-tag-character paths: each is elided to 160 escapes (~1.6k characters).
+        val paths = (0 until 64).map { "/p$it/" + tag.repeat(4_090) }
+        val rows = grantRows(requested(paths, paths.map { "/w$it" + it }))
+        val shownChars = (rows.read + rows.write).sumOf { it.second.length }
+        assertTrue(shownChars <= CARD_PATH_BUDGET)
+        assertEquals(128, rows.read.size + rows.write.size + rows.hidden)
+        assertTrue(rows.hidden > 0)
+        assertTrue(!rows.grantable)
+        assertEquals(TOO_MANY_COPY, rows.refusal)
+    }
+
+    @Test fun anIncompleteRelativePathMakesTheCardDenyOnly() {
+        val rows = grantRows(requested(listOf("/srv/a", "../" + "a".repeat(1_022))))
+        assertEquals(2, rows.read.size)
+        assertEquals(0, rows.hidden)
+        assertTrue(!rows.grantable)
+        assertEquals(TOO_LONG_COPY, rows.refusal)
+    }
+
+    @Test fun aGrantChoiceIsNotOfferedWhenNotGrantable() {
+        val view = pendingApprovals(ApprovalFixtures.grants.tree).single()
+        val exact = view.choices.first { it.permissionGrant == "exact" }
+        val subset = view.choices.first { it.permissionGrant == "subset" }
+        val deny = view.choices.first { it.permissionGrant == null }
+        val all = GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report"), networkEnabled = true)
+        assertTrue(pickFor(view, exact, confirmed = true, subset = all) != null)
+        assertEquals(null, pickFor(view, exact, confirmed = true, subset = all, grantable = false))
+        assertEquals(null, pickFor(view, subset, confirmed = true, subset = all, grantable = false))
+        assertEquals("deny", pickFor(view, deny, confirmed = false, subset = null, grantable = false)?.choiceId)
+    }
+
     private companion object {
         const val Q_DB = ApprovalFixtures.Q_DB
     }

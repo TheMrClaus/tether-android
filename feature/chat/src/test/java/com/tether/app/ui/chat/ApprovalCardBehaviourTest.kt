@@ -1306,6 +1306,151 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithText(displayPath("/w/\u200Bproj").breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText(displayText("https://evil\u2066.example").breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
     }
+
+    // ---- Round 8: a bounded card, Deny-only when not every path can be shown in full ----
+
+    /** A permissions request (exact / subset / deny) for [read] and [write], optionally with a working directory. */
+    private fun permissionCard(read: List<String>, write: List<String>, cwd: String? = null): ChatFixtures.Folded {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-b"); put("toolId", "perm-b"); put("name", "permissions")
+                putJsonArray("choices") {
+                    addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                    addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") }
+                    addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
+                }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    if (cwd != null) put("cwd", cwd)
+                    putJsonObject("requestedPermissions") {
+                        putJsonObject("fileSystem") {
+                            putJsonArray("read") { read.forEach { add(it) } }
+                            putJsonArray("write") { write.forEach { add(it) } }
+                        }
+                    }
+                }
+            },
+        )
+        return ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree)
+    }
+
+    private val tagChar = "\udb40\udc41" // U+E0041: a FORMAT code point, escaped as \u{E0041}
+
+    /** 64 + 64 paths of the reducer's maximum 4096 code points, mostly tag characters. */
+    private fun worstPaths(relative: Boolean): Pair<List<String>, List<String>> {
+        fun path(side: String, i: Int): String {
+            val head = if (relative) "/$side$i/../" else "/$side$i/"
+            return head + tagChar.repeat(4_096 - head.length)
+        }
+        return (0 until 64).map { path("r", it) } to (0 until 64).map { path("w", it) }
+    }
+
+    private fun assertDenyOnly(refusal: String) {
+        scrollTo("grant-refused")
+        rule.onNodeWithText(refusal).assertExists()
+        rule.onAllNodesWithTag("grant-confirm").assertCountEquals(0)
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("DENY", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-b:deny"), calls)
+    }
+
+    @Test fun theWorstRelativeCardRendersQuicklyAndIsDenyOnly() {
+        val (read, write) = worstPaths(relative = true)
+        val started = System.nanoTime()
+        show(permissionCard(read, write))
+        scrollTo("grant-refused")
+        val ms = (System.nanoTime() - started) / 1_000_000
+        println("round 8: worst relative card (64+64 x 4096 tag characters) rendered in $ms ms")
+        assertTrue("rendered in $ms ms", ms < 5_000)
+        assertDenyOnly(TOO_LONG_COPY)
+        // The budget also holds: not every row is drawn.
+        rule.onNodeWithTag("grant-hidden").assertExists()
+    }
+
+    @Test fun theWorstPlainCardRendersQuicklyAndIsDenyOnly() {
+        val (read, write) = worstPaths(relative = false)
+        val started = System.nanoTime()
+        show(permissionCard(read, write))
+        scrollTo("grant-refused")
+        val ms = (System.nanoTime() - started) / 1_000_000
+        println("round 8: worst plain card (64+64 x 4096 tag characters) rendered in $ms ms")
+        assertTrue("rendered in $ms ms", ms < 5_000)
+        val rows = grantRows(pendingApprovals(fixture.tree).single().requested!!)
+        rule.onNodeWithText("+${rows.hidden} more paths not shown").assertExists()
+        assertTrue(rows.hidden > 0)
+        assertDenyOnly(TOO_MANY_COPY)
+    }
+
+    @Test fun theLargestGrantableCardRendersQuickly() {
+        // Relative tag-character paths just under the cap (1016 escaped characters each), as many as
+        // the budget allows: every row AND the confirmation's words are drawn (~2 x the budget).
+        val paths = (10 until 25).map { "/r$it/../" + tagChar.repeat(112) }
+        val rows = grantRows(RequestedPermissionsView(paths, emptyList(), network = false, exact = GrantedPermissions()))
+        assertTrue(rows.grantable)
+        assertTrue(rows.read.sumOf { it.second.length } > CARD_PATH_BUDGET - 1_100)
+        val started = System.nanoTime()
+        show(permissionCard(paths, emptyList()))
+        scrollTo("grant-confirm")
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.waitForIdle()
+        val ms = (System.nanoTime() - started) / 1_000_000
+        println("round 8: largest grantable card (15 relative paths at the cap) rendered in $ms ms")
+        assertTrue("rendered in $ms ms", ms < 5_000)
+        // The card is taller than the screen: bring the key into view before tapping it.
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Allow all", ignoreCase = true))
+        rule.waitForIdle()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:"))
+    }
+
+    @Test fun aRelativePathJustUnderTheCapIsGrantable() {
+        val path = "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 3)
+        show(permissionCard(listOf(path), emptyList()))
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, calls.size)
+        assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains(path))
+    }
+
+    @Test fun aRelativePathJustOverTheCapIsDenyOnly() {
+        val path = "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 2)
+        show(permissionCard(listOf(path), emptyList()))
+        rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
+        assertDenyOnly(TOO_LONG_COPY)
+    }
+
+    @Test fun aFullCardWithinTheBudgetStaysGrantable() {
+        val read = (0 until 64).map { "/srv/data/file-$it" }
+        val write = (0 until 64).map { "/w/out/report-$it" }
+        show(permissionCard(read, write))
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
+        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+        rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, calls.size)
+        assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains("/w/out/report-63"))
+    }
+
+    @Test fun aLongWorkingDirectoryShowsItsRelativeTail() {
+        val cwd = "/w/" + "d".repeat(4_000) + "/../.."
+        show(permissionCard(listOf("/srv/a"), emptyList(), cwd = cwd))
+        scrollTo("approval-card")
+        val shown = displayPath(cwd)
+        assertTrue(shown, shown.endsWith("/../..\u201d$PDI$RELATIVE_MARKER"))
+        rule.onNodeWithText(shown.breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        // The directory is context, not a grant: the card stays grantable.
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+    }
 }
 
 /**
