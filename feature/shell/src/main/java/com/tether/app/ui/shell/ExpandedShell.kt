@@ -121,6 +121,8 @@ fun ExpandedShell(
                 fileBrowserDisabled = session == null,
                 expanded = ExpandedTopbar(railWidth = if (collapsed) null else railWidth, viewportWidth = viewport, link = link),
             )
+            // T13.2: the link banner, under the topbar (never a modal).
+            LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Row(Modifier.fillMaxSize()) {
                     if (!collapsed) SidebarColumn(railWidth.dp) { slots.drawer() }

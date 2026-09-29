@@ -133,6 +133,15 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val session = sessions.firstOrNull { it.id == selectedId }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
+    // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
+    val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
+    val freshnessNow = com.tether.app.ui.components.rememberTickingNow()
+    val shellFreshness = com.tether.app.ui.shell.ShellFreshness(
+        banner = com.tether.app.ui.shell.ShellFreshness.bannerFor(connection),
+        syncStates = syncStates,
+        listLive = connected,
+        now = freshnessNow,
+    )
 
     var showLog by remember { mutableStateOf(false) }
     // The web's <dialog> stays mounted, so its filters and last stats survive a close and reopen.
@@ -243,6 +252,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End)
                 },
             )
+        CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
                 state = shell,
@@ -278,6 +288,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 header = headerActions,
                 slots = slots,
             )
+        }
         }
 
         toast?.let { message ->

@@ -21,6 +21,9 @@ import com.tether.app.ui.theme.LocalTetherTokens
 object ShellTags {
     const val Shell = "shell"
     const val Topbar = "shell-topbar"
+    const val LinkBanner = "shell-link-banner"
+    const val FreshnessChip = "shell-freshness"
+    const val StatusPill = "shell-status-pill"
     const val MenuKey = "shell-menu"
     const val FilesKey = "shell-files"
     const val LogKey = "shell-log"
@@ -123,6 +126,8 @@ fun PhoneShell(
                 unseenWarnings = unseenWarnings,
                 fileBrowserDisabled = session == null,
             )
+            // T13.2: the link banner, under the topbar (never a modal).
+            LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
             Column(Modifier.weight(1f).fillMaxWidth()) {
                 if (session != null) {
                     WorkspaceHeader(

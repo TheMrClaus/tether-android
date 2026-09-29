@@ -63,6 +63,8 @@ import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.components.FreshnessChip
+import com.tether.app.ui.components.FreshnessCopy
 import com.tether.app.ui.components.TetherStatusPill
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
@@ -156,6 +158,8 @@ fun WorkspaceHeader(
         else -> t.css.spaceLg
     }
     val padV = if (studio && expanded) 16.dp else t.css.spaceSm
+    val freshness = LocalShellFreshness.current
+    val sync = freshness.syncStates[session.id]
     Column(
         modifier
             .fillMaxWidth()
@@ -194,7 +198,11 @@ fun WorkspaceHeader(
             Spacer(Modifier.width(titleGap - 6.dp))
             RenameKey(actions.onRename)
             Spacer(Modifier.width(titleGap))
-            TetherStatusPill(label = statusCopy(session.status), tone = statusToneOf(session.status))
+            // T13.2: from a list that is not live the pill says "Was running" on a faint still dot,
+            // never the spinner or the violet waiting ping (SYNC_DESIGN §4.2). The age is the
+            // freshness chip's, under the row: here it would crowd out the name at a large font.
+            val (pillLabel, pillTone) = FreshnessCopy.statusPill(session.status, freshness.listLive, null, freshness.now)
+            TetherStatusPill(label = pillLabel, tone = pillTone, modifier = Modifier.testTag(ShellTags.StatusPill))
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -239,6 +247,8 @@ fun WorkspaceHeader(
             )
         }
     }
+    // T13.2: how current this session's copy is (nothing while Live).
+    FreshnessChip(sync, freshness.now, Modifier.padding(top = t.css.spaceXs).testTag(ShellTags.FreshnessChip))
     }
 }
 
