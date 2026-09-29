@@ -35,6 +35,13 @@ object OutputIntakeCap {
     /** Segments kept per command (a conforming server can legally alternate streams per character). */
     const val MAX_SEGMENTS = 4096
 
+    /**
+     * Test seam (round 5b): how many commands [capTree] has scanned (handed to [capCommand]) since
+     * the process started. The deterministic form of B1's bound: a publish that one event changed
+     * scans exactly the one command it touched, however much else is stored.
+     */
+    internal val commandsScanned = java.util.concurrent.atomic.AtomicLong()
+
     /** [next] with every command that is not [previous]'s own object (by commandId) capped. */
     fun capTree(previous: JsObj?, next: JsObj, maxChars: Int = MAX_CHARS, maxSegments: Int = MAX_SEGMENTS): JsObj {
         val commands = next["backgroundCommands"] as? JsArr ?: return next
@@ -51,6 +58,7 @@ object OutputIntakeCap {
             val id = (command["commandId"] as? JsStr)?.value
             // Reference identity on purpose: the previous tree's object was capped when it was published.
             if (id != null && known[id] === command) continue
+            commandsScanned.incrementAndGet()
             val capped = capCommand(command, maxChars, maxSegments)
             if (capped !== command) out = out.set(i, capped)
         }

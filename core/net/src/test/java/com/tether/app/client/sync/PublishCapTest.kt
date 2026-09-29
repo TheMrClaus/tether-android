@@ -19,7 +19,7 @@ import org.junit.Test
 /**
  * T6.4 round 4, the output cap as SessionStore.publish applies it. B1: a publish costs only what
  * changed (100 commands × 65,536 one-character alternating segments stored, one output event per
- * publish: well under 1 ms). 5(a): the capped flag stays set across `finished` through publish.
+ * publish scans exactly one command; the time is printed as a diagnostic, never asserted). 5(a): the capped flag stays set across `finished` through publish.
  */
 class PublishCapTest {
     private fun started(id: String) = evNullTurn("background_command_updated", ts = 1) {
@@ -97,18 +97,21 @@ class PublishCapTest {
         val first = command(tree, "c0")
         assertEquals(OutputIntakeCap.MAX_SEGMENTS, (first["segments"] as JsArr).size)
         assertEquals(JsBool.TRUE, first["outputTruncated"])
-        // Steady state: one output event, one publish.
+        // Steady state: one output event, one publish. The bound is asserted as WORK, not time
+        // (round 5b: a wall-clock threshold fails on a loaded host): each publish scans exactly the
+        // one command the event touched, never the other 99 and their 6.5M stored segments.
         val times = LongArray(400)
         for (k in times.indices) {
             val next = reduce(tree, out("c${k % 100}", "y", if (k % 2 == 0) "stdout" else "stderr"))
+            val scannedBefore = OutputIntakeCap.commandsScanned.get()
             val start = System.nanoTime()
             tree = store.publish("s1", next, null)
             times[k] = System.nanoTime() - start
+            assertEquals("publish $k scanned only the changed command", 1L, OutputIntakeCap.commandsScanned.get() - scannedBefore)
         }
+        // Diagnostic only (no assertion): the measured cost.
         val measured = times.drop(100).sorted()
-        val medianMs = measured[measured.size / 2] / 1e6
-        println("PUBLISH_MEDIAN_MS $medianMs p90=${measured[measured.size * 9 / 10] / 1e6}")
-        assertTrue("median publish $medianMs ms", medianMs < 1.0)
+        println("PUBLISH_MEDIAN_MS ${measured[measured.size / 2] / 1e6} p90=${measured[measured.size * 9 / 10] / 1e6}")
         assertTrue((command(tree, "c7")["segments"] as JsArr).size <= OutputIntakeCap.MAX_SEGMENTS)
     }
 
