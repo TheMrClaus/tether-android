@@ -306,6 +306,16 @@ debug builds need a `network_security_config` allowing cleartext **only** for `1
 `localhost`. Remember the WS upgrade must send an `Origin` matching `Host` (OkHttp does not).
 Pair via `POST /api/devices/pair` from a password session → claim in the app.
 
+**Host-credential isolation (binding since 2026-09-29).** Some tether routes act on the *host's* real
+logins: the GitHub connection's login/logout/token (they run `gh auth …`), Claude-account login/logout,
+and Codex login. A test or probe server started with the operator's real `HOME` will wipe or change
+those logins — this happened once (a verifier's route sweep called the GitHub logout route and cleared
+the machine's `gh` login). So every test/probe server an agent starts **must** run with a throwaway
+`HOME`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME` (and `TETHER_CLAUDE_HOME`/`TETHER_CODEX_HOME` empty or
+temp) plus a fake `gh` first on `PATH`, exactly as `tests/integration/revocation-reach.test.mjs` does;
+and route sweeps/probes **never** call those credential routes except through that isolated fake.
+Coordinators repeat this rule in every tether-side brief.
+
 ### 6.4 CI (task T0.4)
 GitHub Actions in tether-android: build + lint + unit tests + Roborazzi verify + corpus
 conformance on every push/PR. Keep the release workflow as is.
