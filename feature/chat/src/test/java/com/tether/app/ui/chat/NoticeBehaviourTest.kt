@@ -84,6 +84,11 @@ class NoticeBehaviourTest {
     fun aTapOnTheXSendsExactlyItsKeyOnce() {
         show(NoticeFixtures.sessionNotices)
         rule.onAllNodesWithTag("notice-dismiss").assertCountEquals(3)
+        // Just appeared: a tap aimed at what was there a moment ago lands on nothing.
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.dismissed.isEmpty())
+        arm()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
         settle()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
@@ -98,6 +103,7 @@ class NoticeBehaviourTest {
     fun aRefusedDismissalReleasesTheXAndSaysWhy() {
         rec.dismissResult = NoticeResult.NotLive
         show(NoticeFixtures.sessionNotices)
+        arm()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
         settle()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
@@ -137,6 +143,7 @@ class NoticeBehaviourTest {
         // The server allows dismiss-notice read-only; only the limit keys take the control lock.
         actions = rec.actions(controlLock = ConsentLock.ReadOnly)
         show(NoticeFixtures.claudeFallback)
+        arm()
         rule.onNodeWithContentDescription("Dismiss notice").performClick()
         settle()
         assertEquals(1, rec.dismissed.size)
@@ -147,6 +154,7 @@ class NoticeBehaviourTest {
     fun theCodexTurnsCompactionAndNoticesAreEachDismissable() {
         show(NoticeFixtures.codexNotices, richCodex = true)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("compaction-notice"))
+        arm()
         rule.onNodeWithContentDescription("Dismiss context-compacted notice").performClick()
         settle()
         assertEquals(listOf("context_compacted:t1:cmp-1"), rec.dismissed)
@@ -200,6 +208,11 @@ class NoticeBehaviourTest {
         show(NoticeFixtures.scheduled)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
         rule.onNodeWithText("Automatic resume scheduled for 2:03 AM UTC.").assertExists()
+        // Armed: its first moment sends nothing.
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
+        settle()
+        assertTrue(rec.controls.isEmpty())
+        arm()
         rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
         settle()
         rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()

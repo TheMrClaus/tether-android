@@ -171,9 +171,11 @@ internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Mo
     val actions = LocalNoticeActions.current
     var latched by remember(dismissKey, actions.link) { mutableStateOf(false) }
     val lock = actions.lock
-    val enabled = lock == null && !latched
+    // Armed like every operator control: not in its first 500 ms, again after it moved; no overlay taps.
+    val arming = rememberArmedControl(dismissKey to actions.link, lock == null && !latched)
+    val enabled = lock == null && !latched && arming.armed
     val tap = {
-        if (!latched && actions.lock == null) {
+        if (!latched && actions.lock == null && arming.armed) {
             latched = true
             val result = actions.onDismiss(dismissKey)
             if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) {
@@ -184,6 +186,7 @@ internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Mo
     }
     Box(
         modifier
+            .then(arming.modifier)
             .size(TetherDimens.touchTargetDp)
             .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
             .semantics(mergeDescendants = true) {
@@ -198,7 +201,7 @@ internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Mo
             .testTag("notice-dismiss"),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (enabled) 1f else 0.5f))
+        Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
     }
 }
 
@@ -357,7 +360,8 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     var overlayBlocked by remember(identity) { mutableStateOf(false) }
     val lock = actions.controlLock
     val actionable = sent == null && lock == null
-    val armed = rememberArmed(identity, actionable)
+    val arming = rememberArmedControl(identity, actionable)
+    val armed = arming.armed
     val resetClock = limitClockTime(view.resetsAt, locale, zone)
     val resumeClock = limitClockTime(view.resumeAt, locale, zone)
 
@@ -374,6 +378,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
 
     Column(
         modifier
+            .then(arming.modifier)
             .fillMaxWidth()
             .cssSurface(
                 shape,
@@ -473,10 +478,11 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
     val actions = LocalNoticeActions.current
     var latched by remember(view.resetsAt, actions.link) { mutableStateOf(false) }
     val lock = actions.controlLock
-    val enabled = lock == null && !latched
+    val arming = rememberArmedControl(view.resetsAt to actions.link, lock == null && !latched)
+    val enabled = lock == null && !latched && arming.armed
     val label = "Cancel scheduled resume"
     val tap = {
-        if (!latched && actions.controlLock == null) {
+        if (!latched && actions.controlLock == null && arming.armed) {
             latched = true
             val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
             if (result != ControlResult.Sent) {
@@ -498,7 +504,7 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
             modifier = Modifier.alpha(0.8f).weight(1f, fill = false).semantics { liveRegion = LiveRegionMode.Polite },
         )
         Box(
-            Modifier
+            arming.modifier
                 .size(TetherDimens.touchTargetDp)
                 .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
                 .semantics(mergeDescendants = true) {
@@ -513,7 +519,7 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
                 .testTag("rate-limit-cancel"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (enabled) 1f else 0.5f))
+            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
         }
     }
 }
