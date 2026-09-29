@@ -412,9 +412,10 @@ fun Composer(
         setAutoApprove = { on -> if (on != composerControls?.auto?.on) toggleAuto() },
         // T6.6 (chat-view.tsx:2480): exactly the flip of the value the toggle was drawn with.
         // Turning it on is a grant: it only asks (the confirmation sends); turning it off sends.
+        // r3: never while locked (offline, or a copy that is not live: T13.2's rule), whichever key asked.
         setAutoContinue = { enabled ->
             val ac = composerControls?.autoContinue
-            if (ac != null && enabled != ac.on) {
+            if (ac != null && enabled != ac.on && controlActions.lock == null) {
                 if (enabled) {
                     escalation = escalationFor(SessionControl.AutoContinueOnLimit(true))
                 } else if (sendControl(SessionControl.AutoContinueOnLimit(false))) {

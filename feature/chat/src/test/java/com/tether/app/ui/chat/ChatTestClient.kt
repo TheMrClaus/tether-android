@@ -120,6 +120,13 @@ class ChatTestClient : TetherClient {
         return com.tether.app.client.InterruptResult.Sent
     }
 
+    /** T6.6 r3: every notice dismissal the UI asked for (`<session>:<key>@<origin>`), NOT de-duplicated. */
+    val dismissCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): com.tether.app.client.NoticeResult {
+        dismissCalls += "$sessionId:$dismissKey@$expectedOrigin"
+        return com.tether.app.client.NoticeResult.Sent
+    }
+
     /** T13.2 r2: every session control the UI asked for (`<session>:<control>`). */
     val controlCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
     override fun sessionControl(sessionId: String, control: com.tether.app.client.SessionControl, expectedOrigin: String?): com.tether.app.client.ControlResult {

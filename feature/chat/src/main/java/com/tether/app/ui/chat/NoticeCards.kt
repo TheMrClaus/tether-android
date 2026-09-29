@@ -83,15 +83,20 @@ import java.util.Locale
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
-/** Why no notice of this session can be dismissed right now (only the link can stop it). */
+/**
+ * Why no notice of this session can be dismissed right now (only the link and the copy's liveness
+ * can stop it). r3: worded like the Stop keys' lock ([stopLockCopy]): offline, it is a saved copy.
+ */
 enum class NoticeLock(val copy: String) {
-    Offline("Connect to dismiss this notice."),
-    CatchingUp("Catching up… You can dismiss this notice once the latest state is in."),
+    Offline("Connect to dismiss this notice. This is a saved copy."),
+    CatchingUp("Catching up… You can dismiss this notice once this session is live."),
 }
 
 /**
  * Dismissal is presentation-only and the server allows it on a read-only or handed-off session, so
  * only the link and the session's liveness lock it (never [ConsentLock.ReadOnly] / HandedOff).
+ * r3: [live] is T13.2's [com.tether.app.client.LiveCopy.isLive] for the session (the live set AND a
+ * Live freshness entry), never the live set alone.
  */
 fun noticeLock(connected: Boolean, live: Boolean): NoticeLock? = when {
     !connected -> NoticeLock.Offline
@@ -442,6 +447,9 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
         )
         val status = when {
             lock == ConsentLock.HandedOff && cancelLock == null && sent == null -> HANDED_OFF_LIMIT_COPY
+            // r3: handed off AND not live: even Dismiss waits for the link / a live copy; say so.
+            lock == ConsentLock.HandedOff && cancelLock != null && sent == null ->
+                "This session was handed off. " + cancelLock.copy.replace("answer", "dismiss this prompt")
             lock != null && sent == null -> lock.copy.replace("answer", "choose")
             overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
             sent != null -> "Choice sent. Waiting for the server."
@@ -489,6 +497,14 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
             )
         }
     }
+}
+
+/** r3: why the scheduled-resume cancel cannot send, worded like the Stop keys' lock ([stopLockCopy]). */
+internal fun cancelLockCopy(lock: ConsentLock): String = when (lock) {
+    ConsentLock.Offline -> "Connect to cancel it. This is a saved copy."
+    ConsentLock.CatchingUp -> "Catching up… You can cancel it once this session is live."
+    ConsentLock.ReadOnly -> "Read-only: Tether isn’t driving this conversation."
+    ConsentLock.HandedOff -> "This session was handed off."
 }
 
 /** A handed-off source's limit card: only Dismiss is live (the work continues elsewhere). */
@@ -543,7 +559,7 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
                     contentDescription = label
                     role = Role.Button
                     when {
-                        lock != null -> stateDescription = controlLockCopy(lock) ?: lock.copy
+                        lock != null -> stateDescription = cancelLockCopy(lock)
                         latched -> stateDescription = "Cancelling…"
                     }
                     if (!enabled) disabled()

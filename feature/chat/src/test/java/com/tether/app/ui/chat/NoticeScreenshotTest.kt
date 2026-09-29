@@ -71,6 +71,7 @@ fun ComposeContentTestRule.snapNotice(shot: NoticeShot, skin: TetherSkin, name: 
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},
+                    liveness = ComposerLiveness.Live,
                     handoffTarget = target,
                 )
             }

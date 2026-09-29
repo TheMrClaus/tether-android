@@ -835,7 +835,8 @@ internal fun SessionSettingsSheet(
                 SheetView.AutoContinue -> controls.autoContinue?.let { ac ->
                     SheetHint("When on, a rate/usage limit hit in this session schedules its own continuation for right after the reset instead of just showing the prompt.")
                     listOf(false, true).forEach { on ->
-                        ControlOptionRow(ControlOption(on.toString(), if (on) "On" else "Off"), selected = ac.on == on, armedRow = true, divider = false) {
+                        // r3: a locked session (offline, or a copy that is not live) draws both rows inert.
+                        ControlOptionRow(ControlOption(on.toString(), if (on) "On" else "Off", disabled = !enabled), selected = ac.on == on, armedRow = true, divider = false) {
                             if (enabled && ac.on != on) handlers.setAutoContinue(on)
                             done()
                         }

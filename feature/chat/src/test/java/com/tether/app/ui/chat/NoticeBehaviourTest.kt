@@ -253,7 +253,7 @@ class NoticeBehaviourTest {
         arm()
         rule.onNodeWithContentDescription("Cancel scheduled resume")
             .assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, controlLockCopy(ConsentLock.Offline)!!))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, cancelLockCopy(ConsentLock.Offline)))
             .performClick()
         settle()
         assertTrue(rec.controls.isEmpty())
@@ -386,25 +386,87 @@ class ComposerLockBehaviourTest {
     private val opened = mutableListOf<String>()
     private val prompts = mutableListOf<String>()
 
-    private fun show(session: AgentSession, handoffTarget: AgentSession?) {
+    private val interrupts = mutableListOf<String>()
+
+    private fun show(
+        session: AgentSession,
+        handoffTarget: AgentSession?,
+        folded: ChatFixtures.Folded = ComposerFixtures.idle,
+        liveness: ComposerLiveness = ComposerLiveness.Live,
+    ) {
         rule.setContent {
             ComposerHost(TetherSkin.Machine) {
                 Composer(
                     session = session,
-                    projection = ComposerFixtures.idle.projection,
+                    projection = folded.projection,
                     controls = null,
                     serverNow = { ComposerFixtures.BUSY_NOW },
                     onSend = { text, _ -> prompts += text; true },
-                    onInterrupt = {},
+                    onInterrupt = { interrupts += session.id },
                     onQueueEdit = { _, _ -> },
                     onQueueRemove = {},
                     onRequestControls = {},
+                    liveness = liveness,
                     handoffTarget = handoffTarget,
                     onOpenSession = { opened += it },
                 )
             }
         }
         rule.waitForIdle()
+    }
+
+    /** T13.2's composer liveness for a saved copy (Interrupt locked, the run row "Was running"). */
+    private val savedCopy = ComposerLiveness(
+        interruptLock = stopLockCopy(ConsentLock.Offline),
+        stale = com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Saved, null),
+    )
+
+    // ---- r3: the read-only / handoff locks composed with T13.2's liveness and Interrupt lock ----
+
+    @Test
+    fun aBusyHandedOffSourceHasNoInterruptKeyEvenLive() {
+        show(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.queued, ComposerLiveness.Live)
+        rule.onNodeWithTag("composer-handoff-lock").assertExists()
+        rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        rule.onAllNodesWithTag(INTERRUPT_KEY_TAG).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
+        rule.onAllNodesWithTag(STALE_RUN_TAG).assertCountEquals(0)
+        assertTrue(interrupts.isEmpty())
+    }
+
+    @Test
+    fun aBusyHandedOffSavedCopyKeepsTheLockRowAndSaysWasRunning() {
+        show(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.queued, savedCopy)
+        rule.onNodeWithTag("composer-handoff-lock").assertExists()
+        rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        rule.onAllNodesWithTag(INTERRUPT_KEY_TAG).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
+        rule.onNodeWithTag(STALE_RUN_TAG).assertExists()
+        assertTrue(interrupts.isEmpty())
+    }
+
+    @Test
+    fun aBusyReadOnlySavedCopyKeepsTheReplayFlagAndSaysWasRunning() {
+        show(ComposerFixtures.session.copy(readOnly = true, provider = "codex"), null, ComposerFixtures.queued, savedCopy)
+        rule.onNodeWithTag("composer-read-only").assertExists()
+        rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        rule.onAllNodesWithTag(INTERRUPT_KEY_TAG).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
+        rule.onNodeWithTag(STALE_RUN_TAG).assertExists()
+        assertTrue(interrupts.isEmpty())
+    }
+
+    @Test
+    fun aBusyDrivableSavedCopyKeepsItsInputButBothInterruptKeysAreLocked() {
+        // The control case: neither T6.6 lock applies, so the composer is drawn and T13.2's lock holds.
+        show(ComposerFixtures.session, null, ComposerFixtures.queued, savedCopy)
+        rule.onAllNodesWithTag("composer-handoff-lock").assertCountEquals(0)
+        rule.onAllNodesWithTag("composer-read-only").assertCountEquals(0)
+        rule.onNodeWithText(PLACEHOLDER_BUSY).assertExists()
+        rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsNotEnabled().performClick()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue(interrupts.isEmpty())
     }
 
     @Test

@@ -169,7 +169,9 @@ fun ChatScreen(
     val codexMap by vm.client.codexControls.collectAsStateWithLifecycle()
     val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
     val pinnedModels by remember(prefs) { prefs.preferences.map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
-    val controlLock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, isLive, session)
+    // T13.2 / T6.6 r3: the session controls, the limit card and the auto-continue grant (and its
+    // pending confirmation, which closes on any lock) all stand on the live-copy rule.
+    val controlLock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)
     val controlActions = remember(session?.id, controlLock, consentOrigin, vm, codexMap[session?.id], opencodeMap[session?.id]) {
         val s = session
         // Bound to the server this row was drawn for: a tap on another server's row is refused.
@@ -192,7 +194,10 @@ fun ChatScreen(
 
     // T6.6: the notices' X (dismiss-notice: link + liveness only, the server allows it read-only)
     // and the limit card (rate-limit-resume: T7.2's guarded path and lock). Taps only.
-    val noticeLink = Triple(connection, isLive, consentOrigin)
+    // r3 (T13.2's consent rule, SYNC_DESIGN §4.2): both stand on [liveNow], LiveCopy's one rule, so
+    // a saved, catching-up or not-downloaded copy (or no entry, when the client reports freshness)
+    // never dismisses, schedules, resumes or cancels, even while the live set still holds the session.
+    val noticeLink = Triple(connection, liveNow, consentOrigin)
     val noticeActions = remember(session?.id, noticeLink, controlLock, vm) {
         val s = session
         val drawnFor = consentOrigin
@@ -201,7 +206,7 @@ fun ChatScreen(
         } else {
             NoticeActions(
                 sessionId = s.id,
-                lock = noticeLock(connection == com.tether.app.client.ConnectionState.Connected && drawnFor != null, isLive),
+                lock = noticeLock(connection == com.tether.app.client.ConnectionState.Connected && drawnFor != null, liveNow),
                 controlLock = controlLock,
                 link = noticeLink,
                 onDismiss = { key -> vm.client.dismissNotice(s.id, key, drawnFor) },
