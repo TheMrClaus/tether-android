@@ -45,6 +45,9 @@ class ChatTestClient : TetherClient {
     val live = MutableStateFlow<Set<String>>(emptySet())
     val decided = MutableStateFlow<Set<String>>(emptySet())
     override val liveSessions: StateFlow<Set<String>> get() = live
+    /** T13.2: per-session freshness (empty = none reported, as before). */
+    val sync = MutableStateFlow<Map<String, com.tether.app.client.SessionSync>>(emptyMap())
+    override val syncStates: StateFlow<Map<String, com.tether.app.client.SessionSync>> get() = sync
     override val decidedRequests: StateFlow<Set<String>> get() = decided
     val unconfirmed = MutableStateFlow<Set<String>>(emptySet())
     override val unconfirmedRequests: StateFlow<Set<String>> get() = unconfirmed

@@ -107,6 +107,10 @@ fun ChatScreen(
     val unconfirmed by vm.client.unconfirmedRequests.collectAsStateWithLifecycle()
     val consentOrigin by vm.client.consentOrigin.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
+    // T13.2: how current this session's copy is (SYNC_DESIGN §4); it also narrows "live" below.
+    val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
+    val sync = session?.let { syncStates[it.id] }
+    val liveNow = ChatFreshness.isLive(session?.id, liveSessions, sync)
     // T6.4: a denial's origin link opens the run's tab AND lands on the refused step.
     var runFocus by remember(session?.id) { mutableStateOf<RunFocus?>(null) }
     val onFocusCall: (String, String) -> Unit = remember(session?.id, vm) {
@@ -115,19 +119,19 @@ fun ChatScreen(
             runFocus = RunFocus(runId, toolId, (runFocus?.nonce ?: 0) + 1)
         }
     }
-    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall) {
-        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall)
+    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall, sync) {
+        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall, sync)
     }
     // T6.4: background commands — open one's output; STOP one (a tap on its Stop key, and only then).
     var openCommandId by remember(session?.id) { mutableStateOf<String?>(null) }
     val onOpenCommand: (String) -> Unit = remember(session?.id) { { id -> openCommandId = id } }
     val stopLock = stopLockCopy(
-        consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, session?.id in liveSessions, session),
+        consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session),
     )
     // Round 2: one "Stopping…" latch per command for this session (the bar and the sheet share it);
     // L3: the stop is bound to the server origin this row was drawn for.
     // L-3 (r3): a stop sent on one link never latches the keys past it.
-    val stopLatches = rememberStopLatches(session?.id, Triple(connection, session?.id in liveSessions, consentOrigin))
+    val stopLatches = rememberStopLatches(session?.id, Triple(connection, liveNow, consentOrigin))
     val commandActions = remember(session?.id, stopLock, consentOrigin, vm, stopLatches) {
         val s = session
         val drawnFor = consentOrigin
@@ -141,7 +145,7 @@ fun ChatScreen(
     // T7.2: the session controls (chat-view.tsx:2299-2319). Reads only: the models / commands reply
     // for every live-row engine, and the Codex v2 catalogs, re-read as the session warms (a turn
     // starts or ends) and once it is live on a (new) connection. Nothing here sends a control.
-    val isLive = session?.id in liveSessions
+    val isLive = liveNow
     val activeTurnId = projection?.activeTurnId
     LaunchedEffect(session?.id, session?.provider, session?.readOnly, activeTurnId, isLive) {
         val s = session
@@ -230,6 +234,9 @@ fun ChatScreen(
                     TetherKey(onClick = onOpenDrawer, classes = KeyClasses.ButtonSecondary, label = "Sessions")
                 }
 
+                // T13.2: offline with nothing on the device: say so, not "Connecting…".
+                projection == null && sync?.freshness == com.tether.app.client.Freshness.NotDownloaded -> SessionNotDownloaded()
+
                 projection == null -> Column(
                     Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -263,7 +270,7 @@ fun ChatScreen(
                     onFocusShown = { runFocus = null },
                 )
 
-                else -> ChatTranscript(
+                else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { ChatTranscript(
                     find = transcriptFind,
                     projection = projection,
                     tree = trees[session.id],
@@ -285,7 +292,7 @@ fun ChatScreen(
                     onOpenCommand = onOpenCommand,
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
-                )
+                ) }
             }
             }
         }
@@ -373,13 +380,15 @@ internal fun consentActionsFor(
     decided: Set<String>,
     unconfirmed: Set<String> = emptySet(),
     onFocusCall: ((runId: String, toolId: String) -> Unit)? = null,
+    /** T13.2: the session's freshness; a copy that is not Live is never actionable. */
+    sync: com.tether.app.client.SessionSync? = null,
 ): ConsentActions {
     val s = session ?: return ConsentActions.Unavailable
     return ConsentActions(
         sessionId = s.id,
         origin = origin,
         // No live socket origin = no live socket: the fingerprints would name no server.
-        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, s.id in liveSessions, s),
+        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync), s),
         decided = decided,
         unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
@@ -459,9 +468,12 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 modifier = Modifier.weight(1f),
             )
             // `.status-badge`: dot + printed word in an etched pill (never colour alone).
+            // T13.2: offline, "Was running" on a still faint dot (SYNC_DESIGN §4.2).
+            val connected = vm.client.connection.collectAsStateWithLifecycle().value == com.tether.app.client.ConnectionState.Connected
+            val (pillLabel, pillTone) = com.tether.app.ui.components.FreshnessCopy.statusPill(session.status, connected, null, 0L)
             TetherStatusPill(
-                label = statusCopy(session.status),
-                tone = statusToneOf(session.status),
+                label = pillLabel,
+                tone = pillTone,
                 modifier = Modifier.padding(horizontal = 6.dp),
             )
             IconButton(onClick = { showTelemetry = true }, modifier = Modifier.size(TetherDimens.touchTargetDp)) {

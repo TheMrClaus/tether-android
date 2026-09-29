@@ -336,7 +336,8 @@ private fun ChatRow(
     if (observer != null) SideEffect { observer(item.key) }
     Box(modifier.fillMaxWidth()) {
         when (item) {
-            is ChatItem.LoadEarlier -> LoadEarlierKey(item.count) {
+            // T13.2: a saved copy cannot fetch them: say so instead of offering a dead key.
+            is ChatItem.LoadEarlier -> if (LocalOlderTurnsUnavailable.current) OlderTurnsNotDownloaded() else LoadEarlierKey(item.count) {
                 val range = loadEarlierRange(item.count)
                 onFetchTurns(range.first, range.last + 1)
             }
