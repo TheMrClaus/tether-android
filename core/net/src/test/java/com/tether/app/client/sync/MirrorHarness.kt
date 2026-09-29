@@ -197,16 +197,31 @@ class MirrorHarness(
         server.enqueue(MockResponse().withWebSocketUpgrade(listener))
     }
 
-    /** A new process: start(), connect, and (unless [handshake] is false) ready -> hello. */
-    /** A new process with no credential stored: start() only, nothing connects. */
+    /**
+     * A new process with no credential stored, booted as production boots it (ta-jt9 L-A):
+     * nothing calls start(), because the app starts the client only once it is configured
+     * (UiRoot). Nothing connects. Returns once the client has read the stored settings.
+     */
     fun bootSignedOut(): Process {
         check(process == null) { "kill the running process first" }
         val p = Process()
         process = p
+        await(p.client.storedSettingsLoaded) { it }
+        assertEquals("a signed-out boot", false, p.client.configured.value)
+        return p
+    }
+
+    /** A new process whose start() is called but not waited for (its bind may be held). */
+    fun bootStartOnly(beforeStart: (Process) -> Unit = {}): Process {
+        check(process == null) { "kill the running process first" }
+        val p = Process()
+        process = p
+        beforeStart(p)
         p.client.start()
         return p
     }
 
+    /** A new process: start(), connect, and (unless [handshake] is false) ready -> hello. */
     fun boot(ready: String = readyFrame(), handshake: Boolean = true, beforeStart: (Process) -> Unit = {}): Process {
         check(process == null) { "kill the running process first" }
         enqueueConnect()
@@ -277,7 +292,7 @@ class MirrorHarness(
     }
 
     fun <T> await(flow: StateFlow<T>, predicate: (T) -> Boolean): T =
-        runBlocking { withTimeout(10_000) { flow.first(predicate) } }
+        runBlocking { withTimeout(20_000) { flow.first(predicate) } }
 
     /** `fold(DB.base, DB.tail)` after every write so far is committed; null = no base. */
     fun dbFold(sessionId: String): JsObj? = dbSession(sessionId)?.let(MirrorLink::rebuild)

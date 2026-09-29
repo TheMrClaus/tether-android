@@ -1,9 +1,11 @@
 package com.tether.app.push
 
 import com.tether.app.client.Credential
+import com.tether.app.client.LOGOUT_CALL_TIMEOUT_MS
 import com.tether.app.client.SettingsStore
 import com.tether.app.protocol.TetherJson
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -81,6 +83,15 @@ open class PushRegistrar(
     private val http: OkHttpClient = httpClient.newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
+        .build()
+
+    /**
+     * ta-jt9 I-B: the unregister runs inside logout's bounded hook, but a blocking `execute()`
+     * does not end when the coroutine's timeout does. So the call itself is bounded, by the same
+     * [LOGOUT_CALL_TIMEOUT_MS] as the logout's own server calls.
+     */
+    private val unregisterHttp: OkHttpClient = http.newBuilder()
+        .callTimeout(LOGOUT_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .build()
 
     private val json = "application/json".toMediaType()
@@ -225,6 +236,7 @@ open class PushRegistrar(
             method = "DELETE",
             path = "/api/push/fcm-register",
             body = "",
+            client = unregisterHttp,
         ) ?: return PushRegistrarResult.Error("Push unregister request failed.")
         return response.use {
             when (it.code) {
@@ -269,7 +281,14 @@ open class PushRegistrar(
         }
     }
 
-    private fun send(base: HttpUrl, credential: Credential.DeviceToken, method: String, path: String, body: String): okhttp3.Response? {
+    private fun send(
+        base: HttpUrl,
+        credential: Credential.DeviceToken,
+        method: String,
+        path: String,
+        body: String,
+        client: OkHttpClient = http,
+    ): okhttp3.Response? {
         val builder = Request.Builder().url(base.resolve(path)!!).authorize(credential)
         when (method) {
             "POST" -> builder.post(body.toRequestBody(json))
@@ -278,7 +297,7 @@ open class PushRegistrar(
         }
         val request = builder.build()
         return try {
-            http.newCall(request).execute()
+            client.newCall(request).execute()
         } catch (_: IOException) {
             null
         }

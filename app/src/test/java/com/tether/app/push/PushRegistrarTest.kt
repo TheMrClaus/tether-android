@@ -237,4 +237,22 @@ class PushRegistrarTest {
         assertEquals(PushRegistrarResult.Success, r.unregister(server.url("/").toString(), Credential.Cookie("c")))
         assertEquals(before, server.requestCount)
     }
+
+    /**
+     * ta-jt9 I-B: logout bounds its hook with a coroutine timeout, which cannot end a blocking
+     * `execute()`. The unregister call is bounded itself (LOGOUT_CALL_TIMEOUT_MS), whatever the
+     * client's own timeouts: a server that never answers cannot hold the logout for long.
+     */
+    @Test
+    fun theLogoutUnregisterIsBoundedWhenTheServerNeverAnswers() = runBlocking {
+        val patient = OkHttpClient.Builder().readTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
+        val r = PushRegistrar(InMemorySettings(), patient, FirebaseTokenProvider { "fcm" })
+        server.enqueue(MockResponse().setResponseCode(200).setHeadersDelay(120, java.util.concurrent.TimeUnit.SECONDS))
+        val started = System.nanoTime()
+        val result = r.unregister(server.url("/").toString(), Credential.DeviceToken(token))
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("$result", result is PushRegistrarResult.Error)
+        assertTrue("the unregister waited $elapsedMs ms", elapsedMs < com.tether.app.client.LOGOUT_CALL_TIMEOUT_MS + 10_000)
+        assertEquals("DELETE", server.takeRequest().method)
+    }
 }

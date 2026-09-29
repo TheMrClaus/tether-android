@@ -104,8 +104,11 @@ private const val SEQLESS_CLEAR_WAIT_MS = 2_000L
 /** §3.1 rule 5: mirror-restored sessions re-attached on `ready`, beyond pinned ones. */
 private const val MIRROR_REATTACH_RECENT = 10
 
-/** Upper bound on the best-effort server calls made while signing out. */
-private const val LOGOUT_CALL_TIMEOUT_MS = 5_000L
+/**
+ * Upper bound on the best-effort server calls made while signing out. Public so the logout
+ * hook's own blocking call (the push unregister, ta-jt9 I-B) is bounded by the same value.
+ */
+const val LOGOUT_CALL_TIMEOUT_MS = 5_000L
 
 /** An RFC 9110 auth-scheme token, short enough to show on the login screen. */
 private val AUTH_SCHEME = Regex("[A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]{0,31}")
@@ -295,6 +298,10 @@ class RealTetherClient(
     private var baseUrlValue: HttpUrl? = null
     // start() has read the persisted server + credential at least once.
     private var settingsLoaded = false
+    // ta-jt9 L-B: bumped by every sign-out (logout(), stop(), a credential the server rejected).
+    // A start() adopts what it read from the store only if no sign-out happened since it began:
+    // its snapshot may predate the sign-out and still hold the credential being forgotten.
+    private var signOutEpoch = 0L
 
     // The ONE credential in force. Cookie (password login) and device token
     // (pairing) differ only in the header they add, so the connect loop below
@@ -1143,6 +1150,30 @@ class RealTetherClient(
         unbindMirrorForWipe()?.wipe()
     }
 
+    /**
+     * ta-jt9 L-A: a boot with no stored credential purges the mirror, whether or not anything
+     * calls [start]. The app starts the client only once it is configured (UiRoot), so the
+     * purge in [bindMirrorToCurrentServer] never ran on a signed-out boot: a process that died
+     * between logout's clearCredential and its shred (or lost the credential another way) kept
+     * a readable mirror, and a later sign-in to the same server bound it and read the previous
+     * sign-in's index. Once per process, on IO (the shred is a Keystore call).
+     */
+    private suspend fun purgeMirrorIfSignedOut() {
+        val stored = try {
+            settings.credential.first()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Unknown: a signed-in boot binds in start(), a signed-out one purges at the next boot.
+            return
+        }
+        if (stored != null) return
+        // Checked and unbound in ONE critical section: a credential adopted since (a sign-in, or
+        // a start()) owns the mirror now, and its own bind decides.
+        val mirror = synchronized(lock) { if (credentialValue != null) null else unbindMirrorForWipe() } ?: return
+        mirror.wipe()
+    }
+
     /** [wipeMirror]'s client half: unbind at once. Returns the mirror to wipe (null = none). */
     private fun unbindMirrorForWipe(): JournalMirror? {
         val mirror = mirrorForWipe ?: return null
@@ -1193,13 +1224,14 @@ class RealTetherClient(
     }
 
     override fun start() {
-        synchronized(lock) {
+        val startEpoch = synchronized(lock) {
             // Deliberately NOT clearing versionHalt: start() re-runs on every
             // activity (re)creation, which is not a decision to retry.
             stopped = false
             if (sweeperJob?.isActive != true) {
                 sweeperJob = scope.launch { sweeperLoop() }
             }
+            signOutEpoch
         }
         scope.launch {
             // ONE snapshot of (URL, credential): two separate reads could straddle
@@ -1209,7 +1241,11 @@ class RealTetherClient(
             val session = settings.session()
             val switch = synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
-                if (credentialValue == null && session.credential != null && base != null) {
+                if (signOutEpoch != startEpoch) {
+                    // ta-jt9 L-B: signed out since this start() began. The snapshot may have been
+                    // read before the store forgot the credential (or, after a stop(), the
+                    // server): adopt nothing from it, or the sign-out would be undone in memory.
+                } else if (credentialValue == null && session.credential != null && base != null) {
                     // Adopted as a pair, never the credential under another URL.
                     baseUrlValue = base
                     credentialValue = session.credential
@@ -1245,6 +1281,7 @@ class RealTetherClient(
             sweeperJob = null
             baseUrlValue = null
             credentialValue = null
+            signOutEpoch++
             // A probe in flight must not keep the slot: a start() before the
             // async settings.clear() lands reloads the credential and connects.
             endConnectAttemptsLocked()
@@ -1307,6 +1344,7 @@ class RealTetherClient(
             base = baseUrlValue
             credential = credentialValue
             credentialValue = null
+            signOutEpoch++
             ws = detachSocketLocked()
             endConnectAttemptsLocked()
             // T6.3: nothing is live and nothing is shown as decided once signed out (the detach
@@ -1332,17 +1370,25 @@ class RealTetherClient(
         // viewModelScope, on main; the Keystore delete is an IPC), but it is awaited: logout
         // still returns only after the keys are gone (M1).
         mirror?.let { withContext(Dispatchers.IO) { it.wipe() } }
-        // A user logout is not a server verdict: no "session expired" copy.
-        signedOutReasonState.value = null
-        connectionState.value = ConnectionState.AuthRequired
+        synchronized(lock) {
+            // ta-jt9 I-C: only if nobody signed in while the shred ran: a sign-in adopted since
+            // owns the state (Connecting / Connected), and this logout must not overwrite it.
+            if (credentialValue == null) {
+                // A user logout is not a server verdict: no "session expired" copy.
+                signedOutReasonState.value = null
+                connectionState.value = ConnectionState.AuthRequired
+            }
+        }
 
         if (base == null || credential == null) return LogoutResult.LocalOnly
 
         // 2. Integrator hook (push unregister for a device token), bounded.
         try {
             withTimeoutOrNull(LOGOUT_CALL_TIMEOUT_MS) { onLogout(base.toString().trimEnd('/'), credential) }
-        } catch (e: CancellationException) {
-            throw e
+        } catch (_: CancellationException) {
+            // ta-jt9 L-C: never this logout's own (it runs NonCancellable, and withTimeoutOrNull
+            // keeps its own timeout): the hook's, e.g. a cancelled Firebase Task. Best effort like
+            // any other failure, so the server revoke below still runs.
         } catch (_: Exception) {
             // Best effort.
         }
@@ -1728,6 +1774,7 @@ class RealTetherClient(
             stopped = true
             cancelTimersLocked()
             credentialValue = null
+            signOutEpoch++
             detachSocketLocked()
         }
         ws?.cancel()
@@ -3062,6 +3109,12 @@ class RealTetherClient(
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile
     internal var mirrorBindTimeoutMs: Long = MIRROR_BIND_TIMEOUT_MS
+
+    init {
+        // ta-jt9 L-A, whether or not anything calls start(). Declared after every property: the
+        // coroutine may run on another thread before the constructor returns.
+        if (mirrorForWipe != null) scope.launch(Dispatchers.IO) { purgeMirrorIfSignedOut() }
+    }
 
     /** Test seam: node requests still waiting for an answer (must return to 0: nothing leaks). */
     internal fun pendingNodeRequestCount(): Int = synchronized(lock) { nodeRequests.size }

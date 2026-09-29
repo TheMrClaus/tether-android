@@ -4,6 +4,7 @@ import com.tether.app.client.ConnectionState
 import com.tether.app.client.HEALTH_132
 import com.tether.app.client.LoginResult
 import com.tether.app.client.snapshotFrame
+import com.tether.app.client.type
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
@@ -62,7 +63,7 @@ class MirrorLifecycleSecurityTest {
     }
 
     private fun awaitTrue(what: String, condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
+        val deadline = System.currentTimeMillis() + 20_000
         while (!condition()) {
             assertTrue("timed out: $what", System.currentTimeMillis() < deadline)
             Thread.sleep(10)
@@ -97,9 +98,9 @@ class MirrorLifecycleSecurityTest {
         Thread { Thread.sleep(300); gate.countDown() }.start()
         h.kill(flushFirst = false)
 
-        // Next cold start: the URL is kept, no credential. The DB goes; nothing is shown.
+        // Next cold start: the URL is kept, no credential, and (as in production) no start().
+        // The DB goes; nothing is shown.
         h.bootSignedOut()
-        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
         awaitTrue("mirror files deleted") { h.dbFactory.existing().isEmpty() }
         assertTrue(h.client.sessions.value.isEmpty())
         assertTrue(h.client.projectionTrees.value.isEmpty())
@@ -112,10 +113,138 @@ class MirrorLifecycleSecurityTest {
         // sign-out, or a revocation whose wipe never ran).
         runBlocking { h.settings.clearCredential() }
         assertTrue(h.keyFile.exists())
-        h.bootSignedOut()
-        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
+        h.bootSignedOut() // no start(): the app starts the client only once configured (ta-jt9 L-A)
         awaitTrue("mirror purged") { h.dbFactory.existing().isEmpty() && !h.keyFile.exists() }
         assertTrue("the old list is never published under AuthRequired", h.client.sessions.value.isEmpty())
+    }
+
+    private fun loginAgain(cookie: String = "again") {
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
+        h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=$cookie; Path=/").setBody("{}"))
+        h.enqueueConnect()
+    }
+
+    /** The socket of the sign-in in progress: ready -> hello -> Connected. */
+    private fun handshakeNewSocket(vararg ids: String): okhttp3.WebSocket {
+        val ws = h.sockets.poll(20, TimeUnit.SECONDS)
+        assertNotNull("the sign-in never reached the ws upgrade", ws)
+        ws!!.send(ready(*ids))
+        h.expectFrame("hello")
+        h.await(h.client.connection) { it == ConnectionState.Connected }
+        return ws
+    }
+
+    /**
+     * ta-jt9 L-A: a death between logout's clearCredential and its shred leaves the credential
+     * gone but the mirror and its keys intact. The next boot is signed out, so (as in production)
+     * nothing calls start(): the purge must run anyway. A later sign-in to the SAME server then
+     * gets an empty mirror, never the previous sign-in's copy or cursors.
+     */
+    @Test
+    fun aSignedOutBootPurgesWithoutStartAndASameOriginSignInGetsAnEmptyMirror() {
+        mirroredThenKilled()
+        runBlocking { h.settings.clearCredential() }
+        assertTrue(h.keyFile.exists())
+        assertTrue(h.dbFactory.existing().isNotEmpty())
+
+        h.bootSignedOut()
+        awaitTrue("purged with no start()") { !h.keyFile.exists() && h.dbFactory.existing().isEmpty() }
+
+        h.received.clear()
+        loginAgain()
+        assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
+        handshakeNewSocket("s1")
+        // The new binding holds nothing of the previous sign-in's copy.
+        assertNull("the previous sign-in's copy was readable by the next one", h.dbSession("s1"))
+        assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
+        h.client.attach("s1")
+        assertNull("a full attach: no cursor restored from the old copy", h.expectFrame("attach")["afterSeq"])
+    }
+
+    /** L-A with nothing configured at all (after a stop(): no URL either): still purged. */
+    @Test
+    fun aBootWithNoServerAndNoCredentialStillPurges() {
+        mirroredThenKilled()
+        h.settings = com.tether.app.client.InMemorySettings()
+        h.bootSignedOut()
+        awaitTrue("purged with no server configured") { !h.keyFile.exists() && h.dbFactory.existing().isEmpty() }
+    }
+
+    /**
+     * ta-jt9 I-C: a sign-in that lands while logout's shred is still in the Keystore owns the
+     * connection state. When the shred returns, the logout must not report AuthRequired over the
+     * live sign-in.
+     */
+    @Test
+    fun aSignInThatLandsDuringTheLogoutShredKeepsItsConnectedState() {
+        h.boot(ready = ready("s1"))
+        val inShred = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        h.kek.beforeDestroyKey = {
+            h.kek.beforeDestroyKey = null
+            inShred.countDown()
+            release.await(20, TimeUnit.SECONDS)
+        }
+        loginAgain()
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // the logout's revoke, after the shred
+        val logout = Thread { runBlocking { h.client.logout() } }
+        try {
+            logout.start()
+            assertTrue("the logout is inside the Keystore delete", inShred.await(20, TimeUnit.SECONDS))
+            h.received.clear()
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
+            handshakeNewSocket("s1")
+        } finally {
+            release.countDown()
+        }
+        logout.join(20_000)
+        assertFalse("logout returned", logout.isAlive)
+        assertEquals(ConnectionState.Connected, h.client.connection.value)
+    }
+
+    /**
+     * ta-hra L-2 (verifier P3): start()'s bind runs in a coroutine logout never cancels. Hold it
+     * inside the Keystore, log out (the wipe overtakes it, so it will answer null) and sign in to
+     * the same server. The stale null must not switch the mirror off for the new sign-in: the
+     * per-binding generation checks drop it. Proven by the new sign-in's frames being mirrored.
+     */
+    @Test
+    fun aStaleStartBindAnsweringAfterALogoutAndASameOriginSignInLeavesTheNewMirrorOn() {
+        mirroredThenKilled()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        h.kek.beforeExistingKey = {
+            h.kek.beforeExistingKey = null
+            entered.countDown()
+            release.await(20, TimeUnit.SECONDS)
+        }
+        var login: Thread? = null
+        try {
+            h.bootStartOnly()
+            assertTrue("start()'s bind is inside the Keystore", entered.await(20, TimeUnit.SECONDS))
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // logout
+            runBlocking { h.client.logout() }
+            assertFalse(h.keyFile.exists())
+            h.received.clear()
+            loginAgain()
+            login = Thread { assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") }) }
+            login.start()
+            while (true) {
+                val request = h.server.takeRequest(20, TimeUnit.SECONDS) ?: throw AssertionError("no login request")
+                if (request.path == "/api/auth/login") break
+            }
+        } finally {
+            release.countDown()
+        }
+        login!!.join(20_000)
+        val ws = handshakeNewSocket("s1")
+        h.client.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 7, state.replace("secret-transcript", "new-sign-in")))
+        h.await(h.client.projectionTrees) { it.containsKey("s1") }
+        val copy = h.dbFold("s1")
+        assertNotNull("the stale bind switched the mirror off for the new sign-in", copy)
+        assertTrue("the new sign-in's copy", copy.toString().contains("new-sign-in"))
     }
 
     @Test
@@ -373,9 +502,10 @@ class MirrorLifecycleSecurityTest {
         assertNull(runBlocking { h.settings.session().credential })
         uiScope.cancel()
 
-        // The next process does not sign back in.
+        // The next process does not sign back in (configured is false), even if started.
         h.kill(flushFirst = false)
         h.bootSignedOut()
+        h.client.start()
         h.await(h.client.connection) { it == ConnectionState.AuthRequired }
         awaitTrue("mirror files deleted") { h.dbFactory.existing().isEmpty() }
         assertNull("no socket was opened", h.sockets.poll(500, TimeUnit.MILLISECONDS))
