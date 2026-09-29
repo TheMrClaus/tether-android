@@ -39,7 +39,7 @@ serves 200 on the box; the **public URL still redirects to the SSO gateway** unt
 **Merged since takeover (2026-09-28/29):** ta-hra (`6f587f7`), ta-js0 + ta-epo (`6ac7822`), ta-koy protocol **v132** (`0883813`; the app now
 speaks 132, floor 129 - refused by servers at 129-131, see ta-bjw), **T6.3 approvals/questions/denials** (`1127819`, 9 rounds; every
 grant needs an unsaved confirmation bound to the drawn ticks; Deny-only when a path can't be shown). tether#208 + **tether#209**
-(`9fe90ce`, auth hardening ta-4sx/ta-06a/ta-eh2) merged - #209 awaits the owner's deploy. **Draft 0.7.4 (code 21)** building from `1127819`.
+(`9fe90ce`, auth hardening ta-4sx/ta-06a/ta-eh2) merged - #209 awaits the owner's deploy. **Draft 0.7.4 (code 21, `1127819`) built** - apksigner v2 cert SHA-256 `4f8c22de...b74d` = 0.6.0's; versionCode 21; CI green on `04c4d16`.
 Filed follow-ups: ta-jt9, ta-dto, ta-705 note, ta-194 (flake), ta-bjw, ta-842, ta-57l, ta-bul; upstream tether ta-8m1 + ta-ej3 (P1,
 service-origin isolation; ta-ej3 needs an owner decision), ta-9qt, ta-28x (path truncation can grant an ancestor dir).
 **Next frontier (`bd ready`):** T6.4 subagents/background, T6.5-T6.7, T7.2-T7.4, T8.x, T10.x (T10.5 passkeys now server-ready), T13.2+.
