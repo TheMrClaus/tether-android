@@ -278,7 +278,10 @@ class SignOutRaceTest {
      * takes the lock only after it has landed. The epoch moved again once the store was clear,
      * so the stale snapshot is refused.
      */
-    private fun aStartStraddlingTheClearOfASignOutWithNothingInMemory(signOut: (RealTetherClient) -> Unit) {
+    private fun aStartStraddlingTheClearOfASignOutWithNothingInMemory(
+        resumeBeforeTheClear: Boolean = false,
+        signOut: (RealTetherClient) -> Unit,
+    ) {
         h.server.start()
         val base = h.server.url("/").toString().trimEnd('/')
         val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
@@ -301,6 +304,16 @@ class SignOutRaceTest {
             }
             client.start()
             assertTrue(snapshotRead.await(20, TimeUnit.SECONDS))
+            if (resumeBeforeTheClear) {
+                // L-1: the start() takes the lock while the clear is still in flight (before the
+                // second bump), with nothing remembered as forgotten.
+                resume.complete(Unit)
+                runBlocking { withTimeout(20_000) { start!!.join() } }
+                assertEquals("the clear is still held", 1L, clearLanded.count)
+                val before = h.server.requestCount
+                assertEquals(FilesResult.Failed(FilesCopy.NOT_SIGNED_IN), runBlocking { client.files.list("/w") })
+                assertEquals("nothing carried the stored token", before, h.server.requestCount)
+            }
             hold.release.complete(Unit)
             assertTrue(clearLanded.await(20, TimeUnit.SECONDS))
             signingOut.join(20_000)
@@ -322,6 +335,18 @@ class SignOutRaceTest {
     fun aStartStraddlingAStopsClearNeverAdoptsTheStoredCredential() = aStartStraddlingTheClearOfASignOutWithNothingInMemory { client ->
         client.stop()
     }
+
+    @Test
+    fun aStartInsideALogoutsClearWithNothingInMemoryNeverAdoptsTheStoredCredential() =
+        aStartStraddlingTheClearOfASignOutWithNothingInMemory(resumeBeforeTheClear = true) { client ->
+            assertEquals(LogoutResult.LocalOnly, runBlocking { client.logout() })
+        }
+
+    @Test
+    fun aStartInsideAStopsClearWithNothingInMemoryNeverAdoptsTheStoredCredential() =
+        aStartStraddlingTheClearOfASignOutWithNothingInMemory(resumeBeforeTheClear = true) { client ->
+            client.stop()
+        }
 
     /**
      * Verifier test gap: start() is called while signed out in memory (its coroutine has not run
@@ -373,6 +398,8 @@ class SignOutRaceTest {
         val base = h.server.url("/").toString().trimEnd('/')
         val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialCookie = "cookie-a"))
         val client = newClient(settings)
+        // The sign-in below waits (bounded) for the held clear first (L-1): keep that short here.
+        client.signOutClearWaitMs = 300
         val ws = connect(client)
         val hold = ClearHold(settings)
         val clearReturned = CountDownLatch(1)

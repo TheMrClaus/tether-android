@@ -367,7 +367,9 @@ class NodeRegistryTest {
         // it must not keep the connect slot (no self-lockout). The next attempt is
         // a sign-in: since ta-jt9 L-B1 a start() right after stop() never re-adopts
         // what the store still holds before stop()'s async clear lands (that would
-        // undo the sign-out), so only a new login connects again.
+        // undo the sign-out), so only a new login connects again. The sign-in waits
+        // for that clear (L-1), so the clear never deletes the new credential.
+        // (The slot through stop() alone: aProbeThatReturnsAfterStopNeverConnects...)
         val probes = java.util.concurrent.atomic.AtomicInteger()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
@@ -412,7 +414,14 @@ class NodeRegistryTest {
             while (probes.get() == 0 && System.nanoTime() < deadline) Thread.sleep(5)
             assertEquals("the first probe is out", 1, probes.get())
             h.client.stop()
+            // stop()'s clear lands while the sign-in is already waiting for it.
+            Thread { Thread.sleep(200); gated.release.complete(Unit) }.start()
             assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
+            assertEquals(
+                "stop()'s late clear kept the new sign-in's credential",
+                Credential.Cookie("parity-fake-cookie-2"),
+                runBlocking { inner.session().credential },
+            )
             // Connected through a fresh attempt, well before the stopped one's
             // probe (1.5 s) returns; and that stale probe changes nothing after.
             val ws = h.sockets.poll(10, TimeUnit.SECONDS)
@@ -422,6 +431,8 @@ class NodeRegistryTest {
             assertEquals(ConnectionState.Connected, h.client.connection.value)
             assertEquals(2, probes.get())
             assertTrue("one socket only", h.sockets.isEmpty())
+            assertEquals(Credential.Cookie("parity-fake-cookie-2"), runBlocking { inner.session().credential })
+            h.await(h.client.configured) { it }
         } finally {
             gated.release.complete(Unit)
         }

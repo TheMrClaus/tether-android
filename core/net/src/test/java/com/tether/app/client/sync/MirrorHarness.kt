@@ -101,13 +101,21 @@ class MirrorHarness(
     /** ta-jt9 L-A2: runs before the store answers storedCredentialState() (the boot purge's read). */
     @Volatile var beforeCredentialState: (suspend () -> Unit)? = null
 
-    /** [settings] as every process sees it, behind the two seams above. */
+    /** ta-jt9 L-2: runs before the store's setServer (a sign-in about to seal its credential). */
+    @Volatile var beforeSetServer: (suspend () -> Unit)? = null
+
+    /** [settings] as every process sees it, behind the seams above. */
     private inner class SeamedSettings(private val inner: InMemorySettings) : com.tether.app.client.SettingsStore by inner {
         override val credential: kotlinx.coroutines.flow.Flow<com.tether.app.client.Credential?>
             get() = if (credentialUnreadable) kotlinx.coroutines.flow.flowOf(null) else inner.credential
 
         override suspend fun session(): com.tether.app.client.Session =
             inner.session().let { if (credentialUnreadable) it.copy(credential = null) else it }
+
+        override suspend fun setServer(baseUrl: String, credential: com.tether.app.client.Credential) {
+            beforeSetServer?.invoke()
+            inner.setServer(baseUrl, credential)
+        }
 
         override suspend fun storedCredentialState(): com.tether.app.client.StoredCredentialState {
             beforeCredentialState?.invoke()

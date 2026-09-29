@@ -257,13 +257,60 @@ class MirrorLifecycleSecurityTest {
      * ta-jt9 L-A2: a boot purge that is still undecided when a sign-in arrives (its read held
      * past the bound) never holds that sign-in for longer than the bound, the sign-in runs with
      * no mirror, and the previous sign-in's copy is shredded anyway: the purge's late decision,
-     * made on the store the sign-in has changed, must not keep it for the next boot.
+     * made on the store the sign-in has changed, must not keep it for the next boot. L-2: the
+     * shred is complete BEFORE the sign-in seals its credential, so a death right after that
+     * never leaves a boot that reads Present next to a readable old copy.
      */
     @Test
     fun anOverdueBootPurgeNeverHoldsASignInAndThePreviousCopyIsStillShredded() {
-        h.close()
-        h = MirrorHarness(bindTimeoutMs = 1_000)
-        h.startServer()
+        mirroredThenKilled() // with the default (generous) bind bound: the copy is really there
+        runBlocking { h.settings.clearCredential() }
+        assertTrue("the old key is there before the race", h.keyFile.exists())
+        assertTrue("the old copy is there before the race", h.dbFactory.existing().isNotEmpty())
+        val entered = CountDownLatch(1)
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        h.beforeCredentialState = {
+            h.beforeCredentialState = null
+            entered.countDown()
+            kotlinx.coroutines.withTimeout(20_000) { release.await() }
+        }
+        // The shred's Keystore delete is slow, still well inside the bound.
+        h.kek.beforeDestroyKey = {
+            h.kek.beforeDestroyKey = null
+            Thread.sleep(400)
+        }
+        var shredDoneAtSetServer: Boolean? = null
+        h.beforeSetServer = {
+            h.beforeSetServer = null
+            shredDoneAtSetServer = !h.keyFile.exists() && h.kek.destroyed >= 1
+        }
+        h.bindTimeoutMs = 1_000 // only this process: the purge is overdue after 1 s
+        try {
+            h.bootSignedOut()
+            assertTrue("the purge's read is held", entered.await(20, TimeUnit.SECONDS))
+            h.received.clear()
+            loginAgain()
+            val started = System.currentTimeMillis()
+            assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
+            assertTrue("the sign-in waited past the bound", System.currentTimeMillis() - started < 10_000)
+            assertEquals("the shred was complete before the new credential was sealed", true, shredDoneAtSetServer)
+            handshakeNewSocket("s1")
+            assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
+            awaitTrue("the previous copy shredded") { !h.keyFile.exists() && h.dbFactory.existing().isEmpty() }
+        } finally {
+            release.complete(Unit)
+        }
+        assertTrue(runBlocking { kotlinx.coroutines.withTimeout(20_000) { h.client.bootPurgeOutcome.await() } })
+        assertFalse("the late decision minted or kept nothing", h.keyFile.exists())
+    }
+
+    /**
+     * ta-jt9 I-3: the server has minted a session, then the caller of login() is cancelled
+     * while the sign-in waits for the boot purge. The credential is adopted and stored anyway
+     * (else a live cookie session is never revoked, or a claimed device token is orphaned).
+     */
+    @Test
+    fun aSignInWhoseCallerIsCancelledAfterTheServerAnsweredIsStillAdopted() {
         mirroredThenKilled()
         runBlocking { h.settings.clearCredential() }
         val entered = CountDownLatch(1)
@@ -273,22 +320,27 @@ class MirrorLifecycleSecurityTest {
             entered.countDown()
             kotlinx.coroutines.withTimeout(20_000) { release.await() }
         }
+        val caller = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
         try {
             h.bootSignedOut()
             assertTrue("the purge's read is held", entered.await(20, TimeUnit.SECONDS))
             h.received.clear()
             loginAgain()
-            val started = System.currentTimeMillis()
-            assertEquals(LoginResult.Success, runBlocking { h.client.login(h.server.url("/").toString(), "pw") })
-            assertTrue("the sign-in waited past the bound", System.currentTimeMillis() - started < 10_000)
-            handshakeNewSocket("s1")
-            assertTrue("no restored cursor asked for a delta", h.framesUntilBarrier().none { it.type() == "attach" })
-            awaitTrue("the previous copy shredded") { !h.keyFile.exists() && h.dbFactory.existing().isEmpty() }
+            val job = caller.launch { h.client.login(h.server.url("/").toString(), "pw") }
+            while (true) {
+                val request = h.server.takeRequest(20, TimeUnit.SECONDS) ?: throw AssertionError("no login request")
+                if (request.path == "/api/auth/login") break
+            }
+            Thread.sleep(300) // past the server's 200: waiting for the purge now
+            job.cancel()
         } finally {
             release.complete(Unit)
         }
-        assertTrue(runBlocking { kotlinx.coroutines.withTimeout(20_000) { h.client.bootPurgeOutcome.await() } })
-        assertFalse("the late decision minted or kept nothing", h.keyFile.exists())
+        awaitTrue("the minted cookie was stored") {
+            runBlocking { h.settings.session().credential } == com.tether.app.client.Credential.Cookie("again")
+        }
+        handshakeNewSocket("s1")
+        caller.cancel()
     }
 
     /** L-A with nothing configured at all (after a stop(): no URL either): still purged. */

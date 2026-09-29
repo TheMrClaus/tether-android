@@ -29,6 +29,7 @@ import java.net.SocketTimeoutException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -309,6 +310,12 @@ class RealTetherClient(
     // ta-jt9 L-B1: the credential the last sign-out forgot. A start() never adopts it from the
     // store, whenever it read its snapshot: the store may still hold it until the clear lands.
     private var forgottenCredential: Credential? = null
+    // ta-jt9 L-1: sign-outs whose store clear has not landed yet (logout, stop(), a rejection).
+    // While any is in flight a start() adopts nothing (the store may still hold what it clears,
+    // also when nothing was in memory to remember as forgotten), and a sign-in waits for them
+    // before it writes the store (a clear landing after it would delete the new credential).
+    // Written under [lock]; the flow mirrors it so a sign-in can wait for 0.
+    private val signOutClearsInFlight = MutableStateFlow(0)
 
     // The ONE credential in force. Cookie (password login) and device token
     // (pairing) differ only in the header they add, so the connect loop below
@@ -502,7 +509,9 @@ class RealTetherClient(
                     if (cookie.isNullOrEmpty()) {
                         return@withContext LoginResult.Unreachable("The server did not return a session cookie.")
                     }
-                    adoptCredential(normalized, Credential.Cookie(cookie))
+                    // ta-jt9 I-3: the server has minted a session: adopt it whatever happens
+                    // to the caller, or it is never stored nor revoked.
+                    withContext(NonCancellable) { adoptCredential(normalized, Credential.Cookie(cookie)) }
                     return@withContext LoginResult.Success
                 }
                 // Tether's own refusal is JSON `{error}` and never carries a challenge
@@ -593,7 +602,8 @@ class RealTetherClient(
                     if (token.isNullOrEmpty()) {
                         return@withContext PairResult.Unreachable("The server did not return a device token.")
                     }
-                    adoptCredential(normalized, Credential.DeviceToken(token))
+                    // ta-jt9 I-3: the single-use code is spent: a token not adopted now is orphaned.
+                    withContext(NonCancellable) { adoptCredential(normalized, Credential.DeviceToken(token)) }
                     return@withContext PairResult.Success
                 }
                 // One message for unknown / expired / already-claimed: the server
@@ -621,9 +631,18 @@ class RealTetherClient(
         if (!awaitBootPurge()) {
             // It failed or is overdue, and this sign-in is about to change the store it decides
             // on: a late decision could then keep the previous sign-in's copy for the next boot.
-            // So that copy is shredded now, off this call (the mirror is off for this process).
-            unbindMirrorForWipe()?.let { m -> scope.launch(Dispatchers.IO) { runCatching { m.wipe() } } }
+            // So that copy is shredded now (the mirror is off for this process), off this
+            // thread but BEFORE setServer (ta-jt9 L-2): a death right after the new credential
+            // is sealed must not find the old copy readable, with a boot that reads Present.
+            // Bounded: the key file goes first, so a shred stuck in the Keystore is unreadable.
+            unbindMirrorForWipe()?.let { m ->
+                val shred = scope.async(Dispatchers.IO) { runCatching { m.wipe() } }
+                withTimeoutOrNull(mirrorBindTimeoutMs) { shred.await() }
+            }
         }
+        // ta-jt9 L-1: a sign-out's store clear still in flight would land after setServer and
+        // delete this sign-in's credential. Bounded: a clear that never lands leaves it as before.
+        withTimeoutOrNull(signOutClearWaitMs) { signOutClearsInFlight.first { it == 0 } }
         // Read BEFORE the URL moves: the server that unsent input filed before
         // the store was bound (a fresh process) was written for.
         val configuredBefore = try {
@@ -633,14 +652,16 @@ class RealTetherClient(
         } catch (_: Exception) {
             null
         }
-        try {
+        val stored = try {
             settings.setServer(base.toString().trimEnd('/'), credential)
+            true
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
             // The store could not be written: this sign-in lives in memory for
             // this process only. The store deletes the old credential before it
             // moves the URL, so disk never pairs the new URL with the old one.
+            false
         }
         val previous: WebSocket?
         val previousWasOpen: Boolean
@@ -659,6 +680,9 @@ class RealTetherClient(
             endConnectAttemptsLocked()
             baseUrlValue = base
             credentialValue = credential
+            // ta-jt9 round 3: the store holds the new credential now, so the forgotten one is
+            // not kept in memory for the life of the process (nor matched later).
+            if (stored) forgottenCredential = null
             stopped = false
             // A fresh login is a user action: it also clears a version halt.
             versionHalt = null
@@ -1191,11 +1215,23 @@ class RealTetherClient(
      * purged, wiped): otherwise a sign-in racing it binds, and reads, the copy it was about to
      * shred. Bounded like a bind (M2). Undecided in time, or not at all (an error), means no
      * mirror in this process, so nothing can read a copy nobody decided on. True = go ahead.
+     *
+     * The bound holds only for the wait here. A purge stuck inside the store's own mutex (a
+     * Keystore hang while it loads the credential) also holds every other store call, the
+     * sign-in's own setServer included, and nothing here can bound that (ta-jt9 I-2).
      */
     private suspend fun awaitBootPurge(): Boolean {
         val decided = withTimeoutOrNull(mirrorBindTimeoutMs) { bootPurge.await() } ?: false
         if (!decided) mirrorLink = null
         return decided
+    }
+
+    /** A sign-out's store clear has landed (or failed): see [signOutClearsInFlight]. */
+    private fun signOutClearDone() {
+        synchronized(lock) {
+            signOutClearsInFlight.value--
+            signOutEpoch++
+        }
     }
 
     /** [wipeMirror]'s client half: unbind at once. Returns the mirror to wipe (null = none). */
@@ -1265,11 +1301,14 @@ class RealTetherClient(
             val session = settings.session()
             val switch = synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
-                if (signOutEpoch != startEpoch || (session.credential != null && session.credential == forgottenCredential)) {
+                if (signOutEpoch != startEpoch || signOutClearsInFlight.value > 0 ||
+                    (session.credential != null && session.credential == forgottenCredential)
+                ) {
                     // ta-jt9 L-B: signed out since this start() began, or (L-B1) the snapshot
                     // holds the credential a sign-out just forgot, read before the store's clear
-                    // landed, whenever this start() began. Adopt nothing from it (not the server
-                    // either, after a stop()), or the sign-out would be undone in memory.
+                    // landed, whenever this start() began, or (L-1) a sign-out's clear is still in
+                    // flight. Adopt nothing from it (not the server either, after a stop()), or
+                    // the sign-out would be undone in memory.
                 } else if (credentialValue == null && session.credential != null && base != null) {
                     // Adopted as a pair, never the credential under another URL.
                     baseUrlValue = base
@@ -1308,6 +1347,7 @@ class RealTetherClient(
             credentialValue?.let { forgottenCredential = it }
             credentialValue = null
             signOutEpoch++
+            signOutClearsInFlight.value++
             // A probe in flight is over: its verdict does nothing and it keeps no
             // slot. (A start() before the async settings.clear() lands does NOT
             // reload the forgotten credential, ta-jt9 L-B1: only a sign-in does.)
@@ -1342,14 +1382,15 @@ class RealTetherClient(
         // before it resurrects anything: they find the store unloaded).
         val wipe = synchronized(lock) { pendingWipe }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            persistMutex.withLock {
-                settings.clear()
-                synchronized(lock) {
-                    if (wipe > wipeLanded) wipeLanded = wipe
-                    // ta-jt9 L-B1: a start() that began after the first bump may have read the
-                    // store before this clear; the epoch moves again once the clear has landed.
-                    signOutEpoch++
+            try {
+                persistMutex.withLock {
+                    settings.clear()
+                    synchronized(lock) { if (wipe > wipeLanded) wipeLanded = wipe }
                 }
+            } finally {
+                // ta-jt9 L-B1 / L-1: a start() that began after the first bump may have read the
+                // store before this clear; the epoch moves again once it has landed (or failed).
+                signOutClearDone()
             }
         }
     }
@@ -1377,6 +1418,7 @@ class RealTetherClient(
             credential = credentialValue
             credentialValue = null
             signOutEpoch++
+            signOutClearsInFlight.value++
             if (credential != null) forgottenCredential = credential
             ws = detachSocketLocked()
             // Nothing is connected from here on: never Connected while signing out.
@@ -1398,11 +1440,14 @@ class RealTetherClient(
         //    in; with no credential, the next start purges whatever of the mirror is left.
         // The store retries its own delete and falls back to a tombstone; one
         // more attempt here covers a store that threw before getting that far.
-        if (runCatching { settings.clearCredential() }.isFailure) {
-            runCatching { settings.clearCredential() }
+        try {
+            if (runCatching { settings.clearCredential() }.isFailure) {
+                runCatching { settings.clearCredential() }
+            }
+        } finally {
+            // ta-jt9 L-B1 / L-1: again once the store is clear (see stop()).
+            signOutClearDone()
         }
-        // ta-jt9 L-B1: again once the store is clear (see stop()).
-        synchronized(lock) { signOutEpoch++ }
         // The shred runs off the caller's thread (ta-hra R3: the UI calls logout from
         // viewModelScope, on main; the Keystore delete is an IPC), but it is awaited: logout
         // still returns only after the keys are gone (M1).
@@ -1812,6 +1857,7 @@ class RealTetherClient(
             cancelTimersLocked()
             credentialValue = null
             signOutEpoch++
+            signOutClearsInFlight.value++
             forgottenCredential = credential
             detachSocketLocked()
         }
@@ -1823,7 +1869,7 @@ class RealTetherClient(
         // State first: an observer that sees the reason must see the settled state.
         connectionState.value = ConnectionState.AuthRequired
         signedOutReasonState.value = reason
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 // Only if the store still holds THIS credential: never wipe a
                 // newer login that landed while this verdict was in flight. One
@@ -1833,9 +1879,10 @@ class RealTetherClient(
             } catch (_: Exception) {
                 // Worst case the dead credential survives a restart; the next
                 // probe rejects it again.
+            } finally {
+                // ta-jt9 L-B1 / L-1: again once the store is clear (see stop()).
+                signOutClearDone()
             }
-            // ta-jt9 L-B1: again once the store is clear (see stop()).
-            synchronized(lock) { signOutEpoch++ }
         }
     }
 
@@ -3147,6 +3194,10 @@ class RealTetherClient(
     /** Test seam: the bound on a hydration read (production: [MIRROR_HYDRATE_TIMEOUT_MS]). */
     @Volatile
     internal var mirrorHydrateTimeoutMs: Long = MIRROR_HYDRATE_TIMEOUT_MS
+
+    /** Test seam: how long a sign-in waits for a sign-out's store clear to land (ta-jt9 L-1). */
+    @Volatile
+    internal var signOutClearWaitMs: Long = LOGOUT_CALL_TIMEOUT_MS
 
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile
