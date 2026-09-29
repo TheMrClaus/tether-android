@@ -225,21 +225,25 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
  * (FSI…PDI) so right-to-left text or bidi controls in it cannot reorder the words around it.
  */
 internal fun commandLabel(command: String): String {
-    // Round 3: embedding / override / isolate controls are dropped (the wrap is the only isolate),
-    // and leading blank lines skipped, so the label is never just "…".
-    val clean = command.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' }
+    // Round 3/4: embedding, override and isolate controls and the directional marks (U+200E/200F,
+    // U+061C) are dropped (the FSI/PDI wrap is the only bidi control left), and leading lines that
+    // are blank or only invisible (format) characters are skipped, so the label is never just "…".
+    val clean = command.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' }
+    fun invisible(c: Char) = c.isWhitespace() || Character.getType(c) == Character.FORMAT.toInt()
     val breaks = charArrayOf('\n', '\r', '\u2028', '\u2029')
     var start = 0
     while (true) {
         val nl = clean.indexOfAny(breaks, start)
-        if (nl < 0 || clean.substring(start, nl).isNotBlank()) break
+        val line = if (nl < 0) clean.substring(start) else clean.substring(start, nl)
+        if (nl < 0 || !line.all(::invisible)) break
         start = nl + 1
     }
     val rest = clean.substring(start)
     val nl = rest.indexOfAny(breaks)
-    val more = nl >= 0 && rest.substring(nl).any { it !in breaks && !it.isWhitespace() }
-    val first = (if (nl < 0) rest else rest.substring(0, nl)).trimEnd() + if (more) "…" else ""
-    return "\u2068$first\u2069"
+    val firstLine = (if (nl < 0) rest else rest.substring(0, nl)).trimEnd()
+    if (firstLine.all(::invisible)) return "\u2068(blank command)\u2069"
+    val more = nl >= 0 && rest.substring(nl).any { it !in breaks && !invisible(it) }
+    return "\u2068" + firstLine + (if (more) "…" else "") + "\u2069"
 }
 
 /**

@@ -51,14 +51,19 @@ class SessionStore {
         return synchronized(adapter) { adapter.adapt(tree) }
     }
 
-    /** Publish [sessionId]'s projection: the tree, and its typed view (removed when null). */
-    fun publish(sessionId: String, tree: JsObj, typed: SessionProjection?) {
-        // T6.4 (L4, r3): every tree the screens see passes here (live folds, hydration, a mirror
-        // rebuild, snapshots), so the client's output cap applies to all of them, against the
-        // tree it replaces (a flag the client set stays set).
+    /**
+     * Publish [sessionId]'s projection: the tree, and its typed view (removed when null). Returns the
+     * tree actually stored (the capped one): a checkpoint must be taken of THAT object (Low-1).
+     */
+    fun publish(sessionId: String, tree: JsObj, typed: SessionProjection?): JsObj {
+        // T6.4 (L4): every tree the screens see passes here (live folds, hydration, a mirror
+        // rebuild, snapshots), so the client's output cap applies to all of them. Only commands
+        // that are not the stored tree's own objects are scanned (r4, B1), so this stays cheap
+        // under the client lock however much output is stored.
         val capped = com.tether.app.client.OutputIntakeCap.capTree(treesState.value[sessionId], tree)
         treesState.value = treesState.value + (sessionId to capped)
         projectionsState.value = if (typed != null) projectionsState.value + (sessionId to typed) else projectionsState.value - sessionId
+        return capped
     }
 
     /** A diverged base (fold exception): the tree and its typed view go; the next snapshot heals it. */

@@ -35,7 +35,7 @@ class OutputIntakeCapTest {
     }.tree()
 
     /** One publish: the fold, then the cap against the tree it replaces (SessionStore.publish). */
-    private fun fold(tree: JsObj, event: JsObj, max: Int) = OutputIntakeCap.capTree(tree, reduce(tree, event), max)
+    private fun fold(tree: JsObj, event: JsObj, maxChars: Int) = OutputIntakeCap.capTree(tree, reduce(tree, event), maxChars)
 
     private fun command(tree: JsObj) = (tree["backgroundCommands"] as JsArr)[0] as JsObj
 
@@ -44,13 +44,13 @@ class OutputIntakeCapTest {
     @Test fun underTheCapTheTreeIsUntouched() {
         val tree = reduce(freshTree(), started())
         val folded = reduce(tree, out("x".repeat(100)))
-        assertSame(folded, OutputIntakeCap.capTree(tree, folded, max = 1_000))
+        assertSame(folded, OutputIntakeCap.capTree(tree, folded, maxChars = 1_000))
         assertEquals(JsBool.FALSE, command(folded)["outputTruncated"])
     }
 
     @Test fun pastTheCapTheNewestOutputIsKeptAndMarkedTruncated() {
         var tree = reduce(freshTree(), started())
-        for (i in 0 until 50) tree = fold(tree, out("line $i\n", if (i % 2 == 0) "stdout" else "stderr"), max = 100)
+        for (i in 0 until 50) tree = fold(tree, out("line $i\n", if (i % 2 == 0) "stdout" else "stderr"), maxChars = 100)
         assertTrue(text(tree).length <= 100)
         assertTrue(text(tree).endsWith("line 49\n"))
         assertEquals(JsBool.TRUE, command(tree)["outputTruncated"])
@@ -58,7 +58,7 @@ class OutputIntakeCapTest {
 
     @Test fun theCutNeverSplitsASurrogatePair() {
         var tree = reduce(freshTree(), started())
-        tree = fold(tree, out("😀".repeat(40)), max = 11)
+        tree = fold(tree, out("😀".repeat(40)), maxChars = 11)
         val kept = text(tree)
         assertTrue(!Character.isLowSurrogate(kept[0]))
         assertEquals(10, kept.length)
@@ -69,7 +69,7 @@ class OutputIntakeCapTest {
         // 201-character id cannot slip past it.
         val id = "i".repeat(201)
         var tree = reduce(freshTree(), started(id))
-        for (i in 0 until 20) tree = fold(tree, out("chunk $i ".repeat(10), id = id), max = 200)
+        for (i in 0 until 20) tree = fold(tree, out("chunk $i ".repeat(10), id = id), maxChars = 200)
         assertTrue(text(tree).length <= 200)
         assertEquals(JsBool.TRUE, command(tree)["outputTruncated"])
     }
@@ -78,15 +78,15 @@ class OutputIntakeCapTest {
         // L-2: `background_command_updated` merges only the segments and carries the server's
         // own flag (false); the client's trimmed output still reads truncated.
         var tree = reduce(freshTree(), started())
-        for (i in 0 until 20) tree = fold(tree, out("x".repeat(50)), max = 100)
+        for (i in 0 until 20) tree = fold(tree, out("x".repeat(50)), maxChars = 100)
         assertEquals(JsBool.TRUE, command(tree)["outputTruncated"])
-        tree = fold(tree, finished(), max = 100)
+        tree = fold(tree, finished(), maxChars = 100)
         assertEquals("finished", (command(tree)["status"] as JsStr).value)
         assertEquals(JsBool.TRUE, command(tree)["outputTruncated"])
     }
 
     @Test fun treesWithoutCommandsAreUntouched() {
         val tree = freshTree()
-        assertSame(tree, OutputIntakeCap.capTree(null, tree, max = 0))
+        assertSame(tree, OutputIntakeCap.capTree(null, tree, maxChars = 0))
     }
 }

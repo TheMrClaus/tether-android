@@ -2285,11 +2285,14 @@ class RealTetherClient(
             return
         }
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
+        var stored = next
         if (next !== tree) {
             val typed = sessionStore.adapt(message.sessionId, next)
-            ifCurrent(webSocket) { sessionStore.publish(message.sessionId, next, typed) }
+            ifCurrent(webSocket) { stored = sessionStore.publish(message.sessionId, next, typed) }
         }
-        event.seq?.let { seq -> maybeCheckpoint(webSocket, message.sessionId, seq, event.type, next) }
+        // Low-1 (r4): the checkpoint is of the tree that was STORED (the capped one), the object
+        // checkpointDue compares against, so a cap never makes checkpoints skip.
+        event.seq?.let { seq -> maybeCheckpoint(webSocket, message.sessionId, seq, event.type, stored) }
     }
 
     /**

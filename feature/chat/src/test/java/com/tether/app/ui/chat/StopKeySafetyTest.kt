@@ -200,6 +200,41 @@ class StopKeySafetyTest {
         assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
     }
 
+    @Test fun theLatchClearsWhenOnlyTheSessionsLivenessFlips() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        arm()
+        stopOf(0).performClick()
+        rule.waitForIdle()
+        // Still connected, same server: only this session stops being live (a resync), then is again.
+        rule.runOnIdle { client.live.value = emptySet() }
+        rule.waitForIdle()
+        rule.runOnIdle { client.live.value = setOf("s1") }
+        rule.waitForIdle()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a")))
+        arm()
+        stopOf(0).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
+    }
+
+    @Test fun theLatchClearsWhenOnlyTheServerOriginChanges() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        arm()
+        stopOf(0).performClick()
+        rule.waitForIdle()
+        // Connected and live throughout: only the server behind the link changes.
+        rule.runOnIdle { client.origin.value = "https://other.example" }
+        rule.waitForIdle()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a")))
+        arm()
+        stopOf(0).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
+        assertEquals(listOf<String?>(TEST_ORIGIN, "https://other.example"), client.stopOrigins)
+    }
+
     @Test fun theLatchExpiresWhileTheCommandStillRunsAndTheKeyArmsAgain() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
@@ -322,6 +357,14 @@ class StopKeySafetyTest {
         assertEquals("\u2068rm -rf build\u2069", commandLabel("\n  \n\u202Erm -rf build\u2069"))
         assertEquals("\u2068ls…\u2069", commandLabel("\r\nls\n\u2066pwd"))
         assertEquals("\u2068echo\u2069", commandLabel("echo\n\n"))
+        // Round 4: directional marks go too (they could reorder the words inside the label) …
+        assertEquals("\u2068rm -rf build\u2069", commandLabel("\u200Frm -rf\u200F build"))
+        assertEquals("\u2068ab\u2069", commandLabel("a\u200Eb\u061C"))
+        // … lines of only invisible (format) characters count as blank …
+        assertEquals("\u2068ls\u2069", commandLabel("\u200B\u2060\nls\n\u200B"))
+        // … and a command with nothing visible still gets a name.
+        assertEquals("\u2068(blank command)\u2069", commandLabel("\n \u200B\n\u202E"))
+        assertEquals("\u2068(blank command)\u2069", commandLabel(""))
     }
 
     // ---- L3 ------------------------------------------------------------------------------------------
