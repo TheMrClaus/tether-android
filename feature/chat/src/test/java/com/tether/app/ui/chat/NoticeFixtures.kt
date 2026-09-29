@@ -96,6 +96,15 @@ object NoticeFixtures {
         )
     }
 
+    /** The web `notices` scenario: a turn recovered as outcome_unknown after a restart. */
+    val outcomeUnknown: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *open("t1", "Start the long migration.").toTypedArray(),
+            *reply("t1", "Starting a long task.").toTypedArray(),
+            end("t1", outcome = "outcome_unknown"),
+        )
+    }
+
     /** v17: an open turn between HTTP attempts. */
     val apiRetry: ChatFixtures.Folded by lazy {
         ChatFixtures.fold(

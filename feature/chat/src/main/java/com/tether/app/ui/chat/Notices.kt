@@ -54,12 +54,13 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(if (interrupted) TetherIcons.CircleStop else TetherIcons.TriangleAlert, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+        // `.chat-outcome`: 0.78rem, no weight of its own (body 400).
         Text(
             text,
             color = color,
             fontFamily = Manrope,
-            fontWeight = TetherWeights.label,
-            fontSize = 12.5.sp,
+            fontWeight = TetherWeights.body,
+            fontSize = 12.48.sp,
         )
     }
 }

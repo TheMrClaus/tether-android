@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
  * The T6.6 visual states. Transcript: `fallback` (a Claude model-fallback notice), `codex` (a rich
  * Codex turn's compaction + info + error notices), `session` (external advancement and background
  * loss), `interrupted` (a turn Tether interrupted), `limit` (the limit card), `scheduled` (the
- * armed automatic resume), `retry` (an api_retry between HTTP attempts). Composer: `read-only` and
+ * armed automatic resume), `retry` (an api_retry between HTTP attempts), `outcome-unknown` (the web's `notices` scenario). Composer: `read-only` and
  * `handoff`. Built from the reducer's own event shapes (NoticeFixtures); the web's fake engine
  * seeds none of them (docs/parity/screens/notices/README.md).
  */
@@ -30,6 +30,7 @@ enum class NoticeShot(val id: String, val composer: Boolean = false) {
     Limit("limit"),
     Scheduled("scheduled"),
     Retry("retry"),
+    OutcomeUnknown("outcome-unknown"),
     ReadOnly("read-only", composer = true),
     Handoff("handoff", composer = true),
 }
@@ -44,6 +45,7 @@ private fun fixtureFor(shot: NoticeShot): ChatFixtures.Folded = when (shot) {
     NoticeShot.Limit -> NoticeFixtures.limit
     NoticeShot.Scheduled -> NoticeFixtures.scheduled
     NoticeShot.Retry -> NoticeFixtures.apiRetry
+    NoticeShot.OutcomeUnknown -> NoticeFixtures.outcomeUnknown
     else -> ChatFixtures.idle
 }
 
@@ -125,7 +127,7 @@ class NoticeTabletScreenshotTest(private val shot: NoticeShot, private val skin:
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(NoticeShot.Fallback, NoticeShot.Session, NoticeShot.Limit).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(NoticeShot.Fallback, NoticeShot.Session, NoticeShot.Limit, NoticeShot.OutcomeUnknown, NoticeShot.Handoff).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
