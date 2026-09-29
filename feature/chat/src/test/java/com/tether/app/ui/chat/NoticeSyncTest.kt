@@ -1,5 +1,6 @@
 package com.tether.app.ui.chat
 
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -8,7 +9,9 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -17,7 +20,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.ConnectionState
@@ -330,6 +335,70 @@ class NoticeSyncTabletTest {
         rule.onNodeWithTag("control-auto-continue").performClick()
         // The dialog animates in (its key moves, so it re-arms once it stands still).
         openAndArm()
+        rule.onNodeWithTag("escalation-confirm").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true, confirmed = true)}"), client.controlCalls)
+    }
+}
+
+/** The centre of the node tagged [tag], in screen pixels (a dialog's key sits in its own window). */
+internal fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.screenCentreOf(tag: String): androidx.compose.ui.geometry.Offset =
+    onNodeWithTag(tag).fetchSemanticsNode().let { it.positionOnScreen + androidx.compose.ui.geometry.Offset(it.size.width / 2f, it.size.height / 2f) }
+
+/** One tap at [screen] pixels on the topmost window still open (a sheet, else the screen): where a key used to be. */
+internal fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.tapScreenAt(screen: androidx.compose.ui.geometry.Offset) {
+    val roots = onAllNodes(androidx.compose.ui.test.isRoot())
+    val root = roots[roots.fetchSemanticsNodes().size - 1]
+    val origin = root.fetchSemanticsNode().positionOnScreen
+    root.performTouchInput { click(screen - origin) }
+}
+
+/**
+ * T6.6 r4: the confirmation's lock inputs are collected with the lifecycle, so while the app is
+ * stopped a drop and a reconnect to the same server go unseen. Stopping the app closes the question.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class NoticeLifecycleTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    fun theAutoContinueConfirmationDoesNotSurviveABackgroundReconnect() {
+        val controlled = SessionControlFixtures.claude.copy(autoContinueOnLimit = false)
+        val client = ChatTestClient().also {
+            it.reports = true
+            it.show(controlled, ComposerFixtures.idle, live = true)
+            it.sessionControls.value = mapOf(controlled.id to SessionControlFixtures.claudeControls)
+            it.sync.value = liveCopy(controlled.id)
+        }
+        rule.hostChat(client, controlled)
+        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
+        rule.openAndArmChat()
+        rule.onNodeWithText(CONFIRM_TITLE).assertExists()
+        val confirmAt = rule.screenCentreOf("escalation-confirm")
+        rule.onNodeWithTag("escalation-confirm").assertIsEnabled()
+
+        // The screen turns off; the link drops and comes back to the same server while stopped.
+        val scenario = rule.activityRule.scenario
+        scenario.moveToState(Lifecycle.State.CREATED)
+        client.link.value = ConnectionState.Disconnected
+        client.live.value = emptySet()
+        client.sync.value = mapOf(controlled.id to SessionSync(Freshness.Saved, 1L))
+        client.link.value = ConnectionState.Connected
+        client.live.value = setOf(controlled.id)
+        client.sync.value = liveCopy(controlled.id)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        rule.openAndArmChat()
+
+        rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.tapScreenAt(confirmAt)
+        rule.armChat()
+        assertTrue("nothing was granted on the new link: ${client.controlCalls}", client.controlCalls.isEmpty())
+
+        // The operator asks again, on the link that is live now: the grant goes, once.
+        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
+        rule.openAndArmChat()
         rule.onNodeWithTag("escalation-confirm").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true, confirmed = true)}"), client.controlCalls)

@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
@@ -238,6 +240,10 @@ fun Composer(
     var escalation by remember(session?.id, controlActions.origin) { mutableStateOf<Escalation?>(null) }
     val escalationLocked = controlActions.lock != null
     LaunchedEffect(escalationLocked) { if (escalationLocked) escalation = null }
+    // T6.6 r4: while the app is stopped the lock above is never observed (its inputs are collected
+    // with the lifecycle), so a reconnect to the same server in the background would leave the
+    // question open and armed on the new link. Stopping closes it; the operator asks again.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { escalation = null }
     val commands = remember(projection?.cliInventory, controls) {
         composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList())
     }

@@ -8,6 +8,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -296,6 +298,28 @@ class SessionControlsPhoneBehaviourTest {
         h.arm()
         assertTrue(h.recorder.sent.isEmpty())
         rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
+    }
+
+    @Test
+    fun stoppingTheAppClosesTheAutoConfirmation() {
+        // T6.6 r4: the Auto question shares the composer's one pending confirmation; the app going
+        // to the background closes it, with the link and the lock unchanged.
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Mode")
+        h.arm()
+        h.click("control-option-${ModeVocabulary.AUTO}")
+        h.arm()
+        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertExists()
+        val confirmAt = rule.screenCentreOf("escalation-confirm")
+        rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        h.arm()
+        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.tapScreenAt(confirmAt)
+        h.arm()
+        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
     }
 
     @Test
