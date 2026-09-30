@@ -115,8 +115,9 @@ object LabelText {
      * ta-28i: a session title (sidebar, search, headers), by the label rule. A title made only of
      * invisible characters and bidi controls is never drawn as nothing: it is spelled out
      * ([visibleValue]), so two such sessions never look alike and the reader sees what it holds.
+     * [max] is the surface's own bound (T15.2: the Overview keeps the web's 160).
      */
-    fun title(text: String?): String = clean(text, MAX_TITLE).ifEmpty { if (text.isNullOrBlank()) "" else visibleValue(text) }
+    fun title(text: String?, max: Int = MAX_TITLE): String = clean(text, max).ifEmpty { if (text.isNullOrBlank()) "" else visibleValue(text) }
 
     /**
      * ta-28i r2: a name as an EDIT FIELD pre-fills it: every bidi control, mark and invisible code

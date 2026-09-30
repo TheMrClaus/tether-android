@@ -51,7 +51,6 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MessageSquareText
 import com.composables.icons.lucide.CirclePlay
 import com.composables.icons.lucide.OctagonPause
-import com.tether.app.client.LabelText
 import com.tether.app.protocol.model.OverviewActivity
 import com.tether.app.protocol.model.OverviewCard
 import com.tether.app.protocol.model.OverviewPending
@@ -70,6 +69,7 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.codeText
 import com.tether.app.ui.theme.CssLineHeight
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -96,13 +96,14 @@ object OverviewTags {
     fun tab(tab: StatusTab) = "overview-tab:${tab.key}"
 }
 
-/** Server/agent text as a single displayed line: bidi and invisible code points out, bounded (T6.4 L5). */
-private fun label(text: String?): String = LabelText.label(text)
-private fun title(text: String?): String = LabelText.clean(text, TITLE_CHARS)
-private fun prose(text: String?): String = LabelText.clean(text, LabelText.MAX_HINT)
-
-/** lib/overview-model.mjs OVERVIEW_LIMITS.titleChars: the server caps titles here too. */
-private const val TITLE_CHARS = 160
+/**
+ * Server/agent text as a single displayed line: bidi and invisible code points out, bounded (T6.4
+ * L5); a title of invisibles spelled out (ta-28i). Workspace names and paths are the one-line code
+ * rule instead ([codeLabel] / [SafeText.line]), as the sidebar draws them.
+ */
+private fun label(text: String?): String = OverviewPresentation.label(text)
+private fun title(text: String?): String = OverviewPresentation.title(text)
+private fun prose(text: String?): String = OverviewPresentation.prose(text)
 
 private fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float = 0f, lineHeight: Float? = null) = TextStyle(
     fontFamily = family,
@@ -258,9 +259,9 @@ private fun Toolbar(state: OverviewClientState, choice: OverviewChoice, onChoice
     // overview.tsx:161-176 — the facet options, plus a remembered choice that has no sessions now.
     val workspaceOptions = buildList {
         add(TetherSelectOption("", "All workspaces"))
-        facets?.workspaces?.forEach { add(TetherSelectOption(it.key, label(it.label), description = SafeText.code(it.key))) }
+        facets?.workspaces?.forEach { add(TetherSelectOption(it.key, SafeText.line(it.label), description = SafeText.line(it.key))) }
         choice.workspace?.takeIf { w -> facets?.workspaces?.none { it.key == w } != false }?.let { w ->
-            add(TetherSelectOption(w, label(w.split("/").lastOrNull { it.isNotEmpty() } ?: w), description = "${SafeText.code(w)} — no sessions now"))
+            add(TetherSelectOption(w, SafeText.line(w.split("/").lastOrNull { it.isNotEmpty() } ?: w), description = "${SafeText.line(w)} — no sessions now"))
         }
     }
     val providerOptions = buildList {
@@ -509,7 +510,7 @@ private fun PendingItem(item: OverviewPending, now: Long, onReview: (String, Str
             }
         }
         Text(
-            prose(item.summary).ifEmpty { if (approval) "Tool approval" else "A question" },
+            OverviewPresentation.requestSummary(item),
             style = css(type.ui, 0.98f, 680),
             color = t.white,
             modifier = Modifier.padding(top = 5.6.dp),
@@ -633,7 +634,14 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             verticalArrangement = Arrangement.spacedBy(3.2.dp),
         ) {
             val meta = css(type.mono, 0.78f, 500)
-            Text(label(card.workspace.label), style = meta, color = t.muted)
+            // ta-28i: a workspace's name is code, one line (the sidebar's rule), so a spoof shows.
+            Text(
+                codeLabel(card.workspace.label),
+                style = meta,
+                color = t.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             card.branch?.takeIf { it.isNotEmpty() }?.let { branch ->
                 Text("·", style = meta, color = t.faint, modifier = Modifier.clearAndSetSemantics { })
                 Row(
@@ -887,7 +895,7 @@ private fun ActivityRow(record: OverviewActivity, onOpen: (String) -> Unit) {
     val (kindLabel, kindIcon) = activityKind(record.kind)
     val failure = record.kind == "failure"
     val rowTitle = title(record.title)
-    val workspace = record.workspace?.let(::label)?.takeIf { it.isNotEmpty() }
+    val workspace = record.workspace?.takeIf { it.isNotEmpty() }
     val text = prose(record.text)
     Row(
         Modifier
@@ -895,7 +903,7 @@ private fun ActivityRow(record: OverviewActivity, onOpen: (String) -> Unit) {
             .heightIn(min = TetherDimens.touchTargetDp)
             .clickable(role = Role.Button) { onOpen(record.sessionId) }
             .semantics(mergeDescendants = true) {
-                contentDescription = "${OverviewFormat.clock(record.ts)}, $rowTitle" + (workspace?.let { ", in workspace $it" } ?: "") + ", $kindLabel: $text"
+                contentDescription = "${OverviewFormat.clock(record.ts)}, $rowTitle" + (workspace?.let { ", in workspace ${SafeText.line(it)}" } ?: "") + ", $kindLabel: $text"
             }
             .testTag(OverviewTags.activityRow(record.id))
             .padding(horizontal = 4.dp, vertical = 8.8.dp),
@@ -907,7 +915,7 @@ private fun ActivityRow(record: OverviewActivity, onOpen: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(rowTitle, style = css(type.ui, 0.86f, 620, lineHeight = 1.25f), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    workspace?.let { Text(it, style = css(type.mono, 0.72f, 400, lineHeight = 1.25f), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    workspace?.let { Text(codeLabel(it), style = css(type.mono, 0.72f, 400, lineHeight = 1.25f), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
                 Text(OverviewFormat.clock(record.ts), style = css(type.mono, 0.8f, 500).copy(fontFeatureSettings = "tnum"), color = t.muted)
             }

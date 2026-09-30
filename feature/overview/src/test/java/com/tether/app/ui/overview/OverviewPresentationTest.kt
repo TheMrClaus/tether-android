@@ -144,6 +144,20 @@ class OverviewPresentationTest {
         assertEquals("2 new requests need your attention.", OverviewPresentation.announcement(emptySet(), listOf(a, b)))
     }
 
+    @Test fun `the announcement speaks the panel's cleaned values, bounded`() {
+        fun one(title: String, summary: String) =
+            OverviewPresentation.announcement(emptySet(), listOf(OverviewPending("s", "r", "approval", title = title, summary = summary)))!!
+        assertEquals("New approval request from evil x: sum mary", one("ev\u202Eil\nx", "sum\u2066\nmary"))
+        assertEquals(
+            "a title of invisibles is spelled out; an empty summary reads as the panel draws it",
+            "New approval request from \\u{200B}\\u{200B}\\u{202E}: Tool approval",
+            one("\u200B\u200B\u202E", ""),
+        )
+        val long = one("T".repeat(5_000), "S".repeat(50_000))
+        assertTrue("bounded: ${long.length}", long.length <= 500)
+        assertTrue(long, long.startsWith("New approval request from TTT") && long.endsWith("…"))
+    }
+
     @Test fun `the review hand-off reads the open turn's pending requests`() {
         fun tree(approvals: Map<String, JsObj> = emptyMap(), questions: Map<String, JsObj> = emptyMap(), active: String? = "t1") = JsObj.of(
             "activeTurnId" to (active?.let(::JsStr) ?: com.tether.app.protocol.tree.JsNull),

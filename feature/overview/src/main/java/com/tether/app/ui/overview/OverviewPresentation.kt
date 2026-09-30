@@ -1,6 +1,7 @@
 package com.tether.app.ui.overview
 
 import com.tether.app.client.ConsentGuard
+import com.tether.app.client.LabelText
 import com.tether.app.protocol.model.OverviewCard
 import com.tether.app.protocol.model.OverviewCounts
 import com.tether.app.protocol.model.OverviewFacets
@@ -170,10 +171,35 @@ object OverviewPresentation {
         val fresh = OverviewClient.newPendingItems(previousKeys, items)
         return when {
             fresh.isEmpty() -> null
-            fresh.size == 1 -> "New ${if (fresh[0].kind == "approval") "approval request" else "question"} from ${fresh[0].title}: ${fresh[0].summary}"
+            // r2: spoken from the values the panel draws (never the raw server text), bounded.
+            fresh.size == 1 -> LabelText.clean(
+                "New ${if (fresh[0].kind == "approval") "approval request" else "question"} from ${title(fresh[0].title)}: ${requestSummary(fresh[0])}",
+                ANNOUNCEMENT_CHARS,
+            )
             else -> "${fresh.size} new requests need your attention."
         }
     }
+
+    // ---- server/agent text as the Overview draws it (T6.4 L5, ta-28i) ------------------------
+
+    /** lib/overview-model.mjs OVERVIEW_LIMITS.titleChars: the server caps titles here too. */
+    const val TITLE_CHARS = 160
+
+    /** The longest announcement: a bounded title and a bounded summary, with the words around them. */
+    const val ANNOUNCEMENT_CHARS = TITLE_CHARS + LabelText.MAX_HINT + 40
+
+    /** A session title: the label rule, an all-invisible title spelled out (ta-28i), the web's bound. */
+    fun title(text: String?): String = LabelText.title(text, TITLE_CHARS)
+
+    /** A one-line server label (a provider's name). */
+    fun label(text: String?): String = LabelText.label(text)
+
+    /** Server/agent prose on one surface line (a summary, a status detail, an activity line). */
+    fun prose(text: String?): String = LabelText.clean(text, LabelText.MAX_HINT)
+
+    /** overview-panels.tsx — a pending request's summary as the panel draws it. */
+    fun requestSummary(item: OverviewPending): String =
+        prose(item.summary).ifEmpty { if (item.kind == "approval") "Tool approval" else "A question" }
 
     // ---- dashboard.tsx:1392-1443 reviewRequest: the hand-off's outcome ----------------------
 
