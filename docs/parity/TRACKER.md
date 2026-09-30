@@ -198,7 +198,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.2 | Accessibility pass | TODO |  |  | From T3.2: CSS text-transform:uppercase keeps the ORIGINAL words as the accessible name; native uppercase labels must set contentDescriptio… |
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  | From the T4.3 r2 verifier (fidelity detail): UsageTrack's colour transition uses Compose's default tween easing; the web uses CSS 'ease' (c… |
-| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
+| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | owner rule 2026-09-30: the coordinator publishes releases itself (no drafts left for the owner) and bumps the minor version each release (0… |
 
 ### Phase 15 — Catch-up to web protocol v135 (Overview, Studio-only, v133-v135)
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -206,9 +206,9 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
 | T15.1 | Overview feed client (v131) | VERIFIED | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
 | T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
-| T15.3 | Overview host + daily usage panels | IN-PROGRESS | security-executor-T15.3 @ 2026-09-30 20… |  | checkpoint: maker started on branch T15.3 from 1c5af15; reading web ref + core/net ToolMedia/stats pattern. |
-| T15.4 | Top-bar navigation | IN-PROGRESS | executor-T15.4 @ 2026-09-30 20:30 |  | checkpoint: maker started in worktree T15.4 from 1c5af15; reading web topbar/dashboard refs |
-| T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
+| T15.3 | Overview host + daily usage panels | DONE | security-executor-T15.3 @ 2026-09-30 20… |  |  |
+| T15.4 | Top-bar navigation | VERIFIED | executor-T15.4 @ 2026-09-30 20:30 |  |  |
+| T15.5 | Studio-only appearance + theme migration | IN-PROGRESS | executor-T15.5 @ 2026-09-30 23:01 |  |  |
 | T15.6 | Queue origin labels (v133) + hidden session count (v135) | TODO |  |  |  |
 | T15.7 | Worktree service links after v134 | TODO |  |  |  |
 | T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | TODO |  |  |  |
@@ -373,3 +373,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 23:00 | claude-main / Opus 5.5 | ta-8lg, T9.1, T15.1, T15.2, T7.4, T15.3, T15.4 | ta-8lg merged `1293f0b` VERIFIED (coordinator red/green recheck). T9.1 merged `e2ae7c8` VERIFIED (follow-up ta-dl4). Overview: T15.1 CONFIRMED, T15.2 REFUTED on text rules -> r2 (+ security L1 caps) -> coordinator recheck -> merged `1c5af15`, both VERIFIED (follow-ups ta-fhl, ta-hoo). T7.4: security FAIL (clipboard file:// URIs), verify REFUTED (staged-set race), gate red from a T7.4 test leak -> r2 running (follow-up ta-ec1). Started T15.3 and T15.4. Also filed ta-exi. | T7.4 r2 recheck; T15.3/T15.4 reviews |
 | 2026-09-30 23:40 | claude-main / Opus 5.5 | release | Owner rule: the coordinator publishes releases, minor bump each. v0.8.0 (code 26, `6c5e474`) built by android-release.yml (draft), APK checked (same cert `4f8c22de...b74d` as 0.7.8, versionName 0.8.0 / code 26), asset renamed tether-0.8.0.apk, PUBLISHED as Latest with highlights. | T7.4 r2; T15.3/T15.4 |
 | 2026-10-01 00:55 | claude-main / Opus 5.5 | T7.4, T15.3, T15.4, ta-ylh, ta-vmg, ta-x9c | All five overnight lanes stopped (usage limit 00:50 + connection errors); resumed each from its transcript with its uncommitted work intact (T7.4 r3 WIP, T15.3 r2 WIP rebased, ta-ylh WIP in 12 files, T15.4 r2 re-verify mid-mutants, flakes not started); makers told to checkpoint-commit first. T15.3 verify CONFIRMED earlier (r2 = origin check + JSON content type). | T7.4 r3; T15.3 r2; T15.4 verdict; ta-ylh; flakes |
+| 2026-10-01 01:30 | claude-main / Opus 5.5 | T15.4, T15.5 | T15.4 r2 re-verify CONFIRMED -> merged ff-only `cee8ea80`, VERIFIED (gate 4741; follow-up ta-2qv). Started T15.5 (Studio-only appearance; rebases over T7.4 at the end). | T7.4 r3; T15.3 r2; ta-ylh; flakes; T15.5 |
