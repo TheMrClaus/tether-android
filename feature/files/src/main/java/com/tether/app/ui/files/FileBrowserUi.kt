@@ -772,13 +772,14 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, n
 @Composable
 private fun TextPreview(text: String, notices: CopyNotices) {
     val t = LocalTetherTokens.current
-    val lines = remember(text) { previewLines(text) }
+    val lines = remember(text) { previewPieces(text) }
     val shape = RoundedCornerShape(if (t.studio) 8.dp else t.radiusMd)
     val base = if (t.studio) ui(13f, lineHeight = 1.75f, mono = true) else ui(rem(0.72f), lineHeight = 1.55f, mono = true)
     val style = base.copy(textDirection = codeDirection)
     val tokens = tokenStyle(t)
     val clipboard = LocalClipboard.current
-    val safeClipboard = remember(clipboard, notices) { SafeCopyClipboard(clipboard, notices) }
+    // r2: the lines' own markers become their line breaks and tabs again first ([PreviewCopy]).
+    val safeClipboard = remember(clipboard, notices) { PreviewCopy.Clipboard(SafeCopyClipboard(clipboard, notices)) }
     CompositionLocalProvider(LocalClipboard provides safeClipboard) {
         SelectionContainer {
             LazyColumn(
@@ -790,8 +791,8 @@ private fun TextPreview(text: String, notices: CopyNotices) {
                     .then(if (t.studio) Modifier else Modifier.border(1.dp, t.line, shape))
                     .padding(if (t.studio) 20.dp else t.css.spaceLg),
             ) {
-                itemsIndexed(lines) { _, line ->
-                    val shown = remember(line, tokens) { styledDisplay(SafeText.code(line), tokens) }
+                itemsIndexed(lines) { _, piece ->
+                    val shown = remember(piece, tokens) { styledDisplay(PreviewCopy.display(piece, last = piece === lines.last()), tokens) }
                     Text(shown, color = t.ink, style = style)
                 }
             }
@@ -800,32 +801,143 @@ private fun TextPreview(text: String, notices: CopyNotices) {
 }
 
 /**
- * Split on newlines (tabs at two columns); a pathological single line is cut into pieces.
+ * One laid-out line of the text preview: [text] is source text (tabs kept), [end] the source line
+ * break that follows it ("\n", "\r\n", or "" when the piece does not end its line: the last line, or
+ * all but the last piece of a pathological long line).
+ */
+internal data class PreviewPiece(val text: String, val end: String = "")
+
+/**
+ * Split on newlines; a pathological single line is cut into pieces.
  * ta-28i: the CR of a CRLF goes with its line break (a lone CR stays, and shows as a token); a
  * piece is cut at a character-cluster boundary ([TextCut]), never inside a surrogate pair (which
- * would draw as two `U+D8xx` tokens) or between a letter and its accent.
+ * would draw as two `U+D8xx` tokens) or between a letter and its accent. r2: bounded (TextCut backs
+ * off at most 64 code points, never below the piece start), so a hostile 1 MiB line of combining
+ * marks, ZWJs or flags is cut in linear time; each piece keeps its line break and tabs, for the copy.
  */
-internal fun previewLines(text: String): List<String> {
-    val out = ArrayList<String>()
-    val split = text.replace("\t", "  ").split('\n')
+internal fun previewPieces(text: String): List<PreviewPiece> {
+    val out = ArrayList<PreviewPiece>()
+    val split = text.split('\n')
     for ((index, raw) in split.withIndex()) {
-        val line = if (index < split.lastIndex && raw.endsWith('\r')) raw.substring(0, raw.length - 1) else raw
+        val last = index == split.lastIndex
+        val crlf = !last && raw.endsWith('\r')
+        val line = if (crlf) raw.substring(0, raw.length - 1) else raw
+        val end = when {
+            last -> ""
+            crlf -> "\r\n"
+            else -> "\n"
+        }
         if (line.length <= LINE_PIECE) {
-            out += line
+            out += PreviewPiece(line, end)
         } else {
             var start = 0
             while (start < line.length) {
                 val limit = minOf(line.length, start + LINE_PIECE)
-                // r2: bounded (TextCut backs off at most 64 code points, never below the piece start), so
-                // a hostile 1 MiB line of combining marks, ZWJs or flags is cut in linear time.
-                var end = TextCut.boundaryAtOrBefore(line, limit, floor = start)
-                if (end <= start) end = limit
-                out += line.substring(start, end)
-                start = end
+                var cut = TextCut.boundaryAtOrBefore(line, limit, floor = start)
+                if (cut <= start) cut = limit
+                out += PreviewPiece(line.substring(start, cut), if (cut == line.length) end else "")
+                start = cut
             }
         }
     }
     return out
+}
+
+/** The lines as drawn before r2 (tabs at two columns, no line breaks): what [previewPieces] shows. */
+internal fun previewLines(text: String): List<String> = previewPieces(text).map { it.text.replace("\t", "  ") }
+
+/**
+ * ta-28i r2: copying ACROSS preview lines. Each line is its own Text in one SelectionContainer, and
+ * the selection joins the selected parts of the Texts with a "\n" between them (whatever the file
+ * had), so a CRLF lost its CR, a TAB came back as two spaces, and a pathological long line split
+ * into pieces gained line breaks it never had: "Copy raw" was not the source. So each drawn piece
+ * but the file's last carries an invisible END marker (the line's own "\n", its "\r\n", or "no
+ * break": the piece continues the line), and each TAB (drawn at two columns, the web's
+ * `tab-size: 2`) a marker before its two spaces; [Clipboard] turns each END marker and the
+ * selection's "\n" after it into the source's break, and each tab marker and its spaces into the
+ * TAB, before the safe copy ([SafeCopyClipboard]) sees the text. So the safe copy AND "Copy raw"
+ * keep the file's line breaks, CRLFs and tabs. The markers are WORD JOINER + ZWNJ / ZWJ: zero-width,
+ * and never in a code display otherwise (the code rule draws every WJ, ZWNJ and ZWJ of the file as
+ * a token), so file content can never pass for one. A selection that starts inside a tab's two
+ * spaces copies those spaces as spaces.
+ */
+internal object PreviewCopy {
+    private const val MARK = SafeText.MARK
+    private const val ZWNJ = '\u200C'
+    private const val ZWJ = '\u200D'
+    val LF_END = "$MARK$ZWNJ"
+    val CRLF_END = "$MARK$ZWNJ$ZWNJ"
+    val CONT_END = "$MARK$ZWNJ$ZWJ"
+    val TAB = "$MARK$ZWJ  "
+
+    /** What a piece draws: the code rule, tabs at two columns, its line break (or [last]: none) as a marker. */
+    fun display(piece: PreviewPiece, last: Boolean = false): String {
+        val code = SafeText.code(piece.text)
+        val body = if (code.indexOf('\t') < 0) code else code.replace("\t", TAB)
+        return when {
+            piece.end == "\n" -> body + LF_END
+            piece.end == "\r\n" -> body + CRLF_END
+            last -> body
+            else -> body + CONT_END
+        }
+    }
+
+    /** A copied selection with the markers turned back into the source's line breaks and tabs. */
+    fun decode(selected: CharSequence): String {
+        val s = selected.toString()
+        if (s.none { it == ZWNJ || it == ZWJ } && !s.endsWith(MARK)) return s
+        val out = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == MARK && i + 1 < s.length && s[i + 1] == ZWNJ) {
+                val next = if (i + 2 < s.length) s[i + 2] else ' '
+                when (next) {
+                    ZWNJ -> out.append("\r\n")
+                    ZWJ -> Unit // the piece continues its line
+                    else -> out.append('\n')
+                }
+                i += if (next == ZWNJ || next == ZWJ) 3 else 2
+                // The selection's own separator after this piece: the marker already said what the file had.
+                if (i < s.length && s[i] == '\n') i++
+                continue
+            }
+            if (c == MARK && i + 1 < s.length && s[i + 1] == ZWJ) {
+                out.append('\t')
+                i += 2
+                var spaces = 0
+                while (spaces < 2 && i < s.length && s[i] == ' ') {
+                    i++
+                    spaces++
+                }
+                continue
+            }
+            // Half a marker (a selection edge cut it): the file never held it.
+            if (c == ZWNJ || c == ZWJ || (c == MARK && i == s.length - 1)) {
+                i++
+                continue
+            }
+            out.append(c)
+            i++
+        }
+        return out.toString()
+    }
+
+    /** [delegate] (the safe copy) fed the [decode]d text. */
+    class Clipboard(private val delegate: androidx.compose.ui.platform.Clipboard) : androidx.compose.ui.platform.Clipboard {
+        override suspend fun getClipEntry(): androidx.compose.ui.platform.ClipEntry? = delegate.getClipEntry()
+
+        override suspend fun setClipEntry(clipEntry: androidx.compose.ui.platform.ClipEntry?) {
+            val data = clipEntry?.clipData
+            val text = if (data != null && data.itemCount > 0) data.getItemAt(0).text else null
+            if (text == null) return delegate.setClipEntry(clipEntry)
+            val decoded = decode(text)
+            if (decoded == text.toString()) return delegate.setClipEntry(clipEntry)
+            delegate.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(data!!.description?.label ?: "text", decoded)))
+        }
+
+        override val nativeClipboard get() = delegate.nativeClipboard
+    }
 }
 
 private const val LINE_PIECE = 4_000

@@ -146,7 +146,8 @@ class FileBrowserBehaviourTest {
     @Test fun aTextFileOpensInThePreviewAndBackReturnsToTheList() {
         launch()
         rule.onNodeWithText("README.md").performClick()
-        waitFor { rule.onAllNodesWithText("A tiny fixture project for the parity screenshots.").fetchSemanticsNodes().isNotEmpty() }
+        // ta-28i r2: a preview line ends in its (zero-width) line-break marker for the copy: substring.
+        waitFor { rule.onAllNodesWithText("A tiny fixture project for the parity screenshots.", substring = true).fetchSemanticsNodes().isNotEmpty() }
         val get = requests("GET").first { it.requestUrl?.queryParameter("path") == "$ROOT/README.md" }
         assertEquals("bytes=0-1048575", get.getHeader("Range"))
         // Phone = master-detail: the list is gone while previewing.

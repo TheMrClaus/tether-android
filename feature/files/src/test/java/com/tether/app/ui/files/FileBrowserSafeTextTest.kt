@@ -125,8 +125,11 @@ class FileBrowserSafeTextTest {
         val node = rule.onNodeWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNode()
         val results = mutableListOf<TextLayoutResult>()
         node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
-        return results.first().let { it.layoutInput.text.text to it }
+        return results.first().let { drawn(it.layoutInput.text.text) to it }
     }
+
+    /** A drawn preview line without its r2 copy markers (zero-width; [PreviewCopy]). */
+    private fun drawn(s: String) = s.removeSuffix(PreviewCopy.CRLF_END).removeSuffix(PreviewCopy.CONT_END).removeSuffix(PreviewCopy.LF_END)
 
     /** The drawn ASCII letters and digits outside tokens: do they read left to right, line by line? */
     private fun latinReadsInOrder(shown: String, layout: TextLayoutResult): Boolean {
@@ -185,6 +188,8 @@ class FileBrowserSafeTextTest {
         val (grant, _) = layoutOf("grant()")
         assertEquals("    grant();${tok(0x200B)}", grant)
         assertFalse(spoken().any { it.contains(vis(0x000D)) && !it.startsWith("lone") })
+        // r2: the CRLF lines carry their line break as the (invisible) marker, the LF lines theirs.
+        assertTrue(spoken().any { it == "    grant();${tok(0x200B)}${PreviewCopy.CRLF_END}" })
         // A lone CR (not a line break's) is shown.
         assertEquals("lone${tok(0x000D)}cr", layoutOf("lone").first)
         assertNoRawBidi()
@@ -228,10 +233,65 @@ class FileBrowserSafeTextTest {
         for (c in listOf(RLO, LRI, PDI, "\u2060")) assertFalse("raw U+%04X copied".format(c[0].code), copied.contains(c))
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
         assertTrue(spoken().any { Regex("^\\d+ hidden control characters copied as \u27E8U\\+\u2026\u27E9$").matches(it) })
+        // r2: the lines keep their breaks (a CRLF stays a CRLF) in the safe copy too.
+        assertTrue("line breaks: ${hex(copied)}", copied.contains("{\r\n    grant();\u200B\r\n// "))
         rule.onNodeWithTag(COPY_RAW_TAG).performClick()
         rule.waitForIdle()
-        assertTrue("Copy raw: ${hex(clip()!!)}", clip()!!.contains(LINE1))
+        // r2: "Copy raw" of the whole preview is the file, byte for byte (line breaks, CRLFs, the lone CR).
+        assertEquals("Copy raw: ${hex(clip()!!)}", TROJAN, clip())
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+    }
+
+    /** r2 (security L2): a selection over two lines copies them WITH their line break and tabs. */
+    @Test fun aTwoLineCopyKeepsItsLineBreakAndTabs() {
+        val menu = MenuSpy()
+        val two = FilesFixtures.file("two.txt", 32)
+        val files = FakeFiles().apply {
+            listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = listOf(two)))
+            texts[two.path] = FilesResult.Ok("alpha\tone\nbeta\r\ngamma")
+        }
+        val browser = FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply { cwd = ROOT; open(); selectFile(two) }
+        rule.setContent {
+            CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
+                TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                    CompositionLocalProvider(LocalReducedMotion provides true) { FileBrowserFrame(browser, onClose = {}, onUpload = {}, env = FilesFixtures.env) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        // The tab still draws at two columns.
+        assertEquals("alpha  one", layoutOf("alpha").first.replace(PreviewCopy.TAB, "  "))
+        rule.onNodeWithText("alpha", substring = true, useUnmergedTree = true).performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(6f, 0f)) }
+        rule.waitForIdle()
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
+        rule.waitForIdle()
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
+        rule.waitForIdle()
+        assertEquals("alpha\tone\nbeta\r\ngamma", clip())
+        // Nothing hidden was in it: no notice.
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+    }
+
+    @Test fun theCopyMarkersDecodeAndHalfAMarkIsDropped() {
+        val pieces = previewPieces("a\tb\r\nc\nd")
+        assertEquals(listOf(PreviewPiece("a\tb", "\r\n"), PreviewPiece("c", "\n"), PreviewPiece("d", "")), pieces)
+        // As a selection hands it over: each Text's part, a "\n" between them.
+        val selected = pieces.mapIndexed { i, p -> PreviewCopy.display(p, last = i == pieces.lastIndex) }.joinToString("\n")
+        assertEquals("a\tb\r\nc\nd", PreviewCopy.decode(selected))
+        // A long line split into pieces copies as ONE line again.
+        val long = "x".repeat(9_000) + "\nend"
+        val longPieces = previewPieces(long)
+        assertEquals(4, longPieces.size)
+        assertEquals(long, PreviewCopy.decode(longPieces.mapIndexed { i, p -> PreviewCopy.display(p, last = i == longPieces.lastIndex) }.joinToString("\n")))
+        // A selection that starts or ends inside a marker never copies half of it.
+        assertEquals("c\n", PreviewCopy.decode("c\u2060\u200C"))
+        assertEquals("c\nd", PreviewCopy.decode("c\u2060\u200C\nd"))
+        assertEquals("b", PreviewCopy.decode("b\u2060"))
+        assertEquals("  b", PreviewCopy.decode("\u200D  b"))
+        // File content can never pass for a marker: the code rule draws its WJ / ZWNJ / ZWJ as tokens.
+        val hostile = PreviewCopy.display(PreviewPiece("x\u2060\u200Cy\u2060\u200D  z"))
+        assertEquals("x\u2060\u200Cy\u2060\u200D  z", com.tether.app.ui.text.SafeText.original(PreviewCopy.decode(hostile)))
+        assertFalse(PreviewCopy.decode(hostile).contains('\n') || PreviewCopy.decode(hostile).contains('\t'))
     }
 
     @Test fun previewPiecesNeverSplitAPairOrAnAccentAndCrlfIsALineBreak() {
