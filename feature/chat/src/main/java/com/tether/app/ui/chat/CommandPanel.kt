@@ -125,7 +125,7 @@ internal fun commandPanelText(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHAR
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
 /**
- * `.chat-command-panel`: `1px --line`, a 2px left edge (`--muted`; `--violet-strong` running,
+ * `.chat-command-panel` (as wide as its content, at most the row): `1px --line`, a 2px left edge (`--muted`; `--violet-strong` running,
  * `--danger` failed), `--radius-md`, `--mineral-deep`. The head (Terminal, the command in the mono
  * face, the status — spinner + words, `--danger` when failed), the output (`<pre>`, 0.78rem mono,
  * stderr in `--warning`, at most 40% of the window tall and scrolling inside, following the tail while
@@ -155,9 +155,11 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
     }
     val maxBody = (LocalConfiguration.current.screenHeightDp * 0.4f).dp
     Box(Modifier.fillMaxWidth().padding(vertical = t.css.spaceXs).testTag(COMMAND_PANEL_TAG)) {
+        // `.chat-row` is a flex row and the panel has no width of its own: it wraps its content, up
+        // to the row's width (a long line wraps inside it).
         Column(
             Modifier
-                .fillMaxWidth()
+                .width(androidx.compose.foundation.layout.IntrinsicSize.Max)
                 .clip(shape)
                 .background(t.mineralDeep)
                 .border(1.dp, t.line, shape)
