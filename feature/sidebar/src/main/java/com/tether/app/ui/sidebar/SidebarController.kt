@@ -205,6 +205,8 @@ class SidebarController(
         onOpenSettings: () -> Unit,
         /** T5.3: dashboard.tsx:1157 openGlobalSearch (TetherViewModel.openGlobalSearch). */
         onOpenGlobalSearch: (() -> Unit)? = null,
+        /** T15.2: the interim Overview entry (null: not shown). */
+        onOpenOverview: (() -> Unit)? = null,
     ): SidebarActions = SidebarActions(
         onCloseDrawer = onClose,
         onNewSession = onNewSession,
@@ -248,6 +250,7 @@ class SidebarController(
         onOpenSettings = onOpenSettings,
         onCollapse = { updatePreferences { it.copy(sidebarCollapsed = true) } },
         onOpenGlobalSearch = onOpenGlobalSearch,
+        onOpenOverview = onOpenOverview,
     )
 
     companion object {

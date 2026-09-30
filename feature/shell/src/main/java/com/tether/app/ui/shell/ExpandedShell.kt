@@ -294,13 +294,19 @@ private fun WorkspaceColumn(
                         .testTag(ShellTags.Stage),
                 ) { slots.chat() }
             } else {
-                EmptyWorkspace(
-                    stage = emptyStage,
-                    onStartSession = onStartSession,
-                    studioWelcome = slots.studioWelcome,
-                    expanded = true,
-                    viewportWidth = viewport,
-                )
+                // T15.2: the Overview takes the whole workspace when it is showing (no session is).
+                val overview = slots.overview
+                if (overview != null) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) { overview() }
+                } else {
+                    EmptyWorkspace(
+                        stage = emptyStage,
+                        onStartSession = onStartSession,
+                        studioWelcome = slots.studioWelcome,
+                        expanded = true,
+                        viewportWidth = viewport,
+                    )
+                }
             }
         }
         if (sheetShown) {

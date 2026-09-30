@@ -83,6 +83,11 @@ class PhoneShellSlots(
     val statusline: StatuslineSlot = {},
     /** Studio's empty stage, StudioWelcome (T8.1). */
     val studioWelcome: (@Composable () -> Unit)? = null,
+    /**
+     * T15.2: the Overview (feature:overview). Non-null while it is showing: it replaces the
+     * workspace's header, stage and empty stage (the host passes no session meanwhile).
+     */
+    val overview: (@Composable () -> Unit)? = null,
 )
 
 /**
@@ -163,11 +168,17 @@ fun PhoneShell(
                         }
                     }
                 } else {
-                    EmptyWorkspace(
-                        stage = emptyStage,
-                        onStartSession = onStartSession,
-                        studioWelcome = slots.studioWelcome,
-                    )
+                    // T15.2: the Overview takes the workspace column when it is showing (no session is).
+                    val overview = slots.overview
+                    if (overview != null) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) { overview() }
+                    } else {
+                        EmptyWorkspace(
+                            stage = emptyStage,
+                            onStartSession = onStartSession,
+                            studioWelcome = slots.studioWelcome,
+                        )
+                    }
                 }
             }
         }

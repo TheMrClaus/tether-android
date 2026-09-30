@@ -40,6 +40,14 @@ fun SessionDrawer(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    /** T15.2: the interim Overview entry (null: not shown). */
+    onOpenOverview: (() -> Unit)? = null,
+    /**
+     * T15.2 (OVERVIEW_STUDIO_PLAN.md §4, dashboard.tsx:725 `activeSession = view === "sessions" ? …`):
+     * false while the selected session is NOT on screen (the Overview is showing). Its settled
+     * report is then not seen, so it is never marked seen.
+     */
+    selectedOnScreen: Boolean = true,
 ) {
     val client = vm.client
     val scope = rememberCoroutineScope()
@@ -147,7 +155,7 @@ fun SessionDrawer(
         }
     }
     // dashboard.tsx:966-973 — the visible, settled session's latest report is on screen.
-    val active = sessions.firstOrNull { it.id == selectedId }
+    val active = sessions.firstOrNull { it.id == selectedId }?.takeIf { selectedOnScreen }
     LaunchedEffect(active?.historyId, active?.status, active?.updatedAt) {
         active?.let { controller.onActiveSettled(it) }
     }
@@ -183,6 +191,7 @@ fun SessionDrawer(
             },
             onOpenSettings = { settingsOpen = true },
             onOpenGlobalSearch = vm::openGlobalSearch,
+            onOpenOverview = onOpenOverview,
         ),
     )
 

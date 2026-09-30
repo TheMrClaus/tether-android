@@ -113,6 +113,11 @@ data class SidebarActions(
     val onOpenGlobalSearch: (() -> Unit)? = null,
     /** Scheduled actions (T9.3). */
     val onOpenScheduledActions: (() -> Unit)? = null,
+    /**
+     * T15.2: the Overview. Null = no host: nothing renders (the entry is an interim hook until the
+     * T15.4 top bar carries Overview / Sessions / Scheduled / Usage).
+     */
+    val onOpenOverview: (() -> Unit)? = null,
 )
 
 /** Transient UI state a screenshot or test can start from (the web's component state). */
@@ -131,6 +136,7 @@ object SidebarTags {
     const val List = "sidebar-list"
     const val NewSession = "sidebar-new-session"
     const val AddWorkspace = "sidebar-add-workspace"
+    const val Overview = "sidebar-overview"
     fun row(key: String) = "sidebar-row:$key"
     fun freshness(key: String) = "sidebar-freshness:$key"
     fun blockDot(workspace: String) = "sidebar-block-dot:$workspace"
@@ -250,6 +256,7 @@ private fun SidebarContent(
         if (phone) MobileHeader(onClose = actions.onCloseDrawer)
 
         NewSessionKey(onClick = actions.onNewSession)
+        actions.onOpenOverview?.let { OverviewNav(it) }
         ScheduledNav(count = state.scheduledActionCount, onClick = actions.onOpenScheduledActions)
 
         ListHeader(
@@ -398,6 +405,33 @@ private fun NewSessionKey(onClick: () -> Unit) {
             }
         },
     )
+}
+
+/**
+ * T15.2: the interim Overview entry, drawn as the Scheduled actions row is (the web reaches the
+ * Overview from its top bar, which is T15.4's; this row goes when that lands).
+ */
+@Composable
+private fun OverviewNav(onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val studio = t.studio
+    val shape = RoundedCornerShape(if (studio) t.radiusSm else t.radiusKey)
+    Row(
+        Modifier
+            .padding(top = if (studio) 0.6f.rem else t.css.spaceMd)
+            .fillMaxWidth()
+            .heightIn(min = if (studio) 2.75f.rem else 2.5f.rem)
+            .clickable(role = Role.Button, onClick = onClick)
+            .border(1.dp, Color.Transparent, shape)
+            .padding(start = if (studio) 0.875f.rem else t.css.spaceMd, end = if (studio) 0.875f.rem else t.css.spaceSm)
+            .testTag(SidebarTags.Overview),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        SmallIcon(TetherIcons.Gauge, t.muted, 17.dp)
+        Text("Overview", style = css(type.ui, if (studio) 0.8125f else 0.78f, 650), color = t.muted, modifier = Modifier.weight(1f))
+    }
 }
 
 /** `.scheduled-actions-nav` (globals.css 10399-10446, 10987-10993; studio.css 305-307). */

@@ -86,6 +86,8 @@ import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -102,6 +104,18 @@ import com.tether.app.ui.shell.shellLayoutFor
 import com.tether.app.ui.statusline.ContextGauge
 import com.tether.app.ui.statusline.SessionStatusline
 import com.tether.app.ui.statusline.TelemetryMetrics
+
+/** T15.2: the Overview's filter choice survives a rotation and a return to the Overview (overview.tsx:42). */
+private val OverviewChoiceSaver = androidx.compose.runtime.saveable.listSaver<com.tether.app.ui.overview.OverviewChoice, String>(
+    save = { listOf(it.workspace.orEmpty(), it.provider.orEmpty(), it.status.key) },
+    restore = { saved ->
+        com.tether.app.ui.overview.OverviewChoice(
+            workspace = saved[0].ifEmpty { null },
+            provider = saved[1].ifEmpty { null },
+            status = com.tether.app.ui.overview.StatusTab.entries.firstOrNull { it.key == saved[2] } ?: com.tether.app.ui.overview.StatusTab.Active,
+        )
+    },
+)
 
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
@@ -144,7 +158,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
 
-    val session = sessions.firstOrNull { it.id == selectedId }
+    // T15.2: the Overview replaces the workspace while it shows; the selected session is then not
+    // on screen (dashboard.tsx:725), so the shell gets none: no header, stage, chat or inspector.
+    var overviewOpen by rememberSaveable { mutableStateOf(false) }
+    var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
+    var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val selectedSession = sessions.firstOrNull { it.id == selectedId }
+    val session = selectedSession?.takeIf { !overviewOpen }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
@@ -202,7 +222,32 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
     // T4.4: a session opened by a link reads like a sidebar pick: the drawer and the previous
     // session's popover close, so the session is on screen and Back leaves the app.
-    LaunchedEffect(vm) { vm.openRequests.collect { shell.onSessionSelected() } }
+    LaunchedEffect(vm) {
+        vm.openRequests.collect {
+            overviewOpen = false
+            shell.onSessionSelected()
+        }
+    }
+    // T15.2: any new selection (a create, a resume, a link) shows that session, not the Overview.
+    LaunchedEffect(vm) { vm.selectedSessionId.drop(1).collect { if (it != null) overviewOpen = false } }
+    // T15.2 (dashboard.tsx:1392-1443 reviewRequest): the hand-off lands in the session; once a
+    // snapshot on this connection has confirmed it, a request no longer pending is said so. A
+    // session that never confirms within the bound says it could not be found. Nothing is answered.
+    reviewTarget?.let { target ->
+        LaunchedEffect(target) {
+            val (sessionId, requestId) = target
+            val confirmed = kotlinx.coroutines.withTimeoutOrNull(com.tether.app.ui.overview.OverviewPresentation.REVIEW_WAIT_MS) {
+                vm.client.liveSessions.first { sessionId in it }
+            }
+            val pending = if (confirmed == null) null else com.tether.app.ui.overview.OverviewPresentation.reviewStillPending(vm.client.projectionTrees.value[sessionId], requestId)
+            when (pending) {
+                null -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_NOT_FOUND)
+                false -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_RESOLVED)
+                true -> Unit
+            }
+            reviewTarget = null
+        }
+    }
 
     // issue #189: a remembered session whose snapshot has not arrived yet reads as "reopening",
     // never as the welcome stage.
@@ -261,10 +306,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         selectedId = selectedId,
                         workspaceRoot = workspaceRoot,
                         onSelect = { id ->
+                            overviewOpen = false
                             vm.selectSession(id)
                             shell.onSessionSelected()
                         },
                         onClose = shell::closeDrawer,
+                        onOpenOverview = {
+                            overviewOpen = true
+                            shell.closeDrawer()
+                        },
+                        selectedOnScreen = !overviewOpen,
                     )
                 },
                 chat = {
@@ -288,11 +339,48 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 statusline = { expanded ->
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
+                overview = if (!overviewOpen) {
+                    null
+                } else {
+                    {
+                        // Read-only: every action hands off to an existing handler the operator taps.
+                        // Opening or reviewing SELECTS the session (attach, draft) and never marks it seen
+                        // here; the session view's own rule applies once it is on screen.
+                        val openFromOverview: (String) -> Unit = { id ->
+                            overviewOpen = false
+                            vm.selectSession(id)
+                            shell.onSessionSelected()
+                        }
+                        com.tether.app.ui.overview.OverviewHost(
+                            client = vm.client,
+                            choice = overviewChoice,
+                            onChoice = { overviewChoice = it },
+                            actions = com.tether.app.ui.overview.OverviewActions(
+                                onOpenSession = openFromOverview,
+                                onReviewRequest = { id, requestId ->
+                                    reviewTarget = id to requestId
+                                    openFromOverview(id)
+                                },
+                                onNewSession = { showProviderPicker = true },
+                                onOpenEventLog = {
+                                    vm.openLog()
+                                    showLog = true
+                                    refreshStats()
+                                },
+                            ),
+                            // T15.3: the Host & usage tile goes here.
+                            hostUsage = null,
+                        )
+                    }
+                },
             )
         // T6.7 r2: when the toast goes away, every armed key re-arms (a tap aimed at the toast as it
         // vanished never lands on the key that was under it).
         var toastBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
         val armEpoch = rememberToastArmEpoch(toast != null, toastBounds)
+        // T15.2: Back leaves the Overview for the session (or empty stage) behind it; the shell's own
+        // surfaces (drawer, popover, sheet) register later and so close first.
+        androidx.activity.compose.BackHandler(enabled = overviewOpen) { overviewOpen = false }
         CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
