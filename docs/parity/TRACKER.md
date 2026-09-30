@@ -37,9 +37,9 @@ End session / per-row selection (`b65fb48`; 7 rows).
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
 **Drafts (unpublished, same cert as 0.6.0 `4f8c22de...b74d`):** 0.7.4 (code 21), 0.7.5 (code 22), **0.7.6 (code 23, `c22e8ca`,
-+T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. **0.7.8 (code 25, `07ba88f`, +ta-96z +T6.5 +ta-blf +T7.3)** built and checked - same cert, versionCode 25. v0.7.3 is the published build. Publishing is the owner's call.
++T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. **0.7.8 (code 25, `07ba88f`, +ta-96z +T6.5 +ta-blf +T7.3)** built and checked - same cert, versionCode 25. **v0.7.8 PUBLISHED by the owner 2026-09-30** (earlier drafts 0.7.4-0.7.7 superseded). Publishing is the owner's call.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
-**Owner queue:** deploy tether #224 (later); publish a draft if wanted; review/redact the private tether issues and PRs before the visibility flip (owner handles it).
+**Owner queue:** deploy tether #224 (later today); review/redact the private tether issues and PRs before the visibility flip (owner handles it).
 **Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
 ta-nrq (Firebase-free push alongside BYO-Firebase) and ta-31i (gateway-agnostic sign-in); ta-96z (accept the `__Host-` cookie name),
 ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9.
@@ -339,3 +339,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | ta-blf | Transcript text spoofing fix merged ff-only, VERIFIED after 5 rounds: risky characters drawn as visible tokens (code: every bidi/invisible char; prose: all explicit bidi formatting chars, marks only beside real RTL letters, ALM only beside Arabic); copy carries the visible form with a notice and an explicit Copy raw; shared rules moved to core/designsystem. Follow-ups ta-28i (other surfaces), ta-fz3 (links). | T7.3 r3 (terminal rule) |
 | 2026-09-30 | claude-main / Opus 5.5 | T7.3 | T7.3 slash commands / `!` run + background commands / command output / @mentions merged ff-only `07ba88f`, VERIFIED (+8 rows). 3 rounds: command output shown through the shared terminal rule (nothing hidden), delegated sends origin- and lock-bound, durable mentions origin-keyed. Follow-ups ta-4dm, ta-10h. No agents running. | 0.7.8 draft; ta-28i, ta-fz3, T7.4 |
 | 2026-09-30 | claude-main / Opus 5.5 (new coordinator session) | ta-28i, ta-fz3 | Took over from disk (0.7.8 draft already checked: code 25, same cert). Dispatched two makers in parallel worktrees: ta-28i (text rules on the remaining surfaces, file preview first) and ta-fz3 (link safety). | verifier + security review for each |
+| 2026-09-30 | claude-main / Opus 5.5 | catch-up | Owner published v0.7.8. Owner reports gaps (screenshots not visible, telemetry thin, no Overview page); the web is 729 commits past PARITY_BASE `7d65611` (v128 -> 133), so a PLAN §9 Catch-up delta analysis was started (read-only). | new matrix rows + tasks from the delta |
