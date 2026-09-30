@@ -448,6 +448,25 @@ interface TetherClient {
     /** `worktree-diff`: ask for the session's diff summary (the host panel is T8.3's). False when not sent. */
     fun requestWorktreeDiff(sessionId: String): Boolean = false
 
+    /**
+     * T9.1 (use-tether.ts:918-921): the latest `worktree-scripts` snapshot per session (raw
+     * `WorktreeScriptsSnapshot`, keyed by its own `sessionId`). Also arrives UNSOLICITED (a service
+     * exits, a setup hook finishes). Emptied with the other server views.
+     */
+    val worktreeScripts: StateFlow<Map<String, kotlinx.serialization.json.JsonObject>> get() = NO_WORKTREE_SCRIPTS
+
+    /**
+     * T9.1 (use-tether.ts:940-941): the latest `change-request` reply per session. [ChangeRequestReading.unknown]
+     * marks a failed lookup, distinct from "no pull request" (a null state).
+     */
+    val changeRequests: StateFlow<Map<String, ChangeRequestReading>> get() = NO_CHANGE_REQUESTS
+
+    /** `worktree-scripts` (use-tether.ts:1496): ask for the session's scripts snapshot. False when not sent. */
+    fun requestWorktreeScripts(sessionId: String): Boolean = false
+
+    /** `change-request` (use-tether.ts:1508), a read; [refresh] asks the server to look again. False when not sent. */
+    fun requestChangeRequest(sessionId: String, refresh: Boolean = false): Boolean = false
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------
@@ -602,6 +621,11 @@ private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList(
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())
+private val NO_WORKTREE_SCRIPTS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject>> = MutableStateFlow(emptyMap())
+private val NO_CHANGE_REQUESTS: StateFlow<Map<String, ChangeRequestReading>> = MutableStateFlow(emptyMap())
+
+/** One `change-request` reply: the raw `ChangeRequestState | null`, and whether the lookup failed. */
+data class ChangeRequestReading(val changeRequest: kotlinx.serialization.json.JsonObject?, val unknown: Boolean)
 
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState

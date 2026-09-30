@@ -405,6 +405,9 @@ class RealTetherClient(
     // T6.2: per-file git hunks (git-diff-file) and diff summaries (worktree-diff), per session.
     private val gitFileDiffsState = MutableStateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>>(emptyMap())
     private val worktreeDiffsState = MutableStateFlow<Map<String, JsonObject?>>(emptyMap())
+    // T9.1: worktree-scripts snapshots and change-request replies, per session (the inspector reads both).
+    private val worktreeScriptsState = MutableStateFlow<Map<String, JsonObject>>(emptyMap())
+    private val changeRequestsState = MutableStateFlow<Map<String, ChangeRequestReading>>(emptyMap())
     // L5: the (sessionId, path) pairs this client asked for; a git-diff-file reply for anything
     // else is dropped (a server cannot fill the card with hunks nobody requested).
     private val requestedGitFileDiffs = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
@@ -443,6 +446,8 @@ class RealTetherClient(
     override val opencodeControls: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = opencodeControlsState
     override val gitFileDiffs: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = gitFileDiffsState
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
+    override val worktreeScripts: StateFlow<Map<String, JsonObject>> = worktreeScriptsState
+    override val changeRequests: StateFlow<Map<String, ChangeRequestReading>> = changeRequestsState
     override val errors: SharedFlow<String> = errorsFlow
     override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
 
@@ -924,6 +929,8 @@ class RealTetherClient(
         sessionControlsState.value = emptyMap()
         gitFileDiffsState.value = emptyMap()
         worktreeDiffsState.value = emptyMap()
+        worktreeScriptsState.value = emptyMap()
+        changeRequestsState.value = emptyMap()
         failedInterruptsState.value = emptyMap()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
@@ -2333,6 +2340,14 @@ class RealTetherClient(
                     gitFileDiffsState.value = gitFileDiffsState.value + (message.sessionId to emptyMap())
                 }
             }
+            // T9.1: use-tether.ts:918-921 (keyed by the snapshot's own sessionId) and 940-941.
+            is ServerMessage.WorktreeScripts -> ifCurrent(webSocket) {
+                val id = (message.snapshot["sessionId"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+                if (!id.isNullOrEmpty()) worktreeScriptsState.value = worktreeScriptsState.value + (id to message.snapshot)
+            }
+            is ServerMessage.ChangeRequest -> ifCurrent(webSocket) {
+                changeRequestsState.value = changeRequestsState.value + (message.sessionId to ChangeRequestReading(message.changeRequest, message.unknown))
+            }
             is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
                 if (!requestedGitFileDiffs.remove(message.sessionId to message.path)) return@ifCurrent
                 val current = gitFileDiffsState.value
@@ -3394,6 +3409,12 @@ class RealTetherClient(
 
     override fun requestWorktreeDiff(sessionId: String): Boolean =
         sendFrame(ClientMessage.WorktreeDiffRequest(sessionId))
+
+    override fun requestWorktreeScripts(sessionId: String): Boolean =
+        sendFrame(ClientMessage.WorktreeScriptsRequest(sessionId))
+
+    override fun requestChangeRequest(sessionId: String, refresh: Boolean): Boolean =
+        sendFrame(ClientMessage.ChangeRequestFetch(sessionId, refresh.takeIf { it }))
 
     override fun requestSessionControls(sessionId: String) {
         sendFrame(ClientMessage.SessionControlsRequest(sessionId))

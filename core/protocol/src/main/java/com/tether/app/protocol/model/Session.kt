@@ -1,6 +1,9 @@
 package com.tether.app.protocol.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Wire shape of an AgentSession row (server publicSession()). */
 @Serializable
@@ -53,6 +56,8 @@ data class AgentSession(
     val approvalPolicy: String? = null,
     /** v101 (T6.6): Claude / Codex "auto-continue when the limit resets" (set-auto-continue-on-limit). */
     val autoContinueOnLimit: Boolean = false,
+    /** v74 (T9.1, lib/protocol.ts AgentSession): the generic `acp` engine's agent id; absent for other providers. */
+    val acpAgentId: String? = null,
 )
 
 /** TS `AgentSession.collaborationMode`: `{ mode, settings: { model, reasoning_effort } }`. */
@@ -74,7 +79,26 @@ data class WorktreeInfo(
     val branch: String,
     val status: String,
     val notice: String? = null,
-)
+    // T9.1: the v98 fields the inspector's Runtime details read (lib/protocol.ts SessionWorktree).
+    // All absent on a pre-v98 manifest (the legacy `tether/<id>` layout).
+    val slug: String? = null,
+    /** "branch-off" | "checkout-branch" | "checkout-pr" (open: an unknown mode reads as branch-off). */
+    val mode: String? = null,
+    val baseRef: String? = null,
+    val baseCommit: String? = null,
+    val prNumber: Long? = null,
+    /** "none" | "pending" | "running" | "ok" | "failed". */
+    val setupStatus: String? = null,
+    /**
+     * Bounded prose from the project-config parser, raw: a `string[]` on the wire, kept as the
+     * element so a malformed list never drops the session row (read it with [configWarningList]).
+     */
+    val configWarnings: JsonElement? = null,
+) {
+    /** [configWarnings]' string elements, in order (anything else is skipped). */
+    val configWarningList: List<String>
+        get() = (configWarnings as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.orEmpty()
+}
 
 @Serializable
 data class SessionMetrics(
@@ -92,6 +116,22 @@ data class SessionMetrics(
     val gitBranch: String? = null,
     val gitAhead: Int? = null,
     val gitBehind: Int? = null,
+    // T9.1: the SessionMetrics fields the inspector reads (lib/protocol.ts SessionMetrics, all <= v126).
+    /** Cache read / miss partition the provider-cumulative input tokens (not additive to [totalTokens]). */
+    val cacheReadInputTokens: Long? = null,
+    val cacheMissInputTokens: Long? = null,
+    /** Issue #164: set when the context reading came from the transcript tail (its wall-clock ms), never live. */
+    val contextSnapshotAt: Long? = null,
+    /** v92: the Claude identity this session talks to (Claude only; absent until resolved). */
+    val accountEmail: String? = null,
+    val accountOrganization: String? = null,
+    /**
+     * v90: `CodexResetCreditsSummary` (Codex only), raw so a malformed summary never drops the row.
+     * Present-but-empty (`availableCount: 0`) differs from absent (never checked).
+     */
+    val codexResetCredits: JsonElement? = null,
+    /** v126: `ClaudeResetGrantsSummary` (Claude only; a cache the Usage page fills), raw like [codexResetCredits]. */
+    val claudeResetGrants: JsonElement? = null,
 )
 
 @Serializable
