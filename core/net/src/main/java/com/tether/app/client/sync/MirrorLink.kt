@@ -4,8 +4,8 @@ import com.tether.app.mirror.HydratedSession
 import com.tether.app.mirror.JournalMirror
 import com.tether.app.mirror.SessionRowInput
 import com.tether.app.protocol.AgentEvent
-import com.tether.app.protocol.PROTOCOL_VERSION
 import com.tether.app.protocol.ServerMessage
+import com.tether.app.protocol.TARGET_PROTOCOL_VERSION
 import com.tether.app.protocol.TetherJson
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.AgentSession
@@ -17,12 +17,17 @@ import kotlinx.coroutines.CompletableDeferred
 
 /**
  * The reducer the mirror's LOCAL bases depend on (SYNC_DESIGN §2.4): the vendored reducer
- * corpus (its manifest `tetherSha`) plus this app's PROTOCOL_VERSION. A new APK with another
- * reducer port changes it, which clears the cursors of local checkpoints. MirrorVersionTest
- * pins the SHA to `parity-corpus/corpus-manifest.json`, so a corpus re-sync must bump it.
+ * corpus (its manifest `tetherSha`) plus the protocol the port models (TARGET_PROTOCOL_VERSION).
+ * A new APK with another reducer port changes it, which clears the cursors of local checkpoints.
+ * MirrorVersionTest pins the SHA to `parity-corpus/corpus-manifest.json`, so a corpus re-sync
+ * must bump it.
+ *
+ * ta-ylh: keyed on TARGET, not the advertised PROTOCOL_VERSION (held at 132 for the owner gate):
+ * the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
+ * port must not be reused, although the corpus (still 79c3d37, re-sync is T15.8) did not move.
  */
 const val REDUCER_CORPUS_SHA = "79c3d377d2f1e650286092b3387392c15512a843"
-val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$PROTOCOL_VERSION"
+val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$TARGET_PROTOCOL_VERSION"
 
 /**
  * T13.1: what the client's frame handlers hand the mirror (SYNC_DESIGN §2.3), as mirror

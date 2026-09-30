@@ -205,7 +205,7 @@ class WireConformanceTest {
 
     /** Hand-built frames for encoder paths the corpus examples do not exercise. */
     private fun extraClientFrames(): List<ClientMessage> = listOf(
-        ClientMessage.Hello(TARGET_PROTOCOL_VERSION, HELLO_CLIENT_ANDROID),
+        ClientMessage.Hello(PROTOCOL_VERSION, HELLO_CLIENT_ANDROID),
         ClientMessage.Create(provider = "codex", approvalPolicy = OrNull("never"), approvalsReviewer = OrNull(null)),
         ClientMessage.Create(provider = "codex", worktree = WorktreeCreateRequest(mode = "checkout-pr", prNumber = 12)),
         ClientMessage.Send("s1", "hi", "k1"),

@@ -12,27 +12,38 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * The protocol the wire TYPES in this module model: tether lib/protocol.ts
- * PROTOCOL_VERSION at 79c3d37 (v132; ta-koy moved it from v129). Every
+ * PROTOCOL_VERSION v135 (ta-ylh; ta-koy moved it 129 -> 132). Every
  * ClientMessage/ServerMessage of that union has a Kotlin type; see
- * WireConformanceTest. Since T1.2 this is also what the runtime speaks
- * ([PROTOCOL_VERSION]). v130-v132 are all additive and not native-breaking:
+ * WireConformanceTest. v130-v135 are all additive and not native-breaking:
  * AgentSession.lastSeq and SessionProjection.removedQueueIds (v130), the opt-in
- * Overview feed frames and pending-request `createdAt` (v131), and
- * OverviewActivity.workspace (v132).
+ * Overview feed frames and pending-request `createdAt` (v131),
+ * OverviewActivity.workspace (v132), queued-message `origin` / `noticeKind`
+ * (v133), WorktreeScript `proxyUnavailable` and the nullable proxy links (v134),
+ * AgentSession.createdVia and ready.hiddenAgentSessionCount (v135).
+ *
+ * NOT what the app advertises: see [PROTOCOL_VERSION].
  */
-const val TARGET_PROTOCOL_VERSION: Int = 132
+const val TARGET_PROTOCOL_VERSION: Int = 135
 
 /**
  * The protocol version the RUNTIME speaks: the `hello` this app sends. The
  * server serves it anywhere inside its native window
  * `nativeProtocolFloor <= v <= server PROTOCOL_VERSION` (S1.1 / D5); see
  * :core:net Compatibility for the client side of that decision.
+ *
+ * ta-ylh: held at 132, below [TARGET_PROTOCOL_VERSION], ON PURPOSE. A server
+ * refuses a native hello NEWER than its own PROTOCOL_VERSION (server_too_old),
+ * and the deployed server was last known at 133, so advertising 135 would lock
+ * the app out until the owner deploys. Nothing on the server is gated on the
+ * client's advertised version (the v133-v135 fields reach every client), so the
+ * app decodes them tolerantly while it still says 132. Raising this is an OWNER
+ * GATE: only once the deployed server is at >= the new value.
  */
-const val PROTOCOL_VERSION: Int = TARGET_PROTOCOL_VERSION
+const val PROTOCOL_VERSION: Int = 132
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be
- * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v132). The
+ * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v135). The
  * server advertises its own value in `ready.nativeProtocolFloor` and `/healthz`;
  * this constant is documentation only — the runtime always trusts the server's.
  */

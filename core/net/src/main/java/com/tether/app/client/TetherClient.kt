@@ -37,6 +37,13 @@ interface TetherClient {
     val workspaceRoot: StateFlow<String?>
 
     /**
+     * v135 (issue #227 part 2): `ready.hiddenAgentSessionCount` — how many agent-created /
+     * derived sessions the server kept out of [sessions]. Display only; null until a ready
+     * carries it (a pre-v135 server never does) and cleared with the server's other views.
+     */
+    val hiddenAgentSessionCount: StateFlow<Int?> get() = NO_HIDDEN_AGENT_SESSION_COUNT
+
+    /**
      * Folded projections for every attached session, keyed by tetherSessionId: the legacy
      * typed view, adapted (memoized per turn/block) from [projectionTrees].
      */
@@ -642,6 +649,7 @@ private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = 
 private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableStateFlow(emptyMap())
 private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
 private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
+private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(null)
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)

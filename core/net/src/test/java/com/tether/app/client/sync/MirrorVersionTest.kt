@@ -1,6 +1,6 @@
 package com.tether.app.client.sync
 
-import com.tether.app.protocol.PROTOCOL_VERSION
+import com.tether.app.protocol.TARGET_PROTOCOL_VERSION
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -12,6 +12,8 @@ class MirrorVersionTest {
         val manifest = File(System.getProperty("parity.corpus"), "corpus-manifest.json").readText()
         val sha = Regex("\"tetherSha\"\\s*:\\s*\"([0-9a-f]+)\"").find(manifest)!!.groupValues[1]
         assertEquals("re-synced corpus: bump REDUCER_CORPUS_SHA (it invalidates local checkpoints)", sha, REDUCER_CORPUS_SHA)
-        assertEquals("$sha/v$PROTOCOL_VERSION", REDUCER_VERSION)
+        assertEquals("$sha/v$TARGET_PROTOCOL_VERSION", REDUCER_VERSION)
+        // ta-ylh: the v135 port (queue origin/noticeKind folded) over the 79c3d37 corpus.
+        assertEquals("79c3d377d2f1e650286092b3387392c15512a843/v135", REDUCER_VERSION)
     }
 }

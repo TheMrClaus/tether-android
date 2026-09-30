@@ -50,6 +50,9 @@ sealed interface ServerMessage {
      * [nativeProtocolFloor] is v129 (required in TS, but absent from a v128
      * server, hence nullable). [workspaceRoot] is TS `string`; a null / wrongly
      * typed value degrades to null rather than dropping the whole handshake.
+     * [hiddenAgentSessionCount] is v135 (issue #227 part 2): how many agent-created / derived
+     * sessions the server kept out of [sessions]. Display only ("N agent sessions are not on
+     * your list"); null when absent (a pre-v135 server) or not a non-negative number.
      */
     data class Ready(
         val protocolVersion: Int,
@@ -57,6 +60,7 @@ sealed interface ServerMessage {
         val providers: List<ProviderInfo>,
         val workspaceRoot: String?,
         val nativeProtocolFloor: Int? = null,
+        val hiddenAgentSessionCount: Int? = null,
     ) : ServerMessage
 
     data class Pong(val nonce: String?) : ServerMessage
@@ -697,6 +701,7 @@ private object ServerDecoders {
                 providers = r.list("providers", ProviderInfo.serializer()),
                 workspaceRoot = r.o.str("workspaceRoot"),
                 nativeProtocolFloor = r.o.long("nativeProtocolFloor")?.toInt(),
+                hiddenAgentSessionCount = r.o.nonNegLong("hiddenAgentSessionCount")?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
             )
         },
         "pong" to { r -> ServerMessage.Pong(r.o.str("nonce")) },

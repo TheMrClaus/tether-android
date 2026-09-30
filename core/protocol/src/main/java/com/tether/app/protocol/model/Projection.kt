@@ -2,6 +2,7 @@ package com.tether.app.protocol.model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Kotlin port of Tether's SessionProjection (see specs/reducer-spec.md and
@@ -255,8 +256,45 @@ data class SessionNotice(
  * delivered at the agent's next safe tool boundary; absent for the default end-of-turn flush.
  */
 @Serializable
-data class QueuedMessage(val queueId: String, val text: String, val flushMode: String? = null) {
+data class QueuedMessage(
+    val queueId: String,
+    val text: String,
+    val flushMode: String? = null,
+    /**
+     * v133 (issue #211): "user" (the operator's draft) | "system" (an automated Tether notice).
+     * Absent on a pre-v133 journal entry, which replays as the operator's. Raw, like
+     * [noticeKind], so a malformed value never drops the queue; read [originKind].
+     */
+    val origin: JsonElement? = null,
+    /** v133: a system notice's kind — "spawn" | "command" | "continuation". Read [noticeKindValue]. */
+    val noticeKind: JsonElement? = null,
+) {
     val atToolBoundary: Boolean get() = flushMode == "next-call"
+
+    /** Port of lib/queued-message.mjs queuedMessageOrigin: absent = "user", unknown = null. */
+    val originKind: String?
+        get() = QueuedOrigin.of((origin as? JsonPrimitive)?.takeIf { it.isString }?.content, absent = origin == null)
+
+    /** True for the operator's own queued message (what the web composer lists). */
+    val isOperatorMessage: Boolean get() = originKind == QueuedOrigin.USER
+
+    /** [noticeKind] when it is a JSON string (an unknown kind is kept as-is), else null. */
+    val noticeKindValue: String? get() = (noticeKind as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
+
+/** v133 (issue #211): lib/queued-message.mjs, the queued-message provenance vocabulary. */
+object QueuedOrigin {
+    const val USER = "user"
+    const val SYSTEM = "system"
+    val ORIGINS: Set<String> = setOf(USER, SYSTEM)
+    val NOTICE_KINDS: Set<String> = setOf("spawn", "command", "continuation")
+
+    /**
+     * queuedMessageOrigin: [absent] (JS undefined) -> "user"; a known string -> itself; anything
+     * else (an unknown string, [text] null for a non-string value) -> null.
+     */
+    internal fun of(text: String?, absent: Boolean): String? =
+        if (absent) USER else text?.takeIf { it in ORIGINS }
 }
 
 @Serializable

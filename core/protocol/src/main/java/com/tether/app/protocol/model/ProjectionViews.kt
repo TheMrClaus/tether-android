@@ -137,6 +137,15 @@ value class QuestionView(val obj: JsObj) {
 value class QueuedMessageView(val obj: JsObj) {
     val queueId: String? get() = obj.string("queueId")
     val text: String? get() = obj.string("text")
+
+    /** v133: [QueuedMessage.originKind] — absent = "user", unknown / non-string = null. */
+    val origin: String? get() = QueuedOrigin.of(obj.string("origin"), absent = !obj.containsKey("origin"))
+
+    /** v133: the operator's own queued message (lib/queued-message.mjs operatorQueuedMessages). */
+    val isOperatorMessage: Boolean get() = origin == QueuedOrigin.USER
+
+    /** v133: a system notice's kind ("spawn" | "command" | "continuation"; unknown kept as-is). */
+    val noticeKind: String? get() = obj.string("noticeKind")
 }
 
 private fun JsObj.string(key: String): String? = (this[key] as? JsStr)?.value

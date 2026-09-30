@@ -74,6 +74,22 @@ class ConnectionPolicyTest {
         assertNull(Compatibility.evaluate(132, 129, clientVersion = 129))
     }
 
+    /**
+     * ta-ylh OWNER GATE: the app decodes v133-v135 but still ADVERTISES 132, so every server from
+     * the last known deployment (133) through tether main (135, floor 129) serves it. Had it
+     * advertised 135, a 133 or 134 server would refuse it (server_too_old) until the owner
+     * deploys — which is why raising PROTOCOL_VERSION waits for the owner's deploy.
+     */
+    @Test
+    fun helloCompatWindowAt132CoversServers133To135() {
+        assertEquals(132, PROTOCOL_VERSION)
+        for (server in 133..135) assertNull("server $server", Compatibility.evaluate(server, 129))
+        for (server in 133..134) {
+            assertEquals("server $server", IncompatibleReason.ServerTooOld, Compatibility.evaluate(server, 129, clientVersion = 135)!!.reason)
+        }
+        assertNull(Compatibility.evaluate(135, 129, clientVersion = 135))
+    }
+
     @Test
     fun windowNamesTheSideThatIsBehind() {
         assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(134, 133)!!.reason)

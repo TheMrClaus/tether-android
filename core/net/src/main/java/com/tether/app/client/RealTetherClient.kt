@@ -391,6 +391,7 @@ class RealTetherClient(
     /** T7.3: the `providers-snapshot` catalog of the current server (the `@` Agents). */
     private val providerCatalogState = MutableStateFlow<List<ProviderCatalogEntry>>(emptyList())
     private val workspaceRootState = MutableStateFlow<String?>(null)
+    private val hiddenAgentSessionCountState = MutableStateFlow<Int?>(null)
 
     // T2.1D: the v128 trees are the source of truth; the typed projections are adapted from
     // them by one memoized adapter per session. T13.1 (c): owned by [sessionStore] (SYNC_DESIGN §2.6
@@ -437,6 +438,7 @@ class RealTetherClient(
     override val providers: StateFlow<List<ProviderInfo>> = providersState
     override val providerCatalog: StateFlow<List<ProviderCatalogEntry>> = providerCatalogState
     override val workspaceRoot: StateFlow<String?> = workspaceRootState
+    override val hiddenAgentSessionCount: StateFlow<Int?> = hiddenAgentSessionCountState
     override val projections: StateFlow<Map<String, SessionProjection>> = sessionStore.projections
     override val projectionTrees: StateFlow<Map<String, JsObj>> = sessionStore.trees
     override val histories: StateFlow<List<HistorySession>> = historiesState
@@ -928,6 +930,7 @@ class RealTetherClient(
         providersState.value = emptyList()
         providerCatalogState.value = emptyList()
         workspaceRootState.value = null
+        hiddenAgentSessionCountState.value = null
         synchronized(lock) { sessionStore.clearViews() }
         historiesState.value = emptyList()
         directoriesState.value = null
@@ -2400,6 +2403,7 @@ class RealTetherClient(
             mirrorOriginLocked()?.let { mirrorLink?.sessions(it, message.sessions, full = true) }
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
+            hiddenAgentSessionCountState.value = message.hiddenAgentSessionCount
             handshakeDone = true
             consentOriginState.value = socketOrigin
             publishConsentLocked()

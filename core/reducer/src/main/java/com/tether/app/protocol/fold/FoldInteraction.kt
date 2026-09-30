@@ -189,13 +189,16 @@ private fun foldQuestionAnswered(state: JsObj, event: JsObj): JsObj {
 private fun hasQueueId(state: JsObj, queueId: JsValue?): Boolean =
     state["queuedMessages"].arr!!.any { strictEquals(it.obj?.get("queueId"), queueId) }
 
-// events.mjs:2863
+// events.mjs:2887 (v135). v133 (issue #211): `origin` / `noticeKind` are copied verbatim when
+// truthy, exactly like `flushMode` — the fold does not validate them (readers normalize).
 private fun foldQueuedAdded(state: JsObj, event: JsObj): JsObj {
     if (hasQueueId(state, event["queueId"])) return state
     val message = JsObj.of(
         "queueId" to event["queueId"],
         "text" to event["text"],
         "flushMode" to (if (truthy(event["flushMode"])) event["flushMode"] else null),
+        "origin" to (if (truthy(event["origin"])) event["origin"] else null),
+        "noticeKind" to (if (truthy(event["noticeKind"])) event["noticeKind"] else null),
     )
     return state.put("queuedMessages", state["queuedMessages"].arr!!.add(message))
 }

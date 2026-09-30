@@ -58,7 +58,18 @@ data class AgentSession(
     val autoContinueOnLimit: Boolean = false,
     /** v74 (T9.1, lib/protocol.ts AgentSession): the generic `acp` engine's agent id; absent for other providers. */
     val acpAgentId: String? = null,
-)
+    /**
+     * v135 (issue #227 part 2): how this session came to exist — "console" | "api-requested" |
+     * "api-agent" | "delegate" | "handoff" | "adopted", null on a manifest predating the field.
+     * DISPLAY METADATA ONLY: nothing may branch an approval, consent, scope or lease on it. Raw so
+     * a malformed stamp never drops the session row; read it with [createdViaStamp].
+     */
+    val createdVia: JsonElement? = null,
+) {
+    /** [createdVia] when it is a JSON string (an unknown future stamp is kept as-is), else null. */
+    val createdViaStamp: String?
+        get() = (createdVia as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
 
 /** TS `AgentSession.collaborationMode`: `{ mode, settings: { model, reasoning_effort } }`. */
 @Serializable
