@@ -31,7 +31,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import com.tether.app.ui.text.codeLabel
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -123,8 +125,9 @@ internal fun FolderPickerDialog(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(TetherIcons.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+            // ta-28i: folder names and paths from the server are code (every control a token), LTR.
             Text(
-                pickerCurrent ?: "—",
+                pickerCurrent?.let { codeLabel(it) } ?: AnnotatedString("—"),
                 color = t.muted,
                 fontFamily = JetBrainsMono,
                 fontSize = 11.2.sp,
@@ -416,7 +419,7 @@ internal fun FolderRow(
         icon()
         Column(Modifier.weight(1f)) {
             Text(
-                name,
+                codeLabel(name),
                 color = t.ink,
                 fontFamily = Manrope,
                 fontWeight = TetherWeights.name,
@@ -425,7 +428,7 @@ internal fun FolderRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                detail,
+                codeLabel(detail),
                 color = t.faint,
                 fontFamily = JetBrainsMono,
                 fontSize = 10.4.sp,

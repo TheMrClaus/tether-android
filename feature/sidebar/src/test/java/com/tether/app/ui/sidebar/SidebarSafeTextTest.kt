@@ -99,4 +99,17 @@ class SidebarSafeTextTest {
         assertTrue("folder in $shown", shown.any { it.contains("ev${tok(0x202E)}il") })
         for (s in shown) assertFalse("raw RLO in \"$s\"", s.contains(RLO))
     }
+
+    @Test fun theFolderPickersRowsAreCode() {
+        rule.setContent {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+                com.tether.app.ui.FolderRow(icon = {}, name = "re${RLO}po", detail = "${F.ROOT}/re${RLO}po", onClick = {})
+            }
+        }
+        rule.waitForIdle()
+        val shown = spoken()
+        assertTrue(shown.toString(), shown.contains("re${tok(0x202E)}po"))
+        assertTrue(shown.toString(), shown.contains("${F.ROOT}/re${tok(0x202E)}po"))
+        for (s in shown) assertFalse("raw RLO in \"$s\"", s.contains(RLO))
+    }
 }
