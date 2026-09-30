@@ -47,6 +47,8 @@ dependencies {
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(composeBom)
     testImplementation(libs.robolectric)
+    // T6.8: the wire-to-screen media test drives the real HttpToolMedia against a replayed server.
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.compose.ui.test.manifest)
