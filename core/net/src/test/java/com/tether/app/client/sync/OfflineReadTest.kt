@@ -74,7 +74,9 @@ class OfflineReadTest {
         val tree = h.await(h.client.projectionTrees) { it.containsKey("s1") }.getValue("s1")
         assertEquals(before, JsCodec.canonical(tree))
         assertTrue(JsCodec.canonical(tree).contains("saved text"))
-        assertTrue(h.client.projections.value.containsKey("s1"))
+        // ta-x9c: SessionStore.publish sets the tree, then its typed view (two flows), so the typed
+        // view is awaited too: read right after the tree, it could still be the previous map.
+        assertTrue(h.await(h.client.projections) { it.containsKey("s1") }.containsKey("s1"))
         val after = h.client.syncStates.value.getValue("s1")
         assertEquals(Freshness.Saved, after.freshness)
         assertEquals(t1, after.lastVerifiedAt)
