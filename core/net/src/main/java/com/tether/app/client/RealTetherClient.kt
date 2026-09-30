@@ -1484,8 +1484,14 @@ class RealTetherClient(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 persistMutex.withLock {
-                    settings.clear()
-                    synchronized(lock) { if (wipe > wipeLanded) wipeLanded = wipe }
+                    // ta-8lg: never fatal (this runs on the app scope: an escape is a crash). The
+                    // store retries its own delete and falls back to a tombstone; one more attempt
+                    // here covers a store that threw before getting that far (as logoutNow() does),
+                    // since a clear that never lands lets the next process sign back in. Only a
+                    // clear that returned is a landed wipe: until then the disk slots stay dead.
+                    if (clearSettingsQuietly() || clearSettingsQuietly()) {
+                        synchronized(lock) { if (wipe > wipeLanded) wipeLanded = wipe }
+                    }
                 }
             } finally {
                 // ta-jt9 L-B1 / L-1: a start() that began after the first bump may have read the
@@ -1493,6 +1499,16 @@ class RealTetherClient(
                 signOutClearDone()
             }
         }
+    }
+
+    /** stop()'s store clear: true = it landed. A failure is reported only by the result. */
+    private suspend fun clearSettingsQuietly(): Boolean = try {
+        settings.clear()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        false
     }
 
     /**
