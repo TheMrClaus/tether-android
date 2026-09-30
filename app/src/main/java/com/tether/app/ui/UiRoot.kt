@@ -32,6 +32,9 @@ import com.tether.app.nav.NavEffect
 import com.tether.app.nav.NavigationViewModel
 import com.tether.app.nav.SessionLinkOpener
 import com.tether.app.ui.chat.CustomTabLinkOpener
+import com.tether.app.ui.chat.ExternalLinkConfirmHost
+import com.tether.app.ui.chat.ExternalLinkGate
+import com.tether.app.ui.chat.LocalExternalLinkGate
 import com.tether.app.ui.chat.LocalLinkOpener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -75,6 +78,7 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
 
     val configured by client.configured.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
+    val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
 
     // T4.4: every link (the tether:// filter, an http(s) link to the paired server, a
     // notification tap, a session link in a chat) goes through one navigator. A
@@ -245,8 +249,12 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
                     )
                 } else {
-                    CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
+                    // ta-fz3: one link gate per signed-in server: a server switch or Lock (this branch
+                    // leaving) drops a pending link confirmation; the host drops it on pause and stop.
+                    val linkGate = remember(serverUrl) { ExternalLinkGate() }
+                    CompositionLocalProvider(LocalLinkOpener provides linkOpener, LocalExternalLinkGate provides linkGate) {
                         MainShell(vm = vm, prefs = prefs)
+                        ExternalLinkConfirmHost(linkGate)
                     }
                     if (inputGuard) NavInputGuard(Modifier.matchParentSize())
                 }

@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -198,7 +199,7 @@ internal const val COPIED_RESET_MS = 1500L
 /**
  * [nodes] as an AnnotatedString: `<strong>` = bolder, `<em>` = (synthesised) italic, `.md-code`
  * mono 0.85em with a NBSP pad each side (its background is painted by [MdText]), links violet +
- * underlined and opened through [onLink] (a Custom Tab, never a WebView).
+ * underlined and opened through [onLink] (ta-fz3: the link gate; a Custom Tab, never a WebView).
  * ta-blf r2: the nodes are ONE line, so one [ProsePlan] over all of them decides its isolates and
  * marks (a word split across emphasis or a link is still one line to the bidi algorithm).
  */
@@ -207,9 +208,27 @@ internal fun inlineAnnotated(
     t: TetherTokens,
     type: TetherTypography,
     baseWeight: Int,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     cursor: FindCursor? = null,
 ): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor, linePlan(nodes)) }
+
+/**
+ * ta-fz3: a link's label as it is drawn (its text and inline code, emphasis flattened), compared
+ * with the href to decide whether the link needs the confirm sheet.
+ */
+internal fun linkLabel(nodes: List<MdInline>): String = buildString {
+    fun walk(list: List<MdInline>) {
+        for (node in list) when (node) {
+            is MdInline.Text -> append(node.text)
+            is MdInline.Code -> append(node.text)
+            is MdInline.Link -> walk(node.children)
+            is MdInline.Span -> walk(node.children)
+            is MdInline.Strong -> walk(node.children)
+            is MdInline.Em -> walk(node.children)
+        }
+    }
+    walk(nodes)
+}
 
 /** The line's pieces in reading order (inline code drawn by the code rule), for its [ProsePlan]. */
 internal fun linePlan(nodes: List<MdInline>): ProsePlan {
@@ -233,7 +252,7 @@ private fun AnnotatedString.Builder.appendInline(
     t: TetherTokens,
     type: TetherTypography,
     weight: Int,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     cursor: FindCursor?,
     plan: ProsePlan,
 ) {
@@ -251,7 +270,7 @@ private fun AnnotatedString.Builder.appendInline(
                 LinkAnnotation.Clickable(
                     tag = node.href,
                     styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
-                    linkInteractionListener = { onLink(node.href) },
+                    linkInteractionListener = { onLink(node) },
                 ),
             ) { appendInline(node.children, t, type, weight, onLink, cursor, plan) }
             is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor, plan)
@@ -410,7 +429,21 @@ fun MarkdownBody(
     val density = LocalDensity.current
     val context = LocalContext.current
     val opener = LocalLinkOpener.current
-    val onLink: (String) -> Unit = remember(opener, context, t) { { href -> opener.open(context, href, t.graphite) } }
+    // ta-fz3: every tap goes through the gate: an external link whose label is not exactly its
+    // href opens only from the confirm sheet. Without a provided gate (a bare transcript) this body
+    // keeps its own, with its own sheet.
+    val providedGate = LocalExternalLinkGate.current
+    val gate = providedGate ?: remember { ExternalLinkGate() }
+    if (providedGate == null) ExternalLinkConfirmHost(gate)
+    // The drawn paragraphs are remembered without the handler in their keys, so the handler reads
+    // the CURRENT gate, opener and context: a gate replaced on a server switch is never called.
+    val currentGate by rememberUpdatedState(gate)
+    val currentOpener by rememberUpdatedState(opener)
+    val currentContext by rememberUpdatedState(context)
+    val currentToolbar by rememberUpdatedState(t.graphite)
+    val onLink: (MdInline.Link) -> Unit = remember {
+        { link -> currentGate.request(currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar) }
+    }
     fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
     val body = style.fontSize
     val baseWeight = style.fontWeight?.weight ?: 400
@@ -482,7 +515,7 @@ private fun MdParagraph(
     t: TetherTokens,
     type: TetherTypography,
     weight: Int,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     mark: BlockMarks? = null,
 ) {
     val text = remember(block, t, type, mark) {
@@ -512,7 +545,7 @@ private fun MdList(
     t: TetherTokens,
     type: TetherTypography,
     weight: Int,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     mark: BlockMarks? = null,
 ) {
     val density = LocalDensity.current
@@ -590,7 +623,7 @@ private fun MdQuote(
     t: TetherTokens,
     type: TetherTypography,
     weight: Int,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     mark: BlockMarks? = null,
 ) {
     val density = LocalDensity.current
@@ -618,7 +651,7 @@ private fun MdTable(
     style: TextStyle,
     t: TetherTokens,
     type: TetherTypography,
-    onLink: (String) -> Unit,
+    onLink: (MdInline.Link) -> Unit,
     mark: BlockMarks? = null,
 ) {
     val cellStyle = style.copy(lineHeight = 1.45.em)

@@ -55,5 +55,8 @@ class SessionLinkOpenerTest {
         links.forEach(::open)
         assertEquals(emptyList<ParsedLink.Open>(), inApp)
         assertEquals(links, external)
+        // ta-fz3: only a session link counts as in-app (it skips the external-link confirmation).
+        links.forEach { assertEquals(it, false, opener.opensInApp(it)) }
+        assertEquals(true, opener.opensInApp("https://tether.example.com/?session=s1"))
     }
 }

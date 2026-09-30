@@ -20,11 +20,19 @@ class SessionLinkOpener(
     private val openInApp: (ParsedLink.Open) -> Unit,
 ) : LinkOpener {
     override fun open(context: Context, href: String, toolbarColor: Color) {
-        val parsed = DeepLinks.parse(href, pairedBaseUrl())
-        if (parsed is ParsedLink.Open && parsed.origin != null && parsed.destination is Destination.Session) {
+        val parsed = sessionLink(href)
+        if (parsed != null) {
             openInApp(parsed)
             return
         }
         delegate.open(context, href, toolbarColor)
+    }
+
+    /** ta-fz3: a session link stays in the app, so it needs no external-link confirmation. */
+    override fun opensInApp(href: String): Boolean = sessionLink(href) != null
+
+    private fun sessionLink(href: String): ParsedLink.Open? {
+        val parsed = DeepLinks.parse(href, pairedBaseUrl())
+        return if (parsed is ParsedLink.Open && parsed.origin != null && parsed.destination is Destination.Session) parsed else null
     }
 }
