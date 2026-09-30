@@ -1,5 +1,6 @@
 package com.tether.app.push
 
+import com.tether.app.client.LabelText
 import com.tether.app.nav.DeepLinks
 import com.tether.app.nav.Destination
 import com.tether.app.nav.ParsedLink
@@ -68,7 +69,11 @@ sealed interface PushMessage {
  *    FCM `notification` block, which is what the server sends. A data-only
  *    message with `data.title`/`data.body` is also accepted, as before T12.1. With
  *    neither, the message is [PushMessage.Ignored]: a blank notification is never
- *    posted.
+ *    posted. ta-28i: both go through the LABEL rule first ([LabelText.clean]: no
+ *    bidi control, mark or invisible code point, whitespace collapsed to one
+ *    space, cut to a bound at a character-cluster boundary, never inside a
+ *    surrogate pair or a combining sequence), so a text that is only invisible
+ *    characters counts as blank, and nothing the system shade draws can reorder.
  * 3. `data.tag` is the server's collapse key (`tether-<kind>-<sha24>`). A tag
  *    outside the expected character set or length is dropped (the notifier falls
  *    back to one shared tag) rather than used as is.
@@ -95,12 +100,12 @@ object PushMessageParser {
     ): PushMessage {
         if (data["kind"] == SYNC_KIND) return PushMessage.SyncHint
 
-        val title = firstNonBlank(notificationTitle, data["title"]) ?: return PushMessage.Ignored
-        val body = firstNonBlank(notificationBody, data["body"]) ?: return PushMessage.Ignored
+        val title = firstShown(MAX_TITLE, notificationTitle, data["title"]) ?: return PushMessage.Ignored
+        val body = firstShown(MAX_BODY, notificationBody, data["body"]) ?: return PushMessage.Ignored
         return PushMessage.Visible(
             kind = PushKind.fromWire(data["kind"]),
-            title = title.take(MAX_TITLE),
-            body = body.take(MAX_BODY),
+            title = title,
+            body = body,
             tag = data["tag"]?.takeIf { TAG_PATTERN.matches(it) },
         )
     }
@@ -121,8 +126,9 @@ object PushMessageParser {
         return (parsed.destination as? Destination.Session)?.id
     }
 
-    private fun firstNonBlank(vararg values: String?): String? =
-        values.firstOrNull { !it.isNullOrBlank() }?.trim()
+    /** The first value with anything visible left after the label rule, cleaned and cut to [max]. */
+    private fun firstShown(max: Int, vararg values: String?): String? =
+        values.firstNotNullOfOrNull { value -> LabelText.clean(value, max).takeIf { it.isNotEmpty() } }
 }
 
 /**

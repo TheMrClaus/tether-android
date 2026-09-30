@@ -108,6 +108,65 @@ class PushMessageParserTest {
         assertEquals(1_000, message.body.length)
     }
 
+    // ta-28i: the server's text reaches the system shade through the label rule.
+    @Test
+    fun bidiControlsAndInvisiblesNeverReachTheShade() {
+        val message = PushMessageParser.parse(
+            mapOf("kind" to "approval"),
+            "Approve \u202Etxt.exe\u202C now",
+            "mv \u2066old\u2069 \u2067new\u2069\u200B\u200E\u2060 done\n\nnext",
+        ) as PushMessage.Visible
+        assertEquals("Approve txt.exe now", message.title)
+        assertEquals("mv old new done next", message.body)
+        for (text in listOf(message.title, message.body)) {
+            for (c in text) {
+                assertFalse("U+%04X in \"$text\"".format(c.code), c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069' || c == '\u200E' || c == '\u200F' || c == '\u061C' || c == '\u200B' || c == '\u2060')
+            }
+        }
+    }
+
+    @Test
+    fun aTitleOfOnlyInvisibleCharactersIsBlankAndTheDataTextIsUsed() {
+        val message = PushMessageParser.parse(
+            mapOf("kind" to "approval", "title" to "Tether needs you", "body" to "Waiting."),
+            "\u202E\u200B\u2066\u2069",
+            "\u3164\u2800",
+        ) as PushMessage.Visible
+        assertEquals("Tether needs you", message.title)
+        assertEquals("Waiting.", message.body)
+        assertEquals(PushMessage.Ignored, PushMessageParser.parse(mapOf("kind" to "approval"), "\u202E", "body"))
+    }
+
+    @Test
+    fun theCapNeverSplitsASurrogatePairOrACombiningSequence() {
+        // The emoji and the accented letter straddle the 200 / 1,000 bounds.
+        for (pad in 196..200) {
+            val title = (PushMessageParser.parse(mapOf("kind" to "approval"), "t".repeat(pad) + "\uD83D\uDE00\uD83D\uDE00e\u0301tail", "b") as PushMessage.Visible).title
+            assertTrue(title.length <= 200)
+            assertTrue(title.endsWith("\u2026"))
+            for (i in title.indices) {
+                if (Character.isHighSurrogate(title[i])) assertTrue("lone high surrogate: pad $pad", i + 1 < title.length && Character.isLowSurrogate(title[i + 1]))
+                if (Character.isLowSurrogate(title[i])) assertTrue("lone low surrogate: pad $pad", i > 0 && Character.isHighSurrogate(title[i - 1]))
+            }
+            val before = title.dropLast(1)
+            assertFalse("a bare 'e' lost its accent: pad $pad", before.endsWith("e") && !before.all { it == 't' })
+        }
+        for (pad in 995..1_000) {
+            val body = (PushMessageParser.parse(mapOf("kind" to "approval"), "t", "b".repeat(pad) + "e\u0301".repeat(10)) as PushMessage.Visible).body
+            assertTrue(body.length <= 1_000)
+            assertFalse("an accent was cut from its letter: pad $pad", body.dropLast(1).endsWith("e"))
+        }
+    }
+
+    @Test
+    fun realArabicAndHebrewStayWholeAndInOrder() {
+        val hebrew = "\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD"
+        val arabic = "\u0645\u0631\u062D\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645"
+        val message = PushMessageParser.parse(mapOf("kind" to "turn_end"), hebrew, arabic) as PushMessage.Visible
+        assertEquals(hebrew, message.title)
+        assertEquals(arabic, message.body)
+    }
+
     @Test
     fun anUnexpectedTagIsDropped() {
         for (bad in listOf("", "has space", "slash/tag", "a".repeat(129), "new\nline")) {
