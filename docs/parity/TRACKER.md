@@ -40,9 +40,11 @@ protocol 134, native floor 129).
 +T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. **0.7.8 (code 25, `07ba88f`, +ta-96z +T6.5 +ta-blf +T7.3)** built and checked - same cert, versionCode 25. **v0.7.8 PUBLISHED by the owner 2026-09-30** (earlier drafts 0.7.4-0.7.7 superseded). Publishing is the owner's call.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
 **Owner queue:** deploy tether #224 (later today); review/redact the private tether issues and PRs before the visibility flip (owner handles it).
-**Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
-ta-nrq (Firebase-free push alongside BYO-Firebase) and ta-31i (gateway-agnostic sign-in); ta-96z (accept the `__Host-` cookie name),
-ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9.
+**Next frontier (`bd ready`), owner-ordered 2026-09-30:** after ta-28i/ta-fz3 merge, in parallel: **T6.8** (P1, tool screenshots
+not showing on device), **Overview** (T15.1 feed -> T15.2 screen / T15.3 host+usage -> T15.4 top bar), **T9.1** full telemetry
+(the web's whole inspector), **T7.4** attachments + image thumbnails; then T15.5 Studio-only, ta-ylh (v135 wire) -> T15.6/T15.7, T15.8
+re-baseline. Server main is protocol **135** (not deployed past 133). Note: `bd ready` on v1.3.0 still lists T15.6/T15.7 despite
+their ta-ylh blocks-edge; check `bd show` before dispatch.
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -127,6 +129,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.5 | Conversation timeline refresh | VERIFIED | TheMrClaus @ 2026-09-30 06:13 |  |  |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
+| T6.8 | Tool screenshots do not show in the conversation (owner report) | TODO |  |  |  |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -134,7 +137,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
 | T7.3 | Slash commands, run/background command, mentions | VERIFIED | TheMrClaus @ 2026-09-30 06:50 |  |  |
-| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
+| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  | owner 2026-09-30: include image thumbnails in the user's own message bubble (v112 AttachmentMeta.mediaRef; bubbles currently show filename … |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -149,7 +152,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T9.1 | Inspector + telemetry | TODO |  |  | from T7.3 (coordinator): Inspector CLI version + inventory rows. |
+| T9.1 | Inspector + telemetry | TODO |  |  | coordinator 2026-09-30 (owner: telemetry is missing much): the phone telemetry sheet body is still an interim 7-row placeholder. Scope = th… |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
@@ -197,6 +200,19 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  | From the T4.3 r2 verifier (fidelity detail): UsageTrack's colour transition uses Compose's default tween easing; the web uses CSS 'ease' (c… |
 | T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | RESOLVED early (owner decision 2026-09-27): android-release.yml setup-android -> packages: platform-tools, sha c08d9fa on main. EVIDENCE: d… |
+
+### Phase 15 — Catch-up to web protocol v135 (Overview, Studio-only, v133-v135)
+| ID | Task | Status | Claimed by | Evidence | Notes |
+|---|---|---|---|---|---|
+| ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
+| T15.1 | Overview feed client (v131) | TODO |  |  |  |
+| T15.2 | Overview screen | TODO |  |  |  |
+| T15.3 | Overview host + daily usage panels | TODO |  |  |  |
+| T15.4 | Top-bar navigation | TODO |  |  |  |
+| T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
+| T15.6 | Queue origin labels (v133) + hidden session count (v135) | TODO |  |  |  |
+| T15.7 | Worktree service links after v134 | TODO |  |  |  |
+| T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | TODO |  |  |  |
 
 ---
 
@@ -315,6 +331,9 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | **Service-proxy strip list: keep the wider gateway list** (oauth2-proxy, Pomerium, Authentik, Authelia, Google IAP, Cloudflare Access variants) | Safer for self-hosters on any gateway | owner |
 | 2026-09-30 | **tether #224 deploy later; the owner redacts the private tether issues/PRs before the visibility flip; beads-scrub backup deleted** | Owner choice | owner |
 | 2026-09-30 | **Transcript prose: every explicit bidi formatting character (embeddings, overrides, isolates) is a visible token; only LRM/RLM/ALM directly next to a real RTL letter stay raw; prose paragraph direction comes from content.** Copy: dangerous characters copy in visible form with a notice and an explicit Copy raw (no long-press raw copy) | Three review rounds kept finding isolate-based word swaps; implicit bidi already orders real Hebrew/Arabic. Cost: rare legitimate isolate use shows tokens | coordinator |
+| 2026-09-30 | **Catch-up batch 1 = Phase 15** (web v129-v135 since PARITY_BASE `7d65611`): Overview feed/screen/host+usage/top bar (T15.1-T15.4), Studio-only appearance (T15.5), v133-v135 wire (ta-ylh widened) + UI (T15.6/T15.7), re-baseline and PARITY_BASE bump (T15.8). P14 (1.0.0) now depends on P15 | The owner found Overview and other web features missing; they postdate the frozen base | owner request, coordinator scoping |
+| 2026-09-30 | Overview, full telemetry (T9.1, rescoped to the web's whole inspector) and attachments with image thumbnails (T7.4) run **in parallel** after ta-28i/ta-fz3; tool screenshots not showing on device is a P1 bug (T6.8) | Owner answers (card) | owner |
+| 2026-09-30 | The app **matches the web's Studio-only appearance** (Light / Dark / Follow system); retired theme families migrate to Studio (T15.5). Supersedes the 2026-09-26 six-skin entry once T15.5 lands | Owner answer (card) | owner |
 
 ## Session log (append-only)
 
