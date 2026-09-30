@@ -1,7 +1,5 @@
 package com.tether.app.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +44,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import com.tether.app.ui.search.GlobalSearchHost
+import com.tether.app.ui.text.CopyNoticeHost
+import com.tether.app.ui.text.CopyNotices
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.copySafely
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -178,6 +180,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
+    // ta-28i: the working directory and the session id are server text: a copy carries them the SAFE
+    // way (a hidden control as its visible token), and the notice's "Copy raw" is the only raw path.
+    val copyNotices = remember { CopyNotices() }
     var copiedPath by remember { mutableStateOf(false) }
     var copiedTetherId by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
@@ -225,14 +230,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
                 onCopyPath = {
                     session?.let {
-                        copyToClipboard(context, "Working directory", it.cwd)
-                        copiedPath = true
+                        if (copySafely(context, SafeText.code(it.cwd), copyNotices, raw = it.cwd, label = "Working directory")) copiedPath = true
                     }
                 },
                 onCopyTetherId = {
                     session?.let {
-                        copyToClipboard(context, "Tether session id", it.id)
-                        copiedTetherId = true
+                        if (copySafely(context, SafeText.code(it.id), copyNotices, raw = it.id, label = "Tether session id")) copiedTetherId = true
                     }
                 },
             )
@@ -332,6 +335,15 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     .onGloballyPositioned { toastBounds = it.boundsInWindow() },
             )
         }
+
+        CopyNoticeHost(
+            copyNotices,
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(12.dp)
+                .zIndex(21f),
+        )
     }
 
     WorkspaceFileBrowser(fileBrowser)
@@ -442,11 +454,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             onCancel = { confirmEnd = null },
         )
     }
-}
-
-private fun copyToClipboard(context: Context, label: String, text: String) {
-    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    manager.setPrimaryClip(ClipData.newPlainText(label, text))
 }
 
 /**

@@ -54,7 +54,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import com.tether.app.client.LabelText
+import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -182,8 +186,9 @@ fun WorkspaceHeader(
         // `calc(var(--space-md) * -0.5)`.
         val titleGap = if (studio && !expanded) 6.4.dp else t.css.spaceMd
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            // ta-28i: the session's title by the label rule, in its content's direction.
             Text(
-                session.name,
+                LabelText.title(session.name),
                 color = t.white,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -192,7 +197,7 @@ fun WorkspaceHeader(
                     studio -> cssText(type.ui, 0.925f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                     expanded -> cssText(type.ui, 1.05f, 720, trackingEm = -0.022f, lineHeight = 1.45f)
                     else -> cssText(type.ui, 1.05f, 680, trackingEm = -0.01f, lineHeight = 1.45f)
-                },
+                }.copy(textDirection = proseDirection),
                 modifier = Modifier.weight(1f, fill = false).semantics { heading() },
             )
             Spacer(Modifier.width(titleGap - 6.dp))
@@ -399,8 +404,9 @@ fun SessionLinksPopover(
             Text("Session links", color = t.ink, style = cssText(type.ui, 0.8f, 700))
             Spacer(Modifier.height(t.css.spaceSm))
             Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                // ta-28i: the working directory is a path: code (every control a token), LTR.
                 LinkRow(
-                    text = compactPath(session.cwd, workspaceRoot),
+                    text = codeLabel(compactPath(session.cwd, workspaceRoot)),
                     leading = null,
                     trailing = if (copiedPath) TetherIcons.Check else TetherIcons.Copy,
                     trailingSize = 14.dp,
@@ -410,11 +416,13 @@ fun SessionLinksPopover(
                     studioSize = true,
                 )
                 LinkRow(
-                    text = when {
-                        copiedTetherId -> "Copied Tether id"
-                        expanded -> "Copy Tether id"
-                        else -> "Tap to copy Tether id"
-                    },
+                    text = AnnotatedString(
+                        when {
+                            copiedTetherId -> "Copied Tether id"
+                            expanded -> "Copy Tether id"
+                            else -> "Tap to copy Tether id"
+                        },
+                    ),
                     leading = TetherIcons.Hash,
                     trailing = if (copiedTetherId) TetherIcons.Check else TetherIcons.Copy,
                     trailingSize = 13.dp,
@@ -459,7 +467,7 @@ fun SessionLinksPopover(
  */
 @Composable
 private fun LinkRow(
-    text: String,
+    text: AnnotatedString,
     leading: ImageVector?,
     trailing: ImageVector,
     trailingSize: Dp,

@@ -544,8 +544,9 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // ta-28i: the session's title by the label rule.
             Text(
-                session.name,
+                com.tether.app.client.LabelText.title(session.name),
                 color = t.white,
                 fontFamily = Manrope,
                 fontWeight = TetherWeights.heading,
