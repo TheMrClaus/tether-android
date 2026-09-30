@@ -227,7 +227,6 @@ internal fun ConversationTimeline(
     val focusIndex = if (focusSlot >= 0) visible.getOrNull(focusSlot) ?: -1 else -1
     val inspecting = focusIndex in 0 until size
 
-    // Precision's graduations take the live tone (the module's [data-theme="precision"|"machine"] rules).
     val markColor = t.muted
     val focusColor = t.white
 
