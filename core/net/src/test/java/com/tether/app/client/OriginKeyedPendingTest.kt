@@ -234,7 +234,8 @@ class OriginKeyedPendingTest {
     /**
      * Connected to A, s-a attached and snapshotted; one turn sent (tries 1,
      * never acked); then A goes away. While A is unreachable the user types a
-     * turn with an attachment and a queued message (tries 0, never sent).
+     * turn with an attachment (T7.4: refused, never filed: attachments are never queued) and a
+     * queued message (tries 0, never sent).
      */
     private fun writeOnA(wrap: (DiskSettings) -> SettingsStore = { it }): OnA {
         val c = processOnA(wrap)
@@ -252,8 +253,11 @@ class OriginKeyedPendingTest {
         ws.close(1001, null)
         await(c.connection) { it == ConnectionState.Disconnected }
         c.send("s-a", "typed offline for A: private prompt two", listOf(picture))
+        // T7.4 (coordinator decision): offline, a message with attachments is refused and says so;
+        // it is not held in memory to go out later (the outbox never carries attachments).
+        awaitErrors { list -> list.contains(ATTACHMENTS_NOT_SENT_COPY) }
         c.queueAdd("s-a", "typed offline for A: private queued three")
-        // The attachment record is memory-only (T1.3); the other two reach A's slot.
+        // The two records (the tried send and the queued one) reach A's slot.
         awaitCondition("A's slot holds its records") {
             PendingInput.fromPersisted(disk.disk).records.size == 2
         }
@@ -295,7 +299,7 @@ class OriginKeyedPendingTest {
         }
 
         // The user is told, naming the server the messages were kept for.
-        awaitErrors { list -> list.any { it.startsWith("3 unsent messages were not sent to this server") && it.contains(displayHost(a)) } }
+        awaitErrors { list -> list.any { it.startsWith("2 unsent messages were not sent to this server") && it.contains(displayHost(a)) } }
         // ...and they stay in A's slot, untouched by B.
         assertEquals(2, PendingInput.fromPersisted(disk.disk).records.size)
         assertNull("B's slot got something", runBlocking { disk.readPendingInput(b.origin()) }?.takeIf {
@@ -348,14 +352,13 @@ class OriginKeyedPendingTest {
         loginTo(a)
         val aws = a.nextSocket()
         handshake(a, aws)
-        // Never-sent records (tries 0) go out at once, the attachment with them;
-        // the one A already saw waits for s-a's snapshot on this socket.
+        // Never-sent records (tries 0) go out at once; the one A already saw waits for s-a's
+        // snapshot on this socket. T7.4: the refused attachment never comes back, on any server.
         val first = framesUntilBarrier(a)
-        assertEquals(listOf("attach", "send", "queue-add"), first.map { it.type() })
+        assertEquals(listOf("attach", "queue-add"), first.map { it.type() })
         assertEquals("s-a", first[0].s("sessionId"))
-        assertEquals("typed offline for A: private prompt two", first[1].s("text"))
-        assertTrue("the attachment came back", first[1].toString().contains("pic.png"))
-        assertEquals("typed offline for A: private queued three", first[2].s("text"))
+        assertEquals("typed offline for A: private queued three", first[1].s("text"))
+        assertTrue("a refused attachment was sent", (a.allFrames + b.allFrames).none { it.contains("pic.png") || it.contains("prompt two") })
 
         aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
         serverBarrier(aws)
@@ -377,7 +380,7 @@ class OriginKeyedPendingTest {
         a.down = false
         loginTo(a)
         // Expired at the restore itself, before any drain: the notice, and nothing on the wire.
-        awaitErrors { list -> list.any { it.startsWith("3 messages could not be delivered") } }
+        awaitErrors { list -> list.any { it.startsWith("2 messages could not be delivered") } }
         val aws = a.nextSocket()
         handshake(a, aws)
         aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
@@ -472,7 +475,7 @@ class OriginKeyedPendingTest {
     fun stopDiscardsTheUnsentInputInMemoryAsWellAsOnDisk() {
         writeOnA()
         client.stop()
-        awaitErrors { list -> list.any { it.startsWith("3 unsent messages were discarded when you signed out") } }
+        awaitErrors { list -> list.any { it.startsWith("2 unsent messages were discarded when you signed out") } }
         a.down = false
         loginTo(a)
         val aws = a.nextSocket()
@@ -843,7 +846,7 @@ class OriginKeyedPendingTest {
         loginTo(a)
         val a2 = a.nextSocket()
         handshake(a, a2)
-        assertEquals(listOf("attach", "send", "queue-add"), framesUntilBarrier(a).map { it.type() })
+        assertEquals(listOf("attach", "queue-add"), framesUntilBarrier(a).map { it.type() })
 
         b.down = false
         loginTo(b)

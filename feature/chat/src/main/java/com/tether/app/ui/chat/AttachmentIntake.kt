@@ -183,13 +183,20 @@ sealed interface BoundedRead {
     class Bytes(val bytes: ByteArray) : BoundedRead
     data object TooLarge : BoundedRead
     data object Failed : BoundedRead
+    data object Cancelled : BoundedRead
 }
 
 /**
  * Read [source] in chunks, aborting as soon as more than [max] bytes arrive (the provider's size
- * claim only sizes the first buffer; it is never trusted to bound the read).
+ * claim only sizes the first buffer; it is never trusted to bound the read), or as soon as [active]
+ * says the caller went away (a cancelled pick stops reading at the next chunk).
  */
-fun readBounded(source: AttachmentSource, max: Long = AttachmentDraft.MAX_ATTACHMENT_BYTES.toLong(), chunk: Int = 64 * 1024): BoundedRead {
+fun readBounded(
+    source: AttachmentSource,
+    max: Long = AttachmentDraft.MAX_ATTACHMENT_BYTES.toLong(),
+    chunk: Int = 64 * 1024,
+    active: () -> Boolean = { true },
+): BoundedRead {
     val claimed = source.reportedSize
     if (claimed != null && claimed > max) return BoundedRead.TooLarge
     return try {
@@ -199,6 +206,7 @@ fun readBounded(source: AttachmentSource, max: Long = AttachmentDraft.MAX_ATTACH
             val buffer = ByteArray(chunk)
             var total = 0L
             while (true) {
+                if (!active()) return BoundedRead.Cancelled
                 val n = stream.read(buffer)
                 if (n < 0) break
                 total += n
@@ -305,12 +313,14 @@ object AttachmentIntake {
         existing: List<StagedAttachment>,
         newId: () -> Long,
         prepare: (ByteArray, String) -> ImageShrink.Prepared = ImageShrink::prepare,
+        active: () -> Boolean = { true },
     ): Result {
         val added = ArrayList<StagedAttachment>()
         val flashes = ArrayList<String>()
         var total = existing.sumOf { it.sizeBytes }
         var wire = AttachmentFrame.wireBytes(existing.map { it.attachment })
         for (source in sources) {
+            if (!active()) return Result(emptyList(), emptyList())
             if (existing.size + added.size >= AttachmentDraft.MAX_ATTACHMENTS) {
                 flashes += AttachmentCopy.COUNT
                 break
@@ -325,8 +335,9 @@ object AttachmentIntake {
                 flashes += AttachmentCopy.TOTAL
                 break
             }
-            val bytes = when (val read = readBounded(source)) {
+            val bytes = when (val read = readBounded(source, active = active)) {
                 is BoundedRead.Bytes -> read.bytes
+                BoundedRead.Cancelled -> return Result(emptyList(), emptyList())
                 BoundedRead.TooLarge -> {
                     flashes += AttachmentCopy.tooLarge(name)
                     continue

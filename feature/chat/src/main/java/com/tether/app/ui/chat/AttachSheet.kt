@@ -133,7 +133,10 @@ class AttachmentStager(
         val origin = originNow()
         val generation = store.generation
         val existing = store.items(origin, sessionId)
-        val result = withContext(io) { AttachmentIntake.intake(sources, existing, store::newId) }
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        // Cancelled (the composer left, the session switched): the read stops at its next chunk,
+        // and withContext throws, so nothing read is staged.
+        val result = withContext(io) { AttachmentIntake.intake(sources, existing, store::newId, active = { job?.isActive != false }) }
         if (store.generation != generation || originNow() != origin) return@withLock result.flashes
         val now = store.items(origin, sessionId)
         if (result.added.isNotEmpty()) store.set(origin, sessionId, (now + result.added).take(AttachmentDraft.MAX_ATTACHMENTS))

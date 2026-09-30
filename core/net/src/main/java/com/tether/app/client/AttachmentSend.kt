@@ -57,7 +57,9 @@ object AttachmentFrame {
                     n += 4
                     i++
                 }
-                else -> n += 3 // BMP, or a lone surrogate (encoded as U+FFFD, 3 bytes)
+                // A lone surrogate is encoded as '?' (String.toByteArray / okio encodeUtf8): 1 byte.
+                Character.isSurrogate(c) -> n += 1
+                else -> n += 3
             }
             i++
         }
