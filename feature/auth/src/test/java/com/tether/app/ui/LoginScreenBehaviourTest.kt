@@ -1,5 +1,8 @@
 package com.tether.app.ui
 
+import android.os.Looper
+import androidx.compose.runtime.snapshots.ObserverHandle
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -9,7 +12,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.performTextClearance
@@ -79,6 +82,11 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         const val REFUSED = "Those credentials are not correct."
     }
 
+    // ta-vmg: the v2 rule runs the screen's coroutines on a StandardTestDispatcher, so they resume
+    // on the main thread as they do on a device (AndroidUiDispatcher). The v1 rule's Unconfined
+    // dispatcher resumed them on the OkHttp/IO thread that answered the probe or the login, which
+    // then wrote the screen's state and applied the snapshot there: an intermittent
+    // CalledFromWrongThreadException. tearDown fails any test that writes screen state off main.
     @get:Rule val rule = createComposeRule()
 
     /** A Tether console. [username] "" = TETHER_USERNAME unset (legacy password-only). */
@@ -153,15 +161,24 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
     private val restricted = AtomicBoolean(false)
     private val pendingRetry = AtomicReference<(() -> Unit)?>(null)
 
+    /** Every screen-state write made off the main thread (ta-vmg): on a device there are none. */
+    private val offMainWrites = ConcurrentLinkedQueue<String>()
+    private var writeObserver: ObserverHandle? = null
+
     @Before fun setUp() {
+        writeObserver = Snapshot.registerGlobalWriteObserver {
+            if (Looper.myLooper() != Looper.getMainLooper()) offMainWrites += Thread.currentThread().name
+        }
         server.dispatcher = console
         server.start()
     }
 
     @After fun tearDown() {
+        writeObserver?.dispose()
         console.probeGate.countDown()
         scope.cancel()
         server.shutdown()
+        assertTrue("screen state written off the main thread: ${offMainWrites.distinct()}", offMainWrites.isEmpty())
     }
 
     private val base get() = server.url("/").toString().trimEnd('/')
