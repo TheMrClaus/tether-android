@@ -1,0 +1,309 @@
+package com.tether.app.ui.files
+
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.test.core.app.ApplicationProvider
+import com.tether.app.client.FilesResult
+import com.tether.app.client.WorkspaceFileEntry
+import com.tether.app.ui.files.FilesFixtures.ROOT
+import com.tether.app.ui.text.COPY_NOTICE_TAG
+import com.tether.app.ui.text.COPY_RAW_TAG
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.theme.LocalReducedMotion
+import com.tether.app.ui.theme.TetherSkin
+import com.tether.app.ui.theme.TetherTheme
+import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * ta-28i: the file browser draws server text by the shared rules. A file body is CODE (the Trojan
+ * Source case: every bidi / invisible control a visible token, every line LTR, in an LTR and an RTL
+ * UI), a copy from it carries the visible form with a notice and "Copy raw"; file names and paths
+ * are code everywhere they show (rows, preview head, actions, delete and rename titles, TalkBack
+ * words); a server's error is prose; the session title is a label. Real Hebrew and Arabic stay
+ * letters, in their order.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", shadows = [NoMagnifier::class])
+class FileBrowserSafeTextTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    private companion object {
+        const val RLO = "\u202E"
+        const val PDF = "\u202C"
+        const val LRI = "\u2066"
+        const val RLI = "\u2067"
+        const val PDI = "\u2069"
+        const val ZWSP = "\u200B"
+        const val HEBREW = "\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD"
+        const val ARABIC = "\u0645\u0631\u062D\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645"
+
+        /** The Trojan Source "commenting-out" form: the check reads as a comment. */
+        const val LINE1 = "if (accessLevel != \"user$RLO $LRI// Check if admin$PDI $LRI\") {"
+        const val LINE2 = "    grant();$ZWSP"
+        const val TROJAN = "$LINE1\r\n$LINE2\r\n// $HEBREW\n// $ARABIC\nlone\rcr\n}"
+        const val HOSTILE_NAME = "invoice${RLO}fdp.exe"
+        val BIDI = ('\u202A'..'\u202E') + ('\u2066'..'\u2069') + listOf('\u200E', '\u200F', '\u061C')
+        fun tok(cp: Int) = "\u2060\u27E8U+%04X\u27E9".format(cp)
+        fun vis(cp: Int) = "\u27E8U+%04X\u27E9".format(cp)
+    }
+
+    private val source = FilesFixtures.file("access.js", TROJAN.length.toLong())
+    private val hostile = FilesFixtures.file(HOSTILE_NAME, 1_024)
+
+    private fun state(select: WorkspaceFileEntry? = source, session: String = FilesFixtures.SESSION): FileBrowserState {
+        val files = FakeFiles().apply {
+            listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = listOf(FilesFixtures.docs, source, hostile)))
+            texts[source.path] = FilesResult.Ok(TROJAN)
+        }
+        return FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply {
+            cwd = ROOT
+            sessionName = session
+            open()
+            select?.let { selectFile(it) }
+        }
+    }
+
+    private fun show(state: FileBrowserState, rtl: Boolean = false, overlay: @Composable () -> Unit = {}) {
+        rule.setContent {
+            TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                CompositionLocalProvider(
+                    LocalReducedMotion provides true,
+                    LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
+                ) {
+                    Box(Modifier.fillMaxSize()) {
+                        FileBrowserFrame(state, onClose = {}, onUpload = {}, env = FilesFixtures.env)
+                        overlay()
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    /** Every text and description TalkBack could read, unmerged. */
+    private fun spoken(): List<String> = rule.onAllNodes(SemanticsMatcher("any") { true }, useUnmergedTree = true).fetchSemanticsNodes().flatMap { n ->
+        n.config.getOrElseNullable(SemanticsProperties.Text) { null }.orEmpty().map { it.text } +
+            n.config.getOrElseNullable(SemanticsProperties.ContentDescription) { null }.orEmpty()
+    }
+
+    private fun assertNoRawBidi() {
+        for (s in spoken()) for (c in BIDI) assertFalse("raw U+%04X in \"$s\"".format(c.code), s.contains(c))
+    }
+
+    private fun layoutOf(text: String): Pair<String, TextLayoutResult> {
+        val node = rule.onNodeWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNode()
+        val results = mutableListOf<TextLayoutResult>()
+        node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+        return results.first().let { it.layoutInput.text.text to it }
+    }
+
+    /** The drawn ASCII letters and digits outside tokens: do they read left to right, line by line? */
+    private fun latinReadsInOrder(shown: String, layout: TextLayoutResult): Boolean {
+        val content = ArrayList<Int>()
+        var i = 0
+        while (i < shown.length) {
+            val u = if (shown[i] == SafeText.MARK) SafeText.unitAt(shown, i) else null
+            if (u != null) {
+                i = u.end
+                continue
+            }
+            if (shown[i] in 'a'..'z' || shown[i] in 'A'..'Z' || shown[i] in '0'..'9') content.add(i)
+            i++
+        }
+        val at = content.map { layout.getLineForOffset(it) to layout.getBoundingBox(it).left }
+        return at.zipWithNext().all { (a, b) -> a.first < b.first || (a.first == b.first && a.second < b.second) }
+    }
+
+    private fun clip(): String? =
+        ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString()
+
+    private fun hex(s: String) = s.map { "%04X".format(it.code) }
+
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private class MenuSpy : androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider {
+        @Volatile var shown: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider? = null
+
+        override suspend fun showTextContextMenu(dataProvider: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider) {
+            shown = dataProvider
+            try {
+                kotlinx.coroutines.awaitCancellation()
+            } finally {
+                if (shown === dataProvider) shown = null
+            }
+        }
+
+        fun press(key: Any) {
+            val menu = checkNotNull(shown) { "no text toolbar is open" }
+            val item = menu.data().components.filterIsInstance<androidx.compose.foundation.text.contextmenu.data.TextContextMenuItem>().first { it.key == key }
+            item.onClick(object : androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession { override fun close() = Unit })
+        }
+    }
+
+    // ---- the text preview (Trojan Source) -------------------------------------------------------
+
+    private fun assertTrojanSourceIsShownLtr(rtl: Boolean) {
+        show(state(), rtl = rtl)
+        val (shown, layout) = layoutOf("accessLevel")
+        assertEquals(
+            "if (accessLevel != \"user${tok(0x202E)} ${tok(0x2066)}// Check if admin${tok(0x2069)} ${tok(0x2066)}\") {",
+            shown,
+        )
+        assertEquals("rtl UI = $rtl", ResolvedTextDirection.Ltr, layout.getParagraphDirection(0))
+        assertTrue("the words read in their stored order (rtl UI = $rtl)", latinReadsInOrder(shown, layout))
+        // The ZWSP after grant(); is a token too; CRLF line ends never are.
+        val (grant, _) = layoutOf("grant()")
+        assertEquals("    grant();${tok(0x200B)}", grant)
+        assertFalse(spoken().any { it.contains(vis(0x000D)) && !it.startsWith("lone") })
+        // A lone CR (not a line break's) is shown.
+        assertEquals("lone${tok(0x000D)}cr", layoutOf("lone").first)
+        assertNoRawBidi()
+    }
+
+    @Test fun everyBidiAndInvisibleControlInAFileBodyIsAVisibleTokenAndTheLineReadsLtr() = assertTrojanSourceIsShownLtr(rtl = false)
+
+    @Test fun inAnRtlUiAFileBodyStillReadsLtr() = assertTrojanSourceIsShownLtr(rtl = true)
+
+    @Test fun realHebrewAndArabicInAFileStayLettersAndReadRightToLeft() {
+        show(state())
+        for (word in listOf(HEBREW, ARABIC)) {
+            val (shown, layout) = layoutOf(word)
+            assertEquals("// $word", shown)
+            assertEquals(ResolvedTextDirection.Ltr, layout.getParagraphDirection(0))
+            // Inside the LTR line the RTL word runs right to left, as in every editor.
+            val first = shown.indexOf(word)
+            assertTrue(layout.getBoundingBox(first).left > layout.getBoundingBox(first + 3).left)
+        }
+    }
+
+    @Test fun aCopyFromThePreviewCarriesTheVisibleFormAndOnlyCopyRawCarriesTheSource() {
+        val menu = MenuSpy()
+        val browser = state()
+        rule.setContent {
+            CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
+                TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                    CompositionLocalProvider(LocalReducedMotion provides true) { FileBrowserFrame(browser, onClose = {}, onUpload = {}, env = FilesFixtures.env) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("accessLevel", substring = true, useUnmergedTree = true).performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
+        rule.waitForIdle()
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
+        rule.waitForIdle()
+        val copied = checkNotNull(clip())
+        assertTrue("the visible form: ${hex(copied)}", copied.contains("\"user${vis(0x202E)} ${vis(0x2066)}// Check if admin${vis(0x2069)} ${vis(0x2066)}\")"))
+        for (c in listOf(RLO, LRI, PDI, "\u2060")) assertFalse("raw U+%04X copied".format(c[0].code), copied.contains(c))
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
+        assertTrue(spoken().any { Regex("^\\d+ hidden control characters copied as \u27E8U\\+\u2026\u27E9$").matches(it) })
+        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
+        rule.waitForIdle()
+        assertTrue("Copy raw: ${hex(clip()!!)}", clip()!!.contains(LINE1))
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+    }
+
+    @Test fun previewPiecesNeverSplitAPairOrAnAccentAndCrlfIsALineBreak() {
+        val piece = 4_000
+        // A surrogate pair and a combining accent straddling the piece edge.
+        val pair = previewLines("a".repeat(piece - 1) + "\uD83D\uDE00" + "b".repeat(10))
+        assertEquals("a".repeat(piece - 1), pair[0])
+        assertEquals("\uD83D\uDE00" + "b".repeat(10), pair[1])
+        val accent = previewLines("a".repeat(piece - 1) + "e\u0301" + "b".repeat(10))
+        assertEquals("a".repeat(piece - 1), accent[0])
+        assertTrue(accent[1].startsWith("e\u0301"))
+        for (line in pair + accent) for (i in line.indices) {
+            if (Character.isHighSurrogate(line[i])) assertTrue(i + 1 < line.length && Character.isLowSurrogate(line[i + 1]))
+            if (Character.isLowSurrogate(line[i])) assertTrue(i > 0 && Character.isHighSurrogate(line[i - 1]))
+        }
+        // One cluster longer than a piece still makes progress, never splitting a pair.
+        val flood = previewLines("x" + "\u0301".repeat(piece * 2 + 5))
+        assertEquals(piece * 2 + 6, flood.sumOf { it.length })
+        assertEquals(listOf("a", "b", "c", "d\r"), previewLines("a\r\nb\nc\r\nd\r"))
+        assertEquals(listOf("a", "lone\rcr"), previewLines("a\r\nlone\rcr"))
+    }
+
+    // ---- file names, paths and the session title ------------------------------------------------
+
+    @Test fun aHostileFileNameIsCodeInTheRowAndItsActionsAndTheTitleIsALabel() {
+        show(state(select = null, session = "Fix ${RLO}lanif$PDF bug$ZWSP"))
+        val shownName = "invoice${tok(0x202E)}fdp.exe"
+        assertEquals(shownName, layoutOf("invoice").first.let { it.substring(it.indexOf("invoice")) })
+        assertTrue(spoken().contains("Actions for $shownName"))
+        assertTrue(spoken().any { it == "Browse Fix lanif bug without leaving the console." })
+        val (_, layout) = layoutOf("invoice")
+        assertEquals(ResolvedTextDirection.Ltr, layout.getParagraphDirection(0))
+        assertNoRawBidi()
+    }
+
+    @Test fun theDeleteAndRenameTitlesNameTheFileAsItIs() {
+        show(state(select = null)) {
+            DeleteConfirmContent(hostile, error = "Could not delete: $RLO" + "evil$PDF", submitting = false, onConfirm = {}, onCancel = {})
+        }
+        assertTrue(spoken().contains("Delete invoice${tok(0x202E)}fdp.exe?"))
+        assertTrue(spoken().contains("Could not delete: ${tok(0x202E)}evil${tok(0x202C)}"))
+        assertNoRawBidi()
+    }
+
+    @Test fun theActionsSheetTitleIsCode() {
+        show(state(select = null)) {
+            ItemActionsContent(hostile, {}, {}, {}, onSave = null, onShare = null, onDelete = {}, onCancel = {})
+        }
+        assertTrue(spoken().contains("invoice${tok(0x202E)}fdp.exe"))
+        assertNoRawBidi()
+    }
+
+    @Test fun theRenamePromptTitleIsCode() {
+        show(state(select = null)) {
+            NamePromptContent(NamePrompt(NamePromptMode.Rename, hostile, "x"), error = "", submitting = false, onValueChange = {}, onSubmit = {}, onCancel = {})
+        }
+        assertTrue(spoken().contains("Rename invoice${tok(0x202E)}fdp.exe"))
+    }
+
+    @Test fun aHostileFolderInTheBreadcrumbsAndDestinationPickerIsCode() {
+        val dir = "$ROOT/sr${RLI}c$PDI"
+        val files = FakeFiles().apply {
+            listings[dir] = FilesResult.Ok(FilesFixtures.listing(dir, entries = listOf(FilesFixtures.dir("in${LRI}ner$PDI", dir))))
+        }
+        val s = FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply {
+            cwd = dir
+            open()
+            openDestPicker(FilesFixtures.file("a.txt", 1, dir), DestinationMode.Move)
+        }
+        show(s) { s.destPicker?.let { DestinationPickerFrame(it, submitting = false, onBrowse = {}, onConfirm = {}, onClose = {}) } }
+        assertTrue(spoken().any { it == "sr${tok(0x2067)}c${tok(0x2069)}" })
+        assertTrue(spoken().any { it.contains("in${tok(0x2066)}ner${tok(0x2069)}") })
+        assertNoRawBidi()
+    }
+}

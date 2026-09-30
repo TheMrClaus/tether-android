@@ -60,6 +60,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -71,6 +73,8 @@ import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Share2
+import com.tether.app.client.LabelText
+import com.tether.app.client.TextCut
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFiles
 import com.tether.app.ui.components.CssBorder
@@ -91,6 +95,19 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.ThemeFamily
+import com.tether.app.ui.text.CopyNoticeHost
+import com.tether.app.ui.text.CopyNotices
+import com.tether.app.ui.text.SafeCopyClipboard
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.appendSafe
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.styledDisplay
+import com.tether.app.ui.text.tokenStyle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.text.buildAnnotatedString
 
 /** Test tags for the browser's regions and controls. */
 object FileBrowserTags {
@@ -289,8 +306,9 @@ private fun BrowserHeader(state: FileBrowserState, narrow: Boolean, studioPhone:
                     },
                     modifier = Modifier.semantics { heading() },
                 )
+                // ta-28i: the session's title by the label rule (no bidi control, no invisible).
                 Text(
-                    "Browse ${state.sessionName.ifEmpty { "the current session" }} without leaving the console.",
+                    "Browse ${LabelText.title(state.sessionName).ifEmpty { "the current session" }} without leaving the console.",
                     color = t.muted,
                     style = if (t.studio) ui(12f) else ui(rem(0.75f)),
                     maxLines = if (narrow) 1 else Int.MAX_VALUE,
@@ -326,7 +344,7 @@ private fun Breadcrumbs(state: FileBrowserState, studioPhone: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (listing == null) {
-                Text(state.cwd, color = t.faint, style = ui(rem(0.68f), mono = true), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(codeLabel(state.cwd), color = t.faint, style = ui(rem(0.68f), mono = true), maxLines = 1, overflow = TextOverflow.Ellipsis)
             } else {
                 listing.breadcrumbs.forEachIndexed { index, crumb ->
                     if (index > 0) Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.ink, modifier = Modifier.size(14.dp))
@@ -341,7 +359,7 @@ private fun Breadcrumbs(state: FileBrowserState, studioPhone: Boolean) {
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            crumb.name,
+                            codeLabel(crumb.name),
                             color = if (current) t.white else t.muted,
                             style = ui(if (t.studio) 12f else rem(0.68f), if (current) 650 else 400, mono = true),
                             maxLines = 1,
@@ -437,7 +455,15 @@ private fun ListPane(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Spinner(14.dp, t.muted)
-                Text("Uploading “$name”…", color = t.muted, style = ui(rem(0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val style = tokenStyle(t)
+                val line = remember(name, style) {
+                    buildAnnotatedString {
+                        append("Uploading “")
+                        appendSafe(name, SafeText.Rule.Code, style)
+                        append("”…")
+                    }
+                }
+                Text(line, color = t.muted, style = ui(rem(0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         if (state.mutationError.isNotEmpty()) {
@@ -498,8 +524,9 @@ private fun EntryRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(iconFor(entry), contentDescription = if (entry.isDirectory) "Folder" else null, tint = if (selected) t.violet else t.faint, modifier = Modifier.size(18.dp))
+                // ta-28i: a file name is code: every bidi / invisible code point a token, laid out LTR.
                 Text(
-                    entry.name,
+                    codeLabel(entry.name),
                     color = ink,
                     style = if (t.studio) ui(13f, 620) else ui(rem(0.76f), 620),
                     maxLines = 1,
@@ -518,7 +545,7 @@ private fun EntryRow(
                 Text(FileFormat.modified(entry.mtime, env), color = t.faint, style = meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(it))
             }
             Box(Modifier.width(tracks.actions), contentAlignment = Alignment.Center) {
-                IconKey(TetherIcons.EllipsisVertical, "Actions for ${entry.name}", ink, { state.openItemActions(entry) }, iconSize = 16.dp)
+                IconKey(TetherIcons.EllipsisVertical, "Actions for ${SafeText.code(entry.name)}", ink, { state.openItemActions(entry) }, iconSize = 16.dp)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
@@ -552,7 +579,8 @@ private fun Banner(message: String, danger: Boolean, modifier: Modifier = Modifi
         ) {
             // Status is never colour alone: the danger line carries the alert glyph.
             if (danger) Icon(TetherIcons.CircleAlert, contentDescription = "Error", tint = t.danger, modifier = Modifier.size(14.dp))
-            Text(message, color = if (danger) t.danger else t.muted, style = ui(rem(0.7f)))
+            // ta-28i: a server's error (or a notice naming a file) is prose: no bidi control drawn raw.
+            Text(proseText(message), color = if (danger) t.danger else t.muted, style = ui(rem(0.7f)))
         }
     }
 }
@@ -592,7 +620,7 @@ private fun StateBlock(
             )
         }
         Text(
-            message,
+            proseText(message),
             color = t.faint,
             style = if (t.studio) ui(13f, lineHeight = 1.55f) else ui(rem(0.72f), lineHeight = 1.55f),
             textAlign = TextAlign.Center,
@@ -636,7 +664,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
             if (masterDetail) IconKey(TetherIcons.ArrowLeft, "Back to file list", t.ink, state::clearSelection, iconSize = 18.dp)
             Column(Modifier.weight(1f)) {
                 Text(
-                    selected.name,
+                    codeLabel(selected.name),
                     color = t.white,
                     style = if (t.studio) ui(14f, 650) else ui(rem(0.84f), 650),
                     maxLines = 1,
@@ -667,15 +695,18 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
             masterDetail -> t.css.spaceMd
             else -> t.css.spaceLg
         }
+        // ta-28i: a copy from the text preview shows its hidden controls as tokens, with "Copy raw".
+        val notices = remember(selected.path) { CopyNotices() }
         Box(Modifier.fillMaxWidth().weight(1f).padding(pad), contentAlignment = Alignment.Center) {
-            PreviewContent(state, selected)
+            PreviewContent(state, selected, notices)
+            CopyNoticeHost(notices, Modifier.align(Alignment.BottomCenter).padding(t.css.spaceSm))
         }
         if (state.previewError.isNotEmpty()) Banner(state.previewError, danger = true, modifier = Modifier.testTag(FileBrowserTags.PreviewError))
     }
 }
 
 @Composable
-private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry) {
+private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, notices: CopyNotices) {
     val t = LocalTetherTokens.current
     val kind = FileKinds.previewKind(entry)
     val tooLargeText = kind == PreviewKind.Text && entry.size > WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES
@@ -685,7 +716,7 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry) {
             when {
                 image != null -> Image(
                     image,
-                    contentDescription = "Preview of ${entry.name}",
+                    contentDescription = "Preview of ${SafeText.code(entry.name)}",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .testTag(FileBrowserTags.Image)
@@ -714,7 +745,7 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry) {
             iconSize = 30.dp,
         )
         kind == PreviewKind.Text && state.previewLoading -> StateBlock(null, "Opening text preview…", spinner = true)
-        kind == PreviewKind.Text && state.text != null -> TextPreview(state.text!!)
+        kind == PreviewKind.Text && state.text != null -> TextPreview(state.text!!, notices)
         kind == PreviewKind.Unsupported -> StateBlock(
             TetherIcons.File,
             "This file type is shown as metadata only. The browser is read-only.",
@@ -728,39 +759,68 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry) {
  * The web's `<pre><code>`: plain text only (never rendered as markup, never executed), wrapped
  * (`white-space: pre-wrap; overflow-wrap: anywhere`), selectable, `tab-size: 2`. Lines are lazy
  * so a 1 MB preview does not lay out at once.
+ *
+ * ta-28i (the Trojan Source case): the web draws the file raw, so a bidi override or isolate in a
+ * source file reorders what the reader sees ("access level" checks that read as comments). Here a
+ * file body is CODE ([SafeText.code]): every bidi control, format / invisible / default-ignorable
+ * code point, lone surrogate and C0/C1 control (except TAB and the line break) is a visible
+ * `--warning` token, and every line lays out LTR ([codeDirection]) whatever the UI direction; RTL
+ * letters stay letters. Each line is its own layout, so nothing reaches past its line. A copy goes
+ * through [SafeCopyClipboard]: the hidden controls as their visible tokens, a notice saying how
+ * many, and the notice's "Copy raw" as the only way to the exact source (no long press copies raw).
  */
 @Composable
-private fun TextPreview(text: String) {
+private fun TextPreview(text: String, notices: CopyNotices) {
     val t = LocalTetherTokens.current
     val lines = remember(text) { previewLines(text) }
     val shape = RoundedCornerShape(if (t.studio) 8.dp else t.radiusMd)
-    val style = if (t.studio) ui(13f, lineHeight = 1.75f, mono = true) else ui(rem(0.72f), lineHeight = 1.55f, mono = true)
-    SelectionContainer {
-        LazyColumn(
-            Modifier
-                .testTag(FileBrowserTags.Text)
-                .fillMaxSize()
-                .clip(shape)
-                .background(t.graphite)
-                .then(if (t.studio) Modifier else Modifier.border(1.dp, t.line, shape))
-                .padding(if (t.studio) 20.dp else t.css.spaceLg),
-        ) {
-            itemsIndexed(lines) { _, line -> Text(line, color = t.ink, style = style) }
+    val base = if (t.studio) ui(13f, lineHeight = 1.75f, mono = true) else ui(rem(0.72f), lineHeight = 1.55f, mono = true)
+    val style = base.copy(textDirection = codeDirection)
+    val tokens = tokenStyle(t)
+    val clipboard = LocalClipboard.current
+    val safeClipboard = remember(clipboard, notices) { SafeCopyClipboard(clipboard, notices) }
+    CompositionLocalProvider(LocalClipboard provides safeClipboard) {
+        SelectionContainer {
+            LazyColumn(
+                Modifier
+                    .testTag(FileBrowserTags.Text)
+                    .fillMaxSize()
+                    .clip(shape)
+                    .background(t.graphite)
+                    .then(if (t.studio) Modifier else Modifier.border(1.dp, t.line, shape))
+                    .padding(if (t.studio) 20.dp else t.css.spaceLg),
+            ) {
+                itemsIndexed(lines) { _, line ->
+                    val shown = remember(line, tokens) { styledDisplay(SafeText.code(line), tokens) }
+                    Text(shown, color = t.ink, style = style)
+                }
+            }
         }
     }
 }
 
-/** Split on newlines (tabs at two columns); a pathological single line is cut into pieces. */
+/**
+ * Split on newlines (tabs at two columns); a pathological single line is cut into pieces.
+ * ta-28i: the CR of a CRLF goes with its line break (a lone CR stays, and shows as a token); a
+ * piece is cut at a character-cluster boundary ([TextCut]), never inside a surrogate pair (which
+ * would draw as two `U+D8xx` tokens) or between a letter and its accent.
+ */
 internal fun previewLines(text: String): List<String> {
     val out = ArrayList<String>()
-    for (line in text.replace("\t", "  ").split('\n')) {
+    val split = text.replace("\t", "  ").split('\n')
+    for ((index, raw) in split.withIndex()) {
+        val line = if (index < split.lastIndex && raw.endsWith('\r')) raw.substring(0, raw.length - 1) else raw
         if (line.length <= LINE_PIECE) {
             out += line
         } else {
             var start = 0
             while (start < line.length) {
-                out += line.substring(start, minOf(line.length, start + LINE_PIECE))
-                start += LINE_PIECE
+                val limit = minOf(line.length, start + LINE_PIECE)
+                var end = TextCut.boundaryAtOrBefore(line, limit)
+                // One cluster longer than a piece (a flood of combining marks): cut at a code point.
+                if (end <= start) end = if (limit < line.length && Character.isLowSurrogate(line[limit]) && limit - 1 > start) limit - 1 else limit
+                out += line.substring(start, end)
+                start = end
             }
         }
     }
@@ -789,7 +849,7 @@ fun ItemActionsContent(
     val t = LocalTetherTokens.current
     TetherDialogSurface(
         modifier = modifier,
-        title = entry.name,
+        styledTitle = codeLabel(entry.name),
         footer = { TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel") },
     ) {
         Column(Modifier.padding(top = t.css.spaceMd), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
@@ -830,14 +890,15 @@ fun NamePromptContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = tokenStyle(LocalTetherTokens.current)
     val title = when (prompt.mode) {
-        NamePromptMode.NewFolder -> "New folder"
-        NamePromptMode.NewFile -> "New file"
-        NamePromptMode.Rename -> "Rename ${prompt.entry?.name ?: ""}"
+        NamePromptMode.NewFolder -> AnnotatedString("New folder")
+        NamePromptMode.NewFile -> AnnotatedString("New file")
+        NamePromptMode.Rename -> nameTitle("Rename ", prompt.entry?.name.orEmpty(), "", tokens)
     }
     TetherDialogSurface(
         modifier = modifier,
-        title = title,
+        styledTitle = title,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel")
             TetherKey(
@@ -868,9 +929,11 @@ fun DeleteConfirmContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // ta-28i: the name the reader confirms is the name that is deleted: code rule, never reordered.
+    val tokens = tokenStyle(LocalTetherTokens.current)
     TetherDialogSurface(
         modifier = modifier,
-        title = "Delete ${entry.name}?",
+        styledTitle = remember(entry.name, tokens) { nameTitle("Delete ", entry.name, "?", tokens) },
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel")
             TetherKey(onClick = onConfirm, classes = KeyClasses.ButtonDanger, label = "Delete", enabled = !submitting)
@@ -895,8 +958,19 @@ private fun ColumnScope.AlertText(message: String) {
         verticalAlignment = Alignment.Top,
     ) {
         Icon(TetherIcons.CircleAlert, contentDescription = "Error", tint = t.muted, modifier = Modifier.padding(top = 3.dp).size(14.dp))
-        TetherDialogText(message)
+        TetherDialogText(proseText(message))
     }
+}
+
+/**
+ * A dialog title around a file name: the name by the code rule (tokens styled) between our own
+ * words. ta-28i: the name holds no raw bidi control or invisible, so nothing in it can move the
+ * words around it; its own RTL letters order as letters do.
+ */
+internal fun nameTitle(before: String, name: String, after: String, tokens: SpanStyle): AnnotatedString = buildAnnotatedString {
+    append(before)
+    appendSafe(name, SafeText.Rule.Code, tokens)
+    append(after)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -948,12 +1022,12 @@ fun DestinationPickerFrame(
                     val mode = if (picker.mode == DestinationMode.Move) "Move" else "Copy"
                     if (!t.studio) Text(type.sectionLabel.format(mode), color = t.faint, style = type.sectionLabel.style)
                     Text(
-                        picker.entry.name,
+                        codeLabel(picker.entry.name),
                         color = t.white,
                         style = if (t.studio) ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f) else ui(rem(1.3f), 700, -0.025f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.semantics { heading(); contentDescription = "$mode ${picker.entry.name}" },
+                        modifier = Modifier.semantics { heading(); contentDescription = "$mode ${SafeText.code(picker.entry.name)}" },
                     )
                 }
                 IconKey(TetherIcons.X, "Close", t.ink, onClose, iconSize = 19.dp)
@@ -966,12 +1040,12 @@ fun DestinationPickerFrame(
                     .fillMaxWidth()
                     .border(1.dp, t.line)
                     .padding(t.css.spaceMd)
-                    .semantics(mergeDescendants = true) { contentDescription = "Destination: ${picker.path}" },
+                    .semantics(mergeDescendants = true) { contentDescription = "Destination: ${SafeText.code(picker.path)}" },
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(TetherIcons.FolderOpen, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
-                Text(picker.path, color = t.muted, style = ui(rem(0.7f), mono = true), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(codeLabel(picker.path), color = t.muted, style = ui(rem(0.7f), mono = true), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             // .folder-list
             val listPad = if (studioPhone) 12.dp else t.css.spaceLg
@@ -990,7 +1064,7 @@ fun DestinationPickerFrame(
                             item { FolderButton(TetherIcons.ArrowUp, "Parent folder", "Go up one level") { onBrowse(parent) } }
                         }
                         items(picker.listing?.entries.orEmpty().filter { it.isDirectory }, key = { it.path }) { dir ->
-                            FolderButton(TetherIcons.Folder, dir.name, dir.path) { onBrowse(dir.path) }
+                            FolderButton(TetherIcons.Folder, dir.name, dir.path, code = true) { onBrowse(dir.path) }
                         }
                     }
                 }
@@ -1025,7 +1099,7 @@ private fun Seam(t: TetherTokens) {
 }
 
 @Composable
-private fun FolderButton(icon: ImageVector, title: String, detail: String, onClick: () -> Unit) {
+private fun FolderButton(icon: ImageVector, title: String, detail: String, code: Boolean = false, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     Column {
         Row(
@@ -1041,8 +1115,9 @@ private fun FolderButton(icon: ImageVector, title: String, detail: String, onCli
         ) {
             Box(Modifier.width(24.dp)) { Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp)) }
             Column(verticalArrangement = Arrangement.spacedBy(3.2.dp)) {
-                Text(title, color = t.muted, style = ui(rem(0.8f), 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(detail, color = t.faint, style = ui(rem(0.64f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // ta-28i: a folder's name and path are code (server text); "Parent folder" is ours.
+                Text(if (code) codeLabel(title) else AnnotatedString(title), color = t.muted, style = ui(rem(0.8f), 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (code) codeLabel(detail) else AnnotatedString(detail), color = t.faint, style = ui(rem(0.64f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
