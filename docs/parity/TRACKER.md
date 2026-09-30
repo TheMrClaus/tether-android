@@ -24,7 +24,10 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-29 ~21:30 CEST):** `main` @ `b65fb48` (code). No agents running.
+**Resume point (2026-09-30 afternoon CEST, new coordinator session):** `main` code head `07ba88f`. **In progress:** ta-28i
+(text rules on file preview / file names / sidebar / notifications / search / question card / MainShell copy) and ta-fz3 (link
+safety), each a maker in its own worktree under `tether-android-wt/`; both get a verifier + security review before merge.
+Merged + verified 2026-09-30: ta-96z, T6.5, ta-blf, T7.3.
 **Merged + verified 2026-09-29:** ta-hra, ta-js0 + ta-epo, ta-koy (protocol v132), **T6.3** approvals/questions/denials, **T6.4**
 sub-agent runs / background commands / guarded Stop / todo bar, **T7.2** Model/Effort/Mode + Codex/OpenCode panels, **ta-41x + ta-jt9**
 sign-in/sign-out hardening, **T13.2** offline mode + stale indicators (`9219a2d`; saved copies never actionable), **T6.6** notices /
@@ -335,3 +338,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | T6.5, T7.3, ta-blf | T6.5 conversation timeline merged ff-only `3dd391c`, VERIFIED (+2 rows; verify REFUTED r1 on the needle while reading a long reply, CONFIRMED r2; off-screen needle divergence recorded in the README). Filed ta-blf (transcript renders bidi controls raw). T7.3 in progress. | T7.3 review; ta-blf |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-blf | Transcript text spoofing fix merged ff-only, VERIFIED after 5 rounds: risky characters drawn as visible tokens (code: every bidi/invisible char; prose: all explicit bidi formatting chars, marks only beside real RTL letters, ALM only beside Arabic); copy carries the visible form with a notice and an explicit Copy raw; shared rules moved to core/designsystem. Follow-ups ta-28i (other surfaces), ta-fz3 (links). | T7.3 r3 (terminal rule) |
 | 2026-09-30 | claude-main / Opus 5.5 | T7.3 | T7.3 slash commands / `!` run + background commands / command output / @mentions merged ff-only `07ba88f`, VERIFIED (+8 rows). 3 rounds: command output shown through the shared terminal rule (nothing hidden), delegated sends origin- and lock-bound, durable mentions origin-keyed. Follow-ups ta-4dm, ta-10h. No agents running. | 0.7.8 draft; ta-28i, ta-fz3, T7.4 |
+| 2026-09-30 | claude-main / Opus 5.5 (new coordinator session) | ta-28i, ta-fz3 | Took over from disk (0.7.8 draft already checked: code 25, same cert). Dispatched two makers in parallel worktrees: ta-28i (text rules on the remaining surfaces, file preview first) and ta-fz3 (link safety). | verifier + security review for each |
