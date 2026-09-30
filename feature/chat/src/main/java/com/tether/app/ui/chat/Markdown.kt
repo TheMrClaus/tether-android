@@ -2,7 +2,6 @@ package com.tether.app.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -88,12 +87,12 @@ import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeText
 import com.tether.app.ui.text.tokenStyle
 import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.proseDirection
 import com.tether.app.ui.text.appendSafe
 import com.tether.app.ui.text.appendStyled
 import com.tether.app.ui.text.LocalCopyNotices
 import com.tether.app.ui.text.ProsePlan
 import com.tether.app.ui.text.copySafely
-import com.tether.app.ui.text.copyRaw
 
 /**
  * T6.1: renders the [parseMarkdown] AST the way the web paints `components/markdown.tsx` with the
@@ -313,7 +312,8 @@ internal fun MdText(
     }
     Text(
         text,
-        style = style,
+        // r4: prose lays out in its content's direction; a caller that set one (a fence: LTR) keeps it.
+        style = if (style.textDirection == androidx.compose.ui.text.style.TextDirection.Unspecified) style.copy(textDirection = proseDirection) else style,
         color = color,
         textAlign = textAlign ?: TextAlign.Unspecified,
         softWrap = softWrap,
@@ -763,9 +763,9 @@ private class TablePolicy(private val cols: Int, private val geo: TableGeometry)
  * key riding the top-right corner. Copy shows a check ("Copied") for 1.5s. No syntax
  * highlighting: the web renders fences as plain text.
  *
- * ta-blf r2: a tap copies the body the SAFE way ([copySafely]: a hidden terminal / bidi control is
- * copied as its visible token, and the copy notice offers "Copy raw"); a long press copies the
- * EXACT raw body at once. While clamped only a peek of the body is laid out (the T6.2 pre rule:
+ * ta-blf: a tap copies the body the SAFE way ([copySafely]: a hidden terminal / bidi control is
+ * copied as its visible token), and the copy notice's "Copy raw" is the one way to the exact raw
+ * body (r4: no long press copies raw). While clamped only a peek of the body is laid out (the T6.2 pre rule:
  * the first 64 lines, 4,096 characters), so a megabyte fence, or one full of tokens, costs its peek.
  */
 @Composable
@@ -828,7 +828,6 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
         CopyKey(
             copied = copied,
             onClick = { if (copySafely(context, SafeText.code(block.code), notices, raw = block.code, label = "code")) copied = true },
-            onLongClick = { if (copyRaw(context, block.code, notices, "code")) copied = true },
             modifier = Modifier.align(Alignment.TopEnd).offset(x = -t.css.spaceXs, y = t.css.spaceXs),
         )
     }
@@ -841,7 +840,7 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
  * `--key-face-deep` with the pressed bevel. Lucide Copy / Check at 14px.
  */
 @Composable
-private fun CopyKey(copied: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -866,14 +865,7 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, onLongClick: () -> Uni
                 border = CssBorder(1.dp, t.keySide),
                 shadows = shadows,
             )
-            .combinedClickable(
-                interactionSource = interaction,
-                indication = null,
-                role = Role.Button,
-                onLongClickLabel = "Copy raw",
-                onLongClick = onLongClick,
-                onClick = onClick,
-            )
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {

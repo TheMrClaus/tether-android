@@ -21,42 +21,34 @@ package com.tether.app.ui.text
  * content. No surface that draws through this file ever draws a raw U+2060: both rules make it a
  * token. So a look-alike typed as text ("⟨U+202E⟩" without the mark) can never pass for a token.
  *
- * PROSE ([Rule.Prose]; bubbles, markdown, thinking, card copy, answered questions, todo items):
- * - Always tokens: the embeddings and overrides LRE RLE PDF LRO RLO (U+202A-U+202E); C0 controls
- *   except TAB, LF and the CR of a CRLF; DEL; C1; the LINE and PARAGRAPH SEPARATORS (U+2028,
- *   U+2029: they break a line without ending the bidi paragraph); WORD JOINER; tag characters,
- *   except in the three RGI subdivision flags (U+1F3F4 + `gbeng` / `gbsct` / `gbwls` + U+E007F).
- * - The isolates LRI RLI FSI PDI (U+2066-U+2069) and the marks LRM RLM ALM (U+200E, U+200F,
- *   U+061C) are how real RTL text is written, but they can reorder text as fully as an override
- *   (RLI + one letter per LRI...PDI draws "resrap" as "parser"; RLMs between letters do the same;
- *   RLI around "/ tmp" draws "tmp /"; RLI around "1 - 2" draws "2 - 1"; an isolated "-rf" beside
- *   "rm" in an RTL line trades places with it). So one is drawn raw only where real RTL text needs
- *   it ([ProsePlan]); otherwise it is a token. An RTL LETTER below is a real letter (Lu/Ll/Lt/Lo)
- *   of bidi class R or AL: the geresh, gershayim and tatweel are not letters. A WORD GAP is
- *   U+0020, U+00A0, U+3000 or a tab: a hair, thin or narrow space is not.
- *   - never on a LINE with no RTL letter: there they have no job but to reorder;
- *   - a mark is kept only when one of its nearest strong neighbours is an RTL letter, and never
- *     when it cuts a run in two (L or digits on both sides; an LRM between two RTL letters). So a
- *     leading RLM followed by Latin is a token;
- *   - an isolate nested inside another is always a token (with its PDI), and so is a stray PDI;
- *   - an isolate whose content has no letter of its own direction is a token (an RLI around
- *     Latin only, an LRI around Hebrew only). An LRI / FSI around neutrals only (an emoji) is an
- *     LTR island that keeps their order and reorders nothing around it, so it is kept;
- *   - an isolate whose edge splits a word (letters or digits of the SAME direction on both sides
- *     of the edge, across punctuation but not across a word gap) is a token;
- *   - an isolate that could trade places with a word: its paragraph (the first strong character
- *     outside every isolate, UAX #9 P2) runs the other way, and the nearest letter outside it on
- *     either side, across spaces, is of the isolate's own direction (a line edge counts as the
- *     paragraph). Without the isolate those two would read as one run; with it they reorder.
- *   What stays possible, by design: RTL text is drawn right to left and mixed-direction text takes
- *   the order UAX #9 gives it (a Hebrew line's "1 - 2" reads "2 - 1" with no control at all).
- *   That is the algorithm doing its job for an RTL reader, not something to hide.
+ * PROSE ([Rule.Prose]; bubbles, markdown, thinking, card copy, answered questions, todo items).
+ * r4 (coordinator decision): every EXPLICIT bidi formatting character is a visible token, with no
+ * exceptions; the IMPLICIT bidi of letters is left alone, so real Hebrew and Arabic order as the
+ * Unicode Bidi Algorithm orders them.
+ * - Always tokens: the embeddings and overrides LRE RLE PDF LRO RLO (U+202A-U+202E); the isolates
+ *   LRI RLI FSI PDI (U+2066-U+2069); C0 controls except TAB, LF and the CR of a CRLF; DEL; C1; the
+ *   LINE and PARAGRAPH SEPARATORS (U+2028, U+2029: they break a line without ending the bidi
+ *   paragraph); WORD JOINER; tag characters, except in the three RGI subdivision flags (U+1F3F4 +
+ *   `gbeng` / `gbsct` / `gbwls` + U+E007F).
+ * - The marks LRM RLM ALM (U+200E, U+200F, U+061C) are drawn raw only beside a real RTL letter
+ *   ([ProsePlan]: its nearest strong neighbour on one side is a Lu/Ll/Lt/Lo letter of class R or
+ *   AL, and it does not cut a run in two); every other mark is a token.
+ * Why isolates are never raw: an isolate (or an embedding) can order the words it holds against
+ *   the words around it as fully as an override can ("mv \u2066old\u2069 \u2066new\u2069 \u05E9" reads "new old mv";
+ *   "Note: \u05D0 \u2066approve\u2069 \u2066not\u2069 \u2066do\u2069 \u05D1" reads "do not approve"; an RLI around one Hebrew letter
+ *   reorders the Latin words and numbers inside it). Three rounds of case-by-case rules kept
+ *   meeting new swaps, so the rule is now absolute. THE COST, accepted: legitimate isolate use
+ *   shows tokens too, e.g. a Hebrew sentence with its file names wrapped in LRI...PDI
+ *   ("\u05D4\u05E7\u05D5\u05D1\u05E5 ⟨U+2066⟩config.json⟨U+2069⟩ \u05E0\u05DE\u05D7\u05E7"). The text stays whole and readable; only the
+ *   isolate is visible. Marks next to RTL letters, Persian ZWNJ, emoji, flags and digits are not
+ *   affected.
+ * - Direction: prose lays out in its content's direction (the first strong character), in an LTR
+ *   and in an RTL UI alike (`proseDirection`, SafeTextCompose.kt), so a Latin-first line is LTR and
+ *   a Hebrew-first line RTL everywhere.
  * - Kept: ZWSP, ZWNJ, ZWJ, BOM, variation selectors and the other default-ignorables. They shape
  *   (Persian ZWNJ, emoji ZWJ sequences, VS16) or hint line breaks, and never reorder.
- * Each block is its own Text layout and Android starts a new bidi paragraph at every '\n', so
- * nothing reaches past its line. Nothing is inserted around paragraphs: wrapping one in FSI...PDI
- * would hide its first strong letter from the paragraph-direction rule (UAX #9 P2) and flip an
- * Arabic paragraph to LTR.
+ * Each block is its own Text layout and Android starts a new bidi paragraph at every '\n'. Nothing
+ * is ever inserted into prose.
  *
  * CODE ([Rule.Code]; fences, inline code, tool I/O, diffs, paths, names, ids): code shows exactly
  * what it holds, so every code point that is invisible or reorders is a token: all twelve bidi
@@ -71,11 +63,13 @@ package com.tether.app.ui.text
  *
  * COPY ([forCopy], [original]): a copy never carries a hidden control the reader did not see.
  * The DANGEROUS set ([dangerous]: C0 except TAB/LF/CRLF, DEL, C1, U+202A-U+202E,
- * U+2066-U+2069, tag characters outside the three flags), and any mark the plan made a token, is
+ * U+2066-U+2069, U+2028/U+2029 (line terminators to some tools), tag characters outside the
+ * three flags), and any mark drawn as a token, is
  * copied as its VISIBLE token text, without the mark (`⟨U+001B⟩`), and the copy reports how many
  * ("N hidden control characters copied as ⟨U+…⟩"). Everything else, including every character
  * real RTL writing needs (letters, the marks it kept, ZWNJ/ZWJ), copies exactly. [original] gives
- * the exact source text for an explicit "Copy raw". Inserted break opportunities never reach a
+ * the exact source text for the copy notice's "Copy raw", the only raw copy path; [hiddenIn]
+ * counts exactly what [forCopy] would show. Inserted break opportunities never reach a
  * copy, and neither does a U+2060 left over when a selection cuts a token in two. A selection that
  * STARTS between the two halves of a break opportunity keeps a leading U+200B: the copy path hands
  * over the selected text only, no offset, and in prose a U+200B is real content, so it cannot be
@@ -167,7 +161,7 @@ object SafeText {
     internal fun isControl(cp: Int): Boolean = (cp < 0x20 && cp != 0x09 && cp != 0x0A) || cp == 0x7F || cp in 0x80..0x9F
 
     /** Prose's unconditional tokens (tags are decided per run, isolates and marks by the plan). */
-    internal fun proseAlways(cp: Int): Boolean = cp in 0x202A..0x202E || cp == MARK.code || isControl(cp) || cp == 0x2028 || cp == 0x2029
+    internal fun proseAlways(cp: Int): Boolean = cp in 0x202A..0x202E || isIsolate(cp) || cp == MARK.code || isControl(cp) || cp == 0x2028 || cp == 0x2029
 
     /** Code's set (see the class doc); a CR is judged with its successor. */
     fun codeEscapes(cp: Int): Boolean {
@@ -189,7 +183,7 @@ object SafeText {
             cp in 0xFFF0..0xFFF8 || cp in 0x1BCA0..0x1BCA3 || cp in 0x1D173..0x1D17A || cp in 0xE0000..0xE0FFF
 
     /** The copy's DANGEROUS set (a CR only when it is not the CR of a CRLF: judged by the caller). */
-    fun dangerous(cp: Int): Boolean = isControl(cp) || cp in 0x202A..0x202E || isIsolate(cp) || isTag(cp)
+    fun dangerous(cp: Int): Boolean = isControl(cp) || cp in 0x202A..0x202E || isIsolate(cp) || isTag(cp) || cp == 0x2028 || cp == 0x2029
 
     /** [start, end) (UTF-16) is a tag run that, after U+1F3F4, spells one of the three RGI flags. */
     internal fun rgiFlag(text: CharSequence, start: Int, end: Int): Boolean {
@@ -259,7 +253,7 @@ object SafeText {
                     run = i
                     continue
                 }
-                if (rule == Rule.Prose && (isIsolate(cp) || isMark(cp))) {
+                if (rule == Rule.Prose && isMark(cp)) {
                     val p = plan ?: ProsePlan.of(text).also { plan = it }
                     if (p.take()) {
                         i += len
@@ -463,7 +457,7 @@ object SafeText {
     /** The clipboard text of a drawn [display] (see COPY in the class doc). */
     fun forCopy(display: CharSequence): Copied {
         val s = display.toString()
-        if (s.none { it == MARK || it < ' ' || it in '\u007F'..'\u009F' || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uDB40' }) {
+        if (s.none { it == MARK || it < ' ' || it in '\u007F'..'\u009F' || it in '\u2028'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uDB40' }) {
             return Copied(s, 0)
         }
         val out = StringBuilder(s.length)
@@ -518,29 +512,11 @@ object SafeText {
         return Copied(out.toString(), hidden)
     }
 
-    /** How many code points of the dangerous set a RAW text holds (a CRLF and the three flags are not). */
-    fun hiddenIn(raw: CharSequence): Int {
-        var n = 0
-        var i = 0
-        while (i < raw.length) {
-            val cp = Character.codePointAt(raw, i)
-            if (isTag(cp)) {
-                var e = i
-                while (e + 1 < raw.length && Character.isHighSurrogate(raw[e]) && isTag(Character.codePointAt(raw, e))) e += 2
-                if (e > i && rgiFlag(raw, i, e)) {
-                    i = e
-                    continue
-                }
-            }
-            if (dangerous(cp) && !(cp == '\r'.code && i + 1 < raw.length && raw[i + 1] == '\n')) n++
-            i += Character.charCount(cp)
-        }
-        return n
-    }
-
-    /** The notice a raw copy that holds hidden characters shows. */
-    fun includedNotice(hidden: Int): String =
-        if (hidden == 1) "Copied raw: 1 hidden control character included" else "Copied raw: $hidden hidden control characters included"
+    /**
+     * How many hidden control characters a copy of [raw], drawn by [rule], shows as tokens: exactly
+     * what [forCopy] counts (the dangerous set, and every mark the rule makes a token).
+     */
+    fun hiddenIn(raw: String, rule: Rule = Rule.Code): Int = forCopy(encode(raw, rule)).hidden
 
     /** The notice a copy with hidden characters shows. */
     fun copyNotice(hidden: Int): String =

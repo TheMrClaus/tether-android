@@ -54,16 +54,79 @@ class SafeTextTest {
 
     // ---- prose: isolates and marks (r2) ------------------------------------------------------
 
-    @Test fun realRtlTextKeepsItsIsolatesAndMarks() {
-        for (text in listOf(
-            "$HEBREW \u05D1$LRI" + "npm$PDI $HEBREW", // a Hebrew prefix letter on an isolated LTR name
-            "$HEBREW ${LRI}config.json$PDI, $HEBREW",
-            "$ARABIC ${RLI}$HEBREW$PDI abc",
-            "C++$LRM $HEBREW", // an LRM between an LTR word and Hebrew
-            "$HEBREW$RLM.", // an RLM after Hebrew, before punctuation
-            "$RLM$HEBREW iPhone", // a leading RLM before Hebrew
-            "\u2068$HEBREW$PDI and more",
-        )) assertSame(text.map { "%04X".format(it.code) }.toString(), text, SafeText.prose(text))
+    // ---- r4: every isolate is a token; marks only beside a real RTL letter --------------------
+
+    @Test fun everyIsolateIsATokenInProseNoExceptions() {
+        for (cp in 0x2066..0x2069) assertEquals("a${tok(cp)}b", SafeText.prose("a${s(cp)}b"))
+        for (line in listOf(
+            "mv ${LRI}old$PDI ${LRI}new$PDI \u05E9", "rm ${LRI}-rf$PDI \u05E9", "Note: \u05D0 ${LRI}approve$PDI ${LRI}not$PDI ${LRI}do$PDI \u05D1",
+            "x ${RLI}abc \u05D0 def$PDI y", "pay ${RLI}100 to 900 \u05E9$PDI now", "$HEBREW ${LRI}config.json$PDI $HEBREW", "\u05D4\u05D9\u05D9 $LRI\uD83D\uDE00$PDI",
+            "$ARABIC ${RLI}$HEBREW$PDI abc", "\u2068$HEBREW$PDI and more",
+        )) {
+            val shown = SafeText.prose(line)
+            for (c in listOf(LRI, RLI, PDI, "\u2068")) assertFalse("raw %04X in ${line.map { "%04X".format(it.code) }}".format(c[0].code), shown.contains(c))
+            assertEquals(line, SafeText.original(shown))
+        }
+    }
+
+    /**
+     * r4: the legitimate corpus (the verifier's, extended) draws no token but its isolates: Hebrew
+     * and Arabic prose, RLM / ALM beside RTL letters, Persian ZWNJ, emoji, flags, digits.
+     */
+    @Test fun aLegitimateCorpusShowsNoTokenButItsIsolates() {
+        val corpus = listOf(
+            "\u05D4\u05E7\u05D5\u05D1\u05E5 ${LRI}config.json$PDI \u05E0\u05DE\u05D7\u05E7",
+            "${LRI}README.md$PDI \u05D4\u05D5\u05D0 \u05D4\u05E7\u05D5\u05D1\u05E5",
+            "\u05D6\u05E8 \u2068https://example.com/a?b=1$PDI \u0627\u0644\u0622\u0646",
+            "\u05E9\u05DC\u05D5\u05DD!$RLM",
+            "\u0627\u0644\u0646\u0633\u0628\u0629 30%\u061C \u0641\u0642\u0637",
+            "\u05D4\u05E9\u05EA\u05DE\u05E9 \u05D1-C++$LRM \u05E2\u05DB\u05E9\u05D9\u05D5",
+            "The word ${RLI}\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD$PDI means hello world",
+            "\u05D4\u05D9\u05D9 $LRI\uD83D\uDE00$PDI",
+            "\u05D4\u05DE\u05D7\u05D9\u05E8: ${RLM}100 \u20AA",
+            "$RLM(\u05D4\u05E2\u05E8\u05D4) \u05E9\u05DC\u05D5\u05DD",
+            "\u0627\u0644\u0646\u0635 $RLM\"\u0645\u0642\u062A\u0628\u0633\"$RLM \u0647\u0646\u0627",
+            "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 \u0628\u0631\u0648\u0645", // Persian with ZWNJ
+            "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 \u2764\uFE0F \uD83C\uDDEE\uD83C\uDDF1 $BLACK_FLAG" + tagText("gbwls") + s(0xE007F),
+            "$HEBREW 1,234.50 \u0661\u0662\u0663 $ARABIC",
+        )
+        for (line in corpus) {
+            val shown = SafeText.prose(line)
+            var at = shown.indexOf(SafeText.MARK)
+            while (at >= 0) {
+                val u = SafeText.unitAt(shown, at)!!
+                assertTrue("a false token (not an isolate) in ${line.map { "%04X".format(it.code) }}", u.isBreak || u.cp in 0x2066..0x2069)
+                at = shown.indexOf(SafeText.MARK, u.end)
+            }
+            assertEquals(line, SafeText.original(shown))
+        }
+        // By the r3 rule, a leading RLM before Latin is a token, even on a Hebrew line (accepted).
+        assertTrue(SafeText.prose("${RLM}Hello $HEBREW").startsWith(tok(0x200F)))
+    }
+
+    @Test fun eachLineJudgesItsOwnMarks() {
+        assertEquals("$HEBREW$RLM.\nabc${tok(0x200F)}def", SafeText.prose("$HEBREW$RLM.\nabc${RLM}def"))
+    }
+
+    @Test fun aLinePlanSpansItsPiecesAndCodeTakesNoDecision() {
+        // The RTL letter is in another piece of the same line; the code piece's own mark takes no decision.
+        val plan = ProsePlan.of(listOf(ProsePlan.Segment("abc "), ProsePlan.Segment("x$RLM", code = true), ProsePlan.Segment(" $RLM$HEBREW")))
+        SafeText.encode("abc ", Rule.Prose, plan)
+        assertEquals(" $RLM$HEBREW", SafeText.encode(" $RLM$HEBREW", Rule.Prose, plan))
+        val latin = ProsePlan.of(listOf(ProsePlan.Segment("see "), ProsePlan.Segment("${RLM}abc")))
+        SafeText.encode("see ", Rule.Prose, latin)
+        assertEquals("${tok(0x200F)}abc", SafeText.encode("${RLM}abc", Rule.Prose, latin))
+    }
+
+    @Test fun hiddenInCountsWhatACopyShows() {
+        assertEquals(2, SafeText.hiddenIn("x = 1${RLM}2${RLM}3")) // code: the marks are tokens
+        assertEquals(0, SafeText.hiddenIn("$HEBREW$RLM.", Rule.Prose)) // prose keeps this mark
+        assertEquals(2, SafeText.hiddenIn("$RLO$LRI"))
+        assertEquals(1, SafeText.hiddenIn("a\u2028b"))
+        assertEquals(0, SafeText.hiddenIn("a\r\nb\u200Bc")) // CRLF and ZWSP: not hidden controls
+        for (text in listOf("x = 1${RLM}2", "$RLO$LRI", "a\u2028b", "$HEBREW $LRI" + "npm$PDI")) for (rule in Rule.entries) {
+            assertEquals(SafeText.forCopy(SafeText.encode(text, rule)).hidden, SafeText.hiddenIn(text, rule))
+        }
     }
 
     @Test fun securityPocsAreAllTokens() {
@@ -105,19 +168,6 @@ class SafeTextTest {
         assertFalse(raw(SafeText.prose("$HEBREW rm -rf $RLI/ tmp$geresh$PDI"), RLI, PDI))
     }
 
-    @Test fun onlyRealWordGapsSeparateIsolatedPieces() {
-        for (gap in listOf("\u200A", "\u2009", "\u202F", "\u2002")) {
-            val pieces = "resrap".map { "$LRI$it$PDI" }.joinToString(gap)
-            assertFalse("gap %04X".format(gap[0].code), raw(SafeText.prose("\u05F3$pieces"), LRI, PDI))
-            assertFalse("gap %04X with Hebrew".format(gap[0].code), raw(SafeText.prose("$HEBREW $pieces"), LRI, PDI))
-            // In an LTR line (no swap possible) the gap rule alone decides: not a word gap, so a split word.
-            assertFalse("gap %04X in an LTR line".format(gap[0].code), raw(SafeText.prose("abc ${LRI}r$PDI$gap${LRI}e$PDI $HEBREW"), LRI, PDI))
-        }
-        // A real space is a word gap: two separately isolated words in an LTR line stay raw.
-        val words = "abc ${LRI}rm$PDI ${LRI}rf$PDI $HEBREW"
-        assertEquals(words, SafeText.prose(words))
-    }
-
     @Test fun aMarkIsKeptOnlyBesideARealRtlLetter() {
         assertFalse(raw(SafeText.prose("${RLM}abc $HEBREW"), RLM)) // leading RLM, Latin next: a token
         assertFalse(raw(SafeText.prose("$HEBREW abc${RLM}def"), RLM)) // inside Latin
@@ -126,65 +176,12 @@ class SafeTextTest {
         assertEquals("abc$LRM $HEBREW", SafeText.prose("abc$LRM $HEBREW"))
     }
 
-    @Test fun anIsolateThatCouldTradePlacesWithAWordIsAToken() {
-        // In an RTL line, an isolated LTR word beside an LTR word would swap with it.
-        assertFalse(raw(SafeText.prose("\u05D0 $LRI-rf$PDI rm"), LRI, PDI))
-        assertFalse(raw(SafeText.prose("\u05D0 rm $LRI-rf$PDI"), LRI, PDI))
-        // In an LTR line, an isolated RTL word beside an RTL word.
-        assertFalse(raw(SafeText.prose("abc $RLI$HEBREW$PDI \u05D0"), RLI, PDI))
-        // The review's PoC: its leading RLM is a token, so the line is LTR and holds what it reads.
-        val poc = SafeText.prose("$RLM$LRI-rf$PDI rm \u05D0")
-        assertFalse(raw(poc, RLM))
-        // Between two words of the other direction, or at the paragraph's own edge: kept.
-        assertEquals("$HEBREW $LRI" + "npm$PDI $HEBREW", SafeText.prose("$HEBREW $LRI" + "npm$PDI $HEBREW"))
-        assertEquals("$HEBREW $LRI" + "npm$PDI", SafeText.prose("$HEBREW $LRI" + "npm$PDI"))
-    }
-
     @Test fun lineAndParagraphSeparatorsAreTokensInProse() {
         assertEquals("a${tok(0x2028)}b${tok(0x2029)}c", SafeText.prose("a\u2028b\u2029c"))
         assertFalse(raw(SafeText.prose("$HEBREW\u2028${LRI}x$PDI rm"), LRI, PDI))
-        // Not dangerous: a copy restores them.
-        assertEquals("a\u2028b", SafeText.forCopy(SafeText.prose("a\u2028b")).text)
-    }
-
-    @Test fun anEmojiOnlyIsolateIsKeptInHebrewText() {
-        val emoji = "\uD83D\uDE00"
-        assertEquals("\u05D4\u05D9\u05D9 $LRI$emoji$PDI", SafeText.prose("\u05D4\u05D9\u05D9 $LRI$emoji$PDI"))
-        // An RTL isolate of neutrals would reverse them: a token.
-        assertFalse(raw(SafeText.prose("\u05D4\u05D9\u05D9 $RLI$emoji !$PDI"), RLI))
-    }
-
-    @Test fun anIsolateThatSplitsAWordIsAToken() {
-        // Glued LTR pieces, with Hebrew on the line.
-        assertFalse(SafeText.prose("$HEBREW ${LRI}r$PDI${LRI}e$PDI").contains(LRI))
-        // Across punctuation too.
-        assertFalse(SafeText.prose("$HEBREW ${LRI}gnp$PDI.${LRI}exe$PDI").contains(LRI))
-        // RTL pieces of one Hebrew word.
-        assertFalse(SafeText.prose("abc ${RLI}\u05D0${PDI}${RLI}\u05D1$PDI").contains(RLI))
-        // An LRM between two Hebrew letters cuts the word.
-        assertFalse(SafeText.prose("\u05E9\u05DC${LRM}\u05D5\u05DD").contains(LRM))
-        // A nested isolate is a token (with its PDI), the outer one stays.
-        val nested = SafeText.prose("$HEBREW ${LRI}a ${LRI}b$PDI c$PDI")
-        assertEquals("$HEBREW ${LRI}a ${tok(0x2066)}b${tok(0x2069)} c$PDI", nested)
-        // A stray PDI is a token.
-        assertEquals("$HEBREW ${tok(0x2069)}", SafeText.prose("$HEBREW $PDI"))
-    }
-
-    @Test fun eachLineIsJudgedOnItsOwn() {
-        val text = "$HEBREW ${LRI}npm$PDI\n${LRI}npm$PDI"
-        assertEquals("$HEBREW ${LRI}npm$PDI\n${tok(0x2066)}npm${tok(0x2069)}", SafeText.prose(text))
-    }
-
-    @Test fun aLinePlanSpansItsPiecesAndCodeTakesNoDecision() {
-        // The Hebrew letter is in another piece of the same line: the isolate is still real RTL text.
-        val plan = ProsePlan.of(listOf(ProsePlan.Segment("$HEBREW "), ProsePlan.Segment("x$RLI", code = true), ProsePlan.Segment(" $HEBREW "), ProsePlan.Segment("${LRI}npm$PDI"), ProsePlan.Segment(" $HEBREW")))
-        SafeText.encode("$HEBREW ", Rule.Prose, plan)
-        SafeText.encode(" $HEBREW ", Rule.Prose, plan)
-        assertEquals("${LRI}npm$PDI", SafeText.encode("${LRI}npm$PDI", Rule.Prose, plan))
-        // No RTL anywhere on the line: a token.
-        val latin = ProsePlan.of(listOf(ProsePlan.Segment("see "), ProsePlan.Segment("${LRI}npm$PDI")))
-        SafeText.encode("see ", Rule.Prose, latin)
-        assertEquals("${tok(0x2066)}npm${tok(0x2069)}", SafeText.encode("${LRI}npm$PDI", Rule.Prose, latin))
+        // r4: a line terminator to some tools: a copy shows it and counts it.
+        SafeText.forCopy(SafeText.prose("a\u2028b\u2029c")).let { assertEquals("a${vis(0x2028)}b${vis(0x2029)}c", it.text); assertEquals(2, it.hidden) }
+        SafeText.forCopy("raw\u2028line").let { assertEquals("raw${vis(0x2028)}line", it.text); assertEquals(1, it.hidden) }
     }
 
     // ---- tags (r2) ---------------------------------------------------------------------------

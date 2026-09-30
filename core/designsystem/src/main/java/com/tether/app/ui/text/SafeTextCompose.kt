@@ -27,6 +27,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,15 @@ fun tokenStyle(t: TetherTokens): SpanStyle = SpanStyle(color = t.warning)
 
 /** Code surfaces lay out LTR, like the web's `<pre>` / `<code>` in its LTR page. */
 val codeDirection: TextDirection = TextDirection.Ltr
+
+/**
+ * r4: prose lays out in the direction of its CONTENT (its first strong character, UAX #9 P2), in
+ * an LTR and in an RTL UI alike: a Latin-first line is LTR, a Hebrew-first line RTL. A Compose Text
+ * with no direction would take the UI's layout direction instead, so an RTL UI would draw a Latin
+ * line in an RTL paragraph, against what the text says. Only a text with no strong character at
+ * all falls back to the UI's direction.
+ */
+val proseDirection: TextDirection = TextDirection.Content
 
 /**
  * Append an already-drawn [display] ([SafeText]), styling its tokens: a run of adjacent tokens
@@ -84,11 +95,15 @@ fun styledDisplay(display: String, style: SpanStyle): AnnotatedString {
     return AnnotatedString.Builder(display.length).apply { appendStyled(display, style) }.toAnnotatedString()
 }
 
-/** [text] as prose draws it, tokens styled; remembered. */
+/** [text] as prose draws it, tokens styled, laid out in its content's direction ([proseDirection]); remembered. */
 @Composable
 fun proseText(text: String): AnnotatedString {
     val t = LocalTetherTokens.current
-    return remember(text, t) { styledDisplay(SafeText.prose(text), tokenStyle(t)) }
+    return remember(text, t) {
+        AnnotatedString.Builder(text.length).apply {
+            withStyle(ParagraphStyle(textDirection = proseDirection)) { appendStyled(SafeText.prose(text), tokenStyle(t)) }
+        }.toAnnotatedString()
+    }
 }
 
 /** [text] as code draws it; [breakAnywhere] lets it wrap between any two characters (never inside a token). */
@@ -121,10 +136,10 @@ fun safePreDisplay(terminal: Boolean = false): PreDisplay {
 // ---- copy -------------------------------------------------------------------------------------
 
 /**
- * A copy's notice: its [message], and the exact source a "Copy raw" key would put on the clipboard
- * ([raw]; null: the copy already was raw, no key).
+ * A copy's notice: its [message], and the exact source its "Copy raw" key puts on the clipboard.
+ * r4: that key is the ONLY raw copy path (the code key has no long press).
  */
-class CopyNotice(val message: String, val raw: String?, val serial: Long)
+class CopyNotice(val message: String, val raw: String, val serial: Long)
 
 /** The copy notice in scope (the transcript's); a copy outside one shows none. */
 @Stable
@@ -136,11 +151,6 @@ class CopyNotices {
     /** A safe copy that showed [hidden] controls as tokens; "Copy raw" puts [raw] on the clipboard. */
     fun show(hidden: Int, raw: String) {
         current = CopyNotice(SafeText.copyNotice(hidden), raw, ++serial)
-    }
-
-    /** A raw copy that included [hidden] controls (no key: it already is raw). */
-    fun showIncluded(hidden: Int) {
-        current = CopyNotice(SafeText.includedNotice(hidden), null, ++serial)
     }
 
     /**
@@ -175,19 +185,6 @@ fun copySafely(context: Context, display: String, notices: CopyNotices?, raw: St
     val copied = SafeText.forCopy(display)
     val ok = putOnClipboard(context, copied.text, label)
     if (ok && copied.hidden > 0) notices?.show(copied.hidden, raw ?: SafeText.original(display))
-    return ok
-}
-
-/**
- * r3: copy [raw] exactly (an explicit raw copy, e.g. the code key's long press). When it holds
- * anything of the dangerous set, [notices] says so ("N hidden control characters included"): a raw
- * copy is never silent about what it carries.
- */
-fun copyRaw(context: Context, raw: String, notices: CopyNotices?, label: String = "text"): Boolean {
-    notices?.clear()
-    val ok = putOnClipboard(context, raw, label)
-    val hidden = SafeText.hiddenIn(raw)
-    if (ok && hidden > 0) notices?.showIncluded(hidden)
     return ok
 }
 
@@ -250,7 +247,7 @@ fun CopyNoticeHost(notices: CopyNotices, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         Text(notice.message, style = type.body, color = t.ink, modifier = Modifier.weight(1f, fill = false))
-        val raw = notice.raw ?: return@Row
+        val raw = notice.raw
         TetherKey(
             onClick = {
                 putOnClipboard(context, raw)

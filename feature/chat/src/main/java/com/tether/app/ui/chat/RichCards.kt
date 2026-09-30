@@ -66,6 +66,7 @@ import com.tether.app.ui.text.proseText
 import com.tether.app.ui.text.codeText
 import com.tether.app.ui.text.tokenStyle
 import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.proseDirection
 import com.tether.app.ui.text.appendSafe
 import com.tether.app.ui.text.safePreDisplay
 
@@ -591,7 +592,7 @@ internal fun CodexPlanCard(plan: PlanView) {
                             )
                         }
                         Column(Modifier.weight(1f)) {
-                            Text(stepText, style = type.body.copy(fontSize = rem(0.8f), lineHeight = 1.4.em), color = t.muted)
+                            Text(stepText, style = type.body.copy(fontSize = rem(0.8f), lineHeight = 1.4.em, textDirection = proseDirection), color = t.muted)
                             if (narrow && small.isNotEmpty()) Text(small.uppercase(Locale.ROOT), style = smallStyle, color = tint)
                         }
                         if (!narrow && small.isNotEmpty()) Text(small.uppercase(Locale.ROOT), style = smallStyle, color = tint)
