@@ -24,11 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-30 21:30 CEST, after a usage-limit stop):** `main` @ `8f6f15a` (gate green: 4604 tests). **Merged + verified today:**
-ta-96z, T6.5, ta-blf, T7.3, ta-28i (`27fd169`), ta-fz3 (`7569d54`), **T6.8** (`8f6f15a`, tile says "Blocked by a sign-in page"), **ta-p5l**
-(tether #230 squash `cac6a5a`, README exempt list). **In progress:** T15.1 -> T15.2 Overview (verifier resumed), T9.1 full inspector
-telemetry (verifier resumed), T7.4 attachments (DONE but gate red from a pre-existing bug -> **ta-8lg** stop() clear escape, maker running;
-T7.4 rebases after it lands). Owner: exempt the app's HTTP routes at his gateway (list in tether README, #230).
+**Resume point (2026-09-30 late evening CEST):** `main` @ `1c5af15`. **Merged + verified today:** ta-96z, T6.5, ta-blf, T7.3,
+ta-28i (`27fd169`), ta-fz3 (`7569d54`), T6.8 (`8f6f15a`), ta-p5l (tether #230 `cac6a5a`), **ta-8lg** (`1293f0b`, stop() clear never
+fatal), **T9.1** (`e2ae7c8`, the web's full inspector in the telemetry sheet), **T15.1 + T15.2** (`1c5af15`, Overview feed + screen,
+sidebar entry). **In progress:** T7.4 attachments r2 (security M1 clipboard file:// + verify M1 staged-set race + lows + a T7.4 test
+leak that keeps the gate red), T15.3 Overview host/usage panels, T15.4 top bar. Owner: exempt the app's HTTP routes at his gateway
+(tether README, #230).
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
@@ -148,7 +149,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T9.1 | Inspector + telemetry | DONE | executor-T9.1 @ 2026-09-30 16:58 |  |  |
+| T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
@@ -201,10 +202,10 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
-| T15.1 | Overview feed client (v131) | DONE | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
-| T15.2 | Overview screen | IN-PROGRESS | executor-T15.1 @ 2026-09-30 16:19 |  | coordinator: the brief's 'must not mark seen' over-stated the web rule; OVERVIEW_STUDIO_PLAN says merely DISPLAYING a card must not mark a … |
-| T15.3 | Overview host + daily usage panels | TODO |  |  |  |
-| T15.4 | Top-bar navigation | TODO |  |  |  |
+| T15.1 | Overview feed client (v131) | VERIFIED | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
+| T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
+| T15.3 | Overview host + daily usage panels | IN-PROGRESS | security-executor-T15.3 @ 2026-09-30 20… |  | checkpoint: maker started on branch T15.3 from 1c5af15; reading web ref + core/net ToolMedia/stats pattern. |
+| T15.4 | Top-bar navigation | IN-PROGRESS | executor-T15.4 @ 2026-09-30 20:30 |  |  |
 | T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
 | T15.6 | Queue origin labels (v133) + hidden session count (v135) | TODO |  |  |  |
 | T15.7 | Worktree service links after v134 | TODO |  |  |  |
@@ -365,3 +366,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8, ta-p5l, T9.1, T7.4 | ta-28i merged ff-only `27fd169` VERIFIED; ta-fz3 merged ff-only `7569d54` VERIFIED (3 rounds). T6.8 done (gateway tile copy + wire replay tests), verifier running with ta-p5l. Started T9.1 and T7.4 (T7.4 re-scoped: inline attachments). Follow-up ta-zih. | T6.8/ta-p5l verdicts; Overview, T9.1, T7.4 reviews |
 | 2026-09-30 | claude-main / Opus 5.5 | T15.1, T15.2 | Overview feed client + screen built (branch T15.1 @ `edefad3`, gates green; sidebar entry, phone + tablet shells; T15.3 host/usage slot left). Mark-seen clarified against the web plan (display never marks seen; opening follows the normal rule). Verifier running; a security review (text rules, send gating) follows. | Overview verdict; T9.1, T7.4 |
 | 2026-09-30 21:30 | claude-main / Opus 5.5 (resumed session) | T15.1, T9.1, T7.4, ta-p5l, ta-8lg | Previous coordinator stopped on its 5-hour limit mid-turn; its Overview and T9.1 verifiers died before verdicts (relaunched from their scratch state). main gate re-run green on `8f6f15a` (4604). tether #230 squash-merged `cac6a5a`, ta-p5l VERIFIED. T7.4 gate failure traced to a pre-existing stop() bug -> ta-8lg (own branch). | Overview + T9.1 verdicts; ta-8lg; T7.4 rebase + gate |
+| 2026-09-30 23:00 | claude-main / Opus 5.5 | ta-8lg, T9.1, T15.1, T15.2, T7.4, T15.3, T15.4 | ta-8lg merged `1293f0b` VERIFIED (coordinator red/green recheck). T9.1 merged `e2ae7c8` VERIFIED (follow-up ta-dl4). Overview: T15.1 CONFIRMED, T15.2 REFUTED on text rules -> r2 (+ security L1 caps) -> coordinator recheck -> merged `1c5af15`, both VERIFIED (follow-ups ta-fhl, ta-hoo). T7.4: security FAIL (clipboard file:// URIs), verify REFUTED (staged-set race), gate red from a T7.4 test leak -> r2 running (follow-up ta-ec1). Started T15.3 and T15.4. Also filed ta-exi. | T7.4 r2 recheck; T15.3/T15.4 reviews |
