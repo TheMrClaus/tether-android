@@ -531,9 +531,25 @@ class AttachmentIntakeTest {
 
     // --- r2 L3: a stalled, overlong or abandoned read is ended by closing its stream -------------
 
-    /** Delivers [first] bytes, then blocks in read() until closed (Android's close unblocks a read). */
+    /**
+     * Runs [block] on its own thread and fails the test if it is not done in [ms] (r3: a stall test
+     * that regresses fails instead of hanging the fork).
+     */
+    private fun <T> within(ms: Long, block: () -> T): T =
+        java.util.concurrent.CompletableFuture.supplyAsync(block).get(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+    private fun await(latch: java.util.concurrent.CountDownLatch, what: String) =
+        assertTrue("never $what", latch.await(10, java.util.concurrent.TimeUnit.SECONDS))
+
+    /**
+     * Delivers [first] bytes, then blocks in read() until closed (Android's close unblocks a read).
+     * [stuck] opens once a read is blocked; [closes] counts the closes.
+     */
     private class StallingSource(private val first: Int = 1) : AttachmentSource {
         val closed = java.util.concurrent.CountDownLatch(1)
+        val stuck = java.util.concurrent.CountDownLatch(1)
+        val closes = java.util.concurrent.atomic.AtomicInteger()
+        val readReturned = java.util.concurrent.CountDownLatch(1)
         override val displayName = "stall.bin"
         override val reportedSize: Long? = null
         override val declaredType = "application/octet-stream"
@@ -546,17 +562,77 @@ class AttachmentIntakeTest {
                     b[off] = 'x'.code.toByte()
                     return 1
                 }
-                if (!closed.await(60, java.util.concurrent.TimeUnit.SECONDS)) error("never closed")
-                throw java.io.IOException("closed")
+                stuck.countDown()
+                try {
+                    if (!closed.await(60, java.util.concurrent.TimeUnit.SECONDS)) error("never closed")
+                    throw java.io.IOException("closed")
+                } finally {
+                    readReturned.countDown()
+                }
             }
-            override fun close() = closed.countDown()
+            override fun close() {
+                closes.incrementAndGet()
+                closed.countDown()
+            }
         }
+    }
+
+    private companion object {
+        /** Like a Binder call: an interrupt does not end the wait. */
+        fun awaitUninterruptibly(latch: java.util.concurrent.CountDownLatch, seconds: Long): Boolean {
+            val deadline = System.nanoTime() + seconds * 1_000_000_000
+            var interrupted = false
+            try {
+                while (true) {
+                    try {
+                        return latch.await(deadline - System.nanoTime(), java.util.concurrent.TimeUnit.NANOSECONDS)
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    /** A provider whose open ignores the signal (and interrupts) and returns a stream only when [release] opens. */
+    private class OpenStall : AttachmentSource {
+        val opening = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val lateClosed = java.util.concurrent.CountDownLatch(1)
+        override val displayName = "openstall.bin"
+        override val reportedSize: Long? = null
+        override val declaredType = "application/octet-stream"
+        override fun open(): InputStream? = open(android.os.CancellationSignal())
+        override fun open(signal: android.os.CancellationSignal): InputStream {
+            opening.countDown()
+            awaitUninterruptibly(release, 60)
+            return object : java.io.ByteArrayInputStream("x".toByteArray()) {
+                override fun close() = lateClosed.countDown()
+            }
+        }
+    }
+
+    /** A provider whose query (name, size, type) stalls until [release] opens. */
+    private class QueryStall : AttachmentSource {
+        val asking = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        override val displayName: String?
+            get() {
+                asking.countDown()
+                release.await(60, java.util.concurrent.TimeUnit.SECONDS)
+                return "q.txt"
+            }
+        override val reportedSize: Long? = null
+        override val declaredType = "text/plain"
+        override fun open(): InputStream = "hi".byteInputStream()
     }
 
     private val quick = ReadLimits(idleMs = 200, totalMs = 60_000, pollMs = 20)
 
     @Test
-    fun aReadThatStallsIsEndedByClosingItsStream() {
+    fun aReadThatStallsIsEndedByClosingItsStream() = within(20_000) {
         val stall = StallingSource()
         val started = System.nanoTime()
         assertSame(BoundedRead.TimedOut, readBounded(stall, limits = quick))
@@ -569,7 +645,7 @@ class AttachmentIntakeTest {
     }
 
     @Test
-    fun aReadThatTricklesPastTheTotalIsEndedToo() {
+    fun aReadThatTricklesPastTheTotalIsEndedToo() = within(20_000) {
         val trickle = object : AttachmentSource {
             override val displayName = "slow.bin"
             override val reportedSize: Long? = null
@@ -590,34 +666,147 @@ class AttachmentIntakeTest {
     }
 
     @Test
-    fun aCancelledPickClosesAStalledStream() {
+    fun aCancelledPickClosesAStalledStream() = within(20_000) {
         val stall = StallingSource()
         val active = java.util.concurrent.atomic.AtomicBoolean(true)
         val result = java.util.concurrent.CompletableFuture.supplyAsync { readBounded(stall, active = { active.get() }, limits = ReadLimits(60_000, 60_000, 20)) }
-        Thread.sleep(100)
+        await(stall.stuck, "stuck in a read")
         active.set(false)
         assertSame(BoundedRead.Cancelled, result.get(5, java.util.concurrent.TimeUnit.SECONDS))
         assertEquals(0, stall.closed.count)
     }
 
+    /** Security re-check (ta-wrx): the caller and the reader both reach the close; the stream is closed once. */
     @Test
-    fun aStalledPickNeverHoldsTheStager() = runBlocking {
-        val store = StagedAttachments()
-        val stager = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = ReadLimits(60_000, 60_000, 20))
-        // Cancelled (the composer left): the stream is closed and the stager is free at once.
+    fun aWalkedAwayFromStreamIsClosedExactlyOnce() = within(20_000) {
         val stall = StallingSource()
-        val job = launch(Dispatchers.Default) { stager.stage("s1", listOf(stall)) }
-        Thread.sleep(100)
-        job.cancel()
-        withTimeout(5_000) { job.join() }
-        assertEquals(0, stall.closed.count)
-        withTimeout(5_000) { stager.stage("s1", listOf(FakeSource("next.txt", 2))) }
-        assertEquals(listOf("next.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
-        // Timed out: the same, with the web's "Could not read".
-        val timed = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = quick)
-        assertEquals(listOf(AttachmentCopy.unreadable("stall.bin")), withTimeout(5_000) { timed.stage("s1", listOf(StallingSource())) })
-        withTimeout(5_000) { timed.stage("s1", listOf(FakeSource("after.txt", 2))) }
-        assertEquals(listOf("next.txt", "after.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+        assertSame(BoundedRead.TimedOut, readBounded(stall, limits = quick))
+        // The reader's IOException, its own close attempt, and the call's end have all happened.
+        await(stall.readReturned, "returned from the read")
+        Thread.sleep(50)
+        assertEquals(1, stall.closes.get())
+    }
+
+    /** F2 (r3): the pick is cancelled only once its read is known to be stuck (no sleeps). */
+    @Test
+    fun aStalledPickNeverHoldsTheStager() = within(30_000) {
+        runBlocking {
+            val store = StagedAttachments()
+            val stager = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = ReadLimits(60_000, 60_000, 20))
+            // Cancelled (the composer left): the stream is closed and the stager is free at once.
+            val stall = StallingSource()
+            val job = launch(Dispatchers.Default) { stager.stage("s1", listOf(stall)) }
+            await(stall.stuck, "stuck in a read")
+            job.cancel()
+            withTimeout(5_000) { job.join() }
+            await(stall.closed, "closed")
+            withTimeout(5_000) { stager.stage("s1", listOf(FakeSource("next.txt", 2))) }
+            assertEquals(listOf("next.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+            // Timed out: the same, with the web's "Could not read".
+            val timed = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = quick)
+            assertEquals(listOf(AttachmentCopy.unreadable("stall.bin")), withTimeout(5_000) { timed.stage("s1", listOf(StallingSource())) })
+            withTimeout(5_000) { timed.stage("s1", listOf(FakeSource("after.txt", 2))) }
+            assertEquals(listOf("next.txt", "after.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+        }
+    }
+
+    // --- r3 F1: a provider that stalls in its open or its query never holds the stager ---------
+
+    @Test
+    fun anOpenThatIgnoresItsSignalIsWalkedAwayFromAndItsLateStreamClosed() = within(20_000) {
+        val stall = OpenStall()
+        val started = System.nanoTime()
+        assertSame(BoundedRead.TimedOut, readBounded(stall, limits = ReadLimits(idleMs = 200, totalMs = 300, pollMs = 20)))
+        val ms = (System.nanoTime() - started) / 1_000_000
+        assertTrue("took $ms ms against 200/300 ms limits", ms < 2_000)
+        // The provider answers at last: its stream is closed, its bytes discarded.
+        stall.release.countDown()
+        await(stall.lateClosed, "closed the late stream")
+    }
+
+    @Test
+    fun aCancelledPickStalledInItsOpenNeverHoldsTheStager() = within(30_000) {
+        runBlocking {
+            val store = StagedAttachments()
+            val stager = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = ReadLimits(60_000, 60_000, 20))
+            val stall = OpenStall()
+            try {
+                val job = launch(Dispatchers.Default) { stager.stage("s1", listOf(stall)) }
+                await(stall.opening, "opening")
+                job.cancel()
+                withTimeout(1_500) { stager.stage("s1", listOf(FakeSource("next.txt", 2))) }
+                assertEquals(listOf("next.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+                withTimeout(5_000) { job.join() }
+            } finally {
+                stall.release.countDown()
+            }
+            // The late open is discarded: nothing of it is ever staged.
+            await(stall.lateClosed, "closed the late stream")
+            assertEquals(listOf("next.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+        }
+    }
+
+    @Test
+    fun aQueryThatStallsIsWalkedAwayFromAndTheBatchGoesOn() = within(20_000) {
+        val stall = QueryStall()
+        try {
+            val started = System.nanoTime()
+            val r = AttachmentIntake.intake(listOf(stall, FakeSource("ok.txt", 2)), emptyList(), { 1L }, limits = ReadLimits(100, 200, 20))
+            val ms = (System.nanoTime() - started) / 1_000_000
+            assertTrue("took $ms ms against a 200 ms limit", ms < 2_000)
+            assertEquals(listOf("ok.txt"), r.added.map { it.attachment.name })
+            assertEquals(listOf(AttachmentCopy.unreadable(AttachmentNames.FALLBACK)), r.flashes)
+        } finally {
+            stall.release.countDown()
+        }
+    }
+
+    /** A provider whose query waits for its CancellationSignal (or 10 s), and says whether it saw it. */
+    class SignalQueryProvider : android.content.ContentProvider() {
+        companion object {
+            val sawCancel = java.util.concurrent.CountDownLatch(1)
+        }
+
+        override fun onCreate() = true
+        override fun getType(uri: android.net.Uri) = "text/plain"
+        override fun query(uri: android.net.Uri, projection: Array<out String>?, queryArgs: android.os.Bundle?, signal: android.os.CancellationSignal?): android.database.Cursor? {
+            val cancelled = java.util.concurrent.CountDownLatch(1)
+            signal?.setOnCancelListener { cancelled.countDown() }
+            if (awaitUninterruptibly(cancelled, 10)) sawCancel.countDown()
+            return null
+        }
+        override fun query(uri: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): android.database.Cursor? = query(uri, p, null as android.os.Bundle?, null)
+        override fun openFile(uri: android.net.Uri, mode: String): android.os.ParcelFileDescriptor {
+            val f = java.io.File.createTempFile("q", ".txt").apply { writeText("hi") }
+            return android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri? = null
+        override fun delete(uri: android.net.Uri, s: String?, a: Array<out String>?) = 0
+        override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
+    }
+
+    @Test
+    fun aContentUrisQueryIsGivenASignalThatIsCancelledWhenItIsWalkedAwayFrom() {
+        val authority = "com.slow.provider"
+        val pm = org.robolectric.Shadows.shadowOf(context.packageManager)
+        pm.installPackage(android.content.pm.PackageInfo().apply {
+            packageName = "com.slow"
+            applicationInfo = android.content.pm.ApplicationInfo().apply { packageName = "com.slow" }
+        })
+        pm.addOrUpdateProvider(android.content.pm.ProviderInfo().apply {
+            this.authority = authority
+            packageName = "com.slow"
+            name = SignalQueryProvider::class.java.name
+        })
+        org.robolectric.Robolectric.setupContentProvider(SignalQueryProvider::class.java, authority)
+        val source = ContentUriSource(context.contentResolver, android.net.Uri.parse("content://$authority/x"), AttachmentUriPolicy.of(context))
+        within(20_000) {
+            val started = System.nanoTime()
+            val r = AttachmentIntake.intake(listOf(source), emptyList(), { 1L }, limits = ReadLimits(100, 200, 20))
+            assertTrue("took ${(System.nanoTime() - started) / 1_000_000} ms", System.nanoTime() - started < 2_000_000_000)
+            assertEquals(listOf(AttachmentCopy.unreadable(AttachmentNames.FALLBACK)), r.flashes)
+            await(SignalQueryProvider.sawCancel, "cancelled the query's signal")
+        }
     }
 
     @Test

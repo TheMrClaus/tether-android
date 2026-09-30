@@ -14,10 +14,13 @@ import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.helpers.AttachmentDraft
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -37,8 +40,10 @@ import kotlin.math.roundToInt
  * - (r2, M1) only a `content://` URI of ANOTHER app's provider is ever read ([AttachmentUriPolicy]):
  *   never a `file://` URI (opened inside this process, with its access to the app's own files) and
  *   never one of the app's own providers;
- * - (r2, L3) a read that stalls, runs too long or whose pick went away is ended by closing its
- *   stream ([readBounded]); closing unblocks a read stuck in the provider.
+ * - (r2 L3, r3 F1) every call into the provider (its query, its type, its open, its reads) runs on
+ *   a provider-call thread ([ProviderCalls]) that the caller waits for with deadlines and with the
+ *   pick's cancellation: a provider that stalls anywhere is walked away from, and never holds the
+ *   stager.
  */
 
 /** One item a row handed over (a picked document or picture, a clipboard picture). */
@@ -53,10 +58,18 @@ interface AttachmentSource {
     val declaredType: String?
 
     /**
-     * A pasted picture (the clipboard row: images only). It is kept only when its BYTES are a
-     * picture ([AttachmentTypes.sniff]), whatever the clip claimed, and is named for what they are.
+     * A pasted picture (the clipboard row: images only). It is offered only when its claimed type
+     * is an image, and kept only when its BYTES are a picture ([AttachmentTypes.sniff]), whatever
+     * the clip claimed, and is named for what they are.
      */
     val imagesOnly: Boolean get() = false
+
+    /**
+     * F1 (r3): the provider's claims (name, size, type), asked once. The intake calls this on a
+     * provider-call thread ([ProviderCalls]), never its own: a provider that stalls answering is
+     * walked away from, and [signal] is cancelled then (a query that honours it stops).
+     */
+    fun describe(signal: CancellationSignal): SourceInfo = SourceInfo(displayName, reportedSize, declaredType)
 
     /** The bytes, or null when the provider cannot open them. */
     fun open(): InputStream?
@@ -64,6 +77,9 @@ interface AttachmentSource {
     /** [open], ended early when [signal] is cancelled (a provider that honours it stops opening). */
     fun open(signal: CancellationSignal): InputStream? = open()
 }
+
+/** What a provider claims about one source ([AttachmentSource.describe]); all of it untrusted. */
+class SourceInfo(val displayName: String?, val reportedSize: Long?, val declaredType: String?)
 
 /**
  * M1 (T7.4 r2): the only URIs an attachment is ever read from. Everything a picker result or the
@@ -74,6 +90,9 @@ interface AttachmentSource {
  *   closed), and that provider must not be one of this app's own: a URI naming one of them would
  *   have the app attach its own data. A user prefix (`10@media`) is looked up without it, so an
  *   own provider under another user's prefix is refused too.
+ * Known limit (fails closed, r3): the lookup is made in THIS profile, so a cross-profile pick
+ * (`content://10@authority`) whose provider is installed only in the other profile does not
+ * resolve here and is refused ("Could not read").
  * [providerPackage] answers the package that owns an authority (null: none resolves).
  */
 class AttachmentUriPolicy(private val ownPackage: String, private val providerPackage: (authority: String) -> String?) {
@@ -101,7 +120,8 @@ class AttachmentUriPolicy(private val ownPackage: String, private val providerPa
 /**
  * A document, a Photo Picker picture or a clipboard picture, read through the [resolver]. Nothing
  * about a URI the [policy] refuses is asked of anyone (no name, size or type query, no open): it
- * reads as unopenable ("Could not read").
+ * reads as unopenable ("Could not read"). A pasted picture ([imagesOnly]) is typed by its provider,
+ * else by the clip's [clipType], and named `pasted-image.<subtype>` (no query).
  */
 class ContentUriSource(
     private val resolver: ContentResolver,
@@ -110,30 +130,38 @@ class ContentUriSource(
     private val nameOverride: String? = null,
     private val typeOverride: String? = null,
     override val imagesOnly: Boolean = false,
+    private val clipType: String? = null,
 ) : AttachmentSource {
     private val allowed: Boolean by lazy { policy.allows(uri) }
 
-    private val columns: Pair<String?, Long?> by lazy {
+    @Volatile private var described: SourceInfo? = null
+
+    override fun describe(signal: CancellationSignal): SourceInfo {
+        described?.let { return it }
+        if (!allowed) return SourceInfo(nameOverride, null, typeOverride).also { described = it }
         var name: String? = null
         var size: Long? = null
-        if (!allowed) return@lazy name to size
-        try {
-            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 && !cursor.isNull(it) }?.let { name = cursor.getString(it) }
-                    cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !cursor.isNull(it) }?.let { size = cursor.getLong(it) }
+        if (!imagesOnly && nameOverride == null) {
+            try {
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null, signal)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 && !cursor.isNull(it) }?.let { name = cursor.getString(it) }
+                        cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !cursor.isNull(it) }?.let { size = cursor.getLong(it) }
+                    }
                 }
+            } catch (_: RuntimeException) {
+                // A provider that cannot answer (or a cancelled query): no name, unknown size (the read still bounds it).
             }
-        } catch (_: RuntimeException) {
-            // A provider that cannot answer: no name, unknown size (the read still bounds it).
         }
-        name to size
+        val type = (typeOverride ?: runCatching { resolver.getType(uri) }.getOrNull() ?: clipType)?.lowercase()
+        if (imagesOnly) name = ClipboardImages.pastedName(type?.takeIf { it.startsWith("image/") } ?: "image/png")
+        return SourceInfo(nameOverride ?: name, size?.takeIf { it >= 0 }, type).also { described = it }
     }
 
-    override val displayName: String? get() = nameOverride ?: columns.first
-    override val reportedSize: Long? get() = columns.second?.takeIf { it >= 0 }
-    override val declaredType: String?
-        get() = typeOverride ?: if (allowed) runCatching { resolver.getType(uri) }.getOrNull() else null
+    // Direct reads of the claims ask the provider on the caller's thread: the intake never does.
+    override val displayName: String? get() = describe(CancellationSignal()).displayName
+    override val reportedSize: Long? get() = describe(CancellationSignal()).reportedSize
+    override val declaredType: String? get() = describe(CancellationSignal()).declaredType
 
     override fun open(): InputStream? = open(CancellationSignal())
 
@@ -265,10 +293,10 @@ sealed interface BoundedRead {
 }
 
 /**
- * L3 (T7.4 r2): how long one source may take. A read that delivers nothing for [idleMs], or is not
- * done after [totalMs], is ended by closing its stream (a picked cloud file may be slow; a provider
- * that never answers must not hold the stager, and an IO thread, forever). [pollMs] is how often the
- * watchdog looks (the same look ends a read whose pick was cancelled).
+ * L3 (T7.4 r2): how long one provider call may take. A read that delivers nothing for [idleMs], or
+ * any call not done after [totalMs], is walked away from (a picked cloud file may be slow; a
+ * provider that never answers must not hold the stager). [pollMs] is how often the waiting caller
+ * looks at its deadlines and at the pick's cancellation.
  */
 class ReadLimits(val idleMs: Long, val totalMs: Long, val pollMs: Long = 100) {
     companion object {
@@ -276,24 +304,84 @@ class ReadLimits(val idleMs: Long, val totalMs: Long, val pollMs: Long = 100) {
     }
 }
 
-/** L3: the one daemon thread that ends stalled or abandoned reads (it only ever closes streams). */
-internal object ReadWatchdog {
-    private val timer: ScheduledExecutorService by lazy {
-        ScheduledThreadPoolExecutor(1) { r -> Thread(r, "attachment-read-watchdog").apply { isDaemon = true } }
-            .apply { removeOnCancelPolicy = true }
+/**
+ * F1 (T7.4 r3): every call into another app's provider (its query and type lookup, its open, its
+ * reads) runs here, on at most [MAX_THREADS] daemon threads. The caller waits for it itself, looking
+ * every [ReadLimits.pollMs] at its deadlines and at the pick's cancellation; past them it walks away:
+ * `abandon` cancels the call's signal and closes what the call opened (which unblocks a read), the
+ * call's late result is discarded, and the caller (the stager, and its lock) goes on at once. A
+ * provider that never returns keeps its thread (a Binder call cannot be interrupted), never the
+ * stager; with every thread stuck, a new call is refused at once ("Could not read").
+ */
+internal object ProviderCalls {
+    const val MAX_THREADS = 8
+
+    private val pool = ThreadPoolExecutor(0, MAX_THREADS, 30, TimeUnit.SECONDS, SynchronousQueue()) { r ->
+        Thread(r, "attachment-provider-call").apply { isDaemon = true }
     }
 
-    fun every(pollMs: Long, check: () -> Unit): ScheduledFuture<*> =
-        timer.scheduleWithFixedDelay({ runCatching(check) }, pollMs, pollMs, TimeUnit.MILLISECONDS)
+    sealed interface Outcome<out T> {
+        class Done<T>(val value: T) : Outcome<T>
+        data object Failed : Outcome<Nothing>
+        data object TimedOut : Outcome<Nothing>
+        data object Cancelled : Outcome<Nothing>
+    }
+
+    private fun ms(since: Long) = (System.nanoTime() - since) / 1_000_000
+
+    /**
+     * Run [call] on a provider-call thread and wait for it: [progress] (moved by the call as it makes
+     * headway) starts the idle deadline, the call's start the total one. [abandon] runs once, on the
+     * caller's thread, if it walks away.
+     */
+    fun <T> await(
+        limits: ReadLimits,
+        active: () -> Boolean,
+        progress: AtomicLong = AtomicLong(System.nanoTime()),
+        abandon: () -> Unit = {},
+        call: () -> T,
+    ): Outcome<T> {
+        val started = System.nanoTime()
+        val future = try {
+            pool.submit(Callable(call))
+        } catch (_: RejectedExecutionException) {
+            return Outcome.Failed
+        }
+        while (true) {
+            try {
+                return Outcome.Done(future.get(limits.pollMs, TimeUnit.MILLISECONDS))
+            } catch (_: TimeoutException) {
+                // Still running: look at the deadlines below.
+            } catch (_: ExecutionException) {
+                return Outcome.Failed
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                abandon()
+                future.cancel(true)
+                return Outcome.Cancelled
+            }
+            val why: Outcome<T> = when {
+                !active() -> Outcome.Cancelled
+                ms(progress.get()) > limits.idleMs || ms(started) > limits.totalMs -> Outcome.TimedOut
+                else -> continue
+            }
+            abandon()
+            future.cancel(true)
+            return why
+        }
+    }
 }
 
 /**
  * Read [source] in chunks, aborting as soon as more than [max] bytes arrive (the provider's size
  * claim only sizes the first buffer; it is never trusted to bound the read), or as soon as [active]
- * says the caller went away. L3: a watchdog ([ReadWatchdog]) ends the open and the read when
- * [active] goes false or [limits] run out, by cancelling the open's signal and closing the stream:
- * a read blocked inside the provider is unblocked by the close (Android signals the threads blocked
- * on a descriptor it closes), so a cancelled or stalled pick never keeps its thread or the stager.
+ * says the caller went away. The open and the reads run on a provider-call thread ([ProviderCalls]);
+ * this thread waits for them with [limits] and [active]. When it walks away (a stall in the open or
+ * a read, the total passed, the pick cancelled) it cancels the open's signal and closes the stream
+ * if one was opened (Android signals the threads blocked on a descriptor it closes, so a stuck read
+ * returns); an open that ignores the signal keeps its provider-call thread until the provider
+ * returns, and then its stream is closed and its bytes are discarded. The stream is closed exactly
+ * once, by whichever side gets to it first.
  */
 fun readBounded(
     source: AttachmentSource,
@@ -302,66 +390,63 @@ fun readBounded(
     active: () -> Boolean = { true },
     limits: ReadLimits = ReadLimits.DEFAULT,
 ): BoundedRead {
-    val claimed = source.reportedSize
-    if (claimed != null && claimed > max) return BoundedRead.TooLarge
     val signal = CancellationSignal()
     val stream = AtomicReference<InputStream?>(null)
+    // The caller walked away: whatever the call still does is discarded.
     val ended = AtomicBoolean(false)
-    val timedOut = AtomicBoolean(false)
-    val started = System.nanoTime()
-    val progress = AtomicLong(started)
-    fun end() {
-        if (!ended.compareAndSet(false, true)) return
+    // The single owner of the close (security re-check): the side that wins it closes, once.
+    val closed = AtomicBoolean(false)
+    val progress = AtomicLong(System.nanoTime())
+    fun closeOnce() {
+        val s = stream.get() ?: return
+        if (closed.compareAndSet(false, true)) runCatching { s.close() }
+    }
+    val outcome = ProviderCalls.await(limits, active, progress, abandon = {
+        ended.set(true)
         runCatching { signal.cancel() }
-        stream.get()?.let { runCatching { it.close() } }
-    }
-    fun ms(since: Long) = (System.nanoTime() - since) / 1_000_000
-    val watch = ReadWatchdog.every(limits.pollMs) {
-        if (!active()) {
-            end()
-        } else if (ms(progress.get()) > limits.idleMs || ms(started) > limits.totalMs) {
-            timedOut.set(true)
-            end()
-        }
-    }
-    fun why(): BoundedRead = when {
-        !active() -> BoundedRead.Cancelled
-        timedOut.get() -> BoundedRead.TimedOut
-        else -> BoundedRead.Failed
-    }
-    return try {
-        val input = source.open(signal) ?: return why()
-        stream.set(input)
-        // Ended while it was opening: the watchdog could not close what it did not have yet.
-        if (ended.get()) {
-            runCatching { input.close() }
-            return why()
-        }
-        input.use { s ->
-            val out = ByteArrayOutputStream(((claimed ?: chunk.toLong()).coerceIn(1, max.coerceAtMost(Int.MAX_VALUE.toLong()))).toInt())
-            val buffer = ByteArray(chunk)
-            var total = 0L
-            while (true) {
-                if (!active()) return BoundedRead.Cancelled
-                val n = s.read(buffer)
-                if (ended.get()) return why()
-                if (n < 0) break
-                progress.set(System.nanoTime())
-                total += n
-                if (total > max) return BoundedRead.TooLarge
-                out.write(buffer, 0, n)
+        closeOnce()
+    }) {
+        try {
+            val claimed = source.reportedSize
+            if (claimed != null && claimed > max) return@await BoundedRead.TooLarge
+            val input = source.open(signal) ?: return@await BoundedRead.Failed
+            stream.set(input)
+            // Walked away while it was opening: the caller had nothing to close yet.
+            if (ended.get()) {
+                closeOnce()
+                return@await BoundedRead.Cancelled
             }
-            if (total == 0L) BoundedRead.Failed else BoundedRead.Bytes(out.toByteArray())
+            try {
+                val out = ByteArrayOutputStream(((claimed ?: chunk.toLong()).coerceIn(1, max.coerceAtMost(Int.MAX_VALUE.toLong()))).toInt())
+                val buffer = ByteArray(chunk)
+                var total = 0L
+                while (true) {
+                    if (!active() || ended.get()) return@await BoundedRead.Cancelled
+                    val n = input.read(buffer)
+                    if (ended.get()) return@await BoundedRead.Cancelled
+                    if (n < 0) break
+                    progress.set(System.nanoTime())
+                    total += n
+                    if (total > max) return@await BoundedRead.TooLarge
+                    out.write(buffer, 0, n)
+                }
+                if (total == 0L) BoundedRead.Failed else BoundedRead.Bytes(out.toByteArray())
+            } finally {
+                closeOnce()
+            }
+        } catch (_: OutOfMemoryError) {
+            BoundedRead.TooLarge
+        } catch (_: Exception) {
+            // Including the IOException of a read whose stream the caller closed, and the open's
+            // OperationCanceledException (both discarded then: the caller already answered).
+            if (ended.get()) BoundedRead.Cancelled else BoundedRead.Failed
         }
-    } catch (_: OutOfMemoryError) {
-        BoundedRead.TooLarge
-    } catch (_: Exception) {
-        // A close by the watchdog surfaces here as the read's IOException (or the open's
-        // OperationCanceledException).
-        why()
-    } finally {
-        watch.cancel(false)
-        stream.get()?.let { runCatching { it.close() } }
+    }
+    return when (outcome) {
+        is ProviderCalls.Outcome.Done -> outcome.value
+        ProviderCalls.Outcome.Failed -> BoundedRead.Failed
+        ProviderCalls.Outcome.TimedOut -> BoundedRead.TimedOut
+        ProviderCalls.Outcome.Cancelled -> BoundedRead.Cancelled
     }
 }
 
@@ -469,8 +554,23 @@ object AttachmentIntake {
                 flashes += AttachmentCopy.COUNT
                 break
             }
-            var name = AttachmentNames.wire(source.displayName)
-            val claimed = source.reportedSize
+            // F1 (r3): the provider's claims are asked on a provider-call thread, under the limits.
+            val signal = CancellationSignal()
+            val info = when (val d = ProviderCalls.await(limits, active, abandon = { runCatching { signal.cancel() } }) { source.describe(signal) }) {
+                is ProviderCalls.Outcome.Done -> d.value
+                ProviderCalls.Outcome.Cancelled -> return Result(emptyList(), emptyList())
+                ProviderCalls.Outcome.Failed, ProviderCalls.Outcome.TimedOut -> {
+                    flashes += AttachmentCopy.unreadable(AttachmentNames.FALLBACK)
+                    continue
+                }
+            }
+            var name = AttachmentNames.wire(info.displayName)
+            val claimed = info.reportedSize
+            // A pasted item that does not even claim to be an image is not read at all.
+            if (source.imagesOnly && info.declaredType?.lowercase()?.startsWith("image/") != true) {
+                flashes += AttachmentCopy.NO_CLIPBOARD_IMAGE
+                continue
+            }
             if (claimed != null && claimed > AttachmentDraft.MAX_ATTACHMENT_BYTES) {
                 flashes += AttachmentCopy.tooLarge(name)
                 continue
@@ -511,7 +611,7 @@ object AttachmentIntake {
             val attachment: Attachment
             val size: Long
             try {
-                val prepared = prepare(bytes, sniffedPicture ?: AttachmentTypes.resolve(bytes, source.declaredType))
+                val prepared = prepare(bytes, sniffedPicture ?: AttachmentTypes.resolve(bytes, info.declaredType))
                 attachment = Attachment(
                     name = name,
                     mediaType = prepared.mediaType.ifEmpty { AttachmentTypes.OCTET },
@@ -545,9 +645,11 @@ object AttachmentIntake {
  *
  * M1 (T7.4 r2): the clip is another app's. Only an item the [AttachmentUriPolicy] allows is
  * considered at all (a `file://` URI, one of this app's own providers or an authority that does not
- * resolve is dropped before anything is asked of it); the claimed type only pre-filters; the item is
- * kept only if its bytes are a picture ([AttachmentSource.imagesOnly]), and named for them.
- * Blocking (a type query per item): call it off the main thread.
+ * resolve is dropped before anything is asked of it); the claimed type (the provider's, else the
+ * clip's) only pre-filters; the item is kept only if its bytes are a picture
+ * ([AttachmentSource.imagesOnly]), and named for them. r3 (F1): nothing is asked of the provider
+ * here (its type is asked by the intake, on a provider-call thread under the limits); the package
+ * manager is, so call it off the main thread.
  */
 object ClipboardImages {
     /** The clip's image items, as sources. */
@@ -557,10 +659,9 @@ object ClipboardImages {
         for (i in 0 until clip.itemCount) {
             val uri = clip.getItemAt(i)?.uri ?: continue
             if (!policy.allows(uri)) continue
-            val type = runCatching { resolver.getType(uri) }.getOrNull()?.lowercase()
-                ?: (0 until clip.description.mimeTypeCount).map { clip.description.getMimeType(it).lowercase() }.firstOrNull { it.startsWith("image/") }
-            if (type == null || !type.startsWith("image/")) continue
-            found += ContentUriSource(resolver, uri, policy, nameOverride = pastedName(type), typeOverride = type, imagesOnly = true)
+            // F1 (r3): the provider's own type is asked later, by the intake, under its limits.
+            val clipType = (0 until clip.description.mimeTypeCount).map { clip.description.getMimeType(it).lowercase() }.firstOrNull { it.startsWith("image/") }
+            found += ContentUriSource(resolver, uri, policy, imagesOnly = true, clipType = clipType)
         }
         return found
     }
