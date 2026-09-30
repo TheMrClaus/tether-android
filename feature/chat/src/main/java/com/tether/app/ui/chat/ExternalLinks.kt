@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -79,6 +81,9 @@ object CustomTabLinkOpener : LinkOpener {
         // markdown.tsx SAFE_HREF (never javascript:/data:/intent:), as ta-fz3's full-string check.
         if (!isSafeHref(href)) return null
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(href))
+        // r2: only activities that declare they may be opened from a link (a browser, a mail app),
+        // never an exported non-browsable VIEW handler.
+        intent.addCategory(Intent.CATEGORY_BROWSABLE)
         // ASCII-only fold like the allowlist (JVM ignoreCase would fold Unicode, e.g. `ı` == `i`).
         if (!href.startsWithAsciiIgnoreCase("mailto:")) {
             intent.putExtras(Bundle().apply { putBinder(EXTRA_SESSION, null) })
@@ -122,8 +127,10 @@ enum class LinkDecision {
 }
 
 /**
- * ta-fz3: the one place a tapped chat link is decided. A link whose visible label is not exactly
- * its href, or whose href is not printable ASCII, only opens from the confirm sheet
+ * ta-fz3: the one place a tapped chat link is decided. A link only opens without the confirm
+ * sheet when [SafeHref.opensDirectly] allows it (an exact printable-ASCII label, a short host, no
+ * `@`) and the caller does not force a confirmation (r2: a clamped block, or a link that appeared
+ * or moved within the arm delay); every other external link only opens from the confirm sheet
  * ([ExternalLinkConfirmDialog]): an explicit tap on its armed Open key. What opens is exactly what
  * the sheet showed ([SafeHref.Target.display]: the host in ASCII). There is no auto-open and no
  * retry: a confirmation opens once, or not at all.
@@ -139,14 +146,19 @@ class ExternalLinkGate {
         private set
     private var serial = 0L
 
-    fun request(context: Context, opener: LinkOpener, href: String, label: String, toolbarColor: Color): LinkDecision {
+    /**
+     * A tap on [href] drawn with [label]. [forceConfirm] (r2): the link sits where the screen may
+     * mislead (a clamped block, or it appeared or moved under the finger within the arm delay), so
+     * even a link that could open directly asks first.
+     */
+    fun request(context: Context, opener: LinkOpener, href: String, label: String, toolbarColor: Color, forceConfirm: Boolean = false): LinkDecision {
         val target = SafeHref.target(href) ?: return LinkDecision.Refused
         if (opener.opensInApp(target.display)) {
             pending = null
             opener.open(context, target.display, toolbarColor)
             return LinkDecision.InApp
         }
-        if (SafeHref.opensDirectly(target, label)) {
+        if (!forceConfirm && SafeHref.opensDirectly(target, label)) {
             pending = null
             opener.open(context, target.display, toolbarColor)
             return LinkDecision.Opened
@@ -169,6 +181,30 @@ class ExternalLinkGate {
         pending = null
     }
 }
+
+/**
+ * r2: when a markdown body last appeared or moved in its window (more than [CONTROL_REARM_MOVE_DP]):
+ * a link in it opens directly only [CONSENT_ARM_DELAY_MS] after that, so a tap aimed at what was
+ * there a moment ago (text streaming in, the list following new output) asks first. Plain fields,
+ * not state: a scroll never recomposes the body.
+ */
+internal class LinkSettle(private val clock: () -> Long) {
+    private var anchor: Offset? = null
+    private var since: Long = clock()
+
+    fun positioned(at: Offset, limitPx: Float) {
+        val a = anchor
+        if (a == null || kotlin.math.abs(at.x - a.x) > limitPx || kotlin.math.abs(at.y - a.y) > limitPx) {
+            anchor = at
+            since = clock()
+        }
+    }
+
+    fun settled(): Boolean = anchor != null && clock() - since >= CONSENT_ARM_DELAY_MS
+}
+
+/** The time [LinkSettle] reads ([SystemClock.uptimeMillis]); tests may drive it. */
+internal val LocalLinkClock = staticCompositionLocalOf<() -> Long> { { SystemClock.uptimeMillis() } }
 
 /** The gate in scope (UiRoot provides one per signed-in server); a markdown body without one keeps its own. */
 val LocalExternalLinkGate = staticCompositionLocalOf<ExternalLinkGate?> { null }

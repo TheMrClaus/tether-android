@@ -45,6 +45,7 @@ import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.LocalInClampedBlock
 import com.tether.app.ui.components.TetherExpandableBlock
 import com.tether.app.ui.components.expandPeek
 import com.tether.app.ui.components.TetherLayoutClass
@@ -441,8 +443,18 @@ fun MarkdownBody(
     val currentOpener by rememberUpdatedState(opener)
     val currentContext by rememberUpdatedState(context)
     val currentToolbar by rememberUpdatedState(t.graphite)
+    // r2: inside a clamped block, or within the arm delay of appearing or moving, a link always asks.
+    val currentClamped by rememberUpdatedState(LocalInClampedBlock.current)
+    val clock = LocalLinkClock.current
+    val settle = remember(clock) { LinkSettle(clock) }
+    val movePx = with(density) { CONTROL_REARM_MOVE_DP.dp.toPx() }
     val onLink: (MdInline.Link) -> Unit = remember {
-        { link -> currentGate.request(currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar) }
+        { link ->
+            currentGate.request(
+                currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar,
+                forceConfirm = currentClamped || !settle.settled(),
+            )
+        }
     }
     fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
     val body = style.fontSize
@@ -452,7 +464,7 @@ fun MarkdownBody(
         find?.let { f -> blocks.runningFold(0) { acc, b -> acc + countBlockMatches(b, f.needle) } }
     }
 
-    Column(modifier) {
+    Column(modifier.onGloballyPositioned { settle.positioned(it.positionInWindow(), movePx) }) {
         var previousBottom: Dp? = null
         blocks.forEachIndexed { index, block ->
             val headingStyle = (block as? MdBlock.Heading)?.let { headingStyle(type, it.tag) }

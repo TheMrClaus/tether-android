@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -116,6 +118,13 @@ fun expandToggleLabel(open: Boolean, hidden: Int?, locale: Locale = Locale.getDe
     else -> "Show more"
 }
 
+/**
+ * ta-fz3 r2: true inside a [TetherExpandableBlock] (or a nest of them) that is clamped and hides
+ * part of its content: what is drawn there may be cut off or faded, so a link in it never opens
+ * without its confirmation.
+ */
+val LocalInClampedBlock = compositionLocalOf { false }
+
 /** Whether a clamped block has genuinely more to show (`hiddenPx <= OVERFLOW_SLOP` → no toggle). */
 fun expandOverflows(contentPx: Int, clampPx: Int, slopPx: Float): Boolean = contentPx - clampPx > slopPx
 
@@ -202,7 +211,11 @@ fun TetherExpandableBlock(
         Box(clip) {
             Box(
                 if (scrollX) Modifier.horizontalScroll(rememberScrollState()) else Modifier,
-            ) { content() }
+            ) {
+                // ta-fz3 r2: content that is cut off or faded here knows it (a link in it always asks first).
+                val outer = LocalInClampedBlock.current
+                CompositionLocalProvider(LocalInClampedBlock provides (outer || overflowing)) { content() }
+            }
         }
         if (overflowing || open) {
             ExpandToggleRow(open = open, hidden = hidden) {

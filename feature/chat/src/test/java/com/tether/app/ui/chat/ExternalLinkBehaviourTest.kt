@@ -10,7 +10,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
@@ -59,15 +62,23 @@ class ExternalLinkBehaviourTest {
         override fun opensInApp(href: String): Boolean = inApp(href)
     }
 
-    private fun show(markdown: String) {
+    /** The links' settle clock (r2): a body opens a link directly only [CONSENT_ARM_DELAY_MS] after it appeared or moved. */
+    private var now = 0L
+
+    private fun settleLinks() {
+        now += CONSENT_ARM_DELAY_MS + 100
+    }
+
+    private fun show(markdown: String, opener: LinkOpener = recorder, settled: Boolean = true) {
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.Machine)) {
-                CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true) {
+                CompositionLocalProvider(LocalLinkOpener provides opener, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
                     MarkdownBody(parseMarkdown(markdown), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
                 }
             }
         }
         rule.waitForIdle()
+        if (settled) settleLinks()
     }
 
     private val hasLink = SemanticsMatcher("has link") { n ->
@@ -123,6 +134,103 @@ class ExternalLinkBehaviourTest {
         assertTrue(!sheetShown())
     }
 
+    // ---- r2: the external intent ----------------------------------------------------------------
+
+    @Test fun theExternalIntentIsBrowsableOnly() {
+        for (href in listOf("https://example.test/docs", "http://example.test/", "mailto:ops@example.test")) {
+            val intent = checkNotNull(CustomTabLinkOpener.intentFor(href, Color.Black))
+            assertTrue(href, intent.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+            assertEquals(href, android.content.Intent.ACTION_VIEW, intent.action)
+            assertNull(href, intent.component)
+        }
+    }
+
+    @Test fun theLinkRowIsExactlyTheAsciiIntentData() {
+        // r2: Hebrew, CJK and look-alikes outside the host are shown, and open, percent-encoded.
+        val href = "https://example.test/\u05E9\u05DC\u05D5\u05DD/\u6587\u00B7\u30FB\u0660?q=\u2027#\u30CE"
+        show("[docs]($href)", opener = CustomTabLinkOpener)
+        tapLink()
+        val row = field(EXTERNAL_LINK_TARGET_TAG).removePrefix("Link: ")
+        assertTrue(row, row.all { it in '!'..'~' })
+        assertEquals("https://example.test/%D7%A9%D7%9C%D7%95%D7%9D/%E6%96%87%C2%B7%E3%83%BB%D9%A0?q=%E2%80%A7#%E3%83%8E", row)
+        arm()
+        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).performClick()
+        rule.waitForIdle()
+        val started = org.robolectric.Shadows.shadowOf(rule.activity).nextStartedActivity
+        assertEquals(row, started.dataString)
+        assertTrue(started.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+    }
+
+    // ---- r2: nothing opens directly where the screen may mislead -------------------------------
+
+    @Test fun aLinkThatJustAppearedAsksFirst() {
+        show("See [https://example.test/docs](https://example.test/docs).", settled = false)
+        tapLink()
+        assertEquals("appeared within the arm delay: asks", emptyList<String>(), opened)
+        assertTrue(sheetShown())
+    }
+
+    @Test fun aLinkThatMovedUnderTheFingerAsksFirst() {
+        var above by mutableStateOf(0)
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Machine)) {
+                CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
+                    androidx.compose.foundation.layout.Column {
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(above.dp))
+                        MarkdownBody(parseMarkdown("[https://example.test/docs](https://example.test/docs)"), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        settleLinks()
+        above = 120 // new output pushes the link down the screen
+        rule.waitForIdle()
+        tapLink()
+        assertEquals(emptyList<String>(), opened)
+        assertTrue(sheetShown())
+        rule.onNodeWithTag(EXTERNAL_LINK_CANCEL_TAG).performClick()
+        rule.waitForIdle()
+        // Still for the arm delay: it opens directly again.
+        settleLinks()
+        tapLink()
+        assertEquals(listOf("https://example.test/docs"), opened)
+    }
+
+    @Test fun aLinkInsideAClampedBlockAsksFirstUntilTheBlockIsOpen() {
+        val filler = (1..40).joinToString("\n\n") { "Line $it of a long thought." }
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Machine)) {
+                CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
+                    com.tether.app.ui.components.TetherExpandableBlock(clamp = 120.dp) {
+                        MarkdownBody(parseMarkdown("[https://example.test/docs](https://example.test/docs)\n\n$filler"), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        settleLinks()
+        tapLink()
+        assertEquals("clamped: asks", emptyList<String>(), opened)
+        assertTrue(sheetShown())
+        rule.onNodeWithTag(EXTERNAL_LINK_CANCEL_TAG).performClick()
+        rule.waitForIdle()
+        rule.onNode(androidx.compose.ui.test.hasContentDescription("Show", substring = true) and androidx.compose.ui.test.hasContentDescription("more", substring = true)).performClick()
+        rule.waitForIdle()
+        settleLinks()
+        tapLink()
+        assertEquals("open: nothing is cut off", listOf("https://example.test/docs"), opened)
+    }
+
+    @Test fun anAtOrALongHostAsksEvenWhenTheLabelMatches() {
+        for (href in listOf("https://evil.example?@bank.example", "https://bank.example.com.evil.example/", "https://" + "a".repeat(41) + ".com/")) {
+            opened.clear()
+            val gate = ExternalLinkGate()
+            assertEquals(href, LinkDecision.Confirm, gate.request(rule.activity, recorder, href, href, Color.Black))
+            assertEquals(emptyList<String>(), opened)
+        }
+    }
+
     @Test fun aLabelThatIsExactlyItsAsciiHrefOpensDirectly() {
         show("See [https://example.test/docs](https://example.test/docs).")
         tapLink()
@@ -170,7 +278,56 @@ class ExternalLinkBehaviourTest {
         tapLink()
         rule.onNodeWithText("Write this email?").assertIsDisplayed()
         assertEquals("To: ops@example.test", field(EXTERNAL_LINK_TO_TAG))
-        assertEquals("Address: mailto:ops@example.test?subject=Deploy", field(EXTERNAL_LINK_TARGET_TAG))
+        // r2: the query is dropped: only the address opens, and the sheet shows exactly that.
+        assertEquals("Address: mailto:ops@example.test", field(EXTERNAL_LINK_TARGET_TAG))
+    }
+
+    // ---- r2: mailto recipients are what the mail app reads --------------------------------------
+
+    /** What a mail app reads from [data] (android.net.MailTo decodes the query, then splits it). */
+    private fun mailRecipients(data: String): List<String> {
+        val m = android.net.MailTo.parse(data)
+        assertEquals("no header but the address line: $data", setOf("to"), m.headers.keys)
+        return m.to.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    @Test fun theMailAppReadsExactlyTheRecipientsTheSheetShows() {
+        val payloads = buildList {
+            for (name in listOf("to", "cc", "bcc", "TO", "Bcc", "%74o", "b%63c")) {
+                for (sep in listOf("&", "%26", "%3F", "%0A", "%0D%0A", "%26amp;")) {
+                    for (eq in listOf("=", "%3D", "%3d")) add("subject=Deploy$sep$name${eq}spy@evil.test")
+                }
+                add("$name=spy@evil.test")
+                add("subject=x&$name=spy@evil.test&body=y")
+            }
+            add("subject=Deploy%26bcc%3Dspy@evil.test")
+            add("subject=x%26to%3Devil@x.com")
+            add("body=%3Fbcc=spy@evil.test")
+            add("")
+        }
+        val bases = listOf("ops@example.test", "ops@example.test,dev@example.org", "o.p+s@ex\u0430mple.com")
+        var checked = 0
+        for (base in bases) for (q in payloads) {
+            val href = if (q.isEmpty()) "mailto:$base" else "mailto:$base?$q"
+            val target = com.tether.app.ui.text.SafeHref.target(href) ?: continue
+            val intent = checkNotNull(CustomTabLinkOpener.intentFor(target.display, Color.Black))
+            // The oracle: what opens, read the way a mail app reads it, names exactly the To row.
+            assertEquals(href, target.recipients, mailRecipients(intent.dataString!!))
+            assertEquals(href, target.display, intent.dataString)
+            checked++
+        }
+        assertTrue("the sweep reached the allowed links: $checked", checked > 100)
+    }
+
+    @Test fun theVerifiersMailtoIsShownAndOpenedAsItsAddressOnly() {
+        show("[write to ops](mailto:ops@example.test?subject=Deploy%26bcc%3Dspy@evil.test)", opener = CustomTabLinkOpener)
+        tapLink()
+        assertEquals("To: ops@example.test", field(EXTERNAL_LINK_TO_TAG))
+        arm()
+        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).performClick()
+        rule.waitForIdle()
+        val started = org.robolectric.Shadows.shadowOf(rule.activity).nextStartedActivity
+        assertEquals(listOf("ops@example.test"), mailRecipients(started.dataString!!))
     }
 
     @Test fun aSessionLinkThatStaysInTheAppNeedsNoSheet() {
