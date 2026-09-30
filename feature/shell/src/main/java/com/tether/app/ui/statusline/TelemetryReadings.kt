@@ -48,9 +48,8 @@ data class ReadingEnv(
  * The SessionMetrics fields the telemetry readings consume, as JS numbers (null = absent / not a
  * finite number is decided by the helpers, exactly as on the web).
  *
- * [contextSnapshotAt] (issue #164, lib/protocol.ts SessionMetrics) is not yet decoded by the
- * Android wire model ([SessionMetrics] in :core:protocol has no such field), so [from] leaves it
- * null and a transcript snapshot reads as "no context reading" until the model carries it.
+ * [contextSnapshotAt] (issue #164, lib/protocol.ts SessionMetrics): decoded since T9.1, so a
+ * transcript-derived reading is labelled as a snapshot here and in the inspector.
  */
 @Immutable
 data class TelemetryMetrics(
@@ -70,7 +69,7 @@ data class TelemetryMetrics(
                 contextPercent = it.contextPercent,
                 contextTokens = it.contextTokens?.toDouble(),
                 contextWindow = it.contextWindow?.toDouble(),
-                contextSnapshotAt = null,
+                contextSnapshotAt = it.contextSnapshotAt?.toDouble(),
                 fiveHour = TelemetryWindow.from(it.fiveHour),
                 weekly = TelemetryWindow.from(it.weekly),
                 fable = TelemetryWindow.from(it.fable),

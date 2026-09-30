@@ -206,7 +206,9 @@ class TelemetryReadingsTest {
         assertEquals(90_000.0, m.contextTokens!!, 0.0)
         assertEquals(TelemetryWindow(12.0, 1_790_080_000_000.0), m.fiveHour)
         assertNull(m.weekly)
-        assertNull(m.contextSnapshotAt) // not decoded by the Android wire model yet
+        assertNull(m.contextSnapshotAt) // absent on the row: a live reading
+        // T9.1: decoded now, so a transcript-derived reading carries its stamp.
+        assertEquals(1_790_000_000_000.0, TelemetryMetrics.from(SessionMetrics(contextSnapshotAt = 1_790_000_000_000))!!.contextSnapshotAt!!, 0.0)
         assertNull(TelemetryMetrics.from(null))
     }
 }

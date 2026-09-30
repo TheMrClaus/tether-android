@@ -100,7 +100,7 @@ class InspectorNoticesModelTest {
     }
 
     @Test
-    fun aNameTheCleaningWouldChangeIsShownWithItsHiddenCodePointsWrittenOut() {
+    fun aNameWithHiddenCodePointsIsDrawnWithThemAsVisibleTokens() {
         // "github" with a zero-width space, and one with a right-to-left override: neither may pass
         // for the plain "github", and each keeps its own row state (keyed on the raw name).
         val state = SessionView(
@@ -111,13 +111,17 @@ class InspectorNoticesModelTest {
                 evNullTurn("mcp_health_updated", seq = 3, ts = InspectorFixtures.NOW) { put("name", "‮buhtig"); put("status", "ready") },
             ),
         )
+        // T9.1: the name is kept raw and drawn by the code rule (com.tether.app.ui.text): every
+        // hidden or reordering code point is a visible token, so the three never display alike.
         val servers = mcpServers(state)
-        val shown = servers.associate { it.key to it.name }
+        val shown = servers.associate { it.key to com.tether.app.ui.text.SafeText.code(it.name) }
         assertEquals("github", shown["github"])
-        assertEquals("git\\u{200B}hub", shown["git​hub"])
-        assertEquals("\\u{202E}buhtig", shown["‮buhtig"])
-        assertEquals(3, servers.map { it.name }.toSet().size)
+        assertEquals(true, shown["git\u200Bhub"]!!.contains("⟨U+200B⟩"))
+        assertEquals(true, shown["\u202Ebuhtig"]!!.contains("⟨U+202E⟩"))
+        assertEquals(3, shown.values.toSet().size)
         assertEquals(3, servers.map { it.key }.toSet().size)
+        // The error keeps its words raw for the prose rule.
+        assertEquals("boom", servers.single { it.key == "git\u200Bhub" }.error)
     }
 }
 
