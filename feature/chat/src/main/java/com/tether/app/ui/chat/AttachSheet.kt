@@ -139,8 +139,10 @@ class AttachmentStager(
         val generation = store.generation
         val existing = store.items(origin, sessionId)
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        // Cancelled (the composer left, the session switched): the read watchdog closes the stream
-        // (L3), and withContext throws, so nothing read is staged.
+        // Cancelled (the composer left, the session switched): the intake stops waiting for the
+        // provider within ReadLimits.pollMs, even one stuck in its query or open (r3 F1: those run
+        // on provider-call threads it walks away from), and withContext throws, so nothing read is
+        // staged and the lock is released. A stalled provider is walked away from the same way.
         val result = withContext(io) { AttachmentIntake.intake(sources, existing, store::newId, active = { job?.isActive != false }, limits = limits) }
         if (store.generation != generation || originNow() != origin || !allowed(sessionId)) return@withLock result.flashes
         val now = store.items(origin, sessionId)

@@ -761,6 +761,43 @@ class AttachmentIntakeTest {
         }
     }
 
+    /**
+     * F1 (r3): a provider that never returns keeps its provider-call thread, and there are at most
+     * [ProviderCalls.MAX_THREADS] of them: with every one stuck, a new call is refused at once (never
+     * queued behind them, never a new thread), and the threads come back when the providers return.
+     */
+    @Test
+    fun stuckProviderCallsAreBoundedAndANewCallIsRefusedAtOnce() = within(30_000) {
+        val stalls = ArrayList<OpenStall>()
+        try {
+            var refused = false
+            for (i in 0..ProviderCalls.MAX_THREADS) {
+                val stall = OpenStall()
+                val r = readBounded(stall, limits = ReadLimits(idleMs = 50, totalMs = 100, pollMs = 10))
+                if (r === BoundedRead.Failed) {
+                    refused = true
+                    break
+                }
+                assertSame(BoundedRead.TimedOut, r)
+                stalls += stall
+            }
+            assertTrue("more than ${ProviderCalls.MAX_THREADS} threads were stuck", refused)
+            val started = System.nanoTime()
+            assertSame(BoundedRead.Failed, readBounded(FakeSource("next.txt", 2), limits = ReadLimits(60_000, 60_000, 10)))
+            assertTrue("a refusal waited", System.nanoTime() - started < 1_000_000_000)
+        } finally {
+            stalls.forEach { it.release.countDown() }
+        }
+        stalls.forEach { await(it.lateClosed, "closed a late stream") }
+        // The threads are back: a read goes through again.
+        val deadline = System.nanoTime() + 5_000_000_000
+        var r: BoundedRead
+        do {
+            r = readBounded(FakeSource("again.txt", 2), limits = ReadLimits(60_000, 60_000, 10))
+        } while (r !is BoundedRead.Bytes && System.nanoTime() < deadline)
+        assertTrue("$r", r is BoundedRead.Bytes)
+    }
+
     /** A provider whose query waits for its CancellationSignal (or 10 s), and says whether it saw it. */
     class SignalQueryProvider : android.content.ContentProvider() {
         companion object {
@@ -775,6 +812,8 @@ class AttachmentIntakeTest {
             if (awaitUninterruptibly(cancelled, 10)) sawCancel.countDown()
             return null
         }
+        override fun query(uri: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?, signal: android.os.CancellationSignal?): android.database.Cursor? =
+            query(uri, p, null as android.os.Bundle?, signal)
         override fun query(uri: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): android.database.Cursor? = query(uri, p, null as android.os.Bundle?, null)
         override fun openFile(uri: android.net.Uri, mode: String): android.os.ParcelFileDescriptor {
             val f = java.io.File.createTempFile("q", ".txt").apply { writeText("hi") }
