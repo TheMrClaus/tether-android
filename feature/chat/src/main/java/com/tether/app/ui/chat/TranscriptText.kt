@@ -79,8 +79,8 @@ import com.tether.app.ui.theme.TetherTokens
 internal object TranscriptText {
     /** WORD JOINER: every token starts with it, and a covered surface never draws it raw. */
     const val MARK: Char = '\u2060'
-    private const val OPEN: Char = '⟨' // MATHEMATICAL LEFT ANGLE BRACKET
-    private const val CLOSE: Char = '⟩'
+    private const val OPEN: Char = '\u27E8' // MATHEMATICAL LEFT ANGLE BRACKET
+    private const val CLOSE: Char = '\u27E9' // MATHEMATICAL RIGHT ANGLE BRACKET
     private const val HEX = "0123456789ABCDEF"
 
     enum class Rule { Prose, Code }
@@ -129,12 +129,11 @@ internal object TranscriptText {
     fun encode(text: String, rule: Rule): String {
         val n = text.length
         var i = 0
-        // Fast path: nothing to escape, the same String back.
+        // Fast path: nothing to escape, the same String back (no copy).
         while (i < n && !candidate(text, i, rule)) i++
         if (i == n) return text
-        val out = StringBuilder(n + 16)
-        out.append(text, 0, i)
-        var run = i
+        var out: StringBuilder? = null
+        var run = 0
         while (i < n) {
             if (!candidate(text, i, rule)) {
                 i++
@@ -150,10 +149,11 @@ internal object TranscriptText {
                     i = end
                     continue
                 }
-                out.append(text, run, i)
+                val sb = out ?: StringBuilder(n + 16).also { out = it }
+                sb.append(text, run, i)
                 var k = i
                 while (k < end) {
-                    appendToken(out, text.codePointAt(k))
+                    appendToken(sb, text.codePointAt(k))
                     k += 2
                 }
                 i = end
@@ -164,13 +164,15 @@ internal object TranscriptText {
                 i += len
                 continue
             }
-            out.append(text, run, i)
-            appendToken(out, cp)
+            val sb = out ?: StringBuilder(n + 16).also { out = it }
+            sb.append(text, run, i)
+            appendToken(sb, cp)
             i += len
             run = i
         }
-        out.append(text, run, n)
-        return out.toString()
+        val sb = out ?: return text
+        sb.append(text, run, n)
+        return sb.toString()
     }
 
     /** A cheap per-char filter: false means the char is certainly drawn as is. */
