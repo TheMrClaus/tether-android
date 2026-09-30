@@ -40,7 +40,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * Geometry of the settings rocker in one skin (globals.css 8861-8921, Studio studio.css 570-586).
@@ -60,19 +59,8 @@ data class RockerGeometry(
     val capLeftOn: Dp,
 )
 
-fun rockerGeometry(t: TetherTokens): RockerGeometry = if (t.skin.family == ThemeFamily.Studio) {
-    // 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on.
-    RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
-} else {
-    // 4.1rem × 1.8rem with a 1px border; cap at left 50%, calc(50% - 1px) × calc(100% - 4px),
-    // top 1px; ON translates it by calc(-100% + 1px).
-    val w = 65.6.dp
-    val h = 28.8.dp
-    val innerW = w - 2.dp
-    val innerH = h - 2.dp
-    val capW = innerW / 2 - 1.dp
-    RockerGeometry(w, h, 1.dp, 8.dp, 1.dp, capW, innerH - 4.dp, 5.44.dp, innerW / 2, innerW / 2 - capW + 1.dp)
-}
+fun rockerGeometry(t: TetherTokens): RockerGeometry = // 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on.
+        RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
 
 /**
  * The bi-stable settings rocker (`.settings-toggle > i`): a recessed frame (`--key-face-deep`,
@@ -97,7 +85,6 @@ fun TetherRocker(
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val reduced = LocalReducedMotion.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val g = rockerGeometry(t)
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -107,29 +94,13 @@ fun TetherRocker(
         label = "rockerCap",
     )
     val frameShape = RoundedCornerShape(g.radius)
-    val frame = when {
-        studio -> Modifier.cssSurface(frameShape, if (checked) t.violetStrong else t.lineStrong)
-        else -> Modifier.cssSurface(
-            frameShape, t.keyFaceDeep,
-            CssBorder(g.border, if (checked) t.accentSide else t.lineStrong),
-            t.css.well,
-        )
-    }
+    val frame = Modifier.cssSurface(frameShape, if (checked) t.violetStrong else t.lineStrong)
     // The rocker is an `<i>` element, so its legend inherits the UA `font-style: italic`; the
     // bundled mono face has no italic, so both Chromium and Compose synthesize the oblique.
     val legend = TextStyle(
         fontFamily = type.mono, fontSize = 8.32.sp, fontWeight = FontWeight(750), fontStyle = FontStyle.Italic, letterSpacing = 0.08.em,
     )
-    val capShadows: List<CssShadow> = if (studio) {
-        listOf(softShadow(1.dp, 3.dp, Color(16, 30, 58).copy(alpha = 0.14f)))
-    } else {
-        listOf(
-            hardShadow(1.dp, t.litStrong, inset = true),
-            hardShadow(0.dp, t.litFaint, x = (-1).dp, inset = true),
-            hardShadow(2.dp, t.keySide),
-            softShadow(2.dp, 3.dp, t.contact.copy(alpha = 0.28f)),
-        )
-    }
+    val capShadows: List<CssShadow> = listOf(softShadow(1.dp, 3.dp, Color(16, 30, 58).copy(alpha = 0.14f)))
     Box(
         modifier
             .semantics { contentDescription?.let { this.contentDescription = it } }
@@ -188,7 +159,7 @@ fun TetherRocker(
                     Modifier
                         .offset(x = capLeft.dp, y = g.capTop)
                         .size(g.capWidth, g.capHeight)
-                        .cssSurface(RoundedCornerShape(g.capRadius), if (studio) Color.White else t.keyFace, shadows = capShadows),
+                        .cssSurface(RoundedCornerShape(g.capRadius), Color.White, shadows = capShadows),
                 )
             }
         }

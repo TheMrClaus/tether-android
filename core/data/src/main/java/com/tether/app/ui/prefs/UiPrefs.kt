@@ -9,7 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -78,7 +78,8 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
     /**
      * The web's `loginVariant` preference (Settings → Sign-in screen): Retro is
-     * the opt-in, anything else is Instrument (hooks/use-preferences.ts). The
+     * the opt-in, anything else (the former `instrument` included) is Default
+     * (lib/theme-mode.mjs normalizeLoginVariant). The
      * Settings control arrives with the settings surface; the login screen
      * already honours the stored value.
      */
@@ -86,10 +87,10 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
     suspend fun setLoginVariant(variant: LoginVariant) = updatePreferences { it.copy(loginVariant = variant) }
 
-    /** Family × mode (web `themeFamily`/`themeMode`); a legacy flat `theme_choice` is migrated on read. */
-    val themeChoice: Flow<ThemeChoice> = field { it.theme }
+    /** Studio light / dark / follow system (web `themeMode`); retired theme keys are migrated on read. */
+    val themeMode: Flow<ThemeMode> = field { it.themeMode }
 
-    suspend fun setThemeChoice(choice: ThemeChoice) = updatePreferences { it.copy(theme = choice) }
+    suspend fun setThemeMode(mode: ThemeMode) = updatePreferences { it.copy(themeMode = mode) }
 
     val showThinking: Flow<Boolean> = field { it.showThinking }
 
@@ -117,10 +118,11 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
         /** Every model field is written back, like the web's whole-object save. */
         private fun write(prefs: MutablePreferences, next: TetherPreferences) {
-            prefs[Keys.themeFamily] = next.theme.family.id
-            prefs[Keys.themeMode] = next.theme.mode.id
-            // Like the web (use-preferences.ts:334), the legacy flat id is dropped once the two axes are stored.
+            prefs[Keys.themeMode] = next.themeMode.id
+            // Like the web (lib/theme-mode.mjs DEPRECATED_THEME_KEYS), the retired family and the
+            // legacy flat id are consumed by the read and never saved again.
             prefs.remove(Keys.theme)
+            prefs.remove(Keys.themeFamily)
             prefs[Keys.loginVariant] = next.loginVariant.id
             prefs[Keys.defaultWorkspace] = next.defaultWorkspace
             prefs[Keys.showEnded] = next.showEndedSessions
@@ -153,15 +155,15 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     /**
      * What a boot of the console resolves its view from (dashboard.tsx `bootView`): the remembered
      * last view, and whether this install already kept Tether preferences before that record
-     * existed (the web tests its preferences key; here the model's stored theme axes, written by
-     * every save of the model, or the legacy flat theme). Unreadable storage reads as a fresh
+     * existed (the web tests its preferences key; here the model's stored theme mode, written by
+     * every save of the model, or a retired theme key an older version wrote). Unreadable storage reads as a fresh
      * install, like the web's blocked localStorage.
      */
     suspend fun viewBoot(): ViewBoot = runCatching {
         val stored = store.data.first()
         ViewBoot(
             storedView = stored[Keys.lastView],
-            hasExistingPreferences = Keys.themeFamily in stored || Keys.theme in stored,
+            hasExistingPreferences = Keys.themeMode in stored || Keys.themeFamily in stored || Keys.theme in stored,
         )
     }.getOrElse { ViewBoot(storedView = null, hasExistingPreferences = false) }
 
@@ -228,11 +230,12 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
 /** Stored sign-in screen choice; see [UiPrefs.loginVariant]. */
 enum class LoginVariant(val id: String) {
-    Instrument("instrument"),
+    /** Studio's own sign-in (the web renamed the former `instrument` choice to "Default"). */
+    Default("default"),
     Retro("retro");
 
     companion object {
-        fun fromId(id: String?): LoginVariant = if (id == Retro.id) Retro else Instrument
+        fun fromId(id: String?): LoginVariant = if (id == Retro.id) Retro else Default
     }
 }
 

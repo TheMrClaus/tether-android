@@ -53,22 +53,15 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.ThemeFamily
 
 /** The key's silhouette: a labelled/rounded key, or the round `.chat-jump` cap. */
 enum class KeyShape { Rounded, Circle }
 
-/** The execution slit sits `left: 0.32rem` inside the key (globals.css:9238). */
-private val SlitInset: Dp = 5.12.dp
-
 /**
- * The molded key of the web's material layer (globals.css 8565-8578 grammar): a raised face
- * over a hard side-wall, lit from the upper left, with a soft contact shadow — every layer of
- * the skin's box-shadow list drawn by [cssSurface] (resolved by [resolveKey]). Pressing travels
- * the key down `--press-travel`, compresses the side-wall and darkens the top bevel; disabled
- * keys sit flat at 0.48 opacity; focus is an independent violet ring ([focusRing]); a latched
- * ([selected]) key carries the violet selected tone. Studio re-dresses it flat
- * (studio.css 260-278).
+ * A key of the web's button grammar (globals.css 8565-8578, dressed flat by studio.css 260-278):
+ * the face, border and box-shadow list resolved by [resolveKey] and drawn by [cssSurface];
+ * disabled keys sit at 0.48 opacity; focus is an independent violet ring ([focusRing]); a latched
+ * ([selected]) key carries the violet selected tone.
  *
  * Legends: [label] is a fixed verb by default and takes the skin's etched-legend transform
  * (uppercase + tracking in the instrument skins, none in Studio); pass `fixedVerb = false` for
@@ -90,16 +83,12 @@ fun TetherKey(
     /** Unspecified: the skin's key-legend role (0.8rem instrument, 0.8125rem Studio). */
     fontSize: TextUnit = TextUnit.Unspecified,
     enabled: Boolean = true,
-    /** Contact-polish wear; which composition (if any) comes from the class set (globals.css 8771-8857). */
-    wear: Boolean = true,
     minHeight: Dp = TetherDimens.touchTargetDp,
     contentDescription: String? = null,
     selected: Boolean = false,
     size: KeySize = KeySize.Regular,
     /** Null: the class set's radius (a round cap for `chat-jump`). */
     shape: KeyShape? = null,
-    /** Overrides the class set's wear composition (e.g. [KeyWear.SendCompact] for the phone's icon-only Send). */
-    wearPattern: KeyWear? = null,
     fixedVerb: Boolean = true,
     interactionSource: MutableInteractionSource? = null,
     /** Null: the legend centred with `space-sm` gaps. T5.1: New session lays out `gap: space-md` from the start. */
@@ -133,7 +122,6 @@ fun TetherKey(
     val look = resolveKey(t, classes, state, selected = selected, size = size, layout = currentLayoutClass())
     val round = shape == KeyShape.Circle || (shape == null && look.radius == KeyRadiusCircle)
     val keyShape: Shape = if (round) CircleShape else RoundedCornerShape(if (look.radius == KeyRadiusCircle) 0.dp else look.radius)
-    val wearShown = if (look.wear == KeyWear.None) KeyWear.None else wearPattern ?: look.wear
 
     // CSS: `transition: background var(--duration-fast), transform 90ms var(--ease-out)`; the
     // global prefers-reduced-motion rule collapses every transition to a state jump.
@@ -143,13 +131,11 @@ fun TetherKey(
         label = "keyFace",
     )
 
-    val studio = t.skin.family == ThemeFamily.Studio
     val legend = type.keyLabel
-    val baseStyle = if (studio) legend.style.copy(fontSize = 13.sp) else legend.style
+    val baseStyle = legend.style.copy(fontSize = 13.sp)
     val textStyle = (if (fixedVerb) baseStyle else baseStyle.copy(letterSpacing = 0.sp))
         .let { if (fontSize != TextUnit.Unspecified) it.copy(fontSize = fontSize) else it }
     val shown = label?.let { if (fixedVerb) legend.format(it) else it }
-    val slit = look.slit && t.keySlit > 0.dp
     val iconOnly = label == null
 
     Row(
@@ -172,26 +158,8 @@ fun TetherKey(
                 alpha = look.alpha
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .offset { IntOffset(0, look.travel.roundToPx()) }
             .focusRing(focused, keyShape, t.violet)
             .cssSurface(keyShape, face, CssBorder(1.dp, look.border), look.shadows)
-            .drawWithContent {
-                drawContent()
-                // ::before / ::after are positioned, so they paint over the legend.
-                if (wear && wearShown != KeyWear.None) {
-                    val path = Path().apply { addOutline(keyShape.createOutline(this@drawWithContent.size, layoutDirection, this@drawWithContent)) }
-                    clipPath(path) { drawKeyWear(t, wearShown) }
-                }
-                if (slit) {
-                    val h = this.size.height * 0.42f
-                    drawRoundRect(
-                        color = t.accentInk.copy(alpha = look.slitAlpha),
-                        topLeft = Offset(SlitInset.toPx(), (this.size.height - h) / 2f),
-                        size = Size(t.keySlit.toPx(), h),
-                        cornerRadius = CornerRadius(1.dp.toPx()),
-                    )
-                }
-            }
             .padding(horizontal = contentPadding ?: if (iconOnly) 0.dp else t.css.spaceLg),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = contentArrangement ?: Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),

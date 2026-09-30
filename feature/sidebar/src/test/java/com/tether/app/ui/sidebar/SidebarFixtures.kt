@@ -26,7 +26,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
 
 /** Seeded sidebar data, shaped like the web's `session-drawer` scenario (tether scripts/parity-seed.mjs). */

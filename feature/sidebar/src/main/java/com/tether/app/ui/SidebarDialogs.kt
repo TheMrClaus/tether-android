@@ -53,8 +53,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
-import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
@@ -169,7 +167,6 @@ internal fun FolderPickerDialog(
                 onClick = { onDismiss() },
                 classes = KeyClasses.ButtonSecondary,
                 label = "Cancel",
-                wear = false,
             )
             TetherKey(
                 onClick = {
@@ -195,7 +192,7 @@ fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default.showEndedSessions)
     val showThinking by prefs.showThinking.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default.showThinking)
-    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
+    val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.Default)
     val pushEnabled by prefs.pushEnabled.collectAsStateWithLifecycle(initialValue = true)
     val pushScope by prefs.pushScope.collectAsStateWithLifecycle(initialValue = PushScope.All)
     val pushPermissionAsked by prefs.pushPermissionAsked.collectAsStateWithLifecycle(initialValue = false)
@@ -210,7 +207,7 @@ fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
     }
     TetherDialog(onDismiss = { onDismiss() }, title = "Settings") {
         Text(
-            "THEME",
+            "APPEARANCE",
             color = t.faint,
             fontFamily = Manrope,
             fontWeight = TetherWeights.strong,
@@ -218,24 +215,13 @@ fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
             letterSpacing = 0.08.em,
             modifier = Modifier.padding(bottom = 6.dp),
         )
-        // The web's two axes (Settings → Appearance): the family, then the lighting.
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ThemeFamily.entries.forEach { family ->
-                ThemeOption(
-                    label = family.label,
-                    chosen = family == themeChoice.family,
-                    onClick = { scope.launch { prefs.setThemeChoice(themeChoice.copy(family = family)) } },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
+        // Settings → Appearance (hooks/use-preferences.ts THEME_MODES): Studio's lighting only.
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             ThemeMode.entries.forEach { mode ->
                 ThemeOption(
                     label = mode.label,
-                    chosen = mode == themeChoice.mode,
-                    onClick = { scope.launch { prefs.setThemeChoice(themeChoice.copy(mode = mode)) } },
+                    chosen = mode == themeMode,
+                    onClick = { scope.launch { prefs.setThemeMode(mode) } },
                     modifier = Modifier.weight(1f),
                 )
             }

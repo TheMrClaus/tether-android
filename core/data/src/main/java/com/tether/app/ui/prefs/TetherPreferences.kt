@@ -4,7 +4,8 @@ import com.tether.app.protocol.helpers.PanelWidths
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
-import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeMigration
+import com.tether.app.ui.theme.ThemeMode
 
 /**
  * T2.3: the web's `tether.preferences.v1` object (tether hooks/use-preferences.ts:148-212,
@@ -15,18 +16,22 @@ import com.tether.app.ui.theme.ThemeChoice
  * (the xterm terminal they configured is gone), so there is no behaviour to match.
  *
  * Persistence is one DataStore key per field ([PreferenceKeys]) rather than one JSON blob, so
- * the keys the app already shipped (theme/showThinking/showEnded/pinnedProjects/loginVariant)
- * keep their stored values with no migration. Parsing ([parse]) is fail-soft per field: a
+ * the keys the app already shipped (showThinking/showEnded/pinnedProjects/loginVariant) keep
+ * their stored values with no migration; the appearance is migrated onto the Studio mode (T15.5,
+ * [ThemeMigration]). Parsing ([parse]) is fail-soft per field: a
  * missing, wrongly-typed or out-of-vocabulary value reads as that field's web default and
- * never throws. The web itself only repairs the theme pair, `sidebarSort`, `loginVariant` and
+ * never throws. The web itself only repairs the theme mode, `sidebarSort`, `loginVariant` and
  * the two panel widths (use-preferences.ts:331-343) and otherwise spreads stored junk through
  * `{...defaults, ...stored}`; a typed store cannot carry junk, so the native rule is the
  * stricter "wrong type ⇒ default".
  */
 data class TetherPreferences(
-    /** `themeFamily` + `themeMode` (+ the legacy flat `theme`, migrated on read). */
-    val theme: ThemeChoice = ThemeChoice.Default,
-    val loginVariant: LoginVariant = LoginVariant.Instrument,
+    /**
+     * `themeMode`: Studio light, dark or follow system — the only appearance choice. Retired
+     * `theme_family` / flat `theme_choice` values are decoded on read ([ThemeMigration]).
+     */
+    val themeMode: ThemeMode = ThemeMode.Default,
+    val loginVariant: LoginVariant = LoginVariant.Default,
     /** The folder new sessions open in when the operator has not picked one ("" = server default). */
     val defaultWorkspace: String = "",
     val showEndedSessions: Boolean = true,
@@ -69,13 +74,12 @@ data class TetherPreferences(
             fun bool(key: String, default: Boolean) = raw[key] as? Boolean ?: default
             fun str(key: String) = raw[key] as? String
             return TetherPreferences(
-                // use-preferences.ts:116-129 via ThemeChoice.normalize (T3.1).
-                theme = ThemeChoice.normalize(
-                    str(PreferenceKeys.THEME_FAMILY),
+                // lib/theme-mode.mjs normalizeThemeMode (T15.5): the stored family is ignored.
+                themeMode = ThemeMigration.normalize(
                     str(PreferenceKeys.THEME_MODE),
                     str(PreferenceKeys.LEGACY_THEME),
                 ),
-                // use-preferences.ts:340 — anything but the explicit opt-in is Instrument.
+                // lib/theme-mode.mjs normalizeLoginVariant — anything but the explicit opt-in is Default.
                 loginVariant = LoginVariant.fromId(str(PreferenceKeys.LOGIN_VARIANT)),
                 defaultWorkspace = str(PreferenceKeys.DEFAULT_WORKSPACE) ?: d.defaultWorkspace,
                 showEndedSessions = bool(PreferenceKeys.SHOW_ENDED_SESSIONS, d.showEndedSessions),
@@ -160,8 +164,9 @@ enum class SidebarSort(val id: String) {
  * already shipped before T2.3 and must never be renamed.
  */
 object PreferenceKeys {
-    /** Legacy flat theme id (pre-T3.1), web `theme`; read only to migrate. */
+    /** Deprecated: the flat theme id (up to 0.6.x), web `theme`; read only to migrate, dropped on save. */
     const val LEGACY_THEME = "theme_choice"
+    /** Deprecated: the retired theme family (0.7.x to 0.8.0), web `themeFamily`; dropped on save. */
     const val THEME_FAMILY = "theme_family"
     const val THEME_MODE = "theme_mode"
     const val SHOW_THINKING = "show_thinking"

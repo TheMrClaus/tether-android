@@ -35,12 +35,12 @@ import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.focusRing
 import com.tether.app.ui.theme.CssLineHeight
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * ENTRY POINT — the live context gauge (components/context-gauge.tsx): a 270° speedometer arc
@@ -89,17 +89,11 @@ fun ContextGauge(
     val held by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
     val open = pressed == true
-    val studio = t.skin.family == ThemeFamily.Studio
     val shape = RoundedCornerShape(t.radiusKey)
     val active = held && onClick != null
 
-    val face = when {
-        studio -> Color.Transparent
-        active -> t.keyFaceDeep
-        open -> t.violetWash
-        else -> Color.Transparent
-    }
-    val shadows = if (active && !studio) t.css.bevelPressed + t.css.shadowKeyPressed else emptyList()
+    val face = Color.Transparent
+    val shadows = emptyList<CssShadow>()
     val legend = if (open) t.violet else t.muted
 
     val interactive = when {
@@ -110,7 +104,6 @@ fun ContextGauge(
 
     Row(
         modifier
-            .offset(y = if (active) t.pressTravel else 0.dp)
             .focusRing(focused, shape, t.violet)
             .cssSurface(shape, face, shadows = shadows)
             .then(interactive)

@@ -28,7 +28,6 @@ import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 
 /** Where a usage track sits: its size and the material rules that apply there. */
 enum class UsageTrackPlacement {
@@ -61,13 +60,12 @@ fun UsageTrack(
 ) {
     val t = LocalTetherTokens.current
     val reduced = LocalReducedMotion.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val tone = usageTone(percent)
-    val shape: Shape = if (studio) RoundedCornerShape(6.dp) else RoundedCornerShape(percent = 50)
-    val floor = if (studio) t.line else t.keyFaceDeep
+    val shape: Shape = RoundedCornerShape(6.dp)
+    val floor = t.line
     val meter = placement == UsageTrackPlacement.Meter
     val border = if (meter) CssBorder(1.dp, t.lineStrong) else null
-    val shadows = if (meter && !studio) listOf(CssShadow(true, 0.dp, 1.dp, 2.dp, 0.dp, t.contact.copy(alpha = 0.2f))) else emptyList()
+    val shadows = emptyList<CssShadow>()
     val duration = t.css.duration
     val easing = t.css.easeOut.toEasing()
     val width by animateFloatAsState(

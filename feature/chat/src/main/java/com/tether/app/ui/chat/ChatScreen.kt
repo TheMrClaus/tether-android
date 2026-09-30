@@ -603,7 +603,6 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                     iconSize = 16.dp,
                     contentDescription = "End session",
                     enabled = endAllowed,
-                    wear = false,
                 )
             }
         }

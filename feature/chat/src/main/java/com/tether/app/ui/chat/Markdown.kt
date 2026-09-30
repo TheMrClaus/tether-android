@@ -909,7 +909,6 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = M
     Box(
         modifier
             .alpha(0.85f)
-            .offset { IntOffset(0, if (pressed) t.pressTravel.roundToPx() else 0) }
             .size(44.dp)
             .cssSurface(
                 shape,

@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * Sanctioned ambient motion (globals.css keyframes 3868-3877): 720ms ring spinners, the 1s Loader
@@ -186,7 +185,6 @@ fun statusToneOf(status: String): StatusTone = when (status) {
 fun TetherStatusPill(label: String, tone: StatusTone, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val ink = statusColor(tone)
     val waiting = tone == StatusTone.Waiting
     val shape = RoundedCornerShape(percent = 50)
@@ -196,23 +194,18 @@ fun TetherStatusPill(label: String, tone: StatusTone, modifier: Modifier = Modif
         // border stays 0-width in Studio.
         waiting -> Modifier.cssSurface(
             shape, t.violetWash,
-            if (studio) null else CssBorder(1.dp, t.violetStrong),
-            if (studio) emptyList() else listOf(softShadow(1.dp, 2.dp, t.contact.copy(alpha = 0.14f), inset = true)),
+            null,
+            emptyList(),
         )
-        studio -> Modifier.cssSurface(shape, t.graphiteRaised)
-        else -> Modifier.cssSurface(
-            shape, t.mineralDeep, CssBorder(1.dp, t.lineStrong),
-            listOf(softShadow(1.dp, 2.dp, t.contact.copy(alpha = 0.14f), inset = true)),
-        )
+        else -> Modifier.cssSurface(shape, t.graphiteRaised)
     }
     Row(
         modifier = modifier
             .semantics(mergeDescendants = true) { contentDescription = label }
-            .then(if (studio) Modifier else Modifier.height(24.dp))
+            .then(Modifier)
             .then(surface)
             .then(
-                if (studio) Modifier.padding(horizontal = 8.8.dp, vertical = 4.8.dp)
-                else Modifier.padding(start = 8.dp, end = 9.6.dp),
+                Modifier.padding(horizontal = 8.8.dp, vertical = 4.8.dp),
             ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.6.dp),

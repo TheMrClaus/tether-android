@@ -534,9 +534,9 @@ private fun TopbarIconKey(
     val t = LocalTetherTokens.current
     val look: (KeyState) -> ChromeLook = { state ->
         when {
-            state == KeyState.Disabled -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, t.radiusSm, alpha = 0.5f)
-            state == KeyState.Pressed || lit -> ChromeLook(t.graphiteRaised, Color.Transparent, t.white, emptyList(), 0.dp, t.radiusSm)
-            else -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, t.radiusSm)
+            state == KeyState.Disabled -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), t.radiusSm, alpha = 0.5f)
+            state == KeyState.Pressed || lit -> ChromeLook(t.graphiteRaised, Color.Transparent, t.white, emptyList(), t.radiusSm)
+            else -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), t.radiusSm)
         }
     }
     ChromeIconKey(
@@ -720,25 +720,23 @@ internal fun TopbarBrand(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     Row(
         modifier.clearAndSetSemantics {
             contentDescription = "Tether"
             heading()
         },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (studio && !studioDesktop) 8.dp else 11.2.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (!studioDesktop) 8.dp else 11.2.dp),
     ) {
         BrandMark(t, if (studioDesktop) 29.6.dp else 25.6.dp)
         Text(
-            if (studio) "tether" else "TETHER",
+            "tether",
             color = ink ?: t.white,
             maxLines = 1,
             style = when {
                 // r2: each skin its own wordmark; only Studio has a desktop size.
-                studio && studioDesktop -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
-                studio -> cssText(type.ui, 1.1f, 770, trackingEm = -0.04f)
-                else -> cssText(type.ui, 0.74f, 740, trackingEm = 0.22f)
+                studioDesktop -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
+                else -> cssText(type.ui, 1.1f, 770, trackingEm = -0.04f)
             },
         )
     }
@@ -746,22 +744,10 @@ internal fun TopbarBrand(
 
 @Composable
 private fun BrandMark(t: TetherTokens, studioSize: Dp = 25.6.dp) {
-    if (t.studio) {
-        // 1.6rem tile (1.85rem from 48rem), 0.58rem radius, --accent; bars 0.19×0.72rem, 3px radius, white, both opaque.
-        val shape = RoundedCornerShape(9.28.dp)
-        Canvas(Modifier.size(studioSize).cssSurface(shape, t.accent)) {
-            drawNeedle(Color.White, 3.04.dp.toPx(), 11.52.dp.toPx(), 3.dp.toPx(), -3.52.dp.toPx(), 5.12.dp.toPx(), 1f)
-        }
-    } else {
-        // 1.55rem cap: 1px --key-side edge, --key-face, lit top bevel, side wall, contact shade.
-        val shadows = listOf(
-            hardShadow(1.dp, t.litStrong, inset = true),
-            hardShadow(1.dp, t.keySide),
-            softShadow(2.dp, 3.dp, t.contact.copy(alpha = 0.25f), spread = (-1).dp),
-        )
-        Canvas(Modifier.size(24.8.dp).cssSurface(CircleShape, t.keyFace, CssBorder(1.dp, t.keySide), shadows)) {
-            drawNeedle(t.violet, 2.24.dp.toPx(), 8.dp.toPx(), 999f, -2.56.dp.toPx(), 4.8.dp.toPx(), 0.4f)
-        }
+    // 1.6rem tile (1.85rem from 48rem), 0.58rem radius, --accent; bars 0.19×0.72rem, 3px radius, white, both opaque.
+    val shape = RoundedCornerShape(9.28.dp)
+    Canvas(Modifier.size(studioSize).cssSurface(shape, t.accent)) {
+        drawNeedle(Color.White, 3.04.dp.toPx(), 11.52.dp.toPx(), 3.dp.toPx(), -3.52.dp.toPx(), 5.12.dp.toPx(), 1f)
     }
 }
 

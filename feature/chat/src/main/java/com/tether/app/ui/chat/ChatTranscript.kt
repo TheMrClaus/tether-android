@@ -64,7 +64,6 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 
@@ -79,21 +78,11 @@ internal class TranscriptSpacing(val padding: PaddingValues, val scrollGap: Dp, 
 
 internal fun transcriptSpacing(t: TetherTokens, phone: Boolean): TranscriptSpacing {
     val css = t.css
-    return if (t.skin.family == ThemeFamily.Studio) {
-        if (phone) {
-            TranscriptSpacing(PaddingValues(horizontal = 16.dp, vertical = 24.dp), scrollGap = 22.4.dp, turnGap = 16.dp)
-        } else {
-            TranscriptSpacing(PaddingValues(horizontal = 32.dp, vertical = 32.dp), scrollGap = 28.dp, turnGap = 16.dp)
-        }
-    } else if (phone) {
-        TranscriptSpacing(PaddingValues(horizontal = css.spaceSm, vertical = css.spaceMd), scrollGap = css.spaceMd, turnGap = css.spaceMd)
-    } else {
-        TranscriptSpacing(
-            PaddingValues(start = css.spaceLg, end = css.spaceLg, top = css.spaceLg, bottom = css.spaceMd),
-            scrollGap = css.spaceMd,
-            turnGap = css.spaceMd,
-        )
-    }
+    return if (phone) {
+                    TranscriptSpacing(PaddingValues(horizontal = 16.dp, vertical = 24.dp), scrollGap = 22.4.dp, turnGap = 16.dp)
+                } else {
+                    TranscriptSpacing(PaddingValues(horizontal = 32.dp, vertical = 32.dp), scrollGap = 28.dp, turnGap = 16.dp)
+                }
 }
 
 /**
@@ -339,7 +328,7 @@ private fun ChatTranscriptBody(
 
 /** The transcript well: `--mineral-deep` (`:root .chat-frame`), Studio's `--graphite` (studio.css:369). */
 internal fun chatWellColor(t: TetherTokens): androidx.compose.ui.graphics.Color =
-    if (t.skin.family == ThemeFamily.Studio) t.graphite else t.mineralDeep
+    t.graphite
 
 private fun ChatItem.contentType(): String = when (this) {
     is ChatItem.Block -> block.kind

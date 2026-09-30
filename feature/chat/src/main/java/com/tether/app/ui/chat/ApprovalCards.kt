@@ -240,7 +240,7 @@ internal fun isObscured(flags: Int): Boolean =
 internal const val FLAG_PARTIALLY_OBSCURED = 0x2
 
 @Composable
-private fun cardShape(t: TetherTokens): RoundedCornerShape = RoundedCornerShape(if (isStudio(t)) 14.dp else t.radiusMd)
+private fun cardShape(t: TetherTokens): RoundedCornerShape = RoundedCornerShape(14.dp)
 
 /** A status line in words (never colour alone), announced politely when it appears. */
 @Composable
@@ -268,7 +268,6 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val consent = LocalConsent.current
-    val studio = isStudio(t)
     val shape = cardShape(t)
     val requested = view.requested
     // The card's identity is [ApprovalView.contentFp] (session + turn + request, no origin). The
@@ -353,9 +352,9 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 shape,
                 background = t.attentionBg,
                 border = CssBorder(1.dp, t.attentionBorder),
-                shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.litSoft, inset = true)) + t.css.shadowFloating,
+                shadows = emptyList(),
             )
-            .padding(if (studio) 20.dp else t.css.spaceLg)
+            .padding(20.dp)
             .semantics { paneTitle = "Tool approval required" }
             .testTag("approval-card"),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -624,7 +623,6 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val consent = LocalConsent.current
-    val studio = isStudio(t)
     // As the approval card: the page, picks, "Other" text and skips live in the shell's
     // CardStateStore under [QuestionRequestView.contentFp], by answer SLOT and by index into the
     // slot's label union (never the server's text, L3; a pick is a LABEL whichever page it was made
@@ -711,9 +709,9 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                 cardShape(t),
                 background = t.questionBg,
                 border = CssBorder(1.dp, t.questionBorder),
-                shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.seamLip, inset = true)) + t.css.shadowRaised,
+                shadows = emptyList(),
             )
-            .padding(if (studio) 20.dp else t.css.spaceMd)
+            .padding(20.dp)
             .semantics { paneTitle = "The agent is asking a question" }
             .testTag("question-card"),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
@@ -910,7 +908,6 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
 internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = isStudio(t)
     Row(modifier.fillMaxWidth()) {
         Column(
             Modifier
@@ -920,9 +917,9 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
                     cardShape(t),
                     background = t.tintSm,
                     border = CssBorder(1.dp, t.css.border),
-                    shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.seamLip, inset = true)) + t.css.shadowRaised,
+                    shadows = emptyList(),
                 )
-                .padding(if (studio) 20.dp else t.css.spaceMd)
+                .padding(20.dp)
                 .semantics { contentDescription = "Your answer to the agent's question" }
                 .testTag("answered-card"),
             verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),

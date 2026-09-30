@@ -67,7 +67,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.text.proseText
 import com.tether.app.ui.text.codeLabel
 
@@ -89,10 +88,9 @@ internal class BubbleLook(
 
 internal fun bubbleLook(t: TetherTokens, type: TetherTypography, user: Boolean, phone: Boolean): BubbleLook {
     val css = t.css
-    val studio = t.skin.family == ThemeFamily.Studio
     // Studio's chat font is 0.9rem on a phone (studio.css:455), 0.925rem wider (studio.css:372).
-    val style = if (studio && !phone) type.chatBody.copy(fontSize = (0.925f * TetherTypography.SP_PER_REM).sp) else type.chatBody
-    return if (studio) {
+    val style = if (!phone) type.chatBody.copy(fontSize = (0.925f * TetherTypography.SP_PER_REM).sp) else type.chatBody
+    return run {
         val padV = if (phone) 14.dp else 16.dp // 0.875rem / 1rem
         val padH = if (phone) 16.dp else 19.2.dp // 1rem / 1.2rem
         val r = 14.dp // 0.875rem
@@ -117,33 +115,6 @@ internal fun bubbleLook(t: TetherTokens, type: TetherTypography, user: Boolean, 
                 background = Color.Transparent,
                 border = null,
                 shadows = emptyList(),
-                ink = t.ink,
-                style = style,
-            )
-        }
-    } else {
-        val md = t.radiusMd
-        val sm = t.radiusSm
-        val padding = PaddingValues(horizontal = css.spaceMd, vertical = css.spaceSm)
-        if (user) {
-            BubbleLook(
-                maxFraction = if (phone) 0.94f else css.chatBubbleMax,
-                padding = padding,
-                shape = RoundedCornerShape(topStart = md, topEnd = md, bottomEnd = sm, bottomStart = md),
-                background = t.userBubbleBg,
-                border = CssBorder(1.dp, t.userBubbleBorder),
-                shadows = listOf(hardShadow(1.dp, t.litFaint, inset = true)) + css.shadowRaised,
-                ink = t.userBubbleInk,
-                style = style,
-            )
-        } else {
-            BubbleLook(
-                maxFraction = if (phone) 1f else css.chatBubbleMax,
-                padding = padding,
-                shape = RoundedCornerShape(topStart = md, topEnd = md, bottomEnd = md, bottomStart = sm),
-                background = t.graphiteRaised,
-                border = CssBorder(1.dp, t.line),
-                shadows = listOf(hardShadow(1.dp, t.litStrong, inset = true)) + css.shadowRaised,
                 ink = t.ink,
                 style = style,
             )

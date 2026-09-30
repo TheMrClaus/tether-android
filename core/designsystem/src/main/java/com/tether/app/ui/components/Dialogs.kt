@@ -46,7 +46,6 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * Studio's dialog chrome is written as literals in studio.css (504-514), not tokens: 16px radius,
@@ -63,7 +62,7 @@ object StudioDialog {
 }
 
 /** The skin's modal backdrop (`--scrim`; Studio's literal). */
-fun dialogScrim(t: TetherTokens): Color = if (t.skin.family == ThemeFamily.Studio) StudioDialog.scrim else t.scrim
+fun dialogScrim(t: TetherTokens): Color = StudioDialog.scrim
 
 /**
  * The molded case every dialog is (`.confirm-dialog`, globals.css 3584-3632 + material layer
@@ -85,41 +84,36 @@ fun TetherDialogSurface(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     BoxWithConstraints(modifier) {
-        val width = if (studio) minOf(440.dp, maxWidth - 32.dp) else minOf(384.dp, maxWidth - 24.dp)
-        val shape = RoundedCornerShape(if (studio) StudioDialog.radius else t.radiusLg)
+        val width = minOf(440.dp, maxWidth - 32.dp)
+        val shape = RoundedCornerShape(StudioDialog.radius)
         Column(
             Modifier
                 .width(width)
                 .cssSurface(
                     shape, t.graphite,
-                    if (studio) null else CssBorder(1.dp, t.keySide),
-                    if (studio) StudioDialog.shadows else t.css.edgeHighlight + t.css.shadowModal,
+                    null,
+                    StudioDialog.shadows,
                 ),
         ) {
             Column(
                 Modifier
                     .then(if (scrollable) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier)
                     .padding(
-                        start = if (studio) 28.dp else t.css.spaceLg,
-                        end = if (studio) 28.dp else t.css.spaceLg,
-                        top = if (studio) 28.dp else t.css.spaceXl,
-                        bottom = if (studio) 28.dp else t.css.spaceLg,
+                        start = 28.dp,
+                        end = 28.dp,
+                        top = 28.dp,
+                        bottom = 28.dp,
                     ),
             ) {
                 if (title != null || styledTitle != null) {
                     Text(
                         text = styledTitle ?: AnnotatedString(title.orEmpty()),
                         color = t.white,
-                        style = if (studio) {
-                            type.body.copy(fontSize = 22.sp, fontWeight = FontWeight(700), letterSpacing = (-0.025).em, lineHeight = 1.3.em)
-                        } else {
-                            type.body.copy(fontSize = 16.8.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
-                        },
+                        style = type.body.copy(fontSize = 22.sp, fontWeight = FontWeight(700), letterSpacing = (-0.025).em, lineHeight = 1.3.em),
                         modifier = Modifier
                             .semantics { heading() }
-                            .padding(bottom = if (studio) 12.dp else t.css.spaceSm),
+                            .padding(bottom = 12.dp),
                     )
                 }
                 content()
@@ -129,8 +123,8 @@ fun TetherDialogSurface(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = if (studio) 28.dp else t.css.spaceLg, vertical = if (studio) 18.dp else t.css.spaceLg),
-                    horizontalArrangement = Arrangement.spacedBy(if (studio) 10.dp else t.css.spaceSm, Alignment.End),
+                        .padding(horizontal = 28.dp, vertical = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                     content = footer,
                 )
@@ -148,11 +142,10 @@ fun TetherDialogText(text: String, modifier: Modifier = Modifier) = TetherDialog
 fun TetherDialogText(text: AnnotatedString, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     Text(
         text,
         color = t.muted,
-        style = type.body.copy(fontSize = if (studio) 14.sp else 12.8.sp, lineHeight = if (studio) 1.65.em else 1.55.em),
+        style = type.body.copy(fontSize = 14.sp, lineHeight = 1.65.em),
         modifier = modifier,
     )
 }

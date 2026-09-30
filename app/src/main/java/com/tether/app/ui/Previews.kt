@@ -18,18 +18,16 @@ import com.tether.app.ui.chat.Composer
 import com.tether.app.ui.chat.ToolCard
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** Design-time previews for the key components (machine theme). */
+/** Design-time previews for the key components (Studio dark). */
 
 @Composable
 private fun PreviewSurface(content: @Composable () -> Unit) {
-    TetherTheme(choice = ThemeChoice(ThemeFamily.Precision, ThemeMode.Dark)) {
+    TetherTheme(mode = ThemeMode.Dark) {
         val t = LocalTetherTokens.current
         Column(Modifier.background(t.mineral).padding(12.dp)) {
             content()

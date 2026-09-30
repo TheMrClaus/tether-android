@@ -26,10 +26,10 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.theme.CssLineHeight
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.SkinTokens
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.TokenScope
 
 /**
@@ -64,7 +64,6 @@ val StudioSidebarScope: TokenScope = TokenScope(":root:where([data-theme^=\"stud
     )
 }
 
-internal val TetherTokens.studio: Boolean get() = skin.family == ThemeFamily.Studio
 
 /** A CSS declaration block's text: `font: <weight> <rem> <family>`, tracking in em, unitless line-height. */
 internal fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float = 0f, lineHeight: Float? = null): TextStyle = TextStyle(
@@ -108,18 +107,12 @@ internal fun ProviderCap(
     letterRem: Float = 0.8f,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
-    val shape = if (studio) androidx.compose.foundation.shape.RoundedCornerShape(0.45f.rem) else CircleShape
-    val border = when {
-        studio -> null
-        selected -> CssBorder(1.dp, t.violetStrong)
-        inRow -> CssBorder(1.dp, t.keySide)
-        else -> CssBorder(1.dp, t.lineStrong)
-    }
-    val shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.litStrong, inset = true), hardShadow(1.dp, t.keySide))
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(0.45f.rem)
+    val border = null
+    val shadows = emptyList<CssShadow>()
     val ink = if (provider == "claude" || provider == "codex" || provider == "opencode") t.ink else t.white
     Box(
-        modifier.size(size).cssSurface(shape, if (studio) t.graphiteRaised else t.keyFace, border, shadows),
+        modifier.size(size).cssSurface(shape, t.graphiteRaised, border, shadows),
         contentAlignment = Alignment.Center,
     ) {
         ProviderLogo(

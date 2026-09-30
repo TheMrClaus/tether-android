@@ -99,7 +99,6 @@ fun ExpandedShell(
     showRail: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     LaunchedEffect(Unit) { state.closeDrawer() }
 
     BoxWithConstraints(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
@@ -112,11 +111,10 @@ fun ExpandedShell(
         var pendingInspector by remember { mutableStateOf<PendingWidth?>(null) }
         LaunchedEffect(panels.sidebarWidth) { pendingRail = null }
         LaunchedEffect(panels.inspectorWidth) { pendingInspector = null }
-        val family = t.skin.family
         val railStored = pendingRail.let { if (it != null) it.width else panels.sidebarWidth }
         val inspectorStored = pendingInspector.let { if (it != null) it.width else panels.inspectorWidth }
-        val railWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Rail, railStored, family, viewport)
-        val inspectorWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Inspector, inspectorStored, family, viewport)
+        val railWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Rail, railStored, viewport)
+        val inspectorWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Inspector, inspectorStored, viewport)
         val collapsed = panels.sidebarCollapsed || !showRail
         // `.is-wide-workspace` (no active session): the inspector column is 0 and its handle hidden.
         val inspectorColumn = columnLayout && session != null
@@ -133,7 +131,7 @@ fun ExpandedShell(
             fileBrowserDisabled = session == null,
         )
 
-        Column(Modifier.fillMaxSize().background(if (studio) t.graphite else t.mineral)) {
+        Column(Modifier.fillMaxSize().background(t.graphite)) {
             TetherTopbar(actions = topbar, state = topbarState, onToggleMenu = state::toggleMenu, fold = fold)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
@@ -222,7 +220,6 @@ fun ExpandedShell(
 @Composable
 private fun SidebarColumn(width: Dp, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     Box(
         Modifier
             .testTag(ShellTags.Sidebar)
@@ -230,21 +227,17 @@ private fun SidebarColumn(width: Dp, content: @Composable () -> Unit) {
             .fillMaxHeight()
             .drawBehind {
                 val px = 1.dp.toPx()
-                drawRect(if (studio) StudioDrawer.background else t.graphite)
-                if (!studio) {
-                    drawRect(t.lineStrong, Offset(size.width - px, 0f), Size(px, size.height))
-                    drawRect(t.seamLip, Offset(size.width - 2 * px, 0f), Size(px, size.height))
-                }
+                drawRect(StudioDrawer.background)
             }
-            .padding(end = if (studio) 0.dp else 1.dp)
+            .padding(end = 0.dp)
             .windowInsetsPadding(
                 WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
-                    .union(WindowInsets(bottom = if (studio) 12.dp else t.css.spaceSm)),
+                    .union(WindowInsets(bottom = 12.dp)),
             )
             .padding(
-                start = if (studio) 14.dp else t.css.spaceMd,
-                end = if (studio) 14.dp else t.css.spaceMd,
-                top = if (studio) 21.6.dp else t.css.spaceMd,
+                start = 14.dp,
+                end = 14.dp,
+                top = 21.6.dp,
             )
             .semantics { paneTitle = "Agent sessions" },
     ) { content() }
@@ -271,13 +264,11 @@ private fun WorkspaceColumn(
     modifier: Modifier = Modifier,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     BoxWithConstraints(
         modifier
             .fillMaxHeight()
             .drawBehind {
-                drawRect(if (studio) t.graphite else t.css.bayFloor)
-                if (!studio) drawRect(t.css.litFaint, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx()))
+                drawRect(t.graphite)
             }
             .testTag(ShellTags.Workspace),
     ) {
@@ -296,12 +287,8 @@ private fun WorkspaceColumn(
                     gaugeIsHandle = !columnLayout,
                     dial = slots.dial,
                 )
-                val left = when {
-                    studio -> 0.dp
-                    viewport >= ExpandedBreakpoints.STAGE_GUTTER -> 44.dp + t.css.spaceSm
-                    else -> t.css.spaceLg + 7.dp
-                }
-                val edge = if (studio) 0.dp else t.css.spaceMd
+                val left = 0.dp
+                val edge = 0.dp
                 Box(
                     Modifier
                         .weight(1f)
@@ -350,7 +337,6 @@ private fun WorkspaceColumn(
 @Composable
 private fun InspectorColumn(width: Dp, body: @Composable ColumnScope.() -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     Column(
         Modifier
             .testTag(ShellTags.InspectorColumn)
@@ -358,18 +344,17 @@ private fun InspectorColumn(width: Dp, body: @Composable ColumnScope.() -> Unit)
             .fillMaxHeight()
             .drawBehind {
                 val px = 1.dp.toPx()
-                drawRect(if (studio) t.mineralDeep else t.graphite)
-                drawRect(if (studio) t.line else t.lineStrong, Offset.Zero, Size(px, size.height))
-                if (!studio) drawRect(t.seamLip, Offset(px, 0f), Size(px, size.height))
+                drawRect(t.mineralDeep)
+                drawRect(t.line, Offset.Zero, Size(px, size.height))
             }
             .padding(start = 1.dp)
             .semantics { paneTitle = "Session details" }
             .verticalScroll(rememberScrollState())
             .padding(
-                start = if (studio) 20.dp else t.css.spaceLg,
-                end = if (studio) 20.dp else t.css.spaceLg,
-                top = if (studio) 24.dp else t.css.spaceLg,
-                bottom = if (studio) 24.dp else t.css.spaceXl,
+                start = 20.dp,
+                end = 20.dp,
+                top = 24.dp,
+                bottom = 24.dp,
             ),
         content = body,
     )
@@ -388,9 +373,9 @@ private fun ExpandDock(onExpand: () -> Unit, modifier: Modifier = Modifier) {
         { state ->
             if (state == KeyState.Pressed) {
                 val k = resolveKey(t, KeyClasses.IconButton, state)
-                ChromeLook(k.face, t.lineStrong, t.muted, k.shadows, k.travel, t.radiusSm)
+                ChromeLook(k.face, t.lineStrong, t.muted, k.shadows, t.radiusSm)
             } else {
-                ChromeLook(t.graphiteRaised, t.lineStrong, t.muted, t.css.edgeHighlight + t.css.shadowRaised, 0.dp, t.radiusSm)
+                ChromeLook(t.graphiteRaised, t.lineStrong, t.muted, t.css.edgeHighlight + t.css.shadowRaised, t.radiusSm)
             }
         }
     }

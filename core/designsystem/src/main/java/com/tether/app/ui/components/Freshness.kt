@@ -171,7 +171,7 @@ fun FreshnessPill(icon: ImageVector, label: String, modifier: Modifier = Modifie
         modifier
             .semantics(mergeDescendants = true) { contentDescription = label }
             .heightIn(min = 24.dp)
-            .cssSurface(shape, t.graphiteRaised, if (t.skin.family == com.tether.app.ui.theme.ThemeFamily.Studio) null else CssBorder(1.dp, t.line))
+            .cssSurface(shape, t.graphiteRaised, null)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),

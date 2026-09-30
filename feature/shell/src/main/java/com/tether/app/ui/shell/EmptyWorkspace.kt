@@ -93,7 +93,7 @@ fun EmptyWorkspace(
     viewportWidth: Int = 0,
 ) {
     val t = LocalTetherTokens.current
-    if (t.studio && studioWelcome != null && stage is EmptyStage.Welcome) {
+    if (studioWelcome != null && stage is EmptyStage.Welcome) {
         studioWelcome()
         return
     }

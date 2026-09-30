@@ -10,24 +10,20 @@ import com.tether.app.ui.prefs.LoginVariant
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
- * The login screen's non-visual logic, shared by the three surfaces and kept
+ * The login screen's non-visual logic, shared by the two surfaces and kept
  * free of Compose so it is unit-testable. Mirrors components/login/use-login-flow.ts
  * (the web's state machine) plus the native-only parts (server URL, pairing).
  */
 
-/** The three web sign-in screens (PLAN D12). */
-enum class LoginSurface { Instrument, Studio, Retro }
+/** The web's two sign-in screens (app/login/page.tsx), both dressed in Studio. */
+enum class LoginSurface { Studio, Retro }
 
 /**
- * app/login/page.tsx: Retro is the per-device opt-in and ignores the theme;
- * otherwise the theme family decides — Studio's welcome for Studio, the
- * Instrument terminal readout for every other family.
+ * app/login/page.tsx: Retro is the per-device opt-in layout; "Default" is Studio's
+ * welcome sign-in. The former Instrument screen was retired with the theme families.
  */
-fun loginSurfaceFor(variant: LoginVariant, studioFamily: Boolean): LoginSurface = when {
-    variant == LoginVariant.Retro -> LoginSurface.Retro
-    studioFamily -> LoginSurface.Studio
-    else -> LoginSurface.Instrument
-}
+fun loginSurfaceFor(variant: LoginVariant): LoginSurface =
+    if (variant == LoginVariant.Retro) LoginSurface.Retro else LoginSurface.Studio
 
 /** The two ways in: the browser password, or a code minted by a browser session. */
 enum class AuthMode { Password, Pairing }
@@ -100,16 +96,6 @@ const val USERNAME_MISSING_HINT = "If this console has a username, enter it too.
  */
 fun usernameHintFor(requirements: SignInRequirements?, username: String): Boolean =
     username.isBlank() && requirements?.usernameRequired != false
-
-/** Instrument frame-bar status (instrument-login.tsx statusState). */
-fun instrumentStatusLabel(phase: LoginPhase, probing: Boolean): String = when {
-    phase == LoginPhase.Checking -> "probing"
-    phase == LoginPhase.Verifying -> "verifying"
-    phase == LoginPhase.Success -> "unlocked"
-    phase == LoginPhase.Error -> "refused"
-    probing -> "probing"
-    else -> "locked"
-}
 
 /** Which side must update is known from /healthz (the D5 native window). */
 fun versionCopy(incompatibility: Incompatibility): String = when (incompatibility.reason) {

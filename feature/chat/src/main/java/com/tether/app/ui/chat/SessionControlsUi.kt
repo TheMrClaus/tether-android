@@ -86,7 +86,6 @@ import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.util.providerGlyph
 
 /**
@@ -228,11 +227,10 @@ internal fun ComposerOptionsRow(
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val enabled = lock == null
-    val studio = t.skin.family == ThemeFamily.Studio
     Row(
-        modifier.fillMaxWidth().padding(bottom = if (studio) 0.dp else t.css.spaceXs),
+        modifier.fillMaxWidth().padding(bottom = 0.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 8.dp else t.css.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         controls.model?.let { model ->
             RowIcon(TetherIcons.Cpu)
@@ -364,7 +362,6 @@ internal fun ControlPill(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val shape = RoundedCornerShape(999.dp)
@@ -373,12 +370,7 @@ internal fun ControlPill(
         active -> t.violetDeep
         else -> t.white
     }
-    val edge = when {
-        studio -> null
-        danger -> CssBorder(1.dp, t.amber)
-        active -> CssBorder(1.dp, t.violetStrong)
-        else -> CssBorder(1.dp, t.keySide)
-    }
+    val edge = null
     Box(
         modifier
             .heightIn(min = 44.dp)
@@ -401,12 +393,12 @@ internal fun ControlPill(
                     compositingStrategy = CompositingStrategy.ModulateAlpha
                     translationY = if (pressed && enabled) 1.dp.toPx() else 0f
                 }
-                .height(if (studio) 36.dp else 30.4.dp)
+                .height(36.dp)
                 .cssSurface(
                     shape,
-                    if (studio) t.graphiteRaised else if (pressed) t.keyFaceHover else t.keyFace,
+                    t.graphiteRaised,
                     edge,
-                    if (studio) emptyList() else listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowKeySm,
+                    emptyList(),
                 )
                 .padding(horizontal = t.css.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
@@ -420,7 +412,7 @@ internal fun ControlPill(
             if (icon != null) Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
             Text(
                 label,
-                style = type.body.copy(fontSize = if (studio) 11.52.sp else 11.2.sp, fontWeight = FontWeight(600)),
+                style = type.body.copy(fontSize = 11.52.sp, fontWeight = FontWeight(600)),
                 color = ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -640,10 +632,9 @@ internal fun SessionSettingsTrigger(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val shape = RoundedCornerShape(if (studio) 10.dp else t.radiusKey)
+    val shape = RoundedCornerShape(10.dp)
     val warn = autoOn || unknownMode
     val name = if (hasOtherSettings) {
         "Session settings: $label${if (autoOn) ", Auto approve on" else ""}${if (unknownMode) ", unknown mode" else ""}"
@@ -664,9 +655,9 @@ internal fun SessionSettingsTrigger(
             .graphicsLayer { translationY = if (pressed) 1.dp.toPx() else 0f }
             .cssSurface(
                 shape,
-                if (studio) t.graphiteRaised else if (pressed) t.keyFaceHover else t.keyFace,
-                if (studio) null else CssBorder(1.dp, if (warn) t.warning else t.line),
-                if (studio) emptyList() else t.css.bevelRaisedSm + t.css.shadowKeySm,
+                t.graphiteRaised,
+                null,
+                emptyList(),
             )
             .padding(horizontal = t.css.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
@@ -859,11 +850,10 @@ private fun t() = LocalTetherTokens.current
 private fun HubRow(icon: ImageVector, label: String, value: String, danger: Boolean = false, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = if (studio) 58.dp else 44.dp)
+            .heightIn(min = 58.dp)
             .clickable(role = Role.Button, onClick = onClick)
             .clearAndSetSemantics {
                 role = Role.Button
@@ -872,21 +862,21 @@ private fun HubRow(icon: ImageVector, label: String, value: String, danger: Bool
                 testTag = "sheet-row-$label"
             }
             .cssSurface(
-                RoundedCornerShape(if (studio) 8.dp else t.radiusMd),
-                if (studio) Color.Transparent else t.graphiteRaised,
-                if (studio) null else CssBorder(1.dp, if (danger) t.warning else t.line),
-                if (studio) emptyList() else t.css.edgeHighlight,
+                RoundedCornerShape(8.dp),
+                Color.Transparent,
+                null,
+                emptyList(),
             )
-            .padding(horizontal = if (studio) 12.dp else t.css.spaceMd),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp)) }
-        Text(label, style = type.body.copy(fontSize = if (studio) 14.sp else 13.76.sp, fontWeight = FontWeight(600)), color = t.white, modifier = Modifier.weight(1f))
+        Text(label, style = type.body.copy(fontSize = 14.sp, fontWeight = FontWeight(600)), color = t.white, modifier = Modifier.weight(1f))
         if (value.isNotEmpty()) {
             Text(
                 value,
-                style = type.body.copy(fontSize = if (studio) 12.sp else 12.48.sp, fontWeight = FontWeight(500)),
+                style = type.body.copy(fontSize = 12.sp, fontWeight = FontWeight(500)),
                 color = if (danger) t.warning else t.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

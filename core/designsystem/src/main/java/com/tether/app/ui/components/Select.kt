@@ -57,7 +57,6 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.ThemeFamily
 
 /** One row of a [TetherSelect] (components/tether-select.tsx `TetherSelectOption`, flat form). */
 @Immutable
@@ -95,16 +94,11 @@ fun TetherSelectTrigger(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(if (studio) 8.dp else t.radiusSm)
-    val face = if (studio) t.graphite else t.keyFace
-    val fontSize = when {
-        studio -> 13.sp
-        style == SelectTriggerStyle.Field -> 16.sp
-        else -> 11.52.sp
-    }
+    val shape = RoundedCornerShape(8.dp)
+    val face = t.graphite
+    val fontSize = 13.sp
     Row(
         modifier = modifier
             .semantics(mergeDescendants = true) {
@@ -130,7 +124,7 @@ fun TetherSelectTrigger(
     ) {
         Text(
             label,
-            style = type.body.copy(fontSize = fontSize, fontWeight = FontWeight(if (style == SelectTriggerStyle.Field && !studio) 400 else 600)),
+            style = type.body.copy(fontSize = fontSize, fontWeight = FontWeight(600)),
             color = t.white,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

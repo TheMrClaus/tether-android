@@ -50,9 +50,9 @@ internal object StudioDrawer {
     val background = Color(0xFF141D2E)
 }
 
-/** `.session-sidebar` phone width: `min(20rem, 88vw)`; Studio `min(21rem, 92vw)` (studio.css 443). */
-internal fun drawerWidth(studio: Boolean, viewportWidth: Dp): Dp =
-    if (studio) minOf(336.dp, viewportWidth * 0.92f) else minOf(320.dp, viewportWidth * 0.88f)
+/** `.session-sidebar` phone width: Studio `min(21rem, 92vw)` (studio.css 443). */
+internal fun drawerWidth(viewportWidth: Dp): Dp =
+    minOf(336.dp, viewportWidth * 0.92f)
 
 /**
  * The phone drawer container: `.session-sidebar` below 48rem plus `.drawer-backdrop`
@@ -75,7 +75,6 @@ fun SessionDrawerHost(
 ) {
     val t = LocalTetherTokens.current
     val reduced = LocalReducedMotion.current
-    val studio = t.studio
     val slide by animateFloatAsState(
         targetValue = if (open) 0f else -1.02f,
         animationSpec = if (reduced) snap() else tween(t.css.duration, easing = t.css.easeOut.toEasing()),
@@ -94,10 +93,10 @@ fun SessionDrawerHost(
                     .testTag(ShellTags.DrawerBackdrop),
             )
         }
-        val width = drawerWidth(studio, maxWidth)
+        val width = drawerWidth(maxWidth)
         val edge = t.line
-        val insetTop = if (studio) 16.dp else t.css.spaceMd
-        val insetSide = if (studio) 14.dp else t.css.spaceMd
+        val insetTop = 16.dp
+        val insetSide = 14.dp
         val insetBottom = t.css.spaceMd
         Box(
             Modifier
@@ -108,8 +107,7 @@ fun SessionDrawerHost(
                     alpha = if (shown) 1f else 0f
                 }
                 .drawBehind {
-                    drawRect(if (studio) StudioDrawer.background else t.graphite)
-                    if (!studio) drawRect(edge, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
+                    drawRect(StudioDrawer.background)
                 }
                 .then(
                     if (open) {
@@ -120,17 +118,13 @@ fun SessionDrawerHost(
                         Modifier.clearAndSetSemantics { }
                     },
                 )
-                .padding(end = if (studio) 0.dp else 1.dp)
+                .padding(end = 0.dp)
                 // max(padding, safe area) per side; consuming the insets here keeps the content's
                 // own statusBars/navigationBars padding from doubling them.
                 .windowInsetsPadding(
                     WindowInsets.statusBars.only(WindowInsetsSides.Top).union(WindowInsets(top = insetTop))
                         .union(
-                            if (studio) {
-                                WindowInsets(bottom = insetBottom)
-                            } else {
-                                WindowInsets.navigationBars.only(WindowInsetsSides.Bottom).union(WindowInsets(bottom = insetBottom))
-                            },
+                            WindowInsets(bottom = insetBottom),
                         ),
                 )
                 .padding(horizontal = insetSide)

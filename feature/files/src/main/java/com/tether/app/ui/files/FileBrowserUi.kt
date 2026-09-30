@@ -94,7 +94,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.text.CopyNoticeHost
 import com.tether.app.ui.text.CopyNotices
 import com.tether.app.ui.text.SafeCopyClipboard
@@ -135,8 +134,6 @@ internal object FileBrowserBreakpoints {
     /** Studio's phone query (`max-width: 640px`). */
     val StudioPhone: Dp = 640.dp
 }
-
-private val TetherTokens.studio: Boolean get() = skin.family == ThemeFamily.Studio
 
 /** A CSS text role in the skin's UI face: [size] in sp (rem x 16 or Studio px), weight, tracking. */
 @Composable
@@ -230,20 +227,17 @@ fun FileBrowserFrame(
         val viewport = maxWidth
         val masterDetail = viewport <= FileBrowserBreakpoints.MasterDetail
         val narrow = viewport <= FileBrowserBreakpoints.Narrow
-        val studioPhone = t.studio && viewport <= FileBrowserBreakpoints.StudioPhone
+        val studioPhone = viewport <= FileBrowserBreakpoints.StudioPhone
         val full = state.previewFullscreen
         // globals.css 3348-3372 / 3553; studio.css 654, 954, 986.
         val (width, height) = when {
             full -> maxWidth to maxHeight
-            t.studio && studioPhone -> (maxWidth - 24.dp) to (maxHeight - 32.dp)
-            t.studio -> minOf(1400.dp, maxWidth - 48.dp) to minOf(820.dp, maxHeight - 48.dp)
-            masterDetail -> (maxWidth - 8.dp) to (maxHeight - 8.dp)
-            else -> minOf(1408.dp, maxWidth - 24.dp) to minOf(768.dp, maxHeight - 24.dp)
+            studioPhone -> (maxWidth - 24.dp) to (maxHeight - 32.dp)
+            else -> minOf(1400.dp, maxWidth - 48.dp) to minOf(820.dp, maxHeight - 48.dp)
         }
         val radius = when {
             full -> 0.dp
-            t.studio -> if (studioPhone) 14.dp else StudioDialog.radius
-            else -> t.radiusLg
+            else -> if (studioPhone) 14.dp else StudioDialog.radius
         }
         val shape = RoundedCornerShape(radius)
         Column(
@@ -253,8 +247,8 @@ fun FileBrowserFrame(
                 .height(height)
                 .cssSurface(
                     shape, t.graphite,
-                    if (t.studio || full) null else CssBorder(1.dp, t.keySide),
-                    if (t.studio) StudioDialog.shadows else listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowModal,
+                    null,
+                    StudioDialog.shadows,
                 )
                 .clip(shape)
                 // The <dialog> swallows taps: only Back and Close dismiss it.
@@ -284,14 +278,10 @@ private fun BrowserHeader(state: FileBrowserState, narrow: Boolean, studioPhone:
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (t.studio) (if (studioPhone) 76.dp else 88.dp) else 68.dp)
+                .heightIn(min = (if (studioPhone) 76.dp else 88.dp))
                 .padding(
-                    horizontal = when {
-                        t.studio -> if (studioPhone) 20.dp else 28.dp
-                        narrow -> t.css.spaceMd
-                        else -> t.css.spaceLg
-                    },
-                    vertical = if (t.studio) (if (studioPhone) 18.dp else 22.dp) else t.css.spaceMd,
+                    horizontal = if (studioPhone) 20.dp else 28.dp,
+                    vertical = (if (studioPhone) 18.dp else 22.dp),
                 ),
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceLg),
             verticalAlignment = Alignment.CenterVertically,
@@ -300,22 +290,18 @@ private fun BrowserHeader(state: FileBrowserState, narrow: Boolean, studioPhone:
                 Text(
                     "Workspace files",
                     color = t.white,
-                    style = if (t.studio) {
-                        ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f)
-                    } else {
-                        ui(rem(1.15f), 680, -0.02f)
-                    },
+                    style = ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f),
                     modifier = Modifier.semantics { heading() },
                 )
                 // ta-28i: the session's title by the label rule (no bidi control, no invisible).
                 Text(
                     "Browse ${LabelText.title(state.sessionName).ifEmpty { "the current session" }} without leaving the console.",
                     color = t.muted,
-                    style = if (t.studio) ui(12f) else ui(rem(0.75f)),
+                    style = ui(12f),
                     maxLines = if (narrow) 1 else Int.MAX_VALUE,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .padding(top = if (t.studio) 5.dp else 3.2.dp)
+                        .padding(top = 5.dp)
                         .then(if (narrow) Modifier.widthIn(max = 288.dp) else Modifier),
                 )
             }
@@ -323,7 +309,6 @@ private fun BrowserHeader(state: FileBrowserState, narrow: Boolean, studioPhone:
         }
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(1.dp).background(t.line))
         // `.file-browser-dialog > header::after`: the perforation over the header's bottom edge.
-        if (!t.studio) PerfDivider(Modifier.align(Alignment.BottomStart).offset(y = 1.dp))
     }
 }
 
@@ -336,10 +321,10 @@ private fun Breadcrumbs(state: FileBrowserState, studioPhone: Boolean) {
             Modifier
                 .testTag(FileBrowserTags.Breadcrumbs)
                 .fillMaxWidth()
-                .background(if (t.studio) t.graphite else t.graphiteRaised)
-                .heightIn(min = if (t.studio) 54.dp else 44.dp)
+                .background(t.graphite)
+                .heightIn(min = 54.dp)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = if (t.studio) 20.dp else t.css.spaceMd)
+                .padding(horizontal = 20.dp)
                 .semantics { contentDescription = "Workspace path" },
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
@@ -352,17 +337,17 @@ private fun Breadcrumbs(state: FileBrowserState, studioPhone: Boolean) {
                     val current = index == listing.breadcrumbs.lastIndex
                     Box(
                         Modifier
-                            .heightIn(min = if (t.studio) 44.dp else 32.dp)
+                            .heightIn(min = 44.dp)
                             .clip(RoundedCornerShape(t.radiusSm))
                             .semantics { if (current) stateDescription = "Current folder" }
                             .clickable(role = Role.Button) { state.loadDirectory(crumb.path) }
-                            .padding(horizontal = if (t.studio) 10.dp else t.css.spaceSm),
+                            .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             codeLabel(crumb.name),
                             color = if (current) t.white else t.muted,
-                            style = ui(if (t.studio) 12f else rem(0.68f), if (current) 650 else 400, mono = true),
+                            style = ui(12f, if (current) 650 else 400, mono = true),
                             maxLines = 1,
                         )
                     }
@@ -390,13 +375,13 @@ private fun ListPane(
     val t = LocalTetherTokens.current
     val listing = state.listing
     val tracks = tracksFor(narrow)
-    val inline = if (t.studio) (if (studioPhone) 14.dp else 20.dp) else t.css.spaceMd
+    val inline = (if (studioPhone) 14.dp else 20.dp)
     Column(modifier.testTag(FileBrowserTags.ListPane).semantics { contentDescription = "Files and folders" }) {
         // Toolbar: Parent folder | n items + New folder, New file, Upload.
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (t.studio) 56.dp else 44.dp)
+                .heightIn(min = 56.dp)
                 .padding(horizontal = inline),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (studioPhone) 6.dp else t.css.spaceMd),
@@ -404,7 +389,7 @@ private fun ListPane(
             val upEnabled = listing?.parent != null && !state.loading
             Row(
                 Modifier
-                    .heightIn(min = if (t.studio) 44.dp else 36.dp)
+                    .heightIn(min = 44.dp)
                     .graphicsLayer { alpha = if (upEnabled) 1f else 0.48f }
                     .clip(RoundedCornerShape(t.radiusSm))
                     .clickable(enabled = upEnabled, role = Role.Button) { state.openParent() }
@@ -413,10 +398,10 @@ private fun ListPane(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(TetherIcons.ArrowUp, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
-                Text("Parent folder", color = t.muted, style = if (t.studio) ui(13f, 630) else ui(rem(0.7f), 630), maxLines = 1)
+                Text("Parent folder", color = t.muted, style = ui(13f, 630), maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
-            Text("${listing?.entries?.size ?: 0} items", color = t.faint, style = if (t.studio) ui(12f) else ui(rem(0.67f)), maxLines = 1)
+            Text("${listing?.entries?.size ?: 0} items", color = t.faint, style = ui(12f), maxLines = 1)
             Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                 val ready = listing != null
                 IconKey(TetherIcons.FolderPlus, "New folder", t.faint, { state.openNamePrompt(NamePromptMode.NewFolder) }, enabled = ready)
@@ -429,16 +414,16 @@ private fun ListPane(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(if (t.studio) t.mineral else Color.Transparent)
-                .heightIn(min = if (t.studio) 38.dp else 32.dp)
+                .background(t.mineral)
+                .heightIn(min = 38.dp)
                 .padding(horizontal = inline)
                 .semantics(mergeDescendants = true) {},
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val style = if (t.studio) ui(11f, 700) else ui(rem(0.61f), 700, 0.07f)
-            val color = if (t.studio) t.muted else t.faint
-            fun head(label: String) = if (t.studio) label else label.uppercase()
+            val style = ui(11f, 700)
+            val color = t.muted
+            fun head(label: String) = label
             Text(head("Name"), color = color, style = style, modifier = Modifier.weight(1f))
             Text(head("Size"), color = color, style = style, modifier = Modifier.width(tracks.size))
             tracks.modified?.let { Text(head("Modified"), color = color, style = style, modifier = Modifier.width(it)) }
@@ -510,13 +495,13 @@ private fun EntryRow(
 ) {
     val t = LocalTetherTokens.current
     val ink = if (selected) t.white else t.muted
-    val meta = if (t.studio) ui(11f) else ui(rem(0.65f))
+    val meta = ui(11f)
     Column(Modifier.testTag(FileBrowserTags.row(entry.path))) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .background(if (selected) t.violetWash else Color.Transparent)
-                .heightIn(min = if (t.studio) 54.dp else 44.dp)
+                .heightIn(min = 54.dp)
                 .padding(horizontal = inline),
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
             verticalAlignment = Alignment.CenterVertically,
@@ -539,7 +524,7 @@ private fun EntryRow(
                 Text(
                     codeLabel(entry.name),
                     color = ink,
-                    style = if (t.studio) ui(13f, 620) else ui(rem(0.76f), 620),
+                    style = ui(13f, 620),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -629,7 +614,7 @@ private fun StateBlock(
             Text(
                 title,
                 color = t.white,
-                style = if (t.studio) ui(16f, 650) else ui(rem(0.9f), 650),
+                style = ui(16f, 650),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = t.css.spaceXs).semantics { heading() },
             )
@@ -637,7 +622,7 @@ private fun StateBlock(
         Text(
             proseText(message),
             color = t.faint,
-            style = if (t.studio) ui(13f, lineHeight = 1.55f) else ui(rem(0.72f), lineHeight = 1.55f),
+            style = ui(13f, lineHeight = 1.55f),
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 544.dp),
         )
@@ -652,7 +637,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
     Column(
         modifier
             .testTag(FileBrowserTags.Preview)
-            .background(if (t.studio) t.mineral else t.mineralDeep)
+            .background(t.mineral)
             .semantics { contentDescription = "File preview"; liveRegion = LiveRegionMode.Polite },
     ) {
         if (selected == null) {
@@ -668,10 +653,10 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (t.studio) 64.dp else 0.dp)
+                .heightIn(min = 64.dp)
                 .padding(
-                    horizontal = if (t.studio) 20.dp else t.css.spaceLg,
-                    vertical = if (t.studio) 14.dp else t.css.spaceMd,
+                    horizontal = 20.dp,
+                    vertical = 14.dp,
                 ),
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
@@ -681,7 +666,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
                 Text(
                     codeLabel(selected.name),
                     color = t.white,
-                    style = if (t.studio) ui(14f, 650) else ui(rem(0.84f), 650),
+                    style = ui(14f, 650),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() },
@@ -689,7 +674,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
                 Text(
                     "${FileFormat.size(selected.size)} · Modified ${FileFormat.modified(selected.mtime, env)}",
                     color = t.faint,
-                    style = if (t.studio) ui(12f) else ui(rem(0.65f)),
+                    style = ui(12f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 3.2.dp),
@@ -705,11 +690,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
             )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-        val pad = when {
-            t.studio -> if (studioPhone) 16.dp else 24.dp
-            masterDetail -> t.css.spaceMd
-            else -> t.css.spaceLg
-        }
+        val pad = if (studioPhone) 16.dp else 24.dp
         // ta-28i: a copy from the text preview shows its hidden controls as tokens, with "Copy raw".
         val notices = remember(selected.path) { CopyNotices() }
         Box(Modifier.fillMaxWidth().weight(1f).padding(pad), contentAlignment = Alignment.Center) {
@@ -788,8 +769,8 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, n
 private fun TextPreview(text: String, notices: CopyNotices) {
     val t = LocalTetherTokens.current
     val lines = remember(text) { previewPieces(text) }
-    val shape = RoundedCornerShape(if (t.studio) 8.dp else t.radiusMd)
-    val base = if (t.studio) ui(13f, lineHeight = 1.75f, mono = true) else ui(rem(0.72f), lineHeight = 1.55f, mono = true)
+    val shape = RoundedCornerShape(8.dp)
+    val base = ui(13f, lineHeight = 1.75f, mono = true)
     val style = base.copy(textDirection = codeDirection)
     val tokens = tokenStyle(t)
     val clipboard = LocalClipboard.current
@@ -803,8 +784,8 @@ private fun TextPreview(text: String, notices: CopyNotices) {
                     .fillMaxSize()
                     .clip(shape)
                     .background(t.graphite)
-                    .then(if (t.studio) Modifier else Modifier.border(1.dp, t.line, shape))
-                    .padding(if (t.studio) 20.dp else t.css.spaceLg),
+                    .then(Modifier)
+                    .padding(20.dp),
             ) {
                 itemsIndexed(lines) { _, piece ->
                     val shown = remember(piece, tokens) { styledDisplay(PreviewCopy.display(piece, last = piece === lines.last()), tokens) }
@@ -1124,42 +1105,40 @@ fun DestinationPickerFrame(
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     BoxWithConstraints(modifier.fillMaxSize().background(dialogScrim(t)), contentAlignment = Alignment.Center) {
-        val studioPhone = t.studio && maxWidth <= FileBrowserBreakpoints.StudioPhone
+        val studioPhone = maxWidth <= FileBrowserBreakpoints.StudioPhone
         val width = if (studioPhone) maxWidth - 24.dp else minOf(608.dp, maxWidth - 24.dp)
         val maxH = maxHeight - when {
             studioPhone -> 32.dp
-            t.studio -> 48.dp
-            else -> 24.dp
+            else -> 48.dp
         }
-        val shape = RoundedCornerShape(if (t.studio) (if (studioPhone) 14.dp else StudioDialog.radius) else t.radiusLg)
+        val shape = RoundedCornerShape((if (studioPhone) 14.dp else StudioDialog.radius))
         Column(
             Modifier
                 .width(width)
                 .heightIn(max = maxH)
                 .cssSurface(
                     shape, t.graphite,
-                    if (t.studio) null else CssBorder(1.dp, t.keySide),
-                    if (t.studio) StudioDialog.shadows else listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowModal,
+                    null,
+                    StudioDialog.shadows,
                 )
                 .clip(shape)
                 .swallowTaps(),
         ) {
-            val inlinePad = if (t.studio) (if (studioPhone) 20.dp else 28.dp) else t.css.spaceXl
+            val inlinePad = (if (studioPhone) 20.dp else 28.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = if (t.studio) (if (studioPhone) 76.dp else 88.dp) else 0.dp)
-                    .padding(horizontal = inlinePad, vertical = if (t.studio) (if (studioPhone) 18.dp else 22.dp) else t.css.spaceLg),
+                    .heightIn(min = (if (studioPhone) 76.dp else 88.dp))
+                    .padding(horizontal = inlinePad, vertical = (if (studioPhone) 18.dp else 22.dp)),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceLg),
             ) {
                 Column(Modifier.weight(1f)) {
                     val mode = if (picker.mode == DestinationMode.Move) "Move" else "Copy"
-                    if (!t.studio) Text(type.sectionLabel.format(mode), color = t.faint, style = type.sectionLabel.style)
                     Text(
                         codeLabel(picker.entry.name),
                         color = t.white,
-                        style = if (t.studio) ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f) else ui(rem(1.3f), 700, -0.025f),
+                        style = ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.semantics { heading(); contentDescription = "$mode ${SafeText.line(picker.entry.name)}" },
@@ -1208,8 +1187,8 @@ fun DestinationPickerFrame(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = inlinePad, vertical = if (t.studio) (if (studioPhone) 16.dp else 18.dp) else t.css.spaceMd),
-                horizontalArrangement = Arrangement.spacedBy(if (t.studio) 10.dp else t.css.spaceSm, Alignment.End),
+                    .padding(horizontal = inlinePad, vertical = (if (studioPhone) 16.dp else 18.dp)),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TetherKey(onClick = onClose, classes = KeyClasses.ButtonSecondary, label = "Cancel")
@@ -1229,8 +1208,7 @@ fun DestinationPickerFrame(
 /** A `--line-strong` rule with the lit lip beneath (`box-shadow: 0 1px 0 var(--seam-lip)`). */
 @Composable
 private fun Seam(t: TetherTokens) {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(if (t.studio) t.line else t.lineStrong))
-    if (!t.studio) Box(Modifier.fillMaxWidth().height(1.dp).background(t.seamLip))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
 }
 
 @Composable

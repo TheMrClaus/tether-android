@@ -89,11 +89,11 @@ internal fun materialTypography(t: TetherTypography): Typography = Typography(
 
 @Composable
 fun TetherTheme(
-    choice: ThemeChoice = ThemeChoice.Default,
+    mode: ThemeMode = ThemeMode.Default,
     content: @Composable () -> Unit,
 ) {
     // `system` mode follows the device's dark setting, like the web's prefers-color-scheme.
-    val skin = choice.resolve(isSystemInDarkTheme())
+    val skin = mode.resolve(isSystemInDarkTheme())
     val tokens = tokensFor(skin)
     val view = LocalView.current
     val context = LocalContext.current

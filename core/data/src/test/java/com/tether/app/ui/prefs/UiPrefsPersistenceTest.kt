@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
 import java.io.File
 import kotlinx.coroutines.CoroutineScope

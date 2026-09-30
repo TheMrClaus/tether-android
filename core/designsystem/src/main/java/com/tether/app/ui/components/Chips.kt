@@ -33,10 +33,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * A composer chip (`.draft-chip` / `.model-selector-chip`, globals.css 9724-9748): a raised pill
@@ -62,16 +62,14 @@ fun TetherChip(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.skin.family == ThemeFamily.Studio
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(percent = 50)
     val border = when {
         active -> CssBorder(1.dp, t.violet)
-        studio -> null
-        else -> CssBorder(1.dp, t.line)
+        else -> null
     }
-    val shadows = if (studio) emptyList() else t.css.edgeHighlight
+    val shadows = emptyList<CssShadow>()
     Box(
         modifier = modifier
             .semantics(mergeDescendants = true) {
@@ -96,12 +94,12 @@ fun TetherChip(
     ) {
         Row(
             modifier = Modifier
-                .then(if (studio) Modifier.heightIn(min = 36.dp) else Modifier.height(28.8.dp))
+                .then(Modifier.heightIn(min = 36.dp))
                 .focusRing(focused, shape, t.violet)
                 .cssSurface(shape, t.graphiteRaised, border, shadows)
                 .padding(horizontal = t.css.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (studio) 6.4.dp else t.css.spaceXs),
+            horizontalArrangement = Arrangement.spacedBy(6.4.dp),
         ) {
             leading?.invoke(this)
             Text(

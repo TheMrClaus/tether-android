@@ -87,7 +87,7 @@ private const val PROBE_RETRY_MS = 400L
 
 /**
  * Everything a surface renders, plus the callbacks. One state machine
- * ([LoginScreen]) drives all three surfaces, like use-login-flow.ts on the web.
+ * ([LoginScreen]) drives both surfaces, like use-login-flow.ts on the web.
  */
 class LoginUi(
     val mode: AuthMode,
@@ -135,9 +135,7 @@ class LoginUi(
 @Composable
 fun LoginScreen(
     client: TetherClient,
-    surface: LoginSurface = LoginSurface.Instrument,
-    /** Retro's Studio restyle (retro-login.tsx `studio`). */
-    studioFamily: Boolean = false,
+    surface: LoginSurface = LoginSurface.Studio,
     /**
      * Set after a user logout when the server side needs a word (see
      * logoutNoticeFor); the host clears it once a sign-in succeeds.
@@ -311,9 +309,8 @@ fun LoginScreen(
         onSubmit = ::submit,
     )
     when (surface) {
-        LoginSurface.Instrument -> InstrumentLogin(ui)
         LoginSurface.Studio -> StudioLogin(ui)
-        LoginSurface.Retro -> RetroLogin(ui, studio = studioFamily)
+        LoginSurface.Retro -> RetroLogin(ui)
     }
 }
 
@@ -449,151 +446,6 @@ private fun MonoText(text: String, color: Color, modifier: Modifier = Modifier, 
 
 /** A screen-reader announcement of the final outcome (aria-live="polite" on the web). */
 private fun Modifier.politeLiveRegion(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }
-
-// ---------------------------------------------------------------------------
-// Instrument (instrument-login.tsx): the console's own terminal frame
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun InstrumentLogin(ui: LoginUi) {
-    val t = LocalTetherTokens.current
-    val statusLabel = instrumentStatusLabel(ui.phase, ui.probing)
-    val statusColor = when (ui.phase) {
-        LoginPhase.Checking, LoginPhase.Verifying -> t.violet
-        LoginPhase.Success -> t.running
-        LoginPhase.Error -> t.danger
-        LoginPhase.Ready -> t.faint
-    }
-    val (feedback, feedbackColor) = when (ui.phase) {
-        LoginPhase.Checking -> "checking sign-in" to t.violet
-        LoginPhase.Verifying ->
-            (if (ui.mode == AuthMode.Pairing) "pairing device" else "checking password") to t.violet
-        LoginPhase.Success -> "unlocked · opening console" to t.running
-        LoginPhase.Error -> ui.error.orEmpty() to t.danger
-        LoginPhase.Ready -> ui.notice.orEmpty() to t.warning
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(t.mineral)
-            .systemBarsPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.semantics { contentDescription = "Tether" },
-        ) {
-            BrandMark()
-            Wordmark()
-        }
-        Spacer(Modifier.height(24.dp))
-
-        Column(
-            modifier = Modifier
-                .widthIn(max = 460.dp)
-                .fillMaxWidth()
-                .border(1.dp, t.line, RoundedCornerShape(6.dp))
-                .background(t.mineralDeep, RoundedCornerShape(6.dp)),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MonoText("tether › sign-in", t.faint, fontSize = 11.sp)
-                Spacer(Modifier.weight(1f))
-                // Status is the label AND the dot, never colour alone.
-                StatusDot(color = statusColor)
-                Spacer(Modifier.width(6.dp))
-                MonoText(statusLabel, t.muted, fontSize = 11.sp)
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-            Column(
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = "Return to your agents.",
-                    color = t.white,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.heading,
-                    fontSize = 20.sp,
-                    modifier = Modifier.semantics { heading() },
-                )
-                // The readout: key · value, real readings from the probe.
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    ui.statusLines.forEach { line ->
-                        val key = line.substringBefore(" · ")
-                        val value = line.substringAfter(" · ", "")
-                        Row {
-                            MonoText(key, t.faint, fontSize = 11.5.sp)
-                            if (value.isNotEmpty()) {
-                                MonoText(" · ", t.faint, fontSize = 11.5.sp)
-                                MonoText(value, t.ink, fontSize = 11.5.sp)
-                            }
-                        }
-                    }
-                }
-
-                LabeledRow("server ›", 84) { ServerUrlField(ui, it, JetBrainsMono) }
-                ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
-
-                when (ui.mode) {
-                    AuthMode.Password -> if (ui.passwordEnabled) {
-                        if (ui.usernameShown) LabeledRow("username ›", 84) { UsernameField(ui, it, JetBrainsMono) }
-                        if (ui.usernameOptional) MonoText(USERNAME_OPTIONAL_HINT, t.muted, fontSize = 11.5.sp)
-                        LabeledRow("password ›", 84) { mod ->
-                            Row(mod, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                PasswordField(ui, Modifier.weight(1f), JetBrainsMono)
-                                TetherKey(
-                                    onClick = ui.onSubmit,
-                                    modifier = Modifier.semantics { contentDescription = "Unlock Tether" },
-                                    classes = KeyClasses.ButtonPrimary,
-                                    icon = TetherIcons.ArrowRight,
-                                    enabled = !ui.busy,
-                                )
-                            }
-                        }
-                    } else {
-                        MonoText("password sign-in is off for this console — use a pairing code", t.muted)
-                    }
-                    AuthMode.Pairing -> {
-                        LabeledRow("code ›", 84) { mod ->
-                            Row(mod, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                CodeField(ui, Modifier.weight(1f))
-                                TetherKey(
-                                    onClick = ui.onSubmit,
-                                    modifier = Modifier.semantics { contentDescription = "Pair device" },
-                                    classes = KeyClasses.ButtonPrimary,
-                                    icon = TetherIcons.ArrowRight,
-                                    enabled = !ui.busy,
-                                )
-                            }
-                        }
-                        MonoText(PAIRING_HELP, t.muted, fontSize = 11.5.sp)
-                    }
-                }
-
-                Row(modifier = Modifier.politeLiveRegion(), verticalAlignment = Alignment.Top) {
-                    MonoText("› ", t.faint)
-                    MonoText(feedback, feedbackColor)
-                }
-            }
-        }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = "One private console. Every agent.",
-            color = t.faint,
-            fontFamily = Manrope,
-            fontWeight = TetherWeights.body,
-            fontSize = 12.sp,
-        )
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Studio (studio-login.tsx): brand panel + welcome form
@@ -760,11 +612,11 @@ private fun StudioLabel(text: String) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun RetroLogin(ui: LoginUi, studio: Boolean) {
+private fun RetroLogin(ui: LoginUi) {
     val t = LocalTetherTokens.current
     // Boot lines (the web types them in; the typewriter motion is Phase 3 polish).
     val bootLines = listOf(
-        if (studio) "Tether console" else "TETHER CONSOLE",
+        "Tether console",
         "host ${ui.hostname.ifEmpty { "…" }}",
     ) + ui.statusLines.drop(1)
     val feedback: Pair<String, Color>? = when (ui.phase) {

@@ -70,6 +70,7 @@ import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -199,7 +200,6 @@ internal fun SessionRow(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val reduced = LocalReducedMotion.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -242,25 +242,14 @@ internal fun SessionRow(
         scope.launch { swipeX.animateTo(if (open) -ARCHIVE_WIDTH else 0f, snapSpec) }
     }
 
-    val rowShape = RoundedCornerShape(if (studio) 0.625f.rem else t.radiusKey)
+    val rowShape = RoundedCornerShape(0.625f.rem)
     val rowFace = when {
-        dragging && !studio -> t.graphiteRaised
-        active -> if (studio) Color(0xFF243657) else t.violetWash
+        active -> Color(0xFF243657)
         else -> Color.Transparent
     }
-    val rowBorder = when {
-        studio -> null
-        dragging -> CssBorder(1.dp, t.lineStrong)
-        active -> CssBorder(1.dp, t.violetStrong)
-        else -> CssBorder(1.dp, Color.Transparent)
-    }
-    val rowShadows = when {
-        studio -> emptyList()
-        dragging -> t.css.shadowFloating
-        active -> listOf(hardShadow(1.dp, t.litStrong, inset = true), hardShadow(1.dp, t.contact.copy(alpha = 0.12f)))
-        else -> emptyList()
-    }
-    val ink = if (active) t.white else if (studio) t.ink else t.muted
+    val rowBorder = null
+    val rowShadows = emptyList<CssShadow>()
+    val ink = if (active) t.white else t.ink
 
     Box(
         Modifier
@@ -350,7 +339,7 @@ internal fun SessionRow(
             var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
             Box(
                 Modifier
-                    .width(if (studio) 2.4f.rem else 2.5f.rem)
+                    .width(2.4f.rem)
                     .heightIn(min = 2.75f.rem)
                     .onGloballyPositioned { handleCoords = it }
                     .testTag(SidebarTags.handle(entry.key))
@@ -427,32 +416,27 @@ internal fun SessionRow(
                     }
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
-                        if (studio) Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem)
-                        else Modifier.padding(top = 0.4f.rem, bottom = 0.4f.rem, end = t.css.spaceSm),
+                        Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
                 // The grid gap: space-md on a phone, space-sm from 48rem (globals.css 4052-4058).
                 horizontalArrangement = Arrangement.spacedBy(if (phone) t.css.spaceMd else t.css.spaceSm),
             ) {
-                Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(if (studio) 0.2f.rem else 0.25f.rem)) {
+                Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(0.2f.rem)) {
                     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
                         if (unseen) {
                             Box(Modifier.padding(top = 0.45f.rem).size(7.dp).background(t.violet, RoundedCornerShape(50)))
                         }
                         Text(
                             name,
-                            style = (if (studio) css(type.ui, 0.78f, 600, lineHeight = 1.45f) else css(type.ui, 0.84f, 650, trackingEm = -0.005f, lineHeight = 1.4f))
+                            style = (css(type.ui, 0.78f, 600, lineHeight = 1.45f))
                                 .copy(textDirection = proseDirection),
-                            color = if (studio) (if (active) Color.White else t.ink) else ink,
-                            maxLines = if (studio) 1 else 2,
+                            color = (if (active) Color.White else t.ink),
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         if (live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp, Modifier.padding(top = 0.2f.rem))
-                        if (mode != null && !studio) {
-                            Box(Modifier.weight(0.001f))
-                            ModeTag(mode)
-                        }
                     }
                     StatusLine(entry, now, updatedAt, offline, sync)
                     digest?.let { d ->
@@ -465,7 +449,7 @@ internal fun SessionRow(
                         }
                     }
                     // ta-28i: the location is a path: code, LTR.
-                    location?.let { Text(codeLabel(it), style = css(type.ui, if (studio) 0.64f else 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    location?.let { Text(codeLabel(it), style = css(type.ui, 0.64f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount) }
                 }
                 // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
@@ -473,7 +457,7 @@ internal fun SessionRow(
             }
             // .session-item-end: two taps by design (no modal); 44dp on a phone (coarse pointer).
             if (endable) {
-                val endShape = RoundedCornerShape(if (studio) t.radiusSm else t.radiusKey - 3.dp)
+                val endShape = RoundedCornerShape(t.radiusSm)
                 Box(
                     Modifier
                         .padding(end = 0.3f.rem)
@@ -535,8 +519,7 @@ private fun ModeTag(mode: String) {
 private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val style = css(type.ui, if (studio) 0.68f else 0.68f, if (studio) 500 else 560)
+    val style = css(type.ui, 0.68f, 500)
     val live = entry.live
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap

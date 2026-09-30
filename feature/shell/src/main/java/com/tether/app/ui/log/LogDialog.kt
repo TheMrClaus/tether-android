@@ -89,7 +89,6 @@ import com.tether.app.ui.shell.ChromeIconKey
 import com.tether.app.ui.shell.cssText
 import com.tether.app.ui.shell.rememberDialogIn
 import com.tether.app.ui.shell.rememberIconLook
-import com.tether.app.ui.shell.studio
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
@@ -170,20 +169,16 @@ fun LogDialogFrame(
     val t = LocalTetherTokens.current
     BoxWithConstraints(modifier.fillMaxSize().background(dialogScrim(t)), contentAlignment = Alignment.Center) {
         val narrow = maxWidth <= NarrowMaxWidth
-        val studio = t.studio
         val width = when {
-            studio && narrow -> maxWidth - 24.dp
-            studio -> minOf(980.dp, maxWidth - 48.dp)
-            // The UA sheet's `dialog { max-width: calc(100% - 6px - 2em) }` still caps the instrument case.
-            else -> minOf(928.dp, maxWidth - 24.dp, maxWidth - 38.dp)
+            narrow -> maxWidth - 24.dp
+            else -> minOf(980.dp, maxWidth - 48.dp)
         }
         val maxHeight = maxHeight - when {
-            studio && narrow -> 32.dp
-            studio -> 48.dp
-            else -> 24.dp
+            narrow -> 32.dp
+            else -> 48.dp
         }
-        val bodyMin = minOf(if (studio) 460.dp else 400.dp, this.maxHeight * 0.5f)
-        val shape = RoundedCornerShape(if (studio) (if (narrow) 14.dp else StudioDialog.radius) else t.radiusLg)
+        val bodyMin = minOf(460.dp, this.maxHeight * 0.5f)
+        val shape = RoundedCornerShape((if (narrow) 14.dp else StudioDialog.radius))
         Column(
             surfaceModifier
                 .testTag(LogDialogTags.Dialog)
@@ -191,8 +186,8 @@ fun LogDialogFrame(
                 .heightIn(max = maxHeight)
                 .cssSurface(
                     shape, t.graphite,
-                    if (studio) null else CssBorder(1.dp, t.keySide),
-                    if (studio) StudioDialog.shadows else listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowModal,
+                    null,
+                    StudioDialog.shadows,
                 )
                 .clip(shape),
         ) {
@@ -215,37 +210,24 @@ fun LogDialogFrame(
 private fun LogHeader(narrow: Boolean, onRefresh: () -> Unit, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     Box {
         Column {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .then(if (studio) Modifier.heightIn(min = if (narrow) 76.dp else 88.dp) else Modifier)
+                    .then(Modifier.heightIn(min = if (narrow) 76.dp else 88.dp))
                     .padding(
-                        horizontal = if (studio) (if (narrow) 20.dp else 28.dp) else t.css.spaceXl,
-                        vertical = if (studio) (if (narrow) 18.dp else 22.dp) else t.css.spaceLg,
+                        horizontal = (if (narrow) 20.dp else 28.dp),
+                        vertical = (if (narrow) 18.dp else 22.dp),
                     ),
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceLg),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    if (!studio) {
-                        Text(
-                            type.sectionLabel.format("Tether · health & events"),
-                            color = t.faint,
-                            style = type.sectionLabel.style,
-                            modifier = Modifier.padding(bottom = t.css.spaceSm),
-                        )
-                    }
                     Text(
                         "Health & Event Log",
                         color = t.white,
-                        style = if (studio) {
-                            cssText(type.ui, if (narrow) 1.25f else 1.375f, 700, trackingEm = -0.025f, lineHeight = 1.3f)
-                        } else {
-                            cssText(type.ui, 1.3f, 700, trackingEm = -0.025f)
-                        },
+                        style = cssText(type.ui, if (narrow) 1.25f else 1.375f, 700, trackingEm = -0.025f, lineHeight = 1.3f),
                         modifier = Modifier.semantics { heading() },
                     )
                 }
@@ -265,7 +247,6 @@ private fun LogHeader(narrow: Boolean, onRefresh: () -> Unit, onClose: () -> Uni
 @Composable
 private fun LogFooter(narrow: Boolean, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     // Footer edge: `border-top` then the lit lip inside it (`inset 0 1px 0 var(--seam-lip)`).
     TetherSeam()
     Row(
@@ -273,10 +254,10 @@ private fun LogFooter(narrow: Boolean, onClose: () -> Unit) {
             .fillMaxWidth()
             .background(t.graphite)
             .padding(
-                horizontal = if (studio) (if (narrow) 20.dp else 28.dp) else t.css.spaceXl,
-                vertical = if (studio) (if (narrow) 16.dp else 18.dp) else t.css.spaceMd,
+                horizontal = (if (narrow) 20.dp else 28.dp),
+                vertical = (if (narrow) 16.dp else 18.dp),
             ),
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 10.dp else t.css.spaceLg, Alignment.End),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TetherKey(onClick = onClose, classes = KeyClasses.ButtonSecondary, label = "Done")
@@ -294,23 +275,18 @@ private fun LogBody(
     modifier: Modifier,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val names = remember(sessions) { LogReadings.namesById(sessions) }
     val logged = remember(entries, names) { LogReadings.loggedSessions(entries, names) }
     val rows = remember(entries, state.level, state.session) { LogReadings.filtered(entries, state.level, state.session) }
     val warnCount = remember(entries) { LogReadings.warnCount(entries) }
     val stats = state.stats
     val gap = when {
-        studio && narrow -> 28.dp
-        studio -> 28.dp
-        narrow -> t.css.spaceLg
-        else -> t.css.spaceXl
+        narrow -> 28.dp
+        else -> 28.dp
     }
     val padding = when {
-        studio && narrow -> PaddingValues(horizontal = 20.dp, vertical = 24.dp)
-        studio -> PaddingValues(28.dp)
-        narrow -> PaddingValues(t.css.spaceLg)
-        else -> PaddingValues(t.css.spaceXl)
+        narrow -> PaddingValues(horizontal = 20.dp, vertical = 24.dp)
+        else -> PaddingValues(28.dp)
     }
     LazyColumn(modifier.fillMaxWidth(), contentPadding = padding) {
         var first = true
@@ -356,8 +332,8 @@ private fun EmptyNote(text: String, modifier: Modifier) {
         proseText(text),
         color = t.faint,
         textAlign = TextAlign.Center,
-        style = if (t.studio) cssText(type.ui, 0.8125f, 400, lineHeight = 1.65f) else cssText(type.ui, 0.74f, 400),
-        modifier = modifier.fillMaxWidth().padding(if (t.studio) 28.dp else t.css.spaceLg),
+        style = cssText(type.ui, 0.8125f, 400, lineHeight = 1.65f),
+        modifier = modifier.fillMaxWidth().padding(28.dp),
     )
 }
 
@@ -369,7 +345,6 @@ private data class Tile(val icon: ImageVector, val value: String, val caption: S
 @Composable
 private fun StatTiles(stats: ServerStats, warnCount: Int, narrow: Boolean, modifier: Modifier) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val tiles = listOf(
         Tile(TetherIcons.Clock, LogReadings.uptime(stats.uptimeMs), "Uptime · pid ${stats.pid}", TileTone.Alive),
         Tile(TetherIcons.Activity, "${stats.runtime?.activeTurns ?: 0}", LogReadings.activeTurnsCaption(stats), TileTone.Cooling),
@@ -377,12 +352,12 @@ private fun StatTiles(stats: ServerStats, warnCount: Int, narrow: Boolean, modif
         Tile(TetherIcons.TriangleAlert, "$warnCount", "Warnings logged", TileTone.Stuck, alarm = warnCount > 0),
     )
     val perRow = if (narrow) 2 else 4
-    val hGap = if (studio) 0.dp else t.css.spaceMd
-    val vGap = if (studio) 24.dp else t.css.spaceMd
+    val hGap = 0.dp
+    val vGap = 24.dp
     Column(
         modifier
             .fillMaxWidth()
-            .then(if (studio) Modifier.drawBottomRule(t.line).padding(bottom = 24.dp + 1.dp) else Modifier),
+            .then(Modifier.drawBottomRule(t.line).padding(bottom = 24.dp + 1.dp)),
         verticalArrangement = Arrangement.spacedBy(vGap),
     ) {
         tiles.chunked(perRow).forEachIndexed { rowIndex, row ->
@@ -405,7 +380,6 @@ private fun StatTiles(stats: ServerStats, warnCount: Int, narrow: Boolean, modif
 private fun StatTile(tile: Tile, firstInRow: Boolean, lastInRow: Boolean, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val iconTint = when {
         tile.alarm -> t.danger
         tile.tone == TileTone.Alive -> t.running
@@ -413,44 +387,27 @@ private fun StatTile(tile: Tile, firstInRow: Boolean, lastInRow: Boolean, modifi
         else -> t.muted
     }
     val shape = RoundedCornerShape(t.radiusMd)
-    val surface = when {
-        studio -> Modifier
-            .then(if (lastInRow) Modifier else Modifier.drawEndRule(t.line))
-            .padding(start = if (firstInRow) 0.dp else 20.dp, end = 20.dp + if (lastInRow) 0.dp else 1.dp)
-        else -> Modifier
-            .cssSurface(
-                shape,
-                if (tile.alarm) oklabMix(t.danger, t.graphiteRaised, 0.12f) else t.graphiteRaised,
-                CssBorder(1.dp, if (tile.alarm) oklabMix(t.danger, t.line, 0.45f) else t.line),
-                emptyList(),
-            )
-            .padding(t.css.spaceLg)
-    }
+    val surface = Modifier
+        .then(if (lastInRow) Modifier else Modifier.drawEndRule(t.line))
+        .padding(start = if (firstInRow) 0.dp else 20.dp, end = 20.dp + if (lastInRow) 0.dp else 1.dp)
     Column(
         modifier
             .then(surface)
             .clearAndSetSemantics { contentDescription = "${tile.caption}: ${tile.value}" },
-        verticalArrangement = Arrangement.spacedBy(if (studio) 8.dp else 2.4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (studio) {
-            Icon(tile.icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
-        } else {
-            Box(
-                Modifier.padding(bottom = 5.6.dp).size(32.dp).background(t.slate, RoundedCornerShape(t.radiusSm)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(tile.icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp)) }
-        }
+        Icon(tile.icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
         Text(
             tile.value,
             color = if (tile.alarm) t.danger else t.white,
-            style = if (studio) cssText(type.ui, 1.75f, 680, trackingEm = -0.02f) else cssText(type.ui, 1.6f, 680, trackingEm = -0.02f),
+            style = cssText(type.ui, 1.75f, 680, trackingEm = -0.02f),
             // `line-height: 1` (Studio 1.25) is tighter than the face's natural line, which Compose never shrinks to.
-            modifier = Modifier.cssLineBox(if (studio) (28 * 1.25).sp else 25.6.sp),
+            modifier = Modifier.cssLineBox((28 * 1.25).sp),
         )
         Text(
-            if (studio) tile.caption else tile.caption.uppercase(Locale.ROOT),
-            color = if (studio) t.muted else t.faint,
-            style = if (studio) cssText(type.ui, 0.75f, 400) else cssText(type.ui, 0.66f, 400, trackingEm = 0.05f),
+            tile.caption,
+            color = t.muted,
+            style = cssText(type.ui, 0.75f, 400),
         )
     }
 }
@@ -459,7 +416,6 @@ private fun StatTile(tile: Tile, firstInRow: Boolean, lastInRow: Boolean, modifi
 @Composable
 private fun MetaGrid(stats: ServerStats, narrow: Boolean, modifier: Modifier) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val lines = listOf(
         Triple("Engine", null, LogReadings.engine(stats)),
         Triple("Sessions", null, LogReadings.sessions(stats)),
@@ -468,8 +424,8 @@ private fun MetaGrid(stats: ServerStats, narrow: Boolean, modifier: Modifier) {
         Triple("Protocol", null, "v${stats.protocolVersion}"),
     )
     val columns = if (narrow) 1 else 2
-    val rowGap = if (studio) (if (narrow) 0.dp else 12.dp) else t.css.spaceSm
-    val columnGap = if (studio) 28.dp else t.css.spaceLg
+    val rowGap = (if (narrow) 0.dp else 12.dp)
+    val columnGap = 28.dp
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(rowGap)) {
         lines.chunked(columns).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(columnGap)) {
@@ -484,24 +440,23 @@ private fun MetaGrid(stats: ServerStats, narrow: Boolean, modifier: Modifier) {
 private fun MetaLine(label: String, icon: ImageVector?, value: String, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val labelStyle = if (studio) cssText(type.ui, 0.75f, 400) else cssText(type.ui, 0.66f, 400, trackingEm = 0.05f)
+    val labelStyle = cssText(type.ui, 0.75f, 400)
     Row(
         modifier
             .drawBottomRule(t.line)
-            .padding(top = if (studio) 10.dp else 5.6.dp, bottom = (if (studio) 10.dp else 5.6.dp) + 1.dp)
+            .padding(top = 10.dp, bottom = (10.dp) + 1.dp)
             .clearAndSetSemantics { contentDescription = "$label: $value" },
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
     ) {
         Row(Modifier.alignByBaseline(), horizontalArrangement = Arrangement.spacedBy(4.8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) Icon(icon, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
-            Text(if (studio) label else label.uppercase(Locale.ROOT), color = t.faint, style = labelStyle)
+            Text(label, color = t.faint, style = labelStyle)
         }
         Text(
             value,
             color = t.white,
             textAlign = TextAlign.End,
-            style = if (studio) cssText(type.ui, 0.8125f, 600) else cssText(type.ui, 0.78f, 600),
+            style = cssText(type.ui, 0.8125f, 600),
             modifier = Modifier.weight(1f).alignByBaseline(),
         )
     }
@@ -544,20 +499,15 @@ private fun LogControls(state: LogDialogState, logged: List<LoggedSession>, modi
 @Composable
 private fun LevelFilterGroup(level: LogLevelFilter, onChange: (LogLevelFilter) -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
-    val shape = RoundedCornerShape(if (studio) 8.dp else t.radiusSm)
+    val shape = RoundedCornerShape(8.dp)
     Row(
         Modifier
             .semantics { contentDescription = "Level filter" }
             .then(
-                if (studio) {
-                    Modifier.background(t.mineral, shape).padding(3.dp)
-                } else {
-                    Modifier.cssSurface(shape, t.keyFaceDeep, CssBorder(1.dp, t.lineStrong), t.css.well)
-                },
+                Modifier.background(t.mineral, shape).padding(3.dp),
             )
             .clip(shape),
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 3.dp else 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         FilterKey("All", level == LogLevelFilter.All) { onChange(LogLevelFilter.All) }
         FilterKey("Warnings", level == LogLevelFilter.Warnings) { onChange(LogLevelFilter.Warnings) }
@@ -568,22 +518,12 @@ private fun LevelFilterGroup(level: LogLevelFilter, onChange: (LogLevelFilter) -
 private fun FilterKey(label: String, active: Boolean, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val surface = if (studio) {
+    val surface = run {
         val shape = RoundedCornerShape(6.dp)
         Modifier
             .heightIn(min = 38.dp)
             .then(if (active) Modifier.background(t.graphite, shape) else Modifier)
             .padding(horizontal = 12.dp)
-    } else {
-        Modifier
-            .cssSurface(
-                RoundedCornerShape(0.dp),
-                if (active) t.keyFaceDeep else t.keyFace,
-                null,
-                if (active) t.css.bevelPressed else listOf(hardShadow(1.dp, t.litStrong, inset = true)),
-            )
-            .padding(horizontal = 11.2.dp, vertical = 4.8.dp)
     }
     Box(
         Modifier
@@ -598,11 +538,11 @@ private fun FilterKey(label: String, active: Boolean, onClick: () -> Unit) {
         Text(
             label,
             color = when {
-                active && studio -> t.violetStrong
+                active -> t.violetStrong
                 active -> t.white
                 else -> t.muted
             },
-            style = if (studio) cssText(type.ui, 0.75f, 600) else cssText(type.ui, 0.7f, 600),
+            style = cssText(type.ui, 0.75f, 600),
         )
     }
 }
@@ -621,7 +561,6 @@ private fun LogRow(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val level = entry.level ?: ""
     val time = LogReadings.clockTime(entry.ts, locale, zone)
     val label = LogReadings.label(entry)
@@ -639,35 +578,34 @@ private fun LogRow(
         "error" -> t.danger
         else -> t.ink
     }
-    val small = if (studio) 0.75f else 0.7f
+    val small = 0.75f
     val timeView: @Composable (Modifier) -> Unit = { m ->
-        Text(time, color = t.faint, style = cssText(type.ui, if (studio) 0.75f else 0.68f, 400).tabularNums(), modifier = m)
+        Text(time, color = t.faint, style = cssText(type.ui, 0.75f, 400).tabularNums(), modifier = m)
     }
     val levelView: @Composable (Modifier) -> Unit = { m ->
         Text(
             LabelText.label(level).uppercase(Locale.ROOT),
             color = levelInk,
-            style = cssText(type.ui, if (studio) 0.625f else 0.6f, 700, trackingEm = if (studio) 0f else 0.05f),
+            style = cssText(type.ui, 0.625f, 700, trackingEm = 0f),
             maxLines = 1,
             // `width: 3rem` scales with the font size; Studio's 48px does not.
-            modifier = m.width(if (studio) 48.dp else with(LocalDensity.current) { 48.sp.toDp() }),
+            modifier = m.width(48.dp),
         )
     }
     val body: @Composable (Modifier) -> Unit = { m ->
         BaselineFlow(hGap = 8.dp, vGap = 8.dp, modifier = m) {
-            Text(label, color = t.white, style = cssText(type.ui, if (studio) 0.8125f else 0.74f, 600))
+            Text(label, color = t.white, style = cssText(type.ui, 0.8125f, 600))
             if (session != null) Text(session, color = t.muted, style = cssText(type.ui, small, 400))
             // T9.1: the turn id by the one-line rule, the server's outcome / reason / message by the prose rule.
             if (turn != null) Text(codeLabel(turn), color = t.faint, style = cssText(type.ui, small, 400).tabularNums())
             if (detail.isNotEmpty()) Text(proseText(detail), color = t.muted, style = cssText(type.ui, small, 400))
         }
     }
-    val rowPadding = if (studio) PaddingValues(vertical = 12.dp) else PaddingValues(horizontal = t.css.spaceMd, vertical = 6.4.dp)
-    val radius = if (studio) 0.dp else t.radiusMd
+    val rowPadding = PaddingValues(vertical = 12.dp)
     Box(
         modifier
             .fillMaxWidth()
-            .logRowEdges(t, first, last, radius, framed = !studio, tint)
+            .logRowEdges(t, last, tint)
             .padding(rowPadding)
             .padding(bottom = if (last) 0.dp else 1.dp)
             .clearAndSetSemantics {
@@ -675,7 +613,7 @@ private fun LogRow(
                 contentDescription = listOfNotNull(time, level, label, session, turn, detail.takeIf { it.isNotEmpty() }).joinToString(", ")
             },
     ) {
-        if (studio && narrow) {
+        if (narrow) {
             // studio.css 1023-1024: the row wraps, the body on its own line.
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -694,24 +632,13 @@ private fun LogRow(
     }
 }
 
-/**
- * One row's share of the list frame. Instrument: the list is a `1px var(--line)` box with
- * `--radius-md` corners that clips the row tints, and every row but the last has a `--line`
- * bottom rule. Studio: no frame, only the rules.
- */
-private fun Modifier.logRowEdges(t: TetherTokens, first: Boolean, last: Boolean, radius: Dp, framed: Boolean, tint: Color): Modifier =
+/** One row's share of the list (studio.css): no frame, the row tint, and a `--line` bottom rule on every row but the last. */
+private fun Modifier.logRowEdges(t: TetherTokens, last: Boolean, tint: Color): Modifier =
     drawBehind {
         val px = 1.dp.toPx()
-        val r = radius.toPx()
-        // The frame as one rounded rect, extended past the edges this row does not own, then clipped to the row.
-        val top = if (first || !framed) 0f else -(r + px)
-        val bottom = if (last || !framed) size.height else size.height + r + px
         clipRect {
             if (tint.alpha > 0f) {
-                drawRoundRect(tint, Offset(0f, top), Size(size.width, bottom - top), CornerRadius(r))
-            }
-            if (framed) {
-                drawRoundRect(t.line, Offset(px / 2, top + px / 2), Size(size.width - px, bottom - top - px), CornerRadius(max(0f, r - px / 2)), style = Stroke(px))
+                drawRoundRect(tint, Offset.Zero, size, CornerRadius(0f))
             }
             if (!last) drawRect(t.line, Offset(0f, size.height - px), Size(size.width, px))
         }

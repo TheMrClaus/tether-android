@@ -8,7 +8,6 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
 import com.tether.app.protocol.tree.js
 import com.tether.app.ui.prefs.TetherPreferences
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * The two draggable desktop columns (issue #186): the session rail and the inspector
@@ -74,33 +73,18 @@ object PanelWidthGeometry {
     }
 
     /**
-     * The active theme's width for a column with nothing stored — the `--rail-width` /
-     * `--inspector-width` cascade at [viewportWidth]:
-     *
-     * - instrument skins: rail 18rem (globals.css:70), 20rem from 90rem (11727), and 16.5rem for
-     *   48rem ≤ w < 100rem (11856, later in the file, so it wins between 90 and 100rem);
-     *   inspector 16.5rem (:71), 17rem from 90rem (11727).
-     * - Studio: rail 17rem and inspector 18rem at every width (studio.css:48-49 — the same
-     *   (0,1,0) specificity as those `:root` rules, and studio.css loads after globals.css).
+     * The width of a column with nothing stored — Studio's `--rail-width` / `--inspector-width`:
+     * rail 17rem and inspector 18rem at every width (studio.css:48-49, which cascade over the
+     * globals.css `:root` values at the same specificity).
      */
-    fun defaultWidth(kind: PanelKind, family: ThemeFamily, viewportWidth: Int): Int {
-        if (family == ThemeFamily.Studio) return if (kind == PanelKind.Rail) 272 else 288
-        return when (kind) {
-            PanelKind.Rail -> when {
-                viewportWidth in 768 until 1600 -> 264
-                viewportWidth >= 1440 -> 320
-                else -> 288
-            }
-            PanelKind.Inspector -> if (viewportWidth >= 1440) 272 else 264
-        }
-    }
+    fun defaultWidth(kind: PanelKind): Int = if (kind == PanelKind.Rail) 272 else 288
 
     /**
      * The rendered width: the stored width through the CSS `clamp()` that `panelWidthCss` emits
      * (panel-widths.mjs:101-106, re-clamped against the live viewport), else the theme default.
      */
-    fun effectiveWidth(kind: PanelKind, stored: Int?, family: ThemeFamily, viewportWidth: Int): Int {
-        val parsed = stored?.let { parseStored(it) } ?: return defaultWidth(kind, family, viewportWidth)
+    fun effectiveWidth(kind: PanelKind, stored: Int?, viewportWidth: Int): Int {
+        val parsed = stored?.let { parseStored(it) } ?: return defaultWidth(kind)
         return clamp(kind, parsed.toDouble(), viewportWidth)
     }
 }

@@ -72,7 +72,6 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
-import com.tether.app.ui.theme.ThemeFamily
 import java.util.Locale
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeText
@@ -89,8 +88,6 @@ import com.tether.app.ui.text.safePreDisplay
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
-
-internal fun isStudio(t: TetherTokens): Boolean = t.skin.family == ThemeFamily.Studio
 
 /** `--chat-clamp`: 9rem on a phone (globals.css:8464), 16rem wider. */
 @Composable
@@ -132,15 +129,9 @@ internal fun toolStateOf(block: JsObj): ToolState = when {
 @Composable
 internal fun ToolFrame(state: ToolState, modifier: Modifier = Modifier, nested: Boolean = false, fullWidth: Boolean = false, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = isStudio(t)
-    val radius = if (studio) 12.dp else t.radiusMd
+    val radius = 12.dp
     val shape = RoundedCornerShape(radius)
-    val border = when {
-        studio -> t.line
-        state == ToolState.Error -> t.dangerEdge
-        state == ToolState.Running || state == ToolState.Interrupted -> t.lineStrong
-        else -> t.line
-    }
+    val border = t.line
     Box(modifier.fillMaxWidth()) {
         Column(
             Modifier
@@ -150,7 +141,7 @@ internal fun ToolFrame(state: ToolState, modifier: Modifier = Modifier, nested: 
                     shape,
                     background = t.graphite,
                     border = CssBorder(1.dp, border),
-                    shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.litSoft, inset = true)) + t.css.shadowRaised,
+                    shadows = emptyList(),
                 )
                 .padding(1.dp)
                 .clip(RoundedCornerShape(radius - 1.dp)),
@@ -178,14 +169,13 @@ internal fun toolStatusText(block: JsObj): String = when (toolStateOf(block)) {
 internal fun ToolHead(icon: @Composable () -> Unit, name: String?, status: String, errorStatus: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = isStudio(t)
-    val size = if (studio) rem(0.75f) else rem(0.76f)
+    val size = rem(0.75f)
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (studio) t.graphiteRaised else t.tintXs)
-            .heightIn(min = if (studio) 44.dp else 40.dp)
-            .padding(horizontal = if (studio) 14.4.dp else t.css.spaceMd, vertical = if (studio) 10.4.dp else 7.2.dp),
+            .background(t.graphiteRaised)
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 14.4.dp, vertical = 10.4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
@@ -209,14 +199,9 @@ internal fun ToolHead(icon: @Composable () -> Unit, name: String?, status: Strin
 internal fun StatusLabel(status: String, error: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = isStudio(t)
-    val style = if (studio) {
-        TextStyle(fontFamily = type.ui, fontSize = rem(0.68f), fontWeight = FontWeight(700))
-    } else {
-        TextStyle(fontFamily = type.mono, fontSize = rem(0.62f), fontWeight = FontWeight(700), letterSpacing = 0.08.em)
-    }
+    val style = TextStyle(fontFamily = type.ui, fontSize = rem(0.68f), fontWeight = FontWeight(700))
     Text(
-        if (studio) status else status.uppercase(Locale.ROOT),
+        status,
         style = style,
         color = if (error) t.danger else t.faint,
         modifier = Modifier.semantics { contentDescription = status },
@@ -254,11 +239,7 @@ internal fun preText(text: String): String = if (text.endsWith("\n")) text.subst
 internal fun toolIoStyle(): TextStyle {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    return if (isStudio(t)) {
-        type.codeBlock.copy(fontSize = rem(0.75f), lineHeight = 1.7.em)
-    } else {
-        type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.65.em)
-    }
+    return type.codeBlock.copy(fontSize = rem(0.75f), lineHeight = 1.7.em)
 }
 
 /**
@@ -270,10 +251,8 @@ internal fun toolIoStyle(): TextStyle {
 @Composable
 internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription: String? = null, background: Color? = null, terminal: Boolean = false) {
     val t = LocalTetherTokens.current
-    val studio = isStudio(t)
     val bg = background ?: t.mineralDeep
     val line = t.line
-    val doubleRule = output && !studio
     TetherExpandablePre(
         text = preText(text),
         style = toolIoStyle().copy(textDirection = codeDirection),
@@ -285,9 +264,9 @@ internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription
             .fillMaxWidth()
             .drawBehind {
                 drawRect(bg)
-                drawRect(line, size = Size(size.width, (if (doubleRule) 2 else 1).dp.toPx()))
+                drawRect(line, size = Size(size.width, 1.dp.toPx()))
             }
-            .padding(top = if (doubleRule) 2.dp else 1.dp)
+            .padding(top = 1.dp)
             .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
     )
 }

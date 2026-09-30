@@ -17,7 +17,11 @@ import kotlin.system.exitProcess
  *
  * Every token gets ONE Kotlin type for all skins, the first [Kind] (in declaration order) that
  * parses every skin's resolved value. Output is deterministic: skins in skinMap order
- * (family × light/dark), tokens sorted by CSS name, fixed number formatting, "\n" line endings.
+ * (light, dark), tokens sorted by CSS name, fixed number formatting, "\n" line endings.
+ *
+ * T15.5: Studio is the only visual system. The export's `skinMap` is mode → skin
+ * (`{light: "studio", dark: "studio-dark"}`, tether OVERVIEW_STUDIO_PLAN.md §3 native exports);
+ * an export that still carries theme families is refused.
  */
 enum class Kind(val kotlinType: String, val mapping: String) {
     COLOR("Color", "#hex / rgb() / rgba() / transparent -> Color (sRGB ARGB; alpha quantized like Compose's Color(Float...))"),
@@ -205,6 +209,32 @@ class TokenSpecError(message: String) : IllegalStateException(message)
 
 private fun fail(msg: String): Nothing = throw TokenSpecError(msg)
 
+/**
+ * T15.5: the CSS type of a token whose every Studio value is degenerate (`0`, `none`, `1`). With
+ * only the two Studio skins left, [classify] would type these by that sample (a transform as a
+ * shadow list, a letter-spacing as an Int); the hint keeps the property's real CSS type, and is
+ * only taken when it parses every value.
+ */
+val KIND_HINTS: Map<String, Kind> = mapOf(
+    "--key-label-tracking" to Kind.EM,
+    "--key-label-transform" to Kind.STRING,
+    "--perf-dots" to Kind.STRING,
+    "--tint-boost" to Kind.NUMBER,
+)
+
+/** The token's kind: its [KIND_HINTS] entry when that parses every value, else [classify]. */
+fun kindOf(css: String, values: List<String>): Kind {
+    val hint = KIND_HINTS[css] ?: return classify(values)
+    val parses = when (hint) {
+        Kind.EM -> values.all { Css.em(it) != null }
+        Kind.NUMBER -> values.all { Css.number(it) != null }
+        Kind.STRING -> true
+        else -> fail("unsupported kind hint $hint for $css")
+    }
+    if (!parses) fail("kind hint $hint does not parse every value of $css: $values")
+    return hint
+}
+
 /** Picks the single Kotlin kind that parses every skin's value for one token. */
 fun classify(values: List<String>): Kind = Kind.entries.first { kind ->
     when (kind) {
@@ -289,22 +319,20 @@ fun generate(jsonText: String): String {
     val protocolVersion = root["protocolVersion"]?.str() ?: fail("missing protocolVersion")
     val generatedBy = root["generatedBy"]?.str() ?: fail("missing generatedBy")
     val sources = root["sources"]?.jsonArray?.map { it.str() } ?: fail("missing sources")
-    val families = root["families"]?.jsonArray?.map { it.str() } ?: fail("missing families")
+    if (root["families"] != null) fail("theme families are retired (T15.5): the export must be Studio-only, skinMap mode -> skin")
     val skinMap = root.obj("skinMap")
     val skinsJson = root.obj("skins")
 
-    // Skin order: family order x (light, dark), straight from the skinMap.
-    data class SkinRef(val id: String, val family: String, val dark: Boolean)
-    val skinRefs = families.flatMap { f ->
-        val pair = skinMap.obj(f)
-        listOf(SkinRef(pair["light"]?.str() ?: fail("skinMap.$f.light"), f, false), SkinRef(pair["dark"]?.str() ?: fail("skinMap.$f.dark"), f, true))
-    }
+    // Skin order: light, then dark, straight from the mode -> skin map.
+    data class SkinRef(val id: String, val dark: Boolean)
+    if (skinMap.keys != setOf("light", "dark")) fail("skinMap keys ${skinMap.keys.sorted()} != [dark, light]")
+    val skinRefs = listOf(SkinRef(skinMap["light"]!!.str(), false), SkinRef(skinMap["dark"]!!.str(), true))
     if (skinRefs.map { it.id }.toSet() != skinsJson.keys) fail("skinMap skins ${skinRefs.map { it.id }} != skins ${skinsJson.keys.sorted()}")
 
     class Skin(val ref: SkinRef, val tokens: Map<String, String>, val isDark: Boolean, val barColor: Long)
     val skins = skinRefs.map { ref ->
         val s = skinsJson.obj(ref.id)
-        if (s["family"]?.str() != ref.family) fail("skin ${ref.id}: family ${s["family"]} != skinMap ${ref.family}")
+        if (s["family"] != null) fail("skin ${ref.id}: carries a retired theme family")
         val mode = if (ref.dark) "dark" else "light"
         if (s["mode"]?.str() != mode) fail("skin ${ref.id}: mode ${s["mode"]} != skinMap $mode")
         val scheme = s.obj("properties").obj("color-scheme")["resolved"]?.str()
@@ -336,7 +364,7 @@ fun generate(jsonText: String): String {
     class Token(val css: String, val prop: String, val kind: Kind, val optional: Boolean)
     val tokens = names.map { css ->
         val present = skins.mapNotNull { it.tokens[css] }
-        Token(css, propertyName(css), classify(present), present.size < skins.size)
+        Token(css, propertyName(css), kindOf(css, present), present.size < skins.size)
     }
     tokens.groupBy { it.prop }.filterValues { it.size > 1 }.keys.firstOrNull()?.let { fail("property name collision: $it") }
 
@@ -368,13 +396,13 @@ fun generate(jsonText: String): String {
     line("}")
     line()
     line("/**")
-    line(" * The six web skins (`<html data-theme>`), in skinMap order. [isDark] is the skin's CSS")
+    line(" * The web skins (`<html data-theme>`): Studio light and dark, in skinMap order. [isDark] is the skin's CSS")
     line(" * `color-scheme`; [systemBarColor] is its `chrome.graphite` (the web's theme-color / boot-script")
     line(" * COLORS entry), used for the status and navigation bars.")
     line(" */")
-    line("enum class TetherSkin(val id: String, val family: ThemeFamily, val isDark: Boolean, val systemBarColor: Color) {")
+    line("enum class TetherSkin(val id: String, val isDark: Boolean, val systemBarColor: Color) {")
     skins.forEach { s ->
-        line("    ${constantName(s.ref.id)}(${kotlinString(s.ref.id)}, ThemeFamily.${constantName(s.ref.family)}, isDark = ${s.isDark}, systemBarColor = ${colorLit(s.barColor)}),")
+        line("    ${constantName(s.ref.id)}(${kotlinString(s.ref.id)}, isDark = ${s.isDark}, systemBarColor = ${colorLit(s.barColor)}),")
     }
     line("    ;")
     line()
@@ -387,14 +415,8 @@ fun generate(jsonText: String): String {
     line("    companion object {")
     line("        fun fromId(id: String?): TetherSkin? = entries.firstOrNull { it.id == id }")
     line()
-    line("        /** The web's THEME_SKINS: family × concrete lighting → skin. */")
-    line("        fun of(family: ThemeFamily, dark: Boolean): TetherSkin = when (family) {")
-    families.forEach { f ->
-        val light = skinRefs.first { it.family == f && !it.dark }.id
-        val dark = skinRefs.first { it.family == f && it.dark }.id
-        line("            ThemeFamily.${constantName(f)} -> if (dark) ${constantName(dark)} else ${constantName(light)}")
-    }
-    line("        }")
+    line("        /** The web's resolveThemeSkin: concrete lighting → skin. */")
+    line("        fun of(dark: Boolean): TetherSkin = if (dark) ${constantName(skinRefs[1].id)} else ${constantName(skinRefs[0].id)}")
     line("    }")
     line("}")
     line()

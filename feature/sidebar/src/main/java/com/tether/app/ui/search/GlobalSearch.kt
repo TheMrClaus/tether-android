@@ -99,7 +99,6 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.sidebar.ProviderCap
 import com.tether.app.ui.sidebar.SmallIcon
 import com.tether.app.ui.sidebar.css
-import com.tether.app.ui.sidebar.studio
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -244,8 +243,7 @@ fun GlobalSearchFrame(
     autoFocus: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
-    val scrim = if (studio) StudioDialog.scrim else Color.Black.copy(alpha = 0.45f)
+    val scrim = StudioDialog.scrim
     val trimmed = jsTrim(form.text)
     BoxWithConstraints(
         Modifier
@@ -257,30 +255,28 @@ fun GlobalSearchFrame(
     ) {
         val narrow = maxWidth <= StudioNarrow
         val pad = when {
-            studio && narrow -> androidx.compose.foundation.layout.PaddingValues(12.dp)
-            studio -> androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = minOf(maxHeight * 0.12f, 96.dp), bottom = 24.dp)
-            else -> androidx.compose.foundation.layout.PaddingValues(start = t.css.spaceMd, end = t.css.spaceMd, top = maxHeight * 0.1f, bottom = t.css.spaceMd)
+            narrow -> androidx.compose.foundation.layout.PaddingValues(12.dp)
+            else -> androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = minOf(maxHeight * 0.12f, 96.dp), bottom = 24.dp)
         }
         val viewport = maxHeight
         Box(modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.TopCenter) {
-            val shape = RoundedCornerShape(if (studio) (if (narrow) 14.dp else 16.dp) else t.radiusLg)
+            val shape = RoundedCornerShape((if (narrow) 14.dp else 16.dp))
             val maxPanel = when {
-                studio && narrow -> viewport - 24.dp
-                studio -> viewport - 120.dp
-                else -> viewport * 0.78f
+                narrow -> viewport - 24.dp
+                else -> viewport - 120.dp
             }
             Column(
                 Modifier
                     .testTag(GlobalSearchTags.Dialog)
                     .semantics { paneTitle = "Search all conversations" }
-                    .widthIn(max = if (studio) 800.dp else 760.dp)
+                    .widthIn(max = 800.dp)
                     .fillMaxWidth()
                     .heightIn(max = maxPanel)
                     .cssSurface(
                         shape,
-                        if (studio) t.graphite else t.graphiteRaised,
-                        if (studio) null else CssBorder(1.dp, t.lineStrong),
-                        if (studio) listOf(softShadow(24.dp, 80.dp, Color(16, 30, 58).copy(alpha = 0.2f))) else t.css.edgeHighlight + t.css.shadowModal,
+                        t.graphite,
+                        null,
+                        listOf(softShadow(24.dp, 80.dp, Color(16, 30, 58).copy(alpha = 0.2f))),
                     )
                     .clip(shape)
                     // The panel swallows its own taps: only the backdrop closes (`target === currentTarget`).
@@ -307,7 +303,6 @@ private fun SearchHead(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     if (autoFocus) {
@@ -319,16 +314,16 @@ private fun SearchHead(
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (studio) Modifier.heightIn(min = 76.dp) else Modifier)
+            .then(Modifier.heightIn(min = 76.dp))
             .padding(
-                horizontal = if (studio) (if (narrow) 16.dp else 24.dp) else t.css.spaceMd,
-                vertical = if (studio) (if (narrow) 12.dp else 16.dp) else t.css.spaceSm,
+                horizontal = (if (narrow) 16.dp else 24.dp),
+                vertical = (if (narrow) 12.dp else 16.dp),
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 14.dp else t.css.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SmallIcon(TetherIcons.Search, t.muted, 16.dp)
-        val style = if (studio) css(type.ui, if (narrow) 1f else 1.125f, 500) else css(type.ui, 1f, 400)
+        val style = css(type.ui, if (narrow) 1f else 1.125f, 500)
         BasicTextField(
             value = form.text,
             onValueChange = { onFormChange(form.copy(text = it)) },
@@ -352,10 +347,10 @@ private fun SearchHead(
             },
         )
         if (pending) Spinner()
-        val size = if (studio) 44.dp else 32.dp
+        val size = 44.dp
         Box(
             Modifier
-                .clip(RoundedCornerShape(if (studio) 8.dp else t.radiusSm))
+                .clip(RoundedCornerShape(8.dp))
                 .clickable(role = Role.Button, onClick = onClose)
                 .size(size)
                 .testTag(GlobalSearchTags.Close)
@@ -392,17 +387,16 @@ private fun Spinner() {
 @Composable
 private fun Filters(form: GlobalSearchForm, onFormChange: (GlobalSearchForm) -> Unit, narrow: Boolean) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
-    val gap = if (studio) 12.dp else t.css.spaceSm
+    val gap = 12.dp
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
         FlowRow(
             Modifier
                 .fillMaxWidth()
-                .then(if (studio) Modifier.background(t.graphite) else Modifier)
+                .then(Modifier.background(t.graphite))
                 .padding(
-                    horizontal = if (studio) (if (narrow) 16.dp else 24.dp) else t.css.spaceMd,
-                    vertical = if (studio) (if (narrow) 12.dp else 16.dp) else t.css.spaceSm,
+                    horizontal = (if (narrow) 16.dp else 24.dp),
+                    vertical = (if (narrow) 12.dp else 16.dp),
                 ),
             // `justify-content: space-between` + `flex-wrap`: the right group sits at the end of
             // the chips' line when it fits, else starts a line of its own.
@@ -426,7 +420,7 @@ private fun Filters(form: GlobalSearchForm, onFormChange: (GlobalSearchForm) -> 
             // `.global-search-filter-right`: one line (Studio lets it wrap at <=640px).
             val select: @Composable () -> Unit = { TimeSelect(TimeWindow.of(form.timeWindow)) { onFormChange(form.copy(timeWindow = it.id)) } }
             val scope: @Composable () -> Unit = { ScopeToggle(form.scopeToWorkspace) { onFormChange(form.copy(scopeToWorkspace = it)) } }
-            if (studio && narrow) {
+            if (narrow) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                     verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -445,15 +439,10 @@ private fun Filters(form: GlobalSearchForm, onFormChange: (GlobalSearchForm) -> 
 private fun HarnessChip(id: String, label: String, on: Boolean, narrow: Boolean, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val shape = RoundedCornerShape(if (studio) 7.dp else 999.dp)
-    val border = when {
-        studio -> CssBorder(1.dp, if (on) Color.Transparent else t.line)
-        on -> CssBorder(1.dp, t.violetStrong)
-        else -> CssBorder(1.dp, t.line)
-    }
+    val shape = RoundedCornerShape(7.dp)
+    val border = CssBorder(1.dp, if (on) Color.Transparent else t.line)
     val ink = when {
-        studio && on -> t.violetStrong
+        on -> t.violetStrong
         on -> t.ink
         else -> t.muted
     }
@@ -467,20 +456,20 @@ private fun HarnessChip(id: String, label: String, on: Boolean, narrow: Boolean,
                 stateDescription = if (on) "On" else "Off"
                 selected = on
             }
-            .then(if (studio) Modifier.heightIn(min = if (narrow) 44.dp else 36.dp) else Modifier)
+            .then(Modifier.heightIn(min = if (narrow) 44.dp else 36.dp))
             .cssSurface(shape, if (on) t.violetWash else Color.Transparent, border)
             .padding(
-                start = if (studio) 12.dp else 6.dp,
-                end = if (studio) 12.dp else 10.dp,
-                top = if (studio) 6.dp else 4.dp,
-                bottom = if (studio) 6.dp else 4.dp,
+                start = 12.dp,
+                end = 12.dp,
+                top = 6.dp,
+                bottom = 6.dp,
             )
             .testTag(GlobalSearchTags.chip(id)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ProviderCap(id, 32.dp, inRow = false)
-        Text(label, style = css(type.ui, if (studio) 0.75f else 0.8f, 400), color = ink, maxLines = 1)
+        Text(label, style = css(type.ui, 0.75f, 400), color = ink, maxLines = 1)
     }
 }
 
@@ -493,9 +482,8 @@ private fun HarnessChip(id: String, label: String, on: Boolean, narrow: Boolean,
 private fun TimeSelect(value: TimeWindow, onSelect: (TimeWindow) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     var expanded by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (studio) 7.dp else t.radiusSm)
+    val shape = RoundedCornerShape(7.dp)
     Box {
         Row(
             Modifier
@@ -505,14 +493,14 @@ private fun TimeSelect(value: TimeWindow, onSelect: (TimeWindow) -> Unit) {
                     contentDescription = "Time range"
                     stateDescription = value.label
                 }
-                .then(if (studio) Modifier.heightIn(min = 40.dp) else Modifier)
+                .then(Modifier.heightIn(min = 40.dp))
                 .cssSurface(shape, t.graphite, CssBorder(1.dp, t.line))
-                .padding(horizontal = if (studio) 10.dp else 8.dp, vertical = if (studio) 0.dp else 4.dp)
+                .padding(horizontal = 10.dp, vertical = 0.dp)
                 .testTag(GlobalSearchTags.TimeWindow),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(value.label, style = css(type.ui, if (studio) 0.75f else 0.8f, 400), color = t.ink, maxLines = 1)
+            Text(value.label, style = css(type.ui, 0.75f, 400), color = t.ink, maxLines = 1)
             SmallIcon(TetherIcons.ChevronDown, t.muted, 13.dp)
         }
         if (expanded) {
@@ -549,12 +537,11 @@ private fun TimeSelect(value: TimeWindow, onSelect: (TimeWindow) -> Unit) {
 private fun ScopeToggle(on: Boolean, onChange: (Boolean) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     Row(
         Modifier
             .clickable(role = Role.Checkbox) { onChange(!on) }
             .semantics { toggleableState = if (on) ToggleableState.On else ToggleableState.Off }
-            .heightIn(min = if (studio) 44.dp else 0.dp)
+            .heightIn(min = 44.dp)
             .testTag(GlobalSearchTags.Scope),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -568,7 +555,7 @@ private fun ScopeToggle(on: Boolean, onChange: (Boolean) -> Unit) {
         ) {
             if (on) Icon(TetherIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
         }
-        Text(GlobalSearchCopy.ScopeLabel, style = css(type.ui, if (studio) 0.75f else 0.8f, 400), color = if (on) t.ink else t.muted, maxLines = 1)
+        Text(GlobalSearchCopy.ScopeLabel, style = css(type.ui, 0.75f, 400), color = if (on) t.ink else t.muted, maxLines = 1)
     }
 }
 
@@ -577,12 +564,11 @@ private fun ScopeToggle(on: Boolean, onChange: (Boolean) -> Unit) {
 private fun Meta(label: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val style = css(type.ui, 0.75f, 400)
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (studio) 24.dp else t.css.spaceMd, vertical = if (studio) 12.dp else 6.dp)
+            .padding(horizontal = 24.dp, vertical = 12.dp)
             .heightIn(min = 19.2.dp) // min-height 1.6em of 0.75rem
             .semantics { liveRegion = LiveRegionMode.Polite }
             .testTag(GlobalSearchTags.Meta),
@@ -602,16 +588,15 @@ private fun Results(
     onOpenHit: (SearchHit, String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val show = GlobalSearchModel.showResults(trimmed, results)
     when {
         trimmed.length < 2 -> Hint(GlobalSearchCopy.Hint)
         show && results.hits.isEmpty() && !results.pending -> Hint(GlobalSearchCopy.noMatches(trimmed))
         else -> LazyColumn(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = if (studio) 12.dp else t.css.spaceSm,
-                end = if (studio) 12.dp else t.css.spaceSm,
-                bottom = if (studio) 12.dp else t.css.spaceSm,
+                start = 12.dp,
+                end = 12.dp,
+                bottom = 12.dp,
             ),
         ) {
             // global-search.tsx:185-212 — whatever results are held (the previous query's while a
@@ -625,14 +610,13 @@ private fun Results(
 private fun Hint(text: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     Text(
         text,
-        style = if (studio) css(type.ui, 0.875f, 400, lineHeight = 1.65f) else css(type.ui, 0.85f, 400),
+        style = css(type.ui, 0.875f, 400, lineHeight = 1.65f),
         color = t.muted,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (studio) 24.dp else t.css.spaceMd, vertical = if (studio) 32.dp else t.css.spaceLg)
+            .padding(horizontal = 24.dp, vertical = 32.dp)
             .testTag(GlobalSearchTags.Hint),
     )
 }
@@ -642,7 +626,6 @@ private fun Hint(text: String) {
 private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolean, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val time = Format.relativeTime(hit.updatedAt.toDouble(), now.toDouble())
     val path = GlobalSearchModel.hitPath(hit.cwd, workspaceRoot)
     // ta-28i: the title and snippet by the label rule (in their content's direction), the path as code (LTR).
@@ -651,7 +634,7 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(if (studio) 8.dp else t.radiusMd))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) {
                 contentDescription = buildString {
@@ -662,7 +645,7 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
                     if (hit.matchCount > 1) append(", ${hit.matchCount} matches")
                 }
             }
-            .padding(horizontal = if (studio) 14.dp else 12.dp, vertical = if (studio) 18.dp else 10.dp)
+            .padding(horizontal = 14.dp, vertical = 18.dp)
             .testTag(GlobalSearchTags.hit(hit.historyId)),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -670,24 +653,24 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
             ProviderCap(hit.provider, 32.dp, inRow = false)
             Text(
                 name,
-                style = (if (studio) css(type.ui, 0.875f, 500, lineHeight = 1.5f) else css(type.ui, 0.9f, 500)).copy(textDirection = proseDirection),
+                style = (css(type.ui, 0.875f, 500, lineHeight = 1.5f)).copy(textDirection = proseDirection),
                 color = t.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text(time, style = css(type.ui, if (studio && narrow) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, softWrap = false)
+            Text(time, style = css(type.ui, if (narrow) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, softWrap = false)
         }
-        if (studio) Spacer(Modifier.height(2.dp)) // margin-top 5px (the column gap is 3px)
-        Text(codeLabel(path), style = css(type.ui, if (studio) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp)) // margin-top 5px (the column gap is 3px)
+        Text(codeLabel(path), style = css(type.ui, 0.6875f, 400), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (snippet.isNotEmpty()) {
-            if (studio) Spacer(Modifier.height(4.dp)) // margin-top 7px
+            Spacer(Modifier.height(4.dp)) // margin-top 7px
             Text(
                 buildAnnotatedString {
                     append(snippet)
                     if (hit.matchCount > 1) withStyle(SpanStyle(color = t.muted)) { append(" · ${hit.matchCount} matches") }
                 },
-                style = (if (studio) css(type.ui, 0.8125f, 400, lineHeight = 1.65f) else css(type.ui, 0.8f, 400, lineHeight = 1.45f)).copy(textDirection = proseDirection),
+                style = (css(type.ui, 0.8125f, 400, lineHeight = 1.65f)).copy(textDirection = proseDirection),
                 color = t.slate,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

@@ -91,7 +91,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import com.tether.app.protocol.reduce.resolveModelArg
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.KeyWear
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSeam
@@ -805,7 +804,6 @@ fun Composer(
     Column(modifier = modifier.fillMaxWidth().background(t.graphite)) {
         // `.chat-composer { border-top: 1px solid var(--line-strong); box-shadow: inset 0 1px 0
         // var(--seam-lip) }`; Studio's deck has no border (studio.css:383).
-        if (!metrics.studio) TetherSeam()
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val deckWidth = maxWidth
             val deck = composerDeckPadding(metrics, deckWidth)
@@ -1082,11 +1080,9 @@ private data class DeckPadding(val start: Dp, val top: Dp, val end: Dp, val bott
  * centres a well of at most 53rem.
  */
 private fun composerDeckPadding(m: ComposerMetrics, width: Dp): DeckPadding {
-    if (m.studio) {
-        if (m.phone) return DeckPadding(10.dp, 10.dp, 10.dp, 10.dp)
-        val side = maxOf(32.dp, (width - 848.dp) / 2)
-        return DeckPadding(side, 16.dp, side, 20.dp)
-    }
+    if (m.phone) return DeckPadding(10.dp, 10.dp, 10.dp, 10.dp)
+    val side = maxOf(32.dp, (width - 848.dp) / 2)
+    return DeckPadding(side, 16.dp, side, 20.dp)
     return if (m.phone) DeckPadding(8.dp, 8.dp, 8.dp, 8.dp) else DeckPadding(16.dp, 8.dp, 16.dp, 8.dp)
 }
 
@@ -1108,16 +1104,8 @@ private fun ComposerToolbar(
     actions: @Composable RowScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val gap = when {
-        metrics.studio -> 8.dp
-        metrics.phone -> t.css.spaceXs
-        else -> t.css.spaceSm
-    }
-    val padding = if (metrics.studio) {
-        Modifier.padding(start = 10.4.dp, top = 4.dp, end = 10.4.dp, bottom = 10.4.dp)
-    } else {
-        Modifier.padding(start = t.css.spaceSm, top = t.css.spaceXs, end = t.css.spaceSm, bottom = t.css.spaceSm)
-    }
+    val gap = 8.dp
+    val padding = Modifier.padding(start = 10.4.dp, top = 4.dp, end = 10.4.dp, bottom = 10.4.dp)
     Column(Modifier.fillMaxWidth().then(padding)) {
     options?.invoke()
     Row(
@@ -1125,7 +1113,7 @@ private fun ComposerToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
-        val attachSize = if (metrics.studio || metrics.touchKeys) TetherDimens.touchTargetDp else 30.4.dp
+        val attachSize = TetherDimens.touchTargetDp
         TetherKey(
             onClick = onAttach,
             classes = KeyClasses.Attach,
@@ -1176,16 +1164,14 @@ private fun ComposerActions(
     /** T7.3: why a command key cannot send (a copy that is not live); null = it can. */
     commandLock: String? = null,
 ) {
-    val height = if (metrics.studio || metrics.touchKeys) TetherDimens.touchTargetDp else 33.6.dp
+    val height = TetherDimens.touchTargetDp
     val labelled = !metrics.phone
-    val fontSize = if (metrics.studio) 12.48.sp else 10.24.sp
-    val keyModifier = if (labelled) Modifier.height(height).widthIn(min = if (metrics.studio) 44.dp else 73.6.dp) else Modifier.size(44.dp)
+    val fontSize = 12.48.sp
+    val keyModifier = if (labelled) Modifier.height(height).widthIn(min = 44.dp) else Modifier.size(44.dp)
     val padding = when {
         !labelled -> 0.dp
-        metrics.studio -> 16.dp
-        else -> 12.dp
+        else -> 16.dp
     }
-    val wear = if (!labelled) KeyWear.SendCompact else null
     // T7.3: one command key (`chat-send chat-send--command[-bg]`): the web's `:root .chat-send`
     // material rule (0,2,0) outranks the variant's own colours (0,1,0), so it is drawn as a Send key;
     // the Terminal / SendToBack glyph and the words tell them apart. Armed like every operator
@@ -1208,7 +1194,6 @@ private fun ComposerActions(
                 .semantics { if (!armed) disabled() }
                 .testTag(tag),
             contentPadding = padding,
-            wearPattern = wear,
             contentDescription = if (commandLock == null) description else "$description, unavailable: $commandLock",
         )
     }
@@ -1247,7 +1232,6 @@ private fun ComposerActions(
                 minHeight = height,
                 modifier = keyModifier,
                 contentPadding = padding,
-                wearPattern = wear,
                 contentDescription = "Queue message",
             )
         }
@@ -1290,7 +1274,6 @@ private fun ComposerActions(
             minHeight = height,
             modifier = keyModifier,
             contentPadding = padding,
-            wearPattern = wear,
             contentDescription = "Send message",
         )
     }
@@ -1473,19 +1456,18 @@ fun TurnActivity(
 @Composable
 private fun ComposerTotals(totalActiveMs: Long, totalTokens: Long?) {
     val t = LocalTetherTokens.current
-    val studio = t.skin.family == com.tether.app.ui.theme.ThemeFamily.Studio
     Row(
         Modifier.padding(horizontal = t.css.spaceXs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.2.dp),
     ) {
         Text(
-            if (studio) "Session" else "SESSION",
+            "Session",
             color = t.faint,
             fontFamily = Manrope,
-            fontWeight = if (studio) androidx.compose.ui.text.font.FontWeight(500) else TetherWeights.strong,
-            fontSize = if (studio) 10.4.sp else 8.96.sp,
-            letterSpacing = if (studio) 0.em else 0.1.em,
+            fontWeight = androidx.compose.ui.text.font.FontWeight(500),
+            fontSize = 10.4.sp,
+            letterSpacing = 0.em,
             maxLines = 1,
             modifier = Modifier.semanticsLabel("Session"),
         )

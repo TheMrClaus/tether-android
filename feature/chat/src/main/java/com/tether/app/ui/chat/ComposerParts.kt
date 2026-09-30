@@ -62,7 +62,6 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.Manrope
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * T7.1: the session composer's writing surface, ported from tether components/chat-view.tsx
@@ -78,7 +77,6 @@ internal data class ComposerMetrics(
     val phone: Boolean,
     /** Below 64rem (`max-width: 63.99rem`): 44dp attach / Send keys (touch sizing). */
     val touchKeys: Boolean,
-    val studio: Boolean,
 )
 
 @Composable
@@ -88,7 +86,6 @@ internal fun composerMetrics(): ComposerMetrics {
     return ComposerMetrics(
         phone = phone,
         touchKeys = phone || LocalConfiguration.current.screenWidthDp < 1024,
-        studio = t.skin.family == ThemeFamily.Studio,
     )
 }
 
@@ -109,10 +106,8 @@ internal fun isSubmitKey(event: KeyEvent, value: TextFieldValue): Boolean =
 
 /** `.chat-input` inside the well: the type and padding each layout gives it. */
 internal fun composerTextStyle(base: TextStyle, m: ComposerMetrics): TextStyle = when {
-    m.studio && m.phone -> base.copy(fontSize = 16.sp, lineHeight = 25.6.sp)
-    m.studio -> base.copy(fontSize = 14.8.sp, lineHeight = 23.68.sp)
-    m.phone -> base.copy(fontSize = 16.sp, lineHeight = 24.sp) // ≥16px: 8512 (the iOS zoom rule)
-    else -> base.copy(fontSize = 14.4.sp, lineHeight = 21.6.sp)
+    m.phone -> base.copy(fontSize = 16.sp, lineHeight = 25.6.sp)
+    else -> base.copy(fontSize = 14.8.sp, lineHeight = 23.68.sp)
 }
 
 /**
@@ -143,14 +138,12 @@ internal fun ComposerInput(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val maxHeight = screenHeight * (if (metrics.phone) 0.3f else 0.6f)
     val (minHeight, padding) = when {
-        metrics.studio && metrics.phone -> 52.8.dp to Pad(14.dp, 14.dp, 14.dp, 8.dp)
-        metrics.studio -> 67.2.dp to Pad(16.dp, 16.dp, 16.dp, 8.dp)
-        metrics.phone -> 44.dp to Pad(t.css.spaceMd, 9.6.dp, t.css.spaceMd, 9.6.dp)
-        else -> 40.dp to Pad(t.css.spaceMd, t.css.spaceSm, t.css.spaceMd, 5.6.dp)
+        metrics.phone -> 52.8.dp to Pad(14.dp, 14.dp, 14.dp, 8.dp)
+        else -> 67.2.dp to Pad(16.dp, 16.dp, 16.dp, 8.dp)
     }
     // Chromium's default ::placeholder colour (#757575, measured in every instrument web shot);
     // Studio sets `--faint` (studio.css:481-482).
-    val placeholderColor = if (metrics.studio) t.faint else Color(0xFF757575)
+    val placeholderColor = t.faint
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
@@ -201,12 +194,12 @@ internal fun ComposerWell(
     val surface = if (command) {
         val ring = if (inputFocused) listOf(com.tether.app.ui.theme.CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.dangerEdge)) else emptyList()
         Modifier.cssSurface(
-            RoundedCornerShape(if (metrics.studio) 16.dp else t.radiusMd),
+            RoundedCornerShape(16.dp),
             t.dangerWash,
             CssBorder(1.dp, if (inputFocused) t.danger else t.dangerEdge),
             t.css.well + ring,
         )
-    } else if (metrics.studio) {
+    } else run {
         val shadow = if (inputFocused) {
             softShadow(5.dp, 22.dp, Color(20, 35, 65).copy(alpha = 0.2f), spread = (-9).dp)
         } else {
@@ -218,8 +211,6 @@ internal fun ComposerWell(
             CssBorder(1.dp, if (inputFocused) t.violet else t.lineStrong),
             listOf(shadow),
         )
-    } else {
-        Modifier.tetherWell(t, RoundedCornerShape(t.radiusMd), inputFocused)
     }
     Column(modifier.fillMaxWidth().then(surface)) { content() }
 }

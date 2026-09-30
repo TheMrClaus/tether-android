@@ -84,7 +84,6 @@ import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
-import com.tether.app.ui.theme.ThemeFamily
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlin.math.abs
@@ -228,10 +227,9 @@ internal fun ConversationTimeline(
     val focusIndex = if (focusSlot >= 0) visible.getOrNull(focusSlot) ?: -1 else -1
     val inspecting = focusIndex in 0 until size
 
-    val precision = t.skin.family == ThemeFamily.Precision
     // Precision's graduations take the live tone (the module's [data-theme="precision"|"machine"] rules).
-    val markColor = if (precision) oklabMix(t.muted, t.running, 0.7f) else t.muted
-    val focusColor = if (precision) t.running else t.white
+    val markColor = t.muted
+    val focusColor = t.white
 
     BoxWithConstraints(
         modifier
@@ -466,10 +464,9 @@ private fun TimelineBubble(
     val reducedMotion = LocalReducedMotion.current
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val mobile = side == TimelineSide.Right
-    val precision = t.skin.family == ThemeFamily.Precision
     // width: min(19rem, 100vw - 4.6rem) mobile; min(21rem, 100vw - 7rem) desktop.
     val width = if (mobile) minOf(304.dp, screenWidth - 73.6.dp) else minOf(336.dp, screenWidth - 112.dp)
-    val shape = RoundedCornerShape(if (precision) 12.48.dp else 16.dp)
+    val shape = RoundedCornerShape(16.dp)
     val enter = remember { Animatable(if (reducedMotion) 1f else 0f) }
     LaunchedEffect(Unit) { if (!reducedMotion) enter.animateTo(1f, tween(150)) }
     val (time, counter) = TimelineModel.meta(index, size, point, zone)
@@ -549,7 +546,7 @@ private fun TimelineBubble(
                     Modifier
                         .padding(top = 6.08.dp)
                         .size(3.84.dp)
-                        .background((if (precision) t.running else t.muted).copy(alpha = 0.72f), CircleShape),
+                        .background((t.muted).copy(alpha = 0.72f), CircleShape),
                 )
             }
             Text(

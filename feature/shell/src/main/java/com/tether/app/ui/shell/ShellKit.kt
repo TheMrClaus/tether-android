@@ -55,10 +55,6 @@ import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
-
-/** Studio (studio.css) restyles most of the shell chrome; the instrument skins share globals.css. */
-internal val TetherTokens.studio: Boolean get() = skin.family == ThemeFamily.Studio
 
 /** A CSS text role at [rem] × 16sp with the web's centred CSS line box. */
 internal fun cssText(
@@ -102,13 +98,12 @@ internal fun Modifier.extraWidth(extra: Dp): Modifier = layout { measurable, con
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
-/** One painted state of a chrome control (face, edge, legend colour, box-shadow list, travel). */
+/** One painted state of a chrome control (face, edge, legend colour, box-shadow list). */
 internal data class ChromeLook(
     val face: Color,
     val border: Color,
     val ink: Color,
     val shadows: List<CssShadow>,
-    val travel: Dp,
     val radius: Dp,
     val alpha: Float = 1f,
 )
@@ -126,7 +121,7 @@ internal fun rememberIconLook(ink: Color, radius: Dp, enabled: Boolean = true): 
     return remember(t, ink, radius, enabled) {
         { state ->
             val k = resolveKey(t, KeyClasses.IconButton, state)
-            ChromeLook(k.face, Color.Transparent, ink, k.shadows, k.travel, radius, if (enabled) 1f else k.alpha)
+            ChromeLook(k.face, Color.Transparent, ink, k.shadows, radius, if (enabled) 1f else k.alpha)
         }
     }
 }
@@ -164,7 +159,6 @@ internal fun ChromeIconKey(
     }
     val l = look(state)
     val shape = RoundedCornerShape(l.radius)
-    val travel = if (reduced) 0.dp else l.travel
     Box(
         modifier = modifier
             .semantics {
@@ -177,7 +171,6 @@ internal fun ChromeIconKey(
                 alpha = l.alpha
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .offset { IntOffset(0, travel.roundToPx()) }
             .focusRing(focused, shape, t.violet)
             .cssSurface(shape, l.face, if (l.border.alpha > 0f) CssBorder(1.dp, l.border) else null, l.shadows),
         contentAlignment = Alignment.Center,
@@ -225,7 +218,6 @@ internal fun ChromeLabelKey(
     }
     val l = look(state)
     val shape = RoundedCornerShape(l.radius)
-    val travel = if (reduced) 0.dp else l.travel
     Box(
         modifier = modifier
             .semantics {
@@ -239,7 +231,6 @@ internal fun ChromeLabelKey(
                 alpha = l.alpha
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .offset { IntOffset(0, travel.roundToPx()) }
             .focusRing(focused, shape, t.violet)
             .cssSurface(shape, l.face, if (l.border.alpha > 0f) CssBorder(1.dp, l.border) else null, l.shadows),
         contentAlignment = Alignment.Center,

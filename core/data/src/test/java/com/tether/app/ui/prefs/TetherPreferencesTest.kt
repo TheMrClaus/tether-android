@@ -1,7 +1,6 @@
 package com.tether.app.ui.prefs
 
 import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

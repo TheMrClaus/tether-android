@@ -6,7 +6,6 @@ import androidx.compose.ui.unit.dp
 import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.tokensFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

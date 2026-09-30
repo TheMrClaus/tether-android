@@ -2,7 +2,6 @@ package com.tether.app.ui.shell
 
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.theme.GeneratedTokens
-import com.tether.app.ui.theme.ThemeFamily
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

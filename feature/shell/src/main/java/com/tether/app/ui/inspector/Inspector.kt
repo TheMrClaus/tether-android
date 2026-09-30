@@ -60,7 +60,6 @@ import com.tether.app.ui.components.statusToneOf
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.shell.cssText
-import com.tether.app.ui.shell.studio
 import com.tether.app.ui.statusline.ReadingEnv
 import com.tether.app.ui.statusline.UsageTrack
 import com.tether.app.ui.statusline.UsageTrackPlacement
@@ -201,7 +200,7 @@ private fun IdentityHeading(identity: Identity) {
         Modifier
             .fillMaxWidth()
             .bottomRule(t.line)
-            .padding(bottom = (if (t.studio) 20.dp else t.css.spaceMd) + 1.dp)
+            .padding(bottom = (20.dp) + 1.dp)
             .semantics(mergeDescendants = true) {}
             .testTag(InspectorTags.Identity),
         verticalAlignment = Alignment.CenterVertically,
@@ -216,7 +215,7 @@ private fun IdentityHeading(identity: Identity) {
         Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
             RuledText(
                 listOf(identity.providerLabel),
-                if (t.studio) cssText(type.ui, 0.95f, 720, trackingEm = -0.015f) else cssText(type.ui, 1.02f, 720, trackingEm = -0.015f),
+                cssText(type.ui, 0.95f, 720, trackingEm = -0.015f),
                 t.white,
                 Modifier.semantics { heading() },
             )
@@ -415,8 +414,7 @@ private fun Specs(rows: List<SpecRow>) {
 private fun SpecItem(row: SpecRow) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val labelStyle = if (studio) cssText(type.ui, 0.72f, 700) else cssText(type.ui, 0.64f, 700, trackingEm = 0.08f)
+    val labelStyle = cssText(type.ui, 0.72f, 700)
     val valueStyle = cssText(type.mono, 0.74f, 400, lineHeight = 1.5f)
     val noteStyle = cssText(type.ui, 0.64f, 400, lineHeight = 1.5f)
     Column(
@@ -428,11 +426,11 @@ private fun SpecItem(row: SpecRow) {
             .testTag(InspectorTags.RuntimeRow),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        Text(if (studio) row.label else row.label.uppercase(), style = labelStyle, color = t.faint)
+        Text(row.label, style = labelStyle, color = t.faint)
         Column {
             if (row.value.isNotEmpty()) {
                 val value = if (row.capitalize) row.value.map { if (it.rule == Rule.Label || it.rule == Rule.App) it.copy(text = capitalizeWords(it.text)) else it } else row.value
-                RuledText(value, valueStyle, if (studio) t.ink else t.white)
+                RuledText(value, valueStyle, t.ink)
             }
             row.notes.forEach { note ->
                 RuledText(

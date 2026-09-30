@@ -61,7 +61,7 @@ import com.tether.app.ui.prefs.DataStoreDraftStore
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
+import com.tether.app.ui.theme.ThemeMode
 
 /**
  * Single UI entry point. MainActivity calls UiRoot(ClientLocator.obtain(this)).
@@ -70,7 +70,7 @@ import com.tether.app.ui.theme.ThemeChoice
 fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     val context = LocalContext.current
     val prefs = remember { UiPrefs(context) }
-    val themeChoice by prefs.themeChoice.collectAsStateWithLifecycle(initialValue = ThemeChoice.Default)
+    val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.Default)
 
     val vm: TetherViewModel = viewModel(
         factory = remember(client) { TetherViewModelFactory(client, DataStoreDraftStore(context)) },
@@ -177,12 +177,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
         }
     }
 
-    // PLAN D12 / app/login/page.tsx: Retro is the opt-in, otherwise the theme
-    // family picks the screen. There is no Studio family in ThemeChoice yet
-    // (the Studio skins arrive with the design-system phase), so Instrument is
-    // what every current family gets — exactly the web's mapping for them.
-    val loginVariant by prefs.loginVariant.collectAsStateWithLifecycle(initialValue = LoginVariant.Instrument)
-    val studioFamily = false
+    // app/login/page.tsx: Retro is the opt-in layout, otherwise Studio's own sign-in.
+    val loginVariant by prefs.loginVariant.collectAsStateWithLifecycle(initialValue = LoginVariant.Default)
     val logoutNotice by vm.logoutNotice.collectAsStateWithLifecycle()
 
     // Android 17 local-network permission. The client reports LocalNetworkBlocked
@@ -221,7 +217,7 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
         }
     }
 
-    TetherTheme(choice = themeChoice) {
+    TetherTheme(mode = themeMode) {
         val tokens = LocalTetherTokens.current
         val phase = localNetwork.model.phase
         val needsSetup = !configured || connection is ConnectionState.AuthRequired
@@ -257,8 +253,7 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 if (needsSetup) {
                     LoginScreen(
                         client = client,
-                        surface = loginSurfaceFor(loginVariant, studioFamily),
-                        studioFamily = studioFamily,
+                        surface = loginSurfaceFor(loginVariant),
                         logoutNotice = logoutNotice,
                         onLocalNetworkBlocked = { retry -> localNetwork.onBlocked(LocalNetworkSource.Login, retry) },
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },

@@ -385,8 +385,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val actions = LocalNoticeActions.current
-    val studio = isStudio(t)
-    val shape = RoundedCornerShape(if (studio) 14.dp else t.radiusMd)
+    val shape = RoundedCornerShape(14.dp)
     // Scoped to the session too (r2): another session's prompt with the same resetsAt starts unarmed and unsent.
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
     var sent by remember(identity) { mutableStateOf<String?>(null) }
@@ -420,9 +419,9 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 shape,
                 background = t.attentionBg,
                 border = CssBorder(1.dp, t.attentionBorder),
-                shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.litSoft, inset = true)) + t.css.shadowFloating,
+                shadows = emptyList(),
             )
-            .padding(if (studio) 20.dp else t.css.spaceLg)
+            .padding(20.dp)
             .semantics { paneTitle = "Limit hit" }
             .testTag("rate-limit-card"),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),

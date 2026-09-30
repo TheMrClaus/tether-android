@@ -159,7 +159,7 @@ fun SessionSidebar(
     seed: SidebarUiSeed = SidebarUiSeed(),
 ) {
     val base = LocalTetherTokens.current
-    ProvideTokenScope(if (base.studio) StudioSidebarScope else null) {
+    ProvideTokenScope(StudioSidebarScope) {
         SidebarContent(state, actions, modifier, layout, seed)
     }
 }
@@ -174,7 +174,6 @@ private fun SidebarContent(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val phone = layout == TetherLayoutClass.Phone
 
     var visibleCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
@@ -273,7 +272,7 @@ private fun SidebarContent(
                 .onGloballyPositioned { listBounds = it.boundsInRoot(); dragController.listBounds = listBounds }
                 .semantics { contentDescription = "Workspaces" }
                 .testTag(SidebarTags.List),
-            verticalArrangement = Arrangement.spacedBy(if (studio) 0.dp else 0.3f.rem),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             view.blocks.forEachIndexed { position, block ->
                 item(key = "block:${block.workspace}") {
@@ -341,7 +340,7 @@ private fun MobileHeader(onClose: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .heightIn(min = 3f.rem)
-            .padding(bottom = if (t.studio) 1f.rem else 0.dp),
+            .padding(bottom = 1f.rem),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -365,7 +364,6 @@ private fun MobileHeader(onClose: () -> Unit) {
 private fun NewSessionKey(onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     TetherKey(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().testTag(SidebarTags.NewSession),
@@ -373,27 +371,26 @@ private fun NewSessionKey(onClick: () -> Unit) {
         label = "New session",
         icon = TetherIcons.Plus,
         iconSize = 17.dp,
-        fontSize = if (studio) androidx.compose.ui.unit.TextUnit.Unspecified else (0.74f * 16f).let { androidx.compose.ui.unit.TextUnit(it, androidx.compose.ui.unit.TextUnitType.Sp) },
-        minHeight = if (studio) 2.875f.rem else 2.75f.rem,
-        contentArrangement = Arrangement.spacedBy(if (studio) 0.65f.rem else t.css.spaceMd),
-        contentPadding = if (studio) 0.875f.rem else t.css.spaceMd,
+        fontSize = androidx.compose.ui.unit.TextUnit.Unspecified,
+        minHeight = 2.875f.rem,
+        contentArrangement = Arrangement.spacedBy(0.65f.rem),
+        contentPadding = 0.875f.rem,
         trailing = {
             Spacer(Modifier.weight(1f))
-            val shape = RoundedCornerShape(if (studio) 4.dp else 0.3f.rem)
+            val shape = RoundedCornerShape(4.dp)
             Box(
                 Modifier
                     .clearAndSetSemantics { }
                     .then(
-                        if (studio) Modifier.background(Color.White.copy(alpha = 0.15f), shape)
-                        else Modifier.cssSurface(shape, t.charcoal, CssBorder(1.dp, t.charcoalSide), listOf(hardShadow(1.dp, t.litFaint, inset = true), hardShadow(1.dp, t.charcoalSide))),
+                        Modifier.background(Color.White.copy(alpha = 0.15f), shape),
                     )
-                    .padding(horizontal = if (studio) 0.4f.rem else 0.38f.rem, vertical = 0.05f.rem),
+                    .padding(horizontal = 0.4f.rem, vertical = 0.05f.rem),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     "N",
-                    style = if (studio) css(type.ui, 0.7f, 550) else css(type.mono, 0.62f, 400),
-                    color = if (studio) Color(0xFFE3EBFF) else t.utilityInk,
+                    style = css(type.ui, 0.7f, 550),
+                    color = Color(0xFFE3EBFF),
                 )
             }
         },
@@ -405,22 +402,21 @@ private fun NewSessionKey(onClick: () -> Unit) {
 private fun ScheduledNav(count: Int, onClick: (() -> Unit)?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val shape = RoundedCornerShape(if (studio) t.radiusSm else t.radiusKey)
+    val shape = RoundedCornerShape(t.radiusSm)
     Row(
         Modifier
-            .padding(top = if (studio) 0.6f.rem else t.css.spaceMd, bottom = if (studio) 1f.rem else 0.dp)
+            .padding(top = 0.6f.rem, bottom = 1f.rem)
             .fillMaxWidth()
-            .heightIn(min = if (studio) 2.75f.rem else 2.5f.rem)
+            .heightIn(min = 2.75f.rem)
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .alpha(if (onClick == null) 0.48f else 1f)
             .border(1.dp, Color.Transparent, shape)
-            .padding(start = if (studio) 0.875f.rem else t.css.spaceMd, end = if (studio) 0.875f.rem else t.css.spaceSm),
+            .padding(start = 0.875f.rem, end = 0.875f.rem),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         SmallIcon(TetherIcons.CalendarClock, t.muted, 17.dp)
-        Text("Scheduled actions", style = css(type.ui, if (studio) 0.8125f else 0.78f, 650), color = t.muted, modifier = Modifier.weight(1f))
+        Text("Scheduled actions", style = css(type.ui, 0.8125f, 650), color = t.muted, modifier = Modifier.weight(1f))
         if (count > 0) CountPill(count, t.lineStrong, 0.64f)
     }
 }
@@ -449,42 +445,30 @@ private fun ListHeader(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     Row(
         Modifier
             .fillMaxWidth()
             .padding(
-                start = if (studio) 0.45f.rem else 0.1f.rem,
-                end = if (studio) 0.45f.rem else 0.1f.rem,
-                top = if (studio) 0.dp else t.css.spaceLg,
-                bottom = if (studio) 0.625f.rem else t.css.spaceSm,
+                start = 0.45f.rem,
+                end = 0.45f.rem,
+                top = 0.dp,
+                bottom = 0.625f.rem,
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (studio && phone) 0.dp else t.css.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
     ) {
         // The legend keeps its natural width (the web's flex row never shrinks it); on a rail too
         // narrow for both, the bank runs past the edge as on the web (tablet shot) rather than
         // squeezing the count away.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.45f.rem)) {
             Text(
-                if (studio) "Workspaces" else "WORKSPACES",
-                style = if (studio) css(type.ui, 0.75f, 700) else css(type.ui, 0.62f, 700, trackingEm = 0.13f),
+                "Workspaces",
+                style = css(type.ui, 0.75f, 700),
                 color = t.faint,
                 maxLines = 1,
                 modifier = Modifier.semantics { heading(); contentDescription = "Workspaces, $openCount open" },
             )
-            if (studio) {
-                Text("$openCount", style = css(type.ui, 0.7f, 500), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
-            } else {
-                Box(
-                    Modifier
-                        .clearAndSetSemantics { }
-                        .cssSurface(RoundedCornerShape(999.dp), t.slate, null, listOf(com.tether.app.ui.components.softShadow(1.dp, 1.dp, t.contact.copy(alpha = 0.14f), inset = true)))
-                        .heightIn(min = 1.25f.rem)
-                        .padding(horizontal = 0.4f.rem),
-                    contentAlignment = Alignment.Center,
-                ) { Text("$openCount", style = css(type.mono, 0.6f, 700), color = t.ink) }
-            }
+            Text("$openCount", style = css(type.ui, 0.7f, 500), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
         }
         Spacer(Modifier.weight(1f))
         Box(Modifier.wrapContentWidth(Alignment.Start, unbounded = true)) {
@@ -504,15 +488,12 @@ private fun FilterBank(
     onSortOpen: (Boolean) -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val bankShape = RoundedCornerShape(t.radiusKey - 1.dp)
     Row(
         Modifier.then(
-            if (studio) Modifier else Modifier
-                .cssSurface(bankShape, t.keyFaceDeep, CssBorder(1.dp, t.lineStrong), t.css.well)
-                .padding(2.dp),
+            Modifier,
         ),
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 0.dp else 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val harnessLabel = state.harness?.let { id -> Web.SIDEBAR_HARNESSES.firstOrNull { it.first == id }?.second }
@@ -592,13 +573,12 @@ private fun BankKey(
     onClick: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     // Studio phones draw 2.75rem keys (studio.css 445-447); 2.5rem here so the legend and its count
     // fit the 21rem drawer on one line (the web's row lets the title shrink under the bank). The
     // touch target stays ≥ 44dp (Compose's minimum touch size).
-    val w = if (studio) (if (phone) 2.5f else 1.9f).rem else 1.7f.rem
-    val h = if (studio) (if (phone) 2.75f else 2f).rem else 1.7f.rem
-    val shape = RoundedCornerShape(if (studio) 0.4f.rem else t.radiusKey - 4.dp)
+    val w = (if (phone) 2.5f else 1.9f).rem
+    val h = (if (phone) 2.75f else 2f).rem
+    val shape = RoundedCornerShape(0.4f.rem)
     val shadows = if (on) listOf(
         hardShadow(1.dp, t.litStrong, inset = true),
         com.tether.app.ui.theme.CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = t.violetStrong),
@@ -678,28 +658,27 @@ private fun MenuItem(
 private fun GlobalSearch(onClick: (() -> Unit)?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val shape = RoundedCornerShape(if (studio) 0.625f.rem else t.radiusKey)
+    val shape = RoundedCornerShape(0.625f.rem)
     Row(
         Modifier
-            .padding(bottom = if (studio) 1f.rem else t.css.spaceSm)
+            .padding(bottom = 1f.rem)
             .fillMaxWidth()
-            .heightIn(min = if (studio) 2.75f.rem else 2.4f.rem)
+            .heightIn(min = 2.75f.rem)
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .semantics { if (onClick == null) disabled() }
             .cssSurface(
                 shape,
-                if (studio) Color(0xFF111A2B) else t.mineralDeep,
-                CssBorder(1.dp, if (studio) t.line else t.lineStrong),
-                if (studio) emptyList() else t.css.well,
+                Color(0xFF111A2B),
+                CssBorder(1.dp, t.line),
+                emptyList(),
             )
-            .padding(horizontal = if (studio) 0.75f.rem else t.css.spaceMd),
+            .padding(horizontal = 0.75f.rem),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        val ink = if (studio) t.muted else t.faint
+        val ink = t.muted
         SmallIcon(TetherIcons.Search, ink, 14.dp)
-        Text("Search all conversations…", style = css(type.ui, if (studio) 0.8f else 0.78f, 400), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Search all conversations…", style = css(type.ui, 0.8f, 400), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -708,9 +687,8 @@ private fun GlobalSearch(onClick: (() -> Unit)?) {
 private fun SessionFilter(query: String, onChange: (String) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val interaction = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(if (studio) t.radiusSm else t.radiusKey)
+    val shape = RoundedCornerShape(t.radiusSm)
     Row(
         Modifier
             .padding(bottom = t.css.spaceXs)
@@ -766,11 +744,10 @@ private fun WorkspaceBlock(
     onShowLess: (String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = if (first) 0.dp else if (studio) 0.75f.rem else t.css.spaceMd)
+            .padding(top = if (first) 0.dp else 0.75f.rem)
             .testTag(SidebarTags.block(block.workspace))
             .semantics { contentDescription = SafeText.line(block.name) },
         verticalArrangement = Arrangement.spacedBy(0.15f.rem),
@@ -778,8 +755,8 @@ private fun WorkspaceBlock(
         BlockHeader(block, actions, offline = !state.connected)
         if (!block.collapsed) {
             Column(
-                Modifier.padding(start = if (studio) 0.dp else 0.3f.rem, top = if (studio) 0.3f.rem else 0.dp, bottom = if (studio) 0.1f.rem else 0.dp),
-                verticalArrangement = Arrangement.spacedBy(if (studio) 0.dp else 0.35f.rem),
+                Modifier.padding(start = 0.dp, top = 0.3f.rem, bottom = 0.1f.rem),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 block.rows.forEach { entry ->
                     val row: @Composable (SidebarEntry, Boolean) -> Unit = { e, draggable ->
@@ -853,7 +830,6 @@ private fun WorkspaceBlock(
 private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val shape = RoundedCornerShape(t.radiusSm)
     val ink = if (block.isCurrent) t.white else t.muted
     Row(
@@ -862,7 +838,7 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Bool
             .heightIn(min = 2.75f.rem)
             .then(
                 // Studio zeroes the header's border width (studio.css 318); the current wash stays.
-                if (block.isCurrent) Modifier.background(t.violetWash, shape).border(1.dp, if (studio) Color.Transparent else t.violetStrong, shape)
+                if (block.isCurrent) Modifier.background(t.violetWash, shape).border(1.dp, Color.Transparent, shape)
                 else Modifier.border(1.dp, Color.Transparent, shape),
             ),
         verticalAlignment = Alignment.CenterVertically,
@@ -889,31 +865,30 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Bool
                 .clickable(role = Role.Button) { actions.onToggleWorkspaceCollapsed(block.workspace) }
                 .padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (studio) 0.625f.rem else t.css.spaceSm),
+            horizontalArrangement = Arrangement.spacedBy(0.625f.rem),
         ) {
             // .workspace-badge: the folder's initial (neutral; the name identifies).
-            val badgeShape = RoundedCornerShape(if (studio) 0.4f.rem else 0.35f.rem)
+            val badgeShape = RoundedCornerShape(0.4f.rem)
             Box(
                 Modifier
                     .size(1.5f.rem)
                     .clearAndSetSemantics { }
                     .then(
-                        if (studio) Modifier.background(Color(0xFF283650), badgeShape)
-                        else Modifier.background(t.graphiteRaised, badgeShape).border(1.dp, if (block.isCurrent) t.violetStrong else t.lineStrong, badgeShape),
+                        Modifier.background(Color(0xFF283650), badgeShape),
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     Web.workspaceInitial(block.workspace),
-                    style = if (studio) css(type.ui, 0.75f, 700, lineHeight = 1f) else css(type.mono, 0.7f, 700, lineHeight = 1f),
-                    color = if (block.isCurrent) t.violet else if (studio) Color(0xFFC2D1ED) else t.muted,
+                    style = css(type.ui, 0.75f, 700, lineHeight = 1f),
+                    color = if (block.isCurrent) t.violet else Color(0xFFC2D1ED),
                 )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.1f.rem)) {
                 // ta-28i: a workspace's folder name and path are code (server text), LTR.
-                Text(codeLabel(block.name), style = css(type.ui, if (studio) 0.79f else 0.8f, if (studio) 650 else 640), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(codeLabel(block.name), style = css(type.ui, 0.79f, 650), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 block.path?.let {
-                    Text(codeLabel(it), style = css(type.ui, if (studio) 0.66f else 0.62f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(codeLabel(it), style = css(type.ui, 0.66f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             block.activity?.let { a ->
@@ -1052,7 +1027,6 @@ private fun ResetOrderRow(onClick: () -> Unit) {
 private fun AddWorkspaceRow(onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val shape = RoundedCornerShape(t.radiusSm)
     val line = t.line
     Row(
@@ -1061,17 +1035,7 @@ private fun AddWorkspaceRow(onClick: () -> Unit) {
             .fillMaxWidth()
             .heightIn(min = 2.75f.rem)
             .then(
-                if (studio) Modifier else Modifier.drawBehind {
-                    val px = 1.dp.toPx()
-                    val r = shape.topStart.toPx(size, this)
-                    drawRoundRect(
-                        line,
-                        topLeft = Offset(px / 2, px / 2),
-                        size = androidx.compose.ui.geometry.Size(size.width - px, size.height - px),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
-                        style = Stroke(px, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3 * px, 3 * px))),
-                    )
-                },
+                Modifier,
             )
             .semantics(mergeDescendants = true) { }
             .clickable(role = Role.Button, onClick = onClick)
@@ -1080,9 +1044,9 @@ private fun AddWorkspaceRow(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        val ink = if (studio) t.muted else t.faint
+        val ink = t.muted
         SmallIcon(TetherIcons.FolderPlus, ink, 15.dp)
-        Text("Add workspace", style = css(type.ui, if (studio) 0.75f else 0.76f, 600), color = ink)
+        Text("Add workspace", style = css(type.ui, 0.75f, 600), color = ink)
     }
 }
 
@@ -1175,7 +1139,6 @@ private fun jsUpdatedAt(entry: SidebarEntry): Double = (entry.js["updatedAt"] as
 private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse: (() -> Unit)?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
     val line = t.line
     val lip = t.seamLip
     Row(
@@ -1184,22 +1147,21 @@ private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse
             .drawBehind {
                 val px = 1.dp.toPx()
                 drawRect(line, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, px))
-                if (!studio) drawRect(lip, Offset(0f, px), androidx.compose.ui.geometry.Size(size.width, px))
             }
-            .padding(top = if (studio) 0.75f.rem else t.css.spaceSm, start = t.css.spaceXs, end = t.css.spaceXs),
+            .padding(top = 0.75f.rem, start = t.css.spaceXs, end = t.css.spaceXs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Collapse is desktop-only: below 48rem the drawer has its own close.
         if (!phone && onCollapse != null) {
             FooterButton(TetherIcons.PanelLeftClose, "Collapse sidebar", onClick = onCollapse)
         }
-        FooterButton(TetherIcons.Settings, "Open settings", label = if (studio) "Settings" else null, onClick = onOpenSettings)
+        FooterButton(TetherIcons.Settings, "Open settings", label = "Settings", onClick = onOpenSettings)
         Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
             StatusDot(t.running, size = 0.4f.rem)
             Text(
-                if (studio) "Private runtime" else "PRIVATE RUNTIME",
-                style = if (studio) css(type.ui, 0.66f, 500) else css(type.ui, 0.64f, 620, trackingEm = 0.06f),
+                "Private runtime",
+                style = css(type.ui, 0.66f, 500),
                 color = t.faint,
                 modifier = Modifier.semantics { contentDescription = "Private runtime" },
             )

@@ -25,19 +25,17 @@ import java.util.Locale
  * line-height centres its half-leading like CSS ([CssLineHeight]). Nothing here fixes a
  * container height.
  *
- * Skins: the four instrument skins (tactile/night/precision/machine) share one scale — only
- * `--key-label-tracking` differs (0.05em vs 0.06em). Studio re-dresses the labels in
- * app/studio.css: micro-labels move to `var(--font-ui)` (Manrope — the same bundled face, so no
- * extra font; its -apple-system/Segoe UI fallbacks don't exist on Android), drop the
- * uppercase and the tracking, and several roles change size/weight/leading.
+ * Studio is the only visual system (T15.5): each role is the globals.css value as app/studio.css
+ * cascades over it. Micro-labels use `var(--font-ui)` (Manrope — the bundled face; its
+ * -apple-system/Segoe UI fallbacks don't exist on Android), without uppercase or tracking. Both
+ * Studio skins share one scale.
  */
 @Immutable
 class TetherTypography internal constructor(val skin: TetherSkin) {
     private val t: SkinTokens = skin.tokens
-    private val studio: Boolean = skin.family == ThemeFamily.Studio
 
-    /** The UI face: Studio's `--font-ui`, else the `body` stack (globals.css:609). */
-    val ui: FontFamily = fontFamilyForStack(t.fontUi ?: BODY_FONT_STACK)
+    /** The UI face: Studio's `--font-ui` (studio.css:47). */
+    val ui: FontFamily = fontFamilyForStack(t.fontUi)
 
     /** The mono face: `--font-mono` (globals.css:58). */
     val mono: FontFamily = fontFamilyForStack(t.fontMono)
@@ -45,32 +43,21 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
     /** `body` — globals.css:609-610: 1rem, weight 400 (initial), line-height normal. */
     val body: TextStyle = uiRole(1f, 400)
 
-    /**
-     * Chat bubble text (`.chat-bubble`). Instrument: 0.92rem (globals.css:11272), line-height
-     * 1.65 (globals.css:11743). Studio: 0.9rem on phones (studio.css:455), line-height 1.8
-     * (studio.css:372).
-     */
-    val chatBody: TextStyle = if (studio) uiRole(0.9f, 400, lineHeight = 1.8f) else uiRole(0.92f, 400, lineHeight = 1.65f)
+    /** Chat bubble text (`.chat-bubble`): 0.9rem on phones (studio.css:455), line-height 1.8 (studio.css:372). */
+    val chatBody: TextStyle = uiRole(0.9f, 400, lineHeight = 1.8f)
 
     /**
-     * The composer textarea (`.chat-input`). Instrument: 1rem on phones (globals.css:8512),
-     * line-height 1.5 (globals.css:6741). Studio: `.chat-composer-well .chat-input:focus`
-     * 0.925rem / 1.6 (studio.css:386-387) — the focused (typing) state; the phone rule
-     * (studio.css:458, 1rem) only reaches the unfocused textarea, the focus selector outranks it.
+     * The composer textarea (`.chat-input`): `.chat-composer-well .chat-input:focus` 0.925rem / 1.6
+     * (studio.css:386-387) — the focused (typing) state; the phone rule (studio.css:458, 1rem) only
+     * reaches the unfocused textarea, the focus selector outranks it.
      */
-    val composerInput: TextStyle = if (studio) uiRole(0.925f, 400, lineHeight = 1.6f) else uiRole(1f, 400, lineHeight = 1.5f)
+    val composerInput: TextStyle = uiRole(0.925f, 400, lineHeight = 1.6f)
 
     /**
-     * The workspace header title (`.workspace-title-row h1`). Instrument: 1.05rem
-     * (globals.css:11859), 680, -0.01em (globals.css:1686-1687), line-height 1.45
-     * (globals.css:11742). Studio: 740, -0.025em (studio.css:352), 0.925rem on phones
-     * (studio.css:452); line-height 1.45 inherited from globals.css:11742.
+     * The workspace header title (`.workspace-title-row h1`): 740, -0.025em (studio.css:352),
+     * 0.925rem on phones (studio.css:452); line-height 1.45 inherited from globals.css:11742.
      */
-    val screenTitle: TextStyle = if (studio) {
-        uiRole(0.925f, 740, tracking = -0.025f, lineHeight = 1.45f)
-    } else {
-        uiRole(1.05f, 680, tracking = -0.01f, lineHeight = 1.45f)
-    }
+    val screenTitle: TextStyle = uiRole(0.925f, 740, tracking = -0.025f, lineHeight = 1.45f)
 
     /**
      * The empty-state display heading (`.empty-workspace h1`): clamp(1.7rem, 2.6vw, 2.15rem)
@@ -87,15 +74,10 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
     val markdownH5: TextStyle = uiRole(0.92f, 680, lineHeight = 1.3f)
 
     /**
-     * A list row's title (`.session-item-copy strong`). Instrument: 0.84rem, 650, -0.005em
-     * (globals.css:11113), line-height 1.4 (globals.css:11736). Studio: 0.78rem, 600,
-     * line-height 1.45 (studio.css:331); the -0.005em tracking is not reset, so it stays.
+     * A list row's title (`.session-item-copy strong`): 0.78rem, 600, line-height 1.45
+     * (studio.css:331); the -0.005em tracking of globals.css:11113 is not reset, so it stays.
      */
-    val listTitle: TextStyle = if (studio) {
-        uiRole(0.78f, 600, tracking = -0.005f, lineHeight = 1.45f)
-    } else {
-        uiRole(0.84f, 650, tracking = -0.005f, lineHeight = 1.4f)
-    }
+    val listTitle: TextStyle = uiRole(0.78f, 600, tracking = -0.005f, lineHeight = 1.45f)
 
     /** Fenced code (`.md-pre code`, globals.css:5032-5035): mono 0.8rem, line-height 1.5; all skins. */
     val codeBlock: TextStyle = monoRole(0.8f, 400, lineHeight = 1.5f)
@@ -107,14 +89,10 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
     val codeInline: SpanStyle = SpanStyle(fontFamily = mono, fontSize = 0.85.em)
 
     /**
-     * A message send-time (`.chat-msg-time`, globals.css:4856-4863): 0.65rem, tabular figures;
-     * line-height inherited from the bubble. Studio: 0.64rem in `--font-ui` (studio.css:375).
+     * A message send-time (`.chat-msg-time`, globals.css:4856-4863): tabular figures, 0.64rem in
+     * `--font-ui` (studio.css:375); line-height inherited from the bubble.
      */
-    val timestamp: TextStyle = if (studio) {
-        uiRole(0.64f, 400, lineHeight = 1.8f, tabular = true)
-    } else {
-        uiRole(0.65f, 400, lineHeight = 1.65f, tabular = true)
-    }
+    val timestamp: TextStyle = uiRole(0.64f, 400, lineHeight = 1.8f, tabular = true)
 
     /**
      * A headline figure (`.usage-totals strong`): mono 1.35rem (globals.css:11748), 640, -0.01em,
@@ -122,26 +100,11 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
      */
     val numeral: TextStyle = monoRole(1.35f, 640, tracking = -0.01f, tabular = true)
 
-    /**
-     * The uppercase micro-label (`.section-label`). Instrument: 0.67rem, 720, 0.1em, uppercase
-     * (globals.css:2270-2277). Studio: 0.75rem, no transform, tracking 0 (studio.css:279).
-     */
-    val sectionLabel: TetherLabelStyle = if (studio) {
-        TetherLabelStyle(uiRole(0.75f, 720), uppercase = false)
-    } else {
-        TetherLabelStyle(uiRole(0.67f, 720, tracking = 0.1f), uppercase = true)
-    }
+    /** The micro-label (`.section-label`): 0.75rem, 720, no transform, tracking 0 (studio.css:279). */
+    val sectionLabel: TetherLabelStyle = TetherLabelStyle(uiRole(0.75f, 720), uppercase = false)
 
-    /**
-     * The etched mono status legend (`.status-badge`). Instrument: JetBrains Mono 0.6rem, 700,
-     * 0.08em, uppercase (globals.css:11162-11173). Studio: `font: 600 0.65rem var(--font-ui)`,
-     * no transform, tracking 0 (studio.css:354).
-     */
-    val statusLabel: TetherLabelStyle = if (studio) {
-        TetherLabelStyle(uiRole(0.65f, 600), uppercase = false)
-    } else {
-        TetherLabelStyle(monoRole(0.6f, 700, tracking = 0.08f), uppercase = true)
-    }
+    /** The status legend (`.status-badge`): `font: 600 0.65rem var(--font-ui)`, no transform, tracking 0 (studio.css:354). */
+    val statusLabel: TetherLabelStyle = TetherLabelStyle(uiRole(0.65f, 600), uppercase = false)
 
     /**
      * A fixed-verb key legend (`.button-primary`/`.button-secondary`: 0.8rem, 680 —
@@ -165,9 +128,6 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
     override fun toString(): String = "TetherTypography(${skin.id})"
 
     companion object {
-        /** `body { font-family }` — globals.css:609 (instrument skins define no `--font-ui`). */
-        const val BODY_FONT_STACK: String = "\"Manrope Variable\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
-
         /** CSS `font-variant-numeric: tabular-nums`. */
         const val TABULAR_NUMS: String = "tnum"
 
@@ -223,4 +183,4 @@ private val typographyBySkin: Map<TetherSkin, TetherTypography> = TetherSkin.ent
 
 fun typographyFor(skin: TetherSkin): TetherTypography = typographyBySkin.getValue(skin)
 
-val LocalTetherTypography = staticCompositionLocalOf { typographyFor(TetherSkin.Machine) }
+val LocalTetherTypography = staticCompositionLocalOf { typographyFor(TetherSkin.Studio) }

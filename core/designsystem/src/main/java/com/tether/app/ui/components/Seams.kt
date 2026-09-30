@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.theme.LocalTetherTokens
-import com.tether.app.ui.theme.ThemeFamily
 
 /**
  * A parting line between two molded parts (globals.css 9013-9019, 10850-10874): the upper part's
@@ -24,8 +23,7 @@ import com.tether.app.ui.theme.ThemeFamily
 @Composable
 fun TetherSeam(modifier: Modifier = Modifier, vertical: Boolean = false) {
     val t = LocalTetherTokens.current
-    val studio = t.skin.family == ThemeFamily.Studio
-    val edge = if (studio) t.line else t.lineStrong
+    val edge = t.line
     val lip = t.seamLip
     val size = if (vertical) modifier.fillMaxHeight().width(2.dp) else modifier.fillMaxWidth().height(2.dp)
     Canvas(size.clearAndSetSemantics { }) {

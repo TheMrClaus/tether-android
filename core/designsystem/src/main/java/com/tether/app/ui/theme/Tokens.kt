@@ -14,16 +14,18 @@ import androidx.compose.ui.unit.dp
  * Material3's ColorScheme is only mapped for interop (dialogs, text selection).
  */
 
-/** The web's family × mode → skin resolution (resolveThemeSkin). */
-fun ThemeChoice.resolve(systemDark: Boolean): TetherSkin = TetherSkin.of(family, mode.isDark(systemDark))
+/** The web's mode → Studio skin resolution (lib/theme-mode.mjs resolveThemeSkin). */
+fun ThemeMode.resolve(systemDark: Boolean): TetherSkin = TetherSkin.of(isDark(systemDark))
+
+/** The explicit mode that renders this skin whatever the device asks for (previews, tests, goldens). */
+val TetherSkin.mode: ThemeMode get() = if (isDark) ThemeMode.Dark else ThemeMode.Light
 
 /**
- * Structural dimensions the components treat as theme-invariant, taken from the base skin
- * (`machine` is the CSS `:root` block every skin inherits). Radii DO vary per skin (Studio is
- * rounder) — use [TetherTokens.radiusSm] etc. where the skin matters.
+ * Structural dimensions the components treat as theme-invariant: Studio light's values, which
+ * both Studio skins share (spacing, radii, durations are not lighting-dependent).
  */
 object TetherDimens {
-    private val base = GeneratedTokens.Machine
+    private val base = GeneratedTokens.Studio
 
     val spaceXs = base.spaceXs
     val spaceSm = base.spaceSm
@@ -33,9 +35,6 @@ object TetherDimens {
     val radiusSm = base.radiusSm
     val radiusMd = base.radiusMd
     val radiusLg = base.radiusLg
-
-    /** Chat bubble max width fraction on mobile (the base skin's --chat-card-width, 94%). */
-    const val bubbleMaxFraction = 0.94f
 
     val durationFastMs = base.durationFast
     val durationSlowMs = base.duration
@@ -119,14 +118,13 @@ class TetherTokens internal constructor(
     val tintLine: Color = css.tintLine
 
     // Key geometry
-    val pressTravel: Dp = css.pressTravel
     val radiusKey: Dp = css.radiusKey
     val keySlit: Dp = css.keySlit
 
     /** Uppercase key-legend tracking in em. */
     val keyTracking: Float = css.keyLabelTracking.value
 
-    // Per-skin radii (Studio differs from the instrument skins).
+    // Radii
     val radiusSm: Dp = css.radiusSm
     val radiusMd: Dp = css.radiusMd
     val radiusLg: Dp = css.radiusLg
@@ -159,7 +157,7 @@ class TetherTokens internal constructor(
     /**
      * Soft drop-shadow elevation for a resting key: the y offset of --shadow-key's second
      * (soft) layer; the first "0 Npx 0 key-side" layer is the side wall TetherKey draws itself.
-     * 0 for skins without a key shadow (Studio).
+     * 0 when the skin has no key shadow (both Studio skins).
      */
     val shadowElevation: Dp = css.shadowKey.filter { !it.inset }.getOrNull(1)?.offsetY ?: 0.dp
 
@@ -175,4 +173,4 @@ private val tokensBySkin: Map<TetherSkin, TetherTokens> = TetherSkin.entries.ass
 
 fun tokensFor(skin: TetherSkin): TetherTokens = tokensBySkin.getValue(skin)
 
-val LocalTetherTokens = staticCompositionLocalOf { tokensFor(TetherSkin.Machine) }
+val LocalTetherTokens = staticCompositionLocalOf { tokensFor(TetherSkin.Studio) }

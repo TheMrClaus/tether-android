@@ -44,9 +44,8 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
-import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.resolve
 import kotlinx.coroutines.launch
 
 /** The font scales the gallery can force (1.3× is PLAN §4's accessibility bar). */
@@ -55,21 +54,19 @@ val GalleryFontScales: List<Float> = listOf(1f, 1.3f, 2f)
 /**
  * The debug Component Gallery: every design-system primitive (by web class set, in every state),
  * the type roles, all 136 icon glyphs, the provider logos and the adaptive launcher icon, under a
- * skin switcher (family × mode — the six skins, plus `system`), a font-scale toggle and a
+ * mode switcher (Studio light, dark, or follow system), a font-scale toggle and a
  * reduced-motion toggle. Sections are [GallerySections]; the screenshot tests render the same
  * section composables ([GalleryGoldens]).
  */
 @Composable
-fun ComponentGallery(initial: ThemeChoice = ThemeChoice(ThemeFamily.Precision, ThemeMode.System)) {
-    var family by rememberSaveable { mutableStateOf(initial.family) }
-    var mode by rememberSaveable { mutableStateOf(initial.mode) }
+fun ComponentGallery(initial: ThemeMode = ThemeMode.System) {
+    var mode by rememberSaveable { mutableStateOf(initial) }
     var fontScale by rememberSaveable { mutableFloatStateOf(1f) }
     // Null: follow the device ("Remove animations"), as TetherTheme does.
     var reducedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    val choice = ThemeChoice(family, mode)
-    val skin = TetherSkin.of(family, mode.isDark(isSystemInDarkTheme()))
+    val skin = mode.resolve(isSystemInDarkTheme())
 
-    TetherTheme(choice) {
+    TetherTheme(mode) {
         val t = LocalTetherTokens.current
         val reduced = reducedOverride ?: LocalReducedMotion.current
         val listState = rememberLazyListState()
@@ -83,11 +80,9 @@ fun ComponentGallery(initial: ThemeChoice = ThemeChoice(ThemeFamily.Precision, T
             item(key = "controls") {
                 GalleryControls(
                     skin = skin,
-                    family = family,
                     mode = mode,
                     fontScale = fontScale,
                     reduced = reduced,
-                    onFamily = { family = it },
                     onMode = { mode = it },
                     onFontScale = { fontScale = it },
                     onReduced = { reducedOverride = it },
@@ -110,16 +105,14 @@ fun ComponentGallery(initial: ThemeChoice = ThemeChoice(ThemeFamily.Precision, T
 
 const val GalleryTag = "gallery"
 
-/** The switcher: family, mode, font scale, reduced motion, and a jump row to every section. */
+/** The switcher: mode, font scale, reduced motion, and a jump row to every section. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GalleryControls(
     skin: TetherSkin,
-    family: ThemeFamily,
     mode: ThemeMode,
     fontScale: Float,
     reduced: Boolean,
-    onFamily: (ThemeFamily) -> Unit,
     onMode: (ThemeMode) -> Unit,
     onFontScale: (Float) -> Unit,
     onReduced: (Boolean) -> Unit,
@@ -134,9 +127,6 @@ private fun GalleryControls(
     ) {
         Text("Component Gallery", color = t.ink, style = type.screenTitle, modifier = Modifier.semantics { heading() })
         Text("skin: ${skin.id}", color = t.muted, style = type.codeBlock, modifier = Modifier.testTag(SkinLabelTag))
-        ControlRow("family") {
-            ThemeFamily.entries.forEach { f -> TetherChip(f.label, { onFamily(f) }, active = f == family) }
-        }
         ControlRow("mode") {
             ThemeMode.entries.forEach { m -> TetherChip(m.label, { onMode(m) }, active = m == mode) }
         }

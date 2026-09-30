@@ -159,7 +159,7 @@ fun PhoneShell(
     })
 
     Box(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
-        Column(Modifier.fillMaxSize().background(if (t.studio) t.graphite else t.mineral)) {
+        Column(Modifier.fillMaxSize().background(t.graphite)) {
             TetherTopbar(actions = barActions, state = topbarState, onToggleMenu = state::toggleMenu)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }

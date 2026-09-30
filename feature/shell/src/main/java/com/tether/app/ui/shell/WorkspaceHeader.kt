@@ -74,6 +74,7 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.statusToneOf
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.util.compactPath
@@ -145,30 +146,20 @@ fun WorkspaceHeader(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studio = t.studio
-    val edge = if (studio) t.line else t.lineStrong
-    val shadows = when {
-        studio -> emptyList()
-        expanded -> listOf(
-            hardShadow(1.dp, t.seamLip),
-            softShadow(6.dp, 14.dp, t.contact.copy(alpha = 0.32f), spread = (-8).dp),
-            hardShadow(1.dp, t.litSoft, inset = true),
-        )
-        else -> listOf(hardShadow(1.dp, t.seamLip), hardShadow(1.dp, t.litSoft, inset = true))
-    }
+    val edge = t.line
+    val shadows = emptyList<CssShadow>()
     val padH = when {
-        studio && expanded -> 28.dp
-        studio -> t.css.spaceMd
-        else -> t.css.spaceLg
+        expanded -> 28.dp
+        else -> t.css.spaceMd
     }
-    val padV = if (studio && expanded) 16.dp else t.css.spaceSm
+    val padV = if (expanded) 16.dp else t.css.spaceSm
     val freshness = LocalShellFreshness.current
     val sync = freshness.syncStates[session.id]
     Column(
         modifier
             .fillMaxWidth()
             .zIndex(1f) // `position: relative; z-index: 1` — the shade paints over the stage
-            .then(if (studio && expanded) Modifier.heightIn(min = 80.dp) else Modifier)
+            .then(if (expanded) Modifier.heightIn(min = 80.dp) else Modifier)
             .cssSurface(RectangleShape, t.graphite, shadows = shadows)
             .drawBehind { drawRect(edge, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .padding(bottom = 1.dp)
@@ -180,11 +171,11 @@ fun WorkspaceHeader(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         // `.workspace-header-main`: space-between, gap space-lg (Studio phone 0.5rem).
-        horizontalArrangement = Arrangement.spacedBy(if (studio && !expanded) 8.dp else t.css.spaceLg),
+        horizontalArrangement = Arrangement.spacedBy(if (!expanded) 8.dp else t.css.spaceLg),
     ) {
         // `.workspace-title-row`: gap space-md (Studio phone 0.4rem); the pencil pulls in by
         // `calc(var(--space-md) * -0.5)`.
-        val titleGap = if (studio && !expanded) 6.4.dp else t.css.spaceMd
+        val titleGap = if (!expanded) 6.4.dp else t.css.spaceMd
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             // ta-28i: the session's title by the label rule, in its content's direction.
             Text(
@@ -193,10 +184,8 @@ fun WorkspaceHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = when {
-                    studio && expanded -> cssText(type.ui, 1.12f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
-                    studio -> cssText(type.ui, 0.925f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
-                    expanded -> cssText(type.ui, 1.05f, 720, trackingEm = -0.022f, lineHeight = 1.45f)
-                    else -> cssText(type.ui, 1.05f, 680, trackingEm = -0.01f, lineHeight = 1.45f)
+                    expanded -> cssText(type.ui, 1.12f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
+                    else -> cssText(type.ui, 0.925f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                 }.copy(textDirection = proseDirection),
                 modifier = Modifier.weight(1f, fill = false).semantics { heading() },
             )
@@ -249,7 +238,7 @@ fun WorkspaceHeader(
                 fontSize = if (expanded) 10.56.sp else TextUnit.Unspecified,
                 contentDescription = "End session",
                 enabled = endable,
-                minHeight = if (studio) 44.dp else 37.6.dp,
+                minHeight = 44.dp,
                 modifier = Modifier.testTag(ShellTags.EndSessionKey),
             )
         }
@@ -270,7 +259,7 @@ private fun PinKey(pinned: Boolean, onToggle: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val ink = if (pinned) t.violet else t.muted
-    val face = if (pinned && !t.studio) t.violetWash else Color.Transparent
+    val face = Color.Transparent
     Row(
         Modifier
             .heightIn(min = 44.dp)
@@ -295,7 +284,7 @@ private fun PinKey(pinned: Boolean, onToggle: () -> Unit) {
 private fun RenameKey(onRename: () -> Unit) {
     val t = LocalTetherTokens.current
     val look: (KeyState) -> ChromeLook = remember(t) {
-        { ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, t.radiusSm) }
+        { ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), t.radiusSm) }
     }
     ChromeIconKey(
         onClick = onRename,
@@ -318,16 +307,10 @@ private fun RenameKey(onRename: () -> Unit) {
 @Composable
 fun TelemetryHandlePlaceholder(open: Boolean, onToggle: () -> Unit) {
     val t = LocalTetherTokens.current
-    val studio = t.studio
     val base = rememberIconLook(t.muted, t.radiusKey)
     val look: (KeyState) -> ChromeLook = { state ->
         val l = base(state)
-        when {
-            studio -> l.copy(face = Color.Transparent, shadows = emptyList(), ink = if (open) t.violet else t.muted)
-            open && state == KeyState.Rest -> l.copy(face = t.violetWash, ink = t.violet)
-            open -> l.copy(ink = t.violet)
-            else -> l
-        }
+        l.copy(face = Color.Transparent, shadows = emptyList(), ink = if (open) t.violet else t.muted)
     }
     ChromeIconKey(
         onClick = onToggle,
@@ -478,7 +461,7 @@ private fun LinkRow(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val studioPath = t.studio && studioSize
+    val studioPath = studioSize
     val ink = if (studioPath) t.muted else t.faint
     Row(
         Modifier
