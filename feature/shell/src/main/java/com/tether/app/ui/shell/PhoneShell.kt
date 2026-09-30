@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
@@ -52,6 +55,17 @@ object ShellTags {
     const val ExpandDock = "shell-expand-dock"
     const val ConnectionReadout = "shell-connection"
     const val Dial = "shell-dial"
+
+    // T15.4: the redesigned top bar and its utility menu.
+    const val Brand = "shell-brand"
+    const val SettingsKey = "shell-settings"
+    const val AccountsKey = "shell-accounts"
+    const val ToolsMenuKey = "shell-tools"
+    const val ToolsMenu = "shell-tools-menu"
+    const val MenuFiles = "shell-menu-files"
+    const val MenuAccounts = "shell-menu-accounts"
+    fun nav(destination: TopBarDestination) = "shell-nav:${destination.name.lowercase()}"
+    fun menuNav(destination: TopBarDestination) = "shell-menu-nav:${destination.name.lowercase()}"
 }
 
 /**
@@ -117,20 +131,35 @@ fun PhoneShell(
     copiedPath: Boolean = false,
     copiedTetherId: Boolean = false,
     onStartSession: () -> Unit = {},
+    /** T15.4: the top bar's current destination (null while the console resolves its view). */
+    current: TopBarDestination? = TopBarDestination.Sessions,
+    /** T15.4: the link state the bar prints (on every width since the redesign). */
+    link: LinkReadout = LinkReadout.Connected,
+    /** T15.4: the Sessions rail exists (dashboard.tsx `showRail`): false on the Overview, so no drawer. */
+    showRail: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
     BackHandler(enabled = state.canHandleBack) { state.handleBack() }
+    LaunchedEffect(showRail) { if (!showRail) state.closeDrawer() }
+    val windowWidth = LocalWindowInfo.current.containerSize.width.let { with(LocalDensity.current) { it.toDp().value.toInt() } }
+    val topbarState = TopbarState(
+        current = current,
+        link = link,
+        wide = false,
+        drawerKey = showRail,
+        menuOpen = state.menuOpen,
+        viewportWidth = windowWidth,
+        unseenWarnings = unseenWarnings,
+        fileBrowserDisabled = session == null,
+    )
+    val barActions = topbar.copy(onOpenDrawer = {
+        state.openDrawer()
+        topbar.onOpenDrawer()
+    })
 
     Box(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
         Column(Modifier.fillMaxSize().background(if (t.studio) t.graphite else t.mineral)) {
-            TetherTopbar(
-                actions = topbar.copy(onOpenDrawer = {
-                    state.openDrawer()
-                    topbar.onOpenDrawer()
-                }),
-                unseenWarnings = unseenWarnings,
-                fileBrowserDisabled = session == null,
-            )
+            TetherTopbar(actions = barActions, state = topbarState, onToggleMenu = state::toggleMenu)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
             Column(Modifier.weight(1f).fillMaxWidth()) {
@@ -183,7 +212,7 @@ fun PhoneShell(
             }
         }
 
-        SessionDrawerHost(open = state.drawerOpen, onClose = state::closeDrawer) { slots.drawer() }
+        if (showRail) SessionDrawerHost(open = state.drawerOpen, onClose = state::closeDrawer) { slots.drawer() }
 
         if (session != null && state.linksOpen) {
             SessionLinksPopover(
@@ -196,5 +225,7 @@ fun PhoneShell(
                 statusline = slots.statusline,
             )
         }
+
+        if (state.menuOpen) TopbarMenu(actions = barActions, state = topbarState, onDismiss = state::closeMenu)
     }
 }

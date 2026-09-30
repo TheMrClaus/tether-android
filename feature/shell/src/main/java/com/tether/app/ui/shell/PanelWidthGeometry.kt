@@ -136,12 +136,6 @@ object ExpandedBreakpoints {
     /** `(min-width: 64rem)`: the stage reserves the timeline rail's left gutter (globals.css 11912). */
     const val STAGE_GUTTER = 1024
 
-    /** `(min-width: 80rem)`: the topbar tool keys print their words (globals.css 11844). */
-    const val TOOL_LABELS = 1280
-
-    /** `(max-width: 74rem)` hides Studio's "Workspace" caption (studio.css 433), so it needs more. */
-    const val STUDIO_CAPTION_ABOVE = 1184
-
     /**
      * `(min-width: 100rem)`: the inspector becomes the third column and the telemetry sheet goes
      * away (globals.css 3849, 4139); below it the sheet floats beside the conversation.

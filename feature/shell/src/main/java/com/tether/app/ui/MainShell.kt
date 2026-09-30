@@ -97,8 +97,12 @@ import com.tether.app.ui.chat.LocalCardStates
 import com.tether.app.ui.chat.CardStateStore
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.CompositionLocalProvider
+import com.tether.app.ui.shell.DashboardView
+import com.tether.app.ui.shell.DashboardViews
 import com.tether.app.ui.shell.ExpandedShell
 import com.tether.app.ui.shell.LinkReadout
+import com.tether.app.ui.shell.TopBarDestination
+import com.tether.app.ui.shell.ViewHistory
 import com.tether.app.ui.shell.rememberPersistedPanels
 import com.tether.app.ui.shell.shellLayoutFor
 import com.tether.app.ui.statusline.ContextGauge
@@ -158,13 +162,26 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
 
-    // T15.2: the Overview replaces the workspace while it shows; the selected session is then not
-    // on screen (dashboard.tsx:725), so the shell gets none: no header, stage, chat or inspector.
-    var overviewOpen by rememberSaveable { mutableStateOf(false) }
+    // T15.4 (dashboard.tsx view model, lib/dashboard-view.mjs): the top-level view on screen and the
+    // ones behind it (Android Back plays the web's Back between views). Null current = boot: the
+    // view is not resolved yet, so nothing view-specific is painted. Saved across rotation and
+    // process death; resolved once per shell, like the web's once-per-load `bootView`.
+    var viewHistorySaved by rememberSaveable { mutableStateOf(ViewHistory(null).encode()) }
+    val viewHistory = ViewHistory.decode(viewHistorySaved)
+    val view = viewHistory.current
+    val navigateTo: (DashboardView) -> Unit = { next ->
+        viewHistorySaved = ViewHistory.decode(viewHistorySaved).navigate(next).encode()
+    }
+    // Only a view with a screen here is ever shown (Scheduled is T9.3's; the bar shows it unavailable).
+    val overviewOpen = view == DashboardView.Overview
+    // T15.2: the selected session is on screen only in Sessions (dashboard.tsx:725 `activeSession`);
+    // elsewhere the shell gets none: no header, stage, chat or inspector, and nothing marks it seen.
+    val sessionsView = view == DashboardView.Sessions
+    var settingsOpen by remember { mutableStateOf(false) }
     var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSession = sessions.firstOrNull { it.id == selectedId }
-    val session = selectedSession?.takeIf { !overviewOpen }
+    val session = selectedSession?.takeIf { sessionsView }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
@@ -221,15 +238,37 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         if (s.worktree?.mode == "checkout-pr") vm.client.requestChangeRequest(s.id)
     }
     // T4.4: a session opened by a link reads like a sidebar pick: the drawer and the previous
-    // session's popover close, so the session is on screen and Back leaves the app.
+    // session's popover close, so the session is on screen. T15.4: it shows Sessions (dashboard.tsx
+    // `pushView("sessions", id)`): from another view Back returns there; from Sessions nothing is
+    // pushed, so Back still leaves the app.
     LaunchedEffect(vm) {
         vm.openRequests.collect {
-            overviewOpen = false
+            navigateTo(DashboardView.Sessions)
             shell.onSessionSelected()
         }
     }
-    // T15.2: any new selection (a create, a resume, a link) shows that session, not the Overview.
-    LaunchedEffect(vm) { vm.selectedSessionId.drop(1).collect { if (it != null) overviewOpen = false } }
+    // T15.2/T15.4: any new selection (a create, a resume, a link) shows Sessions (`selectSession`,
+    // `reopen` and the `created` follow all `pushView("sessions")`).
+    LaunchedEffect(vm) { vm.selectedSessionId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
+    LaunchedEffect(vm) { vm.openingHistoryId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
+    // T15.4 (dashboard.tsx bootView): resolve the view once. A session already chosen by a link
+    // (a notification or deep link applied before this shell) wins; else the remembered view; else
+    // an install that kept preferences before that record keeps last-session restoration
+    // (Sessions); a fresh install starts on the Overview. A selection made while the read is in
+    // flight has already resolved it (above), and wins.
+    LaunchedEffect(Unit) {
+        if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
+        val boot = prefs.viewBoot()
+        if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
+        val (resolved, _) = DashboardViews.resolve(
+            sessionLink = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null,
+            storedView = boot.storedView,
+            hasExistingPreferences = boot.hasExistingPreferences,
+        )
+        navigateTo(resolved)
+    }
+    // dashboard.tsx `writeStoredView`: remember the last top-level view for the next launch.
+    LaunchedEffect(view) { view?.let { prefs.setLastView(it.key) } }
     // T15.2 (dashboard.tsx:1392-1443 reviewRequest): the hand-off lands in the session; once a
     // snapshot on this connection has confirmed it, a request no longer pending is said so. A
     // session that never confirms within the bound says it could not be found. Nothing is answered.
@@ -270,9 +309,17 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
                 onOpenFiles = { fileBrowser.open() },
-                // Hosts not built yet (accounts/usage T9.2): their keys render disabled.
+                // Hosts not built yet (Accounts and the Usage page, T9.2): shown unavailable.
                 onOpenUsage = null,
                 onOpenUsageAnalytics = null,
+                onOpenSettings = { settingsOpen = true },
+                // dashboard.tsx:1351 navigateTo. Sessions comes back to the conversation still
+                // selected (or the empty workspace); Scheduled (T9.3) has no screen here yet.
+                onNavigate = { next ->
+                    shell.closeDrawer()
+                    navigateTo(next)
+                },
+                views = setOf(DashboardView.Overview, DashboardView.Sessions),
                 // dashboard.tsx:199 openLog: acknowledge the warnings, open, fetch fresh stats.
                 onOpenLog = {
                     vm.openLog()
@@ -306,16 +353,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         selectedId = selectedId,
                         workspaceRoot = workspaceRoot,
                         onSelect = { id ->
-                            overviewOpen = false
                             vm.selectSession(id)
+                            navigateTo(DashboardView.Sessions)
                             shell.onSessionSelected()
                         },
                         onClose = shell::closeDrawer,
-                        onOpenOverview = {
-                            overviewOpen = true
-                            shell.closeDrawer()
-                        },
-                        selectedOnScreen = !overviewOpen,
+                        onOpenSettings = { settingsOpen = true },
+                        selectedOnScreen = sessionsView,
                     )
                 },
                 chat = {
@@ -339,7 +383,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 statusline = { expanded ->
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
-                overview = if (!overviewOpen) {
+                overview = if (view == null) {
+                    // Boot: no view-specific content yet (the web's "boot" view paints none).
+                    { Box(Modifier.fillMaxSize()) }
+                } else if (!overviewOpen) {
                     null
                 } else {
                     {
@@ -347,8 +394,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         // Opening or reviewing SELECTS the session (attach, draft) and never marks it seen
                         // here; the session view's own rule applies once it is on screen.
                         val openFromOverview: (String) -> Unit = { id ->
-                            overviewOpen = false
                             vm.selectSession(id)
+                            navigateTo(DashboardView.Sessions)
                             shell.onSessionSelected()
                         }
                         com.tether.app.ui.overview.OverviewHost(
@@ -378,9 +425,20 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         // vanished never lands on the key that was under it).
         var toastBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
         val armEpoch = rememberToastArmEpoch(toast != null, toastBounds)
-        // T15.2: Back leaves the Overview for the session (or empty stage) behind it; the shell's own
-        // surfaces (drawer, popover, sheet) register later and so close first.
-        androidx.activity.compose.BackHandler(enabled = overviewOpen) { overviewOpen = false }
+        // T15.4: Back steps to the view behind this one (the web's browser Back between views; from
+        // an Overview opened over a session, that session). The shell's own surfaces (menu, drawer,
+        // popover, sheet) register later and so close first. Nothing behind: Back leaves the app.
+        androidx.activity.compose.BackHandler(enabled = viewHistory.canGoBack) {
+            viewHistorySaved = ViewHistory.decode(viewHistorySaved).back().encode()
+        }
+        val current = view?.let(TopBarDestination::of)
+        val link = when (connection) {
+            ConnectionState.Connected -> LinkReadout.Connected
+            ConnectionState.Connecting -> LinkReadout.Connecting
+            else -> LinkReadout.Reconnecting
+        }
+        // dashboard.tsx:1446: the rail belongs to Sessions (and Scheduled); the Overview is full width.
+        val showRail = view == DashboardView.Sessions || view == DashboardView.Scheduled
         CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
@@ -393,15 +451,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 topbar = topbarActions,
                 header = headerActions,
                 slots = slots,
-                link = when (connection) {
-                    ConnectionState.Connected -> LinkReadout.Connected
-                    ConnectionState.Connecting -> LinkReadout.Connecting
-                    else -> LinkReadout.Reconnecting
-                },
+                link = link,
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
                 onStartSession = { showProviderPicker = true },
+                current = current,
+                showRail = showRail,
             )
         } else {
             PhoneShell(
@@ -416,6 +472,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 topbar = topbarActions,
                 header = headerActions,
                 slots = slots,
+                current = current,
+                link = link,
+                showRail = showRail,
             )
         }
         }
@@ -462,6 +521,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             onDismiss = { showLog = false },
         )
     }
+
+    // T15.4: the top bar's Settings and the rail footer's open the same sheet.
+    if (settingsOpen) com.tether.app.ui.InterimSettingsDialog(prefs, onDismiss = { settingsOpen = false })
 
     if (showLogoutConfirm) {
         TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {

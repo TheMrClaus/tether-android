@@ -92,6 +92,7 @@ import com.composables.icons.lucide.Moon
 import com.composables.icons.lucide.Network
 import com.composables.icons.lucide.Package
 import com.composables.icons.lucide.PackageCheck
+import com.composables.icons.lucide.PanelLeft
 import com.composables.icons.lucide.PanelLeftClose
 import com.composables.icons.lucide.PanelLeftOpen
 import com.composables.icons.lucide.Paperclip
@@ -290,6 +291,11 @@ object TetherIcons {
     val Zap: ImageVector get() = Lucide.Zap
     val ZoomIn: ImageVector get() = Lucide.ZoomIn
     val ZoomOut: ImageVector get() = Lucide.ZoomOut
+
+    // T15.4: the redesigned top bar's drawer key (components/topbar.tsx imports PanelLeft). Not in
+    // [byWebName] yet: the vendored web inventory (lucide-web-glyphs.txt) predates the redesign and
+    // is re-baselined with the rest of the corpus by T15.8.
+    val PanelLeft: ImageVector get() = Lucide.PanelLeft
 
     /** Deprecated lucide-react names the web imports -> the canonical name used here. */
     val deprecatedAliases: Map<String, String> = linkedMapOf(

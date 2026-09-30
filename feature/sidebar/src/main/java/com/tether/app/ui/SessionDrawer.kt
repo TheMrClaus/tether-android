@@ -40,11 +40,14 @@ fun SessionDrawer(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    /** T15.2: the interim Overview entry (null: not shown). */
-    onOpenOverview: (() -> Unit)? = null,
+    /**
+     * T15.4: the host's Settings (the top bar's and the rail footer's open the same one). Null: the
+     * drawer raises its own settings sheet.
+     */
+    onOpenSettings: (() -> Unit)? = null,
     /**
      * T15.2 (OVERVIEW_STUDIO_PLAN.md §4, dashboard.tsx:725 `activeSession = view === "sessions" ? …`):
-     * false while the selected session is NOT on screen (the Overview is showing). Its settled
+     * false while the selected session is NOT on screen (another view is showing). Its settled
      * report is then not seen, so it is never marked seen.
      */
     selectedOnScreen: Boolean = true,
@@ -189,9 +192,8 @@ fun SessionDrawer(
                 folderPicker = true
                 client.browse(current ?: workspaceRoot)
             },
-            onOpenSettings = { settingsOpen = true },
+            onOpenSettings = onOpenSettings ?: { settingsOpen = true },
             onOpenGlobalSearch = vm::openGlobalSearch,
-            onOpenOverview = onOpenOverview,
         ),
     )
 

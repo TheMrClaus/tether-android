@@ -17,7 +17,8 @@ import androidx.compose.runtime.setValue
  *
  * Android's back gesture closes the topmost of them ([handleBack]), in the order they stack on
  * screen: the links popover (top layer), then the drawer (z-modal over the scrim), then the
- * telemetry panel (in the workspace column, the web's Escape handler). With nothing open, back
+ * telemetry panel (in the workspace column, the web's Escape handler); T15.4's utility menu closes
+ * before all of them (it opens over everything). With nothing open, back
  * is not consumed and falls through to the system.
  */
 @Stable
@@ -25,6 +26,7 @@ class PhoneShellState(
     drawerOpen: Boolean = false,
     telemetryOpen: Boolean = false,
     linksOpen: Boolean = false,
+    menuOpen: Boolean = false,
 ) {
     /** The session drawer (`.session-sidebar.is-open`). */
     var drawerOpen: Boolean by mutableStateOf(drawerOpen)
@@ -38,9 +40,25 @@ class PhoneShellState(
     var linksOpen: Boolean by mutableStateOf(linksOpen)
         private set
 
-    /** Topbar menu key (`onOpenDrawer`). Opening the drawer dismisses the light-dismiss popover. */
+    /** T15.4: the top bar's utility menu (topbar.tsx `menuOpen`). */
+    var menuOpen: Boolean by mutableStateOf(menuOpen)
+        private set
+
+    /** The trigger toggles the menu; the light-dismiss popover closes (one light-dismiss surface at a time). */
+    fun toggleMenu() {
+        linksOpen = false
+        menuOpen = !menuOpen
+    }
+
+    /** An outside tap, an item, or back. */
+    fun closeMenu() {
+        menuOpen = false
+    }
+
+    /** Topbar drawer key (`onOpenDrawer`). Opening the drawer dismisses the light-dismiss popover and menu. */
     fun openDrawer() {
         linksOpen = false
+        menuOpen = false
         drawerOpen = true
     }
 
@@ -66,6 +84,7 @@ class PhoneShellState(
 
     /** `.workspace-links-trigger` toggles its popover (`popoverTarget`). */
     fun toggleLinks() {
+        menuOpen = false
         linksOpen = !linksOpen
     }
 
@@ -80,13 +99,15 @@ class PhoneShellState(
     fun onSessionSelected() {
         drawerOpen = false
         linksOpen = false
+        menuOpen = false
     }
 
     /** Whether a back gesture would be consumed by the shell. */
-    val canHandleBack: Boolean get() = linksOpen || drawerOpen || telemetryOpen
+    val canHandleBack: Boolean get() = menuOpen || linksOpen || drawerOpen || telemetryOpen
 
     /** Closes the topmost open surface; false when nothing was open (back falls through). */
     fun handleBack(): Boolean = when {
+        menuOpen -> { menuOpen = false; true }
         linksOpen -> { linksOpen = false; true }
         drawerOpen -> { drawerOpen = false; true }
         telemetryOpen -> { telemetryOpen = false; true }
@@ -96,8 +117,8 @@ class PhoneShellState(
     companion object {
         /** Survives configuration changes and process death, like the web keeps it across renders. */
         val Saver: Saver<PhoneShellState, Any> = listSaver(
-            save = { listOf(it.drawerOpen, it.telemetryOpen, it.linksOpen) },
-            restore = { PhoneShellState(drawerOpen = it[0], telemetryOpen = it[1], linksOpen = it[2]) },
+            save = { listOf(it.drawerOpen, it.telemetryOpen, it.linksOpen, it.menuOpen) },
+            restore = { PhoneShellState(drawerOpen = it[0], telemetryOpen = it[1], linksOpen = it[2], menuOpen = it.getOrElse(3) { false }) },
         )
     }
 }

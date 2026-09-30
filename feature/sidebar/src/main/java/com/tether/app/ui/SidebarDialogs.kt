@@ -185,9 +185,12 @@ internal fun FolderPickerDialog(
     }
 }
 
-/** Interim settings sheet (theme, ended sessions, thinking, notifications) until T10.1. */
+/**
+ * Interim settings sheet (theme, ended sessions, thinking, notifications) until T10.1. T15.4: public,
+ * so the top bar's Settings (the shell) and the rail's footer open the same one.
+ */
 @Composable
-internal fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
+fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
     val t = LocalTetherTokens.current
     val scope = rememberCoroutineScope()
     val showEnded by prefs.showEnded.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default.showEndedSessions)

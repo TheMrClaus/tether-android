@@ -90,6 +90,13 @@ fun ExpandedShell(
     copiedPath: Boolean = false,
     copiedTetherId: Boolean = false,
     onStartSession: () -> Unit = {},
+    /** T15.4: the top bar's current destination (null while the console resolves its view). */
+    current: TopBarDestination? = TopBarDestination.Sessions,
+    /**
+     * T15.4 (dashboard.tsx `showRail`): the Sessions rail exists. The Overview is full width under
+     * the top bar: no rail, no resize handle, no expand dock (and no inspector: no session shows).
+     */
+    showRail: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
     val studio = t.studio
@@ -99,7 +106,7 @@ fun ExpandedShell(
         val viewport = maxWidth.value.roundToInt()
         val columnLayout = viewport >= ExpandedBreakpoints.INSPECTOR_COLUMN
         val sheetShown = session != null && state.telemetryOpen && !columnLayout
-        BackHandler(enabled = state.linksOpen || sheetShown) { state.handleBack() }
+        BackHandler(enabled = state.menuOpen || state.linksOpen || sheetShown) { state.handleBack() }
 
         var pendingRail by remember { mutableStateOf<PendingWidth?>(null) }
         var pendingInspector by remember { mutableStateOf<PendingWidth?>(null) }
@@ -110,17 +117,22 @@ fun ExpandedShell(
         val inspectorStored = pendingInspector.let { if (it != null) it.width else panels.inspectorWidth }
         val railWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Rail, railStored, family, viewport)
         val inspectorWidth = PanelWidthGeometry.effectiveWidth(PanelKind.Inspector, inspectorStored, family, viewport)
-        val collapsed = panels.sidebarCollapsed
+        val collapsed = panels.sidebarCollapsed || !showRail
         // `.is-wide-workspace` (no active session): the inspector column is 0 and its handle hidden.
         val inspectorColumn = columnLayout && session != null
+        val topbarState = TopbarState(
+            current = current,
+            link = link,
+            wide = true,
+            drawerKey = false,
+            menuOpen = state.menuOpen,
+            viewportWidth = viewport,
+            unseenWarnings = unseenWarnings,
+            fileBrowserDisabled = session == null,
+        )
 
         Column(Modifier.fillMaxSize().background(if (studio) t.graphite else t.mineral)) {
-            TetherTopbar(
-                actions = topbar,
-                unseenWarnings = unseenWarnings,
-                fileBrowserDisabled = session == null,
-                expanded = ExpandedTopbar(railWidth = if (collapsed) null else railWidth, viewportWidth = viewport, link = link),
-            )
+            TetherTopbar(actions = topbar, state = topbarState, onToggleMenu = state::toggleMenu)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -153,7 +165,7 @@ fun ExpandedShell(
                         // `justify-self: end; transform: translateX(50%)` over the rail's edge.
                         modifier = Modifier.offset(x = railWidth.dp - PanelHandleWidth / 2).zIndex(3f),
                     )
-                } else {
+                } else if (showRail) {
                     ExpandDock(
                         onExpand = { onPanelsChange(panels.copy(sidebarCollapsed = false)) },
                         modifier = Modifier.align(Alignment.BottomStart).zIndex(3f),
@@ -193,6 +205,8 @@ fun ExpandedShell(
                 showStatusline = !columnLayout,
             )
         }
+
+        if (state.menuOpen) TopbarMenu(actions = topbar, state = topbarState, onDismiss = state::closeMenu)
     }
 }
 

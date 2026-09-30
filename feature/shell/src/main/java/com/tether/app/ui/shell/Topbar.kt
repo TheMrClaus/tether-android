@@ -1,11 +1,26 @@
 package com.tether.app.ui.shell
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -13,26 +28,44 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -40,22 +73,20 @@ import androidx.compose.ui.zIndex
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.focusRing
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.softShadow
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
 
-/** `.dashboard-shell` phone row: `grid-template-rows: calc(3.5rem + env(safe-area-inset-top))` (both families). */
+/** topbar.module.css `.bar` below 48rem: `min-height: 3.5rem` (the status-bar inset on top). */
 val TopbarHeight: Dp = 56.dp
 
-/**
- * `.dashboard-shell` desktop row (≥ 48rem): `grid-template-rows: 3rem …` (globals.css 3960);
- * Studio keeps `calc(4rem + safe-top)` (studio.css 280).
- */
-val ExpandedTopbarHeight: Dp = 48.dp
-val StudioExpandedTopbarHeight: Dp = 64.dp
+/** topbar.module.css `.bar`: `min-height: 4rem` from 48rem (the expanded layout). */
+val WideTopbarHeight: Dp = 64.dp
 
 /** The topbar's link readout (`.connection-state`, topbar.tsx:36-39): its word and whether it spins. */
 enum class LinkReadout(val word: String) {
@@ -64,91 +95,567 @@ enum class LinkReadout(val word: String) {
     Reconnecting("Reconnecting"),
 }
 
-/**
- * The expanded layout's topbar inputs: the rail's rendered width (the brand shares its vertical,
- * globals.css 3978-3987; null while the rail is collapsed), the viewport width for the 74rem /
- * 80rem breakpoints, and the link state the readout prints.
- */
-data class ExpandedTopbar(val railWidth: Int?, val viewportWidth: Int, val link: LinkReadout)
+/** Why a top-bar control is unavailable (topbar.tsx `fileBrowserDisabledReason` and the app's own gaps). */
+object TopbarReasons {
+    /** topbar.tsx's default `fileBrowserDisabledReason`. */
+    const val FILES = "Open a session to browse its files"
 
-/** The topbar's host actions (topbar.tsx props). A null action has no host yet: its key renders disabled. */
+    /**
+     * App-only: a destination the web has and this app does not yet (Scheduled T9.3, Usage and
+     * Accounts T9.2). Shown the way the web shows an unavailable control: `aria-disabled`, dimmed,
+     * with its reason.
+     */
+    const val NOT_YET = "Not available in the app yet"
+}
+
+/**
+ * The top bar's hosts (topbar.tsx props). A null host has nothing to open yet: its control is
+ * shown unavailable with its reason, never hidden.
+ */
 data class TopbarActions(
+    /** `onOpenDrawer`: the Sessions rail's drawer on the phone layout. */
     val onOpenDrawer: () -> Unit,
+    /** `onOpenFiles`: the workspace file browser (unavailable without a session). */
     val onOpenFiles: (() -> Unit)? = null,
+    /** `onOpenUsage`: the "Accounts" control (the web's usage accounts dialog, T9.2). */
     val onOpenUsage: (() -> Unit)? = null,
+    /** The "Usage" destination (the web's `/usage` page, T9.2). */
     val onOpenUsageAnalytics: (() -> Unit)? = null,
+    /** `onOpenLog`: Health & event log. */
     val onOpenLog: (() -> Unit)? = null,
+    /** `onLogout`: Lock. */
     val onLogout: () -> Unit,
+    /** `onOpenSettings`. */
+    val onOpenSettings: (() -> Unit)? = null,
+    /** `onNavigate`: in-app navigation between the console's views. */
+    val onNavigate: ((DashboardView) -> Unit)? = null,
+    /** The views this app can show (Scheduled is T9.3's): any other is shown unavailable. */
+    val views: Set<DashboardView> = setOf(DashboardView.Overview, DashboardView.Sessions),
+) {
+    internal fun hostOf(destination: TopBarDestination): (() -> Unit)? {
+        val view = destination.view ?: return onOpenUsageAnalytics
+        val navigate = onNavigate ?: return null
+        return if (view in views) ({ navigate(view) }) else null
+    }
+}
+
+/**
+ * The bar's inputs besides its hosts: the destination on screen ([current], null while the
+ * console has not resolved its view), the link state, the layout ([wide] = the expanded shell,
+ * the web's ≥ 48rem), whether the rail's drawer key shows ([drawerKey]: narrow, where the rail
+ * exists), whether the utility menu is open, and the window width for the web's finer breakpoints.
+ */
+data class TopbarState(
+    val current: TopBarDestination?,
+    val link: LinkReadout,
+    val wide: Boolean,
+    val drawerKey: Boolean = !wide,
+    val menuOpen: Boolean = false,
+    val viewportWidth: Int = if (wide) 1280 else 412,
+    val unseenWarnings: Int = 0,
+    val fileBrowserDisabled: Boolean = false,
 )
 
+/** topbar.module.css `@media (max-width: 74rem)`: the brand's margin and the nav's gap tighten. */
+internal const val TOPBAR_TIGHT_MAX = 1184
+
+/** topbar.module.css `@media (max-width: 23rem)`: the link word is visually hidden (still read). */
+internal const val TOPBAR_LINK_WORD_MIN = 368
+
 /**
- * `<header className="topbar">` at the phone layout (components/topbar.tsx): menu key, brand, and
- * the right-anchored action cluster — the four-key tool bank and the Lock key. The connection
- * readout (`.connection-state`) is `display: none` below 48rem and the Studio caption is hidden
- * below 74rem, so neither renders on a phone.
+ * T15.4: the console's shared top bar (components/topbar.tsx, topbar.module.css; the approved
+ * Studio concept, OVERVIEW_STUDIO_PLAN.md §4): brand · Overview / Sessions / Scheduled / Usage ·
+ * Files / Accounts · link state · Settings · the utility menu (Health, Lock). On the phone layout
+ * the navigation, Files and Accounts fold into the same menu; the drawer key (where the rail
+ * exists), the brand, the link state and Settings stay on the bar.
  *
- * Material: instrument skins — `--graphite` bar, `1px --line-strong` parting line, a lit top lip
- * and a `--seam-lip` shade below (globals.css 10853-10858); Studio — flat, `1px --line`
- * (studio.css 281, 436). The status-bar inset is the bar's own top padding (globals.css 684).
+ * `--graphite` bar, `1px --line` bottom edge, the status-bar inset as its top padding. The
+ * redesign is Studio's; the skins T15.5 retires draw the same bar in their own tokens.
  */
 @Composable
 fun TetherTopbar(
     actions: TopbarActions,
+    state: TopbarState,
+    onToggleMenu: () -> Unit,
     modifier: Modifier = Modifier,
-    unseenWarnings: Int = 0,
-    fileBrowserDisabled: Boolean = false,
-    /** Non-null: the desktop topbar ([ExpandedTetherTopbar]). */
-    expanded: ExpandedTopbar? = null,
 ) {
-    if (expanded != null) {
-        ExpandedTetherTopbar(actions, expanded, modifier, unseenWarnings, fileBrowserDisabled)
-        return
-    }
     val t = LocalTetherTokens.current
-    val studio = t.studio
-    val edge = if (studio) t.line else t.lineStrong
-    val shadows = if (studio) emptyList() else listOf(hardShadow(1.dp, t.seamLip), hardShadow(1.dp, t.litSoft, inset = true))
+    val wide = state.wide
+    val tight = state.viewportWidth <= TOPBAR_TIGHT_MAX
     Box(
         modifier
             .fillMaxWidth()
-            .zIndex(2f) // z-sticky: the seam shade paints over the workspace below
-            .cssSurface(RectangleShape, t.graphite, shadows = shadows)
-            .drawBehind { drawRect(edge, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
+            .zIndex(2f) // z-sticky
+            .cssSurface(RectangleShape, t.graphite)
+            .drawBehind { drawRect(t.line, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .windowInsetsPadding(WindowInsets.statusBars)
             .testTag(ShellTags.Topbar),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(TopbarHeight)
-                .padding(bottom = 1.dp) // the border-bottom is inside the 3.5rem row
-                .padding(horizontal = if (studio) 10.dp else t.css.spaceMd),
+                .height(if (wide) WideTopbarHeight else TopbarHeight)
+                .padding(bottom = 1.dp) // the border-bottom
+                // `padding-inline: 1.5rem`; narrow `0.625rem`.
+                .padding(horizontal = if (wide) 24.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            // `:root .topbar { gap: var(--space-lg) }`; Studio phone `gap: 0.4rem`.
-            horizontalArrangement = Arrangement.spacedBy(if (studio) 6.4.dp else t.css.spaceLg),
+            // `gap: 1rem`; narrow `0.4rem`.
+            horizontalArrangement = Arrangement.spacedBy(if (wide) 16.dp else 6.4.dp),
         ) {
-            ChromeIconKey(
-                onClick = actions.onOpenDrawer,
-                icon = TetherIcons.Menu,
-                contentDescription = "Open sessions",
-                look = rememberIconLook(t.ink, t.radiusSm),
-                width = 44.dp,
-                height = 44.dp,
-                iconSize = 20.dp,
-                modifier = Modifier.testTag(ShellTags.MenuKey),
-            )
-            TopbarBrand()
+            // `.drawerButton { margin-right: -0.25rem }`: it sits 0.15rem from the brand.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.4.dp)) {
+                if (state.drawerKey) {
+                    TopbarIconKey(
+                        onClick = actions.onOpenDrawer,
+                        icon = TetherIcons.PanelLeft,
+                        iconSize = 19.dp,
+                        contentDescription = "Open sessions",
+                        modifier = Modifier.testTag(ShellTags.MenuKey),
+                    )
+                }
+                BrandLink(
+                    wide = wide,
+                    onClick = actions.onNavigate?.let { navigate -> { navigate(DashboardView.Overview) } },
+                    // `.brand { margin-right: 2.5rem }` (1rem at ≤ 74rem, 0 narrow); the Row's gap is added.
+                    modifier = Modifier.padding(end = if (!wide) 0.dp else if (tight) 16.dp else 40.dp),
+                )
+            }
+            if (wide) {
+                Row(
+                    Modifier.fillMaxHeight().semantics { paneTitle = "Primary" },
+                    horizontalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 8.dp),
+                ) {
+                    TopBarDestination.entries.forEach { destination ->
+                        val host = actions.hostOf(destination)
+                        NavLink(
+                            label = destination.label,
+                            active = destination == state.current,
+                            host = host,
+                            reason = TopbarReasons.NOT_YET,
+                            modifier = Modifier.testTag(ShellTags.nav(destination)),
+                        )
+                    }
+                    val files = actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }
+                    NavLink("Files", active = false, host = files, reason = TopbarReasons.FILES, modifier = Modifier.testTag(ShellTags.FilesKey))
+                    NavLink("Accounts", active = false, host = actions.onOpenUsage, reason = TopbarReasons.NOT_YET, modifier = Modifier.testTag(ShellTags.AccountsKey))
+                }
+            }
             Spacer(Modifier.weight(1f))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(if (studio) 0.dp else t.css.spaceMd),
+                // `.actions { gap: 0.5rem }`; narrow `0.15rem`.
+                horizontalArrangement = Arrangement.spacedBy(if (wide) 8.dp else 2.4.dp),
             ) {
-                ToolBank(actions, unseenWarnings, fileBrowserDisabled)
-                LockKey(actions.onLogout)
+                ConnectionReadout(state.link, showWord = wide || state.viewportWidth >= TOPBAR_LINK_WORD_MIN)
+                if (wide) {
+                    // `.divider`: 1px × 1.75rem `--line`, `margin: 0 0.25rem`; hidden narrow.
+                    Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(28.dp).drawBehind { drawRect(t.line) })
+                }
+                TopbarIconKey(
+                    onClick = { actions.onOpenSettings?.invoke() },
+                    icon = TetherIcons.Settings,
+                    iconSize = 18.dp,
+                    contentDescription = "Settings",
+                    enabled = actions.onOpenSettings != null,
+                    modifier = Modifier.testTag(ShellTags.SettingsKey),
+                )
+                val warnings = state.unseenWarnings
+                TopbarIconKey(
+                    onClick = onToggleMenu,
+                    icon = if (wide) TetherIcons.Ellipsis else TetherIcons.Menu,
+                    iconSize = 19.dp,
+                    // aria-label, plus the visually hidden ", N unseen warnings".
+                    contentDescription = (if (wide) "More tools" else "Menu: navigation and tools") +
+                        if (warnings > 0) ", $warnings unseen warnings" else "",
+                    stateDescription = if (state.menuOpen) "Expanded" else "Collapsed",
+                    lit = state.menuOpen,
+                    modifier = Modifier.testTag(ShellTags.ToolsMenuKey),
+                    overlay = if (warnings > 0) {
+                        { WarningBadge(warnings, Modifier.align(Alignment.TopEnd)) }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
 }
+
+/**
+ * The utility menu (topbar.tsx `role="menu"`, `.menu`): under the bar at its end edge
+ * (`top: calc(100% + 0.4rem); right: 0` of the trigger's root, which ends at the bar's inline
+ * padding), `min-width: 15rem`, `max-width: calc(100vw - 1.5rem)`, `0.4rem` padding, a
+ * `--graphite` card with `1px --line`, `--radius-md` and `--shadow-menu`. Light dismiss: a tap
+ * outside closes it (the web's outside `pointerdown`); an item closes it and then acts.
+ *
+ * Narrow: "Navigate" and the four destinations, a separator, Files and Accounts; then, on every
+ * width, Health & event log (with the warning count) and, after a separator, Lock. An unavailable
+ * item stays in the menu, dimmed, with its reason under its label (`aria-disabled`, focusable).
+ */
+@Composable
+fun TopbarMenu(
+    actions: TopbarActions,
+    state: TopbarState,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val wide = state.wide
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close menu", onClick = onDismiss),
+        )
+        val run: ((() -> Unit)?) -> (() -> Unit)? = { host -> host?.let { { onDismiss(); it() } } }
+        Column(
+            Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .offset(x = -(if (wide) 24.dp else 10.dp), y = (if (wide) WideTopbarHeight else TopbarHeight) + 6.4.dp)
+                .widthIn(min = 240.dp, max = (maxWidth - 24.dp).coerceAtLeast(0.dp))
+                .width(androidx.compose.foundation.layout.IntrinsicSize.Max)
+                .cssSurface(RoundedCornerShape(t.radiusMd), t.graphite, CssBorder(1.dp, t.line), t.css.shadowMenu)
+                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                .semantics { paneTitle = if (wide) "Tools" else "Navigation and tools" }
+                .testTag(ShellTags.ToolsMenu)
+                .padding(1.dp + 6.4.dp),
+        ) {
+            if (!wide) {
+                Text(
+                    "NAVIGATE",
+                    color = t.faint,
+                    maxLines = 1,
+                    style = cssText(type.ui, 0.68f, 650, trackingEm = 0.06f),
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).clearAndSetSemantics { },
+                )
+                TopBarDestination.entries.forEach { destination ->
+                    MenuItem(
+                        label = destination.label,
+                        icon = null,
+                        host = run(actions.hostOf(destination)),
+                        reason = TopbarReasons.NOT_YET,
+                        active = destination == state.current,
+                        modifier = Modifier.testTag(ShellTags.menuNav(destination)),
+                    )
+                }
+                MenuSeparator()
+                MenuItem(
+                    label = "Files",
+                    icon = TetherIcons.FolderOpen,
+                    host = run(actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }),
+                    reason = TopbarReasons.FILES,
+                    modifier = Modifier.testTag(ShellTags.MenuFiles),
+                )
+                MenuItem(
+                    label = "Accounts",
+                    icon = TetherIcons.Gauge,
+                    host = run(actions.onOpenUsage),
+                    reason = TopbarReasons.NOT_YET,
+                    modifier = Modifier.testTag(ShellTags.MenuAccounts),
+                )
+            }
+            val warnings = state.unseenWarnings
+            MenuItem(
+                label = "Health & event log",
+                icon = TetherIcons.Activity,
+                host = run(actions.onOpenLog),
+                reason = TopbarReasons.NOT_YET,
+                stateDescription = if (warnings > 0) "$warnings warnings" else null,
+                trailing = if (warnings > 0) {
+                    { ItemBadge(warnings) }
+                } else {
+                    null
+                },
+                modifier = Modifier.testTag(ShellTags.LogKey),
+            )
+            MenuSeparator()
+            MenuItem(
+                label = "Lock",
+                icon = TetherIcons.LogOut,
+                host = run(actions.onLogout),
+                reason = null,
+                modifier = Modifier.testTag(ShellTags.LockKey),
+            )
+        }
+    }
+}
+
+// ── Bar parts ────────────────────────────────────────────────────────────────
+
+/**
+ * `.brand` as the Overview link (aria-label "Tether — Overview"): the Studio mark and lowercase
+ * wordmark at 1.24rem (1.1rem with a 1.6rem mark narrow), `--white`, a 2.75rem target.
+ */
+@Composable
+private fun BrandLink(wide: Boolean, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Box(
+        modifier
+            .heightIn(min = 44.dp)
+            .clickable(interaction, indication = null, enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+            .clearAndSetSemantics {
+                contentDescription = "Tether — Overview"
+                role = Role.Button
+            }
+            .focusRing(focused, RoundedCornerShape(t.radiusSm), t.violet)
+            .testTag(ShellTags.Brand),
+        contentAlignment = Alignment.Center,
+    ) {
+        TopbarBrand(studioDesktop = wide)
+    }
+}
+
+/**
+ * `.navLink`: 2.75rem tall, `0 0.85rem`, `--muted` 0.875rem / 600; the current destination is
+ * `--violet` with a 2px underline seated on the bar's bottom edge (`bottom: -1px`, inset 0.85rem,
+ * top corners 2px). `aria-current` is its selected state, so colour is not the only cue. An
+ * unavailable one (`aria-disabled`) is at 0.5 opacity and says why.
+ */
+@Composable
+private fun RowScope.NavLink(
+    label: String,
+    active: Boolean,
+    host: (() -> Unit)?,
+    reason: String,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val enabled = host != null
+    val ink = when {
+        active -> t.violet
+        enabled && pressed -> t.white
+        else -> t.muted
+    }
+    Box(
+        modifier
+            .fillMaxHeight()
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) { host?.invoke() }
+            .semantics {
+                if (active) selected = true
+                if (!enabled) stateDescription = reason
+            }
+            .focusRing(focused, RoundedCornerShape(t.radiusSm), t.violet)
+            .drawBehind {
+                if (!active) return@drawBehind
+                val inset = 13.6.dp.toPx()
+                val h = 2.dp.toPx()
+                val r = CornerRadius(2.dp.toPx())
+                val top = size.height - 1.dp.toPx()
+                val rect = RoundRect(inset, top, size.width - inset, top + h, r, r, CornerRadius.Zero, CornerRadius.Zero)
+                drawPath(Path().apply { addRoundRect(rect) }, t.violet)
+            }
+            .padding(horizontal = 13.6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = ink,
+            maxLines = 1,
+            style = cssText(type.ui, 0.875f, 600),
+            modifier = if (enabled) Modifier else Modifier.alpha(0.5f),
+        )
+    }
+}
+
+/**
+ * `.iconButton`: a 2.75rem square, `--radius-sm`, transparent with `--muted` ink; held (the web's
+ * hover) or [lit] (the open menu's trigger, `aria-expanded`) it takes `--graphite-raised` and
+ * `--white`.
+ */
+@Composable
+private fun TopbarIconKey(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    iconSize: Dp,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    lit: Boolean = false,
+    stateDescription: String? = null,
+    overlay: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null,
+) {
+    val t = LocalTetherTokens.current
+    val look: (KeyState) -> ChromeLook = { state ->
+        when {
+            state == KeyState.Disabled -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, t.radiusSm, alpha = 0.5f)
+            state == KeyState.Pressed || lit -> ChromeLook(t.graphiteRaised, Color.Transparent, t.white, emptyList(), 0.dp, t.radiusSm)
+            else -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, t.radiusSm)
+        }
+    }
+    ChromeIconKey(
+        onClick = onClick,
+        icon = icon,
+        contentDescription = contentDescription,
+        look = look,
+        width = 44.dp,
+        height = 44.dp,
+        iconSize = iconSize,
+        enabled = enabled,
+        stateDescription = stateDescription,
+        modifier = modifier,
+        overlay = overlay,
+    )
+}
+
+/**
+ * `.connection` (role="status"): ShieldCheck while connected, else RotateCcw turning once per
+ * 1.2s (static under reduced motion), and the word at 600 0.8rem; `--running` while connected,
+ * else `--muted`. Below 23rem the word is visually hidden but still read ([showWord]). The words
+ * are the app's own constants: no server text reaches the bar.
+ */
+@Composable
+private fun ConnectionReadout(link: LinkReadout, showWord: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val ink = if (link == LinkReadout.Connected) t.css.running else t.muted
+    val reduced = LocalReducedMotion.current
+    val angle by if (link == LinkReadout.Connected || reduced) {
+        remember { mutableFloatStateOf(0f) }
+    } else {
+        rememberInfiniteTransition(label = "link").animateFloat(
+            0f,
+            360f,
+            infiniteRepeatable(tween(1_200, easing = LinearEasing), RepeatMode.Restart),
+            label = "linkSpin",
+        )
+    }
+    Row(
+        Modifier
+            .heightIn(min = 44.dp)
+            .widthIn(min = if (showWord) 0.dp else 36.dp)
+            .padding(horizontal = 4.dp)
+            .semantics {
+                contentDescription = link.word
+                liveRegion = LiveRegionMode.Polite
+            }
+            .testTag(ShellTags.ConnectionReadout),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.2.dp, Alignment.CenterHorizontally),
+    ) {
+        Icon(
+            if (link == LinkReadout.Connected) TetherIcons.ShieldCheck else TetherIcons.RotateCcw,
+            contentDescription = null,
+            tint = ink,
+            modifier = Modifier.size(15.dp).rotate(angle),
+        )
+        if (showWord) {
+            Text(
+                link.word,
+                color = ink,
+                maxLines = 1,
+                modifier = Modifier.clearAndSetSemantics { },
+                style = cssText(type.ui, 0.8f, 600),
+            )
+        }
+    }
+}
+
+// ── Menu parts ───────────────────────────────────────────────────────────────
+
+/**
+ * `.menuItem`: 2.75rem, `0.45rem 0.75rem`, gap 0.7rem, `--radius-sm`, `--ink` 600 0.84rem, the
+ * glyph 16px `--muted`; held (hover) `--graphite-raised` / `--white`. The current destination is
+ * `--violet` behind a 3px × 1.1rem bar (`.menuItemActive::before`). Unavailable: `--faint`, the
+ * reason in a 0.7rem / 500 hint under the label (`.menuHint`).
+ */
+@Composable
+private fun MenuItem(
+    label: String,
+    icon: ImageVector?,
+    host: (() -> Unit)?,
+    reason: String?,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    stateDescription: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val enabled = host != null
+    val shape = RoundedCornerShape(t.radiusSm)
+    val ink = when {
+        !enabled -> t.faint
+        active -> t.violet
+        pressed || focused -> t.white
+        else -> t.ink
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .cssSurface(shape, if (enabled && (pressed || focused)) t.graphiteRaised else Color.Transparent)
+            // aria-disabled rather than disabled: the item stays reachable so its reason is read.
+            .clickable(interaction, indication = null, role = Role.Button) { host?.invoke() }
+            .semantics {
+                if (active) selected = true
+                if (!enabled) disabled()
+                stateDescription?.let { this.stateDescription = it }
+            }
+            .padding(horizontal = 12.dp, vertical = 7.2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.2.dp),
+    ) {
+        if (active) {
+            // `::before`: 3px × 1.1rem, radius 2px, `margin-right: -0.2rem` (0.5rem from the label).
+            Box(Modifier.width(3.dp).height(17.6.dp).cssSurface(RoundedCornerShape(2.dp), t.violet))
+        }
+        if (icon != null) Icon(icon, contentDescription = null, tint = if (enabled) t.muted else t.faint, modifier = Modifier.size(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.6.dp)) {
+            Text(label, color = ink, maxLines = 1, style = cssText(type.ui, 0.84f, 600))
+            if (!enabled && reason != null) {
+                Text(reason, color = t.faint, style = cssText(type.ui, 0.7f, 500))
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+/** `.menuSeparator`: 1px `--line`, `margin: 0.3rem 0.4rem`. */
+@Composable
+private fun MenuSeparator() {
+    val t = LocalTetherTokens.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.4.dp, vertical = 4.8.dp)
+            .height(1.dp)
+            .drawBehind { drawRect(t.line) },
+    )
+}
+
+/**
+ * `.itemBadge`: the warning count at the item's end, a 1.1rem pill, `--brick` with `--accent-ink`
+ * 700 0.62rem tabular figures ("9+" past nine). Its count is also the item's state description.
+ */
+@Composable
+private fun ItemBadge(count: Int) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Box(
+        Modifier
+            .heightIn(min = 17.6.dp)
+            .widthIn(min = 17.6.dp)
+            .cssSurface(RoundedCornerShape(percent = 50), t.brick)
+            .padding(horizontal = 4.8.dp)
+            .clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (count > 9) "9+" else "$count", color = t.accentInk, textAlign = TextAlign.Center, style = cssText(type.ui, 0.62f, 700, lineHeight = 1f))
+    }
+}
+
+// ── Brand ────────────────────────────────────────────────────────────────────
 
 /**
  * `.brand`: the molded round cap with the violet needle and the etched TETHER wordmark
@@ -230,84 +737,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNeedle(
 }
 
 /**
- * `.topbar-keys`: one recessed strip holding four flush keys (globals.css 10912-10938) —
- * `--key-face-deep` floor, `1px --line-strong`, `--well` shadows, 2px padding and gap; each key
- * 2.15rem, `--radius-key - 3px`, `--muted`; pressed seats it (`translateY(1px)`, `--key-face-deep`,
- * `--bevel-pressed`); disabled 0.4. Studio drops the strip: flat 2.5rem × 2.75rem keys at 0.5rem
- * radius (studio.css 288-289, 440-441). `role="group"` "Console tools".
- */
-@Composable
-private fun ToolBank(actions: TopbarActions, unseenWarnings: Int, fileBrowserDisabled: Boolean) {
-    val t = LocalTetherTokens.current
-    val studio = t.studio
-    val keyRadius = if (studio) 8.dp else t.radiusKey - 3.dp
-    val look: (KeyState) -> ChromeLook = { state ->
-        when (state) {
-            KeyState.Pressed -> ChromeLook(t.keyFaceDeep, Color.Transparent, t.muted, t.css.bevelPressed, 1.dp, keyRadius)
-            KeyState.Disabled -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, keyRadius, alpha = 0.4f)
-            KeyState.Rest -> ChromeLook(Color.Transparent, Color.Transparent, t.muted, emptyList(), 0.dp, keyRadius)
-        }
-    }
-    val w = if (studio) 40.dp else 34.4.dp
-    val h = if (studio) 44.dp else 34.4.dp
-    val strip = if (studio) {
-        Modifier
-    } else {
-        Modifier
-            .cssSurface(RoundedCornerShape(t.radiusKey), t.keyFaceDeep, CssBorder(1.dp, t.lineStrong), t.css.well)
-            .padding(3.dp) // 1px border + 2px padding
-    }
-    Row(
-        Modifier
-            .semantics { contentDescription = "Console tools" }
-            .then(strip),
-        horizontalArrangement = Arrangement.spacedBy(if (studio) 0.dp else 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val filesHost = actions.onOpenFiles
-        ChromeIconKey(
-            onClick = { filesHost?.invoke() },
-            icon = TetherIcons.FolderOpen,
-            contentDescription = "Browse workspace files",
-            look = look, width = w, height = h, iconSize = 16.dp,
-            enabled = filesHost != null && !fileBrowserDisabled,
-            modifier = Modifier.testTag(ShellTags.FilesKey),
-        )
-        ChromeIconKey(
-            onClick = { actions.onOpenUsage?.invoke() },
-            icon = TetherIcons.Gauge,
-            contentDescription = "Account usage",
-            look = look, width = w, height = h, iconSize = 16.dp,
-            enabled = actions.onOpenUsage != null,
-        )
-        ChromeIconKey(
-            onClick = { actions.onOpenUsageAnalytics?.invoke() },
-            icon = TetherIcons.ChartColumn,
-            contentDescription = "Usage analytics",
-            look = look, width = w, height = h, iconSize = 16.dp,
-            enabled = actions.onOpenUsageAnalytics != null,
-        )
-        ChromeIconKey(
-            onClick = { actions.onOpenLog?.invoke() },
-            icon = TetherIcons.Activity,
-            contentDescription = "Health & event log",
-            stateDescription = if (unseenWarnings > 0) "$unseenWarnings warnings" else null,
-            look = look, width = w, height = h, iconSize = 16.dp,
-            enabled = actions.onOpenLog != null,
-            modifier = Modifier.testTag(ShellTags.LogKey),
-            overlay = if (unseenWarnings > 0) {
-                { WarningBadge(unseenWarnings, Modifier.align(Alignment.TopEnd)) }
-            } else {
-                null
-            },
-        )
-    }
-}
-
-/**
- * `.topbar-badge`: absolute at 0.125rem from the key's top-right, 0.9rem pill, `--danger` with
- * `--accent-ink` legend and a `--brick-side` lip (globals.css 4624-4630, 9142). The count is also
- * the log key's state description, so it is never carried by the red dot alone.
+ * `.badge` on the menu trigger: a 1.1rem pill at `top: 0.35rem; right: 0.3rem`, `--brick` with
+ * `--accent-ink` 700 0.62rem ("9+" past nine). The count is also in the trigger's name, so it is
+ * never carried by the red dot alone.
  */
 @Composable
 internal fun WarningBadge(count: Int, modifier: Modifier) {
@@ -315,11 +747,11 @@ internal fun WarningBadge(count: Int, modifier: Modifier) {
     val type = LocalTetherTypography.current
     Box(
         modifier
-            .offset(x = (-2).dp, y = 2.dp)
-            .heightIn(min = 14.4.dp)
-            .widthIn(min = 14.4.dp)
-            .cssSurface(RoundedCornerShape(percent = 50), t.danger, shadows = listOf(hardShadow(1.dp, t.brickSide)))
-            .padding(horizontal = 3.2.dp)
+            .offset(x = (-4.8).dp, y = 5.6.dp)
+            .heightIn(min = 17.6.dp)
+            .widthIn(min = 17.6.dp)
+            .cssSurface(RoundedCornerShape(percent = 50), t.brick)
+            .padding(horizontal = 4.8.dp)
             .clearAndSetSemantics { },
         contentAlignment = Alignment.Center,
     ) {
@@ -327,29 +759,7 @@ internal fun WarningBadge(count: Int, modifier: Modifier) {
             if (count > 9) "9+" else "$count",
             color = t.accentInk,
             textAlign = TextAlign.Center,
-            style = cssText(type.ui, 0.54f, 700, lineHeight = 1f),
+            style = cssText(type.ui, 0.62f, 700, lineHeight = 1f),
         )
     }
-}
-
-/**
- * `.logout-button` — "Lock". Its word is `display: none` below 48rem, so the phone shows the
- * glyph alone; the app still names it "Lock" for TalkBack (the web's hidden span leaves the
- * button nameless). Instrument: 2.15rem tall, `--radius-key` (globals.css 10941-10948);
- * Studio: 2.5rem × 2.75rem (studio.css 293, 442).
- */
-@Composable
-private fun LockKey(onLogout: () -> Unit) {
-    val t = LocalTetherTokens.current
-    val studio = t.studio
-    ChromeIconKey(
-        onClick = onLogout,
-        icon = TetherIcons.LogOut,
-        contentDescription = "Lock",
-        look = rememberIconLook(t.muted, if (studio) t.radiusSm else t.radiusKey),
-        width = if (studio) 40.dp else 44.dp,
-        height = if (studio) 44.dp else 34.4.dp,
-        iconSize = 16.dp,
-        modifier = Modifier.testTag(ShellTags.LockKey),
-    )
 }

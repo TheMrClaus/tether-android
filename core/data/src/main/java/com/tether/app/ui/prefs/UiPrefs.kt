@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.tether.app.ui.theme.ThemeChoice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesDataStore(name = "tether_ui_prefs")
@@ -20,7 +21,10 @@ private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesData
  * DataStore-backed UI preferences: the web's `tether.preferences.v1` fields as one
  * [TetherPreferences] model (T2.3), plus the native-only push / permission state.
  */
-class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
+class UiPrefs(
+    /** Public for tests (T15.4: a shell test owns its store, so the boot view's inputs are its own). */
+    private val store: DataStore<Preferences>,
+) {
     constructor(context: Context) : this(context.applicationContext.tetherUiDataStore)
 
     private object Keys {
@@ -56,6 +60,10 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         // can't contain newlines, and DataStore string sets are unordered.
         val pushAttachedSessions = stringPreferencesKey("push_attached_sessions")
         val pushPinnedSessions = stringPreferencesKey("push_pinned_sessions")
+
+        // T15.4 (lib/dashboard-view.mjs VIEW_STORAGE_KEY `tether:lastView`): the last top-level
+        // view, a key of its own beside the preference model, as on the web.
+        val lastView = stringPreferencesKey("last_view")
     }
 
     /**
@@ -140,6 +148,28 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         }
     }
 
+    // ── Top-level view (T15.4) ────────────────────────────────────────────
+
+    /**
+     * What a boot of the console resolves its view from (dashboard.tsx `bootView`): the remembered
+     * last view, and whether this install already kept Tether preferences before that record
+     * existed (the web tests its preferences key; here the model's stored theme axes, written by
+     * every save of the model, or the legacy flat theme). Unreadable storage reads as a fresh
+     * install, like the web's blocked localStorage.
+     */
+    suspend fun viewBoot(): ViewBoot = runCatching {
+        val stored = store.data.first()
+        ViewBoot(
+            storedView = stored[Keys.lastView],
+            hasExistingPreferences = Keys.themeFamily in stored || Keys.theme in stored,
+        )
+    }.getOrElse { ViewBoot(storedView = null, hasExistingPreferences = false) }
+
+    /** Remember the top-level view on screen (dashboard.tsx `writeStoredView`). */
+    suspend fun setLastView(view: String) {
+        runCatching { store.edit { it[Keys.lastView] = view } }
+    }
+
     // ── Push notifications ────────────────────────────────────────────────
 
     /** Master toggle. Default ON: the first-launch UX prompts for permission. */
@@ -205,3 +235,6 @@ enum class LoginVariant(val id: String) {
         fun fromId(id: String?): LoginVariant = if (id == Retro.id) Retro else Instrument
     }
 }
+
+/** T15.4: the stored inputs of the console's boot view ([UiPrefs.viewBoot]). */
+data class ViewBoot(val storedView: String?, val hasExistingPreferences: Boolean)

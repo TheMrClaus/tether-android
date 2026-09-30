@@ -227,4 +227,25 @@ class UiPrefsPersistenceTest {
             withDrafts { drafts -> assertEquals(junk, JsObj.EMPTY, drafts.readDraftPreferences()) }
         }
     }
+
+    /**
+     * T15.4 (dashboard.tsx bootView): a fresh install has no remembered view and no preferences;
+     * any save of the model makes it an existing one; the last view survives process death.
+     */
+    @Test
+    fun viewBootReadsTheRememberedViewAndWhetherPreferencesExist() = runBlocking {
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot()) }
+        withPrefs { prefs -> prefs.updatePreferences { it.copy(showThinking = true) } }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = true), prefs.viewBoot()) }
+        withPrefs { prefs -> prefs.setLastView("overview") }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "overview", hasExistingPreferences = true), prefs.viewBoot()) }
+        // Only a remembered view (no model saved yet): still not an "existing" install.
+        prefsFile.delete()
+        withPrefs { prefs -> prefs.setLastView("sessions") }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "sessions", hasExistingPreferences = false), prefs.viewBoot()) }
+        // A legacy flat theme alone marks an install that predates the view record.
+        prefsFile.delete()
+        withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.LEGACY_THEME)] = "night" } }
+        withPrefs { prefs -> assertTrue(prefs.viewBoot().hasExistingPreferences) }
+    }
 }
