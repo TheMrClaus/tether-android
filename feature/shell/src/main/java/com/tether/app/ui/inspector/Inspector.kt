@@ -153,11 +153,9 @@ fun ColumnScope.Inspector(
 
 /**
  * A [Line] drawn by each segment's rule: app copy and cleaned labels as they are, code through
- * SafeText's code rule, messages through its prose rule (hidden code points as `--warning` tokens).
+ * SafeText's line / code rules, messages through its prose rule (hidden code points as `--warning` tokens).
  * A line of prose alone lays out in its content's direction; anything else LTR (code, app copy).
- *
- * TODO(ta-28i): one-line values (paths, branches, ids) move to `SafeText.Rule.Line` / `codeLabel`
- * when that rule lands on main; this is the one place to switch.
+ * One-line values (paths, branches, ids) use the LINE rule: TAB / LF / CR are tokens too.
  */
 @Composable
 internal fun rendered(line: Line): AnnotatedString {
@@ -173,6 +171,7 @@ internal fun renderLine(line: Line, t: TetherTokens): AnnotatedString {
             line.forEach { seg ->
                 when (seg.rule) {
                     Rule.App, Rule.Label -> append(seg.text)
+                    Rule.Line -> appendSafe(seg.text, SafeText.Rule.Line, style)
                     Rule.Code -> appendSafe(seg.text, SafeText.Rule.Code, style)
                     Rule.Prose -> appendSafe(seg.text, SafeText.Rule.Prose, style)
                 }

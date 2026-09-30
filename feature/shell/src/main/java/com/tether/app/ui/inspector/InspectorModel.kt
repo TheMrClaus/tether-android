@@ -54,9 +54,9 @@ import java.util.Locale
  * section by section in the web's order. Nothing here sends anything.
  *
  * Server and agent text never reaches the screen as a bare string: every value is a [Seg] that
- * names its drawing rule ([Rule]): the app's own words, a cleaned LABEL (names), CODE (paths,
- * branches, ids, model ids: every hidden or reordering code point a visible token) or PROSE
- * (messages). The composables draw each rule through `com.tether.app.ui.text`.
+ * names its drawing rule ([Rule]): the app's own words, a cleaned LABEL (names), LINE (paths,
+ * branches, ids, model ids, the account: every hidden, reordering or line-breaking code point a
+ * visible token), CODE (a multi-line log) or PROSE (messages). The composables draw each rule through `com.tether.app.ui.text`.
  */
 
 /** How one piece of text is drawn. */
@@ -67,7 +67,13 @@ enum class Rule {
     /** A name or label, already cleaned by [LabelText] (bidi controls and invisibles dropped, bounded). */
     Label,
 
-    /** A path, branch, id or model id: SafeText's code rule (hidden code points shown as tokens), LTR. */
+    /**
+     * A one-line name, path, branch, id or model id: SafeText's line rule (the code rule, and TAB /
+     * LF / CR as tokens too, so a value can never break into a second, forged row), LTR.
+     */
+    Line,
+
+    /** A multi-line code block (a setup log): SafeText's code rule, its line breaks kept. */
     Code,
 
     /** A message: SafeText's prose rule. */
@@ -88,7 +94,7 @@ internal fun label(text: String?): Seg = Seg(LabelText.label(text), Rule.Label)
 internal const val MAX_CODE = 1_000
 internal const val MAX_PROSE = LabelText.MAX_ERROR
 
-internal fun code(text: String): Seg = Seg(bound(text, MAX_CODE), Rule.Code)
+internal fun code(text: String): Seg = Seg(bound(text, MAX_CODE), Rule.Line)
 internal fun prose(text: String): Seg = Seg(bound(text, MAX_PROSE), Rule.Prose)
 
 private fun bound(text: String, max: Int): String =
@@ -666,7 +672,8 @@ internal fun runtime(session: AgentSession, state: SessionView?): List<SpecRow> 
     add(SpecRow("Effort", listOf(session.metrics?.effort?.takeIf { it.isNotEmpty() }?.let(::label) ?: app("—")), capitalize = true))
     val email = session.metrics?.accountEmail?.takeIf { it.isNotEmpty() }
     if (session.provider == "claude" && email != null) {
-        add(SpecRow("Account", listOf(label(email)), listOfNotNull(session.metrics?.accountOrganization?.takeIf { it.isNotEmpty() }?.let { Note(listOf(label(it))) })))
+        // The account identity is an id: the one-line rule, so a look-alike shows its hidden code points.
+        add(SpecRow("Account", listOf(code(email)), listOfNotNull(session.metrics?.accountOrganization?.takeIf { it.isNotEmpty() }?.let { Note(listOf(code(it))) })))
     }
     if (session.provider == "acp") {
         add(

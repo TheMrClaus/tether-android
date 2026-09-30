@@ -111,10 +111,10 @@ class InspectorNoticesModelTest {
                 evNullTurn("mcp_health_updated", seq = 3, ts = InspectorFixtures.NOW) { put("name", "‮buhtig"); put("status", "ready") },
             ),
         )
-        // T9.1: the name is kept raw and drawn by the code rule (com.tether.app.ui.text): every
+        // T9.1: the name is kept raw and drawn by the one-line rule (com.tether.app.ui.text): every
         // hidden or reordering code point is a visible token, so the three never display alike.
         val servers = mcpServers(state)
-        val shown = servers.associate { it.key to com.tether.app.ui.text.SafeText.code(it.name) }
+        val shown = servers.associate { it.key to com.tether.app.ui.text.SafeText.line(it.name) }
         assertEquals("github", shown["github"])
         assertEquals(true, shown["git\u200Bhub"]!!.contains("⟨U+200B⟩"))
         assertEquals(true, shown["\u202Ebuhtig"]!!.contains("⟨U+202E⟩"))

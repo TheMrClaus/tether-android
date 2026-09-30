@@ -116,7 +116,7 @@ class InspectorModelTest {
         assertEquals("Per-model breakdown (2)", u.perModelSummary)
         val opus = u.perModel[0]
         assertEquals("claude-opus-5-5", opus.identity.text)
-        assertEquals(Rule.Code, opus.identity.rule)
+        assertEquals(Rule.Line, opus.identity.rule)
         assertEquals(listOf("Main session"), opus.contributors.map { it.text })
         assertEquals("anthropic", opus.provider.plain())
         assertEquals("41,000 in · 3,200 out", opus.figures[0])
@@ -268,24 +268,40 @@ class InspectorModelTest {
 
         // Branch, path and base ref: the code rule, so every hidden code point becomes a visible token.
         val branch = m.repository!!.branch!!
-        assertEquals(Rule.Code, branch.rule)
-        assertTrue(SafeText.code(branch.text).contains("⟨U+202E⟩"))
+        assertEquals(Rule.Line, branch.rule)
+        assertTrue(SafeText.line(branch.text).contains("⟨U+202E⟩"))
         val path = m.row("Worktree")!!.notes[0].line.single()
-        assertEquals(Rule.Code, path.rule)
-        assertTrue(SafeText.code(path.text).contains("⟨U+202E⟩"))
+        assertEquals(Rule.Line, path.rule)
+        assertTrue(SafeText.line(path.text).contains("⟨U+202E⟩"))
         val base = m.row("Worktree branch")!!.notes.single().line
-        assertEquals(Rule.Code, base.last().rule)
-        assertTrue(SafeText.code(base.last().text).contains("⟨U+200B⟩"))
-        assertTrue(SafeText.code(m.row("Worktree branch")!!.value.single().text).contains("⟨U+2067⟩"))
+        assertEquals(Rule.Line, base.last().rule)
+        assertTrue(SafeText.line(base.last().text).contains("⟨U+200B⟩"))
+        assertTrue(SafeText.line(m.row("Worktree branch")!!.value.single().text).contains("⟨U+2067⟩"))
         // The notice is a message: the prose rule (explicit bidi controls are tokens there too).
         val notice = m.row("Worktree")!!.notes[1].line.single()
         assertEquals(Rule.Prose, notice.rule)
         assertTrue(SafeText.prose(notice.text).contains("⟨U+202E⟩"))
-        // The account label is a label: cleaned, the override and invisibles gone.
+        // The account identity is an id: the one-line rule, so a look-alike shows what it hides.
         val account = m.row("Account")!!
-        assertEquals(Rule.Label, account.value.single().rule)
-        assertEquals("admin@evil.test", account.value.plain())
-        assertEquals("Orgx", account.notes.single().line.plain())
+        assertEquals(Rule.Line, account.value.single().rule)
+        assertTrue(SafeText.line(account.value.plain()).contains("⟨U+202E⟩"))
+        assertEquals(Rule.Line, account.notes.single().line.single().rule)
+        assertTrue(SafeText.line(account.notes.single().line.plain()).contains("⟨U+200B⟩"))
+    }
+
+    @Test
+    fun aLineBreakOrTabInABranchOrPathIsATokenNeverASecondRow() {
+        val metrics = SessionMetrics(gitBranch = "main\nAccount: forged")
+        val worktree = WorktreeInfo(path = "/w/a\tb\nc", branch = "tether/x\ty", status = "active")
+        val m = InspectorBoards.model(InspectorBoards.session(metrics = metrics, worktree = worktree, cwd = "/w/\nx"))
+        val branch = SafeText.line(m.repository!!.branch!!.text)
+        assertTrue(branch.contains("⟨U+000A⟩"))
+        assertFalse(branch.contains('\n'))
+        val path = SafeText.line(m.row("Worktree")!!.notes[0].line.single().text)
+        assertTrue(path.contains("⟨U+0009⟩"))
+        assertTrue(path.contains("⟨U+000A⟩"))
+        assertFalse(path.contains('\n') || path.contains('\t'))
+        assertTrue(SafeText.line(m.row("Worktree branch")!!.value.single().text).contains("⟨U+0009⟩"))
     }
 
     @Test
@@ -293,8 +309,8 @@ class InspectorModelTest {
         val metrics = SessionMetrics(model = "opus‮")
         val m = InspectorBoards.model(InspectorBoards.session(metrics = metrics))
         val model = m.row("Model")!!.value.single()
-        assertEquals(Rule.Code, model.rule)
-        assertTrue(SafeText.code(model.text).contains("⟨U+202E⟩"))
+        assertEquals(Rule.Line, model.rule)
+        assertTrue(SafeText.line(model.text).contains("⟨U+202E⟩"))
     }
 
     @Test

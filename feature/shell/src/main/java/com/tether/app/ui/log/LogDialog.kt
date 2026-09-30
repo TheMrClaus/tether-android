@@ -2,7 +2,7 @@ package com.tether.app.ui.log
 
 import androidx.compose.foundation.background
 import com.tether.app.client.LabelText
-import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.proseText
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -657,8 +657,8 @@ private fun LogRow(
         BaselineFlow(hGap = 8.dp, vGap = 8.dp, modifier = m) {
             Text(label, color = t.white, style = cssText(type.ui, if (studio) 0.8125f else 0.74f, 600))
             if (session != null) Text(session, color = t.muted, style = cssText(type.ui, small, 400))
-            // T9.1: the turn id by the code rule, the server's outcome / reason / message by the prose rule.
-            if (turn != null) Text(codeText(turn), color = t.faint, style = cssText(type.ui, small, 400).tabularNums())
+            // T9.1: the turn id by the one-line rule, the server's outcome / reason / message by the prose rule.
+            if (turn != null) Text(codeLabel(turn), color = t.faint, style = cssText(type.ui, small, 400).tabularNums())
             if (detail.isNotEmpty()) Text(proseText(detail), color = t.muted, style = cssText(type.ui, small, 400))
         }
     }

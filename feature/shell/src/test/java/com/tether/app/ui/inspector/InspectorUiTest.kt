@@ -61,16 +61,29 @@ class InspectorUiTest {
         )
         show(InspectorBoards.model(session, state), state)
         // The branch (code rule).
-        rule.onNodeWithText(SafeText.code("main${rlo}x"), substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(SafeText.line("main${rlo}x"), substring = true, useUnmergedTree = true).assertExists()
         // The MCP server name (code rule) and, behind "View error", its error (prose rule).
-        rule.onNodeWithText(SafeText.code("git${rlo}hub"), substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(SafeText.line("git${rlo}hub"), substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("View error").performScrollTo().performClick()
         rule.onNodeWithText(SafeText.prose("denied${rlo} ok"), substring = true, useUnmergedTree = true).assertExists()
         // Runtime details: the path is code; the account label is cleaned.
         rule.onNodeWithText("Runtime details").performScrollTo().performClick()
-        rule.onNodeWithText(SafeText.code("/w/${rlo}p"), substring = true, useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("a@b.test", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(SafeText.line("/w/${rlo}p"), substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(SafeText.line("a${rlo}@b.test"), substring = true, useUnmergedTree = true).assertExists()
         rule.onAllNodesWithText(rlo, substring = true, useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun aLineBreakOrTabInABranchOrWorktreePathIsDrawnAsATokenOnOneLine() {
+        val session = InspectorBoards.session(
+            metrics = SessionMetrics(gitBranch = "main\nforged"),
+            worktree = WorktreeInfo(path = "/w/a\tb", branch = "b", status = "active"),
+        )
+        show(InspectorBoards.model(session))
+        rule.onNodeWithText(SafeText.line("main\nforged"), substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Runtime details").performScrollTo().performClick()
+        rule.onNodeWithText(SafeText.line("/w/a\tb"), substring = true, useUnmergedTree = true).assertExists()
+        rule.onAllNodesWithText("\n", substring = true, useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test

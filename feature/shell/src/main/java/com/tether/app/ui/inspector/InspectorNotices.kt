@@ -58,7 +58,7 @@ import com.tether.app.ui.statusline.wrapUpReading
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
-import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.proseText
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -134,7 +134,7 @@ fun InspectorLimitNotice(state: SessionView?, modifier: Modifier = Modifier, env
 }
 
 /**
- * One `McpHealthProjection`, bounded for display: [name] is drawn by the code rule, [error] by the
+ * One `McpHealthProjection`, bounded for display: [name] is drawn by the one-line rule (codeLabel), [error] by the
  * prose rule (com.tether.app.ui.text). [key] is the server's raw name (the row's state identity).
  */
 @Immutable
@@ -159,8 +159,8 @@ fun mcpServers(state: SessionView?): List<McpServerView> {
     return health.entries.mapNotNull { (_, value) ->
         val o = value as? JsObj ?: return@mapNotNull null
         val name = (o["name"] as? JsStr)?.value ?: return@mapNotNull null
-        // T9.1: kept raw (bounded) and drawn by the shared text rules: the name as CODE (every bidi /
-        // invisible code point a visible token, so one server can never pass for another), the
+        // T9.1: kept raw (bounded) and drawn by the shared text rules: the name by the one-line rule
+        // (codeLabel: every bidi / invisible / line-break code point a visible token, so one server can never pass for another), the
         // error as PROSE.
         val error = ((o["error"] as? JsStr)?.value ?: (o["failureReason"] as? JsStr)?.value)?.takeIf { it.isNotBlank() }?.let { prose(it).text }
         McpServerView(code(name).text, (o["status"] as? JsStr)?.value ?: "unknown", error, key = name)
@@ -268,7 +268,7 @@ private fun McpServerRow(server: McpServerView, compact: Boolean, last: Boolean)
     ) {
         Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
             Text(
-                codeText(server.name),
+                codeLabel(server.name),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(if (compact) 0.7f else 0.76f)),
                 color = t.ink,
                 maxLines = 1,
