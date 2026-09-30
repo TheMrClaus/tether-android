@@ -24,11 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-30 evening CEST):** `main` @ `7569d54`. **Merged + verified today:** ta-96z, T6.5, ta-blf, T7.3, **ta-28i**
-(text rules on file preview/names/sidebar/push/search/question card/MainShell copy; `27fd169`), **ta-fz3** (link safety; `7569d54`).
-**In progress:** T15.1 -> T15.2 Overview (feed client committed), T9.1 full inspector telemetry, T7.4 attachments (inline on the socket,
-see Decision log), T6.8 (DONE, verifying; tile says "Blocked by a sign-in page") + ta-p5l (tether README exempt list, branch pushed,
-PR after verify). Owner: exempt the app's HTTP routes at his gateway (list in ta-p5l).
+**Resume point (2026-09-30 21:30 CEST, after a usage-limit stop):** `main` @ `8f6f15a` (gate green: 4604 tests). **Merged + verified today:**
+ta-96z, T6.5, ta-blf, T7.3, ta-28i (`27fd169`), ta-fz3 (`7569d54`), **T6.8** (`8f6f15a`, tile says "Blocked by a sign-in page"), **ta-p5l**
+(tether #230 squash `cac6a5a`, README exempt list). **In progress:** T15.1 -> T15.2 Overview (verifier resumed), T9.1 full inspector
+telemetry (verifier resumed), T7.4 attachments (DONE but gate red from a pre-existing bug -> **ta-8lg** stop() clear escape, maker running;
+T7.4 rebases after it lands). Owner: exempt the app's HTTP routes at his gateway (list in tether README, #230).
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
@@ -125,7 +125,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.5 | Conversation timeline refresh | VERIFIED | TheMrClaus @ 2026-09-30 06:13 |  |  |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
-| T6.8 | Tool screenshots do not show in the conversation (owner report) | DONE | executor-T6.8 @ 2026-09-30 15:46 | `bd show` |  |
+| T6.8 | Tool screenshots do not show in the conversation (owner report) | VERIFIED | executor-T6.8 @ 2026-09-30 15:46 | `bd show` |  |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -133,7 +133,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
 | T7.3 | Slash commands, run/background command, mentions | VERIFIED | TheMrClaus @ 2026-09-30 06:50 |  |  |
-| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | IN-PROGRESS | security-executor-T7.4 @ 2026-09-30 16:… |  | checkpoint 2824562: core layer (AttachmentFrame caps, sendAttachments guard, outbox refuses attachments, in-flight notice), VM staged set +… |
+| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | DONE | security-executor-T7.4 @ 2026-09-30 16:… |  |  |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -148,7 +148,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T9.1 | Inspector + telemetry | IN-PROGRESS | executor-T9.1 @ 2026-09-30 16:58 |  | checkpoint: 4a2784b protocol+client (InspectorFieldsWireTest, InspectorReadsClientTest green); cac6eb0 InspectorModel/Inspector/InspectorHo… |
+| T9.1 | Inspector + telemetry | DONE | executor-T9.1 @ 2026-09-30 16:58 |  |  |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
@@ -202,7 +202,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
 | T15.1 | Overview feed client (v131) | DONE | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
-| T15.2 | Overview screen | IN-PROGRESS | executor-T15.1 @ 2026-09-30 16:19 |  |  |
+| T15.2 | Overview screen | IN-PROGRESS | executor-T15.1 @ 2026-09-30 16:19 |  | coordinator: the brief's 'must not mark seen' over-stated the web rule; OVERVIEW_STUDIO_PLAN says merely DISPLAYING a card must not mark a … |
 | T15.3 | Overview host + daily usage panels | TODO |  |  |  |
 | T15.4 | Top-bar navigation | TODO |  |  |  |
 | T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
@@ -364,3 +364,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8 | ta-28i r2 gate run by the coordinator: green on `3a680f8` (4532 tests); re-verify + security re-check running. ta-fz3 r2: security PASS-WITH-FOLLOW-UPS, verify REFUTED on streamed links (settle timer) -> small r3 (settle on content change, table-cell links ask, no `/` in mailto local parts). T6.8: no app bug; owner confirmed the gateway -> ta-p5l (README exempt list). | ta-28i verdicts; ta-fz3 r3; T6.8 tile copy |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8, ta-p5l, T9.1, T7.4 | ta-28i merged ff-only `27fd169` VERIFIED; ta-fz3 merged ff-only `7569d54` VERIFIED (3 rounds). T6.8 done (gateway tile copy + wire replay tests), verifier running with ta-p5l. Started T9.1 and T7.4 (T7.4 re-scoped: inline attachments). Follow-up ta-zih. | T6.8/ta-p5l verdicts; Overview, T9.1, T7.4 reviews |
 | 2026-09-30 | claude-main / Opus 5.5 | T15.1, T15.2 | Overview feed client + screen built (branch T15.1 @ `edefad3`, gates green; sidebar entry, phone + tablet shells; T15.3 host/usage slot left). Mark-seen clarified against the web plan (display never marks seen; opening follows the normal rule). Verifier running; a security review (text rules, send gating) follows. | Overview verdict; T9.1, T7.4 |
+| 2026-09-30 21:30 | claude-main / Opus 5.5 (resumed session) | T15.1, T9.1, T7.4, ta-p5l, ta-8lg | Previous coordinator stopped on its 5-hour limit mid-turn; its Overview and T9.1 verifiers died before verdicts (relaunched from their scratch state). main gate re-run green on `8f6f15a` (4604). tether #230 squash-merged `cac6a5a`, ta-p5l VERIFIED. T7.4 gate failure traced to a pre-existing stop() bug -> ta-8lg (own branch). | Overview + T9.1 verdicts; ta-8lg; T7.4 rebase + gate |
