@@ -68,28 +68,36 @@ data class OverviewUsage(
     val coverage: List<UsageCoverage>,
 )
 
-/** What one GET came to. */
+/**
+ * What one GET came to. [origin] is the paired origin (scheme://host[:port]) the call was made
+ * for, on every outcome that got that far: a screen keeps a reading only while the answers keep
+ * coming from the origin it came from, so one server's numbers never stand beside another's
+ * answer. Null only when there was no server to ask.
+ */
 sealed interface OverviewMetricsResult<out T> {
-    /** [origin] is the paired origin the reading came from (scheme://host[:port]): a reading is never shown for another. */
-    data class Ok<T>(val value: T, val origin: String) : OverviewMetricsResult<T>
+    val origin: String?
+
+    data class Ok<T>(val value: T, override val origin: String) : OverviewMetricsResult<T>
 
     /** No credential, or Tether's own 401 (the /api/ gate's JSON answer). */
-    data object SignedOut : OverviewMetricsResult<Nothing>
+    data class SignedOut(override val origin: String? = null) : OverviewMetricsResult<Nothing>
 
     /** Tether's own 403 (JSON, no challenge). */
-    data object Forbidden : OverviewMetricsResult<Nothing>
+    data class Forbidden(override val origin: String) : OverviewMetricsResult<Nothing>
 
-    data object LocalNetworkBlocked : OverviewMetricsResult<Nothing>
+    data object LocalNetworkBlocked : OverviewMetricsResult<Nothing> {
+        override val origin: String? get() = null
+    }
 
     /**
      * T6.8's rule ([HttpToolMedia.blockedBySignIn]): a sign-in gateway answered instead of Tether (any
      * 3xx, a 401/403 that is not Tether's JSON or carries a challenge, a 200 HTML page). Decided from
      * the status line and headers only: the body is never kept and a redirect is never followed.
      */
-    data class Blocked(val code: Int) : OverviewMetricsResult<Nothing>
+    data class Blocked(val code: Int, override val origin: String) : OverviewMetricsResult<Nothing>
 
     /** Unreachable, any other non-2xx, a body over the cap, or a body this client cannot use. */
-    data class Unavailable(val code: Int? = null) : OverviewMetricsResult<Nothing>
+    data class Unavailable(val code: Int?, override val origin: String) : OverviewMetricsResult<Nothing>
 }
 
 /** The two readings, fetched with the paired credential. */
@@ -99,8 +107,8 @@ interface OverviewMetricsSource {
 
     /** No client (previews, fakes): nothing is ever fetched. */
     object Unavailable : OverviewMetricsSource {
-        override suspend fun host(): OverviewMetricsResult<HostMetrics> = OverviewMetricsResult.SignedOut
-        override suspend fun usage(): OverviewMetricsResult<OverviewUsage> = OverviewMetricsResult.SignedOut
+        override suspend fun host(): OverviewMetricsResult<HostMetrics> = OverviewMetricsResult.SignedOut()
+        override suspend fun usage(): OverviewMetricsResult<OverviewUsage> = OverviewMetricsResult.SignedOut()
     }
 
     companion object {
@@ -145,7 +153,7 @@ class HttpOverviewMetrics(
 
     private suspend fun <T> get(path: String, parse: (JsonObject) -> T?): OverviewMetricsResult<T> {
         val paired = when (val a = authority()) {
-            FilesAuthority.SignedOut -> return OverviewMetricsResult.SignedOut
+            FilesAuthority.SignedOut -> return OverviewMetricsResult.SignedOut()
             FilesAuthority.LocalNetworkBlocked -> return OverviewMetricsResult.LocalNetworkBlocked
             is FilesAuthority.Paired -> a
         }
@@ -153,11 +161,11 @@ class HttpOverviewMetrics(
         val request = paired.sign(
             Request.Builder().url(target).header("Accept", "application/json").header("Cache-Control", "no-store"),
         ).get().build()
+        val origin = consoleOrigin(paired.origin)
         // Nothing but the fixed route on the paired origin ever carries the credential.
         if (!sameOrigin(request.url, paired.origin) || request.url.encodedPath != path || request.url.query != null) {
-            return OverviewMetricsResult.Unavailable()
+            return OverviewMetricsResult.Unavailable(null, origin)
         }
-        val origin = consoleOrigin(paired.origin)
         val call = http.newCall(request)
         call.timeout().timeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         return try {
@@ -165,27 +173,27 @@ class HttpOverviewMetrics(
         } catch (e: CancellationException) {
             throw e
         } catch (_: IOException) {
-            OverviewMetricsResult.Unavailable()
+            OverviewMetricsResult.Unavailable(null, origin)
         } catch (_: RuntimeException) {
-            OverviewMetricsResult.Unavailable()
+            OverviewMetricsResult.Unavailable(null, origin)
         } catch (_: OutOfMemoryError) {
-            OverviewMetricsResult.Unavailable()
+            OverviewMetricsResult.Unavailable(null, origin)
         }
     }
 
     private fun <T> read(response: Response, origin: String, parse: (JsonObject) -> T?): OverviewMetricsResult<T> {
         val declaredType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)
         if (HttpToolMedia.blockedBySignIn(response.code, declaredType, response.header("WWW-Authenticate") != null)) {
-            return OverviewMetricsResult.Blocked(response.code)
+            return OverviewMetricsResult.Blocked(response.code, origin)
         }
         when {
-            response.code == 401 -> return OverviewMetricsResult.SignedOut
-            response.code == 403 -> return OverviewMetricsResult.Forbidden
-            response.code != 200 -> return OverviewMetricsResult.Unavailable(response.code)
+            response.code == 401 -> return OverviewMetricsResult.SignedOut(origin)
+            response.code == 403 -> return OverviewMetricsResult.Forbidden(origin)
+            response.code != 200 -> return OverviewMetricsResult.Unavailable(response.code, origin)
         }
-        val text = readCapped(response) ?: return OverviewMetricsResult.Unavailable(response.code)
-        val obj = OverviewMetricsJson.parseObject(text) ?: return OverviewMetricsResult.Unavailable(response.code)
-        val value = parse(obj) ?: return OverviewMetricsResult.Unavailable(response.code)
+        val text = readCapped(response) ?: return OverviewMetricsResult.Unavailable(response.code, origin)
+        val obj = OverviewMetricsJson.parseObject(text) ?: return OverviewMetricsResult.Unavailable(response.code, origin)
+        val value = parse(obj) ?: return OverviewMetricsResult.Unavailable(response.code, origin)
         return OverviewMetricsResult.Ok(value, origin)
     }
 

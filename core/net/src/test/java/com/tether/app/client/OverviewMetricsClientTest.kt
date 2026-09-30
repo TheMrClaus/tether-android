@@ -81,9 +81,9 @@ class OverviewMetricsClientTest {
         other.start()
         loadedButIdle(cookie = "cookie")
         h.server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", other.url("/api/overview/host")))
-        assertEquals(OverviewMetricsResult.Blocked(302), h.client.overviewMetrics.host())
+        assertEquals(OverviewMetricsResult.Blocked(302, origin), h.client.overviewMetrics.host())
         h.server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", other.url("/api/overview/usage")))
-        assertEquals(OverviewMetricsResult.Blocked(307), h.client.overviewMetrics.usage())
+        assertEquals(OverviewMetricsResult.Blocked(307, origin), h.client.overviewMetrics.usage())
         assertEquals(0, other.requestCount)
     }
 
@@ -91,8 +91,8 @@ class OverviewMetricsClientTest {
         loadedButIdle(token = "tthr_device")
         h.client.logout()
         val before = h.server.requestCount
-        assertEquals(OverviewMetricsResult.SignedOut, h.client.overviewMetrics.host())
-        assertEquals(OverviewMetricsResult.SignedOut, h.client.overviewMetrics.usage())
+        assertEquals(OverviewMetricsResult.SignedOut(), h.client.overviewMetrics.host())
+        assertEquals(OverviewMetricsResult.SignedOut(), h.client.overviewMetrics.usage())
         assertEquals(before, h.server.requestCount)
     }
 }

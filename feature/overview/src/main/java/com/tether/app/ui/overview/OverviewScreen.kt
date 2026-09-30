@@ -105,7 +105,7 @@ private fun label(text: String?): String = OverviewPresentation.label(text)
 private fun title(text: String?): String = OverviewPresentation.title(text)
 private fun prose(text: String?): String = OverviewPresentation.prose(text)
 
-private fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float = 0f, lineHeight: Float? = null) = TextStyle(
+internal fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float = 0f, lineHeight: Float? = null) = TextStyle(
     fontFamily = family,
     fontSize = (rem * 16f).sp,
     fontWeight = FontWeight(weight),
@@ -141,7 +141,7 @@ fun OverviewScreen(
     modifier: Modifier = Modifier,
     /** The polite announcement of requests that arrived while the operator watches (overview.tsx:349). */
     announcement: String = "",
-    /** T15.3: the "Host & usage" tile (host readings and daily token usage). Not built yet: nothing renders. */
+    /** T15.3: the "Host & usage" tile (host readings and daily token usage): [HostUsageHost]. Null renders nothing. */
     hostUsage: (@Composable () -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
@@ -389,7 +389,7 @@ private fun StaleNote(updatedAt: Long?, now: Long) {
 // ── Panels ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun Panel(
+internal fun Panel(
     tag: String,
     attention: Boolean,
     modifier: Modifier = Modifier,
@@ -412,7 +412,7 @@ private fun Panel(
 }
 
 @Composable
-private fun PanelTitle(text: String, badge: Int? = null, trailing: @Composable RowScope.() -> Unit = {}) {
+internal fun PanelTitle(text: String, badge: Int? = null, trailing: @Composable RowScope.() -> Unit = {}) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.6.dp)) {

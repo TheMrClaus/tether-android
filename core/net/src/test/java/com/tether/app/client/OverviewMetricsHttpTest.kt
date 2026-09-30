@@ -81,12 +81,12 @@ class OverviewMetricsHttpTest {
     @Test fun aRedirectIsBlockedAndNeverFollowed() = runBlocking<Unit> {
         for (code in listOf(301, 302, 303, 307, 308)) {
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", elsewhere.url("/api/overview/host")))
-            assertEquals(OverviewMetricsResult.Blocked(code), metrics.host())
+            assertEquals(OverviewMetricsResult.Blocked(code, origin), metrics.host())
             take()
         }
         // A same-origin redirect (a gateway's own login path) is not followed either.
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", server.url("/login")))
-        assertEquals(OverviewMetricsResult.Blocked(302), metrics.usage())
+        assertEquals(OverviewMetricsResult.Blocked(302, origin), metrics.usage())
         take()
         assertEquals("one request per call: nothing followed", 6, server.requestCount)
         assertEquals(0, elsewhere.requestCount)
@@ -94,19 +94,19 @@ class OverviewMetricsHttpTest {
 
     @Test fun aSignInPageIsBlockedButTethersOwnRefusalsAreNot() = runBlocking<Unit> {
         val cases = listOf(
-            MockResponse().setResponseCode(401).setHeader("Content-Type", "text/html").setBody("<html>login</html>") to OverviewMetricsResult.Blocked(401),
-            MockResponse().setResponseCode(403).setBody("Forbidden") to OverviewMetricsResult.Blocked(403),
-            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setHeader("WWW-Authenticate", "Bearer").setBody("{}") to OverviewMetricsResult.Blocked(401),
-            MockResponse().setResponseCode(200).setHeader("Content-Type", "text/html; charset=utf-8").setBody("<html>sign in</html>") to OverviewMetricsResult.Blocked(200),
-            MockResponse().setResponseCode(200).setHeader("Content-Type", "application/xhtml+xml").setBody("<html/>") to OverviewMetricsResult.Blocked(200),
+            MockResponse().setResponseCode(401).setHeader("Content-Type", "text/html").setBody("<html>login</html>") to OverviewMetricsResult.Blocked(401, origin),
+            MockResponse().setResponseCode(403).setBody("Forbidden") to OverviewMetricsResult.Blocked(403, origin),
+            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setHeader("WWW-Authenticate", "Bearer").setBody("{}") to OverviewMetricsResult.Blocked(401, origin),
+            MockResponse().setResponseCode(200).setHeader("Content-Type", "text/html; charset=utf-8").setBody("<html>sign in</html>") to OverviewMetricsResult.Blocked(200, origin),
+            MockResponse().setResponseCode(200).setHeader("Content-Type", "application/xhtml+xml").setBody("<html/>") to OverviewMetricsResult.Blocked(200, origin),
             // Tether's own answers: the /api/ gate's 401 (tests/integration/overview-feed-wire.test.mjs), a 403, a 500.
-            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setBody("""{"error":"Authentication required."}""") to OverviewMetricsResult.SignedOut,
-            MockResponse().setResponseCode(403).setHeader("Content-Type", json).setBody("""{"error":"Forbidden."}""") to OverviewMetricsResult.Forbidden,
-            MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}""") to OverviewMetricsResult.Unavailable(500),
-            MockResponse().setResponseCode(502).setHeader("Content-Type", "text/html").setBody("<html>bad gateway</html>") to OverviewMetricsResult.Unavailable(502),
-            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"Not found."}""") to OverviewMetricsResult.Unavailable(404),
+            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setBody("""{"error":"Authentication required."}""") to OverviewMetricsResult.SignedOut(origin),
+            MockResponse().setResponseCode(403).setHeader("Content-Type", json).setBody("""{"error":"Forbidden."}""") to OverviewMetricsResult.Forbidden(origin),
+            MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}""") to OverviewMetricsResult.Unavailable(500, origin),
+            MockResponse().setResponseCode(502).setHeader("Content-Type", "text/html").setBody("<html>bad gateway</html>") to OverviewMetricsResult.Unavailable(502, origin),
+            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"Not found."}""") to OverviewMetricsResult.Unavailable(404, origin),
             // Another 2xx is not the route's answer.
-            MockResponse().setResponseCode(204) to OverviewMetricsResult.Unavailable(204),
+            MockResponse().setResponseCode(204) to OverviewMetricsResult.Unavailable(204, origin),
         )
         for ((index, case) in cases.withIndex()) {
             server.enqueue(case.first)
@@ -120,11 +120,11 @@ class OverviewMetricsHttpTest {
         val padded = """{"tokensToday":{"value":1,"label":"Tokens today","partial":false},"pad":"${"x".repeat(4096)}"}"""
         // Declared: Content-Length over the cap.
         server.enqueue(ok(padded))
-        assertEquals(OverviewMetricsResult.Unavailable(200), small.usage())
+        assertEquals(OverviewMetricsResult.Unavailable(200, origin), small.usage())
         take()
         // Streamed: chunked, no length.
         server.enqueue(MockResponse().setHeader("Content-Type", json).setChunkedBody(padded, 128))
-        assertEquals(OverviewMetricsResult.Unavailable(200), small.usage())
+        assertEquals(OverviewMetricsResult.Unavailable(200, origin), small.usage())
         take()
         // At the cap exactly it is read.
         val prefix = """{"tokensToday":{"value":1,"label":"Tokens today","partial":false},"pad":""""
@@ -137,7 +137,7 @@ class OverviewMetricsHttpTest {
 
     @Test fun theDefaultCapIsSixtyFourKibibytes() = runBlocking<Unit> {
         server.enqueue(MockResponse().setHeader("Content-Type", json).setChunkedBody("{\"pad\":\"" + "x".repeat(70_000) + "\"}", 4096))
-        assertEquals(OverviewMetricsResult.Unavailable(200), metrics.host())
+        assertEquals(OverviewMetricsResult.Unavailable(200, origin), metrics.host())
         take()
     }
 
@@ -155,19 +155,19 @@ class OverviewMetricsHttpTest {
         )
         for (body in bodies) {
             server.enqueue(ok(body))
-            assertEquals(body.take(20), OverviewMetricsResult.Unavailable(200), metrics.host())
+            assertEquals(body.take(20), OverviewMetricsResult.Unavailable(200, origin), metrics.host())
             take()
         }
         // The usage route needs its tokensToday.
         server.enqueue(ok("""{"asOf":1,"coverage":[]}"""))
-        assertEquals(OverviewMetricsResult.Unavailable(200), metrics.usage())
+        assertEquals(OverviewMetricsResult.Unavailable(200, origin), metrics.usage())
         take()
     }
 
     @Test fun signedOutOrLocalNetworkBlockedSendsNothing() = runBlocking<Unit> {
         authority = FilesAuthority.SignedOut
-        assertEquals(OverviewMetricsResult.SignedOut, metrics.host())
-        assertEquals(OverviewMetricsResult.SignedOut, metrics.usage())
+        assertEquals(OverviewMetricsResult.SignedOut(), metrics.host())
+        assertEquals(OverviewMetricsResult.SignedOut(), metrics.usage())
         authority = FilesAuthority.LocalNetworkBlocked
         assertEquals(OverviewMetricsResult.LocalNetworkBlocked, metrics.host())
         assertEquals(0, server.requestCount)
@@ -183,18 +183,21 @@ class OverviewMetricsHttpTest {
         val b = metrics.host() as OverviewMetricsResult.Ok
         assertEquals("http://${elsewhere.hostName}:${elsewhere.port}", b.origin)
         assertEquals("Bearer tthr_other", elsewhere.takeRequest(20, TimeUnit.SECONDS)!!.getHeader("Authorization"))
+        // A failure names the server it is about too, so A's reading is never kept beside B's answer.
+        elsewhere.enqueue(MockResponse().setResponseCode(500))
+        assertEquals(b.origin, metrics.usage().origin)
         assertEquals(1, server.requestCount)
     }
 
     @Test fun anUnreachableServerIsUnavailable() = runBlocking<Unit> {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
-        assertEquals(OverviewMetricsResult.Unavailable(), metrics.host())
+        assertEquals(OverviewMetricsResult.Unavailable(null, origin), metrics.host())
     }
 
     @Test fun aHangingServerTimesOut() = runBlocking<Unit> {
         val quick = HttpOverviewMetrics(noRedirects, authority = { authority }, callTimeoutMs = 300)
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        assertEquals(OverviewMetricsResult.Unavailable(), withTimeout(10_000) { quick.host() })
+        assertEquals(OverviewMetricsResult.Unavailable(null, origin), withTimeout(10_000) { quick.host() })
     }
 
     @Test fun cancellingTheCallerCancelsTheRequest() = runBlocking<Unit> {

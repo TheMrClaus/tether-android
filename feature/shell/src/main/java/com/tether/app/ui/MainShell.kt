@@ -436,8 +436,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                                     refreshStats()
                                 },
                             ),
-                            // T15.3: the Host & usage tile goes here.
-                            hostUsage = null,
+                            // T15.3: the Host & usage tile (polls only while shown and started; no Usage screen yet, T9.2).
+                            hostUsage = { com.tether.app.ui.overview.HostUsageHost(vm.client) },
                         )
                     }
                 },
