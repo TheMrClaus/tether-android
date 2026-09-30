@@ -854,7 +854,8 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
 /**
  * The card's display bound. ta-28i: cut at a character-cluster boundary ([TextCut]: never inside a
  * surrogate pair or a combining sequence), and always on the SOURCE, before the prose rule draws it,
- * so a token is never cut in half.
+ * so a token is never cut in half. r2: a single cluster longer than the bound (a flood of marks) is
+ * cut at a code point instead of showing only "…" ([TextCut]'s bounded back-off).
  */
 internal fun cut4k(s: String): String = if (s.length > CARD_TEXT_MAX) com.tether.app.client.TextCut.cut(s, CARD_TEXT_MAX) + "…" else s
 

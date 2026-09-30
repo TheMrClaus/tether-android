@@ -816,9 +816,10 @@ internal fun previewLines(text: String): List<String> {
             var start = 0
             while (start < line.length) {
                 val limit = minOf(line.length, start + LINE_PIECE)
-                var end = TextCut.boundaryAtOrBefore(line, limit)
-                // One cluster longer than a piece (a flood of combining marks): cut at a code point.
-                if (end <= start) end = if (limit < line.length && Character.isLowSurrogate(line[limit]) && limit - 1 > start) limit - 1 else limit
+                // r2: bounded (TextCut backs off at most 64 code points, never below the piece start), so
+                // a hostile 1 MiB line of combining marks, ZWJs or flags is cut in linear time.
+                var end = TextCut.boundaryAtOrBefore(line, limit, floor = start)
+                if (end <= start) end = limit
                 out += line.substring(start, end)
                 start = end
             }

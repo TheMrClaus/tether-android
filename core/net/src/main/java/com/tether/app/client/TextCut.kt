@@ -12,25 +12,58 @@ package com.tether.app.client
  * Tokens: a caller that draws tokens (the SafeText rules, [LabelText.visibleValue]) always cuts
  * the SOURCE text here first and encodes after, so a token is never cut in half.
  *
- * Cost: linear in how far it backs off (a run of combining marks at the edge); nothing past the
- * cut is read beyond one code point.
+ * Cost (r2): BOUNDED. A cut backs off at most [MAX_BACKOFF] code points (never below its floor);
+ * a cluster longer than that (a flood of combining marks, a long ZWJ chain) is cut at a code point
+ * instead, never inside a surrogate pair. The regional-indicator pairing looks back at most
+ * [MAX_RI_SCAN] indicators (a longer run of them may pair from the wrong one: it is not text a
+ * reader can tell apart anyway). So a cut costs O(MAX_BACKOFF x MAX_RI_SCAN) at worst, whatever
+ * the text, and cutting a 1 MiB line into pieces is linear.
  */
 object TextCut {
+    /** Most code points a cut backs off looking for a cluster boundary. */
+    const val MAX_BACKOFF = 64
+
+    /** Most regional indicators the flag pairing looks back over. */
+    const val MAX_RI_SCAN = 64
+
+    /**
+     * Test seam (r2): while set, every boundary test and every regional-indicator step adds one, so a
+     * test can show the work is linear without timing anything.
+     */
+    @Volatile
+    var stepProbe: java.util.concurrent.atomic.AtomicLong? = null
+
     /** [s] cut to at most [max] UTF-16 units, at a cluster boundary ([boundaryAtOrBefore]). */
     fun cut(s: String, max: Int): String {
         if (s.length <= max) return s
         return s.substring(0, boundaryAtOrBefore(s, max.coerceAtLeast(0)))
     }
 
-    /** The largest index <= [index] where [s] may be cut: 0 and `s.length` always are. */
-    fun boundaryAtOrBefore(s: CharSequence, index: Int): Int {
-        var p = index.coerceIn(0, s.length)
-        while (p > 0 && p < s.length && !isBoundary(s, p)) p = previousStart(s, p)
-        return p
+    /**
+     * Where [s] may be cut at or before [index]: the nearest cluster boundary within [MAX_BACKOFF]
+     * code points above [floor], else (a cluster too long to keep whole) a code-point cut at [index]
+     * that never splits a surrogate pair. 0 and `s.length` always are boundaries.
+     */
+    fun boundaryAtOrBefore(s: CharSequence, index: Int, floor: Int = 0): Int {
+        val hi = index.coerceIn(0, s.length)
+        if (hi == 0 || hi == s.length) return hi
+        val lo = floor.coerceIn(0, hi)
+        var p = hi
+        var steps = 0
+        while (p > lo && steps < MAX_BACKOFF) {
+            if (isBoundary(s, p)) return p
+            p = previousStart(s, p)
+            steps++
+        }
+        if (p == 0) return 0
+        // No boundary near enough: a code point, never half a pair (and above the floor when it can be).
+        val cp = if (Character.isLowSurrogate(s[hi]) && Character.isHighSurrogate(s[hi - 1])) hi - 1 else hi
+        return if (cp > lo) cp else hi
     }
 
     /** Whether a cut between `s[i - 1]` and `s[i]` keeps every cluster whole. */
     fun isBoundary(s: CharSequence, i: Int): Boolean {
+        stepProbe?.incrementAndGet()
         if (i <= 0 || i >= s.length) return true
         // Never between the two halves of a pair.
         if (Character.isLowSurrogate(s[i]) && Character.isHighSurrogate(s[i - 1])) return false
@@ -45,7 +78,8 @@ object TextCut {
         if (regional(next) && regional(prev)) {
             var run = 0
             var k = i
-            while (k > 0) {
+            while (k > 0 && run < MAX_RI_SCAN) {
+                stepProbe?.incrementAndGet()
                 val cp = Character.codePointBefore(s, k)
                 if (!regional(cp)) break
                 run++

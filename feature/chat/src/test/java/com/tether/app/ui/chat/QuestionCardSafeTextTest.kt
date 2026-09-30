@@ -167,5 +167,9 @@ class QuestionCardSafeTextTest {
         assertEquals("q".repeat(CARD_TEXT_MAX - 1) + "\u2026", cut)
         val accent = cut4k("q".repeat(CARD_TEXT_MAX - 1) + "e\u0301" + "tail")
         assertEquals("q".repeat(CARD_TEXT_MAX - 1) + "\u2026", accent)
+        // r2: one cluster longer than the bound is cut at a code point, not reduced to a lone "\u2026".
+        val flood = cut4k("q" + "\u0301".repeat(CARD_TEXT_MAX * 2))
+        assertEquals(CARD_TEXT_MAX + 1, flood.length)
+        assertTrue(flood.startsWith("q\u0301"))
     }
 }

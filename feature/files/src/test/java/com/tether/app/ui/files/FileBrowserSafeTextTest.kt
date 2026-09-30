@@ -340,4 +340,20 @@ class FileBrowserSafeTextTest {
         assertTrue(shown.any { it == "Destination: $dir".replace("\n", tok(0x0A)) })
         for (t in shown) assertFalse("raw line break in \"$t\"", t.contains('\n'))
     }
+
+    /** r2: splitting a hostile single line at the real 1 MiB preview cap is linear (boundary tests counted). */
+    @Test fun previewLinesIsLinearOnAHostileMegabyteLine() {
+        val n = com.tether.app.client.WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES.toInt()
+        for (text in listOf("x" + "\u0301".repeat(n - 1), "\uD83D\uDC68\u200D".repeat(n / 3), "\uD83C\uDDE9".repeat(n / 2))) {
+            val probe = java.util.concurrent.atomic.AtomicLong()
+            com.tether.app.client.TextCut.stepProbe = probe
+            val lines = try { previewLines(text) } finally { com.tether.app.client.TextCut.stepProbe = null }
+            assertEquals(text, lines.joinToString(""))
+            assertTrue("${probe.get()} steps for ${text.length}", probe.get() <= 8L * text.length)
+            for (line in lines) {
+                assertFalse(line.isNotEmpty() && Character.isLowSurrogate(line[0]))
+                assertFalse(line.isNotEmpty() && Character.isHighSurrogate(line[line.length - 1]))
+            }
+        }
+    }
 }

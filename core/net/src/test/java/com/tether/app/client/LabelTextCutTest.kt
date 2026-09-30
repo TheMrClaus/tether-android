@@ -39,8 +39,12 @@ class LabelTextCutTest {
             assertTrue(arabic.startsWith(cut))
             if (cut.length < arabic.length) assertFalse("a mark was cut from its letter at $max", TextCut.extendsPrevious(arabic[cut.length].code))
         }
-        // A pathological run of marks backs off to before its base.
-        assertEquals("ok ", TextCut.cut("ok a" + "\u0301".repeat(500), 100))
+        // A short cluster at the edge goes whole; a pathological run of marks (a cluster longer than
+        // the bounded back-off, r2) is cut at a code point instead, never splitting a pair.
+        assertEquals("ok ", TextCut.cut("ok a" + "\u0301".repeat(20), 10))
+        val flood = TextCut.cut("ok a" + "\u0301".repeat(500), 100)
+        assertEquals(100, flood.length)
+        assertTrue(flood.startsWith("ok a\u0301"))
     }
 
     @Test fun emojiSequencesAndFlagsStayWhole() {
@@ -94,6 +98,39 @@ class LabelTextCutTest {
             val v = LabelText.visibleValue("c".repeat(pad) + "\\".repeat(60))
             val body = v.substringBeforeLast("\u2026#")
             assertEquals(v, 0, body.count { it == '\\' } % 2)
+        }
+    }
+
+    /** r2: cutting stays linear on a hostile 1 MiB text: the back-off and the flag pairing are bounded. */
+    @Test fun cuttingAHostileMegabyteIsLinear() {
+        val n = 1 shl 20
+        val floods = mapOf(
+            "combining marks" to "a" + "\u0301".repeat(n - 1),
+            "zwj chain" to "\uD83D\uDC68\u200D".repeat(n / 3),
+            "regional indicators" to "\uD83C\uDDE9".repeat(n / 2),
+        )
+        for ((what, text) in floods) {
+            val probe = java.util.concurrent.atomic.AtomicLong()
+            TextCut.stepProbe = probe
+            try {
+                // Cut the whole text into 4,000-unit pieces, as the file preview does.
+                var start = 0
+                var pieces = 0
+                while (start < text.length) {
+                    var end = TextCut.boundaryAtOrBefore(text, minOf(text.length, start + 4_000), floor = start)
+                    if (end <= start) end = minOf(text.length, start + 4_000)
+                    assertFalse("$what: a pair split at $end", end < text.length && Character.isLowSurrogate(text[end]) && Character.isHighSurrogate(text[end - 1]))
+                    start = end
+                    pieces++
+                }
+                assertTrue("$what: $pieces pieces", pieces <= text.length / 3_900 + 1)
+                // At most MAX_BACKOFF boundary tests per piece, each with at most MAX_RI_SCAN steps.
+                val bound = pieces.toLong() * (TextCut.MAX_BACKOFF + 1) * (TextCut.MAX_RI_SCAN + 1)
+                assertTrue("$what: ${probe.get()} steps > $bound", probe.get() <= bound)
+                assertTrue("$what: ${probe.get()} steps for ${text.length} units", probe.get() <= 8L * text.length)
+            } finally {
+                TextCut.stepProbe = null
+            }
         }
     }
 }
