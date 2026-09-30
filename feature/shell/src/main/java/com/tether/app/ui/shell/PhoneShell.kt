@@ -64,6 +64,7 @@ object ShellTags {
     const val ToolsMenu = "shell-tools-menu"
     const val MenuFiles = "shell-menu-files"
     const val MenuAccounts = "shell-menu-accounts"
+    const val WarningBadge = "shell-warning-badge"
     fun nav(destination: TopBarDestination) = "shell-nav:${destination.name.lowercase()}"
     fun menuNav(destination: TopBarDestination) = "shell-menu-nav:${destination.name.lowercase()}"
 }

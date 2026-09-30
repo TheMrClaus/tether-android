@@ -31,12 +31,15 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -160,16 +163,30 @@ data class TopbarState(
 /** topbar.module.css `@media (max-width: 74rem)`: the brand's margin and the nav's gap tighten. */
 internal const val TOPBAR_TIGHT_MAX = 1184
 
-/**
- * App-only: below 64rem the expanded bar keeps the four destinations and moves Files and Accounts
- * into the utility menu (as the web's narrow bar does). The web keeps them on its bar from 48rem,
- * but this layout starts at 840dp, where brand, four destinations, Files, Accounts, the link state,
- * Settings and the menu do not fit on one row.
- */
-internal const val TOPBAR_TOOLS_INLINE_MIN = 1024
+/** The expanded bar's own items, in order: the four destinations, then Files and Accounts. */
+enum class BarItem(val destination: TopBarDestination?) {
+    Overview(TopBarDestination.Overview),
+    Sessions(TopBarDestination.Sessions),
+    Scheduled(TopBarDestination.Scheduled),
+    Usage(TopBarDestination.Usage),
+    Files(null),
+    Accounts(null),
+}
 
-/** Whether Files and Accounts are on the bar (else they are in the menu). */
-internal val TopbarState.toolsInline: Boolean get() = wide && viewportWidth >= TOPBAR_TOOLS_INLINE_MIN
+/**
+ * T15.4 r2: which of the expanded bar's items did not fit on it, measured, not guessed from the
+ * width: the room between the brand and the actions depends on the window AND the font scale. The
+ * bar keeps the longest prefix of [BarItem] that fits whole and folds the rest (from the end:
+ * Accounts first) into the utility menu, which lists exactly [folded]. So every destination and
+ * tool is always either fully on the bar or in the menu, never clipped or hidden. (The web keeps
+ * them all on its bar from 48rem; this layout starts at 840dp and honours the system font scale.)
+ * The phone bar folds everything, so it does not use this.
+ */
+@androidx.compose.runtime.Stable
+class TopbarFold {
+    var folded: Set<BarItem> by androidx.compose.runtime.mutableStateOf(emptySet())
+        internal set
+}
 
 /** topbar.module.css `@media (max-width: 23rem)`: the link word is visually hidden (still read). */
 internal const val TOPBAR_LINK_WORD_MIN = 368
@@ -190,6 +207,8 @@ fun TetherTopbar(
     state: TopbarState,
     onToggleMenu: () -> Unit,
     modifier: Modifier = Modifier,
+    /** r2: shared with [TopbarMenu], which lists what the bar folded. */
+    fold: TopbarFold = remember { TopbarFold() },
 ) {
     val t = LocalTetherTokens.current
     val wide = state.wide
@@ -235,25 +254,26 @@ fun TetherTopbar(
             if (wide) {
                 // `<nav aria-label="Primary">`: takes the room left between the brand and the
                 // actions (never more), so a tight window cannot push Settings off the bar.
-                Row(
-                    Modifier.weight(1f).fillMaxHeight().clipToBounds().semantics { paneTitle = "Primary" },
-                    horizontalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 8.dp),
-                ) {
-                    TopBarDestination.entries.forEach { destination ->
-                        val host = actions.hostOf(destination)
-                        NavLink(
-                            label = destination.label,
-                            active = destination == state.current,
-                            host = host,
-                            reason = TopbarReasons.NOT_YET,
-                            modifier = Modifier.testTag(ShellTags.nav(destination)),
-                        )
+                FoldingNav(
+                    gap = if (tight) 0.dp else 8.dp,
+                    fold = fold,
+                    modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds().semantics { paneTitle = "Primary" },
+                ) { item, probe ->
+                    val destination = item.destination
+                    val files = actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }
+                    val (label, host, reason, tag) = when {
+                        destination != null -> Quad(destination.label, actions.hostOf(destination), TopbarReasons.NOT_YET, ShellTags.nav(destination))
+                        item == BarItem.Files -> Quad("Files", files, TopbarReasons.FILES, ShellTags.FilesKey)
+                        else -> Quad("Accounts", actions.onOpenUsage, TopbarReasons.NOT_YET, ShellTags.AccountsKey)
                     }
-                    if (state.toolsInline) {
-                        val files = actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }
-                        NavLink("Files", active = false, host = files, reason = TopbarReasons.FILES, modifier = Modifier.testTag(ShellTags.FilesKey))
-                        NavLink("Accounts", active = false, host = actions.onOpenUsage, reason = TopbarReasons.NOT_YET, modifier = Modifier.testTag(ShellTags.AccountsKey))
-                    }
+                    NavLink(
+                        label = label,
+                        active = destination != null && destination == state.current,
+                        host = host,
+                        reason = reason,
+                        // A measuring probe is never placed; it carries no tag and no semantics.
+                        modifier = if (probe) Modifier.clearAndSetSemantics { } else Modifier.testTag(tag),
+                    )
                 }
             } else {
                 Spacer(Modifier.weight(1f))
@@ -315,10 +335,14 @@ fun TopbarMenu(
     state: TopbarState,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** r2: what the bar folded ([TetherTopbar]'s); the phone bar folds everything. */
+    fold: TopbarFold = remember { TopbarFold() },
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val wide = state.wide
+    val inMenu: (BarItem) -> Boolean = { !wide || it in fold.folded }
+    val menuDestinations = BarItem.entries.filter { it.destination != null && inMenu(it) }.mapNotNull { it.destination }
     BoxWithConstraints(modifier.fillMaxSize()) {
         Box(
             Modifier
@@ -337,9 +361,13 @@ fun TopbarMenu(
                 .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
                 .semantics { paneTitle = if (wide) "Tools" else "Navigation and tools" }
                 .testTag(ShellTags.ToolsMenu)
-                .padding(1.dp + 6.4.dp),
+                .heightIn(max = (maxHeight - (if (wide) WideTopbarHeight else TopbarHeight) - 16.dp).coerceAtLeast(120.dp))
+                .padding(1.dp)
+                // r2: at a large font the menu scrolls rather than run off the screen.
+                .verticalScroll(rememberScrollState())
+                .padding(6.4.dp),
         ) {
-            if (!wide) {
+            if (menuDestinations.isNotEmpty()) {
                 Text(
                     "NAVIGATE",
                     color = t.faint,
@@ -347,7 +375,7 @@ fun TopbarMenu(
                     style = cssText(type.ui, 0.68f, 650, trackingEm = 0.06f),
                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).clearAndSetSemantics { },
                 )
-                TopBarDestination.entries.forEach { destination ->
+                menuDestinations.forEach { destination ->
                     MenuItem(
                         label = destination.label,
                         icon = null,
@@ -359,7 +387,7 @@ fun TopbarMenu(
                 }
                 MenuSeparator()
             }
-            if (!state.toolsInline) {
+            if (inMenu(BarItem.Files)) {
                 MenuItem(
                     label = "Files",
                     icon = TetherIcons.FolderOpen,
@@ -367,6 +395,8 @@ fun TopbarMenu(
                     reason = TopbarReasons.FILES,
                     modifier = Modifier.testTag(ShellTags.MenuFiles),
                 )
+            }
+            if (inMenu(BarItem.Accounts)) {
                 MenuItem(
                     label = "Accounts",
                     icon = TetherIcons.Gauge,
@@ -705,7 +735,8 @@ internal fun TopbarBrand(
             color = ink ?: t.white,
             maxLines = 1,
             style = when {
-                studioDesktop -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
+                // r2: each skin its own wordmark; only Studio has a desktop size.
+                studio && studioDesktop -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
                 studio -> cssText(type.ui, 1.1f, 770, trackingEm = -0.04f)
                 else -> cssText(type.ui, 0.74f, 740, trackingEm = 0.22f)
             },
@@ -758,14 +789,18 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNeedle(
 /**
  * `.badge` on the menu trigger: a 1.1rem pill at `top: 0.35rem; right: 0.3rem`, `--brick` with
  * `--accent-ink` 700 0.62rem ("9+" past nine). The count is also in the trigger's name, so it is
- * never carried by the red dot alone.
+ * never carried by the red dot alone. r2: drawn at its 1× size at every font scale (its legend in
+ * dp, not scaled sp), so at a large font it cannot grow over the trigger's glyph; the scaled
+ * count is read in the trigger's name and printed in the menu's Health item.
  */
 @Composable
 internal fun WarningBadge(count: Int, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
+    val legend = with(androidx.compose.ui.platform.LocalDensity.current) { (0.62f * 16f).dp.toSp() }
     Box(
         modifier
+            .testTag(ShellTags.WarningBadge)
             .offset(x = (-4.8).dp, y = 5.6.dp)
             .heightIn(min = 17.6.dp)
             .widthIn(min = 17.6.dp)
@@ -778,7 +813,52 @@ internal fun WarningBadge(count: Int, modifier: Modifier) {
             if (count > 9) "9+" else "$count",
             color = t.accentInk,
             textAlign = TextAlign.Center,
-            style = cssText(type.ui, 0.62f, 700, lineHeight = 1f),
+            style = cssText(type.ui, 0.62f, 700, lineHeight = 1f).copy(fontSize = legend),
         )
+    }
+}
+
+private data class Quad(val label: String, val host: (() -> Unit)?, val reason: String, val tag: String)
+
+/**
+ * T15.4 r2: the expanded bar's `<nav>`: every [BarItem] is first measured as an unplaced probe at
+ * its natural width; the longest prefix that fits whole in the room given (with [gap] between)
+ * is composed and placed; the rest is reported to [fold] for the menu. Nothing is ever drawn cut.
+ */
+@Composable
+private fun FoldingNav(
+    gap: Dp,
+    fold: TopbarFold,
+    modifier: Modifier = Modifier,
+    item: @Composable (BarItem, probe: Boolean) -> Unit,
+) {
+    androidx.compose.ui.layout.SubcomposeLayout(modifier) { constraints ->
+        val gapPx = gap.roundToPx()
+        val height = constraints.maxHeight
+        val probe = androidx.compose.ui.unit.Constraints(minHeight = height, maxHeight = height)
+        val widths = BarItem.entries.map { entry ->
+            subcompose("probe-${entry.name}") { item(entry, true) }.sumOf { it.measure(probe).width }
+        }
+        var used = 0
+        var fits = 0
+        for (w in widths) {
+            val next = used + (if (fits == 0) 0 else gapPx) + w
+            if (next > constraints.maxWidth) break
+            used = next
+            fits++
+        }
+        val folded = BarItem.entries.drop(fits).toSet()
+        if (fold.folded != folded) fold.folded = folded
+        val placeables = BarItem.entries.take(fits).mapIndexed { index, entry ->
+            subcompose("item-${entry.name}") { item(entry, false) }
+                .map { it.measure(androidx.compose.ui.unit.Constraints.fixed(widths[index], height)) }
+        }
+        layout(constraints.maxWidth, height) {
+            var x = 0
+            placeables.forEach { parts ->
+                parts.forEach { it.placeRelative(x, 0) }
+                x += (parts.maxOfOrNull { it.width } ?: 0) + gapPx
+            }
+        }
     }
 }

@@ -319,6 +319,20 @@ class TetherViewModel(
      */
     val openRequests: SharedFlow<String> = _openRequests.asSharedFlow()
 
+    private val _bootLinkPending = MutableStateFlow(false)
+
+    /**
+     * T15.4 r2: a session link came with the intent that LAUNCHED the app and has not settled yet
+     * (it waits for the stored settings and the session list). Like the web's `?session=` on a
+     * cold load it wins the console's boot view: Sessions, with nothing behind it. Set by the root
+     * that routes links; never by a link arriving later (that one steps to Sessions).
+     */
+    val bootLinkPending: StateFlow<Boolean> = _bootLinkPending.asStateFlow()
+
+    fun setBootLinkPending(pending: Boolean) {
+        _bootLinkPending.value = pending
+    }
+
     /** Select [id] on behalf of a link: [selectSession] plus an [openRequests] event. Navigation only. */
     fun openSession(id: String) {
         selectSession(id)

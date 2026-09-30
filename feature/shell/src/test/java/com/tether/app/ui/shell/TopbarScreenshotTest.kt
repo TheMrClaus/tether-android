@@ -63,9 +63,10 @@ fun ComposeContentTestRule.snapTopbar(shot: TopbarShot, skin: TetherSkin, wide: 
                         onOpenSettings = {},
                         onNavigate = {},
                     )
+                    val fold = androidx.compose.runtime.remember { TopbarFold() }
                     Box(Modifier.fillMaxSize()) {
-                        TetherTopbar(actions, state, onToggleMenu = {})
-                        if (shot.menuOpen) TopbarMenu(actions, state, onDismiss = {})
+                        TetherTopbar(actions, state, onToggleMenu = {}, fold = fold)
+                        if (shot.menuOpen) TopbarMenu(actions, state, onDismiss = {}, fold = fold)
                     }
                 }
             }

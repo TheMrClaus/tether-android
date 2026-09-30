@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -249,6 +250,28 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         awaitTag(ShellTags.WorkspaceHeader)
         rule.waitUntil(5_000) { client.seenCalls.isNotEmpty() }
         assertEquals(listOf("h-s1"), client.seenCalls.toList())
+    }
+
+    /** r2: Lock only ever opens the sign-out confirmation; only its "Sign out" signs out. */
+    @Test fun lockOpensTheConfirmationAndOnlyItSignsOut() {
+        launch()
+        onOverview()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.LockKey).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Sign out of this server?").assertExists()
+        assertEquals("no sign-out before the confirmation", 0, client.logoutCalls.get())
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Sign out of this server?").assertDoesNotExist()
+        assertEquals("Cancel does not sign out", 0, client.logoutCalls.get())
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.LockKey).performClick()
+        // The confirmation's "Sign out" key (its title reads "Sign out" too).
+        val signOutKey = androidx.compose.ui.test.hasText("Sign out", substring = false) and
+            androidx.compose.ui.test.SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Button)
+        rule.onNode(signOutKey).performClick()
+        rule.waitUntil(5_000) { client.logoutCalls.get() == 1 }
     }
 
     @Test fun settingsOpensFromTheBarOnEveryView() {

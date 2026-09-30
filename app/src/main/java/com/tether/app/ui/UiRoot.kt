@@ -101,21 +101,36 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
             null -> Unit
         }
     }
+    // T15.4 r2: the intent the app was launched with (a later one arrives through onNewIntent). A
+    // link on it is a cold-start link: it wins the console's boot view (Sessions, nothing behind),
+    // even while it waits for the stored settings and the session list.
+    val bootIntent = remember { launchIntent }
     LaunchedEffect(launchIntent) {
         launchIntent ?: return@LaunchedEffect
+        val atBoot = launchIntent === bootIntent && DeepLinkIntents.mayOpenSession(launchIntent)
+        if (atBoot) vm.setBootLinkPending(true)
         client.storedSettingsLoaded.first { it }
         applyNav(navigator.offer(DeepLinkIntents.parse(launchIntent, client.serverUrl.value), navContextOf(client)))
+        if (atBoot) vm.setBootLinkPending(navigator.pendingSessionId != null)
     }
     LaunchedEffect(client, navigator) {
         client.storedSettingsLoaded.first { it }
         merge(client.configured, client.connection, client.serverUrl, client.sessions)
-            .collect { applyNav(navigator.step(navContextOf(client))) }
+            .collect {
+                applyNav(navigator.step(navContextOf(client)))
+                if (navigator.pendingSessionId == null) vm.setBootLinkPending(false)
+            }
     }
     // T6.2: downloaded tool-media clips belong to one sign-in on one server (ToolMediaCache).
     LaunchedEffect(client) { com.tether.app.ui.chat.syncToolMediaCache(client, context.cacheDir) }
     // dashboard.tsx selectActiveId: an explicit selection retires a waiting link.
     LaunchedEffect(vm, navigator) {
-        vm.selectedSessionId.drop(1).collect { if (it != null) navigator.onUserSelection() }
+        vm.selectedSessionId.drop(1).collect {
+            if (it != null) {
+                navigator.onUserSelection()
+                vm.setBootLinkPending(false)
+            }
+        }
     }
     // A switch made by a link swallows touches and hardware keys briefly, so input aimed at
     // the previous session cannot land on the new one's controls (another window can fire a

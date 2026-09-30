@@ -169,9 +169,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // A session already chosen by a link (a notification or deep link applied before this shell
     // composed) resolves the boot at once: the explicit session link wins, so nothing is read.
     var viewHistorySaved by rememberSaveable {
-        val linked = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null
+        val linked = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value
         mutableStateOf(ViewHistory(if (linked) DashboardView.Sessions else null).encode())
     }
+    // T15.4 r2: whether the operator has moved between views yet (the bar, the rail, a hand-off,
+    // Back). Until then the boot is still the app's own, so a cold-start link may still claim it.
+    var userNavigated by rememberSaveable { mutableStateOf(false) }
     val viewHistory = ViewHistory.decode(viewHistorySaved)
     val view = viewHistory.current
     val navigateTo: (DashboardView) -> Unit = { next ->
@@ -265,11 +268,22 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         val boot = prefs.viewBoot()
         if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
         val (resolved, _) = DashboardViews.resolve(
-            sessionLink = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null,
+            sessionLink = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value,
             storedView = boot.storedView,
             hasExistingPreferences = boot.hasExistingPreferences,
         )
         navigateTo(resolved)
+    }
+    // T15.4 r2 (the web's `?session=` on a cold load): a link the app was launched with wins the
+    // boot even when it only becomes known after the view resolved from storage (it waits for the
+    // stored settings, then for the session list). Until the operator navigates, the boot view is
+    // REPLACED by Sessions with nothing behind it, so Back still leaves the app (T4.4).
+    LaunchedEffect(vm) {
+        vm.bootLinkPending.collect { pending ->
+            if (!pending || userNavigated) return@collect
+            if (ViewHistory.decode(viewHistorySaved).canGoBack) return@collect
+            viewHistorySaved = ViewHistory(DashboardView.Sessions).encode()
+        }
     }
     // dashboard.tsx `writeStoredView`: remember the last top-level view for the next launch.
     LaunchedEffect(view) { view?.let { prefs.setLastView(it.key) } }
@@ -321,6 +335,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 // selected (or the empty workspace); Scheduled (T9.3) has no screen here yet.
                 onNavigate = { next ->
                     shell.closeDrawer()
+                    userNavigated = true
                     navigateTo(next)
                 },
                 views = setOf(DashboardView.Overview, DashboardView.Sessions),
@@ -357,6 +372,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         selectedId = selectedId,
                         workspaceRoot = workspaceRoot,
                         onSelect = { id ->
+                            userNavigated = true
                             vm.selectSession(id)
                             navigateTo(DashboardView.Sessions)
                             shell.onSessionSelected()
@@ -398,6 +414,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         // Opening or reviewing SELECTS the session (attach, draft) and never marks it seen
                         // here; the session view's own rule applies once it is on screen.
                         val openFromOverview: (String) -> Unit = { id ->
+                            userNavigated = true
                             vm.selectSession(id)
                             navigateTo(DashboardView.Sessions)
                             shell.onSessionSelected()
@@ -433,6 +450,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         // an Overview opened over a session, that session). The shell's own surfaces (menu, drawer,
         // popover, sheet) register later and so close first. Nothing behind: Back leaves the app.
         androidx.activity.compose.BackHandler(enabled = viewHistory.canGoBack) {
+            userNavigated = true
             viewHistorySaved = ViewHistory.decode(viewHistorySaved).back().encode()
         }
         val current = view?.let(TopBarDestination::of)

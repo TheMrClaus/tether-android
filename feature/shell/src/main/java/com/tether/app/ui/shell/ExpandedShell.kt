@@ -120,6 +120,8 @@ fun ExpandedShell(
         val collapsed = panels.sidebarCollapsed || !showRail
         // `.is-wide-workspace` (no active session): the inspector column is 0 and its handle hidden.
         val inspectorColumn = columnLayout && session != null
+        // r2: what the bar could not fit, listed by its menu.
+        val fold = remember { TopbarFold() }
         val topbarState = TopbarState(
             current = current,
             link = link,
@@ -132,7 +134,7 @@ fun ExpandedShell(
         )
 
         Column(Modifier.fillMaxSize().background(if (studio) t.graphite else t.mineral)) {
-            TetherTopbar(actions = topbar, state = topbarState, onToggleMenu = state::toggleMenu)
+            TetherTopbar(actions = topbar, state = topbarState, onToggleMenu = state::toggleMenu, fold = fold)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -206,7 +208,7 @@ fun ExpandedShell(
             )
         }
 
-        if (state.menuOpen) TopbarMenu(actions = topbar, state = topbarState, onDismiss = state::closeMenu)
+        if (state.menuOpen) TopbarMenu(actions = topbar, state = topbarState, onDismiss = state::closeMenu, fold = fold)
     }
 }
 

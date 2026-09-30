@@ -22,4 +22,11 @@ object DeepLinkIntents {
         if (intent.action != Intent.ACTION_VIEW) return null
         return DeepLinks.parse(intent.dataString, pairedBaseUrl)
     }
+
+    /**
+     * T15.4 r2: whether [intent] may name a session (only `ACTION_VIEW` with a data URI can; a
+     * notification tap never does). Read before the stored settings exist, so it does not parse.
+     */
+    fun mayOpenSession(intent: Intent?): Boolean =
+        intent != null && PushDeepLink.parse(intent) == null && intent.action == Intent.ACTION_VIEW && !intent.dataString.isNullOrEmpty()
 }
