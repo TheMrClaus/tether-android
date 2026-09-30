@@ -5,13 +5,24 @@ package com.tether.app.client
  * catalog error) is cleaned the way T6.4 cleans a command label before it is drawn: no bidi
  * embedding / override / isolate controls or directional marks (they could reorder the words around
  * them), no default-ignorable or blank-looking code points, whitespace (line breaks included)
- * collapsed to one space, trimmed, and cut at a code-point boundary to a bound. Values sent back to
- * the server are never cleaned: only what is displayed.
+ * collapsed to one space, trimmed, and cut to a bound. Values sent back to the server are never
+ * cleaned: only what is displayed.
+ *
+ * ta-28i: this is the LABEL rule every one-line server/agent label outside the transcript uses
+ * (session titles and snippets in the sidebar and search, push notifications). A cut is made at a
+ * character-cluster boundary ([TextCut]): never inside a surrogate pair, a combining sequence, an
+ * emoji ZWJ / modifier sequence or a flag, and never inside a [visibleValue] escape. The label rule
+ * drops every explicit bidi control and every mark (it is a single line: a dropped mark cannot
+ * reorder anything, and a label draws in its content's direction on screen), which is stricter than
+ * the transcript's prose rule (marks kept beside real RTL letters) and never looser.
  */
 object LabelText {
     const val MAX_LABEL = 80
     const val MAX_HINT = 300
     const val MAX_ERROR = 500
+
+    /** ta-28i: a session title (the web clamps it to two sidebar lines; this bounds the work). */
+    const val MAX_TITLE = 200
 
     /** Most catalog items one snapshot / controls reply may offer. */
     const val MAX_ITEMS = 200
@@ -55,7 +66,8 @@ object LabelText {
             }
         }
         if (out.length <= max) return out.toString()
-        val cut = ConsentGuard.cutCodePoints(out.toString(), max - 1).trimEnd()
+        // ta-28i: at a cluster boundary: an accent, a skin tone or half a flag is never left behind.
+        val cut = TextCut.cut(out.toString(), max - 1).trimEnd()
         return "$cut…"
     }
 
@@ -67,6 +79,10 @@ object LabelText {
     fun visibleValue(value: String?): String {
         if (value.isNullOrEmpty()) return ""
         val out = StringBuilder()
+        // ta-28i: where each source unit (a code point, an escape, a doubled backslash) ends, in
+        // [out] and in [value]: a cut is made only there, so an escape is never cut in half.
+        val outEnds = ArrayList<Int>()
+        val srcEnds = ArrayList<Int>()
         var i = 0
         while (i < value.length && out.length <= MAX_LABEL) {
             val cp = value.codePointAt(i)
@@ -79,14 +95,24 @@ object LabelText {
             } else {
                 out.appendCodePoint(cp)
             }
+            outEnds.add(out.length)
+            srcEnds.add(i)
         }
         if (out.length <= MAX_LABEL && i >= value.length) return out.toString()
         // Round 4 (P3): a cut value keeps a stable tag of the WHOLE value, so two long values that
         // share their first characters never display identically.
         val tag = java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }.take(6)
-        return ConsentGuard.cutCodePoints(out.toString(), MAX_LABEL - 8) + "…#" + tag
+        var keep = 0
+        for (k in outEnds.indices) {
+            if (outEnds[k] > MAX_LABEL - 8) break
+            if (TextCut.isBoundary(value, srcEnds[k])) keep = outEnds[k]
+        }
+        return out.substring(0, keep) + "…#" + tag
     }
+
+    /** ta-28i: a session title (sidebar, search, headers), by the label rule. */
+    fun title(text: String?): String = clean(text, MAX_TITLE)
 
     fun label(text: String?): String = clean(text, MAX_LABEL)
     fun hint(text: String?): String = clean(text, MAX_HINT)
