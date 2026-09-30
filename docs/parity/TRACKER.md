@@ -311,6 +311,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 | **Beads scrub: proceed at the next quiet window** (fresh store from a neutralised export; the event timeline is dropped, notes and evidence kept); no cache purge request; git history left as is, TRACKER wording neutralised in a normal commit | Owner choice | owner |
 | 2026-09-30 | **Service-proxy strip list: keep the wider gateway list** (oauth2-proxy, Pomerium, Authentik, Authelia, Google IAP, Cloudflare Access variants) | Safer for self-hosters on any gateway | owner |
 | 2026-09-30 | **tether #224 deploy later; the owner redacts the private tether issues/PRs before the visibility flip; beads-scrub backup deleted** | Owner choice | owner |
+| 2026-09-30 | **Transcript prose: every explicit bidi formatting character (embeddings, overrides, isolates) is a visible token; only LRM/RLM/ALM directly next to a real RTL letter stay raw; prose paragraph direction comes from content.** Copy: dangerous characters copy in visible form with a notice and an explicit Copy raw (no long-press raw copy) | Three review rounds kept finding isolate-based word swaps; implicit bidi already orders real Hebrew/Arabic. Cost: rare legitimate isolate use shows tokens | coordinator |
 
 ## Session log (append-only)
 
