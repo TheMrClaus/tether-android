@@ -553,6 +553,13 @@ class TranscriptBidiBehaviourTest {
             rule.waitForIdle()
             val ms = (System.nanoTime() - started) / 1_000_000
             assertTrue("fence $n took $ms ms", ms < 5_000)
+            // While clamped only the peek is laid out: what the layout holds stays bounded, whatever the fence.
+            val laidOut = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult), useUnmergedTree = true).fetchSemanticsNodes().maxOf { node ->
+                val results = mutableListOf<TextLayoutResult>()
+                node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+                results.firstOrNull()?.layoutInput?.text?.length ?: 0
+            }
+            assertTrue("fence $n laid out $laidOut characters", laidOut <= 2 * com.tether.app.ui.components.ExpandPeekChars)
             assertTrue(rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Show", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         }
     }
