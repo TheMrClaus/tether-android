@@ -35,6 +35,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -187,17 +188,28 @@ class ExternalLinkGate {
  * a link in it opens directly only [CONSENT_ARM_DELAY_MS] after that, so a tap aimed at what was
  * there a moment ago (text streaming in, the list following new output) asks first. Plain fields,
  * not state: a scroll never recomposes the body.
+ *
+ * r3: its CONTENT counts too. The timer restarts when the body's blocks change ([changed]: a link
+ * streamed into a body already on screen, a thinking card receiving text) and when its measured
+ * size changes (whatever is inside moved: a link pushed down within the body, a re-wrap).
  */
 internal class LinkSettle(private val clock: () -> Long) {
     private var anchor: Offset? = null
+    private var size: IntSize? = null
     private var since: Long = clock()
 
-    fun positioned(at: Offset, limitPx: Float) {
+    fun positioned(at: Offset, measured: IntSize, limitPx: Float) {
         val a = anchor
-        if (a == null || kotlin.math.abs(at.x - a.x) > limitPx || kotlin.math.abs(at.y - a.y) > limitPx) {
+        if (a == null || kotlin.math.abs(at.x - a.x) > limitPx || kotlin.math.abs(at.y - a.y) > limitPx || measured != size) {
             anchor = at
+            size = measured
             since = clock()
         }
+    }
+
+    /** r3: the body's content changed: whatever is under the finger may be new. */
+    fun changed() {
+        since = clock()
     }
 
     fun settled(): Boolean = anchor != null && clock() - since >= CONSENT_ARM_DELAY_MS

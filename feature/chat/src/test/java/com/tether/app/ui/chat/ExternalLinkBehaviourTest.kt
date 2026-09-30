@@ -197,6 +197,92 @@ class ExternalLinkBehaviourTest {
         assertEquals(listOf("https://example.test/docs"), opened)
     }
 
+    private fun host(content: @androidx.compose.runtime.Composable () -> Unit) {
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Machine)) {
+                CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) { content() }
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    // r3 (ported from the verifier's probes): content that changes inside a settled body.
+
+    @Test fun linkStreamedIntoASettledBodyAsks() {
+        var md by mutableStateOf("Thinking about it")
+        host { MarkdownBody(parseMarkdown(md), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) }
+        settleLinks()
+        md = "Thinking about it\n\n[https://example.com](https://example.com)"
+        rule.waitForIdle()
+        tapLink()
+        assertEquals("a link that just appeared under the finger asks", emptyList<String>(), opened)
+        assertTrue(sheetShown())
+        rule.onNodeWithTag(EXTERNAL_LINK_CANCEL_TAG).performClick()
+        rule.waitForIdle()
+        settleLinks()
+        tapLink()
+        assertEquals("settled again: direct", listOf("https://example.com"), opened)
+    }
+
+    @Test fun linkPushedDownInsideASettledBodyAsks() {
+        var md by mutableStateOf("[https://example.com](https://example.com)")
+        host { MarkdownBody(parseMarkdown(md), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) }
+        settleLinks()
+        md = (1..8).joinToString("\n\n") { "New line $it" } + "\n\n[https://example.com](https://example.com)"
+        rule.waitForIdle()
+        tapLink()
+        assertEquals("a link that moved inside its body asks", emptyList<String>(), opened)
+        assertTrue(sheetShown())
+    }
+
+    @Test fun thinkingStreamAddsLinkToOpenCard() {
+        var txt by mutableStateOf("Considering")
+        host { ThinkingCard(com.tether.app.protocol.model.TurnBlock(blockId = "k", kind = "thinking", text = txt)) }
+        rule.onNode(androidx.compose.ui.test.hasContentDescription("Thinking")).performClick()
+        rule.waitForIdle()
+        settleLinks()
+        txt = "Considering\n\n[https://example.com](https://example.com)"
+        rule.waitForIdle()
+        tapLink()
+        assertEquals("a thinking delta that adds a link: asks", emptyList<String>(), opened)
+        assertTrue(sheetShown())
+    }
+
+    @Test fun aSameSizedContentChangeAsksToo() {
+        // The blocks change, the body's size and position do not: the timer still restarts.
+        var md by mutableStateOf("[https://example.com](https://example.com) one")
+        host { MarkdownBody(parseMarkdown(md), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) }
+        settleLinks()
+        md = "[https://example.org](https://example.org) one"
+        rule.waitForIdle()
+        tapLink()
+        assertEquals(emptyList<String>(), opened)
+        assertTrue(sheetShown())
+    }
+
+    @Test fun aLinkInATableCellAlwaysAsks() {
+        // r3: a cell does not wrap (it scrolls sideways): `https://bank.example.` may be all that shows.
+        val link = "[https://bank.example.evil.co](https://bank.example.evil.co)"
+        var md by mutableStateOf("| $link | b |\n|---|---|\n| c | d |")
+        host { MarkdownBody(parseMarkdown(md), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) }
+        for (table in listOf(md, "| a | b |\n|---|---|\n| $link | d |")) {
+            md = table
+            rule.waitForIdle()
+            settleLinks()
+            tapLink()
+            assertEquals(table, emptyList<String>(), opened)
+            assertTrue(table, sheetShown())
+            rule.onNodeWithTag(EXTERNAL_LINK_CANCEL_TAG).performClick()
+            rule.waitForIdle()
+        }
+        // The same link outside a table opens directly.
+        md = "See $link."
+        rule.waitForIdle()
+        settleLinks()
+        tapLink()
+        assertEquals(listOf("https://bank.example.evil.co"), opened)
+    }
+
     @Test fun aLinkInsideAClampedBlockAsksFirstUntilTheBlockIsOpen() {
         val filler = (1..40).joinToString("\n\n") { "Line $it of a long thought." }
         rule.setContent {
@@ -305,7 +391,9 @@ class ExternalLinkBehaviourTest {
             add("body=%3Fbcc=spy@evil.test")
             add("")
         }
-        val bases = listOf("ops@example.test", "ops@example.test,dev@example.org", "o.p+s@ex\u0430mple.com")
+        // r3: and every character a local part may hold, one at a time.
+        val bases = listOf("ops@example.test", "ops@example.test,dev@example.org", "o.p+s@ex\u0430mple.com") +
+            "!$&'*+-=^_`{|}~.".map { c -> "a${c}b@example.test" }
         var checked = 0
         for (base in bases) for (q in payloads) {
             val href = if (q.isEmpty()) "mailto:$base" else "mailto:$base?$q"

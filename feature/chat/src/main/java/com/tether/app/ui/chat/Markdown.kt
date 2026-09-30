@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -448,14 +449,20 @@ fun MarkdownBody(
     val clock = LocalLinkClock.current
     val settle = remember(clock) { LinkSettle(clock) }
     val movePx = with(density) { CONTROL_REARM_MOVE_DP.dp.toPx() }
-    val onLink: (MdInline.Link) -> Unit = remember {
-        { link ->
-            currentGate.request(
-                currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar,
-                forceConfirm = currentClamped || !settle.settled(),
-            )
-        }
+    // r3: new content restarts the timer (a link streamed in, or pushed down, under the finger).
+    DisposableEffect(settle, blocks) {
+        settle.changed()
+        onDispose {}
     }
+    fun handle(link: MdInline.Link, force: Boolean) {
+        currentGate.request(
+            currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar,
+            forceConfirm = force || currentClamped || !settle.settled(),
+        )
+    }
+    val onLink: (MdInline.Link) -> Unit = remember { { link -> handle(link, force = false) } }
+    // r3: a table cell does not wrap (it scrolls sideways), so its link can be cut off: it always asks.
+    val onTableLink: (MdInline.Link) -> Unit = remember { { link -> handle(link, force = true) } }
     fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
     val body = style.fontSize
     val baseWeight = style.fontWeight?.weight ?: 400
@@ -464,7 +471,7 @@ fun MarkdownBody(
         find?.let { f -> blocks.runningFold(0) { acc, b -> acc + countBlockMatches(b, f.needle) } }
     }
 
-    Column(modifier.onGloballyPositioned { settle.positioned(it.positionInWindow(), movePx) }) {
+    Column(modifier.onGloballyPositioned { settle.positioned(it.positionInWindow(), it.size, movePx) }) {
         var previousBottom: Dp? = null
         blocks.forEachIndexed { index, block ->
             val headingStyle = (block as? MdBlock.Heading)?.let { headingStyle(type, it.tag) }
@@ -494,7 +501,7 @@ fun MarkdownBody(
                 is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.Quote -> MdQuote(block, style, t, type, baseWeight, onLink, mark)
-                is MdBlock.Table -> MdTable(block, style, t, type, onLink, mark)
+                is MdBlock.Table -> MdTable(block, style, t, type, onTableLink, mark)
                 is MdBlock.Code -> MdCodeBlock(block, mark)
                 MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             }
