@@ -67,6 +67,10 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import com.tether.app.client.LabelText
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -641,6 +645,9 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
     val studio = t.studio
     val time = Format.relativeTime(hit.updatedAt.toDouble(), now.toDouble())
     val path = GlobalSearchModel.hitPath(hit.cwd, workspaceRoot)
+    // ta-28i: the title and snippet by the label rule (in their content's direction), the path as code (LTR).
+    val name = LabelText.title(hit.name)
+    val snippet = LabelText.hint(hit.snippet)
     Column(
         Modifier
             .fillMaxWidth()
@@ -648,10 +655,10 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) {
                 contentDescription = buildString {
-                    append(hit.name)
+                    append(name)
                     append(", ").append(time)
-                    append(", ").append(path)
-                    if (hit.snippet.isNotEmpty()) append(", ").append(hit.snippet)
+                    append(", ").append(SafeText.code(path))
+                    if (snippet.isNotEmpty()) append(", ").append(snippet)
                     if (hit.matchCount > 1) append(", ${hit.matchCount} matches")
                 }
             }
@@ -662,8 +669,8 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ProviderCap(hit.provider, 32.dp, inRow = false)
             Text(
-                hit.name,
-                style = if (studio) css(type.ui, 0.875f, 500, lineHeight = 1.5f) else css(type.ui, 0.9f, 500),
+                name,
+                style = (if (studio) css(type.ui, 0.875f, 500, lineHeight = 1.5f) else css(type.ui, 0.9f, 500)).copy(textDirection = proseDirection),
                 color = t.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -672,15 +679,15 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
             Text(time, style = css(type.ui, if (studio && narrow) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, softWrap = false)
         }
         if (studio) Spacer(Modifier.height(2.dp)) // margin-top 5px (the column gap is 3px)
-        Text(path, style = css(type.ui, if (studio) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (hit.snippet.isNotEmpty()) {
+        Text(codeLabel(path), style = css(type.ui, if (studio) 0.6875f else 0.72f, 400), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (snippet.isNotEmpty()) {
             if (studio) Spacer(Modifier.height(4.dp)) // margin-top 7px
             Text(
                 buildAnnotatedString {
-                    append(hit.snippet)
+                    append(snippet)
                     if (hit.matchCount > 1) withStyle(SpanStyle(color = t.muted)) { append(" · ${hit.matchCount} matches") }
                 },
-                style = if (studio) css(type.ui, 0.8125f, 400, lineHeight = 1.65f) else css(type.ui, 0.8f, 400, lineHeight = 1.45f),
+                style = (if (studio) css(type.ui, 0.8125f, 400, lineHeight = 1.65f) else css(type.ui, 0.8f, 400, lineHeight = 1.45f)).copy(textDirection = proseDirection),
                 color = t.slate,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

@@ -111,8 +111,12 @@ object LabelText {
         return out.substring(0, keep) + "…#" + tag
     }
 
-    /** ta-28i: a session title (sidebar, search, headers), by the label rule. */
-    fun title(text: String?): String = clean(text, MAX_TITLE)
+    /**
+     * ta-28i: a session title (sidebar, search, headers), by the label rule. A title made only of
+     * invisible characters and bidi controls is never drawn as nothing: it is spelled out
+     * ([visibleValue]), so two such sessions never look alike and the reader sees what it holds.
+     */
+    fun title(text: String?): String = clean(text, MAX_TITLE).ifEmpty { if (text.isNullOrBlank()) "" else visibleValue(text) }
 
     fun label(text: String?): String = clean(text, MAX_LABEL)
     fun hint(text: String?): String = clean(text, MAX_HINT)

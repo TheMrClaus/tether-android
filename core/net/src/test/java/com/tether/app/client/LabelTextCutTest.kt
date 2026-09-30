@@ -73,6 +73,9 @@ class LabelTextCutTest {
         assertEquals(hebrew, LabelText.title(hebrew))
         assertEquals(arabic, LabelText.title(arabic))
         assertEquals(LabelText.MAX_TITLE, LabelText.title("y".repeat(10_000)).length)
+        // A title of nothing but invisibles is spelled out, never an empty row.
+        assertEquals("\\u{202E}\\u{200B}", LabelText.title("\u202E\u200B"))
+        assertEquals("", LabelText.title("   "))
     }
 
     @Test fun aVisibleValueNeverCutsAnEscapeOrAPairInHalf() {

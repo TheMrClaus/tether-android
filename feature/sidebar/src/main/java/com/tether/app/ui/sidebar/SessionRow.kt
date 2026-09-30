@@ -56,6 +56,10 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import com.tether.app.client.LabelText
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.helpers.Format
@@ -202,7 +206,9 @@ internal fun SessionRow(
 
     val live = entry.live
     val provider = live?.provider?.takeIf { it.isNotEmpty() } ?: entry.history?.provider ?: ""
-    val name = Web.sidebarSessionName(entry.js)
+    // ta-28i: the server's title by the label rule (no bidi control, mark or invisible; cut at a
+    // cluster boundary), drawn in its content's direction; it is also what TalkBack reads.
+    val name = LabelText.title(Web.sidebarSessionName(entry.js))
     val updatedAt = SidebarModel.rowUpdatedAt(entry)
     val mode = (Web.sidebarSessionMode(entry.js) as? com.tether.app.protocol.tree.JsStr)?.value
     val endable = live != null && !live.runtimeArchived
@@ -435,7 +441,8 @@ internal fun SessionRow(
                         }
                         Text(
                             name,
-                            style = if (studio) css(type.ui, 0.78f, 600, lineHeight = 1.45f) else css(type.ui, 0.84f, 650, trackingEm = -0.005f, lineHeight = 1.4f),
+                            style = (if (studio) css(type.ui, 0.78f, 600, lineHeight = 1.45f) else css(type.ui, 0.84f, 650, trackingEm = -0.005f, lineHeight = 1.4f))
+                                .copy(textDirection = proseDirection),
                             color = if (studio) (if (active) Color.White else t.ink) else ink,
                             maxLines = if (studio) 1 else 2,
                             overflow = TextOverflow.Ellipsis,
@@ -453,11 +460,13 @@ internal fun SessionRow(
                             if (d.newTurns > 0) {
                                 Text("${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"} since you left", style = css(type.ui, 0.7f, 600), color = t.violet)
                             }
-                            if (d.snippet.isNotEmpty()) Text(d.snippet, style = css(type.ui, 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val snippet = LabelText.hint(d.snippet)
+                            if (snippet.isNotEmpty()) Text(snippet, style = css(type.ui, 0.7f, 400).copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    location?.let { Text(it, style = css(type.ui, if (studio) 0.64f else 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    entry.snippet?.let { SnippetLine(it, entry.matchCount) }
+                    // ta-28i: the location is a path: code, LTR.
+                    location?.let { Text(codeLabel(it), style = css(type.ui, if (studio) 0.64f else 0.7f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount) }
                 }
                 // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
                 SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
@@ -607,9 +616,9 @@ private fun rowDescription(
     entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
         append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
     }
-    location?.let { append(", $it") }
-    // T5.3: a content-search hit says where it matched.
-    entry.snippet?.let { snippet ->
+    location?.let { append(", ").append(SafeText.code(it)) }
+    // T5.3: a content-search hit says where it matched. ta-28i: by the label rule, as drawn.
+    entry.snippet?.let { LabelText.hint(it) }?.let { snippet ->
         append(", matched: $snippet")
         if (entry.matchCount > 1) append(", ${entry.matchCount} matches")
     }
@@ -631,7 +640,7 @@ private fun SnippetLine(snippet: String, matchCount: Int) {
         horizontalArrangement = Arrangement.spacedBy(0.25f.rem),
     ) {
         SmallIcon(TetherIcons.Search, t.faint, 11.dp)
-        Text(snippet, style = style, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Text(snippet, style = style.copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         if (matchCount > 1) Text("·\u00A0$matchCount matches", style = style, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
     }
 }
