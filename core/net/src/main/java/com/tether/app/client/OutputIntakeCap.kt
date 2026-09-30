@@ -42,8 +42,50 @@ object OutputIntakeCap {
      */
     internal val commandsScanned = java.util.concurrent.atomic.AtomicLong()
 
-    /** [next] with every command that is not [previous]'s own object (by commandId) capped. */
-    fun capTree(previous: JsObj?, next: JsObj, maxChars: Int = MAX_CHARS, maxSegments: Int = MAX_SEGMENTS): JsObj {
+    /**
+     * Test seam (T7.3 r2): how many foreground `command_output` blocks [capTree] has scanned. A
+     * publish scans only the blocks that are not the previous tree's own objects: one live delta
+     * scans the one block it touched.
+     */
+    internal val outputBlocksScanned = java.util.concurrent.atomic.AtomicLong()
+
+    /**
+     * [next] with every background command that is not [previous]'s own object (by commandId) capped,
+     * and (T7.3 r2) every foreground `command_output` block that is not [previous]'s own object (by
+     * turn and block id) capped the same way: the fold's `command_output_delta` appends without a
+     * bound too (events.mjs:2210).
+     */
+    fun capTree(previous: JsObj?, next: JsObj, maxChars: Int = MAX_CHARS, maxSegments: Int = MAX_SEGMENTS): JsObj =
+        capOutputBlocks(previous, capBackground(previous, next, maxChars, maxSegments), maxChars, maxSegments)
+
+    private fun capOutputBlocks(previous: JsObj?, next: JsObj, maxChars: Int, maxSegments: Int): JsObj {
+        val turns = next["turnsById"] as? JsObj ?: return next
+        val before = previous?.get("turnsById") as? JsObj
+        if (before === turns) return next
+        var outTurns = turns
+        for ((turnId, t) in turns) {
+            val turn = t as? JsObj ?: continue
+            val priorTurn = before?.get(turnId)
+            if (priorTurn === turn) continue
+            val blocks = turn["blocksById"] as? JsObj ?: continue
+            val priorBlocks = (priorTurn as? JsObj)?.get("blocksById") as? JsObj
+            if (priorBlocks === blocks) continue
+            var outBlocks = blocks
+            for ((blockId, b) in blocks) {
+                val block = b as? JsObj ?: continue
+                if ((block["kind"] as? JsStr)?.value != "command_output") continue
+                // Reference identity on purpose: the previous tree's object was capped when it was published.
+                if (priorBlocks?.get(blockId) === block) continue
+                outputBlocksScanned.incrementAndGet()
+                val capped = capCommand(block, maxChars, maxSegments)
+                if (capped !== block) outBlocks = outBlocks.put(blockId, capped)
+            }
+            if (outBlocks !== blocks) outTurns = outTurns.put(turnId, turn.put("blocksById", outBlocks))
+        }
+        return if (outTurns === turns) next else next.put("turnsById", outTurns)
+    }
+
+    private fun capBackground(previous: JsObj?, next: JsObj, maxChars: Int, maxSegments: Int): JsObj {
         val commands = next["backgroundCommands"] as? JsArr ?: return next
         val before = previous?.get("backgroundCommands") as? JsArr
         if (before === commands) return next

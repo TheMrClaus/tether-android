@@ -108,4 +108,41 @@ class CommandGuardTest {
         assertEquals("line\nnext", LabelText.output("line\u2028next"))
         assertEquals("", LabelText.output(null))
     }
+
+    // --- r2: bounded escape scanning (TerminalEscapes) -------------------------------------------
+
+    @Test
+    fun anUnterminatedStringSequenceHidesOnlyItsIntroducer() {
+        // No BEL / ST before the line break: the rest of the stream stays visible.
+        assertEquals("0;title\nline two\nline three", LabelText.output("\u001B]0;title\nline two\nline three"))
+        // CAN / SUB end the scan too (then are dropped as controls).
+        assertEquals("8;;xafter", LabelText.output("\u001B]8;;x\u0018after"))
+        assertEquals("qrest", LabelText.output("\u001BPq\u001Arest"))
+        // A body past the bound (4 KiB) never swallows what follows.
+        val long = "\u001B]52;c;" + "A".repeat(TerminalEscapes.MAX_STRING + 10) + "\u0007visible"
+        val shown = LabelText.output(long)
+        assertTrue(shown.endsWith("visible"))
+        assertTrue(shown.startsWith("52;c;AAAA"))
+        // Terminated within the bound: hidden whole.
+        assertEquals("before after", LabelText.output("before \u001B]0;" + "t".repeat(TerminalEscapes.MAX_STRING - 10) + "\u0007after"))
+    }
+
+    @Test
+    fun anUnfinishedCsiHidesOnlyItsIntroducer() {
+        assertEquals("31;1 still here", LabelText.output("\u001B[31;1\u0001 still here"))
+        assertEquals("ok", LabelText.output("\u001B[2Kok"))
+        // More parameter bytes than the bound: not a sequence it will hide.
+        assertEquals("1".repeat(300) + "m", LabelText.output("\u001B[" + "1".repeat(300) + "m"))
+    }
+
+    @Test
+    fun eightBitC1IntroducersAreConsumedWithTheirParameters() {
+        assertEquals(" visible", LabelText.output("\u009D52;c;c2VjcmV0\u009C visible"))
+        assertEquals(" visible", LabelText.output("\u009D0;title\u0007 visible"))
+        assertEquals("red plain", LabelText.output("\u009B31mred\u009B0m plain"))
+        assertEquals("ok", LabelText.output("\u0090qpayload\u001B\\ok"))
+        assertEquals("ok", LabelText.output("\u009Fapc\u009Cok"))
+        // Unterminated 8-bit OSC: only the introducer goes.
+        assertEquals("52;c;tail\nnext", LabelText.output("\u009D52;c;tail\nnext"))
+    }
 }

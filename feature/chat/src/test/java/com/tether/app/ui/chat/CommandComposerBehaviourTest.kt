@@ -29,6 +29,9 @@ import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.theme.TetherSkin
+import com.tether.app.protocol.reduce.ev
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -164,6 +167,16 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
+    fun anOversizedCommandSaysTheLimit() {
+        show()
+        input().performTextInput("!echo " + "x".repeat(com.tether.app.client.CommandGuard.COMMAND_MAX_BYTES))
+        input().performKeyInput { pressKey(Key.Enter) }
+        rule.waitForIdle()
+        assertTrue(rec.runs.isEmpty())
+        rule.onNodeWithText(COMMAND_TOO_LONG_COPY).assertExists()
+    }
+
+    @Test
     fun aCopyThatIsNotLiveRunsNothing() {
         liveness = ComposerLiveness(interruptLock = "Connect to run it. This is a saved copy.", stale = null)
         show()
@@ -278,12 +291,36 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
-    fun serverCommandNamesAreDrawnClean() {
-        val hostile = ServerMessage.SessionControls("sess-0001", emptyList(), listOf(SessionCommandOption("rev\u202Eiew", "line1\nline2", null, null, true)), model = null)
+    fun serverCommandTextIsDrawnCleanAndAnUncleanNameIsNeverOffered() {
+        // r2: a name that is not already clean is not offered (completing it would put raw server
+        // text in the draft); a clean name's hint and description are drawn clean.
+        val hostile = ServerMessage.SessionControls(
+            "sess-0001", emptyList(),
+            listOf(
+                SessionCommandOption("rev\u202Eiew", "spoofed", null, null, true),
+                SessionCommandOption("re\u200Bset", "zero width", null, null, true),
+                SessionCommandOption("revert", "line1\nline2", "<\u202Esha>", null, true),
+            ),
+            model = null,
+        )
         show(ComposerFixtures.idle, controls = hostile)
-        input().performTextInput("/rev")
+        input().performTextInput("/re")
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("/review, line1 line2, Tether").assertExists()
+        rule.onNodeWithContentDescription("/revert <sha>, line1 line2, Tether").assertExists()
+        rule.onAllNodesWithContentDescription("/review, spoofed, Tether").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("/reset, zero width, Tether").assertCountEquals(0)
+        input().performKeyInput { pressKey(Key.Enter) }
+        rule.waitForIdle()
+        assertEquals("/revert ", inputText())
+    }
+
+    @Test
+    fun theOfferableRuleTakesOnlyCleanNames() {
+        assertTrue(offerableCommand(SessionCommandOption("security-review")))
+        assertTrue(!offerableCommand(SessionCommandOption("a b")))
+        assertTrue(!offerableCommand(SessionCommandOption("")))
+        assertTrue(!offerableCommand(SessionCommandOption("x\u0007")))
+        assertTrue(!offerableCommand(SessionCommandOption("rev\u2066iew")))
     }
 
     @Test
@@ -455,4 +492,36 @@ class CommandComposerBehaviourTest {
 
     private fun rawBlock(f: ChatFixtures.Folded): JsObj =
         buildChatItems(f.projection, f.tree, showThinking = false).filterIsInstance<ChatItem.Block>().single { it.block.kind == COMMAND_OUTPUT_BLOCK }.raw!!
+
+    @Test
+    fun thePanelCleansOnlyABoundedRawTail() {
+        val huge = com.tether.app.protocol.tree.JsArr.of(
+            (0 until 40).map { i ->
+                com.tether.app.protocol.tree.JsObj.of(
+                    "stream" to com.tether.app.protocol.tree.JsStr(if (i % 2 == 0) "stdout" else "stderr"),
+                    "text" to com.tether.app.protocol.tree.JsStr("$i:" + "y".repeat(50_000)),
+                )
+            },
+        )
+        val raw = commandPanelRawTail(huge)
+        assertTrue(raw.segments.sumOf { it.text.length } <= 2 * COMMAND_PANEL_MAX_CHARS)
+        val shown = commandPanelText(huge)
+        assertTrue(shown.segments.sumOf { it.text.length } <= COMMAND_PANEL_MAX_CHARS)
+        assertTrue(shown.dropped > 0)
+    }
+
+    @Test
+    fun anUnterminatedEscapeInTheStreamNeverHidesWhatFollows() {
+        val f = ChatFixtures.fold(
+            ev("turn_started", "t1", ts = CommandFixtures.T) {
+                put("commandRun", buildJsonObject { put("command", "cat log"); put("cwd", "/w"); put("logFile", "/w/l") })
+            },
+            ev("command_output_started", "t1", ts = CommandFixtures.T) { put("blockId", "b"); put("command", "cat log"); put("logFile", "/w/l") },
+            ev("command_output_delta", "t1", ts = CommandFixtures.T) { put("blockId", "b"); put("stream", "stdout"); put("text", "start \u001B]0;") },
+            ev("command_output_delta", "t1", ts = CommandFixtures.T) { put("blockId", "b"); put("stream", "stdout"); put("text", "title\nline after\n") },
+        )
+        val view = commandOutputView(rawBlock(f))!!
+        val text = commandPanelText(view.segments).segments.joinToString("") { it.text }
+        assertEquals("start 0;title\nline after\n", text)
+    }
 }

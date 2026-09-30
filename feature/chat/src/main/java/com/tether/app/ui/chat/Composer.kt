@@ -300,6 +300,10 @@ fun Composer(
             flash("Type a command after “!” to run it.")
             return
         }
+        if (command.toByteArray(Charsets.UTF_8).size > CommandGuard.COMMAND_MAX_BYTES) {
+            flash(COMMAND_TOO_LONG_COPY)
+            return
+        }
         if (!background && busy) {
             flash("Wait for the current turn to finish, or use “Send to background”.")
             return
@@ -372,7 +376,7 @@ fun Composer(
             if (codexCompactReady) listOf(SessionCommandOption("compact", "Summarize conversation to prevent hitting the context limit", "", supported = true)) else emptyList()
         } else {
             composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList(), collator)
-        }
+        }.filter(::offerableCommand)
     }
 
     // The command-name fragment being typed ("/mod" -> "mod"), or null when the

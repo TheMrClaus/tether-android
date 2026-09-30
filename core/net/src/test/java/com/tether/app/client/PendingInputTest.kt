@@ -60,17 +60,36 @@ class PendingInputTest {
 
     private fun tree(records: List<PendingRecord>) = JsArr.of(records.map { it.tree })
 
+    private fun expressibleMention(v: Any?): com.tether.app.protocol.DelegateMention? {
+        val o = v as? JsObj ?: return null
+        if (o.keys.any { it !in setOf("kind", "provider", "model", "reasoningEffort", "mode") }) return null
+        if ((o["kind"] as? com.tether.app.protocol.tree.JsStr)?.value != "delegate") return null
+        val provider = (o["provider"] as? com.tether.app.protocol.tree.JsStr)?.value?.takeIf { it.isNotEmpty() } ?: return null
+        val mode = (o["mode"] as? com.tether.app.protocol.tree.JsStr)?.value?.takeIf { it == "review" || it == "build" } ?: return null
+        fun opt(key: String): Pair<Boolean, String?> = when (val x = o[key]) {
+            null -> true to null
+            is com.tether.app.protocol.tree.JsStr -> true to x.value
+            else -> false to null
+        }
+        val (modelOk, model) = opt("model")
+        val (effortOk, effort) = opt("reasoningEffort")
+        if (!modelOk || !effortOk) return null
+        return com.tether.app.protocol.DelegateMention(provider, mode, model, effort)
+    }
+
     private fun addRecordArgs(store: PendingStore, input: Any?, now: Long): Any {
         val obj = input as? JsObj ?: throw Unexpressible("input is not an object")
-        // The socket never files a P2.4 @Agent mention; the facade has no mention parameter.
-        if (obj.has("mention")) throw Unexpressible("mention")
+        // T7.3: the facade files a P2.4 @Agent mention (sendDelegated). It takes a typed
+        // DelegateMention, so only a well-formed one it can rebuild key for key is expressible; the
+        // web port's own shape check (dropping a malformed one) is covered on the port itself.
+        val mention = obj["mention"]?.let { expressibleMention(it) ?: throw Unexpressible("mention the typed facade cannot express") }
         val attachments = (obj["attachments"] as? JsArr)?.map { a ->
             val at = a as JsObj
             Attachment(string(at["name"]), string(at["mediaType"]), string(at["data"]))
         }
         val r = PendingInput.addRecord(
             store, string(obj["key"]), string(obj["kind"]), string(obj["sessionId"]), string(obj["text"]), now,
-            attachments,
+            attachments, mention,
         )
         return JsObj.of("store" to r.store.tree, "evicted" to tree(r.evicted))
     }

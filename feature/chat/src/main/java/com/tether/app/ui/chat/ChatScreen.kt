@@ -237,7 +237,8 @@ fun ChatScreen(
                 origin = drawnFor,
                 agents = com.tether.app.client.CommandGuard.delegateAgents(s, providerCatalog),
                 onRequestAgents = { vm.client.requestProviderCatalog() },
-                onSendDelegated = { text, attachments, mention -> vm.sendDelegated(s.id, text, attachments, mention) },
+                // r2: bound to the server the chip was picked on; the client re-checks it with the record.
+                onSendDelegated = { text, attachments, mention -> vm.sendDelegated(s.id, text, attachments, mention, drawnFor) },
             )
         }
     }

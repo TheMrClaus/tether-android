@@ -91,8 +91,8 @@ object LabelText {
     /**
      * T7.3: a command's OUTPUT (a terminal stream) as it is drawn and read aloud. The line structure is
      * kept: "\n" stays, "\r\n" and a lone "\r" (a progress line rewriting itself) read as one line
-     * break, U+2028 / U+2029 as a line break, a tab stays. Removed: ANSI escape sequences whole (CSI
-     * `ESC [ … final`, OSC `ESC ] … BEL | ESC \`, and the two-character `ESC x` forms), every other
+     * break, U+2028 / U+2029 as a line break, a tab stays. Removed: terminal escape sequences, whole
+     * when complete and only their introducer when not ([TerminalEscapes], 7-bit and 8-bit), every other
      * C0 / C1 control, DEL, the bidi embedding / override / isolate controls and directional marks (so
      * output can never reorder what is drawn around it), and the invisible or blank-looking code
      * points ([invisibleCodePoint]); any other kind of space is drawn as a plain space. Nothing is
@@ -107,7 +107,7 @@ object LabelText {
             val cp = text.codePointAt(i)
             val width = Character.charCount(cp)
             when {
-                cp == 0x1B -> i = skipEscape(text, i)
+                cp < 0x10000 && TerminalEscapes.opens(cp.toChar()) -> i = TerminalEscapes.skip(text, i)
                 cp == '\r'.code -> {
                     out.append('\n')
                     i += if (i + 1 < n && text[i + 1] == '\n') 2 else 1
@@ -122,31 +122,6 @@ object LabelText {
             }
         }
         return out.toString()
-    }
-
-    /** The index just past the escape sequence that starts at [start] (an ESC). */
-    private fun skipEscape(text: String, start: Int): Int {
-        var i = start + 1
-        if (i >= text.length) return i
-        when (text[i]) {
-            '[' -> {
-                // CSI: parameter and intermediate bytes (0x20-0x3F), then one final byte (0x40-0x7E).
-                i++
-                while (i < text.length && text[i].code in 0x20..0x3F) i++
-                if (i < text.length && text[i].code in 0x40..0x7E) i++
-            }
-            ']', 'P', 'X', '^', '_' -> {
-                // OSC / DCS / SOS / PM / APC: up to BEL or ST (ESC \), bounded by the text.
-                i++
-                while (i < text.length) {
-                    if (text[i] == '\u0007') return i + 1
-                    if (text[i] == '\u001B' && i + 1 < text.length && text[i + 1] == '\\') return i + 2
-                    i++
-                }
-            }
-            else -> i++ // ESC x: one character (charset selection, keypad modes, …)
-        }
-        return i
     }
 
     fun label(text: String?): String = clean(text, MAX_LABEL)

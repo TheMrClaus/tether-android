@@ -307,11 +307,13 @@ interface TetherClient {
     fun requestProviderCatalog(): Boolean = false
 
     /**
-     * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only with a
-     * mention the current catalog offers this session ([CommandGuard.mentionOffered]); otherwise
+     * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only when drawn for
+     * the server the outbox belongs to ([expectedOrigin]; r2), for a listed session that is neither
+     * read-only, handed off nor archived, with a mention the current catalog offers it
+     * ([CommandGuard.mentionOffered]), all checked in the same step that records it. Otherwise
      * nothing is recorded.
      */
-    fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention): MentionResult = MentionResult.NotOffered
+    fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): MentionResult = MentionResult.NotOffered
 
     /**
      * T6.6: dismiss ONE notice instance for every device (`dismiss-notice`, v119; the server journals

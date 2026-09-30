@@ -1004,4 +1004,78 @@ class OriginKeyedPendingTest {
         assertEquals(null, client.workspaceRoot.value)
         assertTrue(client.providers.value.isEmpty())
     }
+
+    // ------------------------------------------------------------------
+    // 4. T7.3 r2: a delegate mention is durable per origin too
+    // ------------------------------------------------------------------
+
+    private fun readyWith(sessionId: String) =
+        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[{"id":"$sessionId","provider":"claude","name":"n","cwd":"/w",""" +
+            """"status":"ready","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}],""" +
+            """"providers":[],"workspaceRoot":null}"""
+
+    private val catalog =
+        """{"type":"providers-snapshot","entries":[{"key":"claude","provider":"claude","status":"ready","models":[{"value":"m-build","displayName":"Build model"}]}]}"""
+
+    @Test
+    fun aDelegatedSendFiledOfflineForAIsNeverSeenByBAndReachesAWithItsMention() {
+        val c = processOnA()
+        c.start()
+        val ws = a.nextSocket()
+        ws.send(readyWith("s-a"))
+        assertEquals("hello", a.frame().type())
+        await(c.connection) { it == ConnectionState.Connected }
+        ws.send(catalog)
+        await(c.providerCatalog) { it.isNotEmpty() }
+        c.attach("s-a")
+        assertEquals("attach", a.frame().type())
+        ws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        await(c.projections) { it.containsKey("s-a") }
+
+        // A goes away; the operator delegates while it is unreachable (drawn for A: the outbox's origin).
+        a.down = true
+        ws.close(1001, null)
+        await(c.connection) { it == ConnectionState.Disconnected }
+        val mention = com.tether.app.protocol.DelegateMention(provider = "claude", mode = "build", model = "m-build")
+        assertEquals(MentionResult.NotLive, c.sendDelegated("s-a", "x", emptyList(), mention, b.origin()))
+        assertEquals(MentionResult.Sent, c.sendDelegated("s-a", "delegated offline for A: private brief", emptyList(), mention, a.origin()))
+        awaitCondition("A's slot holds the delegation with its mention") {
+            PendingInput.fromPersisted(disk.disk).records.any { it.mention == mention }
+        }
+
+        // A hostile B: its own session (the same id), its own catalog, a snapshot, an event.
+        loginTo(b)
+        val bws = b.nextSocket()
+        bws.send(readyWith("s-a"))
+        assertEquals("hello", b.frame().type())
+        await(client.connection) { it == ConnectionState.Connected }
+        bws.send(catalog)
+        bws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        bws.send(turnStartedEvent("s-a", "t9", 2))
+        serverBarrier(bws)
+        assertTrue("B received frames before the barrier", framesUntilBarrier(b).isEmpty())
+        for (text in b.allFrames) {
+            assertTrue("A's delegation reached B: $text", !text.contains("private") && !text.contains("mention") && !text.contains("\"send\""))
+        }
+        // A's slot on disk keeps it, mention and mode intact; B's slot has nothing.
+        val kept = PendingInput.fromPersisted(disk.disk).records.single { it.text.contains("delegated offline") }
+        assertEquals(mention, kept.mention)
+        assertNull(runBlocking { disk.readPendingInput(b.origin()) }?.takeIf { PendingInput.fromPersisted(it).records.isNotEmpty() })
+
+        // Back to A: it goes out there, never sent before (tries 0), with the mention and its mode.
+        a.down = false
+        loginTo(a)
+        val aws = a.nextSocket()
+        aws.send(readyWith("s-a"))
+        assertEquals("hello", a.frame().type())
+        await(client.connection) { it == ConnectionState.Connected }
+        val first = framesUntilBarrier(a)
+        val send = first.single { it.type() == "send" }
+        assertEquals("delegated offline for A: private brief", send.s("text"))
+        val m = send["mention"] as JsonObject
+        assertEquals("build", m["mode"]!!.jsonPrimitive.content)
+        assertEquals("claude", m["provider"]!!.jsonPrimitive.content)
+        assertEquals("m-build", m["model"]!!.jsonPrimitive.content)
+        assertTrue(b.allFrames.none { it.contains("private") })
+    }
 }

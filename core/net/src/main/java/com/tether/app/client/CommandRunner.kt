@@ -55,6 +55,12 @@ enum class MentionResult {
     /** Recorded in the durable outbox (it goes out like any send). */
     Sent,
 
+    /** Drawn for another server than the one the outbox (and any socket) belongs to, or for none. */
+    NotLive,
+
+    /** The session is read-only, handed off, archived, or not listed (fail closed). */
+    Locked,
+
     /** The mention names an agent, model, effort or mode the current catalog does not offer. */
     NotOffered,
 }

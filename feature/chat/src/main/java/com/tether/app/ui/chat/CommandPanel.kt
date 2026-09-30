@@ -117,10 +117,17 @@ internal fun commandOutputView(block: JsObj?): CommandOutputView? {
 internal class CommandPanelText(val segments: List<OutputSegment>, val dropped: Int)
 
 internal fun commandPanelText(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHARS): CommandPanelText {
-    val cleaned = outputSegments(segments).map { OutputSegment(it.stderr, LabelText.output(it.text)) }.filter { it.text.isNotEmpty() }
+    // T7.3 r2: only the RAW tail (twice the bound, for what cleaning removes) is cleaned, so the cost
+    // of a redraw follows the bound, not everything the command printed.
+    val raw = commandPanelRawTail(segments, max)
+    val cleaned = raw.segments.map { OutputSegment(it.stderr, LabelText.output(it.text)) }.filter { it.text.isNotEmpty() }
     val tail = outputTail(cleaned, max)
-    return CommandPanelText(tail.segments, tail.dropped)
+    return CommandPanelText(tail.segments, tail.dropped + raw.dropped)
 }
+
+/** The raw tail [commandPanelText] cleans: at most `2 × max` characters of the newest output. */
+internal fun commandPanelRawTail(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHARS): OutputTail =
+    outputTail(outputSegments(segments), 2 * max)
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 

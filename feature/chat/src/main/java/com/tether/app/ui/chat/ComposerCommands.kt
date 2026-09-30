@@ -101,7 +101,7 @@ internal fun runRefusalCopy(result: RunCommandResult): String? = when (result) {
     RunCommandResult.NotLive -> "Catching up — the command was not run. Try again in a moment."
     RunCommandResult.Locked -> "This session can’t run commands from here."
     RunCommandResult.NotOffered -> "Command mode isn’t offered for this session — the command was not run."
-    RunCommandResult.Invalid -> "Type a command after “!” to run it."
+    RunCommandResult.Invalid -> "The command is empty or over the 16 KiB limit — it was not run."
     RunCommandResult.Busy -> "Wait for the current turn to finish, or use “Send to background”."
 }
 
@@ -111,6 +111,17 @@ internal fun backgroundRefusalCopy(result: BackgroundCommandResult): String? = w
     BackgroundCommandResult.Locked -> "This session can’t be changed from here."
     BackgroundCommandResult.NotRunning -> "That command already finished — nothing was moved to the background."
 }
+
+/** T7.3 r2: a command over the server's limit (protocol-validate.mjs LIMITS.COMMAND_BYTES) says so. */
+internal const val COMMAND_TOO_LONG_COPY = "That command is over the 16 KiB limit — shorten it to run it."
+
+/**
+ * T7.3 r2: the palette offers a command only when its name is already clean (what the menu draws
+ * is exactly what completing it puts in the draft). A name with a control, bidi or invisible
+ * character, or a space, is never offered; typed by the operator it is still ordinary prompt text.
+ */
+internal fun offerableCommand(command: SessionCommandOption): Boolean =
+    command.name.isNotEmpty() && LabelText.label(command.name) == command.name && command.name.none { it.isWhitespace() }
 
 /** chat-view.tsx:3841. */
 internal const val COMMAND_MODE_FLAG = "Command mode — runs in the session directory; the agent watches and comments on the output."

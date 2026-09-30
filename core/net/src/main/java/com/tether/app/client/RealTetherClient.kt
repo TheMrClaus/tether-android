@@ -2643,19 +2643,28 @@ class RealTetherClient(
     }
 
     /**
-     * T7.3: a delegated send (v103 `send.mention`). The mention is checked against the catalog the
-     * CURRENT server pushed, under the lock, then recorded like any send (use-tether.ts sendText with a
-     * mention is the same durable path).
+     * T7.3: a delegated send (v103 `send.mention`), recorded like any send (use-tether.ts sendText with a
+     * mention is the same durable path). r2: in ONE step under the lock, the same one that records it:
+     * drawn for the server the outbox belongs to ([expectedOrigin] = [pendingOrigin], and the socket's,
+     * when there is one: a switch can never slip between the check and the record); the session listed
+     * and neither read-only, handed off nor archived; the mention one the catalog that server pushed
+     * offers it. Otherwise nothing is recorded.
      */
-    override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention): MentionResult {
-        val offered = synchronized(lock) {
-            val session = sessionsState.value.firstOrNull { it.id == sessionId }
-            session != null && CommandGuard.mentionOffered(session, mention, providerCatalogState.value)
+    override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): MentionResult {
+        var evicted: List<PendingRecord> = emptyList()
+        val result = synchronized(lock) {
+            val owner = pendingOrigin
+            if (expectedOrigin == null || owner != expectedOrigin || (socketOrigin != null && socketOrigin != expectedOrigin)) return@synchronized MentionResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized MentionResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized MentionResult.Locked
+            if (!CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized MentionResult.NotOffered
+            evicted = recordLocked(PendingInput.KIND_SEND, sessionId, text, attachments.ifEmpty { null }, mention)
+            MentionResult.Sent
         }
-        if (!offered) return MentionResult.NotOffered
-        recordAndDrain(PendingInput.KIND_SEND, sessionId, text, attachments.ifEmpty { null }, mention)
+        if (result != MentionResult.Sent) return result
+        afterRecord(evicted)
         if (attachments.isNotEmpty()) probeLink()
-        return MentionResult.Sent
+        return result
     }
 
     /** use-tether.ts:630 filePending: mint, record, persist, then one drain puts it on the wire. */
@@ -2666,13 +2675,26 @@ class RealTetherClient(
         attachments: List<Attachment>? = null,
         mention: com.tether.app.protocol.DelegateMention? = null,
     ) {
-        val key = PendingInput.newKey()
-        val evicted = synchronized(lock) {
-            val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments, mention)
-            pendingStore = result.store
-            forgetLocked(result.evicted.map { it.key })
-            result.evicted
-        }
+        val evicted = synchronized(lock) { recordLocked(kind, sessionId, text, attachments, mention) }
+        afterRecord(evicted)
+    }
+
+    /** Mint a key and file the record in the pending store. Caller holds [lock]; returns the evicted records. */
+    private fun recordLocked(
+        kind: String,
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>?,
+        mention: com.tether.app.protocol.DelegateMention?,
+    ): List<PendingRecord> {
+        val result = PendingInput.addRecord(pendingStore, PendingInput.newKey(), kind, sessionId, text, clock(), attachments, mention)
+        pendingStore = result.store
+        forgetLocked(result.evicted.map { it.key })
+        return result.evicted
+    }
+
+    /** The outside-the-lock half of a record: the eviction notice, the persist, one drain. */
+    private fun afterRecord(evicted: List<PendingRecord>) {
         if (evicted.isNotEmpty()) {
             emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
         }
