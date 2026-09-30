@@ -18,8 +18,13 @@ import org.junit.Test
  */
 class CommandOutputRuleTest {
 
-    /** A drawn text with the token marks and break opportunities taken out, for readable asserts. */
-    private fun shown(raw: String): String = SafeText.terminal(raw).replace("${SafeText.MARK}\u200B", "").replace(SafeText.MARK.toString(), "")
+    /**
+     * What the PANEL draws for [raw] (its own path: [commandPanelText]), with the token marks and break
+     * opportunities taken out for readable asserts.
+     */
+    private fun shown(raw: String): String = unmarked(panel(raw))
+
+    private fun unmarked(drawn: String): String = drawn.replace("${SafeText.MARK}\u200B", "").replace(SafeText.MARK.toString(), "")
 
     private fun panel(vararg texts: String): String =
         commandPanelText(JsArr.of(texts.map { JsObj.of("stream" to JsStr("stdout"), "text" to JsStr(it)) }))
@@ -80,7 +85,7 @@ class CommandOutputRuleTest {
 
     @Test
     fun anEscBeforeANonBmpCharacterLeavesNoLoneSurrogate() {
-        val drawn = SafeText.terminal("\u001B😀 ok")
+        val drawn = panel("\u001B😀 ok")
         assertEquals("⟨U+001B⟩😀 ok", shown("\u001B😀 ok"))
         for (i in drawn.indices) {
             if (Character.isHighSurrogate(drawn[i])) assertTrue(i + 1 < drawn.length && Character.isLowSurrogate(drawn[i + 1]))
@@ -100,7 +105,8 @@ class CommandOutputRuleTest {
     @Test
     fun thePanelsTailIsNeverCutInsideAToken() {
         // A drawn tail cut at the bound must start on a unit boundary.
-        val raw = "\u0001x".repeat(COMMAND_PANEL_MAX_CHARS)
+        // A drawn unit of 11 characters (a 9-character token + "xx"), so the bound falls inside a token.
+        val raw = "\u0001xx".repeat(COMMAND_PANEL_MAX_CHARS)
         val text = panel(raw)
         assertTrue(text.length <= COMMAND_PANEL_MAX_CHARS)
         val first = text.first()
