@@ -24,15 +24,11 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-30 afternoon CEST, new coordinator session):** `main` code head `07ba88f`. **In progress:** ta-28i
-(text rules on file preview / file names / sidebar / notifications / search / question card / MainShell copy) and ta-fz3 (link
-safety), each a maker in its own worktree under `tether-android-wt/`; both get a verifier + security review before merge.
-Merged + verified 2026-09-30: ta-96z, T6.5, ta-blf, T7.3.
-**Merged + verified 2026-09-29:** ta-hra, ta-js0 + ta-epo, ta-koy (protocol v132), **T6.3** approvals/questions/denials, **T6.4**
-sub-agent runs / background commands / guarded Stop / todo bar, **T7.2** Model/Effort/Mode + Codex/OpenCode panels, **ta-41x + ta-jt9**
-sign-in/sign-out hardening, **T13.2** offline mode + stale indicators (`9219a2d`; saved copies never actionable), **T6.6** notices /
-rate limit / auto-continue / MCP health (`ccdb1a8`; 23 rows), **T6.7** interrupt bound to its turn / server errors attributed /
-End session / per-row selection (`b65fb48`; 7 rows).
+**Resume point (2026-09-30 late afternoon CEST):** `main` code head `07ba88f`. **In progress (4 agents):** ta-28i r2 and ta-fz3 r2 fix
+rounds (r1: ta-28i verify CONFIRMED + security PASS-WITH-FOLLOW-UPS, M1 single-line names/paths/ids must tokenise LF/CR/TAB; ta-fz3
+verify REFUTED on mailto recipient smuggling via encoded `&`, security PASS-WITH-FOLLOW-UPS); **T6.8** (P1 tool screenshots, repro on a
+throwaway server) and **T15.1 -> T15.2** (Overview feed + screen). Queued for free slots: T9.1 full telemetry, T7.4 attachments.
+Merged + verified 2026-09-30: ta-96z, T6.5, ta-blf, T7.3. Host restart mid-afternoon: reviewers resumed, nothing lost.
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
@@ -129,7 +125,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.5 | Conversation timeline refresh | VERIFIED | TheMrClaus @ 2026-09-30 06:13 |  |  |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
-| T6.8 | Tool screenshots do not show in the conversation (owner report) | TODO |  |  |  |
+| T6.8 | Tool screenshots do not show in the conversation (owner report) | IN-PROGRESS | executor-T6.8 @ 2026-09-30 15:46 |  | maker started: reading code path and preparing isolated repro |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -152,7 +148,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T9.1 | Inspector + telemetry | TODO |  |  | coordinator 2026-09-30 (owner: telemetry is missing much): the phone telemetry sheet body is still an interim 7-row placeholder. Scope = th… |
+| T9.1 | Inspector + telemetry | TODO |  |  | from ta-28i review: the inspector MCP server name/error and the event log dialog still draw server text raw - route them through LabelText/… |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
@@ -205,7 +201,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
-| T15.1 | Overview feed client (v131) | TODO |  |  |  |
+| T15.1 | Overview feed client (v131) | IN-PROGRESS | executor-T15.1 @ 2026-09-30 15:46 |  |  |
 | T15.2 | Overview screen | TODO |  |  |  |
 | T15.3 | Overview host + daily usage panels | TODO |  |  |  |
 | T15.4 | Top-bar navigation | TODO |  |  |  |
@@ -360,3 +356,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 (new coordinator session) | ta-28i, ta-fz3 | Took over from disk (0.7.8 draft already checked: code 25, same cert). Dispatched two makers in parallel worktrees: ta-28i (text rules on the remaining surfaces, file preview first) and ta-fz3 (link safety). | verifier + security review for each |
 | 2026-09-30 | claude-main / Opus 5.5 | catch-up | Owner published v0.7.8. Owner reports gaps (screenshots not visible, telemetry thin, no Overview page); the web is 729 commits past PARITY_BASE `7d65611` (v128 -> 133), so a PLAN §9 Catch-up delta analysis was started (read-only). | new matrix rows + tasks from the delta |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3 | Host restart interrupted the four reviewers (verifier + security review for ta-28i and ta-fz3). Checked worktrees: maker branches clean at 1602901 / ce416a4, nothing to checkpoint; all four resumed in context. | verdicts -> fix rounds or merge |
+| 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8, T15.1 | Review r1 done for both (see RESUME HERE); r2 fix rounds sent to the makers. Follow-ups filed: ta-w58, ta-4mm, ta-j8r, ta-3xc, ta-td0 (from ta-28i), ta-08y (from ta-fz3). Started T6.8 and T15.1->T15.2. | r2 re-review; T9.1, T7.4 |
