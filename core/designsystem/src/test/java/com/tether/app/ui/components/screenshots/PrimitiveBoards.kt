@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.KeyClass
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.KeyWear
 import com.tether.app.ui.components.KeySize
 import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.SelectTriggerStyle

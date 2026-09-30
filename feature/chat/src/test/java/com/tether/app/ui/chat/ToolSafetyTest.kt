@@ -120,7 +120,7 @@ class ToolSafetyTest {
         val items = (0 until 20).map { ToolMediaItem("image", "image/png", "/api/tool-media/${"%064x".format(it)}.png") }
         val loader = ToolFixtures.FakeLoader()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader) { ToolMediaRow(items) }
             }
         }
@@ -348,7 +348,7 @@ class ToolSafetyTest {
             ev("tool_output_delta", "t1", ts = 1) { put("toolId", "c"); put("chunk", output) },
         )
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(
                     projection = LegacyProjectionAdapter.adaptOnce(tree)!!,
                     tree = tree,
@@ -381,7 +381,7 @@ class ToolSafetyTest {
             ev("tool_end", "t1", ts = 1) { put("toolId", "c"); put("output", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"text":${JsonPrimitive(output)},"exitCode":0,"status":"completed"}""")) },
         )
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(
                     projection = LegacyProjectionAdapter.adaptOnce(tree)!!,
                     tree = tree,
@@ -458,7 +458,7 @@ class ToolSafetyTest {
         val text = (1..5_000).joinToString("\n") { "line $it" }
         assertEquals(63, expandPeek(text).count { it == '\n' })
         assertEquals(4096, expandPeek("x".repeat(100_000)).length)
-        rule.setContent { ChatHost(TetherSkin.Machine) { TetherExpandablePre(text) } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { TetherExpandablePre(text) } }
         rule.waitForIdle()
         fun shown() = rule.onAllNodes(hasText("line 1", substring = true)).fetchSemanticsNodes().single().config[SemanticsProperties.Text].joinToString("") { it.text }
         assertTrue("collapsed: a peek of ${shown().length} characters", shown().length < 1_000)
@@ -477,7 +477,7 @@ class ToolSafetyTest {
             ev("tool_end", "t1", ts = 1) { put("toolId", "f"); put("output", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"status":"completed","changes":[$change]}""")) },
         )
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(
                     projection = LegacyProjectionAdapter.adaptOnce(tree)!!,
                     tree = tree,
@@ -534,7 +534,7 @@ class ToolSafetyTest {
         assertEquals(0, plan.card)
         val loader = ToolFixtures.FakeLoader()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader) { ToolCard(block, showThinking = false) }
             }
         }
@@ -569,7 +569,7 @@ class ToolSafetyTest {
 
     @Test fun aHundredFileTurnDiffBuildsAtMostItsBudgetAndOnlyAPeekWhileCollapsed() {
         val text = diffOf(100, 2_000)
-        rule.setContent { ChatHost(TetherSkin.Machine) { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.verticalScrollForTest()) { CodexUnifiedDiff(text) } } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.verticalScrollForTest()) { CodexUnifiedDiff(text) } } }
         rule.waitForIdle()
         fun rowsBuilt() = rule.onAllNodes(hasText("r", substring = true)).fetchSemanticsNodes()
             .count { n -> n.config[SemanticsProperties.Text].joinToString("") { it.text }.matches(Regex("r\\d+")) }
@@ -656,7 +656,7 @@ class ToolSafetyTest {
         val hunks = (1..3_000).joinToString("\n") { if (it == 1) "+" + "z".repeat(2_000) else "+zz$it" }
         val summary = WorktreeDiffSummaryView("origin/main", 0.0, (0 until 600).map { WorktreeDiffEntry("f$it", "M") }, emptyList())
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.verticalScrollForTest()) {
                     GitChangesCard(summary, mapOf("f0" to com.tether.app.protocol.ServerMessage.GitDiffFile("s", "f0", hunks, false, false)), onRequestFile = {})
                 }

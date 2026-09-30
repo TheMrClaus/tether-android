@@ -51,7 +51,7 @@ class SidebarBehaviourTest {
         onSortModeChange = { events += "sort:${it.id}" },
     )
 
-    private fun show(state: SidebarState = F.state(F.drawerSessions.take(4)), skin: TetherSkin = TetherSkin.Machine) {
+    private fun show(state: SidebarState = F.state(F.drawerSessions.take(4)), skin: TetherSkin = TetherSkin.StudioDark) {
         rule.setContent { SidebarUnderTest(skin, state, actions = actions) }
         rule.waitForIdle()
     }

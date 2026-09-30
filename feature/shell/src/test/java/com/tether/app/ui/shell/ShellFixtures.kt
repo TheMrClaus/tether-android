@@ -12,8 +12,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 
 /** The seeded web scenarios' sessions (tether scripts/parity-seed.mjs), as the shell sees them. */
 object ShellFixtures {
@@ -56,12 +56,12 @@ fun placeholderSlots(): PhoneShellSlots = PhoneShellSlots(
     drawer = { Box(Modifier.fillMaxSize().testTag(DrawerSlotTag)) },
     chat = {
         val t = LocalTetherTokens.current
-        Box(Modifier.fillMaxSize().background(if (t.skin.family == com.tether.app.ui.theme.ThemeFamily.Studio) t.graphite else t.mineralDeep).testTag(ChatSlotTag))
+        Box(Modifier.fillMaxSize().background(t.graphite).testTag(ChatSlotTag))
     },
     inspector = { Box(Modifier.testTag(InspectorSlotTag)) },
 )
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 /** The phone shell in [skin] with placeholder slots and a fresh or given state. */
 @Composable

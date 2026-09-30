@@ -84,7 +84,7 @@ class FontScaleScreenshotTest(private val primitive: String, private val skin: T
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = FontScaleBoards.keys.flatMap { p ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(p, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(p, it) }
         }
     }
 }

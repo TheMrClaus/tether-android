@@ -56,7 +56,7 @@ class ErrorToastTest {
 
     private fun show(message: String, fromServer: Boolean) {
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) { ErrorToast(message = message, onClose = { closed++ }, fromServer = fromServer) }
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) { ErrorToast(message = message, onClose = { closed++ }, fromServer = fromServer) }
         }
         rule.waitForIdle()
     }
@@ -97,7 +97,7 @@ class ErrorToastTest {
     fun aTapOnTheToastsBodyNeverReachesWhatIsUnderIt() {
         var under = 0
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 Box(Modifier.fillMaxWidth().height(200.dp)) {
                     Box(Modifier.fillMaxWidth().height(200.dp).clickable { under++ }.testTag("under"))
                     ErrorToast(message = "Session not found.", onClose = { closed++ }, fromServer = true, modifier = Modifier.align(Alignment.BottomCenter))
@@ -241,6 +241,6 @@ class ErrorToastFontScaleScreenshotTest(private val shot: ToastShot, private val
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ToastShot.Server).flatMap { s -> listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(ToastShot.Server).flatMap { s -> listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
     }
 }

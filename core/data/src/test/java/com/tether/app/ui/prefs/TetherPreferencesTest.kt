@@ -1,6 +1,5 @@
 package com.tether.app.ui.prefs
 
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -19,9 +18,8 @@ class TetherPreferencesTest {
     @Test
     fun defaultsMatchTheWeb() {
         val table: List<Pair<String, Any?>> = listOf(
-            "themeFamily precision (:238)" to (d.theme.family == ThemeFamily.Precision),
-            "themeMode system (:239)" to (d.theme.mode == ThemeMode.System),
-            "loginVariant instrument (:240)" to (d.loginVariant == LoginVariant.Instrument),
+            "themeMode system" to (d.themeMode == ThemeMode.System),
+            "loginVariant default" to (d.loginVariant == LoginVariant.Default),
             "defaultWorkspace '' (:241)" to (d.defaultWorkspace == ""),
             "showEndedSessions true (:245)" to (d.showEndedSessions),
             "confirmBeforeEnd true (:246)" to (d.confirmBeforeEnd),
@@ -44,27 +42,59 @@ class TetherPreferencesTest {
         assertEquals(setOf("terminalFontSize", "scrollback", "showQuickKeys"), TetherPreferences.BROWSER_ONLY.keys)
     }
 
-    /** normalizeThemeSelection (use-preferences.ts:116-129) + LEGACY_THEMES (:100-110). */
+    /**
+     * T15.5 (lib/theme-mode.mjs normalizeThemeMode + LEGACY_THEME_MODES): every appearance shape
+     * this app has stored — the flat `theme_choice` (up to 0.6.x), the `theme_family` +
+     * `theme_mode` pair (0.7.x to 0.8.0), `theme_mode` alone (now) — reads as a Studio mode. A valid
+     * stored mode wins whatever family it was paired with; the family itself never matters.
+     */
     @Test
-    fun themePairIsMigratedAndRepaired() {
-        fun theme(family: Any?, mode: Any?, legacy: Any?) = TetherPreferences.parse(
+    fun everyStoredAppearanceMigratesToAStudioMode() {
+        fun mode(family: Any?, mode: Any?, legacy: Any?) = TetherPreferences.parse(
             mapOf(
                 PreferenceKeys.THEME_FAMILY to family,
                 PreferenceKeys.THEME_MODE to mode,
                 PreferenceKeys.LEGACY_THEME to legacy,
             ),
-        ).theme
-        val table = listOf(
-            Triple(Triple("studio", "dark", "night"), ThemeFamily.Studio, ThemeMode.Dark), // pair wins
-            Triple(Triple(null, null, "night"), ThemeFamily.Tactile, ThemeMode.Dark),
-            Triple(Triple(null, null, "quiet"), ThemeFamily.Precision, ThemeMode.Dark),
-            Triple(Triple(null, null, "system"), ThemeFamily.Precision, ThemeMode.System),
-            Triple(Triple("tactile", null, "machine"), ThemeFamily.Tactile, ThemeMode.Dark), // per axis
-            Triple(Triple("junk", "sepia", "neon"), ThemeFamily.Precision, ThemeMode.System),
-            Triple(Triple(7, true, 3.5), ThemeFamily.Precision, ThemeMode.System), // wrong types
+        ).themeMode
+        val table: List<Pair<Triple<Any?, Any?, Any?>, ThemeMode>> = listOf(
+            // Fresh install.
+            Triple(null, null, null) to ThemeMode.System,
+            // Up to 0.6.x: the flat id alone (the app's five ids + the web's "quiet").
+            Triple(null, null, "system") to ThemeMode.System,
+            Triple(null, null, "machine") to ThemeMode.Dark,
+            Triple(null, null, "night") to ThemeMode.Dark,
+            Triple(null, null, "quiet") to ThemeMode.Dark,
+            Triple(null, null, "tactile") to ThemeMode.Light,
+            Triple(null, null, "precision") to ThemeMode.Light,
+            Triple(null, null, "studio") to ThemeMode.Light,
+            Triple(null, null, "studio-dark") to ThemeMode.Dark,
+            // 0.7.x to 0.8.0: every family x mode pair keeps its mode.
+            Triple("tactile", "light", null) to ThemeMode.Light,
+            Triple("tactile", "dark", null) to ThemeMode.Dark,
+            Triple("tactile", "system", null) to ThemeMode.System,
+            Triple("precision", "light", null) to ThemeMode.Light,
+            Triple("precision", "dark", null) to ThemeMode.Dark,
+            Triple("precision", "system", null) to ThemeMode.System,
+            Triple("studio", "light", null) to ThemeMode.Light,
+            Triple("studio", "dark", null) to ThemeMode.Dark,
+            Triple("studio", "system", null) to ThemeMode.System,
+            // A pair beside a leftover flat id: the stored mode wins.
+            Triple("studio", "dark", "tactile") to ThemeMode.Dark,
+            Triple("precision", "light", "machine") to ThemeMode.Light,
+            // A family without a usable mode: the flat id decides, else the system.
+            Triple("tactile", null, "machine") to ThemeMode.Dark,
+            Triple("tactile", "sepia", null) to ThemeMode.System,
+            // Now: the mode alone.
+            Triple(null, "light", null) to ThemeMode.Light,
+            Triple(null, "dark", null) to ThemeMode.Dark,
+            Triple(null, "system", null) to ThemeMode.System,
+            // Junk and wrong types follow the system.
+            Triple("junk", "sepia", "neon") to ThemeMode.System,
+            Triple(7, true, 3.5) to ThemeMode.System,
         )
-        for ((input, family, mode) in table) {
-            assertEquals("$input", ThemeChoice(family, mode), theme(input.first, input.second, input.third))
+        for ((input, expected) in table) {
+            assertEquals("$input", expected, mode(input.first, input.second, input.third))
         }
     }
 
@@ -73,8 +103,9 @@ class TetherPreferencesTest {
     fun enumsAcceptOnlyTheExplicitOptIn() {
         fun parse(key: String, value: Any?) = TetherPreferences.parse(mapOf(key to value))
         assertEquals(LoginVariant.Retro, parse(PreferenceKeys.LOGIN_VARIANT, "retro").loginVariant)
-        for (junk in listOf("instrument", "RETRO", "", 1, null)) {
-            assertEquals("$junk", LoginVariant.Instrument, parse(PreferenceKeys.LOGIN_VARIANT, junk).loginVariant)
+        // The former "instrument" (and junk) reads as Default: junk can never pick Retro.
+        for (junk in listOf("default", "instrument", "RETRO", "", 1, null)) {
+            assertEquals("$junk", LoginVariant.Default, parse(PreferenceKeys.LOGIN_VARIANT, junk).loginVariant)
         }
         assertEquals(SidebarSort.LastActive, parse(PreferenceKeys.SIDEBAR_SORT, "last-active").sidebarSort)
         for (junk in listOf("created", "lastActive", "", false, null)) {

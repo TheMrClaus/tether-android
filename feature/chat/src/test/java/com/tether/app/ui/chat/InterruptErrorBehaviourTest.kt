@@ -69,7 +69,7 @@ class InterruptErrorBehaviourTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = header)
             }
@@ -297,7 +297,7 @@ class InterruptErrorBehaviourTest {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides (menu ?: androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider.current),
             ) {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 Column {
                     ChatTranscript(
                         projection = fixture.projection,

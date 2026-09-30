@@ -51,16 +51,7 @@ fun expandedSlots(): PhoneShellSlots = PhoneShellSlots(
     drawer = { Box(Modifier.fillMaxSize().testTag(DrawerSlotTag)) },
     chat = {
         val t = LocalTetherTokens.current
-        val frame = if (t.skin.family == ThemeFamily.Studio) {
-            Modifier.background(t.graphite)
-        } else {
-            Modifier.cssSurface(
-                RoundedCornerShape(t.radiusLg),
-                t.mineralDeep,
-                CssBorder(1.dp, t.lineStrong),
-                t.css.well + t.css.bezel + softShadow(2.dp, 6.dp, t.contact.copy(alpha = 0.1f), spread = 7.dp),
-            )
-        }
+        val frame = Modifier.background(t.graphite)
         Box(Modifier.fillMaxSize().then(frame).testTag(ChatSlotTag)) { Box(Modifier.testTag(StageFrameTag)) }
     },
     inspector = { Box(Modifier.testTag(InspectorSlotTag)) },

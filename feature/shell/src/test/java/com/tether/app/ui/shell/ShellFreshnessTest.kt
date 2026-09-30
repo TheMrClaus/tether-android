@@ -115,7 +115,7 @@ class ShellFreshnessTest {
 
     @Test
     fun offlineTheHeaderSaysWasRunningAndTheChipSaysHowOldTheCopyIs() {
-        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession) } }
+        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), offlineSession) } }
         rule.onNodeWithTag(ShellTags.LinkBanner).assert(description("Offline. Showing saved copies"))
         rule.onNodeWithTag(ShellTags.FreshnessChip).assert(description("Saved copy · updated 12 min ago"))
         rule.onNodeWithTag(ShellTags.StatusPill).assert(description("Was running"))
@@ -124,14 +124,14 @@ class ShellFreshnessTest {
     @Test
     fun aWaitingSessionFromASavedCopyNeverSaysItNeedsYouNow() {
         val waiting = offlineSession.copy(status = "waiting")
-        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), waiting) } }
+        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), waiting) } }
         rule.onNodeWithTag(ShellTags.StatusPill).assert(description("Was waiting on you"))
     }
 
     @Test
     fun liveShowsNoMarkAndTheOrdinaryStatus() {
         val live = ShellFreshness(syncStates = mapOf(offlineSession.id to SessionSync(Freshness.Live, NOW)), listLive = true, now = NOW)
-        rule.setContent { WithFreshness(live) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession) } }
+        rule.setContent { WithFreshness(live) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), offlineSession) } }
         rule.onNodeWithTag(ShellTags.LinkBanner).assertDoesNotExist()
         rule.onNodeWithTag(ShellTags.FreshnessChip).assertDoesNotExist()
         rule.onNodeWithTag(ShellTags.StatusPill).assert(description("Active"))
@@ -140,7 +140,7 @@ class ShellFreshnessTest {
     @Test
     fun catchingUpOnALiveLinkMarksTheCopyButNotTheStatus() {
         val catching = ShellFreshness(syncStates = mapOf(offlineSession.id to SessionSync(Freshness.CatchingUp, VERIFIED)), listLive = true, now = NOW)
-        rule.setContent { WithFreshness(catching) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession) } }
+        rule.setContent { WithFreshness(catching) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), offlineSession) } }
         rule.onNodeWithTag(ShellTags.FreshnessChip).assert(description("Catching up…"))
         rule.onNodeWithTag(ShellTags.StatusPill).assert(description("Active"))
     }
@@ -158,7 +158,7 @@ class ShellFreshnessTest {
     @Test
     fun offlineTheRedEndSessionKeyIsDisabled() {
         val ends = mutableListOf<String>()
-        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Tactile, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
+        rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Studio, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
         rule.waitForIdle()
         assertTrue("no End session from a saved copy: $ends", "end" !in ends)
@@ -168,7 +168,7 @@ class ShellFreshnessTest {
     fun connectedEndSessionNeedsTheSessionsCopyToBeLive() {
         val ends = mutableListOf<String>()
         var freshness by androidx.compose.runtime.mutableStateOf(liveShellFreshness(offlineSession.id))
-        rule.setContent { WithFreshness(freshness) { ShellUnderTest(TetherSkin.Machine, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
+        rule.setContent { WithFreshness(freshness) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled()
         val cases = Freshness.entries.filter { it != Freshness.Live }.map { it.name to mapOf(offlineSession.id to SessionSync(it, VERIFIED)) } +
             ("missing entry" to emptyMap())
@@ -204,7 +204,7 @@ class ShellFreshnessTest {
         val label = offlineFreshness().staleLabel(offlineSession.id)
         assertEquals("Saved copy · updated 12 min ago", label)
         rule.setContent {
-            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 androidx.compose.foundation.layout.Column {
                     com.tether.app.ui.statusline.ContextGauge(metrics, onClick = {}, stale = label, modifier = androidx.compose.ui.Modifier.testTag("gauge"))
                     com.tether.app.ui.statusline.SessionStatusline(metrics, null, stale = label)

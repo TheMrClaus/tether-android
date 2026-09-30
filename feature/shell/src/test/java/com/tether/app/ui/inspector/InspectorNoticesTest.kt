@@ -132,7 +132,7 @@ class InspectorNoticesBehaviourTest {
 
     @Test
     fun theCompactCardOpensItselfWhileAServerHasAProblemAndSaysSoInWords() {
-        rule.setContent { TetherTheme(choiceFor(TetherSkin.Machine)) { Column { InspectorMcpHealth("claude", null, InspectorFixtures.mcp) } } }
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { Column { InspectorMcpHealth("claude", null, InspectorFixtures.mcp) } } }
         rule.onAllNodesWithTag("mcp-server").assertCountEquals(4)
         rule.onNodeWithText("Needs authentication").assertExists()
         // Errors wait behind "View error" (one per troubled server), then show on a tap.
@@ -144,7 +144,7 @@ class InspectorNoticesBehaviourTest {
 
     @Test
     fun aHealthyCardStartsClosedAndOpensOnATap() {
-        rule.setContent { TetherTheme(choiceFor(TetherSkin.Machine)) { Column { InspectorMcpHealth("claude", null, InspectorFixtures.healthy) } } }
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { Column { InspectorMcpHealth("claude", null, InspectorFixtures.healthy) } } }
         rule.onAllNodesWithTag("mcp-server").assertCountEquals(0)
         rule.onNodeWithText("MCP health").performClick()
         rule.onAllNodesWithTag("mcp-server").assertCountEquals(2)
@@ -153,7 +153,7 @@ class InspectorNoticesBehaviourTest {
     @Test
     fun opencodeWithoutServeHasNoCardAndServeShowsPlugins() {
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 Column {
                     InspectorMcpHealth("opencode", null, InspectorFixtures.mcp)
                     InspectorMcpHealth("opencode", "opencode-serve-v2", InspectorFixtures.healthy)
@@ -167,7 +167,7 @@ class InspectorNoticesBehaviourTest {
 
     @Test
     fun theRateLimitNoticeIsAPoliteStatus() {
-        rule.setContent { TetherTheme(choiceFor(TetherSkin.Machine)) { Column { InspectorLimitNotice(InspectorFixtures.rateLimited(), env = InspectorFixtures.env) } } }
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { Column { InspectorLimitNotice(InspectorFixtures.rateLimited(), env = InspectorFixtures.env) } } }
         rule.onNodeWithTag("inspector-rate-limit")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
     }
@@ -212,6 +212,6 @@ class InspectorNoticesFontScaleScreenshotTest(private val shot: InspectorShot, p
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(InspectorShot.Mcp, InspectorShot.RateLimit).flatMap { s -> listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(InspectorShot.Mcp, InspectorShot.RateLimit).flatMap { s -> listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
     }
 }

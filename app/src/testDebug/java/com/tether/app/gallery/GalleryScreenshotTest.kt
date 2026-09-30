@@ -9,8 +9,8 @@ import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,7 +37,7 @@ class GalleryScreenshotTest(private val golden: String, private val skin: Tether
         val (title, content) = GalleryGoldens.getValue(golden)
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            TetherTheme(ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)) {
+            TetherTheme(skin.mode) {
                 GalleryBoard(title, Modifier.fillMaxWidth().testTag(Tag), content)
             }
         }

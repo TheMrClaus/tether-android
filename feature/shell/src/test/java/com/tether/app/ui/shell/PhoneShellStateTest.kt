@@ -102,9 +102,8 @@ class PhoneShellStateTest {
     }
 
     @Test fun drawerWidthFollowsTheWebClamp() {
-        assertEquals(320f, drawerWidth(studio = false, viewportWidth = androidx.compose.ui.unit.Dp(412f)).value, 0.01f)
-        assertEquals(316.8f, drawerWidth(studio = false, viewportWidth = androidx.compose.ui.unit.Dp(360f)).value, 0.01f)
-        assertEquals(336f, drawerWidth(studio = true, viewportWidth = androidx.compose.ui.unit.Dp(412f)).value, 0.01f)
-        assertEquals(331.2f, drawerWidth(studio = true, viewportWidth = androidx.compose.ui.unit.Dp(360f)).value, 0.01f)
+        // Studio: min(21rem, 92vw) (studio.css 443).
+        assertEquals(336f, drawerWidth(viewportWidth = androidx.compose.ui.unit.Dp(412f)).value, 0.01f)
+        assertEquals(331.2f, drawerWidth(viewportWidth = androidx.compose.ui.unit.Dp(360f)).value, 0.01f)
     }
 }

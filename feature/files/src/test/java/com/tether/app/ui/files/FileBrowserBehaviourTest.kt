@@ -28,7 +28,6 @@ import com.tether.app.ui.files.FilesFixtures.ROOT
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -104,7 +103,7 @@ class FileBrowserBehaviourTest {
         val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
         val files = HttpWorkspaceFiles(http, authority = { FilesAuthority.Paired(server.url("/")) { it.header("Authorization", "Bearer tthr_e2e") } })
         rule.setContent {
-            TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+            TetherTheme(ThemeMode.Dark) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     if (show()) {
                         state = rememberFileBrowserState(files, identity)

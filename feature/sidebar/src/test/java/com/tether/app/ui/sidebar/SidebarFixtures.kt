@@ -25,8 +25,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 
 /** Seeded sidebar data, shaped like the web's `session-drawer` scenario (tether scripts/parity-seed.mjs). */
 object SidebarFixtures {
@@ -174,7 +174,7 @@ object SidebarFixtures {
     }
 }
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 private val StudioRail = Color(0xFF141D2E)
 
@@ -195,14 +195,12 @@ fun SidebarUnderTest(
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
             val t = LocalTetherTokens.current
-            val studio = t.skin.family == ThemeFamily.Studio
             BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
                 val phone = layout == TetherLayoutClass.Phone
                 if (phone) Box(Modifier.fillMaxSize().background(t.scrim))
                 val width = when {
                     !phone -> 264.dp
-                    studio -> minOf(336.dp, maxWidth * 0.92f)
-                    else -> minOf(320.dp, maxWidth * 0.88f)
+                    else -> minOf(336.dp, maxWidth * 0.92f)
                 }
                 val edge = if (phone) t.line else t.lineStrong
                 Box(
@@ -210,15 +208,14 @@ fun SidebarUnderTest(
                         .width(width)
                         .fillMaxHeight()
                         .drawBehind {
-                            drawRect(if (studio) StudioRail else t.graphite)
-                            if (!studio) drawRect(edge, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
+                            drawRect(StudioRail)
                         }
-                        .padding(end = if (studio) 0.dp else 1.dp)
+                        .padding(end = 0.dp)
                         .padding(
-                            start = if (studio) 14.dp else t.css.spaceMd,
-                            end = if (studio) 14.dp else t.css.spaceMd,
-                            top = if (studio) (if (phone) 16.dp else 21.6.dp) else t.css.spaceMd,
-                            bottom = if (studio) 12.dp else if (phone) t.css.spaceMd else t.css.spaceSm,
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = (if (phone) 16.dp else 21.6.dp),
+                            bottom = 12.dp,
                         ),
                 ) {
                     SessionSidebar(state, actions, layout = layout, seed = seed)

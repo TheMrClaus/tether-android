@@ -54,7 +54,7 @@ class ChatSyncTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = header)
             }

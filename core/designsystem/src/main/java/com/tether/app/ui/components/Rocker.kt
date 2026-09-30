@@ -59,8 +59,9 @@ data class RockerGeometry(
     val capLeftOn: Dp,
 )
 
-fun rockerGeometry(t: TetherTokens): RockerGeometry = // 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on.
-        RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
+/** Studio's track (studio.css): 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on. */
+fun rockerGeometry(): RockerGeometry =
+    RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
 
 /**
  * The bi-stable settings rocker (`.settings-toggle > i`): a recessed frame (`--key-face-deep`,
@@ -85,7 +86,7 @@ fun TetherRocker(
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val reduced = LocalReducedMotion.current
-    val g = rockerGeometry(t)
+    val g = rockerGeometry()
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val capLeft by animateFloatAsState(

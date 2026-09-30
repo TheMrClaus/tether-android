@@ -10,7 +10,6 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.ui.icons.ProviderLogos
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -56,20 +55,13 @@ class ComponentGalleryTest {
         assertEquals(com.tether.app.ui.components.KeyClass.entries.toSet(), used)
     }
 
-    @Test fun switcherResolvesAllSixSkins() {
-        rule.setContent { ComponentGallery(ThemeChoice(ThemeFamily.Precision, ThemeMode.Light)) }
-        val expected = mapOf(
-            (ThemeFamily.Tactile to ThemeMode.Light) to "tactile",
-            (ThemeFamily.Tactile to ThemeMode.Dark) to "night",
-            (ThemeFamily.Precision to ThemeMode.Light) to "precision",
-            (ThemeFamily.Precision to ThemeMode.Dark) to "machine",
-            (ThemeFamily.Studio to ThemeMode.Light) to "studio",
-            (ThemeFamily.Studio to ThemeMode.Dark) to "studio-dark",
-        )
-        for ((pair, skin) in expected) {
+    @Test fun switcherResolvesBothStudioSkins() {
+        rule.setContent { ComponentGallery(ThemeMode.Light) }
+        rule.onNodeWithTag(SkinLabelTag).assertTextEquals("skin: studio")
+        val expected = listOf(ThemeMode.Dark to "studio-dark", ThemeMode.Light to "studio")
+        for ((mode, skin) in expected) {
             // A chip is announced by its label (contentDescription; the legend text is cleared).
-            rule.onNodeWithContentDescription(pair.first.label).performClick()
-            rule.onNodeWithContentDescription(pair.second.label).performClick()
+            rule.onNodeWithContentDescription(mode.label).performClick()
             rule.onNodeWithTag(SkinLabelTag).assertTextEquals("skin: $skin")
         }
     }

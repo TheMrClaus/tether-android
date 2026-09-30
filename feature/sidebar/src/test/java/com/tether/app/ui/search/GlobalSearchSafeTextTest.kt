@@ -70,7 +70,7 @@ class GlobalSearchSafeTextTest {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
             val list by client.sessions.collectAsStateWithLifecycle()
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 androidx.compose.runtime.CompositionLocalProvider(com.tether.app.ui.theme.LocalReducedMotion provides true) {
                     GlobalSearchHost(vm = vm, prefs = prefs, sessions = list, workspaceRoot = F.ROOT, onCloseDrawer = {})
                 }

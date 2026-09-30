@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso
@@ -52,7 +53,7 @@ class LogDialogBehaviourTest {
     private fun ComposeContentTestRule.show(
         entries: List<LogEntry> = LogFixtures.mixed,
         state: LogDialogState = LogDialogState(stats = LogFixtures.stats),
-        skin: TetherSkin = TetherSkin.Machine,
+        skin: TetherSkin = TetherSkin.StudioDark,
     ): LogDialogState {
         setContent {
             TetherTheme(choiceFor(skin)) {
@@ -114,7 +115,11 @@ class LogDialogBehaviourTest {
         rule.onNode(hasContentDescription("Refactor billing export") and androidx.compose.ui.test.hasClickAction()).performClick()
         rule.waitForIdle()
         assertEquals("sess-0002", state.session)
-        assertEquals(listOf("Turn error", "Turn started", "Session evicted"), rowDescriptions().map { it.split(", ")[2] })
+        // Studio's taller rows leave the last one below the fold of the lazy list: scroll it in.
+        assertEquals(listOf("Turn error", "Turn started"), rowDescriptions().map { it.split(", ")[2] }.take(2))
+        rule.onNode(androidx.compose.ui.test.hasScrollToNodeAction())
+            .performScrollToNode(hasContentDescription("Session evicted", substring = true))
+        assertEquals("Session evicted", rowDescriptions().map { it.split(", ")[2] }.last())
     }
 
     @Test
@@ -188,8 +193,8 @@ class LogDialogBehaviourTest {
             val density = rule.density.density
             assertTrue("$label touch height ${node.touchBoundsInRoot.height / density}dp", node.touchBoundsInRoot.height / density >= 44f)
         }
-        // A tap just above the drawn key, inside its extended target, still selects it.
-        rule.onNodeWithText("Warnings").performTouchInput { click(Offset(centerX, -with(rule.density) { 8.dp.toPx() })) }
+        // A tap just above the drawn key (38dp in Studio), inside its 44dp extended target, still selects it.
+        rule.onNodeWithText("Warnings").performTouchInput { click(Offset(centerX, -with(rule.density) { 2.dp.toPx() })) }
         rule.waitForIdle()
         rule.onNodeWithText("Warnings").assertIsSelected()
     }
@@ -208,7 +213,7 @@ class LogDialogModalTest {
     fun backDismissesAndTheBackdropDoesNot() {
         var open by mutableStateOf(true)
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     if (open) LogDialog(LogFixtures.mixed, LogFixtures.sessions, LogDialogState(), onRefresh = {}, onDismiss = { open = false })
                 }

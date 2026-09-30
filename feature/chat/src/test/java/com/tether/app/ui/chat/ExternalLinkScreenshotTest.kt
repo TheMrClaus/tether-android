@@ -75,7 +75,7 @@ class ExternalLinkConfirmFontScaleScreenshotTest(private val skin: TetherSkin) {
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(it) }
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
     }
 }
 
@@ -91,6 +91,6 @@ class ExternalLinkVariantScreenshotTest(private val skin: TetherSkin) {
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(it) }
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
     }
 }

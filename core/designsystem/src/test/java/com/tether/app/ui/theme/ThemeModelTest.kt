@@ -3,81 +3,84 @@ package com.tether.app.ui.theme
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The web's theme model (hooks/use-preferences.ts): resolution, legacy migration, defaults. */
+/**
+ * The web's appearance model (tether lib/theme-mode.mjs, T15.5): Studio is the only visual
+ * system; the mode resolves to one of its two skins, and every retired stored value migrates.
+ */
 class ThemeModelTest {
 
     @Test
-    fun familyTimesModeResolvesLikeTheWeb() {
-        // family, mode, systemDark -> skin id (THEME_SKINS + resolveThemeMode)
+    fun modeResolvesToAStudioSkinLikeTheWeb() {
+        // mode, systemDark -> skin id (resolveThemeSkin)
         val table = listOf(
-            Triple(ThemeFamily.Tactile, ThemeMode.Light, false) to "tactile",
-            Triple(ThemeFamily.Tactile, ThemeMode.Light, true) to "tactile",
-            Triple(ThemeFamily.Tactile, ThemeMode.Dark, false) to "night",
-            Triple(ThemeFamily.Tactile, ThemeMode.Dark, true) to "night",
-            Triple(ThemeFamily.Tactile, ThemeMode.System, false) to "tactile",
-            Triple(ThemeFamily.Tactile, ThemeMode.System, true) to "night",
-            Triple(ThemeFamily.Precision, ThemeMode.Light, false) to "precision",
-            Triple(ThemeFamily.Precision, ThemeMode.Light, true) to "precision",
-            Triple(ThemeFamily.Precision, ThemeMode.Dark, false) to "machine",
-            Triple(ThemeFamily.Precision, ThemeMode.Dark, true) to "machine",
-            Triple(ThemeFamily.Precision, ThemeMode.System, false) to "precision",
-            Triple(ThemeFamily.Precision, ThemeMode.System, true) to "machine",
-            Triple(ThemeFamily.Studio, ThemeMode.Light, false) to "studio",
-            Triple(ThemeFamily.Studio, ThemeMode.Light, true) to "studio",
-            Triple(ThemeFamily.Studio, ThemeMode.Dark, false) to "studio-dark",
-            Triple(ThemeFamily.Studio, ThemeMode.Dark, true) to "studio-dark",
-            Triple(ThemeFamily.Studio, ThemeMode.System, false) to "studio",
-            Triple(ThemeFamily.Studio, ThemeMode.System, true) to "studio-dark",
+            (ThemeMode.Light to false) to "studio",
+            (ThemeMode.Light to true) to "studio",
+            (ThemeMode.Dark to false) to "studio-dark",
+            (ThemeMode.Dark to true) to "studio-dark",
+            (ThemeMode.System to false) to "studio",
+            (ThemeMode.System to true) to "studio-dark",
         )
-        assertEquals(ThemeFamily.entries.size * ThemeMode.entries.size * 2, table.size)
+        assertEquals(ThemeMode.entries.size * 2, table.size)
         for ((input, skin) in table) {
-            val (family, mode, systemDark) = input
-            assertEquals("$family/$mode systemDark=$systemDark", skin, ThemeChoice(family, mode).resolve(systemDark).id)
+            val (mode, systemDark) = input
+            assertEquals("$mode systemDark=$systemDark", skin, mode.resolve(systemDark).id)
         }
-        // All six skins are reachable.
-        assertEquals(TetherSkin.entries.map { it.id }.toSet(), table.map { it.second }.toSet())
     }
 
     @Test
-    fun defaultIsPrecisionFollowingTheSystem() {
-        assertEquals(ThemeChoice(ThemeFamily.Precision, ThemeMode.System), ThemeChoice.Default)
-        assertEquals(ThemeChoice.Default, ThemeChoice.normalize(null, null, null))
-        assertEquals(TetherSkin.Precision, ThemeChoice.Default.resolve(systemDark = false))
-        assertEquals(TetherSkin.Machine, ThemeChoice.Default.resolve(systemDark = true))
+    fun onlyTheTwoStudioSkinsExist() {
+        assertEquals(listOf("studio", "studio-dark"), TetherSkin.entries.map { it.id })
+        assertEquals(TetherSkin.Studio, TetherSkin.of(dark = false))
+        assertEquals(TetherSkin.StudioDark, TetherSkin.of(dark = true))
+        for (skin in TetherSkin.entries) assertEquals(skin, skin.mode.resolve(systemDark = !skin.isDark))
     }
 
     @Test
-    fun legacyFlatThemeIdsMigrateLikeLegacyThemes() {
+    fun defaultFollowsTheSystem() {
+        // Web defaults: themeMode "system".
+        assertEquals(ThemeMode.System, ThemeMode.Default)
+        assertEquals(ThemeMode.System, ThemeMigration.normalize(null, null))
+        assertEquals(TetherSkin.Studio, ThemeMode.Default.resolve(systemDark = false))
+        assertEquals(TetherSkin.StudioDark, ThemeMode.Default.resolve(systemDark = true))
+    }
+
+    @Test
+    fun pickerOffersLightDarkAndFollowSystemOnly() {
+        // hooks/use-preferences.ts THEME_MODES, in order, with the web's labels.
+        assertEquals(listOf("light", "dark", "system"), ThemeMode.entries.map { it.id })
+        assertEquals(listOf("Light", "Dark", "Follow system"), ThemeMode.entries.map { it.label })
+    }
+
+    @Test
+    fun legacyFlatThemesMigrateToAStudioMode() {
+        // lib/theme-mode.mjs LEGACY_THEME_MODES, verbatim.
         val table = mapOf(
-            "machine" to ThemeChoice(ThemeFamily.Precision, ThemeMode.Dark),
-            "night" to ThemeChoice(ThemeFamily.Tactile, ThemeMode.Dark),
-            "precision" to ThemeChoice(ThemeFamily.Precision, ThemeMode.Light),
-            "tactile" to ThemeChoice(ThemeFamily.Tactile, ThemeMode.Light),
-            "system" to ThemeChoice(ThemeFamily.Precision, ThemeMode.System),
-            "quiet" to ThemeChoice(ThemeFamily.Precision, ThemeMode.Dark),
+            "tactile" to ThemeMode.Light,
+            "precision" to ThemeMode.Light,
+            "studio" to ThemeMode.Light,
+            "night" to ThemeMode.Dark,
+            "machine" to ThemeMode.Dark,
+            "quiet" to ThemeMode.Dark,
+            "studio-dark" to ThemeMode.Dark,
+            "system" to ThemeMode.System,
         )
-        assertEquals(table, ThemeChoice.LEGACY)
+        assertEquals(table, ThemeMigration.LEGACY_THEME_MODES)
         for ((legacy, expected) in table) {
-            assertEquals(legacy, expected, ThemeChoice.normalize(null, null, legacy))
+            assertEquals(legacy, expected, ThemeMigration.normalize(null, legacy))
         }
-        // Every value this app ever stored in theme_choice (the old enum ids) is covered.
-        listOf("system", "machine", "night", "tactile", "precision").forEach {
-            assertEquals(it, table.getValue(it), ThemeChoice.normalize(null, null, it))
-        }
-        // An unknown legacy id falls back to the default.
-        assertEquals(ThemeChoice.Default, ThemeChoice.normalize(null, null, "neon"))
+        // Unknown flat ids fall back to following the system.
+        assertEquals(ThemeMode.System, ThemeMigration.normalize(null, "neon"))
+        assertEquals(ThemeMode.System, ThemeMigration.normalize(null, ""))
     }
 
     @Test
-    fun twoAxisFieldsWinAndRepairPerAxis() {
-        // Both axes stored: the legacy id is ignored.
-        assertEquals(
-            ThemeChoice(ThemeFamily.Studio, ThemeMode.Light),
-            ThemeChoice.normalize("studio", "light", "machine"),
-        )
-        // One valid axis: the other comes from the legacy id, then the default.
-        assertEquals(ThemeChoice(ThemeFamily.Studio, ThemeMode.Dark), ThemeChoice.normalize("studio", null, "machine"))
-        assertEquals(ThemeChoice(ThemeFamily.Tactile, ThemeMode.Dark), ThemeChoice.normalize("bogus", "dark", "tactile"))
-        assertEquals(ThemeChoice(ThemeFamily.Studio, ThemeMode.System), ThemeChoice.normalize("studio", "bogus", null))
+    fun aValidStoredModeAlwaysWins() {
+        assertEquals(ThemeMode.Light, ThemeMigration.normalize("light", "machine"))
+        assertEquals(ThemeMode.Dark, ThemeMigration.normalize("dark", "tactile"))
+        assertEquals(ThemeMode.System, ThemeMigration.normalize("system", "night"))
+        // An invalid stored mode falls back to the legacy flat id, then to the system.
+        assertEquals(ThemeMode.Dark, ThemeMigration.normalize("bogus", "night"))
+        assertEquals(ThemeMode.System, ThemeMigration.normalize("bogus", null))
+        assertEquals(ThemeMode.System, ThemeMigration.normalize("Dark", null))
     }
 }

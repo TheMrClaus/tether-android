@@ -119,7 +119,6 @@ class TetherTokens internal constructor(
 
     // Key geometry
     val radiusKey: Dp = css.radiusKey
-    val keySlit: Dp = css.keySlit
 
     /** Uppercase key-legend tracking in em. */
     val keyTracking: Float = css.keyLabelTracking.value

@@ -14,7 +14,7 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Every generated token of all 6 skins equals the JSON value. The CSS values are parsed
+ * Every generated token of both Studio skins equals the JSON value. The CSS values are parsed
  * here independently of the generator (tools/design-tokens) so a generator bug cannot hide.
  */
 class GeneratedTokensTest {
@@ -105,9 +105,9 @@ class GeneratedTokensTest {
     // ── tests ────────────────────────────────────────────────────────────────
 
     @Test
-    fun everyGeneratedTokenEqualsTheJsonValueInAllSixSkins() {
+    fun everyGeneratedTokenEqualsTheJsonValueInBothStudioSkins() {
         val seen = mutableMapOf<String, Int>()
-        assertEquals(6, TokenCorpus.skins.size)
+        assertEquals(2, TokenCorpus.skins.size)
         for (id in TokenCorpus.skins.keys) {
             val skin = assertNotNullSkin(id)
             val json = resolved(id)
@@ -141,7 +141,7 @@ class GeneratedTokensTest {
                 }
             }
         }
-        // Every category is exercised (6 skins × tokens in it).
+        // Every category is exercised (2 skins × tokens in it).
         listOf("color", "length", "em", "int/ms", "float", "easing", "shadow", "string").forEach {
             assertTrue("category $it covered: $seen", (seen[it] ?: 0) > 0)
         }
@@ -160,7 +160,8 @@ class GeneratedTokensTest {
         assertEquals(TokenCorpus.skins.keys, TetherSkin.entries.map { it.id }.toSet())
         for (skin in TetherSkin.entries) {
             val s = TokenCorpus.skins.getValue(skin.id).jsonObject
-            assertEquals(skin.id, s.getValue("family").jsonPrimitive.content, skin.family.id)
+            // T15.5: Studio-only export, no theme family anywhere.
+            assertEquals(skin.id, null, s["family"])
             val scheme = s.getValue("properties").jsonObject.getValue("color-scheme").jsonObject
                 .getValue("resolved").jsonPrimitive.content
             assertEquals(skin.id, scheme == "dark", skin.isDark)
@@ -170,11 +171,8 @@ class GeneratedTokensTest {
             // The bar colour is the skin's panel colour (--graphite), as on the web.
             assertEquals(skin.id, skin.tokens.graphite, skin.systemBarColor)
         }
-        // Axes: the hand-written :core:data enums carry exactly the JSON's families/modes.
-        assertEquals(
-            TokenCorpus.root.getValue("families").jsonArray.map { it.jsonPrimitive.content },
-            ThemeFamily.entries.map { it.id },
-        )
+        // The mode axis: the hand-written :core:data enum carries exactly the JSON's modes.
+        assertEquals(null, TokenCorpus.root["families"])
         assertEquals(
             TokenCorpus.root.getValue("modes").jsonArray.map { it.jsonPrimitive.content },
             ThemeMode.entries.map { it.id },
@@ -183,12 +181,13 @@ class GeneratedTokensTest {
 
     @Test
     fun skinMapMatchesJson() {
+        // Studio-only (T15.5): mode -> skin, as the web exporter now writes it.
         val map = TokenCorpus.root.getValue("skinMap").jsonObject
-        for (family in ThemeFamily.entries) {
-            val pair = map.getValue(family.id).jsonObject
-            assertEquals(pair.getValue("light").jsonPrimitive.content, TetherSkin.of(family, dark = false).id)
-            assertEquals(pair.getValue("dark").jsonPrimitive.content, TetherSkin.of(family, dark = true).id)
-        }
+        assertEquals(setOf("light", "dark"), map.keys)
+        assertEquals(map.getValue("light").jsonPrimitive.content, TetherSkin.of(dark = false).id)
+        assertEquals(map.getValue("dark").jsonPrimitive.content, TetherSkin.of(dark = true).id)
+        assertEquals(ThemeMode.Light.resolve(systemDark = true), TetherSkin.fromId(map.getValue("light").jsonPrimitive.content))
+        assertEquals(ThemeMode.Dark.resolve(systemDark = false), TetherSkin.fromId(map.getValue("dark").jsonPrimitive.content))
     }
 
     @Test
@@ -216,13 +215,10 @@ class GeneratedTokensTest {
             assertEquals(skin.id, cssColor(json.getValue("--violet-strong")), t.violetStrong)
             assertEquals(skin.id, cssColor(json.getValue("--tint-md")), t.tintMd)
             assertEquals(skin.id, cssLengthDp(json.getValue("--radius-key"))!!, t.radiusKey.value, 1e-4f)
-            assertEquals(skin.id, cssLengthDp(json.getValue("--press-travel"))!!, t.pressTravel.value, 1e-4f)
         }
-        // The hand-tuned elevation the keys used (y of --shadow-key's soft layer) is preserved.
-        assertEquals(3f, tokensFor(TetherSkin.Machine).shadowElevation.value, 0f)
-        assertEquals(5f, tokensFor(TetherSkin.Tactile).shadowElevation.value, 0f)
-        assertEquals(4f, tokensFor(TetherSkin.Precision).shadowElevation.value, 0f)
+        // Studio keys carry no drop shadow in either lighting (--shadow-key is transparent).
         assertEquals(0f, tokensFor(TetherSkin.Studio).shadowElevation.value, 0f)
+        assertEquals(0f, tokensFor(TetherSkin.StudioDark).shadowElevation.value, 0f)
         assertNotNull(GeneratedTokens.Studio.fontUi)
     }
 }

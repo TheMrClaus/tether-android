@@ -34,7 +34,7 @@ class PhoneShellBehaviourTest {
 
     private val events = mutableListOf<String>()
 
-    private fun show(state: PhoneShellState, session: com.tether.app.protocol.model.AgentSession? = ShellFixtures.idle, skin: TetherSkin = TetherSkin.Machine, warnings: Int = 0) {
+    private fun show(state: PhoneShellState, session: com.tether.app.protocol.model.AgentSession? = ShellFixtures.idle, skin: TetherSkin = TetherSkin.StudioDark, warnings: Int = 0) {
         rule.setContent { ShellUnderTest(skin, state, session, unseenWarnings = warnings, onEvent = { events += it }) }
     }
 
@@ -187,13 +187,13 @@ class PhoneShellBehaviourTest {
 
     @Test fun startIsDisabledWhileDisconnected() {
         rule.setContent {
-            ShellUnderTest(TetherSkin.Tactile, PhoneShellState(), null, emptyStage = EmptyStage.Welcome(false, ShellFixtures.providers))
+            ShellUnderTest(TetherSkin.Studio, PhoneShellState(), null, emptyStage = EmptyStage.Welcome(false, ShellFixtures.providers))
         }
         rule.onNodeWithContentDescription("Start first session").assertIsNotEnabled()
     }
 
     @Test fun reopeningStageNamesTheLinkState() {
-        rule.setContent { ShellUnderTest(TetherSkin.Tactile, PhoneShellState(), null, emptyStage = EmptyStage.Reopening(false)) }
+        rule.setContent { ShellUnderTest(TetherSkin.Studio, PhoneShellState(), null, emptyStage = EmptyStage.Reopening(false)) }
         rule.onNodeWithText("Reconnecting.").assertIsDisplayed()
         rule.onNodeWithText("Start first session").assertDoesNotExist()
     }
@@ -279,7 +279,7 @@ class PhoneShellExpandedWidthTest {
     @Test fun layoutClassIsExpandedAndTheShellStillWorks() {
         assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(1280))
         val state = PhoneShellState()
-        rule.setContent { ShellUnderTest(TetherSkin.Precision, state, ShellFixtures.idle) }
+        rule.setContent { ShellUnderTest(TetherSkin.Studio, state, ShellFixtures.idle) }
         rule.onNodeWithTag(ShellTags.Topbar).assertIsDisplayed()
         rule.onNodeWithTag(ShellTags.MenuKey).performClick()
         assertTrue(state.drawerOpen)
@@ -298,7 +298,7 @@ class LinksPopoverShortScreenTest {
 
     @Test fun popoverIsCappedAndScrollsToItsLastControl() {
         val events = mutableListOf<String>()
-        rule.setContent { ShellUnderTest(TetherSkin.Machine, PhoneShellState(linksOpen = true), ShellFixtures.idle, onEvent = { events += it }) }
+        rule.setContent { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(linksOpen = true), ShellFixtures.idle, onEvent = { events += it }) }
         val card = rule.onNodeWithTag(ShellTags.LinksPopover).fetchSemanticsNode()
         val cap = with(rule.density) { (320.dp - 128.dp).toPx() }
         assertTrue("card ${card.boundsInRoot.height}px > cap ${cap}px", card.boundsInRoot.height <= cap + 1f)

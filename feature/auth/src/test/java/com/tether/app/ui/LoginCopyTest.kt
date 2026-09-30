@@ -15,14 +15,16 @@ class LoginCopyTest {
 
     @Test
     fun surfaceSelectionMatchesAppLoginPage() {
-        assertEquals(LoginSurface.Instrument, loginSurfaceFor(LoginVariant.Instrument, studioFamily = false))
-        assertEquals(LoginSurface.Studio, loginSurfaceFor(LoginVariant.Instrument, studioFamily = true))
-        // Retro is the opt-in and ignores the theme family.
-        assertEquals(LoginSurface.Retro, loginSurfaceFor(LoginVariant.Retro, studioFamily = false))
-        assertEquals(LoginSurface.Retro, loginSurfaceFor(LoginVariant.Retro, studioFamily = true))
-        assertEquals(LoginVariant.Instrument, LoginVariant.fromId(null))
-        assertEquals(LoginVariant.Instrument, LoginVariant.fromId("studio"))
+        // app/login/page.tsx: Retro is the opt-in layout, Default is Studio's own sign-in.
+        assertEquals(listOf(LoginSurface.Studio, LoginSurface.Retro), LoginSurface.entries)
+        assertEquals(LoginSurface.Studio, loginSurfaceFor(LoginVariant.Default))
+        assertEquals(LoginSurface.Retro, loginSurfaceFor(LoginVariant.Retro))
+        assertEquals(LoginVariant.Default, LoginVariant.fromId(null))
+        assertEquals(LoginVariant.Default, LoginVariant.fromId("studio"))
+        // The retired "instrument" choice reads as Default (lib/theme-mode.mjs normalizeLoginVariant).
+        assertEquals(LoginVariant.Default, LoginVariant.fromId("instrument"))
         assertEquals(LoginVariant.Retro, LoginVariant.fromId("retro"))
+        assertEquals("default", LoginVariant.Default.id)
     }
 
     @Test
@@ -50,15 +52,6 @@ class LoginCopyTest {
         assertEquals("tether.example.com", hostnameOf("tether.example.com/"))
         assertEquals("10.0.2.2", hostnameOf("http://10.0.2.2:4290"))
         assertEquals("", hostnameOf("  "))
-    }
-
-    @Test
-    fun instrumentStatusLabels() {
-        assertEquals("probing", instrumentStatusLabel(LoginPhase.Ready, probing = true))
-        assertEquals("locked", instrumentStatusLabel(LoginPhase.Ready, probing = false))
-        assertEquals("verifying", instrumentStatusLabel(LoginPhase.Verifying, probing = false))
-        assertEquals("unlocked", instrumentStatusLabel(LoginPhase.Success, probing = false))
-        assertEquals("refused", instrumentStatusLabel(LoginPhase.Error, probing = true))
     }
 
     @Test
@@ -117,6 +110,5 @@ class LoginCopyTest {
         assertEquals(true, usernameHintFor(null, " "))
         assertEquals(false, usernameHintFor(probe, ""))
         assertEquals(false, usernameHintFor(null, "operator"))
-        assertEquals("probing", instrumentStatusLabel(LoginPhase.Checking, probing = false))
     }
 }

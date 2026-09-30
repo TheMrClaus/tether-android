@@ -18,8 +18,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
@@ -62,7 +62,7 @@ class FilesSafeTextScreenshotTest(private val shot: String, private val skin: Te
             if (shot == "delete") openDeleteConfirm(hostile)
         }
         rule.setContent {
-            TetherTheme(ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)) {
+            TetherTheme(skin.mode) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     val t = LocalTetherTokens.current
                     Box(Modifier.fillMaxSize().background(t.mineral).testTag("files-safe-shot")) {
@@ -86,6 +86,6 @@ class FilesSafeTextScreenshotTest(private val shot: String, private val skin: Te
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf("preview", "delete").flatMap { s -> listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf("preview", "delete").flatMap { s -> listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
     }
 }

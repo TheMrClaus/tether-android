@@ -81,7 +81,7 @@ class ToolMediaWireRenderTest {
         val loader = ToolMediaRepository(source, rule.activity.cacheDir, origin.toString().trimEnd('/'))
         val folded = wire()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader) {
                     ChatTranscript(
                         projection = folded.projection,

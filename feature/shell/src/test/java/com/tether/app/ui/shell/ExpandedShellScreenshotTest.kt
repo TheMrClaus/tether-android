@@ -124,7 +124,7 @@ class ExpandedFontScaleScreenshotTest(private val shot: ExpandedShot, private va
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(ExpandedShot.Idle, ExpandedShot.Details, ExpandedShot.Links).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }
@@ -153,6 +153,6 @@ class LinksPopoverShortScreenScreenshotTest(private val skin: TetherSkin) {
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(it) }
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
     }
 }

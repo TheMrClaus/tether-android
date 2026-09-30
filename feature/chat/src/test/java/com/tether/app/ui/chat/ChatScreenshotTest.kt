@@ -140,7 +140,7 @@ class ChatFontScaleScreenshotTest(private val shot: ChatShot, private val skin: 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(ChatShot.MarkdownTop, ChatShot.Markdown, ChatShot.Streaming, ChatShot.ThinkingOpen).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }

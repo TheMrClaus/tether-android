@@ -67,7 +67,7 @@ class ComposerBehaviourTest {
     private fun show(fixture: ChatFixtures.Folded, initialDraft: String = "", accept: Boolean = true) {
         projection = fixture.projection
         rule.setContent {
-            ComposerHost(TetherSkin.Machine) {
+            ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = ComposerFixtures.session,
                     projection = projection,

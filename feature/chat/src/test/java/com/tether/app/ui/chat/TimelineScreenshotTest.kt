@@ -90,7 +90,7 @@ class TimelineFontScaleScreenshotTest(private val shot: TimelineShot, private va
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(TimelineShot.Scrub, TimelineShot.Saved).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }

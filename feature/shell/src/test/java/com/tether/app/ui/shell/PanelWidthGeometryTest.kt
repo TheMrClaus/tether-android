@@ -71,46 +71,29 @@ class PanelWidthGeometryTest {
         assertNull(PanelWidthGeometry.parseStored(true))
     }
 
-    /**
-     * The theme defaults (no stored width): instrument rail 18rem / 16.5rem at 48-100rem / 20rem
-     * from 100rem (globals.css:70, 11856, 11727); inspector 16.5rem / 17rem from 90rem (:71,
-     * 11727); Studio 17rem / 18rem everywhere (studio.css:48-49).
-     */
+    /** The defaults (no stored width): Studio's rail 17rem and inspector 18rem at every width (studio.css:48-49). */
     @Test fun defaultsFollowTheCascade() {
-        val machine = ThemeFamily.Precision
-        assertEquals(288, PanelWidthGeometry.defaultWidth(rail, machine, 700))
-        assertEquals(264, PanelWidthGeometry.defaultWidth(rail, machine, 900))
-        assertEquals(264, PanelWidthGeometry.defaultWidth(rail, machine, 1280))
-        assertEquals(264, PanelWidthGeometry.defaultWidth(rail, machine, 1500)) // 11856 beats 11727
-        assertEquals(320, PanelWidthGeometry.defaultWidth(rail, machine, 1600))
-        assertEquals(264, PanelWidthGeometry.defaultWidth(inspector, machine, 1280))
-        assertEquals(272, PanelWidthGeometry.defaultWidth(inspector, machine, 1600))
-        for (w in listOf(900, 1280, 1600, 1920)) {
-            assertEquals(272, PanelWidthGeometry.defaultWidth(rail, ThemeFamily.Studio, w))
-            assertEquals(288, PanelWidthGeometry.defaultWidth(inspector, ThemeFamily.Studio, w))
-        }
+        assertEquals(272, PanelWidthGeometry.defaultWidth(rail))
+        assertEquals(288, PanelWidthGeometry.defaultWidth(inspector))
     }
 
-    /** The defaults agree with the generated token export (D9): base values and the @media ones. */
+    /** The defaults agree with the generated token export (D9) in both Studio skins. */
     @Test fun defaultsAgreeWithTheGeneratedTokens() {
-        assertEquals(GeneratedTokens.Machine.railWidth.value.toInt(), PanelWidthGeometry.defaultWidth(rail, ThemeFamily.Precision, 700))
-        assertEquals(GeneratedTokens.Machine.inspectorWidth.value.toInt(), PanelWidthGeometry.defaultWidth(inspector, ThemeFamily.Precision, 1280))
-        assertEquals(GeneratedTokens.Studio.railWidth.value.toInt(), PanelWidthGeometry.defaultWidth(rail, ThemeFamily.Studio, 1280))
-        assertEquals(GeneratedTokens.StudioDark.inspectorWidth.value.toInt(), PanelWidthGeometry.defaultWidth(inspector, ThemeFamily.Studio, 1600))
-        val media = GeneratedTokens.responsive.associateBy { it.name to it.media }
-        assertEquals(media.getValue("--rail-width" to "@media (min-width: 48rem) and (max-width: 99.999rem)").value.value.toInt(), PanelWidthGeometry.defaultWidth(rail, ThemeFamily.Tactile, 1280))
-        assertEquals(media.getValue("--rail-width" to "@media (min-width: 90rem)").value.value.toInt(), PanelWidthGeometry.defaultWidth(rail, ThemeFamily.Tactile, 1600))
-        assertEquals(media.getValue("--inspector-width" to "@media (min-width: 90rem)").value.value.toInt(), PanelWidthGeometry.defaultWidth(inspector, ThemeFamily.Tactile, 1600))
+        for (tokens in listOf(GeneratedTokens.Studio, GeneratedTokens.StudioDark)) {
+            assertEquals(tokens.railWidth.value.toInt(), PanelWidthGeometry.defaultWidth(rail))
+            assertEquals(tokens.inspectorWidth.value.toInt(), PanelWidthGeometry.defaultWidth(inspector))
+        }
     }
 
     /** A stored width renders through the CSS clamp(); nothing stored is the default; 0 never zeroes a column. */
     @Test fun effectiveWidthClampsStoredAndFallsBackToTheDefault() {
-        assertEquals(264, PanelWidthGeometry.effectiveWidth(rail, null, ThemeFamily.Precision, 1280))
-        assertEquals(360, PanelWidthGeometry.effectiveWidth(rail, 360, ThemeFamily.Precision, 1280))
+        assertEquals(272, PanelWidthGeometry.effectiveWidth(rail, null, 1280))
+        assertEquals(288, PanelWidthGeometry.effectiveWidth(inspector, null, 1280))
+        assertEquals(360, PanelWidthGeometry.effectiveWidth(rail, 360, 1280))
         // A width stored on a wide display re-clamps on a narrower one (panel-widths.mjs:13-16).
-        assertEquals(360, PanelWidthGeometry.effectiveWidth(rail, 470, ThemeFamily.Precision, 900))
-        assertEquals(224, PanelWidthGeometry.effectiveWidth(rail, 0, ThemeFamily.Precision, 1280))
-        assertEquals(448, PanelWidthGeometry.effectiveWidth(inspector, 8192, ThemeFamily.Studio, 1600))
+        assertEquals(360, PanelWidthGeometry.effectiveWidth(rail, 470, 900))
+        assertEquals(224, PanelWidthGeometry.effectiveWidth(rail, 0, 1280))
+        assertEquals(448, PanelWidthGeometry.effectiveWidth(inspector, 8192, 1600))
     }
 
     /** The three fields round-trip through the whole preference model, other fields untouched. */

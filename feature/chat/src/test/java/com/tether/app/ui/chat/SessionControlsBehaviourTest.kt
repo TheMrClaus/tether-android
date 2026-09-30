@@ -55,7 +55,7 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
     fun show() {
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            ComposerHost(TetherSkin.Machine) {
+            ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = session,
                     projection = ComposerFixtures.idle.projection,

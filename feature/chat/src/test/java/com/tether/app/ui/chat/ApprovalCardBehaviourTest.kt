@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -125,7 +126,7 @@ class ApprovalCardBehaviourTest {
         fixture = f
         consent = c
         rule.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides store) {
                 androidx.compose.runtime.key(generation) {
                     ChatTranscript(
@@ -447,7 +448,7 @@ class ApprovalCardBehaviourTest {
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
         val c = actions()
         tester.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 ChatTranscript(projection = ApprovalFixtures.grants.projection, tree = ApprovalFixtures.grants.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
             }
         }
@@ -469,7 +470,7 @@ class ApprovalCardBehaviourTest {
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
         val c = actions()
         tester.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 ChatTranscript(projection = ApprovalFixtures.write.projection, tree = ApprovalFixtures.write.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
             }
         }
@@ -660,7 +661,7 @@ class ApprovalCardBehaviourTest {
         var f by mutableStateOf(ApprovalFixtures.grants)
         val c = actions()
         tester.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
             }
         }
@@ -681,7 +682,7 @@ class ApprovalCardBehaviourTest {
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
         val c = actions()
         tester.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 ChatTranscript(projection = ApprovalFixtures.grants.projection, tree = ApprovalFixtures.grants.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
             }
         }
@@ -742,7 +743,7 @@ class ApprovalCardBehaviourTest {
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(rule)
         val c = actions()
         tester.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 ChatTranscript(projection = ApprovalFixtures.question.projection, tree = ApprovalFixtures.question.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = c)
             }
         }
@@ -1434,7 +1435,8 @@ class ApprovalCardBehaviourTest {
         rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
         rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
+        // Studio's roomier card puts the choice keys below the confirmation's fold: bring them in.
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(1, calls.size)
         assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains("/w/out/report-63"))
@@ -1512,7 +1514,7 @@ class ApprovalScreenBehaviourTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = session, projection = projections[session.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }
@@ -1577,7 +1579,7 @@ class ApprovalScreenBehaviourTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = session.copy(readOnly = true), projection = projections["s1"], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }

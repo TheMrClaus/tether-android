@@ -120,7 +120,7 @@ class SidebarFontScaleScreenshotTest(private val shot: SidebarShot, private val 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Status).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }

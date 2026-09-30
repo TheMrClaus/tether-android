@@ -24,8 +24,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -131,7 +131,7 @@ private fun Overlay(state: FileBrowserState) {
 fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: String, size: String) {
     val state = stateFor(shot)
     setContent {
-        TetherTheme(ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)) {
+        TetherTheme(skin.mode) {
             CompositionLocalProvider(LocalReducedMotion provides true) {
                 // The console floor behind the scrim (the shell is there in the app, as on the web).
                 Box(Modifier.fillMaxSize().background(LocalTetherTokens.current.mineral).testTag(ShotTag)) {
@@ -192,7 +192,7 @@ class FilesFontScaleScreenshotTest(private val shot: FilesShot, private val skin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(FilesShot.List, FilesShot.Text, FilesShot.Actions, FilesShot.NamePrompt).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }

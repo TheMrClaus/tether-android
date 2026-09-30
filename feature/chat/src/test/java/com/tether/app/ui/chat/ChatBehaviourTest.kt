@@ -54,7 +54,7 @@ class ChatBehaviourTest {
         opener: LinkOpener? = null,
     ) {
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 val body = @androidx.compose.runtime.Composable {
                     ChatTranscript(
                         projection = fixture.projection,

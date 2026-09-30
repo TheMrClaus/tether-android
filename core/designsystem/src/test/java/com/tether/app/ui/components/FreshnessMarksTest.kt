@@ -67,7 +67,7 @@ class FreshnessMarksTest {
     @Test
     fun talkBackReadsTheWordsOfEveryMark() {
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 androidx.compose.foundation.layout.Column {
                     FreshnessChip(SessionSync(Freshness.Saved, ago(12)), now)
                     FreshnessChip(SessionSync(Freshness.CatchingUp, null), now)

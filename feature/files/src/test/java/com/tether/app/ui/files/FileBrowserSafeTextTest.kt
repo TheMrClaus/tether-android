@@ -32,7 +32,6 @@ import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,7 +95,7 @@ class FileBrowserSafeTextTest {
 
     private fun show(state: FileBrowserState, rtl: Boolean = false, overlay: @Composable () -> Unit = {}) {
         rule.setContent {
-            TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+            TetherTheme(ThemeMode.Dark) {
                 CompositionLocalProvider(
                     LocalReducedMotion provides true,
                     LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
@@ -216,7 +215,7 @@ class FileBrowserSafeTextTest {
         val browser = state()
         rule.setContent {
             CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
-                TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                TetherTheme(ThemeMode.Dark) {
                     CompositionLocalProvider(LocalReducedMotion provides true) { FileBrowserFrame(browser, onClose = {}, onUpload = {}, env = FilesFixtures.env) }
                 }
             }
@@ -253,7 +252,7 @@ class FileBrowserSafeTextTest {
         val browser = FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply { cwd = ROOT; open(); selectFile(two) }
         rule.setContent {
             CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
-                TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                TetherTheme(ThemeMode.Dark) {
                     CompositionLocalProvider(LocalReducedMotion provides true) { FileBrowserFrame(browser, onClose = {}, onUpload = {}, env = FilesFixtures.env) }
                 }
             }

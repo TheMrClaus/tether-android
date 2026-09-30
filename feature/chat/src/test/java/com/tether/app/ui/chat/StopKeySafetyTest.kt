@@ -70,7 +70,7 @@ class StopKeySafetyTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = session, projection = projections[session.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }
@@ -270,7 +270,7 @@ class StopKeySafetyTest {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         var shown by mutableStateOf(session)
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }
@@ -334,7 +334,7 @@ class StopKeySafetyTest {
         val actions = CommandActions(null, {}, { id -> calls += id; com.tether.app.client.StopCommandResult.Sent })
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.offset(y = androidx.compose.ui.unit.Dp(offset.toFloat()))) {
                     RunningCommandsBar(listOf(command), actions)
                 }
@@ -400,7 +400,7 @@ class StopKeySafetyTest {
         assertTrue(keys.size > keys.toSet().size) // the collision is real
         assertEquals(keys.size, uniqueLazyKeys(keys).toSet().size)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(projection = projection, tree = tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone)
             }
         }
@@ -426,7 +426,7 @@ class StopKeySafetyTest {
         assertEquals(rows.size, rows.map { it.key }.toSet().size)
         assertEquals(4, rows.size) // head + 3 steps (the repeat still shows, as on the web)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.foundation.layout.Column {
                     SubagentTabs(runs, runs.single().runId, onSelect = {})
                     SubagentRunTab(runs.single(), showThinking = false, pending = emptyList(), pendingQuestions = emptyList(), answeredIds = emptySet())
@@ -444,7 +444,7 @@ class StopKeySafetyTest {
     @Test fun aRunTabFollowsNewStepsOnlyWhileAtTheBottom() {
         var tree by mutableStateOf(longRun(60))
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 SubagentRunTab(collectSubagentRuns(tree).single(), showThinking = false, pending = emptyList(), pendingQuestions = emptyList(), answeredIds = emptySet())
             }
         }
@@ -462,7 +462,7 @@ class StopKeySafetyTest {
     @Test fun aDenialFocusIsHandedBackOnceItsStepIsShown() {
         var cleared = 0
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 val run = collectSubagentRuns(longRun(40)).single()
                 SubagentRunTab(run, showThinking = false, pending = emptyList(), pendingQuestions = emptyList(), answeredIds = emptySet(), focus = RunFocus(run.runId, "e10", 1), onFocusShown = { cleared++ })
             }

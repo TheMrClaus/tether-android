@@ -93,7 +93,7 @@ class QuestionCardSafeTextTest {
             onOpenRun = {},
         )
         rule.setContent {
-            ChatHost(TetherSkin.Machine, wellHeight = 900.dp) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
                 CompositionLocalProvider(LocalCardStates provides CardStateStore()) {
                     ChatTranscript(
                         projection = f.projection,

@@ -91,7 +91,7 @@ class LongTranscriptPerfTest {
         val composed = mutableListOf<String>()
         val listState = LazyListState()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalChatRowObserver provides { key: String -> composed += key }) {
                     ChatTranscript(
                         projection = state.second,

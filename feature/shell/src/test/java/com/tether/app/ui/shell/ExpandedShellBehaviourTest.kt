@@ -47,7 +47,7 @@ abstract class ExpandedBehaviourBase {
         state: PhoneShellState = PhoneShellState(),
         store: PanelStore = PanelStore(),
         session: AgentSession? = ExpandedFixtures.idle,
-        skin: TetherSkin = TetherSkin.Machine,
+        skin: TetherSkin = TetherSkin.StudioDark,
     ) {
         rule.setContent { ExpandedShellUnderTest(skin, state, session, store, onEvent = { events += it }) }
     }
@@ -117,9 +117,9 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
 
     @Test fun railTakesTheThemeDefaultWithNothingStored() {
         show()
-        assertEquals(264f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f)
         val r = range(ShellTags.RailHandle)
-        assertEquals(264f, r.current)
+        assertEquals(272f, r.current)
         assertEquals(224f..480f, r.range)
     }
 
@@ -147,12 +147,12 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
             moveBy(Offset(dpPx(30f), 0f))
         }
         rule.waitForIdle()
-        assertEquals("live width during the drag", 324f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals("live width during the drag", 332f, widthDp(ShellTags.Sidebar), 0.5f)
         assertTrue("nothing committed mid-drag", store.commits.isEmpty())
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput { up() }
         rule.waitForIdle()
-        assertEquals(listOf(PanelPrefs(sidebarWidth = 324)), store.commits)
-        assertEquals(324f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals(listOf(PanelPrefs(sidebarWidth = 332)), store.commits)
+        assertEquals(332f, widthDp(ShellTags.Sidebar), 0.5f)
     }
 
     @Test fun aDragIsClampedToTheViewportCeiling() {
@@ -189,7 +189,7 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
             up()
         }
         rule.waitForIdle()
-        assertEquals(304, store.panels.sidebarWidth)
+        assertEquals(312, store.panels.sidebarWidth)
     }
 
     @Test fun theHandleTakesATouchBesideItsDrawnStripOnTheRailSide() {
@@ -201,7 +201,7 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
             up()
         }
         rule.waitForIdle()
-        assertEquals(240, store.panels.sidebarWidth)
+        assertEquals(248, store.panels.sidebarWidth)
     }
 
     @Test fun doubleTapResetsToTheThemeDefault() {
@@ -210,7 +210,7 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput { doubleClick(center) }
         rule.waitForIdle()
         assertEquals(listOf(PanelPrefs(sidebarWidth = null)), store.commits)
-        assertEquals(264f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f)
     }
 
     @Test fun arrowKeysMoveTheEdgeAndHomeResets() {
@@ -220,17 +220,17 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
         handle.performSemanticsAction(SemanticsActions.RequestFocus)
         handle.performKeyInput { pressKey(Key.DirectionRight) }
         rule.waitForIdle()
-        assertEquals(280, store.panels.sidebarWidth)
+        assertEquals(288, store.panels.sidebarWidth)
         handle.performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionRight) } }
         rule.waitForIdle()
-        assertEquals(344, store.panels.sidebarWidth)
+        assertEquals(352, store.panels.sidebarWidth)
         handle.performKeyInput { pressKey(Key.DirectionLeft) }
         rule.waitForIdle()
-        assertEquals(328, store.panels.sidebarWidth)
+        assertEquals(336, store.panels.sidebarWidth)
         handle.performKeyInput { pressKey(Key.MoveHome) }
         rule.waitForIdle()
         assertEquals(null, store.panels.sidebarWidth)
-        assertEquals(264f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f)
     }
 
     @Test fun talkBackAdjustsTheWidthAsARangeAndCanReset() {
@@ -340,7 +340,7 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
     }
 
     @Test fun filesNeedsASessionAndTheEmptyStageShows() {
-        show(session = null, skin = TetherSkin.Tactile)
+        show(session = null, skin = TetherSkin.Studio)
         rule.onNodeWithTag(ShellTags.FilesKey).assertIsNotEnabled()
         rule.onNodeWithTag(ShellTags.EmptyWorkspace).assertIsDisplayed()
         rule.onNodeWithContentDescription("Start first session").assertIsDisplayed()
@@ -371,8 +371,8 @@ class ExpandedShellColumnBehaviourTest : ExpandedBehaviourBase() {
         show(state)
         rule.onNodeWithTag(ShellTags.InspectorColumn).assertIsDisplayed()
         rule.onNodeWithTag(InspectorSlotTag).assertExists()
-        assertEquals(272f, widthDp(ShellTags.InspectorColumn), 0.5f)
-        assertEquals(320f, widthDp(ShellTags.Sidebar), 0.5f)
+        assertEquals(288f, widthDp(ShellTags.InspectorColumn), 0.5f)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f)
         // Tooltip-only: no toggle state and no action (dashboard.tsx:80).
         val gauge = rule.onNodeWithContentDescription("Session telemetry").fetchSemanticsNode()
         assertEquals(null, gauge.config.getOrNull(SemanticsProperties.ToggleableState))
@@ -389,8 +389,8 @@ class ExpandedShellColumnBehaviourTest : ExpandedBehaviourBase() {
             up()
         }
         rule.waitForIdle()
-        assertEquals(PanelPrefs(inspectorWidth = 320), store.panels)
-        assertEquals(320f, widthDp(ShellTags.InspectorColumn), 0.5f)
+        assertEquals(PanelPrefs(inspectorWidth = 336), store.panels)
+        assertEquals(336f, widthDp(ShellTags.InspectorColumn), 0.5f)
     }
 
     @Test fun arrowRightNarrowsTheInspector() {
@@ -400,7 +400,7 @@ class ExpandedShellColumnBehaviourTest : ExpandedBehaviourBase() {
         handle.performSemanticsAction(SemanticsActions.RequestFocus)
         handle.performKeyInput { pressKey(Key.DirectionRight) }
         rule.waitForIdle()
-        assertEquals(256, store.panels.inspectorWidth)
+        assertEquals(272, store.panels.inspectorWidth)
     }
 
     @Test fun storedWidthsForBothColumnsAreRestored() {
@@ -446,7 +446,7 @@ class ExpandedShellFoldableBehaviourTest : ExpandedBehaviourBase() {
         rule.waitForIdle()
         val stage = rule.onNodeWithTag(ShellTags.Stage).fetchSemanticsNode().boundsInRoot
         val workspace = rule.onNodeWithTag(ShellTags.Workspace).fetchSemanticsNode().boundsInRoot
-        assertEquals(dpPx(23f), stage.left - workspace.left, 1f) // calc(space-lg + 7px) below 64rem
+        assertEquals(0f, stage.left - workspace.left, 1f) // Studio's stage has no gutter
     }
 
     @Test fun everyControlHasA44dpTouchTarget() {
@@ -468,7 +468,7 @@ class ExpandedShellBelowColumnBehaviourTest : ExpandedBehaviourBase() {
         show(state)
         rule.onNodeWithTag(ShellTags.InspectorColumn).assertDoesNotExist()
         rule.onNodeWithTag(ShellTags.InspectorHandle).assertDoesNotExist()
-        assertEquals(264f, widthDp(ShellTags.Sidebar), 0.5f) // 16.5rem at 48-100rem (11856)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f) // Studio 17rem at every width (studio.css:48)
         val gauge = rule.onNodeWithContentDescription("Session telemetry").fetchSemanticsNode()
         assertEquals(androidx.compose.ui.state.ToggleableState.Off, gauge.config[SemanticsProperties.ToggleableState])
         rule.onNodeWithContentDescription("Session telemetry").performClick()
@@ -488,8 +488,8 @@ class ExpandedShellAtColumnBehaviourTest : ExpandedBehaviourBase() {
         show(state)
         rule.onNodeWithTag(ShellTags.InspectorColumn).assertIsDisplayed()
         rule.onNodeWithTag(ShellTags.InspectorHandle).assertExists()
-        assertEquals(320f, widthDp(ShellTags.Sidebar), 0.5f) // 20rem from 100rem (11727)
-        assertEquals(272f, widthDp(ShellTags.InspectorColumn), 0.5f)
+        assertEquals(272f, widthDp(ShellTags.Sidebar), 0.5f) // Studio 17rem at every width (studio.css:48)
+        assertEquals(288f, widthDp(ShellTags.InspectorColumn), 0.5f)
         val gauge = rule.onNodeWithContentDescription("Session telemetry").fetchSemanticsNode()
         assertEquals(null, gauge.config.getOrNull(SemanticsActions.OnClick))
         rule.onNodeWithTag(ShellTags.TelemetrySheet).assertDoesNotExist()

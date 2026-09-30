@@ -71,7 +71,7 @@ class ExternalLinkBehaviourTest {
 
     private fun show(markdown: String, opener: LinkOpener = recorder, settled: Boolean = true) {
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalLinkOpener provides opener, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
                     MarkdownBody(parseMarkdown(markdown), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
                 }
@@ -173,7 +173,7 @@ class ExternalLinkBehaviourTest {
     @Test fun aLinkThatMovedUnderTheFingerAsksFirst() {
         var above by mutableStateOf(0)
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
                     androidx.compose.foundation.layout.Column {
                         androidx.compose.foundation.layout.Spacer(Modifier.height(above.dp))
@@ -199,7 +199,7 @@ class ExternalLinkBehaviourTest {
 
     private fun host(content: @androidx.compose.runtime.Composable () -> Unit) {
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) { content() }
             }
         }
@@ -286,7 +286,7 @@ class ExternalLinkBehaviourTest {
     @Test fun aLinkInsideAClampedBlockAsksFirstUntilTheBlockIsOpen() {
         val filler = (1..40).joinToString("\n\n") { "Line $it of a long thought." }
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true, LocalLinkClock provides { now }) {
                     com.tether.app.ui.components.TetherExpandableBlock(clamp = 120.dp) {
                         MarkdownBody(parseMarkdown("[https://example.test/docs](https://example.test/docs)\n\n$filler"), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
@@ -525,7 +525,7 @@ class ExternalLinkBehaviourTest {
         var signedIn by mutableStateOf(true)
         var current: ExternalLinkGate? = null
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalLinkOpener provides recorder, LocalReducedMotion provides true) {
                     if (signedIn) {
                         val gate = remember(server) { ExternalLinkGate() }

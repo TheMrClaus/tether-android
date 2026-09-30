@@ -69,7 +69,7 @@ class ChatFindBehaviourTest {
         var shown by mutableStateOf(initial)
         current = { shown = it }
         val content: @androidx.compose.runtime.Composable () -> Unit = {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }

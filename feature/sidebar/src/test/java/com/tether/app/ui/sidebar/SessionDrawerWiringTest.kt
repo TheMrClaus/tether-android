@@ -46,7 +46,7 @@ class SessionDrawerWiringTest {
         val sessions = listOf(live)
 
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 SessionDrawer(
                     vm = vm,
                     prefs = prefs,

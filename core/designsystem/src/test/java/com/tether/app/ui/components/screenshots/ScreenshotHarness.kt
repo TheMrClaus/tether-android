@@ -34,8 +34,8 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import kotlinx.coroutines.delay
 
 /** The two device classes the parity program screenshots (PLAN §5.3). */
@@ -49,7 +49,7 @@ const val GoldenDir = "src/test/screenshots"
 
 fun goldenPath(primitive: String, skin: TetherSkin, size: ScreenSize): String = "$GoldenDir/$primitive/${skin.id}-${size.id}.png"
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 /**
  * Time the (paused) clock advances before capture: every press/colour transition has settled,

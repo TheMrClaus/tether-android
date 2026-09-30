@@ -54,7 +54,7 @@ class NoticeBehaviourTest {
         rich = richCodex
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(
                     projection = fixture.projection,
                     tree = fixture.tree,
@@ -336,7 +336,7 @@ class NoticeBehaviourTest {
         val limit = rateLimitPrompt(NoticeFixtures.limit.tree)!!
         val scheduled = rateLimitPrompt(NoticeFixtures.scheduled.tree)!!
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.runtime.CompositionLocalProvider(LocalNoticeActions provides actions) {
                     // The card last: its "Choice sent" line would move (and so re-arm) anything below it.
                     androidx.compose.foundation.layout.Column {
@@ -395,7 +395,7 @@ class ComposerLockBehaviourTest {
         liveness: ComposerLiveness = ComposerLiveness.Live,
     ) {
         rule.setContent {
-            ComposerHost(TetherSkin.Machine) {
+            ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = session,
                     projection = folded.projection,

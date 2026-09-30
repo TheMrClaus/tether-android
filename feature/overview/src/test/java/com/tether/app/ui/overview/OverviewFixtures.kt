@@ -21,8 +21,8 @@ import com.tether.app.protocol.overview.OverviewPhase
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 
 /**
  * The approved concept's illustrative data (design/mockups/tether-overview/studio-*.png), as the
@@ -116,7 +116,7 @@ object OverviewFixtures {
     val loading = OverviewClientState(phase = OverviewPhase.Loading)
 }
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 @Composable
 fun OverviewUnderTest(

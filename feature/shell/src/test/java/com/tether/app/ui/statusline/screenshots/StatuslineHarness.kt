@@ -32,8 +32,8 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import kotlinx.coroutines.delay
 
 /*
@@ -48,7 +48,7 @@ const val GoldenDir = "src/test/screenshots"
 
 fun goldenPath(board: String, skin: TetherSkin, size: ScreenSize): String = "$GoldenDir/$board/${skin.id}-${size.id}.png"
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 const val CaptureAtMs: Long = 600
 const val BoardTag = "board"

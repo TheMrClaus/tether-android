@@ -83,7 +83,7 @@ class SubagentRunPerfTest {
         var tree by mutableStateOf(base)
         val composed = mutableListOf<String>()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalChatRowObserver provides { key: String -> composed += key }) {
                     SubagentRunTab(runOf(tree), showThinking = false, pending = emptyList(), pendingQuestions = emptyList(), answeredIds = emptySet())
                 }
@@ -132,7 +132,7 @@ class SubagentRunPerfTest {
         val composed = mutableListOf<String>()
         val listState = LazyListState()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalChatRowObserver provides { key: String -> composed += key }) {
                     ChatTranscript(
                         projection = holder.second,

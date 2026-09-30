@@ -23,8 +23,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import kotlinx.serialization.json.put
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -168,7 +168,7 @@ That's everything for this release."""
     }
 }
 
-fun choiceFor(skin: TetherSkin): ThemeChoice = ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)
+fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
 /**
  * The chat well as the web frames it: below the topbar + workspace header band and above the

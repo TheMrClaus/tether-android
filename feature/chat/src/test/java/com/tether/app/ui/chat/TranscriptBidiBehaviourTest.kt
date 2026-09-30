@@ -100,7 +100,7 @@ class TranscriptBidiBehaviourTest {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides (menu ?: androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider.current),
             ) {
-                ChatHost(TetherSkin.Machine, wellHeight = wellHeight) {
+                ChatHost(TetherSkin.StudioDark, wellHeight = wellHeight) {
                     Column {
                         extra?.invoke()
                         ChatTranscript(
@@ -293,7 +293,7 @@ class TranscriptBidiBehaviourTest {
         val f = fixture("Latin first, then $HEBREW", "$HEBREW first, then Latin\n\nLatin first, then $HEBREW again")
         rule.setContent {
             androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides ui.value) {
-                ChatHost(TetherSkin.Machine) {
+                ChatHost(TetherSkin.StudioDark) {
                     ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, listState = LazyListState(), showTimeline = false)
                 }
             }
@@ -493,7 +493,7 @@ class TranscriptBidiBehaviourTest {
         val pocs = allPocs.filter { it.none { c -> c in '0'..'9' } }.mapIndexed { n, p -> "p$n $p" }
         rule.setContent {
             androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
-                ChatHost(TetherSkin.Machine, wellHeight = 9_000.dp) {
+                ChatHost(TetherSkin.StudioDark, wellHeight = 9_000.dp) {
                     MarkdownBody(parseMarkdown(pocs.joinToString("\n\n")), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
                 }
             }
@@ -639,7 +639,7 @@ class TranscriptBidiBehaviourTest {
         val blocks = parseMarkdown("```\n$body\n```")
         val active = androidx.compose.runtime.mutableStateOf(0)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 MarkdownBody(blocks, LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink, find = FindMarks(if (active.value == 0) "line 3 " else "line 150 ", 0))
             }
         }
@@ -757,7 +757,7 @@ class TranscriptBidiBehaviourTest {
 
     @Test fun theTodoBarsAgentWordsAreProse() {
         val progress = ProgressView(listOf(ProgressItem("Fix the ${RLO}parser$PDF", ProgressStatus.IN_PROGRESS)), "Fix the ${RLO}parser$PDF", 0, 1)
-        rule.setContent { ChatHost(TetherSkin.Machine) { TodoBar(progress, "s1") } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { TodoBar(progress, "s1") } }
         rule.onNodeWithTag("todo-bar-head").performClick()
         rule.waitForIdle()
         assertTrue(rule.onAllNodes(hasText("Fix the ${tok(0x202E)}parser${tok(0x202C)}"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
@@ -768,7 +768,7 @@ class TranscriptBidiBehaviourTest {
         val flag = "\uD83C\uDFF4" + "gbsct".map { String(Character.toChars(0xE0000 + it.code)) }.joinToString("") + String(Character.toChars(0xE007F))
         var checked = false
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 val t = LocalTetherTokens.current
                 val shown = markedPlain("flag $flag and more", FindMarks(String(Character.toChars(0xE0073)), 0), t)
                 assertEquals("flag $flag and more", shown.text)
@@ -793,7 +793,7 @@ class TranscriptBidiBehaviourTest {
             put("commandId", "c"); put("stream", "stdout"); put("text", "\u001B[31mFAIL\u001B[0m ${RLO}exe.txt\n\u001B[2Kerased\n")
         }.tree())
         rule.setContent {
-            ChatHost(TetherSkin.Machine) { CommandOutputSurface(runningBackgroundCommands(tree).single(), CommandActions.Unavailable, onClose = {}) }
+            ChatHost(TetherSkin.StudioDark) { CommandOutputSurface(runningBackgroundCommands(tree).single(), CommandActions.Unavailable, onClose = {}) }
         }
         rule.mainClock.advanceTimeBy(COMMAND_SHEET_SAMPLE_MS * 2)
         rule.waitForIdle()
@@ -848,7 +848,7 @@ class TranscriptBidiBehaviourTest {
         val bigFence = "```\n" + "val x = compute(a, b) // a line of ordinary code\n".repeat(21_000) + "```"
         val which = androidx.compose.runtime.mutableStateOf(0)
         val fences = listOf(emptyList(), parseMarkdown(tagFence), parseMarkdown(bigFence))
-        rule.setContent { ChatHost(TetherSkin.Machine) { MarkdownBody(fences[which.value], LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { MarkdownBody(fences[which.value], LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink) } }
         rule.waitForIdle()
         for (n in 1..2) {
             val started = System.nanoTime()

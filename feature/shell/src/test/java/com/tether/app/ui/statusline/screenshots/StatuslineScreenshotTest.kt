@@ -76,7 +76,7 @@ class StatuslineFontScaleScreenshotTest(private val board: String, private val s
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = StatuslineBoards.keys.flatMap { b ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(b, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(b, it) }
         }
     }
 }
@@ -96,7 +96,7 @@ class UsageTrackMotionScreenshotTest(private val reduced: Boolean) {
     @Test fun framesAfterAChange() {
         rule.snapBoard(
             if (reduced) "usage-track-reduced-motion" else "usage-track-motion",
-            TetherSkin.Machine,
+            TetherSkin.StudioDark,
             ScreenSize.Phone,
             reducedMotion = reduced,
             captureAtMs = FlipAfterMs + FrameAfterFlipMs,

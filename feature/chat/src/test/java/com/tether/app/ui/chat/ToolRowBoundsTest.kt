@@ -94,7 +94,7 @@ class ToolRowBoundsTest {
     @Test fun twentyThousandStreamedStepsDrawBoundedRowsPerDelta() {
         var block by mutableStateOf(task(done = false, thread(20_000)))
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.foundation.layout.Box(Modifier.verticalScroll(rememberScrollState())) { ToolCard(block, showThinking = false) }
             }
         }
@@ -139,7 +139,7 @@ class ToolRowBoundsTest {
         assertEquals(AGENT_ROWS_MAX, view.agents.size)
         assertEquals(20_000, view.agentsTotal)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.foundation.layout.Box(Modifier.verticalScroll(rememberScrollState())) { ToolBlockView(block, ToolRenderFlags(richCodex = true, richOpencode = false, showThinking = false)) }
             }
         }
@@ -216,7 +216,7 @@ class ToolRowBoundsTest {
         // A malformed Edit is raw for another reason: no note.
         assertEquals(null, (toolInputModel("Edit", JsObj.of("file_path" to js("a"), "old_string" to js("x"))) as ToolInputModel.Raw).note)
         assertEquals(null, (toolInputModel("Bash", JsObj.of("command" to js("ls"))) as ToolInputModel.Raw).note)
-        rule.setContent { ChatHost(TetherSkin.Machine) { ToolInputView("Edit", JsObj.of("file_path" to js("a"), "old_string" to js(big), "new_string" to js("x"))) } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { ToolInputView("Edit", JsObj.of("file_path" to js("a"), "old_string" to js(big), "new_string" to js("x"))) } }
         rule.waitForIdle()
         rule.onAllNodes(hasText(TOO_LARGE_TO_DIFF)).fetchSemanticsNodes().single()
     }
@@ -230,7 +230,7 @@ class ToolRowBoundsTest {
         val block = JsObj.of("kind" to js("tool"), "name" to js("Task"), "done" to JsBool.TRUE, "output" to media(2), "subagent" to thread)
         val loader = ToolFixtures.FakeLoader()
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader) {
                     androidx.compose.foundation.layout.Box(Modifier.verticalScroll(rememberScrollState())) { ToolCard(block, showThinking = false) }
                 }
@@ -249,7 +249,7 @@ class ToolRowBoundsTest {
     @Test fun longTitlesAreCutBeforeTheyAreDrawn() {
         val long = "x".repeat(1_000_000)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides null) {
                     androidx.compose.foundation.layout.Column {
                         ToolCard(JsObj.of("kind" to js("tool"), "name" to js(long), "done" to JsBool.TRUE), showThinking = false)

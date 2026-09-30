@@ -9,7 +9,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -60,7 +59,7 @@ class UiPrefsPersistenceTest {
     @Test
     fun everyFieldRoundTripsAcrossARestart() = runBlocking {
         val edited = TetherPreferences(
-            theme = ThemeChoice(ThemeFamily.Studio, ThemeMode.Dark),
+            themeMode = ThemeMode.Dark,
             loginVariant = LoginVariant.Retro,
             defaultWorkspace = "/srv/work",
             showEndedSessions = false,
@@ -86,7 +85,7 @@ class UiPrefsPersistenceTest {
         withPrefs { prefs ->
             assertEquals(edited, prefs.preferences.first())
             // The per-field flows read the same model.
-            assertEquals(edited.theme, prefs.themeChoice.first())
+            assertEquals(ThemeMode.Dark, prefs.themeMode.first())
             assertEquals(LoginVariant.Retro, prefs.loginVariant.first())
             assertTrue(prefs.showThinking.first())
             assertFalse(prefs.showEnded.first())
@@ -102,7 +101,10 @@ class UiPrefsPersistenceTest {
         }
     }
 
-    /** The keys shipped before T2.3 keep their stored values, and a legacy flat theme migrates. */
+    /**
+     * Upgrade from 0.6.x and earlier: the keys shipped before T2.3 keep their stored values, and
+     * the flat theme id migrates to its Studio mode (T15.5); the next save drops it.
+     */
     @Test
     fun shippedKeysAreReadAndLegacyThemeIsDroppedOnSave() = runBlocking {
         withStore(prefsFile) { ds ->
@@ -115,7 +117,7 @@ class UiPrefsPersistenceTest {
         }
         withPrefs { prefs ->
             val p = prefs.preferences.first()
-            assertEquals(ThemeChoice(ThemeFamily.Tactile, ThemeMode.Dark), p.theme)
+            assertEquals(ThemeMode.Dark, p.themeMode)
             assertTrue(p.showThinking)
             assertEquals(listOf("/srv/x"), p.pinnedProjects)
             prefs.setShowEnded(false)
@@ -123,9 +125,66 @@ class UiPrefsPersistenceTest {
         }
         withStore(prefsFile) { ds ->
             val raw = ds.data.first().asMap().mapKeys { it.key.name }
-            assertFalse("legacy theme id dropped once the pair is stored", "theme_choice" in raw)
-            assertEquals("tactile", raw["theme_family"])
+            assertFalse("legacy theme id consumed by the save", "theme_choice" in raw)
+            assertFalse("no family is ever written", "theme_family" in raw)
             assertEquals("dark", raw["theme_mode"])
+            assertEquals("pinned", raw["push_scope"])
+        }
+    }
+
+    /**
+     * T15.5, upgrade from every flat id up to 0.6.x and every 0.7.x-0.8.0 family x mode pair: the
+     * read is the Studio mode, the first save consumes the deprecated keys and writes the mode
+     * alone, and a later read (the migrated store) gives the same mode.
+     */
+    @Test
+    fun everyStoredAppearanceShapeUpgradesToTheModeAlone() = runBlocking {
+        val shapes: List<Pair<Map<String, String>, ThemeMode>> =
+            listOf("system" to ThemeMode.System, "machine" to ThemeMode.Dark, "night" to ThemeMode.Dark, "quiet" to ThemeMode.Dark,
+                "tactile" to ThemeMode.Light, "precision" to ThemeMode.Light)
+                .map { (flat, mode) -> mapOf(PreferenceKeys.LEGACY_THEME to flat) to mode } +
+                listOf("tactile", "precision", "studio").flatMap { family ->
+                    ThemeMode.entries.map { mode ->
+                        mapOf(PreferenceKeys.THEME_FAMILY to family, PreferenceKeys.THEME_MODE to mode.id) to mode
+                    }
+                } +
+                listOf(mapOf(PreferenceKeys.THEME_FAMILY to "precision", PreferenceKeys.THEME_MODE to "light", PreferenceKeys.LEGACY_THEME to "machine") to ThemeMode.Light)
+        for ((stored, expected) in shapes) {
+            prefsFile.delete()
+            withStore(prefsFile) { ds -> ds.edit { p -> stored.forEach { (k, v) -> p[stringPreferencesKey(k)] = v } } }
+            withPrefs { prefs ->
+                assertEquals("$stored", expected, prefs.themeMode.first())
+                assertTrue("$stored predates the view record", prefs.viewBoot().hasExistingPreferences)
+                prefs.setShowThinking(true) // any save of the model
+            }
+            withStore(prefsFile) { ds ->
+                val raw = ds.data.first().asMap().mapKeys { it.key.name }
+                assertFalse("$stored: family consumed", PreferenceKeys.THEME_FAMILY in raw)
+                assertFalse("$stored: flat id consumed", PreferenceKeys.LEGACY_THEME in raw)
+                assertEquals("$stored", expected.id, raw[PreferenceKeys.THEME_MODE])
+            }
+            withPrefs { prefs -> assertEquals("$stored after the save", expected, prefs.themeMode.first()) }
+        }
+    }
+
+    /** Picking a mode stores it alone; the web's former "instrument" sign-in is saved back as "default". */
+    @Test
+    fun settingTheModeStoresOnlyTheModeAndRenamesInstrument() = runBlocking {
+        withStore(prefsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey(PreferenceKeys.THEME_FAMILY)] = "tactile"
+                it[stringPreferencesKey(PreferenceKeys.THEME_MODE)] = "dark"
+                it[stringPreferencesKey(PreferenceKeys.LOGIN_VARIANT)] = "instrument"
+            }
+        }
+        withPrefs { prefs ->
+            assertEquals(LoginVariant.Default, prefs.loginVariant.first())
+            prefs.setThemeMode(ThemeMode.Light)
+            assertEquals(ThemeMode.Light, prefs.themeMode.first())
+        }
+        withStore(prefsFile) { ds ->
+            val raw = ds.data.first().asMap().mapKeys { it.key.name }
+            assertEquals(mapOf(PreferenceKeys.THEME_MODE to "light", PreferenceKeys.LOGIN_VARIANT to "default"), raw.filterKeys { it in setOf(PreferenceKeys.THEME_MODE, PreferenceKeys.THEME_FAMILY, PreferenceKeys.LEGACY_THEME, PreferenceKeys.LOGIN_VARIANT) })
         }
     }
 

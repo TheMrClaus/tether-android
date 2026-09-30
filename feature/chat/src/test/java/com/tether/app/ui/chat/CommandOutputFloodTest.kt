@@ -46,7 +46,7 @@ class CommandOutputFloodTest {
         val rebuilds = mutableListOf<String>()
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalChatRowObserver provides { key: String -> if (key == "command-output-lines") rebuilds += key }) {
                     CommandOutputSurface(runningBackgroundCommands(state).single(), CommandActions.Unavailable, onClose = {})
                 }

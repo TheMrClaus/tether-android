@@ -66,7 +66,7 @@ class SidebarSafeTextTest {
         val histories = mapOf(
             F.ROOT to listOf(F.history("h-away", "Finished while you were away", ago = 12, seenAgo = 40, digest = HistoryDigest(2, "All ${RLO}ssap$PDF tests\u200B pass"))),
         )
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, F.state(sessions, histories = histories)) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(sessions, histories = histories)) }
         rule.waitForIdle()
         val shown = spoken()
         // Labels: bidi controls and invisibles dropped, whitespace collapsed; the words in their stored order.
@@ -97,7 +97,7 @@ class SidebarSafeTextTest {
     @Test fun aHostileWorkspaceFolderNameIsCode() {
         val folder = "${F.ROOT}/ev${RLO}il"
         val sessions = listOf(F.live("w1", "Build", cwd = folder, ago = 2))
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, F.state(sessions, pinned = listOf(folder))) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(sessions, pinned = listOf(folder))) }
         rule.waitForIdle()
         val shown = spoken()
         assertTrue("folder in $shown", shown.any { it.contains("ev${tok(0x202E)}il") })
@@ -106,7 +106,7 @@ class SidebarSafeTextTest {
 
     @Test fun theFolderPickersRowsAreCode() {
         rule.setContent {
-            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 com.tether.app.ui.FolderRow(icon = {}, name = "re${RLO}po", detail = "${F.ROOT}/re${RLO}po", onClick = {})
             }
         }
@@ -119,7 +119,7 @@ class SidebarSafeTextTest {
     /** r2 (M1): a line break in a folder the picker lists is a token, never hidden under the one-line clip. */
     @Test fun aLineBreakInAPickerFolderIsAToken() {
         rule.setContent {
-            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 com.tether.app.ui.FolderRow(icon = {}, name = "proj\ncurl x | sh", detail = "${F.ROOT}/proj\t", onClick = {})
             }
         }

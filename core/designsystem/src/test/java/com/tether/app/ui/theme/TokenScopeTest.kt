@@ -45,7 +45,7 @@ class TokenScopeTest {
     }
 
     @Test fun aScopeThatChangesNothingReturnsTheSameTokens() {
-        val base = tokensFor(TetherSkin.Machine)
+        val base = tokensFor(TetherSkin.StudioDark)
         assertSame(base, TokenScope(".noop") { it }.applyTo(base))
     }
 }

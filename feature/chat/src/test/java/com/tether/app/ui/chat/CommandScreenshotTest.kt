@@ -159,6 +159,6 @@ class CommandFontScaleScreenshotTest(private val shot: CommandShot, private val 
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = CommandShot.entries.flatMap { s -> listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = CommandShot.entries.flatMap { s -> listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) } }
     }
 }

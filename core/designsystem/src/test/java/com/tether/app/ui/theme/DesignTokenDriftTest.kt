@@ -40,14 +40,24 @@ class DesignTokenDriftTest {
     @Test
     fun verifyFailsWhenATokenValueChanges() {
         val original = TokenCorpus.jsonFile.readText()
-        // machine --graphite is #111517 (raw and resolved); change the resolved value only.
-        val needle = "\"resolved\": \"#111517\""
+        // studio-dark --graphite is #172032 (raw and resolved); change the resolved value only.
+        val needle = "\"resolved\": \"#172032\""
         assertTrue("fixture value present", original.contains(needle))
-        val copy = tmp.newFile("design-tokens.json").apply { writeText(original.replaceFirst(needle, "\"resolved\": \"#111518\"")) }
+        val copy = tmp.newFile("design-tokens.json").apply { writeText(original.replaceFirst(needle, "\"resolved\": \"#172033\"")) }
         val drift = verify(copy, TokenCorpus.generatedFile, tmp.root.resolve("out/GeneratedTokens.kt"))
         assertNotNull("changed JSON must fail verification", drift)
         assertTrue(drift!!, drift.contains("Design tokens drifted"))
-        assertTrue(drift, drift.contains("0xFF111518"))
+        assertTrue(drift, drift.contains("0xFF172033"))
+    }
+
+    /** T15.5: an export that still carries the retired theme families is refused, not generated. */
+    @Test
+    fun anExportWithThemeFamiliesIsRefused() {
+        val original = TokenCorpus.jsonFile.readText()
+        val withFamilies = original.replaceFirst("{\n", "{\n  \"families\": [\"studio\"],\n")
+        val error = runCatching { generate(withFamilies) }.exceptionOrNull()
+        assertNotNull("a family-bearing export must not generate", error)
+        assertTrue(error.toString(), error!!.message!!.contains("theme families are retired"))
     }
 
     @Test

@@ -74,7 +74,7 @@ class ShellFontScaleScreenshotTest(private val shot: ShellShot, private val skin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(ShellShot.Idle, ShellShot.Empty, ShellShot.Details).flatMap { s ->
-            listOf(TetherSkin.Machine, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
 }

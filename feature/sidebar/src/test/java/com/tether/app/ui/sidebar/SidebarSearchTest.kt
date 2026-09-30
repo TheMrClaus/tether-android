@@ -114,7 +114,7 @@ class SidebarSearchTest {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
             val sessions by client.sessions.collectAsStateWithLifecycle()
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 SessionDrawer(vm = vm, prefs = prefs, sessions = sessions, selectedId = null, workspaceRoot = F.ROOT, onSelect = {}, onClose = {})
             }
         }

@@ -53,7 +53,7 @@ abstract class PersistedPanelsBase {
     protected fun show() {
         rule.setContent {
             key(generation) {
-                ExpandedShellUnderTest(TetherSkin.Machine, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs))
+                ExpandedShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs))
             }
         }
     }
@@ -81,15 +81,15 @@ class PersistedPanelsTest : PersistedPanelsBase() {
 
     @Test fun aRailResizeIsSavedAndRestoredInANewComposition() {
         show()
-        awaitWidth(ShellTags.Sidebar, 264f)
+        awaitWidth(ShellTags.Sidebar, 272f)
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
             down(center)
             moveBy(Offset(dpPx(60f), 0f))
             up()
         }
-        awaitStored(PanelPrefs(sidebarWidth = 324))
+        awaitStored(PanelPrefs(sidebarWidth = 332))
         recompose()
-        awaitWidth(ShellTags.Sidebar, 324f)
+        awaitWidth(ShellTags.Sidebar, 332f)
     }
 
     @Test fun aResetRemovesTheSavedWidth() {
@@ -99,7 +99,7 @@ class PersistedPanelsTest : PersistedPanelsBase() {
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput { doubleClick(center) }
         awaitStored(PanelPrefs())
         recompose()
-        awaitWidth(ShellTags.Sidebar, 264f)
+        awaitWidth(ShellTags.Sidebar, 272f)
     }
 
     @Test fun expandingTheCollapsedRailIsSaved() {
@@ -119,15 +119,15 @@ class PersistedPanelsColumnTest : PersistedPanelsBase() {
 
     @Test fun anInspectorResizeIsSavedAndRestoredInANewComposition() {
         show()
-        awaitWidth(ShellTags.InspectorColumn, 272f)
+        awaitWidth(ShellTags.InspectorColumn, 288f)
         rule.onNodeWithTag(ShellTags.InspectorHandle).performTouchInput {
             down(center)
             moveBy(Offset(-dpPx(48f), 0f))
             up()
         }
-        awaitStored(PanelPrefs(inspectorWidth = 320))
+        awaitStored(PanelPrefs(inspectorWidth = 336))
         recompose()
-        awaitWidth(ShellTags.InspectorColumn, 320f)
+        awaitWidth(ShellTags.InspectorColumn, 336f)
     }
 }
 

@@ -53,23 +53,16 @@ class MotionAndHapticsTest {
 
     @Test fun perfDotsParseOrNone() {
         assertEquals(null, perfDotColor("none"))
-        val machine = tokensFor(TetherSkin.Machine).css.perfDots
-        val precision = tokensFor(TetherSkin.Precision).css.perfDots
+        val machine = tokensFor(TetherSkin.StudioDark).css.perfDots
+        val precision = tokensFor(TetherSkin.Studio).css.perfDots
         assertTrue(machine, perfDotColor(machine) != null || machine == "none")
         assertTrue(precision, perfDotColor(precision) != null || precision == "none")
         assertEquals(null, perfDotColor(tokensFor(TetherSkin.Studio).css.perfDots))
     }
 
     @Test fun rockerGeometryMatchesTheCss() {
-        val g = rockerGeometry(tokensFor(TetherSkin.Tactile))
-        assertEquals(65.6f, g.width.value, 0.01f)
-        assertEquals(28.8f, g.height.value, 0.01f)
-        // left: 50% of the 63.6px padding box; width calc(50% - 1px); ON: translateX(-100% + 1px).
-        assertEquals(31.8f, g.capLeftOff.value, 0.01f)
-        assertEquals(30.8f, g.capWidth.value, 0.01f)
-        assertEquals(2.0f, g.capLeftOn.value, 0.01f)
-        assertEquals(22.8f, g.capHeight.value, 0.01f)
-        val s = rockerGeometry(tokensFor(TetherSkin.Studio))
+        // Studio's 40×24 track with an 18px cap at 3px, +16px when on.
+        val s = rockerGeometry()
         assertEquals(40f, s.width.value, 0f)
         assertEquals(3f, s.capLeftOff.value, 0f)
         assertEquals(19f, s.capLeftOn.value, 0f)

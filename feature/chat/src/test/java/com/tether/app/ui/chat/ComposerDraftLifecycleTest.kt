@@ -90,7 +90,7 @@ class ComposerDraftLifecycleTest {
             model.selectSession(id)
             activity.setContent {
                 val projections by client.projections.collectAsState()
-                ComposerHost(TetherSkin.Machine) {
+                ComposerHost(TetherSkin.StudioDark) {
                     Composer(
                         session = ComposerFixtures.session,
                         projection = projections[id],

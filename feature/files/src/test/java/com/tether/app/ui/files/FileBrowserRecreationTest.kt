@@ -20,7 +20,6 @@ import com.tether.app.ui.files.FilesFixtures.ROOT
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -104,7 +103,7 @@ class FileBrowserRecreationTest {
     private fun host() {
         scenario.onActivity { activity ->
             activity.setContent {
-                TetherTheme(ThemeChoice(TetherSkin.Machine.family, ThemeMode.Dark)) {
+                TetherTheme(ThemeMode.Dark) {
                     CompositionLocalProvider(LocalReducedMotion provides true) {
                         val s = rememberFileBrowserState(files, identity)
                         s.cwd = ROOT

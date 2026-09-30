@@ -64,7 +64,7 @@ internal fun ComposeContentTestRule.showTimeline(
     reducedMotion: Boolean = true,
     haptics: TetherHaptics = RecordingHaptics(),
     listState: LazyListState = LazyListState(),
-    skin: TetherSkin = TetherSkin.Machine,
+    skin: TetherSkin = TetherSkin.StudioDark,
 ): LazyListState {
     setContent {
         CompositionLocalProvider(LocalTetherHaptics provides haptics) {
@@ -321,7 +321,7 @@ class TimelineBehaviourTest {
         var live by mutableStateOf(false)
         val f = TimelineFixtures.edges
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, liveCopy = live)
             }
         }
@@ -386,7 +386,7 @@ class TimelineExpandedBehaviourTest {
 
     @Composable
     private fun Host(f: ChatFixtures.Folded) {
-        ChatHost(TetherSkin.Machine, WellHeightTablet, WellWidthTablet) {
+        ChatHost(TetherSkin.StudioDark, WellHeightTablet, WellWidthTablet) {
             ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, listState = list, liveCopy = true)
         }
     }
@@ -453,7 +453,7 @@ class TimelineScreenTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = session, projection = projections[session.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }

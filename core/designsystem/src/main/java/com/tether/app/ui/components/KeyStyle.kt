@@ -97,10 +97,6 @@ data class KeyLook(
     val radius: Dp,
     /** `button:disabled { opacity: 0.48 }` (`.chat-send:disabled` 0.5). */
     val alpha: Float,
-    /** Whether the execution slit `::before` is displayed (its width is `--key-slit`). */
-    val slit: Boolean,
-    /** Execution-slit opacity (0.55; 0.25 on a disabled key). */
-    val slitAlpha: Float,
 )
 
 /** `button:disabled` opacity (globals.css:647). */
@@ -126,8 +122,6 @@ class KeyComputed(
     var shadows: List<CssShadow> = emptyList(),
     var radius: Dp = 0.dp,
     var alpha: Float = 1f,
-    var slit: Boolean = false,
-    var slitAlpha: Float = 0.55f,
 )
 
 /** The context a declaration reads: the skin's tokens and the key's size variant. */
@@ -313,14 +307,6 @@ val KeyRules: List<KeyRule> = listOf(
     g(8759, Send, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
     g(8760, Interrupt, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
     g(8983, Icon, spec(3), KeyPseudo.Active, declare = neutralActive), // icon controls (8983-8989)
-    // Execution slit ::before (globals.css 9220-9253).
-    g(9228, Primary, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
-    g(9229, Send, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
-    g(9231, Interrupt, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
-    g(9232, End, spec(2, 1)) { slit = true; slitAlpha = 0.55f },
-    g(9250, Primary, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
-    g(9251, Send, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
-    g(9253, Interrupt, spec(3, 1), KeyPseudo.Disabled) { slitAlpha = 0.25f },
     // The composer paperclip (inside .chat-composer-toolbar): a round key at pill height on
     // desktop (11389-11406), the key radius on a phone (11941, inside the 47.9375rem query).
     g(11315, Attach, spec(2)) { border = it.t.keySide; radius = it.t.radiusKey },
@@ -353,9 +339,6 @@ val KeyRules: List<KeyRule> = listOf(
     s(266, Send, spec(2), declare = studioAccentKey),
     s(267, NewSession, spec(2), declare = studioAccentKey),
     s(277, Secondary, spec(2)) { border = it.t.lineStrong; face = it.t.graphite; ink = it.t.ink },
-    s(271, Primary, spec(2, 1)) { slit = false },
-    s(273, NewSession, spec(2, 1)) { slit = false },
-    s(275, Send, spec(2, 1)) { slit = false },
     s(303, NewSession, spec(2)) { face = Color(0xFF365CDE) },
     s(389, Attach, spec(3)) { border = Color.Transparent; radius = 9.6.dp; face = it.t.graphiteRaised; shadows = emptyList() }, // .chat-composer-toolbar .chat-attach-btn
     s(489, Deny, spec(3), declare = studioFlatDestructive),
@@ -395,7 +378,7 @@ fun resolveKey(
     val c = KeyComputed(ink = t.ink)
     val ctx = KeyContext(t, size)
     for (rule in matchingKeyRules(t, classes, state, selected, layout)) rule.declare(c, ctx)
-    return KeyLook(c.face, c.border, c.ink, c.shadows, c.radius, c.alpha, c.slit, c.slitAlpha)
+    return KeyLook(c.face, c.border, c.ink, c.shadows, c.radius, c.alpha)
 }
 
 /**

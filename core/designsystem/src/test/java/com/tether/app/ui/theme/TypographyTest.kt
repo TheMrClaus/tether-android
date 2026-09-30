@@ -36,48 +36,27 @@ class TypographyTest {
         val tabular: Boolean = false,
     )
 
-    private val instrumentSkins = listOf(TetherSkin.Tactile, TetherSkin.Night, TetherSkin.Precision, TetherSkin.Machine)
-    private val studioSkins = listOf(TetherSkin.Studio, TetherSkin.StudioDark)
-
-    /** --key-label-tracking: globals.css:436/552 (tactile, night), 205/320 (machine, precision), studio.css:78. */
-    private fun keyTracking(skin: TetherSkin): Float = when (skin) {
-        TetherSkin.Tactile, TetherSkin.Night -> 0.05f
-        TetherSkin.Precision, TetherSkin.Machine -> 0.06f
-        TetherSkin.Studio, TetherSkin.StudioDark -> 0f
-    }
-
-    private fun instrument(skin: TetherSkin): Map<String, Spec> = mapOf(
+    /**
+     * The roles Studio does not restyle: the globals.css values it inherits (studio.css cascades
+     * over globals.css, T15.5).
+     */
+    private val inherited: Map<String, Spec> = mapOf(
         // body — globals.css:609-610
         "body" to Spec(Face.Ui, 1f, 400),
-        // .chat-bubble — globals.css:11272 (0.92rem), 11743 (line-height 1.65)
-        "chatBody" to Spec(Face.Ui, 0.92f, 400, lineHeight = 1.65f),
-        // .chat-input — globals.css:8512 (phone 1rem), 6741 (line-height 1.5)
-        "composerInput" to Spec(Face.Ui, 1f, 400, lineHeight = 1.5f),
-        // .workspace-title-row h1 — globals.css:11859 (1.05rem), 1686-1687 (680, -0.01em), 11742 (1.45)
-        "screenTitle" to Spec(Face.Ui, 1.05f, 680, -0.01f, 1.45f),
         // .empty-workspace h1 — globals.css:11257 (clamp floor 1.7rem, 640, -0.035em), 2285 (1.18)
         "displayTitle" to Spec(Face.Ui, 1.7f, 640, -0.035f, 1.18f),
         // .md-h — globals.css:4915-4918
         "markdownH3" to Spec(Face.Ui, 1.05f, 680, lineHeight = 1.3f),
         "markdownH4" to Spec(Face.Ui, 0.98f, 680, lineHeight = 1.3f),
         "markdownH5" to Spec(Face.Ui, 0.92f, 680, lineHeight = 1.3f),
-        // .session-item-copy strong — globals.css:11113 (0.84rem, 650, -0.005em), 11736 (1.4)
-        "listTitle" to Spec(Face.Ui, 0.84f, 650, -0.005f, 1.4f),
         // .md-pre code — globals.css:5032-5035
         "codeBlock" to Spec(Face.Mono, 0.8f, 400, lineHeight = 1.5f),
-        // .chat-msg-time — globals.css:4859-4860 (0.65rem, tabular-nums); line-height inherited (11743)
-        "timestamp" to Spec(Face.Ui, 0.65f, 400, lineHeight = 1.65f, tabular = true),
         // .usage-totals strong — globals.css:11748 (mono, 1.35rem), 11573 (640, tabular-nums, -0.01em)
         "numeral" to Spec(Face.Mono, 1.35f, 640, -0.01f, tabular = true),
-        // .section-label — globals.css:2273-2276
-        "sectionLabel" to Spec(Face.Ui, 0.67f, 720, 0.1f, uppercase = true),
-        // :root .status-badge — globals.css:11169-11173
-        "statusLabel" to Spec(Face.Mono, 0.6f, 700, 0.08f, uppercase = true),
-        // .button-primary — globals.css:2307-2308; etched legends 9211-9212
-        "keyLabel" to Spec(Face.Ui, 0.8f, 680, keyTracking(skin), uppercase = true),
     )
 
-    private fun studio(skin: TetherSkin): Map<String, Spec> = instrument(skin) + mapOf(
+    /** The roles studio.css restyles. */
+    private val studio: Map<String, Spec> = mapOf(
         // studio.css:455 (phone 0.9rem), 372 (line-height 1.8)
         "chatBody" to Spec(Face.Ui, 0.9f, 400, lineHeight = 1.8f),
         // studio.css:386-387 (focused textarea: 0.925rem / 1.6)
@@ -92,7 +71,7 @@ class TypographyTest {
         "sectionLabel" to Spec(Face.Ui, 0.75f, 720),
         // studio.css:354 (font: 600 0.65rem var(--font-ui); none; 0)
         "statusLabel" to Spec(Face.Ui, 0.65f, 600),
-        // --key-label-transform none / tracking 0 — studio.css:77-78
+        // .button-primary 0.8rem / 680 (globals.css:2307-2308); --key-label-transform none / tracking 0 — studio.css:77-78
         "keyLabel" to Spec(Face.Ui, 0.8f, 680, 0f),
     )
 
@@ -114,16 +93,16 @@ class TypographyTest {
         "keyLabel" to (t.keyLabel.style to t.keyLabel.uppercase),
     )
 
-    private fun expected(skin: TetherSkin) = if (skin in studioSkins) studio(skin) else instrument(skin)
+    private val expected: Map<String, Spec> = inherited + studio
 
     private fun em(v: Float) = TextUnit(v, TextUnitType.Em)
 
     @Test
-    fun everyRoleMatchesTheWebCssInAllSixSkins() {
-        assertEquals(TetherSkin.entries.toSet(), (instrumentSkins + studioSkins).toSet())
+    fun everyRoleMatchesTheWebCssInBothStudioSkins() {
+        assertTrue(inherited.keys.none { it in studio.keys })
         for (skin in TetherSkin.entries) {
             val t = typographyFor(skin)
-            val want = expected(skin)
+            val want = expected
             val got = actual(t)
             assertEquals("$skin roles", want.keys, got.keys)
             for ((role, spec) in want) {
@@ -153,7 +132,7 @@ class TypographyTest {
 
     @Test
     fun studioLabelsDropUppercaseAndTracking() {
-        for (skin in studioSkins) {
+        for (skin in TetherSkin.entries) {
             val t = typographyFor(skin)
             for (label in listOf(t.sectionLabel, t.statusLabel, t.keyLabel)) {
                 assertFalse("${skin.id} uppercase", label.uppercase)
@@ -161,11 +140,6 @@ class TypographyTest {
                 assertSame("${skin.id} --font-ui", Manrope, label.style.fontFamily)
                 assertEquals("Send", label.format("Send"))
             }
-        }
-        for (skin in instrumentSkins) {
-            val t = typographyFor(skin)
-            assertEquals("SEND", t.keyLabel.format("Send"))
-            assertTrue(t.sectionLabel.uppercase && t.statusLabel.uppercase)
         }
     }
 
@@ -185,9 +159,8 @@ class TypographyTest {
             assertSame("${skin.id} mono", JetBrainsMono, t.mono)
             assertSame("${skin.id} ui", Manrope, t.ui)
         }
-        // Studio is the only family defining --font-ui (studio.css:47); instrument skins use body's stack.
-        assertEquals(studioSkins.toSet(), TetherSkin.entries.filter { it.tokens.fontUi != null }.toSet())
-        assertSame(Manrope, fontFamilyForStack(TetherTypography.BODY_FONT_STACK))
+        // --font-ui (studio.css:47) resolves to the bundled Manrope in both skins.
+        for (skin in TetherSkin.entries) assertSame(skin.id, Manrope, fontFamilyForStack(skin.tokens.fontUi))
         assertSame(JetBrainsMono, fontFamilyForStack("\"JetBrains Mono Variable\", ui-monospace"))
         assertSame(FontFamily.Monospace, fontFamilyForStack("\"Nope\", ui-monospace"))
         assertSame(FontFamily.SansSerif, fontFamilyForStack("-apple-system, \"Segoe UI\""))
@@ -195,7 +168,7 @@ class TypographyTest {
 
     @Test
     fun inlineCodeIsRelativeMono() {
-        val span = typographyFor(TetherSkin.Machine).codeInline
+        val span = typographyFor(TetherSkin.StudioDark).codeInline
         assertSame(JetBrainsMono, span.fontFamily)
         assertEquals(em(0.85f), span.fontSize) // .md-code 0.85em — globals.css:4953
     }

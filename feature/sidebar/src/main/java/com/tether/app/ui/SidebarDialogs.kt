@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import com.tether.app.ui.text.codeLabel
@@ -459,7 +461,7 @@ fun ProviderGlyph(glyph: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** One selectable theme family / mode in Settings. */
+/** One Appearance mode in Settings: a radio option, so the choice is announced, not only coloured. */
 @Composable
 internal fun ThemeOption(label: String, chosen: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
@@ -474,7 +476,7 @@ internal fun ThemeOption(label: String, chosen: Boolean, onClick: () -> Unit, mo
                 if (chosen) t.violetStrong else t.keySide,
                 RoundedCornerShape(t.radiusSm),
             )
-            .clickable(onClick = onClick)
+            .selectable(selected = chosen, onClick = onClick, role = Role.RadioButton)
             .heightIn(min = TetherDimens.touchTargetDp)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

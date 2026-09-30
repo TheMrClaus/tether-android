@@ -44,10 +44,10 @@ does draw offscreen).
 - Boards: `src/test/java/.../components/screenshots/PrimitiveBoards.kt` — one composable per
   primitive laying out its visual states (rest / pressed / focus / disabled / selected / open…).
   Pressed and focus are held with a real `PressInteraction` / `FocusInteraction`.
-- Tests: `PrimitiveScreenshotTest.kt` — every board × all 6 skins at phone
+- Tests: `PrimitiveScreenshotTest.kt` — every board × both Studio skins (light, dark) at phone
   (`w412dp-h915dp-420dpi`, the web's 412×915 @2.625), the sheet and dialog also at tablet
   (`w1280dp-h800dp-mdpi`) with the expandable block, the indicators under reduced motion, and keys /
-  chips / expandable at 1.3× font scale (Machine + Studio; a 1600dp-tall window so the grown board
+  chips / expandable at 1.3× font scale (Studio light + dark; a 1600dp-tall window so the grown board
   is captured whole). The clock is paused and
   advanced 600ms, so ambient motion is captured at a fixed frame.
 - Goldens: `src/test/screenshots/<primitive>/<skin>-<size>.png`, checked in.

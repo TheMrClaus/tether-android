@@ -74,7 +74,7 @@ class ComposerSubmitRaceTest {
         ForeignPicks.install(rule.activity)
         rule.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides registryOwner) {
-                ComposerHost(TetherSkin.Machine) {
+                ComposerHost(TetherSkin.StudioDark) {
                     Composer(
                         session = ComposerFixtures.session,
                         projection = fixture.projection,

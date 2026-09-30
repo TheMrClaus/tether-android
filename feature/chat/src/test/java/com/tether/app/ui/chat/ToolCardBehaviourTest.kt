@@ -62,7 +62,7 @@ class ToolCardBehaviourTest {
         listState: LazyListState = LazyListState(),
     ) {
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader) {
                     ChatTranscript(
                         projection = fixture.projection,
@@ -104,7 +104,7 @@ class ToolCardBehaviourTest {
     @Test fun aRunningRunIsOpenAndClosesWhenItFinishesLikeReactsDetails() {
         var fixture by mutableStateOf(ToolFixtures.running)
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 ChatTranscript(
                     projection = fixture.projection,
                     tree = fixture.tree,
@@ -117,7 +117,7 @@ class ToolCardBehaviourTest {
         }
         rule.waitForIdle()
         group().assert(expanded)
-        rule.onNodeWithText("RUNNING · 12S").assert(hasContentDescription("running · 12s"))
+        rule.onNodeWithText("running · 12s").assert(hasContentDescription("running · 12s"))
         // The reader closes it while it runs: it stays closed.
         group().performClick()
         rule.waitForIdle()
@@ -192,7 +192,7 @@ class ToolCardBehaviourTest {
         show(ToolFixtures.corpusFinal("tool-lifecycle-progress"))
         group().assert(hasContentDescription("1 shell command, 1 file read · 1 interrupted")).performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("INTERRUPTED").assertExists()
+        rule.onNodeWithText("interrupted").assertExists()
         assertEquals(0, rule.onAllNodesWithText("[Request interrupted by user for tool use]").fetchSemanticsNodes().size)
         rule.onNodeWithText("What the CLI reported").performClick()
         rule.waitForIdle()
@@ -259,7 +259,7 @@ class ToolCardBehaviourTest {
             uncommitted = listOf(WorktreeDiffEntry("logo.png", "??"), WorktreeDiffEntry("gone.ts", " D")),
         )
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 GitChangesCard(summary, diffs, onRequestFile = { requested += it })
             }
         }

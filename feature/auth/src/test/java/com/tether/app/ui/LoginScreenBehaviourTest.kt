@@ -23,8 +23,8 @@ import com.tether.app.client.RealTetherClient
 import com.tether.app.protocol.TetherJson
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
-import com.tether.app.ui.theme.ThemeChoice
 import com.tether.app.ui.theme.ThemeMode
+import com.tether.app.ui.theme.mode
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -191,8 +191,8 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
             localNetworkAccess = LocalNetworkAccess { restricted.get() },
         )
         rule.setContent {
-            val skin = if (surface == LoginSurface.Studio) TetherSkin.Studio else TetherSkin.Machine
-            TetherTheme(ThemeChoice(skin.family, if (skin.isDark) ThemeMode.Dark else ThemeMode.Light)) {
+            val skin = if (surface == LoginSurface.Studio) TetherSkin.Studio else TetherSkin.StudioDark
+            TetherTheme(skin.mode) {
                 LoginScreen(
                     client = client,
                     surface = surface,
@@ -232,7 +232,6 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
     private val checkingCopy get() = if (surface == LoginSurface.Studio) "Checking sign-in…" else "checking sign-in"
 
     private val successCopy get() = when (surface) {
-        LoginSurface.Instrument -> "unlocked · opening console"
         LoginSurface.Studio -> "You’re in. Opening your workspace…"
         LoginSurface.Retro -> "ACCESS GRANTED"
     }

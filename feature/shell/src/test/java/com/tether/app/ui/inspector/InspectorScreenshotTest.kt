@@ -63,7 +63,7 @@ class InspectorScreenshotTest(private val shot: InspectorSheetShot, private val 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = InspectorSheetShot.entries.flatMap { s ->
-            listOf(TetherSkin.Studio, TetherSkin.StudioDark, TetherSkin.Machine).map { arrayOf<Any>(s, it) }
+            listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(s, it) }
         }
     }
 }

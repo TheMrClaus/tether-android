@@ -44,7 +44,7 @@ class TurnActivityTest {
     )
 
     private fun show(projection: SessionProjection, now: Long, part: TurnActivityPart) {
-        rule.setContent { ChatHost(TetherSkin.Machine) { TurnActivity(projection, session, serverNow = { now }, part = part) } }
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { TurnActivity(projection, session, serverNow = { now }, part = part) } }
         rule.waitForIdle()
     }
 

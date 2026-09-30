@@ -13,7 +13,7 @@ import org.junit.Test
  */
 class UsageTrackMotionGoldensTest {
     private fun fillPixels(board: String): Int {
-        val image = ImageIO.read(File(goldenPath(board, com.tether.app.ui.theme.TetherSkin.Machine, ScreenSize.Phone)))
+        val image = ImageIO.read(File(goldenPath(board, com.tether.app.ui.theme.TetherSkin.StudioDark, ScreenSize.Phone)))
         var count = 0
         for (y in 0 until image.height) for (x in 0 until image.width) {
             val p = image.getRGB(x, y)

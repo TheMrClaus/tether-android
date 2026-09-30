@@ -17,6 +17,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -60,7 +61,7 @@ class SubagentRunBehaviourTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 val sessions by client.sessions.collectAsStateWithLifecycle()
                 val s = sessions.firstOrNull { it.id == shown.id } ?: shown
@@ -105,7 +106,8 @@ class SubagentRunBehaviourTest {
         rule.runOnIdle { vm.selectRun("s1", "t1::toolu_a") }
         rule.waitForIdle()
         rule.onNodeWithText("Survey the tests").assertIsDisplayed()
-        rule.onNodeWithText("done").assertIsDisplayed()
+        // Studio's status legends are not upper-cased, so the tab's badge and the header read alike.
+        rule.onAllNodesWithText("done").onFirst().assertIsDisplayed()
         rule.onNodeWithText("3 steps").assertIsDisplayed()
         rule.onNodeWithText("usage not captured").assertIsDisplayed()
         rule.onNodeWithText("Task given to this sub-agent").performClick()

@@ -58,7 +58,7 @@ class ResumePickerBehaviourTest {
         rule.setContent {
             val sessions by client.sessions.collectAsStateWithLifecycle()
             val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 SessionDrawer(
                     vm = vm,
                     prefs = prefs,

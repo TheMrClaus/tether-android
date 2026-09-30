@@ -63,7 +63,7 @@ class SubagentThreadPagingTest {
 
     private fun show(block: JsObj) {
         rule.setContent {
-            ChatHost(TetherSkin.Machine) {
+            ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader()) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         ToolCard(block, showThinking = false)

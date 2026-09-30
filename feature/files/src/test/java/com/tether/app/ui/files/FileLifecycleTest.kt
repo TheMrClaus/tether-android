@@ -266,7 +266,7 @@ class FileLifecycleTest {
             val refusing = object : android.content.ContextWrapper(base) {
                 override fun startActivity(intent: android.content.Intent?) = throw SecurityException("chooser refused")
             }
-            com.tether.app.ui.theme.TetherTheme(com.tether.app.ui.theme.ThemeChoice(com.tether.app.ui.theme.TetherSkin.Machine.family, com.tether.app.ui.theme.ThemeMode.Dark)) {
+            com.tether.app.ui.theme.TetherTheme(com.tether.app.ui.theme.ThemeMode.Dark) {
                 androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalContext provides refusing) { WorkspaceFileBrowser(s) }
             }
         }

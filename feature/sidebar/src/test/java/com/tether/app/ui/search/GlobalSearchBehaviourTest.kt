@@ -68,7 +68,7 @@ class GlobalSearchBehaviourTest {
         rule.setContent {
             val list by client.sessions.collectAsStateWithLifecycle()
             val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
-            TetherTheme(choiceFor(TetherSkin.Machine)) {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
               androidx.compose.runtime.CompositionLocalProvider(com.tether.app.ui.theme.LocalReducedMotion provides true) {
                 if (withDrawer) {
                     SessionDrawer(vm = vm, prefs = prefs, sessions = list, selectedId = selectedId, workspaceRoot = F.ROOT, onSelect = vm::selectSession, onClose = { host.drawerClosed++ })

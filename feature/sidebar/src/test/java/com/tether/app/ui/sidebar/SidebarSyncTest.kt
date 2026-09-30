@@ -95,7 +95,7 @@ class SidebarSyncTest {
 
     @Test
     fun offlineRowsSayWasAndHowOldTheirCopyIs() {
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Was running", substring = true).assertExists()
         rule.onNodeWithContentDescription("Saved copy · updated 12 min ago", substring = true).assertExists()
         rule.onNodeWithContentDescription("Approve the lint fix, chat, Was waiting on you", substring = true).assertExists()
@@ -113,7 +113,7 @@ class SidebarSyncTest {
 
     @Test
     fun aLiveListShowsNoGlyphAndTheOrdinaryStatus() {
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNodeWithTag(SidebarTags.freshness("live:a1"), useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Active", substring = true).assertExists()
         rule.onNodeWithContentDescription("Saved copy", substring = true).assertDoesNotExist()
@@ -125,7 +125,7 @@ class SidebarSyncTest {
     fun offlineARowWithNoFreshnessEntryStillNeverSaysItNeedsYou() {
         // Item 3: the "was" words and the still dot follow the link, not the entry.
         val bare = SidebarSyncFixtures.offline().copy(syncStates = emptyMap())
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, bare, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, bare, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Was running", substring = true).assertExists()
         rule.onNodeWithContentDescription("Approve the lint fix, chat, Was waiting on you", substring = true).assertExists()
         rule.onNodeWithText("Was running", useUnmergedTree = true).assertExists()
@@ -144,7 +144,7 @@ class SidebarSyncTest {
 
     @Test
     fun offlineTheWorkspaceHeaderSaysWasOnAStillDot() {
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline().copy(syncStates = emptyMap()), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline().copy(syncStates = emptyMap()), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNode(stateContains(", 1 was waiting")).assertExists()
         rule.onAllNodes(stateContains(", 1 waiting")).fetchSemanticsNodes().let { assertTrue("offline: no '1 waiting' now", it.isEmpty()) }
         rule.onNodeWithTag(SidebarTags.blockDot(SidebarFixtures.ROOT), useUnmergedTree = true).assertExists()
@@ -152,7 +152,7 @@ class SidebarSyncTest {
 
     @Test
     fun aLiveListsWorkspaceHeaderKeepsItsLiveCountAndDot() {
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(connected = true), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNode(stateContains(", 1 waiting")).assertExists()
         rule.onNodeWithTag(SidebarTags.blockDot(SidebarFixtures.ROOT), useUnmergedTree = true).assertDoesNotExist()
     }
@@ -160,7 +160,7 @@ class SidebarSyncTest {
     @Test
     fun offlineARowsEndControlIsInertAndItsSwipeIsGone() {
         val ended = mutableListOf<String>()
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, _ -> ended += id })) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, _ -> ended += id })) }
         rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsNotEnabled().performClick()
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
         rule.waitForIdle()
@@ -173,7 +173,7 @@ class SidebarSyncTest {
     fun aLiveListsRowStillEndsWithItsTwoTaps() {
         val ended = mutableListOf<String>()
         val state = SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A)
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
         rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
@@ -190,7 +190,7 @@ class SidebarSyncTest {
     fun anArmedRowCarriesTheOriginItWasArmedFor() {
         val ended = mutableListOf<String>()
         var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
-        rule.setContent { SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
         rule.waitForIdle()
         rule.runOnIdle { state = state.copy(origin = ORIGIN_B) }
@@ -212,7 +212,7 @@ class SidebarSyncTest {
         val ended = mutableListOf<String>()
         var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
         rule.setContent {
-            SidebarUnderTest(TetherSkin.Machine, state, TetherLayoutClass.Phone, SidebarUiSeed(swipedKey = "live:a1"), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" }))
+            SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(swipedKey = "live:a1"), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" }))
         }
         rule.runOnIdle { state = state.copy(origin = ORIGIN_B) }
         rule.waitForIdle()

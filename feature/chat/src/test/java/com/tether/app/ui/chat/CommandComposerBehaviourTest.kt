@@ -72,7 +72,7 @@ class CommandComposerBehaviourTest {
     ) {
         fixture = start
         rule.setContent {
-            ComposerHost(TetherSkin.Machine) {
+            ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = session,
                     projection = fixture.projection,
@@ -481,7 +481,7 @@ class CommandComposerBehaviourTest {
     @Test
     fun thePanelDrawsTheOutputCleanAndSaysTheStatusInWords() {
         val view = commandOutputView(rawBlock(CommandFixtures.hostile))!!
-        rule.setContent { ComposerHost(TetherSkin.Machine) { CommandOutputPanel(view) } }
+        rule.setContent { ComposerHost(TetherSkin.StudioDark) { CommandOutputPanel(view) } }
         rule.waitForIdle()
         rule.onNodeWithContentDescription("Command ${commandLabel(CommandFixtures.COMMAND)}, running…").assertExists()
         val shown = rule.onNodeWithTag("command-panel-body").fetchSemanticsNode().let { node ->
