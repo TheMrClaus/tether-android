@@ -193,7 +193,7 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
         val text = block.text
         if (!text.isNullOrEmpty()) {
             // T5.3: `HighlightedText` — the find marks over the plain text, when it has any.
-            // ta-blf: prose ([TranscriptText]): an override or embedding shows as a token.
+            // ta-blf: prose ([com.tether.app.ui.text.SafeText]): an override or embedding shows as a token.
             if (find != null) MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink) else Text(proseText(text), style = look.style, color = look.ink)
         }
         val attachments = block.attachments

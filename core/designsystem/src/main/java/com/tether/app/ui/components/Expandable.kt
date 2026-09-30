@@ -281,7 +281,7 @@ fun TetherExpandablePre(
 
 /**
  * ta-blf: how a [TetherExpandablePre] draws its text, e.g. with invisible and bidi code points made
- * visible (feature/chat `TranscriptText`). Applied after the peek is cut.
+ * visible ([com.tether.app.ui.text.SafeText], `safePreDisplay`). Applied after the peek is cut.
  */
 fun interface PreDisplay {
     fun show(text: String): AnnotatedString
