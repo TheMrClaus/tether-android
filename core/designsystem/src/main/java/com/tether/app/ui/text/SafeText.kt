@@ -59,6 +59,12 @@ package com.tether.app.ui.text
  * the one exception: they draw as the flag they are. RTL LETTERS are never tokens, in code or in
  * prose; code lays out LTR, as the web's `<pre>` in its LTR page and every editor do.
  *
+ * LINE ([Rule.Line]; ta-28i r2: a one-line NAME, path or id: a file or folder name, a working
+ * directory, a session id, a tool name): [code], and also TAB, LF and CR (a CRLF too) are tokens. A
+ * one-line surface clips at its first line break (maxLines = 1), so a raw line break would hide what
+ * follows it ("proj" + LF + "curl … | sh") and two names that differ only after it would look alike.
+ * Multi-line bodies (a file preview, a fence) keep [code]'s line handling.
+ *
  * TERMINAL ([terminal]; command output): [code] after the ANSI SGR colour sequences are dropped
  * (T7.3 r3: only up to [MAX_SGR_PARAMS] parameter characters). Every other escape sequence
  * (cursor moves, erase, OSC titles and clipboard payloads, 8-bit C1 forms) is shown, never
@@ -67,7 +73,8 @@ package com.tether.app.ui.text
  * COPY ([forCopy], [original]): a copy never carries a hidden control the reader did not see.
  * The DANGEROUS set ([dangerous]: C0 except TAB/LF/CRLF, DEL, C1, U+202A-U+202E,
  * U+2066-U+2069, U+2028/U+2029 (line terminators to some tools), tag characters outside the
- * three flags), and any mark drawn as a token, is
+ * three flags), and any mark drawn as a token, and (ta-28i r2) any TAB or LF token the one-line
+ * rule drew, is
  * copied as its VISIBLE token text, without the mark (`⟨U+001B⟩`), and the copy reports how many
  * ("N hidden control characters copied as ⟨U+…⟩"). Everything else, including every character
  * real RTL writing needs (letters, the marks it kept, ZWNJ/ZWJ), copies exactly. [original] gives
@@ -98,11 +105,14 @@ object SafeText {
     /** The three RGI subdivision flags (England, Scotland, Wales): tag text after U+1F3F4. */
     val RGI_FLAG_TAGS: Set<String> = setOf("gbeng", "gbsct", "gbwls")
 
-    enum class Rule { Prose, Code }
+    enum class Rule { Prose, Code, Line }
 
     fun prose(text: String): String = encode(text, Rule.Prose)
 
     fun code(text: String): String = encode(text, Rule.Code)
+
+    /** ta-28i r2: a one-line name, path or id ([Rule.Line]: [code], with TAB / LF / CR as tokens). */
+    fun line(text: String): String = encode(text, Rule.Line)
 
     /** Command output: [code] after the SGR colour sequences are dropped (see the class doc). */
     fun terminal(text: String): String = code(dropSgr(text))
@@ -225,6 +235,7 @@ object SafeText {
             Rule.Prose -> c < ' ' && c != '\t' && c != '\n' || c in '\u007F'..'\u009F' || c == '\u200E' || c == '\u200F' ||
                 c == '\u061C' || c in '\u2028'..'\u202E' || c == MARK || c in '\u2066'..'\u2069' || c == '\uDB40'
             Rule.Code -> c < ' ' && c != '\t' && c != '\n' || c >= '\u007F'
+            Rule.Line -> c < ' ' || c >= '\u007F'
         }
 
         fun crlf(i: Int): Boolean = text[i] == '\r' && i + 1 < n && text[i + 1] == '\n'
@@ -246,7 +257,7 @@ object SafeText {
                 if (isTag(cp)) {
                     val end = tagRunEnd(i)
                     if (end == i) { // a lone high surrogate from the tag block
-                        if (rule == Rule.Code) {
+                        if (rule != Rule.Prose) {
                             flushTo(run, i)
                             token(hex(cp), i, i + 1)
                             run = i + 1
@@ -276,7 +287,11 @@ object SafeText {
                     run = i
                     continue
                 }
-                val esc = if (rule == Rule.Prose) proseAlways(cp) && !crlf(i) else codeEscapes(cp) && !crlf(i)
+                val esc = when (rule) {
+                    Rule.Prose -> proseAlways(cp) && !crlf(i)
+                    Rule.Code -> codeEscapes(cp) && !crlf(i)
+                    Rule.Line -> cp == 0x09 || cp == 0x0A || codeEscapes(cp) // no CRLF exception on one line
+                }
                 if (!esc) {
                     i += len
                     continue
@@ -465,10 +480,15 @@ object SafeText {
     /** What a copy puts on the clipboard, and how many hidden control characters it shows as tokens. */
     class Copied(val text: String, val hidden: Int)
 
-    /** The clipboard text of a drawn [display] (see COPY in the class doc). */
-    fun forCopy(display: CharSequence): Copied {
+    /**
+     * The clipboard text of a drawn [display] (see COPY in the class doc). ta-28i r2: [strict] (a
+     * copy of a one-line name, path or id: the working directory, a session id) copies EVERY token as
+     * its visible text and counts it, a zero-width space, a TAB or a line break included, so the
+     * notice and "Copy raw" appear whenever the copy is not exactly the plain text the reader saw.
+     */
+    fun forCopy(display: CharSequence, strict: Boolean = false): Copied {
         val s = display.toString()
-        if (s.none { it == MARK || it < ' ' || it in '\u007F'..'\u009F' || it in '\u2028'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uDB40' }) {
+        if (!strict && s.none { it == MARK || it < ' ' || it in '\u007F'..'\u009F' || it in '\u2028'..'\u202E' || it in '\u2066'..'\u2069' || it == '\uDB40' }) {
             return Copied(s, 0)
         }
         val out = StringBuilder(s.length)
@@ -485,7 +505,17 @@ object SafeText {
                             out.append(s, i + 1, u.end)
                             hidden += u.count
                         }
+                        strict -> {
+                            out.append(s, i + 1, u.end)
+                            hidden += u.count
+                        }
                         // r3: a mark the plan made a token is copied as the token too (it was cutting a run).
+                        // r2 (ta-28i): so is a TAB or LF token: only the one-line rule draws one, and a line
+                        // break the reader saw as a token never reaches a copy raw.
+                        u.cp == 0x09 || u.cp == 0x0A -> {
+                            out.append(s, i + 1, u.end)
+                            hidden += u.count
+                        }
                         (dangerous(u.cp) || isMark(u.cp)) && !(u.cp == '\r'.code && u.count == 1 && u.end < s.length && s[u.end] == '\n') -> {
                             out.append(s, i + 1, u.end)
                             hidden += u.count

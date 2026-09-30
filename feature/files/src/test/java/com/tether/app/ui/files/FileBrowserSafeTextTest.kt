@@ -306,4 +306,38 @@ class FileBrowserSafeTextTest {
         assertTrue(spoken().any { it.contains("in${tok(0x2066)}ner${tok(0x2069)}") })
         assertNoRawBidi()
     }
+
+    /** r2 (M1): two rows "invoice.pdf" + LF + ".sh" and "invoice.pdf" never look alike; TalkBack says so too. */
+    @Test fun aLineBreakOrTabInAFileNameIsATokenInItsRowAndDescription() {
+        val lf = FilesFixtures.file("invoice.pdf\n.sh", 10)
+        val plain = FilesFixtures.file("invoice.pdf", 10)
+        val tab = FilesFixtures.file("a\tb.txt", 10)
+        val files = FakeFiles().apply { listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = listOf(lf, plain, tab))) }
+        val s = FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply { cwd = ROOT; open() }
+        show(s)
+        val shown = spoken()
+        assertTrue(shown.toString(), shown.contains("invoice.pdf${tok(0x0A)}.sh"))
+        assertTrue(shown.contains("invoice.pdf"))
+        assertTrue(shown.contains("a${tok(0x09)}b.txt"))
+        assertTrue(shown.contains("Actions for invoice.pdf${tok(0x0A)}.sh"))
+        assertTrue(shown.contains("Actions for a${tok(0x09)}b.txt"))
+        for (t in shown) assertFalse("raw line break or tab in \"$t\"", t.contains('\n') || t.contains('\t'))
+    }
+
+    @Test fun aLineBreakInADestinationFolderIsAToken() {
+        val dir = "$ROOT/sr\nc"
+        val files = FakeFiles().apply {
+            listings[dir] = FilesResult.Ok(FilesFixtures.listing(dir, entries = listOf(FilesFixtures.dir("in\nner", dir))))
+        }
+        val s = FileBrowserState(files, FakePlatform(), CoroutineScope(Dispatchers.Unconfined)).apply {
+            cwd = dir
+            open()
+            openDestPicker(FilesFixtures.file("a.txt", 1, dir), DestinationMode.Move)
+        }
+        show(s) { s.destPicker?.let { DestinationPickerFrame(it, submitting = false, onBrowse = {}, onConfirm = {}, onClose = {}) } }
+        val shown = spoken()
+        assertTrue(shown.toString(), shown.contains("in${tok(0x0A)}ner"))
+        assertTrue(shown.any { it == "Destination: $dir".replace("\n", tok(0x0A)) })
+        for (t in shown) assertFalse("raw line break in \"$t\"", t.contains('\n'))
+    }
 }

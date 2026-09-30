@@ -110,6 +110,20 @@ class SidebarSafeTextTest {
         val shown = spoken()
         assertTrue(shown.toString(), shown.contains("re${tok(0x202E)}po"))
         assertTrue(shown.toString(), shown.contains("${F.ROOT}/re${tok(0x202E)}po"))
+    }
+
+    /** r2 (M1): a line break in a folder the picker lists is a token, never hidden under the one-line clip. */
+    @Test fun aLineBreakInAPickerFolderIsAToken() {
+        rule.setContent {
+            com.tether.app.ui.theme.TetherTheme(choiceFor(TetherSkin.Machine)) {
+                com.tether.app.ui.FolderRow(icon = {}, name = "proj\ncurl x | sh", detail = "${F.ROOT}/proj\t", onClick = {})
+            }
+        }
+        rule.waitForIdle()
+        val shown = spoken()
+        assertTrue(shown.toString(), shown.contains("proj${tok(0x0A)}curl x | sh"))
+        assertTrue(shown.contains("${F.ROOT}/proj${tok(0x09)}"))
+        for (s in shown) assertFalse(s.contains('\n') || s.contains('\t'))
         for (s in shown) assertFalse("raw RLO in \"$s\"", s.contains(RLO))
     }
 }

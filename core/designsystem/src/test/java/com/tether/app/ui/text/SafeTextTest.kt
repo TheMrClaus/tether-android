@@ -323,7 +323,8 @@ class SafeTextTest {
         copy("$HEBREW ${LRI}npm$PDI").let { assertEquals("$HEBREW ${vis(0x2066)}npm${vis(0x2069)}", it.text); assertEquals(2, it.hidden) }
         // Not dangerous: exact, whether it was drawn raw or as a token.
         for (text in listOf("a\u200Bb", "x = \"\u200D\"", "a\r\nb", "tab\tend", "$BLACK_FLAG" + tagText("gbsct") + s(0xE007F))) {
-            for (rule in Rule.entries) copy(text, rule).let { assertEquals("$rule ${text.map { c -> "%04X".format(c.code) }}", text, it.text); assertEquals(0, it.hidden) }
+            // ta-28i r2: the one-line rule draws TAB / LF / CR as tokens (tested on its own below).
+            for (rule in listOf(Rule.Prose, Rule.Code)) copy(text, rule).let { assertEquals("$rule ${text.map { c -> "%04X".format(c.code) }}", text, it.text); assertEquals(0, it.hidden) }
         }
         // A mark real RTL text keeps copies exactly; r3: a mark drawn as a token copies as the token, counted.
         copy("$HEBREW$RLM.").let { assertEquals("$HEBREW$RLM.", it.text); assertEquals(0, it.hidden) }
@@ -356,5 +357,42 @@ class SafeTextTest {
         assertEquals("a$BRK${tok(0x202E)}${BRK}b", shown)
         assertEquals("a$BRK${BLACK_FLAG}${BRK}x", SafeText.breakAnywhere("a${BLACK_FLAG}x"))
         assertEquals("x", SafeText.breakAnywhere("x"))
+    }
+
+    // ---- ta-28i r2: the one-line rule and the strict copy ------------------------------------
+
+    @Test fun theLineRuleShowsTabsAndLineBreaksAsTokens() {
+        assertEquals("proj${tok(0x0A)}curl x | sh${tok(0x0A)}", SafeText.line("proj\ncurl x | sh\n"))
+        assertEquals("a${tok(0x09)}b", SafeText.line("a\tb"))
+        // A CRLF on one line is two tokens (the code rule's CRLF exception is for multi-line bodies).
+        assertEquals("a${tok(0x0D)}$BRK${tok(0x0A)}b", SafeText.line("a\r\nb"))
+        assertEquals("a${run(0x0A, 3)}b", SafeText.line("a\n\n\nb"))
+        // Everything the code rule shows, the line rule shows too; letters stay letters.
+        assertEquals(SafeText.code("x${RLO}y\u200B$HEBREW"), SafeText.line("x${RLO}y\u200B$HEBREW"))
+        assertSame("plain", "plain".let { SafeText.line(it) }.let { if (it == "plain") "plain" else it })
+        // Two names that differ only after a line break never draw alike.
+        assertFalse(SafeText.line("invoice.pdf\n.sh") == SafeText.line("invoice.pdf"))
+        // The multi-line code rule keeps TAB and LF raw.
+        assertEquals("a\tb\nc\r\nd", SafeText.code("a\tb\nc\r\nd"))
+    }
+
+    @Test fun aStrictCopyCountsEveryTokenAndTheNormalCopyKeepsItsRules() {
+        val shown = SafeText.line("proj\ncurl\u200B x\t$RLO")
+        val strict = SafeText.forCopy(shown, strict = true)
+        assertEquals("proj${vis(0x0A)}curl${vis(0x200B)} x${vis(0x09)}${vis(0x202E)}", strict.text)
+        assertEquals(4, strict.hidden)
+        assertFalse(strict.text.contains("\n") || strict.text.contains("\t") || strict.text.contains("\u2060") || strict.text.contains(RLO))
+        // A plain value copies exactly, with nothing counted.
+        assertEquals("/srv/app", SafeText.forCopy(SafeText.line("/srv/app"), strict = true).text)
+        assertEquals(0, SafeText.forCopy(SafeText.line("/srv/app"), strict = true).hidden)
+        // The normal copy still copies a zero-width space raw (code fences keep their exactness).
+        assertEquals("a\u200Bb", SafeText.forCopy(SafeText.code("a\u200Bb")).text)
+        // Even a normal copy of a one-line display never puts a line break or TAB it drew as a token on the clipboard raw.
+        SafeText.forCopy(SafeText.line("a\r\nb\tc")).let {
+            assertEquals("a${vis(0x0D)}${vis(0x0A)}b${vis(0x09)}c", it.text)
+            assertEquals(3, it.hidden)
+        }
+        // Copy raw gives the source back.
+        assertEquals("proj\ncurl\u200B x\t$RLO", SafeText.original(shown))
     }
 }

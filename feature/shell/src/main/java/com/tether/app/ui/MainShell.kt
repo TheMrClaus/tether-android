@@ -182,6 +182,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // ta-28i: the working directory and the session id are server text: a copy carries them the SAFE
     // way (a hidden control as its visible token), and the notice's "Copy raw" is the only raw path.
+    // r2: one-line names (TAB / LF / CR are tokens) copied strictly: EVERY token counts, a zero-width
+    // space or a line break included, so the notice always says when the copy is not plain text.
+    // The session id is copied without being shown, which is why this copy is strict.
     val copyNotices = remember { CopyNotices() }
     var copiedPath by remember { mutableStateOf(false) }
     var copiedTetherId by remember { mutableStateOf(false) }
@@ -230,12 +233,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
                 onCopyPath = {
                     session?.let {
-                        if (copySafely(context, SafeText.code(it.cwd), copyNotices, raw = it.cwd, label = "Working directory")) copiedPath = true
+                        if (copySafely(context, SafeText.line(it.cwd), copyNotices, raw = it.cwd, label = "Working directory", strict = true)) copiedPath = true
                     }
                 },
                 onCopyTetherId = {
                     session?.let {
-                        if (copySafely(context, SafeText.code(it.id), copyNotices, raw = it.id, label = "Tether session id")) copiedTetherId = true
+                        if (copySafely(context, SafeText.line(it.id), copyNotices, raw = it.id, label = "Tether session id", strict = true)) copiedTetherId = true
                     }
                 },
             )

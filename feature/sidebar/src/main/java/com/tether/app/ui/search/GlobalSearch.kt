@@ -657,7 +657,7 @@ private fun Hit(hit: SearchHit, workspaceRoot: String, now: Long, narrow: Boolea
                 contentDescription = buildString {
                     append(name)
                     append(", ").append(time)
-                    append(", ").append(SafeText.code(path))
+                    append(", ").append(SafeText.line(path))
                     if (snippet.isNotEmpty()) append(", ").append(snippet)
                     if (hit.matchCount > 1) append(", ${hit.matchCount} matches")
                 }

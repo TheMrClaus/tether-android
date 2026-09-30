@@ -459,7 +459,7 @@ private fun ListPane(
                 val line = remember(name, style) {
                     buildAnnotatedString {
                         append("Uploading “")
-                        appendSafe(name, SafeText.Rule.Code, style)
+                        appendSafe(name, SafeText.Rule.Line, style)
                         append("”…")
                     }
                 }
@@ -545,7 +545,7 @@ private fun EntryRow(
                 Text(FileFormat.modified(entry.mtime, env), color = t.faint, style = meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(it))
             }
             Box(Modifier.width(tracks.actions), contentAlignment = Alignment.Center) {
-                IconKey(TetherIcons.EllipsisVertical, "Actions for ${SafeText.code(entry.name)}", ink, { state.openItemActions(entry) }, iconSize = 16.dp)
+                IconKey(TetherIcons.EllipsisVertical, "Actions for ${SafeText.line(entry.name)}", ink, { state.openItemActions(entry) }, iconSize = 16.dp)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
@@ -716,7 +716,7 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, n
             when {
                 image != null -> Image(
                     image,
-                    contentDescription = "Preview of ${SafeText.code(entry.name)}",
+                    contentDescription = "Preview of ${SafeText.line(entry.name)}",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .testTag(FileBrowserTags.Image)
@@ -969,7 +969,7 @@ private fun ColumnScope.AlertText(message: String) {
  */
 internal fun nameTitle(before: String, name: String, after: String, tokens: SpanStyle): AnnotatedString = buildAnnotatedString {
     append(before)
-    appendSafe(name, SafeText.Rule.Code, tokens)
+    appendSafe(name, SafeText.Rule.Line, tokens)
     append(after)
 }
 
@@ -1027,7 +1027,7 @@ fun DestinationPickerFrame(
                         style = if (t.studio) ui(if (studioPhone) 20f else 22f, 700, -0.025f, 1.3f) else ui(rem(1.3f), 700, -0.025f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.semantics { heading(); contentDescription = "$mode ${SafeText.code(picker.entry.name)}" },
+                        modifier = Modifier.semantics { heading(); contentDescription = "$mode ${SafeText.line(picker.entry.name)}" },
                     )
                 }
                 IconKey(TetherIcons.X, "Close", t.ink, onClose, iconSize = 19.dp)
@@ -1040,7 +1040,7 @@ fun DestinationPickerFrame(
                     .fillMaxWidth()
                     .border(1.dp, t.line)
                     .padding(t.css.spaceMd)
-                    .semantics(mergeDescendants = true) { contentDescription = "Destination: ${SafeText.code(picker.path)}" },
+                    .semantics(mergeDescendants = true) { contentDescription = "Destination: ${SafeText.line(picker.path)}" },
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

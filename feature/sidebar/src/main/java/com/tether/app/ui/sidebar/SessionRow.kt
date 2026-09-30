@@ -616,7 +616,7 @@ private fun rowDescription(
     entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
         append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
     }
-    location?.let { append(", ").append(SafeText.code(it)) }
+    location?.let { append(", ").append(SafeText.line(it)) }
     // T5.3: a content-search hit says where it matched. ta-28i: by the label rule, as drawn.
     entry.snippet?.let { LabelText.hint(it) }?.let { snippet ->
         append(", matched: $snippet")

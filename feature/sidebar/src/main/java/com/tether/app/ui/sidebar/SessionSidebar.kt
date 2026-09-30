@@ -772,7 +772,7 @@ private fun WorkspaceBlock(
             .fillMaxWidth()
             .padding(top = if (first) 0.dp else if (studio) 0.75f.rem else t.css.spaceMd)
             .testTag(SidebarTags.block(block.workspace))
-            .semantics { contentDescription = SafeText.code(block.name) },
+            .semantics { contentDescription = SafeText.line(block.name) },
         verticalArrangement = Arrangement.spacedBy(0.15f.rem),
     ) {
         BlockHeader(block, actions, offline = !state.connected)
@@ -946,11 +946,11 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Bool
             }
             SmallIcon(TetherIcons.ChevronRight, t.faint, 14.dp, Modifier.rotate(if (block.collapsed) 0f else 90f))
         }
-        HeaderAction(TetherIcons.Plus, 15.dp, "New session in ${SafeText.code(block.name)}", t.faint) { actions.onNewSessionIn(block.workspace) }
+        HeaderAction(TetherIcons.Plus, 15.dp, "New session in ${SafeText.line(block.name)}", t.faint) { actions.onNewSessionIn(block.workspace) }
         HeaderAction(
             if (block.pinned) FilledStar else TetherIcons.Star,
             14.dp,
-            if (block.pinned) "Unpin ${SafeText.code(block.name)}" else "Keep ${SafeText.code(block.name)} in the sidebar",
+            if (block.pinned) "Unpin ${SafeText.line(block.name)}" else "Keep ${SafeText.line(block.name)} in the sidebar",
             if (block.pinned) t.violet else t.faint,
             state = if (block.pinned) "Pinned" else "Not pinned",
         ) { actions.onTogglePinnedProject(block.workspace) }
