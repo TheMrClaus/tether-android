@@ -528,6 +528,11 @@ class RealTetherClient(
     override val searchResults: StateFlow<SearchResults> = searchSync.searchResults
     override val globalSearchResults: StateFlow<GlobalSearchResults> = searchSync.globalSearchResults
 
+    // T15.1 v131 Overview feed (OverviewSync.kt). Every call is made under [lock]; its frames go out
+    // on the live, handshaken socket of that moment only ([sendOverviewLocked]).
+    private val overviewSync = OverviewSync()
+    override val overview: StateFlow<com.tether.app.protocol.overview.OverviewClientState> = overviewSync.state
+
     init {
         // One writer for all three, in this order: whoever sees storedSettingsLoaded sees the stored
         // server URL and sign-in state with it (T4.4 cold-start deep links).
@@ -936,6 +941,8 @@ class RealTetherClient(
         sidebarSync.clear()
         createdState.value = null
         searchSync.clear()
+        // T15.1: another server's overview must never show, and its subscription does not carry over.
+        synchronized(lock) { overviewSync.clear() }
     }
 
     /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
@@ -1851,6 +1858,8 @@ class RealTetherClient(
         socketOpen = false
         handshakeDone = false
         clearLiveLocked()
+        // T15.1 (use-tether.ts:1212): the overview stays on screen, marked stale; the wish waits for the next ready.
+        overviewSync.onSocketGone()
         consentOriginState.value = null
         pingTask?.cancel()
         pingTask = null
@@ -2282,6 +2291,10 @@ class RealTetherClient(
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
             is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
                 ifCurrent(webSocket) { searchSync.onFrame(message) }
+            // T15.1: use-tether.ts:1010-1017 — fold; out of step re-subscribes on THIS socket only.
+            is ServerMessage.OverviewSnapshot, is ServerMessage.OverviewDelta -> ifCurrent(webSocket) {
+                overviewSync.onFrame(message, clock()) { sendOverviewLocked(webSocket, it) }
+            }
             is ServerMessage.Snapshot -> onSnapshot(webSocket, message)
             is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
@@ -2418,6 +2431,9 @@ class RealTetherClient(
             sendFrameOn(webSocket, ClientMessage.Browse(it))
             sendFrameOn(webSocket, ClientMessage.Discover(it))
         }
+        // T15.1 (use-tether.ts:802-807): a new socket starts unsubscribed; a standing Overview wish
+        // is replaced from a fresh snapshot before any delta is trusted. On THIS socket only.
+        synchronized(lock) { if (socket === webSocket) overviewSync.onReady { sendOverviewLocked(webSocket, it) } }
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
         // session's snapshot.
@@ -3479,6 +3495,21 @@ class RealTetherClient(
 
     override fun clearGlobalSearch() = searchSync.clearGlobalSearch()
 
+    // T15.1 v131 Overview feed (OverviewSync.kt): the only two frames it ever sends.
+    override fun subscribeOverview(subscription: com.tether.app.protocol.overview.OverviewSubscription): Boolean =
+        synchronized(lock) { overviewSync.subscribe(subscription) { sendOverviewLocked(socket, it) } }
+
+    override fun unsubscribeOverview() = synchronized(lock) { overviewSync.unsubscribe { sendOverviewLocked(socket, it) } }
+
+    /**
+     * An Overview frame, on [expected] only while it is the current socket, open and past the
+     * handshake (never on an un-handshaken socket, never on one that replaced it). Caller holds [lock].
+     */
+    private fun sendOverviewLocked(expected: WebSocket?, message: ClientMessage): Boolean {
+        if (expected == null || socket !== expected || !socketOpen || !handshakeDone) return false
+        return expected.send(message.encode())
+    }
+
     // ------------------------------------------------------------------
     // v109 node registry
     // ------------------------------------------------------------------
@@ -3633,6 +3664,8 @@ class RealTetherClient(
         nodesState.value = emptyList()
         nodeResultState.value = null
         eventLogState.update { EventLog(generation = it.generation + 1) }
+        // T15.1: signed out (Lock) or signed in anew: no overview data or subscription survives it.
+        synchronized(lock) { overviewSync.clear() }
     }
 
     /**

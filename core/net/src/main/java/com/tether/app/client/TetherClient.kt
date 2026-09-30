@@ -9,6 +9,8 @@ import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionProjection
+import com.tether.app.protocol.overview.OverviewClientState
+import com.tether.app.protocol.overview.OverviewSubscription
 import com.tether.app.protocol.tree.JsObj
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -601,7 +603,31 @@ interface TetherClient {
 
     /** use-tether.ts clearGlobalSearch: empty the results and invalidate any in-flight reply. */
     fun clearGlobalSearch() {}
+
+    // ------------------------------------------------------------------
+    // T15.1 v131 Overview feed (OverviewSync.kt): defaults keep other implementations compiling.
+    // ------------------------------------------------------------------
+
+    /**
+     * use-tether.ts `overview`: the opt-in, read-only Overview feed folded by
+     * [com.tether.app.protocol.overview.OverviewClient]. Idle until [subscribeOverview]; Offline
+     * (the last data, stale) while the socket is down; emptied with the other per-server views.
+     */
+    val overview: StateFlow<OverviewClientState> get() = NO_OVERVIEW
+
+    /**
+     * use-tether.ts subscribeOverview: opt in while the Overview is on screen. Re-sending replaces
+     * the subscription (filters, page) and yields a fresh snapshot. Sent only on a live, handshaken
+     * socket; otherwise the wish is recorded and the next `ready` sends it. Returns whether a frame
+     * went out. Viewing is read-only: nothing here attaches a session, marks one seen or sends a turn.
+     */
+    fun subscribeOverview(subscription: OverviewSubscription): Boolean = false
+
+    /** use-tether.ts unsubscribeOverview: leaving the Overview (or the app going to the background) stops its pushes. */
+    fun unsubscribeOverview() {}
 }
+
+private val NO_OVERVIEW: StateFlow<OverviewClientState> = MutableStateFlow(OverviewClientState())
 
 private val NO_SEARCH_RESULTS: StateFlow<SearchResults> = MutableStateFlow(SearchResults())
 private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableStateFlow(GlobalSearchResults())

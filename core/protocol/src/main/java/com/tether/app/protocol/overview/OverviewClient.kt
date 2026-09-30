@@ -1,4 +1,4 @@
-package com.tether.app.protocol.helpers
+package com.tether.app.protocol.overview
 
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.OverviewActivity
