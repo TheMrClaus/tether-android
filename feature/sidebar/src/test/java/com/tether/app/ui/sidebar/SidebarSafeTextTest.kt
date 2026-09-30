@@ -61,6 +61,7 @@ class SidebarSafeTextTest {
             F.live("x4", HEBREW, ago = 5),
             F.live("x5", ARABIC, ago = 6),
             F.live("x6", "Finished while you were away", ago = 12, historyId = "h-away"),
+            F.live("x7", "Unknown status", status = "rea\u202Edy\u200B", ago = 7),
         )
         val histories = mapOf(
             F.ROOT to listOf(F.history("h-away", "Finished while you were away", ago = 12, seenAgo = 40, digest = HistoryDigest(2, "All ${RLO}ssap$PDF tests\u200B pass"))),
@@ -76,6 +77,9 @@ class SidebarSafeTextTest {
         assertTrue(shown.contains("\\u{202E}\\u{200B}"))
         // TalkBack reads the same words.
         assertTrue(shown.any { it.startsWith("Approve the xe.tsil fix, ") })
+        // r2: a status this build does not know is shown by the label rule, drawn and read.
+        assertTrue(shown.toString(), shown.contains("ready"))
+        assertTrue(shown.toString(), shown.any { it.startsWith("Unknown status, chat, ready, ") })
         // The location is a path: code, LTR.
         val location = "re${tok(0x202E)}po"
         assertTrue("location in $shown", shown.any { it.contains(location) })

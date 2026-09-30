@@ -561,7 +561,8 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
                 "waiting" -> WaitingPingDot(color, dotSize = 0.4f.rem)
                 else -> StatusDot(color, size = 0.4f.rem)
             }
-            Text(Format.statusCopy[live.status] ?: live.status, style = style, color = color)
+            // ta-28i r2: a status this build does not know is the server's word: the label rule.
+            Text(Format.statusCopy[live.status] ?: LabelText.label(live.status), style = style, color = color)
             Text("· $rel", style = style, color = t.faint)
         } else {
             SmallIcon(TetherIcons.History, t.faint, 12.dp)
@@ -609,7 +610,7 @@ private fun rowDescription(
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     val live = entry.live
     val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
-    if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: live.status}, $rel")
+    if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: LabelText.label(live.status)}, $rel")
     else append(", $rel ago")
     // T13.2: the full sentence the row's glyph stands for.
     if (live != null) com.tether.app.ui.components.FreshnessCopy.sessionLabel(sync, now)?.let { append(", $it") }

@@ -80,6 +80,18 @@ class ErrorToastTest {
         rule.onNodeWithContentDescription("Server error:", substring = true).assertDoesNotExist()
     }
 
+    /** ta-28i r2: a server's words are prose: an override is a visible token, drawn and read alike. */
+    @Test
+    fun aServersBidiOverrideIsATokenInTheWordsAndTheAlert() {
+        show("Session \u202Etnuocca\u202C not found.", fromServer = true)
+        val shown = "Session \u2060\u27E8U+202E\u27E9tnuocca\u2060\u27E8U+202C\u27E9 not found."
+        rule.onNodeWithContentDescription("Server error: $shown").assert(assertive)
+        rule.onAllNodes(SemanticsMatcher("raw override") { node ->
+            (node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() + node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text })
+                .any { it.contains('\u202E') || it.contains('\u202C') }
+        }, useUnmergedTree = true).assertCountEquals(0)
+    }
+
     /** r2: the toast is a surface: a tap on its body never reaches the control drawn under it. */
     @Test
     fun aTapOnTheToastsBodyNeverReachesWhatIsUnderIt() {

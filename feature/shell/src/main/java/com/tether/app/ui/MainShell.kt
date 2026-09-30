@@ -48,6 +48,7 @@ import com.tether.app.ui.text.CopyNoticeHost
 import com.tether.app.ui.text.CopyNotices
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.copySafely
+import com.tether.app.ui.text.proseText
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -537,6 +538,9 @@ const val ERROR_TOAST_TAG = "error-toast"
 @Composable
 fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifier, fromServer: Boolean = false) {
     val t = LocalTetherTokens.current
+    // ta-28i r2: the words (a server's, often) are prose: every explicit bidi control a token, drawn
+    // and read alike, laid out in their content's direction.
+    val drawn = proseText(message)
     Row(
         modifier = modifier
             .widthIn(max = 480.dp)
@@ -563,7 +567,7 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
             Modifier
                 .weight(1f)
                 .clearAndSetSemantics {
-                    contentDescription = if (fromServer) "Server error: $message" else "Error: $message"
+                    contentDescription = if (fromServer) "Server error: ${drawn.text}" else "Error: ${drawn.text}"
                     liveRegion = LiveRegionMode.Assertive
                 },
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -579,7 +583,7 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
                 )
             }
             Text(
-                text = message,
+                text = drawn,
                 color = t.white,
                 fontFamily = Manrope,
                 fontWeight = TetherWeights.body,
