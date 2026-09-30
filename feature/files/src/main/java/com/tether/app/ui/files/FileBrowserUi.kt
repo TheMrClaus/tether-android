@@ -120,6 +120,7 @@ object FileBrowserTags {
     const val MutationBanner = "files-mutation-banner"
     const val PreviewError = "files-preview-error"
     const val Uploading = "files-uploading"
+    const val HiddenRemoved = "files-hidden-removed"
     fun row(path: String) = "files-row:$path"
 }
 
@@ -468,8 +469,18 @@ private fun ListPane(
         }
         if (state.mutationError.isNotEmpty()) {
             Banner(state.mutationError, danger = true, modifier = Modifier.testTag(FileBrowserTags.MutationBanner))
-        } else if (state.notice.isNotEmpty()) {
-            Banner(state.notice, danger = false, modifier = Modifier.testTag(FileBrowserTags.MutationBanner))
+        } else if (state.notice != null) {
+            // r2: the file's name in the notice is code (one line), between our own words.
+            val notice = state.notice!!
+            val tokens = tokenStyle(t)
+            val line = remember(notice, tokens) {
+                buildAnnotatedString {
+                    append(notice.before)
+                    appendSafe(notice.name, SafeText.Rule.Line, tokens)
+                    append(notice.after)
+                }
+            }
+            Banner(line, danger = false, modifier = Modifier.testTag(FileBrowserTags.MutationBanner))
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
@@ -564,7 +575,11 @@ private fun iconFor(entry: WorkspaceFileEntry): ImageVector = when {
 
 /** `.file-browser-preview-error` (also the mutation banner); neutral for a native notice. */
 @Composable
-private fun Banner(message: String, danger: Boolean, modifier: Modifier = Modifier) {
+private fun Banner(message: String, danger: Boolean, modifier: Modifier = Modifier) = Banner(proseText(message), danger, modifier)
+
+/** [Banner] over an already drawn line (a server's error by the prose rule, a notice with a coded name). */
+@Composable
+private fun Banner(message: AnnotatedString, danger: Boolean, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     Column(modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(if (danger) t.dangerEdge else t.line))
@@ -579,8 +594,8 @@ private fun Banner(message: String, danger: Boolean, modifier: Modifier = Modifi
         ) {
             // Status is never colour alone: the danger line carries the alert glyph.
             if (danger) Icon(TetherIcons.CircleAlert, contentDescription = "Error", tint = t.danger, modifier = Modifier.size(14.dp))
-            // ta-28i: a server's error (or a notice naming a file) is prose: no bidi control drawn raw.
-            Text(proseText(message), color = if (danger) t.danger else t.muted, style = ui(rem(0.7f)))
+            // ta-28i: a server's error is prose; a notice's file name is code (r2): no bidi control drawn raw.
+            Text(message, color = if (danger) t.danger else t.muted, style = ui(rem(0.7f)))
         }
     }
 }
@@ -1029,6 +1044,13 @@ fun NamePromptContent(
             placeholder = "Name",
             modifier = Modifier.fillMaxWidth().padding(top = LocalTetherTokens.current.css.spaceMd),
         )
+        if (prompt.hiddenRemoved) {
+            // r2: the field shows the name without its hidden characters; say so, once.
+            TetherDialogText(
+                "Hidden characters were removed from this name. Renaming saves it without them.",
+                modifier = Modifier.padding(top = LocalTetherTokens.current.css.spaceSm).testTag(FileBrowserTags.HiddenRemoved),
+            )
+        }
         if (error.isNotEmpty()) AlertText(error)
     }
 }

@@ -9,6 +9,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import com.tether.app.client.FilesCopy
 import com.tether.app.client.FilesResult
+import com.tether.app.client.LabelText
+import com.tether.app.client.TextCut
 import com.tether.app.client.UploadSource
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFileListing
@@ -25,7 +27,19 @@ import kotlinx.coroutines.launch
 /** workspace-file-browser.tsx NamePromptMode. */
 enum class NamePromptMode { NewFolder, NewFile, Rename }
 
-data class NamePrompt(val mode: NamePromptMode, val entry: WorkspaceFileEntry? = null, val value: String = "")
+/**
+ * ta-28i r2: [hiddenRemoved] = the Rename field was pre-filled with the name WITHOUT its hidden
+ * characters ([LabelText.withoutHidden]): the field then says so, and renaming saves it without them.
+ */
+data class NamePrompt(val mode: NamePromptMode, val entry: WorkspaceFileEntry? = null, val value: String = "", val hiddenRemoved: Boolean = false)
+
+/**
+ * A neutral outcome line. ta-28i r2: the file [name] in it is drawn by the one-line code rule
+ * between our own words [before] and [after]; [text] is the plain sentence.
+ */
+data class BrowserNotice(val before: String, val name: String = "", val after: String = "") {
+    val text: String get() = before + name + after
+}
 
 enum class DestinationMode { Move, Copy }
 
@@ -145,7 +159,7 @@ class FileBrowserState(
         private set
 
     /** Native: a neutral outcome line ("Saved …") in the slot the web uses for mutation errors. */
-    var notice by mutableStateOf("")
+    var notice by mutableStateOf<BrowserNotice?>(null)
         private set
 
     /** Native: the upload in flight (the web gives no feedback during a long PUT). */
@@ -242,7 +256,7 @@ class FileBrowserState(
         previewLoading = false
         previewFullscreen = false
         mutationError = ""
-        notice = ""
+        notice = null
         launchLatest({ listingJob = it }) { self ->
             val result = files.list(path)
             if (listingJob !== self) return@launchLatest
@@ -362,12 +376,15 @@ class FileBrowserState(
 
     fun openNamePrompt(mode: NamePromptMode, entry: WorkspaceFileEntry? = null) {
         namePromptError = ""
-        namePrompt = NamePrompt(mode, entry, if (mode == NamePromptMode.Rename && entry != null) entry.name else "")
+        // r2: a Rename field shows what it holds: the name without its hidden characters (and says so).
+        val shown = if (mode == NamePromptMode.Rename && entry != null) LabelText.withoutHidden(entry.name) else ""
+        namePrompt = NamePrompt(mode, entry, shown, hiddenRemoved = mode == NamePromptMode.Rename && entry != null && shown != entry.name)
     }
 
     fun updateNamePrompt(value: String) {
         // The web's <input maxLength={200}>.
-        namePrompt = namePrompt?.copy(value = value.take(NAME_MAX_LENGTH))
+        // r2: cut at a character-cluster boundary, never half a surrogate pair or an accent.
+        namePrompt = namePrompt?.copy(value = TextCut.cut(value, NAME_MAX_LENGTH))
     }
 
     fun closeNamePrompt() {
@@ -481,7 +498,7 @@ class FileBrowserState(
     fun upload(picked: List<PickedUpload>, destination: String? = null) {
         if (picked.isEmpty()) return
         mutationError = ""
-        notice = ""
+        notice = null
         scope.launch {
             // The folder the Upload key was pressed in (kept across a configuration change by the host).
             val dir = destination ?: currentDir
@@ -508,10 +525,10 @@ class FileBrowserState(
 
     fun saveTo(entry: WorkspaceFileEntry, target: Uri) {
         mutationError = ""
-        notice = ""
+        notice = null
         scope.launch {
             when (val result = platform.saveTo(files, entry, target)) {
-                is FilesResult.Ok -> notice = "Saved “${entry.name}”."
+                is FilesResult.Ok -> notice = BrowserNotice("Saved “", entry.name, "”.")
                 is FilesResult.Failed -> mutationError = result.message
             }
         }
@@ -519,7 +536,7 @@ class FileBrowserState(
 
     fun share(entry: WorkspaceFileEntry) {
         mutationError = ""
-        notice = ""
+        notice = null
         scope.launch {
             when (val result = platform.shareCopy(files, entry)) {
                 // Closed meanwhile: no sheet will open, so the copy goes now.

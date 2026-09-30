@@ -416,4 +416,42 @@ class FileBrowserSafeTextTest {
             }
         }
     }
+
+    /** r2 (L3): the Rename field never holds a hidden control the reader cannot see; it says what it removed. */
+    @Test fun theRenameFieldIsPrefilledWithoutHiddenCharactersAndSaysSo() {
+        val s = state(select = null)
+        s.openNamePrompt(NamePromptMode.Rename, FilesFixtures.file("invoice${RLO}fdp.exe\u200B", 1))
+        assertEquals("invoicefdp.exe", s.namePrompt!!.value)
+        assertTrue(s.namePrompt!!.hiddenRemoved)
+        show(s) { s.namePrompt?.let { NamePromptContent(it, error = "", submitting = false, onValueChange = s::updateNamePrompt, onSubmit = {}, onCancel = {}) } }
+        rule.onNodeWithTag(FileBrowserTags.HiddenRemoved).assertIsDisplayed()
+        val field = rule.onNode(androidx.compose.ui.test.hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+        assertEquals("invoicefdp.exe", field)
+        // The title still names the file as it is.
+        assertTrue(spoken().contains("Rename invoice${tok(0x202E)}fdp.exe${tok(0x200B)}"))
+        // Typing is cut at the web's 200, never inside a surrogate pair.
+        s.updateNamePrompt("a".repeat(199) + "\uD83D\uDE00")
+        assertEquals("a".repeat(199), s.namePrompt!!.value)
+    }
+
+    @Test fun aCleanNameIsPrefilledAsItIsWithNoNote() {
+        val s = state(select = null)
+        s.openNamePrompt(NamePromptMode.Rename, FilesFixtures.readme)
+        assertEquals("README.md", s.namePrompt!!.value)
+        assertFalse(s.namePrompt!!.hiddenRemoved)
+        show(s) { s.namePrompt?.let { NamePromptContent(it, error = "", submitting = false, onValueChange = {}, onSubmit = {}, onCancel = {}) } }
+        rule.onNodeWithTag(FileBrowserTags.HiddenRemoved).assertDoesNotExist()
+    }
+
+    /** r2: the "Saved" notice names the file by the one-line code rule. */
+    @Test fun theSavedNoticeNamesTheFileAsCode() {
+        val platform = FakePlatform()
+        val files = FakeFiles().apply { listings[ROOT] = FilesResult.Ok(FilesFixtures.listing()) }
+        val s = FileBrowserState(files, platform, CoroutineScope(Dispatchers.Unconfined)).apply { cwd = ROOT; open() }
+        s.saveTo(FilesFixtures.file("invoice${RLO}fdp.exe\n.sh", 1), android.net.Uri.parse("content://test/doc"))
+        assertEquals(BrowserNotice("Saved \u201C", "invoice${RLO}fdp.exe\n.sh", "\u201D."), s.notice)
+        show(s)
+        assertTrue(spoken().toString(), spoken().contains("Saved \u201Cinvoice${tok(0x202E)}fdp.exe${tok(0x0A)}.sh\u201D."))
+        assertNoRawBidi()
+    }
 }

@@ -118,6 +118,29 @@ object LabelText {
      */
     fun title(text: String?): String = clean(text, MAX_TITLE).ifEmpty { if (text.isNullOrBlank()) "" else visibleValue(text) }
 
+    /**
+     * ta-28i r2: a name as an EDIT FIELD pre-fills it: every bidi control, mark and invisible code
+     * point dropped, and every other spacing or control character (TAB, a line break, a no-break or
+     * ideographic space) made a plain space, so what the field holds is what it shows. Unlike [clean]
+     * nothing is collapsed, trimmed or cut: the rest of the name stays exactly as it was.
+     */
+    fun withoutHidden(text: String): String {
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            i += Character.charCount(cp)
+            when {
+                cp == 0x20 -> out.append(' ')
+                bidiControl(cp) -> Unit
+                spacing(cp) -> out.append(' ')
+                invisibleCodePoint(cp) -> Unit
+                else -> out.appendCodePoint(cp)
+            }
+        }
+        return out.toString()
+    }
+
     fun label(text: String?): String = clean(text, MAX_LABEL)
     fun hint(text: String?): String = clean(text, MAX_HINT)
     fun error(text: String?): String = clean(text, MAX_ERROR)

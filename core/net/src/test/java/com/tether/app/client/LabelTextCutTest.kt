@@ -133,4 +133,13 @@ class LabelTextCutTest {
             }
         }
     }
+
+    @Test fun anEditFieldGetsTheNameWithoutItsHiddenCharacters() {
+        assertEquals("invoicefdp.exe", LabelText.withoutHidden("invoice\u202Efdp.exe"))
+        assertEquals("a b c  d", LabelText.withoutHidden("a\tb\nc \u00A0d"))
+        assertEquals("ab", LabelText.withoutHidden("a\u200B\u2060\u200E\u2066b\u2069"))
+        // Nothing else changes: double spaces, leading dots, length, RTL letters.
+        val keep = "  .x  \u05E9\u05DC\u05D5\u05DD " + "y".repeat(500)
+        assertEquals(keep, LabelText.withoutHidden(keep))
+    }
 }
