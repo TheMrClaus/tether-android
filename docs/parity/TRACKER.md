@@ -208,8 +208,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
 | T15.3 | Overview host + daily usage panels | DONE | security-executor-T15.3 @ 2026-09-30 20… |  |  |
 | T15.4 | Top-bar navigation | VERIFIED | executor-T15.4 @ 2026-09-30 20:30 |  |  |
-| T15.5 | Studio-only appearance + theme migration | IN-PROGRESS | executor-T15.5 @ 2026-09-30 23:01 |  |  |
-| T15.6 | Queue origin labels (v133) + hidden session count (v135) | TODO |  |  |  |
+| T15.5 | Studio-only appearance + theme migration | IN-PROGRESS | executor-T15.5 @ 2026-09-30 23:01 |  | checkpoint 21f34efa (WIP): main sources compile. done: token JSON filtered to Studio pair (tools/parity/studio-only-tokens.py) + generator … |
+| T15.6 | Queue origin labels (v133) + hidden session count (v135) | IN-PROGRESS | executor-T15.6 @ 2026-09-30 23:41 |  |  |
 | T15.7 | Worktree service links after v134 | TODO |  |  |  |
 | T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | TODO |  |  |  |
 
@@ -374,3 +374,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 23:40 | claude-main / Opus 5.5 | release | Owner rule: the coordinator publishes releases, minor bump each. v0.8.0 (code 26, `6c5e474`) built by android-release.yml (draft), APK checked (same cert `4f8c22de...b74d` as 0.7.8, versionName 0.8.0 / code 26), asset renamed tether-0.8.0.apk, PUBLISHED as Latest with highlights. | T7.4 r2; T15.3/T15.4 |
 | 2026-10-01 00:55 | claude-main / Opus 5.5 | T7.4, T15.3, T15.4, ta-ylh, ta-vmg, ta-x9c | All five overnight lanes stopped (usage limit 00:50 + connection errors); resumed each from its transcript with its uncommitted work intact (T7.4 r3 WIP, T15.3 r2 WIP rebased, ta-ylh WIP in 12 files, T15.4 r2 re-verify mid-mutants, flakes not started); makers told to checkpoint-commit first. T15.3 verify CONFIRMED earlier (r2 = origin check + JSON content type). | T7.4 r3; T15.3 r2; T15.4 verdict; ta-ylh; flakes |
 | 2026-10-01 01:30 | claude-main / Opus 5.5 | T15.4, T15.5 | T15.4 r2 re-verify CONFIRMED -> merged ff-only `cee8ea80`, VERIFIED (gate 4741; follow-up ta-2qv). Started T15.5 (Studio-only appearance; rebases over T7.4 at the end). | T7.4 r3; T15.3 r2; ta-ylh; flakes; T15.5 |
+| 2026-10-01 02:20 | claude-main / Opus 5.5 | ta-ylh, T15.6 | ta-ylh: coordinator ran the gate (maker hit its command limit): green 4757 on `f1b3b639`; verify CONFIRMED -> merged ff-only `f1b3b639`, VERIFIED (advertised hello stays 132). Started T15.6 (queue labels, hidden count, createdVia; + the two ta-ylh lows). | T7.4 r3; T15.3 r2; T15.5; T15.6; flakes |
