@@ -464,6 +464,13 @@ interface TetherClient {
     val toolMedia: ToolMediaSource get() = ToolMediaSource.Unavailable
 
     /**
+     * T15.3: the Overview's `GET /api/overview/host` and `/api/overview/usage` on the paired server,
+     * with the credential in force and never following a redirect (see [HttpOverviewMetrics]). The
+     * default refuses every call without touching the network.
+     */
+    val overviewMetrics: OverviewMetricsSource get() = OverviewMetricsSource.Unavailable
+
+    /**
      * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
      * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
      * session's cached hunks, so an expanded file refetches. Emptied with the other server views.

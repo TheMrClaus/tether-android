@@ -3090,6 +3090,20 @@ class RealTetherClient(
         }
     })
 
+    /**
+     * T15.3: `/api/overview/host` and `/api/overview/usage`, over [authHttp] with the same per-call
+     * (server, credential) read as [files]: a reading can only be asked of, and tagged with, the
+     * origin its credential belongs to.
+     */
+    override val overviewMetrics: OverviewMetricsSource = HttpOverviewMetrics(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
     // ------------------------------------------------------------------
     // Fire-and-forget commands
     // ------------------------------------------------------------------
