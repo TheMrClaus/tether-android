@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.compose.runtime.Immutable
 import com.tether.app.protocol.fold.jsTrim
 import com.tether.app.protocol.helpers.JS_WS
+import com.tether.app.ui.text.SafeHref
 
 /**
  * T6.1 / PLAN D11: a line-for-line Kotlin port of the web's hand-rolled markdown parser
@@ -93,17 +94,6 @@ sealed interface MdBlock {
     data object Rule : MdBlock
 }
 
-/**
- * markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i`, as literal lowercase prefixes compared
- * by [startsWithAsciiIgnoreCase].
- *
- * NOT a Kotlin `Regex(…, IGNORE_CASE)`: on the JVM that flag also sets UNICODE_CASE, so `ſ`
- * (U+017F) matches `s` and `ı` / `İ` (U+0131 / U+0130) match `i` — `httpſ://x` and `maılto:x`
- * would pass the allowlist and become intents. JS `/i` without the `u` flag folds ASCII only.
- * Nor a `java.util.regex.Pattern` with CASE_INSENSITIVE alone: on-device regex is ICU-backed, not
- * the JVM engine the unit tests run, so the fold is written out by hand where both agree.
- */
-private val SAFE_HREF_PREFIXES = listOf("http://", "https://", "mailto:")
 
 /** JS `.` (no `s` flag): anything but the four line terminators. */
 private const val JS_DOT = "[^\\n\\r\\u2028\\u2029]"
@@ -135,8 +125,19 @@ const val INLINE_SCAN_LIMIT: Int = 20_000
 /** markdown.tsx:204 — at most this many inline tokens per scan. */
 private const val INLINE_GUARD: Int = 5000
 
-/** Is [href] an allowed link target (`http://`, `https://`, `mailto:`, any ASCII case)? */
-fun isSafeHref(href: String): Boolean = SAFE_HREF_PREFIXES.any { href.startsWithAsciiIgnoreCase(it) }
+/**
+ * Is [href] an allowed link target? markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i` is the
+ * scheme allowlist (`http://`, `https://`, `mailto:`, ASCII case only); ta-fz3 makes it a
+ * FULL-STRING check ([SafeHref]): a bidi, invisible, control or look-alike code point anywhere,
+ * user-info, a backslash or a host that is not a clean DNS name refuses the link, so its label
+ * stays inert text.
+ *
+ * The scheme fold is NOT a Kotlin `Regex(…, IGNORE_CASE)`: on the JVM that flag also sets
+ * UNICODE_CASE, so `ſ` (U+017F) matches `s` and `ı` / `İ` (U+0131 / U+0130) match `i` — `httpſ://x`
+ * and `maılto:x` would pass the allowlist and become intents. JS `/i` without the `u` flag folds
+ * ASCII only.
+ */
+fun isSafeHref(href: String): Boolean = SafeHref.isSafe(href)
 
 /**
  * JS `/^prefix/i` (no `u` flag): only `A`-`Z` fold to `a`-`z`; every other char must equal the
