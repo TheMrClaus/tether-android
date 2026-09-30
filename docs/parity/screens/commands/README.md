@@ -63,12 +63,20 @@ Montages (`web | android | diff`), 6 skins at phone size, built by
    confirmation. A pending mention is dropped when its link drops or the server changes (it is keyed on the origin it was picked on). **Android difference:** the default
    model is pre-selected only when the catalog's row lists it. **Android difference:** the catalog is
    asked for when the picker first opens with none, not on every `ready`.
-6. **Output and names are cleaned.** Command output goes through `LabelText.output`: ANSI escape
-   sequences are removed whole; C0 / C1 controls, bidi embeddings / overrides / isolates / marks and
-   invisible code points are dropped; CR / CRLF / U+2028 become line breaks. The panel draws the cleaned
-   tail (16,000 characters, with a note when earlier output is cut). Command names, argument hints,
-   descriptions, agent and model names, signals and paths go through `LabelText`, and TalkBack reads the
-   same cleaned words. The output is plain text in a framed mono panel: it cannot draw a control, a
-   link or an approval.
+6. **Output is shown, never hidden (r3).** The panel draws command output by the shared terminal
+   rule (`SafeText.terminal`, ta-blf, core/designsystem `com.tether.app.ui.text`). SGR colour is
+   dropped (digits and separators only, at most `SafeText.MAX_SGR_PARAMS` of them). Every other
+   escape is shown, not interpreted: cursor moves, erase, OSC titles and clipboard payloads,
+   DCS / SOS / PM / APC, 8-bit C1 forms, and ESC before any character. Its ESC / C1 introducer and
+   terminator become visible `⟨U+…⟩` tokens (in `--warning`), and its parameters and payload stay
+   as plain text. Bidi and invisible code points are tokens by the code rule, and a lone CR is a
+   token (a CRLF stays a line break). **Android divergence:** the web draws all of it raw in a
+   `<pre>`. The panel draws a bounded tail: only a raw tail of twice its 16,000-character bound is
+   encoded, and the drawn tail is cut on a unit boundary, never inside a token. The row is
+   selectable, and a copy goes through the transcript's `SafeCopyClipboard`: tokens, never a hidden
+   control; "Copy raw" is the notice's key. Command names, argument hints, descriptions, agent and
+   model names and signals go through `LabelText`, and the palette offers only names that are already
+   clean. The output is plain text in a framed mono panel: it cannot draw a control, a link or an
+   approval.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.

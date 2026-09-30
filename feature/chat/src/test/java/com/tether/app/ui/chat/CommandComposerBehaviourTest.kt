@@ -487,8 +487,11 @@ class CommandComposerBehaviourTest {
         val shown = rule.onNodeWithTag("command-panel-body").fetchSemanticsNode().let { node ->
             node.children.flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }.joinToString("") { it.text }
         }
-        assertEquals("ok\nApprove gnp.exe done", shown)
+        // r3 (ta-blf's terminal rule): SGR dropped, every other control and bidi code point a token.
+        assertEquals("ok\r\nApprove ⟨U+202E⟩gnp.exe⟨U+202C⟩⟨U+0000⟩ done", unmarked(shown))
     }
+
+    private fun unmarked(s: String) = s.replace("${com.tether.app.ui.text.SafeText.MARK}\u200B", "").replace(com.tether.app.ui.text.SafeText.MARK.toString(), "")
 
     private fun rawBlock(f: ChatFixtures.Folded): JsObj =
         buildChatItems(f.projection, f.tree, showThinking = false).filterIsInstance<ChatItem.Block>().single { it.block.kind == COMMAND_OUTPUT_BLOCK }.raw!!
@@ -524,6 +527,6 @@ class CommandComposerBehaviourTest {
         )
         val view = commandOutputView(rawBlock(f))!!
         val text = commandPanelText(view.segments).segments.joinToString("") { it.text }
-        assertEquals("start 0;title\nline after\n", text)
+        assertEquals("start ⟨U+001B⟩]0;title\nline after\n", unmarked(text))
     }
 }

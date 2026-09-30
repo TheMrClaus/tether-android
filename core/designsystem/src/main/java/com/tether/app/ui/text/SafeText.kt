@@ -59,8 +59,10 @@ package com.tether.app.ui.text
  * the one exception: they draw as the flag they are. RTL LETTERS are never tokens, in code or in
  * prose; code lays out LTR, as the web's `<pre>` in its LTR page and every editor do.
  *
- * TERMINAL ([terminal]; command output): [code] after the ANSI SGR colour sequences are dropped.
- * Every other escape sequence (cursor moves, erase, OSC titles) is shown, never interpreted.
+ * TERMINAL ([terminal]; command output): [code] after the ANSI SGR colour sequences are dropped
+ * (T7.3 r3: only up to [MAX_SGR_PARAMS] parameter characters). Every other escape sequence
+ * (cursor moves, erase, OSC titles and clipboard payloads, 8-bit C1 forms) is shown, never
+ * interpreted: its ESC / C1 introducer and terminator are tokens and its payload is plain text.
  *
  * COPY ([forCopy], [original]): a copy never carries a hidden control the reader did not see.
  * The DANGEROUS set ([dangerous]: C0 except TAB/LF/CRLF, DEL, C1, U+202A-U+202E,
@@ -128,7 +130,14 @@ object SafeText {
         }
     }
 
-    /** SGR (`ESC [ digits ; : m`) dropped; every other escape kept for [code] to show. */
+    /**
+     * T7.3 r3: the longest SGR parameter string [dropSgr] drops. A real colour sequence is a few
+     * numbers (`38;2;255;255;255` is 16); a longer one is shown like every other escape, so nothing
+     * of unusual length is ever dropped unseen.
+     */
+    const val MAX_SGR_PARAMS = 32
+
+    /** SGR (`ESC [ digits ; : m`, at most [MAX_SGR_PARAMS] parameter characters) dropped; every other escape kept for [code] to show. */
     fun dropSgr(text: String): String {
         var at = text.indexOf('\u001B')
         if (at < 0) return text
@@ -138,8 +147,9 @@ object SafeText {
             var k = at + 1
             if (k < text.length && text[k] == '[') {
                 k++
-                while (k < text.length && (text[k] in '0'..'9' || text[k] == ';' || text[k] == ':')) k++
-                if (k < text.length && text[k] == 'm') {
+                val params = k
+                while (k < text.length && k - params <= MAX_SGR_PARAMS && (text[k] in '0'..'9' || text[k] == ';' || text[k] == ':')) k++
+                if (k < text.length && k - params <= MAX_SGR_PARAMS && text[k] == 'm') {
                     out.append(text, from, at)
                     from = k + 1
                 }

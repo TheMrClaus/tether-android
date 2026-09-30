@@ -49,6 +49,10 @@ import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.components.SpinningIcon
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.appendStyled
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.tokenStyle
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -113,20 +117,59 @@ internal fun commandOutputView(block: JsObj?): CommandOutputView? {
     )
 }
 
-/** The panel's body: the cleaned tail of the output ([LabelText.output]) and how much was left out. */
+/**
+ * The panel's body: the drawn tail of the output and how much was left out. r3: drawn by the shared
+ * terminal rule ([SafeText.terminal], ta-blf): SGR colour is dropped, every other escape and every
+ * control, bidi or invisible code point is a visible token. Nothing is hidden: the operator sees
+ * what the agent sees. Each segment's [OutputSegment.text] is the DRAWN text (tokens included).
+ */
 internal class CommandPanelText(val segments: List<OutputSegment>, val dropped: Int)
 
 internal fun commandPanelText(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHARS): CommandPanelText {
-    // T7.3 r2: only the RAW tail (twice the bound, for what cleaning removes) is cleaned, so the cost
-    // of a redraw follows the bound, not everything the command printed.
+    // r2: only a RAW tail (twice the bound) is encoded, so a redraw costs the bound, not everything
+    // the command printed. r3: the drawn tail is then cut at a unit boundary, never inside a token.
     val raw = commandPanelRawTail(segments, max)
     panelCharsCleaned.addAndGet(raw.segments.sumOf { it.text.length }.toLong())
-    val cleaned = raw.segments.map { OutputSegment(it.stderr, LabelText.output(it.text)) }.filter { it.text.isNotEmpty() }
-    val tail = outputTail(cleaned, max)
-    return CommandPanelText(tail.segments, tail.dropped + raw.dropped)
+    val drawn = raw.segments.map { OutputSegment(it.stderr, SafeText.terminal(it.text)) }.filter { it.text.isNotEmpty() }
+    var budget = max
+    val kept = ArrayDeque<OutputSegment>()
+    var dropped = raw.dropped
+    for (i in drawn.indices.reversed()) {
+        val seg = drawn[i]
+        if (budget <= 0) {
+            dropped += seg.text.length
+            continue
+        }
+        if (seg.text.length <= budget) {
+            kept.addFirst(seg)
+            budget -= seg.text.length
+        } else {
+            val cut = unitBoundaryAtOrAfter(seg.text, seg.text.length - budget)
+            if (cut < seg.text.length) kept.addFirst(OutputSegment(seg.stderr, seg.text.substring(cut)))
+            dropped += cut
+            budget = 0
+        }
+    }
+    return CommandPanelText(kept.toList(), dropped)
 }
 
-/** Test seam (r2): how many characters [commandPanelText] has handed to the cleaner. */
+/** The first index at or after [from] where a drawn unit starts: never inside a token or a surrogate pair. */
+internal fun unitBoundaryAtOrAfter(display: String, from: Int): Int {
+    var i = 0
+    while (i < display.length) {
+        val u = if (display[i] == SafeText.MARK) SafeText.unitAt(display, i) else null
+        val end = when {
+            u != null -> u.end
+            Character.isHighSurrogate(display[i]) && i + 1 < display.length && Character.isLowSurrogate(display[i + 1]) -> i + 2
+            else -> i + 1
+        }
+        if (i >= from) return i
+        i = end
+    }
+    return display.length
+}
+
+/** Test seam (r2): how many raw characters [commandPanelText] has handed to the drawing rule. */
 internal val panelCharsCleaned = java.util.concurrent.atomic.AtomicLong()
 
 /** The raw tail [commandPanelText] cleans: at most `2 × max` characters of the newest output. */
@@ -141,7 +184,9 @@ private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
  * face, the status — spinner + words, `--danger` when failed), the output (`<pre>`, 0.78rem mono,
  * stderr in `--warning`, at most 40% of the window tall and scrolling inside, following the tail while
  * it streams, the violet caret while it runs), and the foot naming the log file. Output and names are
- * the server's words, cleaned: nothing in them can reorder, hide or pass for the app's own text.
+ * the server's words drawn by the shared terminal rule: nothing in them can reorder, hide, or pass
+ * for the app's own text, and nothing is hidden from the operator. The row is selectable; a copy
+ * goes through the transcript's SafeCopyClipboard (tokens, never a hidden control).
  */
 @Composable
 internal fun CommandOutputPanel(view: CommandOutputView) {
@@ -157,9 +202,11 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
     val line = t.line
     val text = remember(view.segments) { commandPanelText(view.segments) }
     val warning = t.warning
-    val body = remember(text, warning) {
+    val token = tokenStyle(t)
+    val body = remember(text, warning, token) {
         val all = buildAnnotatedString {
-            for (seg in text.segments) if (seg.stderr) withStyle(SpanStyle(color = warning)) { append(seg.text) } else append(seg.text)
+            // Each drawn segment with its tokens styled (ta-blf's token look); stderr in --warning.
+            for (seg in text.segments) if (seg.stderr) withStyle(SpanStyle(color = warning)) { appendStyled(seg.text, token) } else appendStyled(seg.text, token)
         }
         // A `<pre>` draws no empty line for the final newline; the caret sits on the line after.
         if (all.text.endsWith('\n')) all.subSequence(0, all.length - 1) else all
@@ -195,7 +242,8 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
             val scroll = rememberScrollState()
             // Follow the tail while it streams, so a live command reads like a terminal.
             LaunchedEffect(body, view.running) { if (view.running) scroll.scrollTo(scroll.maxValue) }
-            val mono = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), lineHeight = 1.45.em)
+            // Code surfaces lay out LTR, as the web's `<pre>` (ta-blf codeDirection).
+            val mono = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), lineHeight = 1.45.em, textDirection = codeDirection)
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -215,6 +263,7 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
                 if (view.running) Caret()
             }
             view.logFile?.let { path ->
+                val pathText = com.tether.app.ui.text.codeText(path)
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -224,7 +273,7 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
                     Text(
                         buildAnnotatedString {
                             append(if (view.outputTruncated) "Output truncated above — full log: " else "Full output: ")
-                            withStyle(SpanStyle(fontFamily = type.mono)) { append(LabelText.hint(path)) }
+                            withStyle(SpanStyle(fontFamily = type.mono)) { append(pathText) }
                         },
                         style = TextStyle(fontFamily = type.ui, fontSize = rem(0.68f)),
                         color = t.muted,
