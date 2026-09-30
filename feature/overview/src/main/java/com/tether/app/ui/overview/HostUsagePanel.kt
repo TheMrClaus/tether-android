@@ -46,6 +46,7 @@ import com.tether.app.client.HostMetrics
 import com.tether.app.client.OverviewMetricsResult
 import com.tether.app.client.OverviewUsage
 import com.tether.app.client.TetherClient
+import com.tether.app.client.serverOrigin
 import com.tether.app.ui.components.FreshnessPill
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.rememberTickingNow
@@ -77,7 +78,7 @@ object HostUsageTags {
  *   15 s; returning (ON_START, a new server) fetches at once, as the web's `visibilitychange` does;
  * - the readings belong to ONE server: a new [TetherClient.serverUrl] or a sign-out starts them
  *   from nothing, the old polls are cancelled (and their sockets with them), and
- *   [HostUsageModel.fold] refuses to keep a value beside another origin's answer;
+ *   [HostUsageModel.fold] takes only answers about the shown server's origin (r2);
  * - one request at a time per route (the next waits for the last: no pile-up on a slow link).
  *
  * [onViewUsage] is the web's "View usage" link; null (no Usage screen yet) draws none.
@@ -103,8 +104,10 @@ fun HostUsageHost(
     LaunchedEffect(client, server, configured, started) {
         if (!started || !configured || server == null) return@LaunchedEffect
         val source = client.overviewMetrics
-        launch { poll(HostUsageModel.HOST_POLL_MS, { source.host() }) { host = HostUsageModel.fold(host, it, clock()) } }
-        launch { poll(HostUsageModel.USAGE_POLL_MS, { source.usage() }) { usage = HostUsageModel.fold(usage, it, clock()) } }
+        // r2: normalised as the client reads its server URL; an answer about any other origin is dropped.
+        val current = serverOrigin(server)
+        launch { poll(HostUsageModel.HOST_POLL_MS, { source.host() }) { host = HostUsageModel.fold(host, it, clock(), current) } }
+        launch { poll(HostUsageModel.USAGE_POLL_MS, { source.usage() }) { usage = HostUsageModel.fold(usage, it, clock(), current) } }
     }
 
     // Re-read [clock] every poll period (and whenever a reading lands), so a reading goes stale on time.

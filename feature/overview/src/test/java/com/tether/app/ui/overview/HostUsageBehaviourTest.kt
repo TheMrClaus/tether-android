@@ -180,6 +180,35 @@ class HostUsageBehaviourTest {
         meter("Memory").assert(stateIs("10.0 / 16.0 GB"))
     }
 
+    /**
+     * r2 (verifier P3): [TetherClient.serverUrl] can move to B before the client's adopted server does
+     * (RealTetherClient.login stores the server before adopting it), so the source may still answer
+     * about A into B's fresh, empty state. Such an answer is never shown, however often it comes.
+     */
+    @Test fun anAnswerAboutAnotherServerIsNeverShownEvenIntoAFreshState() {
+        show()
+        meter("CPU").assert(stateIs("24%"))
+        client.metrics.host = { OverviewMetricsResult.Ok(HostUsageFixtures.host.copy(cpu = HostReading.Value(HostCpu(77.0, 8))), ORIGIN_A) }
+        client.metrics.usage = { OverviewMetricsResult.Ok(HostUsageFixtures.usagePartial, ORIGIN_A) }
+        rule.runOnIdle { client.server.value = "https://b.test" }
+        settle()
+        advance(15_100)
+        assertTrue("the source was asked for B's tile", client.metrics.hostCalls >= 4)
+        meter("CPU").assert(stateIs("Measuring…"))
+        assertEquals("…", tokens())
+        assertFalse(everything().any { "77%" in it || "24%" in it || "450" in it || "1.28M" in it || "opencode" in it })
+
+        // Once the source answers about B, B shows. The server URL is compared as the client reads
+        // it (no scheme = https, case, default port and a trailing slash do not matter).
+        client.metrics.host = { OverviewMetricsResult.Ok(HostUsageFixtures.hostWarming, ORIGIN_B) }
+        val asked = client.metrics.hostCalls
+        rule.runOnIdle { client.server.value = "B.test:443/" }
+        settle()
+        advance(100)
+        assertTrue("B's tile asked again", client.metrics.hostCalls > asked)
+        meter("Memory").assert(stateIs("10.0 / 16.0 GB"))
+    }
+
     @Test fun signingOutStopsThePollsAndClearsTheReadings() {
         show()
         meter("CPU").assert(stateIs("24%"))

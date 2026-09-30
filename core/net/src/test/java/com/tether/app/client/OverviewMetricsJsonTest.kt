@@ -13,7 +13,11 @@ import org.junit.Test
  * string or array.
  */
 class OverviewMetricsJsonTest {
-    private fun host(text: String) = OverviewMetricsJson.host(OverviewMetricsJson.parseObject(text)!!)
+    private fun hostOrNull(text: String) = OverviewMetricsJson.host(OverviewMetricsJson.parseObject(text)!!)
+    private fun host(text: String) = hostOrNull(text)!!
+
+    /** [json] with one reading object added, so a test about another field reads as the server's answer. */
+    private fun withReading(json: String) = "{\"memory\":{\"unavailable\":\"not_sampled\"}" + (if (json.trim() == "{}") "}" else "," + json.trim().removePrefix("{"))
     private fun usage(text: String) = OverviewMetricsJson.usage(OverviewMetricsJson.parseObject(text)!!)
 
     // --- ported: tests/host-metrics.test.mjs --------------------------------------------------
@@ -70,8 +74,8 @@ class OverviewMetricsJsonTest {
         val out = usage("""{"tokensToday":{"value":null,"label":"Reported tokens today","partial":true},"coverage":[{"provider":"mystery","status":"not_reported"}]}""")!!
         assertNull(out.tokensToday)
         assertEquals(true, out.partial)
-        // An absent value reads the same.
-        assertNull(usage("""{"tokensToday":{"label":"Tokens today"}}""")!!.tokensToday)
+        // An explicit null (the server's own "nothing measured") is a reading; an absent one is not (r2).
+        assertEquals("Reported tokens today", usage("""{"tokensToday":{"value":null,"label":"Reported tokens today","partial":true}}""")!!.label)
     }
 
     // --- lenient -------------------------------------------------------------------------------
@@ -97,27 +101,27 @@ class OverviewMetricsJsonTest {
         for (memory in badBytes) assertEquals(memory, HostReading.Unavailable(""), host("""{"memory":$memory}""").memory)
         assertEquals(HostReading.Unavailable(""), host("""{"disk":{"usedBytes":5,"totalBytes":10,"availableBytes":11}}""").disk)
         assertEquals(HostReading.Unavailable(""), host("""{"disk":{"usedBytes":5,"totalBytes":10}}""").disk)
-        // Missing, or not an object at all.
-        val empty = host("{}")
-        assertEquals(HostReading.Unavailable(""), empty.cpu)
-        assertEquals(HostReading.Unavailable(""), host("""{"cpu":[1,2]}""").cpu)
-        assertEquals(HostReading.Unavailable(""), host("""{"cpu":"75%"}""").cpu)
-        assertNull(empty.scopeLabel)
-        assertNull(host("""{"scopeLabel":42}""").scopeLabel)
+        // Missing, or not an object at all (beside a reading that is).
+        val bare = host(withReading("{}"))
+        assertEquals(HostReading.Unavailable(""), bare.cpu)
+        assertEquals(HostReading.Unavailable(""), host(withReading("""{"cpu":[1,2]}""")).cpu)
+        assertEquals(HostReading.Unavailable(""), host(withReading("""{"cpu":"75%"}""")).cpu)
+        assertNull(bare.scopeLabel)
+        assertNull(host(withReading("""{"scopeLabel":42}""")).scopeLabel)
         // An `unavailable` key wins, whatever else the object holds (overview-host.tsx `"unavailable" in value`).
         assertEquals(HostReading.Unavailable(""), host("""{"cpu":{"unavailable":7,"percent":50}}""").cpu)
     }
 
     @Test fun staleIsReadAsTheWebReadsIt() {
-        assertEquals(false, host("{}").stale)
-        assertEquals(false, host("""{"stale":false}""").stale)
-        assertEquals(false, host("""{"stale":null}""").stale)
-        assertEquals(false, host("""{"stale":0}""").stale)
-        assertEquals(false, host("""{"stale":""}""").stale)
-        assertEquals(true, host("""{"stale":true}""").stale)
-        assertEquals(true, host("""{"stale":1}""").stale)
-        assertEquals(true, host("""{"stale":"yes"}""").stale)
-        assertEquals(true, host("""{"stale":{}}""").stale)
+        assertEquals(false, host(withReading("{}")).stale)
+        assertEquals(false, host(withReading("""{"stale":false}""")).stale)
+        assertEquals(false, host(withReading("""{"stale":null}""")).stale)
+        assertEquals(false, host(withReading("""{"stale":0}""")).stale)
+        assertEquals(false, host(withReading("""{"stale":""}""")).stale)
+        assertEquals(true, host(withReading("""{"stale":true}""")).stale)
+        assertEquals(true, host(withReading("""{"stale":1}""")).stale)
+        assertEquals(true, host(withReading("""{"stale":"yes"}""")).stale)
+        assertEquals(true, host(withReading("""{"stale":{}}""")).stale)
     }
 
     @Test fun anUnusableTokenCountMakesTheWholeUsageUnavailable() {
@@ -130,6 +134,21 @@ class OverviewMetricsJsonTest {
         val out = usage("""{"tokensToday":{"value":1,"partial":"true"}}""")!!
         assertEquals("Tokens today", out.label)
         assertEquals(false, out.partial)
+    }
+
+    /**
+     * r2 (security Low): a 200 JSON answer that is not Tether's (a gateway's `{"error":"login
+     * required"}`) is no reading at all, so it cannot replace a good one with blanks.
+     */
+    @Test fun aForeignShapeIsNotAReading() {
+        for (body in listOf("{}", """{"error":"login required"}""", """{"cpu":[1,2],"memory":"x","disk":null}""", """{"stale":false,"scopeLabel":"OS-visible (host)"}""")) {
+            assertNull(body, hostOrNull(body))
+        }
+        // One reading object is enough (the others may be missing or unusable, as the server may send).
+        assertEquals(HostReading.Unavailable("warming_up"), host("""{"cpu":{"unavailable":"warming_up"}}""").cpu)
+        for (body in listOf("""{"error":"login required"}""", """{"tokensToday":{}}""", """{"tokensToday":{"label":"Tokens today","partial":false}}""", """{"tokensToday":null}""")) {
+            assertNull(body, usage(body))
+        }
     }
 
     // --- bounds ----------------------------------------------------------------------------------
@@ -156,7 +175,7 @@ class OverviewMetricsJsonTest {
     @Test fun aCutNeverSplitsASurrogatePair() {
         val emoji = "😀"
         val text = "a".repeat(OverviewMetricsJson.MAX_TEXT - 1) + emoji
-        val label = host("""{"scopeLabel":"$text"}""").scopeLabel!!
+        val label = host(withReading("""{"scopeLabel":"$text"}""")).scopeLabel!!
         assertEquals(OverviewMetricsJson.MAX_TEXT - 1, label.length)
         assertTrue(!Character.isHighSurrogate(label.last()))
     }
@@ -164,7 +183,7 @@ class OverviewMetricsJsonTest {
     @Test fun hostileTextIsKeptRawForTheScreensRulesButNeverParsedDeep() {
         // Bidi controls and invisibles are kept as data here (the screen draws them by the label rule).
         val hostile = "\u202Eevil\u200B\u0000\n"
-        assertEquals(hostile, host("{\"scopeLabel\":\"\\u202Eevil\\u200B\\u0000\\n\"}").scopeLabel)
+        assertEquals(hostile, host(withReading("{\"scopeLabel\":\"\\u202Eevil\\u200B\\u0000\\n\"}")).scopeLabel)
         assertNull(OverviewMetricsJson.parseObject("{\"a\":" + "[".repeat(20) + "]".repeat(20) + "}"))
         assertNull(OverviewMetricsJson.parseObject("[".repeat(200_000)))
         assertNull(OverviewMetricsJson.parseObject("{"))

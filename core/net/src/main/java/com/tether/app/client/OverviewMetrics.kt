@@ -190,6 +190,9 @@ class HttpOverviewMetrics(
             response.code == 401 -> return OverviewMetricsResult.SignedOut(origin)
             response.code == 403 -> return OverviewMetricsResult.Forbidden(origin)
             response.code != 200 -> return OverviewMetricsResult.Unavailable(response.code, origin)
+            // r2: the server's json() always says so (ToolMedia's rule for its own type); a 200 in
+            // any other type is not its answer, even if the body parses.
+            declaredType != "application/json" -> return OverviewMetricsResult.Unavailable(response.code, origin)
         }
         val text = readCapped(response) ?: return OverviewMetricsResult.Unavailable(response.code, origin)
         val obj = OverviewMetricsJson.parseObject(text) ?: return OverviewMetricsResult.Unavailable(response.code, origin)
@@ -257,8 +260,17 @@ object OverviewMetricsJson {
         null
     }
 
-    /** `HostMetricsSnapshot`. Always a value: a missing or unusable reading is [HostReading.Unavailable]. */
-    fun host(obj: JsonObject): HostMetrics = HostMetrics(
+    /**
+     * `HostMetricsSnapshot`. A missing or unusable reading is [HostReading.Unavailable]; null (not the
+     * server's answer, r2) when none of `cpu`, `memory`, `disk` is an object, e.g. a gateway's
+     * `{"error":"login required"}`: that must not replace a good reading with three blanks.
+     */
+    fun host(obj: JsonObject): HostMetrics? {
+        if (listOf("cpu", "memory", "disk").none { obj[it] is JsonObject }) return null
+        return hostReadings(obj)
+    }
+
+    private fun hostReadings(obj: JsonObject): HostMetrics = HostMetrics(
         scopeLabel = string(obj["scopeLabel"], MAX_TEXT),
         cpu = reading(obj["cpu"]) { o ->
             val percent = number(o["percent"])?.takeIf { it in 0.0..100.0 } ?: return@reading null
@@ -278,9 +290,13 @@ object OverviewMetricsJson {
         stale = truthy(obj["stale"]),
     )
 
-    /** `OverviewUsageSummary`: null when `tokensToday` is missing or unusable. */
+    /**
+     * `OverviewUsageSummary`: null when `tokensToday` is missing or unusable, or (r2) carries no
+     * `value` key at all (the server always sends one, `null` when nothing is reported).
+     */
     fun usage(obj: JsonObject): OverviewUsage? {
         val tokens = obj["tokensToday"] as? JsonObject ?: return null
+        if ("value" !in tokens) return null
         val raw = tokens["value"]
         val value = when {
             raw == null || raw is JsonNull -> null

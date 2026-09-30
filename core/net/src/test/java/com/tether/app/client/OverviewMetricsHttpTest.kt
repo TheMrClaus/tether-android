@@ -115,6 +115,39 @@ class OverviewMetricsHttpTest {
         }
     }
 
+    /**
+     * r2 (security Low): a 200 is Tether's answer only in its own type (server.mjs `json()`) and
+     * shape. A gateway's `200 {"error":"login required"}`, or the right body in another type, is
+     * unavailable: it never becomes a reading that would replace a good one.
+     */
+    @Test fun aTwoHundredThatIsNotTethersAnswerIsUnavailable() = runBlocking<Unit> {
+        val cases = listOf(
+            MockResponse().setHeader("Content-Type", "text/plain").setBody(OverviewMetricsFixtures.HOST_JSON),
+            MockResponse().setBody(OverviewMetricsFixtures.HOST_JSON).removeHeader("Content-Type"),
+            MockResponse().setHeader("Content-Type", "application/octet-stream").setBody(OverviewMetricsFixtures.HOST_JSON),
+            MockResponse().setHeader("Content-Type", "application/problem+json").setBody(OverviewMetricsFixtures.HOST_JSON),
+            ok("""{"error":"login required"}"""),
+            ok("{}"),
+        )
+        for ((index, response) in cases.withIndex()) {
+            server.enqueue(response)
+            assertEquals("host case $index", OverviewMetricsResult.Unavailable(200, origin), metrics.host())
+            take()
+        }
+        for (body in listOf("""{"error":"login required"}""", """{"tokensToday":{}}""")) {
+            server.enqueue(ok(body))
+            assertEquals(body, OverviewMetricsResult.Unavailable(200, origin), metrics.usage())
+            take()
+        }
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain; charset=utf-8").setBody(OverviewMetricsFixtures.USAGE_PARTIAL_JSON))
+        assertEquals(OverviewMetricsResult.Unavailable(200, origin), metrics.usage())
+        take()
+        // The server's own type, with parameters and in any case, is read.
+        server.enqueue(MockResponse().setHeader("Content-Type", "Application/JSON; charset=utf-8").setBody(OverviewMetricsFixtures.HOST_JSON))
+        assertTrue(metrics.host() is OverviewMetricsResult.Ok)
+        take()
+    }
+
     @Test fun aHugeBodyIsDroppedWhetherDeclaredOrStreamed() = runBlocking<Unit> {
         val small = HttpOverviewMetrics(noRedirects, authority = { authority }, maxBytes = 1024)
         val padded = """{"tokensToday":{"value":1,"label":"Tokens today","partial":false},"pad":"${"x".repeat(4096)}"}"""
@@ -219,7 +252,7 @@ class OverviewMetricsHttpTest {
     }
 
     @Test fun aBodyInAnyEncodingIsReadAsUtf8WithoutFailing() = runBlocking<Unit> {
-        val bytes = Buffer().writeUtf8("""{"scopeLabel":"""").write(byteArrayOf(0xC3.toByte(), 0x28)).writeUtf8("""","stale":false}""")
+        val bytes = Buffer().writeUtf8("""{"cpu":{"unavailable":"warming_up"},"scopeLabel":"""").write(byteArrayOf(0xC3.toByte(), 0x28)).writeUtf8("""","stale":false}""")
         server.enqueue(MockResponse().setHeader("Content-Type", json).setBody(bytes))
         val result = metrics.host() as OverviewMetricsResult.Ok
         assertEquals(false, result.value.stale)

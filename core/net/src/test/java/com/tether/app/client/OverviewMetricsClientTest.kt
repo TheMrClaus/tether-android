@@ -64,6 +64,27 @@ class OverviewMetricsClientTest {
         assertEquals("/api/overview/host", req.path)
         assertEquals("Bearer tthr_device", req.getHeader("Authorization"))
         assertNull(req.getHeader("Cookie"))
+        // r2: the tag is exactly what a screen derives from the client's own server URL.
+        assertEquals(origin, serverOrigin(h.client.serverUrl.value))
+    }
+
+    /** r2: [serverOrigin] reads a server URL as sign-in does (normalizeServerUrl) and prints it as [consoleOrigin]. */
+    @Test fun serverOriginNormalisesAsTheClientReadsItsServer() {
+        val cases = mapOf(
+            "https://b.test" to "https://b.test",
+            "b.test" to "https://b.test",
+            " B.Test:443/ " to "https://b.test",
+            "HTTPS://b.test/" to "https://b.test",
+            "http://b.test:80" to "http://b.test",
+            "http://b.test:8080/path/" to "http://b.test:8080",
+            "https://b.test:8443" to "https://b.test:8443",
+            "http://[::1]:3000" to "http://[::1]:3000",
+        )
+        for ((raw, origin) in cases) assertEquals(raw, origin, serverOrigin(raw))
+        assertNull(serverOrigin(null))
+        assertNull(serverOrigin(""))
+        assertNull(serverOrigin("   /"))
+        assertNull(serverOrigin("ftp://b.test"))
     }
 
     @Test fun aPasswordSessionSendsItsCookieWithTheConsoleOriginAndNoBearer() = runBlocking<Unit> {

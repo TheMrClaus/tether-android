@@ -36,40 +36,70 @@ class HostUsageModelTest {
     // --- the fold (useJsonPoll) --------------------------------------------------------------
 
     @Test fun aValueReplacesTheReadingAndAFailureKeepsTheLastValue() {
-        val ok = HostUsageModel.fold(empty, OverviewMetricsResult.Ok(HostUsageFixtures.host, ORIGIN_A), 10)
+        val ok = HostUsageModel.fold(empty, OverviewMetricsResult.Ok(HostUsageFixtures.host, ORIGIN_A), 10, current = ORIGIN_A)
         assertEquals(MetricsReading(HostUsageFixtures.host, null, 10L, ORIGIN_A), ok)
-        val failed = HostUsageModel.fold(ok, OverviewMetricsResult.Unavailable(500, ORIGIN_A), 20)
+        val failed = HostUsageModel.fold(ok, OverviewMetricsResult.Unavailable(500, ORIGIN_A), 20, current = ORIGIN_A)
         assertEquals(MetricsReading(HostUsageFixtures.host, MetricsFault.Unavailable(500), 10L, ORIGIN_A), failed)
-        val blocked = HostUsageModel.fold(ok, OverviewMetricsResult.Blocked(302, ORIGIN_A), 20)
+        val blocked = HostUsageModel.fold(ok, OverviewMetricsResult.Blocked(302, ORIGIN_A), 20, current = ORIGIN_A)
         assertEquals(HostUsageFixtures.host, blocked.data)
         assertEquals(MetricsFault.Blocked(302), blocked.fault)
         // The next value clears the fault.
-        assertEquals(MetricsReading(HostUsageFixtures.host, null, 30L, ORIGIN_A), HostUsageModel.fold(failed, OverviewMetricsResult.Ok(HostUsageFixtures.host, ORIGIN_A), 30))
+        assertEquals(MetricsReading(HostUsageFixtures.host, null, 30L, ORIGIN_A), HostUsageModel.fold(failed, OverviewMetricsResult.Ok(HostUsageFixtures.host, ORIGIN_A), 30, current = ORIGIN_A))
     }
 
-    @Test fun anAnswerFromAnotherServerNeverKeepsTheFirstServersValue() {
+    @Test fun onlyAnswersAboutTheShownServerCount() {
+        // r2 (verifier P3): the shown server is A; an answer about B (the client's adopted server
+        // moved first) changes nothing, whatever it is.
         val a = fresh(HostUsageFixtures.host, ORIGIN_A)
-        for (failure in listOf<OverviewMetricsResult<HostMetrics>>(
+        val aboutB = listOf<OverviewMetricsResult<HostMetrics>>(
+            OverviewMetricsResult.Ok(HostUsageFixtures.hostWarming, ORIGIN_B),
             OverviewMetricsResult.Unavailable(500, ORIGIN_B),
             OverviewMetricsResult.Unavailable(null, ORIGIN_B),
             OverviewMetricsResult.Blocked(302, ORIGIN_B),
             OverviewMetricsResult.Forbidden(ORIGIN_B),
             OverviewMetricsResult.SignedOut(ORIGIN_B),
-            OverviewMetricsResult.SignedOut(),
-            OverviewMetricsResult.LocalNetworkBlocked,
+        )
+        for (answer in aboutB) assertEquals(answer.toString(), a, HostUsageModel.fold(a, answer, NOW + 1, current = ORIGIN_A))
+        // The shown server is B and its reading is still empty: A's answer is not taken either.
+        for (answer in aboutB.map { it.retag(ORIGIN_A) }) assertEquals(answer.toString(), empty, HostUsageModel.fold(empty, answer, NOW + 1, current = ORIGIN_B))
+        // No shown server: nothing tagged is taken.
+        assertEquals(empty, HostUsageModel.fold(empty, OverviewMetricsResult.Ok(HostUsageFixtures.host, ORIGIN_A), NOW, current = null))
+        // An answer no server gave (no credential, local network blocked) always counts.
+        assertEquals(MetricsReading<HostMetrics>(fault = MetricsFault.SignedOut), HostUsageModel.fold(a, OverviewMetricsResult.SignedOut(), NOW, current = ORIGIN_A))
+        assertNull(HostUsageModel.fold(a, OverviewMetricsResult.LocalNetworkBlocked, NOW, current = ORIGIN_A).data)
+    }
+
+    @Test fun aReadingAboutAnotherServerNeverStandsBesideTheShownServersAnswer() {
+        // Defence in depth: a reading that is somehow A's while B is shown is dropped by B's first answer.
+        val a = fresh(HostUsageFixtures.host, ORIGIN_A)
+        for (answer in listOf<OverviewMetricsResult<HostMetrics>>(
+            OverviewMetricsResult.Unavailable(500, ORIGIN_B),
+            OverviewMetricsResult.Blocked(302, ORIGIN_B),
         )) {
-            val next = HostUsageModel.fold(a, failure, NOW + 1)
-            assertNull(failure.toString(), next.data)
-            assertNull(failure.toString(), next.at)
+            val next = HostUsageModel.fold(a, answer, NOW + 1, current = ORIGIN_B)
+            assertNull(answer.toString(), next.data)
+            assertNull(answer.toString(), next.at)
+            assertEquals(ORIGIN_B, next.origin)
         }
-        val b = HostUsageModel.fold(a, OverviewMetricsResult.Ok(HostUsageFixtures.hostWarming, ORIGIN_B), NOW + 1)
-        assertEquals(MetricsReading(HostUsageFixtures.hostWarming, null, NOW + 1, ORIGIN_B), b)
+        assertEquals(
+            MetricsReading(HostUsageFixtures.hostWarming, null, NOW + 1, ORIGIN_B),
+            HostUsageModel.fold(a, OverviewMetricsResult.Ok(HostUsageFixtures.hostWarming, ORIGIN_B), NOW + 1, current = ORIGIN_B),
+        )
+    }
+
+    private fun OverviewMetricsResult<HostMetrics>.retag(origin: String): OverviewMetricsResult<HostMetrics> = when (this) {
+        is OverviewMetricsResult.Ok -> copy(origin = origin)
+        is OverviewMetricsResult.Unavailable -> copy(origin = origin)
+        is OverviewMetricsResult.Blocked -> copy(origin = origin)
+        is OverviewMetricsResult.Forbidden -> copy(origin = origin)
+        is OverviewMetricsResult.SignedOut -> copy(origin = origin)
+        OverviewMetricsResult.LocalNetworkBlocked -> this
     }
 
     @Test fun signedOutOrRefusedShowsNothingOfTheServer() {
         val a = fresh(HostUsageFixtures.host, ORIGIN_A)
-        assertEquals(MetricsReading<HostMetrics>(fault = MetricsFault.SignedOut, origin = ORIGIN_A), HostUsageModel.fold(a, OverviewMetricsResult.SignedOut(ORIGIN_A), NOW))
-        assertEquals(MetricsReading<HostMetrics>(fault = MetricsFault.Forbidden, origin = ORIGIN_A), HostUsageModel.fold(a, OverviewMetricsResult.Forbidden(ORIGIN_A), NOW))
+        assertEquals(MetricsReading<HostMetrics>(fault = MetricsFault.SignedOut, origin = ORIGIN_A), HostUsageModel.fold(a, OverviewMetricsResult.SignedOut(ORIGIN_A), NOW, current = ORIGIN_A))
+        assertEquals(MetricsReading<HostMetrics>(fault = MetricsFault.Forbidden, origin = ORIGIN_A), HostUsageModel.fold(a, OverviewMetricsResult.Forbidden(ORIGIN_A), NOW, current = ORIGIN_A))
     }
 
     // --- meters -------------------------------------------------------------------------------

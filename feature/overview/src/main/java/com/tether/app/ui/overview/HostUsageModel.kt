@@ -51,12 +51,17 @@ object HostUsageModel {
     /**
      * overview-host.tsx `useJsonPoll`'s two `setReading`s: a value replaces the reading; a failure
      * keeps the last value and records why. Native additions:
-     * - an answer about ANOTHER server (its [OverviewMetricsResult.origin]) starts from nothing, so
-     *   one server's numbers never stand beside another's answer;
+     * - r2: only answers about [current] (the shown server's origin, `serverOrigin(serverUrl)`) count;
+     *   an answer about any other server is ignored outright, even into an empty reading (the
+     *   client's adopted server can lag [com.tether.app.client.TetherClient.serverUrl]). An answer
+     *   with no origin (signed out, local network blocked: no server was asked) always counts;
+     * - an answer about another server than the reading's own starts from nothing, so one server's
+     *   numbers never stand beside another's answer;
      * - signed out or refused (401/403): the value is dropped, not kept as stale (a credential the
      *   server no longer accepts shows none of its numbers).
      */
-    fun <T> fold(reading: MetricsReading<T>, result: OverviewMetricsResult<T>, at: Long): MetricsReading<T> {
+    fun <T> fold(reading: MetricsReading<T>, result: OverviewMetricsResult<T>, at: Long, current: String?): MetricsReading<T> {
+        if (result.origin != null && result.origin != current) return reading
         val kept = if (result.origin != reading.origin) MetricsReading() else reading
         return when (result) {
             is OverviewMetricsResult.Ok -> MetricsReading(result.value, null, at, result.origin)
