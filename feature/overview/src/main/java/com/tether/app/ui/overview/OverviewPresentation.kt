@@ -201,6 +201,24 @@ object OverviewPresentation {
     fun requestSummary(item: OverviewPending): String =
         prose(item.summary).ifEmpty { if (item.kind == "approval") "Tool approval" else "A question" }
 
+    /**
+     * overview-panels.tsx:41 `item.createdAt ? Math.max(0, now - item.createdAt) : undefined`: a
+     * falsy (0 or absent) createdAt is unknown; a future one is 0. The difference is taken without
+     * wrapping, as the web's doubles never wrap.
+     */
+    fun requestAge(createdAt: Long?, now: Long): Long? {
+        if (createdAt == null || createdAt == 0L) return null
+        return elapsed(createdAt, now)
+    }
+
+    /** `Math.max(0, now - since)`, saturated instead of wrapping. */
+    fun elapsed(since: Long, now: Long): Long {
+        val delta = now - since
+        // Overflow only when the signs of now and since differ and the result's sign is not now's.
+        if (((now xor since) and (now xor delta)) < 0) return if (now >= 0) Long.MAX_VALUE else 0L
+        return maxOf(0L, delta)
+    }
+
     // ---- dashboard.tsx:1392-1443 reviewRequest: the hand-off's outcome ----------------------
 
     const val REVIEW_RESOLVED = "That request was already answered or withdrawn. Here is the session it came from."

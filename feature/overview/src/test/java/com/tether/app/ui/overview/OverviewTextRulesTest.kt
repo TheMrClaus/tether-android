@@ -159,4 +159,29 @@ class OverviewTextRulesTest {
         assertTrue("heading spells the title out: $inside", inside.contains(spelled))
         assertTrue("TalkBack hears the spelled title: $inside", inside.contains("Open session: $spelled"))
     }
+
+    /** The spoken request ages with one pending request created at [createdAt] (overview-panels.tsx:41). */
+    private fun agesFor(createdAt: Long): List<String> {
+        val pend = listOf(OverviewPending("s-a", "r-a", "question", createdAt = createdAt, title = "ta", summary = "sa"))
+        render(f.populated.copy(data = f.populated.data!!.copy(pending = OverviewPendingPanel(pend, 1, 0))))
+        return shown().filter { it.startsWith("waiting ") && !it.startsWith("waiting for ") }
+    }
+
+    @Test fun aZeroCreatedAtShowsNoAgeLikeTheWeb() {
+        assertEquals("web: createdAt 0 is falsy, no age", emptyList<String>(), agesFor(0L))
+    }
+
+    @Test fun aNegativeCreatedAtIsTruthyAndAgedLikeTheWeb() {
+        assertEquals("web: now - (-5)", listOf("waiting 20724 days"), agesFor(-5L))
+    }
+
+    @Test fun aFutureCreatedAtIsLessThanAMinuteLikeTheWeb() {
+        assertEquals("web: Math.max(0, …)", listOf("waiting less than a minute"), agesFor(f.NOW + 86_400_000))
+    }
+
+    @Test fun anExtremeCreatedAtNeverWrapsToNoTime() {
+        // Web: now - (-2^63) is a huge positive double; a Long difference must not wrap to "<1m".
+        val ages = agesFor(Long.MIN_VALUE)
+        assertTrue("a days count, not less than a minute: $ages", ages.size == 1 && ages.single().matches(Regex("waiting \\d{10,} days")))
+    }
 }

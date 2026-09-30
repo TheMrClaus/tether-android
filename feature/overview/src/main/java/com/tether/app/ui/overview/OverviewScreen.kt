@@ -488,7 +488,7 @@ private fun PendingPanel(
 private fun PendingItem(item: OverviewPending, now: Long, onReview: (String, String) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val age = item.createdAt?.let { maxOf(0L, now - it) }
+    val age = OverviewPresentation.requestAge(item.createdAt, now)
     val approval = item.kind == "approval"
     val sessionTitle = title(item.title)
     Column {
@@ -597,7 +597,7 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
     val status = OverviewPresentation.cardStatus(card)
     val waiting = status.tone == CardTone.Waiting
     val since = OverviewPresentation.stateSince(card)
-    val elapsed = since?.let { maxOf(0L, now - it) }
+    val elapsed = since?.let { OverviewPresentation.elapsed(it, now) }
     val request = OverviewPresentation.reviewTarget(card)
     val excerpt = OverviewPresentation.shownExcerpt(card, status)
     val cardTitle = title(card.title)
