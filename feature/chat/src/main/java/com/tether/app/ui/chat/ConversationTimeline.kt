@@ -41,6 +41,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -492,7 +493,9 @@ private fun TimelineBubble(
             .testTag(TIMELINE_BUBBLE_TAG)
             .cssSurface(
                 shape = shape,
-                background = t.graphiteRaised.copy(alpha = t.graphiteRaised.alpha * 0.95f),
+                // 95% graphite-raised over a blur(18px) backdrop: Compose cannot blur what is behind
+                // a node, so the backdrop is the well's floor the blur would average to.
+                background = t.graphiteRaised.copy(alpha = t.graphiteRaised.alpha * 0.95f).compositeOver(chatWellColor(t)),
                 border = CssBorder(1.dp, oklabMix(t.line, t.seamLip, 0.84f)),
                 shadows = listOf(
                     softShadow(y = 18.dp, blur = 42.dp, spread = (-24).dp, color = t.contact.copy(alpha = 0.55f)),
