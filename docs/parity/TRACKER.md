@@ -33,8 +33,10 @@ leak that keeps the gate red), T15.3 Overview host/usage panels, T15.4 top bar. 
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
-**Drafts (unpublished, same cert as 0.6.0 `4f8c22de...b74d`):** 0.7.4 (code 21), 0.7.5 (code 22), **0.7.6 (code 23, `c22e8ca`,
-+T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. **0.7.8 (code 25, `07ba88f`, +ta-96z +T6.5 +ta-blf +T7.3)** built and checked - same cert, versionCode 25. **v0.7.8 PUBLISHED by the owner 2026-09-30** (earlier drafts 0.7.4-0.7.7 superseded). Publishing is the owner's call.
+**Releases (same cert as 0.6.0 `4f8c22de...b74d`):** v0.7.8 (code 25) published by the owner 2026-09-30; drafts 0.7.4-0.7.7
+superseded. **Owner rule 2026-09-30: the coordinator PUBLISHES releases itself (no drafts left for the owner), and every new
+release bumps the MINOR version** (0.8.0, 0.9.0, ...; versionCode +1 each). Flow: `android-release.yml` draft -> download the APK,
+check the signing cert against 0.7.8's and the versionName/versionCode -> publish; never publish a mismatched cert.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
 **Owner queue:** deploy tether #224 (later today); review/redact the private tether issues and PRs before the visibility flip (owner handles it).
 **Next frontier (`bd ready`), owner-ordered 2026-09-30:** after ta-28i/ta-fz3 merge, in parallel: **T6.8** (P1, tool screenshots
@@ -205,7 +207,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T15.1 | Overview feed client (v131) | VERIFIED | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
 | T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
 | T15.3 | Overview host + daily usage panels | IN-PROGRESS | security-executor-T15.3 @ 2026-09-30 20… |  | checkpoint: maker started on branch T15.3 from 1c5af15; reading web ref + core/net ToolMedia/stats pattern. |
-| T15.4 | Top-bar navigation | IN-PROGRESS | executor-T15.4 @ 2026-09-30 20:30 |  |  |
+| T15.4 | Top-bar navigation | IN-PROGRESS | executor-T15.4 @ 2026-09-30 20:30 |  | checkpoint: maker started in worktree T15.4 from 1c5af15; reading web topbar/dashboard refs |
 | T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
 | T15.6 | Queue origin labels (v133) + hidden session count (v135) | TODO |  |  |  |
 | T15.7 | Worktree service links after v134 | TODO |  |  |  |
@@ -334,6 +336,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | T6.8 root cause: the owner's sign-in gateway still fronts `/api`, and the app (correctly) never follows its login redirect, so tool images show "Image unavailable". Fix on the gateway + tether README exempt list (ta-p5l); the app only explains the failure better | Owner answers (card): tile shows "Image unavailable", gateway still there | owner |
 | 2026-09-30 | Chat links keep the current direct-open rule (exact short ASCII label==href, no `@`, settled, not clamped); everything else asks first. No "always ask" | Owner answer (card) | owner |
 | 2026-09-30 | T7.4: attachments go **inline on the WebSocket send, like the web** (no upload route). Port the web's image shrinking (long edge 1568, JPEG 0.8), keep the web's limits, and refuse any send frame over a safe cap below OkHttp's 16 MiB queue limit, before sending (a logged divergence for large non-image sets). Sheet rows = the web's four (no camera or text-clipboard rows). Offline sends with attachments are refused; the in-memory queue is T13.3's. The oversized-frame socket drop on main is fixed in T7.4 | The maker found the brief assumed an upload route the web doesn't have, and OkHttp closes the socket on a >16 MiB frame | claude-main (coordinator default) |
+| 2026-09-30 | Releases: the coordinator publishes each APK release itself (no drafts for the owner to publish), and every new release bumps the minor version (0.7.8 -> 0.8.0 -> 0.9.0; versionCode +1). Replaces "publishing is the owner's call" | Owner instruction (chat) | owner |
 
 ## Session log (append-only)
 
