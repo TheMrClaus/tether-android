@@ -173,6 +173,6 @@ class ToolParsingBoundsTest {
     @Test fun pathsAreCutBeforeTheyAreDrawn() {
         val long = "d/".repeat(1_000_000)
         assertEquals(PATH_MAX + 1, cutLine(long, PATH_MAX).length)
-        assertTrue(cutLine(long, PATH_MAX).breakAnywhere().length < 2 * PATH_MAX + 2)
+        assertTrue(cutLine(long, PATH_MAX).breakAnywhere().length < 3 * PATH_MAX + 3) // ta-blf r2: a 2-char break opportunity
     }
 }

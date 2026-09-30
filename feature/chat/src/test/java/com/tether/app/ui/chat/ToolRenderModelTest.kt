@@ -186,7 +186,8 @@ class ToolRenderModelTest {
         assertEquals("a", jsTrim("\uFEFF  a \t"))
         assertEquals("\u0085a", jsTrim("\u0085a"))
         assertEquals("x", "x".breakAnywhere())
-        assertEquals("a\u200Bb", "ab".breakAnywhere())
+        // ta-blf r2: the break opportunity is WORD JOINER + ZWSP (never a bare ZWSP a copy would carry).
+        assertEquals("a\u2060\u200Bb", "ab".breakAnywhere())
     }
 }
 
