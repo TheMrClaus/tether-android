@@ -812,11 +812,13 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
                     if (mark == null) {
                         Text(codeText(if (opened || !truncated) block.code else peek), style = style, color = t.ink, softWrap = false, modifier = padding)
                     } else {
-                        // r3: the find marks keep the peek too, unless the active match lies past it.
+                        // r3: the find marks keep the peek too, unless the active match lies past it. While
+                        // the active match is here the find opened the fence: that is not the reader asking
+                        // for all of it, so only a reader's own open (with no active match here) lifts the peek.
                         val pastPeek = remember(block, mark, peek) {
                             reveal && truncated && findRanges(block.code, mark.find.needle).getOrNull(mark.find.active - mark.base)?.let { it.last >= peek.length } == true
                         }
-                        val body = if (opened || !truncated || pastPeek) block.code else peek
+                        val body = if ((opened && !reveal) || !truncated || pastPeek) block.code else peek
                         val marked = remember(body, mark, t) { buildAnnotatedString { appendMarked(body, mark.cursor(), t, SafeText.Rule.Code) } }
                         MdText(marked, style, t.ink, padding, softWrap = false)
                     }

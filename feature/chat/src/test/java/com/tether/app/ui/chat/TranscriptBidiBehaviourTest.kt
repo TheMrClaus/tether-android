@@ -298,6 +298,93 @@ class TranscriptBidiBehaviourTest {
         assertEquals("the control leaks", ResolvedTextDirection.Rtl, results.first().getBidiRunDirection("$line ok!".lastIndexOf('!')))
     }
 
+    // ---- r3: ordering by the Unicode Bidi Algorithm (ICU) --------------------------------------
+
+    /**
+     * Does [display] read in logical order under the UBA (ICU, the same algorithm Android lays
+     * out with)? Its visible ASCII characters, never a token's own, must come out left to right in
+     * the order they are held. [rtl]: the paragraph defaults to RTL when it has no strong
+     * character (Compose's ContentOrRtl in an RTL layout).
+     */
+    private fun readsInOrder(display: String, rtl: Boolean): Boolean {
+        val content = HashSet<Int>()
+        var i = 0
+        while (i < display.length) {
+            val u = if (display[i] == SafeText.MARK) SafeText.unitAt(display, i) else null
+            if (u != null) {
+                i = u.end
+                continue
+            }
+            if (display[i] in '!'..'~') content.add(i) // every visible ASCII character: punctuation moves too
+            i++
+        }
+        val bidi = android.icu.text.Bidi()
+        bidi.setPara(display, if (rtl) android.icu.text.Bidi.LEVEL_DEFAULT_RTL else android.icu.text.Bidi.LEVEL_DEFAULT_LTR, null)
+        // In an RTL paragraph punctuation beside RTL text (a token's own brackets included: UAX #9
+        // pairs them) is placed by the neutral rules for an RTL reader; words and numbers still
+        // must not trade places, so there only letters and digits are compared.
+        val ltr = bidi.paraLevel.toInt() == 0
+        val order = bidi.visualMap.filter { it in content && (ltr || display[it].isLetterOrDigit()) }
+        return order == order.sorted()
+    }
+
+    private val pieces = "resrap".map { "$LRI$it$PDI" }.joinToString("")
+
+    /** Every PoC of the three reviews (r1-r3), with and without an RTL letter on its line. */
+    private val allPocs: List<String> by lazy {
+        val geresh = "\u05F3"
+        val tatweel = "\u0640"
+        val base = listOf(
+            "fix the $RLI$pieces$PDI bug",
+            "$RLI" + "resrap".toList().joinToString(RLM) + PDI,
+            "${RLM}t${RLM}h${RLM}r${RLM}e${RLM}e",
+            "${RLM}1${RLM}2${RLM}3",
+            "rm -rf $RLI/ tmp$PDI now",
+            "${RLI}1 - 2$PDI",
+            "range ${RLI}1 - 2$geresh$PDI ok",
+            "rm -rf $RLI/ tmp$geresh$PDI",
+            "$geresh" + "resrap".map { "$LRI$it$PDI" }.joinToString("\u200A"),
+            "$tatweel " + "resrap".map { "$LRI$it$PDI" }.joinToString(""),
+            "$RLM$LRI-rf$PDI rm",
+            "$LRI-rf$PDI rm",
+        )
+        base + base.filter { it.none { c -> c in '0'..'9' } }.map { "\u05D0 $it" } + listOf(
+            "\u05D0 " + "resrap".map { "$LRI$it$PDI" }.joinToString("\u200A"),
+            "\u05D0 $LRI-rf$PDI rm",
+            "$RLM$LRI-rf$PDI rm \u05D0",
+        )
+    }
+
+    @Test fun everyPocReadsInOrderUnderTheBidiAlgorithmInBothDirections() {
+        for (poc in allPocs) for (rtl in listOf(false, true)) {
+            val shown = SafeText.prose(poc)
+            assertTrue("rtl=$rtl ${hex(poc)} -> ${hex(shown)}", readsInOrder(shown, rtl))
+        }
+        // The check is real: raw, the PoCs do not read in order.
+        assertFalse(readsInOrder("fix the $RLI$pieces$PDI bug", rtl = false))
+        assertFalse(readsInOrder("\u05D0 $LRI-rf$PDI rm", rtl = false))
+        assertFalse(readsInOrder("rm -rf $RLI/ tmp\u05F3$PDI", rtl = false))
+    }
+
+    /** r3: in an RTL layout (Arabic / Hebrew system language) the transcript draws every PoC in order. */
+    @Test fun anRtlLayoutDrawsEveryPocInOrder() {
+        val pocs = allPocs.filter { it.none { c -> c in '0'..'9' } }.mapIndexed { n, p -> "p$n $p" }
+        rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+                ChatHost(TetherSkin.Machine, wellHeight = 9_000.dp) {
+                    MarkdownBody(parseMarkdown(pocs.joinToString("\n\n")), LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink)
+                }
+            }
+        }
+        rule.waitForIdle()
+        val drawn = spoken()
+        for ((n, poc) in pocs.withIndex()) {
+            val shown = drawn.first { it.startsWith("p$n ") }
+            assertEquals(poc, SafeText.original(shown))
+            assertTrue("p$n ${hex(shown)}", readsInOrder(shown, rtl = true))
+        }
+    }
+
     // ---- code --------------------------------------------------------------------------------
 
     @Test fun codeShowsEveryBidiAndInvisibleCodePoint() {
@@ -369,7 +456,7 @@ class TranscriptBidiBehaviourTest {
 
     @Test fun aRowsSelectionCopiesHiddenControlsVisiblyAndCopyRawGivesTheOriginal() {
         val menu = MenuSpy()
-        show(fixture(SPOOF, "Plain $HEBREW reply with an RTL mark$RLM."), menu)
+        show(fixture(SPOOF, "Plain reply with an RTL mark: $HEBREW$RLM."), menu)
         selectAllAndCopy(menu, "parser")
         val prompt = checkNotNull(clip())
         assertTrue("the visible form: ${hex(prompt)}", prompt.contains("Fix the ${vis(0x202E)}parser${vis(0x202C)} bug now"))
@@ -380,9 +467,79 @@ class TranscriptBidiBehaviourTest {
         assertTrue("Copy raw: ${hex(clip()!!)}", clip()!!.contains(SPOOF))
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
         // Real RTL text copies exactly, with no notice.
-        selectAllAndCopy(menu, "reply with")
-        assertTrue(clip()!!.contains("Plain $HEBREW reply with an RTL mark$RLM."))
+        selectAllAndCopy(menu, "Plain reply")
+        assertTrue(clip()!!.contains("Plain reply with an RTL mark: $HEBREW$RLM."))
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+    }
+
+    /** r3: every copy clears the notice first: an earlier copy's "Copy raw" can never be left behind. */
+    @Test fun aStaleCopyRawIsNeverLeftBehind() {
+        val menu = MenuSpy()
+        show(
+            ChatFixtures.fold(
+                *ChatFixtures.turn("t1", SPOOF, "A clean reply.", ChatFixtures.T_IDLE),
+                *ChatFixtures.turn("t2", "Code.", "```\n$FENCE\n```\n\n```\nclean code\n```", ChatFixtures.T_IDLE + 60_000),
+            ),
+            menu,
+        )
+        selectAllAndCopy(menu, "parser")
+        rule.onNodeWithTag(COPY_RAW_TAG).assertExists()
+        selectAllAndCopy(menu, "A clean reply")
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+        // The copy key too.
+        rule.onAllNodesWithContentDescription("Copy code")[0].performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(COPY_RAW_TAG).assertExists()
+        // (The first key now says "Copied": the clean fence's key is the only "Copy code".)
+        rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+        assertEquals("clean code", clip())
+    }
+
+    /** r3: a raw copy (the key's long press) says what hidden controls it carries; a clean one says nothing. */
+    @Test fun aLongPressRawCopySaysWhatItIncludes() {
+        show(fixture("Show me.", "```\n$FENCE\n```\n\n```\nclean code\n```"))
+        rule.onAllNodesWithContentDescription("Copy code")[0].performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        assertEquals(FENCE, clip())
+        rule.onNodeWithText("Copied raw: 2 hidden control characters included").assertIsDisplayed()
+        rule.onNodeWithTag(COPY_RAW_TAG).assertDoesNotExist()
+        rule.onAllNodesWithContentDescription("Copy code").onFirst().performTouchInput { longClick(center) } // the other key says "Copied"
+        rule.waitForIdle()
+        assertEquals("clean code", clip())
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+    }
+
+    /** r3: a bidi mark code shows as a token is copied as the token, and counted. */
+    @Test fun aTokenisedMarkIsCopiedVisibly() {
+        show(fixture("Show me.", "```\nx = 1${RLM}2${RLM}3\n```"))
+        rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
+        rule.waitForIdle()
+        assertEquals("x = 1${vis(0x200F)}2${vis(0x200F)}3", clip())
+        rule.onNodeWithText(NOTICE_2).assertExists()
+    }
+
+    /** r3: find in a long fence keeps the peek, unless the active match lies past it. */
+    @Test fun findKeepsTheFencePeekUnlessTheActiveMatchIsPastIt() {
+        val body = (1..200).joinToString("\n") { "line $it of the fence" }
+        val blocks = parseMarkdown("```\n$body\n```")
+        val active = androidx.compose.runtime.mutableStateOf(0)
+        rule.setContent {
+            ChatHost(TetherSkin.Machine) {
+                MarkdownBody(blocks, LocalTetherTypography.current.chatBody, LocalTetherTokens.current.ink, find = FindMarks(if (active.value == 0) "line 3 " else "line 150 ", 0))
+            }
+        }
+        rule.waitForIdle()
+        fun laidOut(): Int = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult), useUnmergedTree = true).fetchSemanticsNodes().maxOf { node ->
+            val results = mutableListOf<TextLayoutResult>()
+            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+            results.firstOrNull()?.layoutInput?.text?.length ?: 0
+        }
+        assertTrue("an active match inside the peek lays out the peek: ${laidOut()}", laidOut() < body.length)
+        rule.runOnIdle { active.value = 1 }
+        rule.waitForIdle()
+        assertEquals("an active match past the peek lays out the whole fence", body.length, laidOut())
     }
 
     @Test fun aCopiedPathIsThePathNotItsBreakOpportunities() {
