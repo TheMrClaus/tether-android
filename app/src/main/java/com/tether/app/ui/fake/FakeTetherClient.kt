@@ -375,6 +375,20 @@ class FakeTetherClient : TetherClient {
 
     override fun attach(sessionId: String) { /* projections are pre-seeded */ }
 
+    /** T7.4: the demo takes a message with attachments like any send (it has no wire). */
+    override fun sendAttachments(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+    ): com.tether.app.client.AttachmentSendResult {
+        if (attachments.isEmpty()) return com.tether.app.client.AttachmentSendResult.Empty
+        if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.AttachmentSendResult.NotLive
+        send(sessionId, text, attachments)
+        return com.tether.app.client.AttachmentSendResult.Sent
+    }
+
     override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
         val turnId = "t-${System.currentTimeMillis()}"
         val startTs = System.currentTimeMillis()

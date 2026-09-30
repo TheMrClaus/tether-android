@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -38,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -181,7 +183,7 @@ private fun MessageTime(label: String, ink: Color) {
 
 /**
  * USER bubble (chat-view.tsx:556-606): the operator's words as plain pre-wrap text (never
- * markdown), attachment chips, and the send time. [timeLabel] is `messageClockTime(block.ts ??
+ * markdown), the attachments (T7.4: pictures as thumbnails, other files as chips), and the send time. [timeLabel] is `messageClockTime(block.ts ??
  * turn.startedAt)`; "" hides it.
  */
 @Composable
@@ -197,28 +199,7 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
             if (find != null) MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink) else Text(proseText(text), style = look.style, color = look.ink)
         }
         val attachments = block.attachments
-        if (!attachments.isNullOrEmpty()) {
-            // `.chat-bubble-attachments` chips; image thumbnails (v112 mediaRef) are T7.4's.
-            Spacer(Modifier.height(t.css.spaceXs))
-            attachments.forEach { attachment ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .padding(bottom = 4.dp)
-                        .background(t.tintMd, RoundedCornerShape(t.radiusSm))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                    Icon(
-                        if (attachment.mediaType.startsWith("image/")) TetherIcons.FileText else TetherIcons.Paperclip,
-                        contentDescription = null,
-                        tint = look.ink,
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text(codeText(attachment.name), style = type.timestamp.copy(fontSize = 12.2.sp), color = look.ink, maxLines = 1)
-                }
-            }
-        }
+        if (!attachments.isNullOrEmpty()) BubbleAttachments(attachments, look)
         if (timeLabel.isNotEmpty()) MessageTime(timeLabel, look.ink)
     }
 }
@@ -371,4 +352,97 @@ fun ThinkingCard(block: TurnBlock, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/**
+ * T7.4 (chat-view.tsx:561-600, v112): the `.chat-bubble-attachments` row — wrapping, `space-xs`
+ * apart, `space-xs` below the text. An attached picture the server materialized (`mediaRef`) is a
+ * real thumbnail through the transcript's own tool-media path (the paired origin's
+ * `/api/tool-media/<sha256>.<ext>` only, no redirects, bounded, the same "Image unavailable" tile
+ * when it cannot load; a tap opens the viewer); every other attachment keeps its name chip, the
+ * name drawn by the code rule on one line. A picture the engine could only take as a staged path
+ * says so ("sent as a path"; with a thumbnail, the note under the row).
+ *
+ * Divergence (fail visible): the web chips only attachments with NO `mediaRef`, so one whose ref is
+ * malformed shows nothing at all; here it keeps its chip.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun BubbleAttachments(attachments: List<com.tether.app.protocol.model.AttachmentMeta>, look: BubbleLook) {
+    val t = LocalTetherTokens.current
+    val split = remember(attachments) { splitAttachments(attachments) }
+    Spacer(Modifier.height(t.css.spaceXs))
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.testTag("bubble-attachments"),
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+    ) {
+        if (split.media.isNotEmpty()) ToolMediaRow(split.media, bare = true)
+        split.chips.forEach { attachment -> BubbleAttachmentChip(attachment, look) }
+        if (split.media.isNotEmpty() && split.sentAsPath) {
+            Text(
+                "Sent to the agent as a file path, not an image.",
+                style = look.style.copy(fontSize = 11.2.sp),
+                color = t.muted,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** `.chat-bubble-attachment`: a glyph (FileText for a picture, else Paperclip), the name, "sent as a path". */
+@Composable
+private fun BubbleAttachmentChip(attachment: com.tether.app.protocol.model.AttachmentMeta, look: BubbleLook) {
+    val t = LocalTetherTokens.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .widthIn(max = 224.dp)
+            .background(t.tintLg, RoundedCornerShape(t.radiusSm))
+            .padding(horizontal = 6.4.dp, vertical = 1.6.dp)
+            .testTag("bubble-attachment-chip"),
+    ) {
+        Icon(
+            if (attachment.mediaType.startsWith("image/")) TetherIcons.FileText else TetherIcons.Paperclip,
+            contentDescription = null,
+            tint = look.ink,
+            modifier = Modifier.size(12.dp),
+        )
+        Text(
+            codeText(attachment.name),
+            style = look.style.copy(fontSize = 12.8.sp),
+            color = t.ink,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (attachment.delivery == "path") {
+            Text("sent as a path", style = look.style.copy(fontSize = 10.88.sp), color = t.muted, maxLines = 1)
+        }
+    }
+}
+
+/** What a user message's attachments draw as: thumbnails, chips, and whether one went as a path. */
+@androidx.compose.runtime.Immutable
+internal class BubbleAttachmentSplit(val media: List<ToolMediaItem>, val chips: List<com.tether.app.protocol.model.AttachmentMeta>, val sentAsPath: Boolean)
+
+/**
+ * chat-view.tsx:565-571: an attachment is a thumbnail when its `mediaRef` is an image `media_ref`
+ * (the server materializes images only), else a chip. The ref's url is not trusted here: the loader
+ * accepts only the paired origin's `/api/tool-media/` paths and shows the failure tile otherwise.
+ */
+internal fun splitAttachments(attachments: List<com.tether.app.protocol.model.AttachmentMeta>): BubbleAttachmentSplit {
+    val media = ArrayList<ToolMediaItem>()
+    val chips = ArrayList<com.tether.app.protocol.model.AttachmentMeta>()
+    for (attachment in attachments) {
+        val item = attachment.mediaRef?.let { ref ->
+            runCatching { com.tether.app.protocol.tree.JsCodec.fromJson(ref) }.getOrNull()
+        }?.let { value ->
+            val record = value as? com.tether.app.protocol.tree.JsObj
+            if ((record?.get("type") as? com.tether.app.protocol.tree.JsStr)?.value == "media_ref") toMediaItem(value) else null
+        }?.takeIf { !it.isVideo }
+        if (item != null) media += item else chips += attachment
+    }
+    return BubbleAttachmentSplit(media, chips, attachments.any { it.delivery == "path" })
 }

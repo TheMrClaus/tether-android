@@ -1,7 +1,5 @@
 package com.tether.app.ui.chat
 
-import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -112,7 +110,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 
-/** Server caps (lib/protocol-validate.mjs LIMITS): 10 files, 9 MiB each, 18 MiB total. */
 /** T13.2 r2: the composer's Interrupt key. */
 internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
 
@@ -132,10 +129,6 @@ internal const val INTERRUPTING_LOCK_COPY = "Interrupting… the turn is already
 
 /** T13.2 r2: the run row of a copy that is not live ("Was running", still, not ticking). */
 internal const val STALE_RUN_TAG = "composer-run-stale"
-
-private const val MAX_ATTACHMENTS = 10
-private const val MAX_ATTACHMENT_BYTES = 9L * 1024 * 1024
-private const val MAX_TOTAL_ATTACHMENT_BYTES = 18L * 1024 * 1024
 
 /**
  * T13.2 r2 (SYNC_DESIGN §4.2): what the composer's turn controls and readings stand on. There is no
@@ -161,9 +154,6 @@ class ComposerLiveness(
         val Live = ComposerLiveness(interruptLock = null, stale = null)
     }
 }
-
-/** A file the operator picked, held in memory until the next idle send. */
-private data class PickedAttachment(val attachment: Attachment, val sizeBytes: Long)
 
 /**
  * The session composer (tether components/chat-view.tsx `.chat-composer`, :3681-4516): the
@@ -201,7 +191,11 @@ fun Composer(
     /** T13.2 r2: whether the copy is live (Interrupt's lock, the run row's freshness). Required. */
     liveness: ComposerLiveness,
     modifier: Modifier = Modifier,
-    onAttachError: (String) -> Unit = {},
+    /**
+     * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
+     * them (an explicit Send only; the client re-checks the link, the server and the session).
+     */
+    attachments: ComposerAttachments = ComposerAttachments.Unavailable,
     initialDraft: String? = null,
     awaitDraft: suspend () -> String = { "" },
     onDraftChange: (String) -> Unit = {},
@@ -242,7 +236,7 @@ fun Composer(
         val stored = currentAwaitDraft()
         if (field.text.isEmpty() && stored.isNotEmpty()) setDraft(stored)
     }
-    var picked by remember(session?.id) { mutableStateOf(listOf<PickedAttachment>()) }
+    val picked = attachments.staged
 
     val activeTurn = projection?.activeTurnId?.let { projection.turnsById[it] }
     val busy = activeTurn != null
@@ -679,9 +673,19 @@ fun Composer(
                 flash("Wait for the current turn to finish before delegating.")
                 return
             }
-            if (runActions.onSendDelegated(text, picked.map { it.attachment }, mention)) {
+            if (hasAttachments) {
+                // T7.4: a delegation that carries attachments takes the attachments' one guarded path.
+                val result = attachments.send(text, mention)
+                if (result == com.tether.app.client.AttachmentSendResult.Sent) {
+                    setDraft("")
+                    delegateMention = null
+                } else {
+                    attachmentRefusalCopy(result)?.let(::flash)
+                }
+                return
+            }
+            if (runActions.onSendDelegated(text, emptyList(), mention)) {
                 setDraft("")
-                picked = emptyList()
                 delegateMention = null
             } else {
                 flash("That agent isn’t offered for this session any more — nothing was sent.")
@@ -698,12 +702,14 @@ fun Composer(
             // Queue path is text-only; attachments are only attachable while
             // idle, so none are pending here.
             if (text.isNotEmpty() && onSend(text, emptyList())) setDraft("")
+        } else if (hasAttachments) {
+            // T7.4: this tap is the send; nothing retries, queues or holds it. A refusal keeps the
+            // draft and the chips and says why (offline: "Not connected — … were not sent.").
+            val result = attachments.send(text, null)
+            if (result == com.tether.app.client.AttachmentSendResult.Sent) setDraft("") else attachmentRefusalCopy(result)?.let(::flash)
         } else {
-            // Refused sends (§5.6 rollback) keep draft + chips.
-            if (onSend(text, picked.map { it.attachment })) {
-                setDraft("")
-                picked = emptyList()
-            }
+            // Refused sends (§5.6 rollback) keep the draft.
+            if (onSend(text, emptyList())) setDraft("")
         }
     }
 
@@ -755,19 +761,30 @@ fun Composer(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        scope.launch {
-            val (loaded, failures) = withContext(Dispatchers.IO) {
-                readAttachments(context, uris, picked.sumOf { it.sizeBytes })
-            }
-            if (loaded.isNotEmpty()) picked = (picked + loaded).take(MAX_ATTACHMENTS)
-            if (failures > 0) {
-                onAttachError(
-                    "$failures file${if (failures == 1) "" else "s"} skipped — unreadable or over the 9 MB per-file limit.",
-                )
-            }
+    // T7.4 (attach-sheet.tsx, touch shell): the paperclip opens the sheet; its rows open the Photo
+    // Picker (no storage permission), the clipboard's pictures, or the document picker. What comes
+    // back is staged (never sent): only Send transmits it.
+    var attachSheetOpen by remember(session?.id) { mutableStateOf(false) }
+    val currentAttachments by rememberUpdatedState(attachments)
+    fun stageSources(sources: List<AttachmentSource>) {
+        if (sources.isEmpty()) return
+        scope.launch { currentAttachments.stage(sources).lastOrNull()?.let(::flash) }
+    }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(com.tether.app.protocol.helpers.AttachmentDraft.MAX_ATTACHMENTS)) { uris ->
+        stageSources(uris.map { ContentUriSource(context.contentResolver, it) })
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        stageSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it) })
+    }
+    fun pasteImage() {
+        val sources = try {
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            ClipboardImages.sources(clipboard?.primaryClip, context.contentResolver)
+        } catch (_: RuntimeException) {
+            flash(AttachmentCopy.CLIPBOARD_UNREADABLE)
+            return
         }
+        if (sources.isEmpty()) flash(AttachmentCopy.NO_CLIPBOARD_IMAGE) else stageSources(sources)
     }
 
     val inputInteraction = remember { MutableInteractionSource() }
@@ -863,15 +880,15 @@ fun Composer(
                 }
 
                 if (picked.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    // `.chat-attachments` ("Attachments to send"): wrapping chips, `space-xs` apart.
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Attachments to send" },
+                        horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
                     ) {
                         picked.forEach { item ->
-                            AttachmentChip(
-                                item = item,
-                                onRemove = { picked = picked - item },
-                            )
+                            StagedAttachmentChip(item = item, onRemove = { attachments.onRemove(item.id) })
                         }
                     }
                 }
@@ -910,7 +927,7 @@ fun Composer(
                     ComposerToolbar(
                         metrics = metrics,
                         width = deckWidth - deck.start - deck.end,
-                        onAttach = { attachmentPicker.launch(arrayOf("*/*")) },
+                        onAttach = { attachSheetOpen = true },
                         // The web keeps the paperclip live while a turn runs; submit() asks the operator to wait.
                         attachEnabled = session != null,
                         totals = if (projection != null && session != null) {
@@ -967,6 +984,14 @@ fun Composer(
                 }
             }
         }
+    }
+    if (attachSheetOpen && session != null) {
+        AttachSheet(
+            onDismiss = { attachSheetOpen = false },
+            onPickImages = { imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onPasteImage = ::pasteImage,
+            onPickFiles = { filePicker.launch(arrayOf("*/*")) },
+        )
     }
     val sheetEntry = sheetAt
     if (sheetEntry != null && session != null && composerControls != null) {
@@ -1255,100 +1280,6 @@ private fun ComposerActions(
             contentDescription = "Send message",
         )
     }
-}
-
-/** One picked-but-unsent attachment: icon + name/size + remove (visual-spec §4 chips). */
-@Composable
-private fun AttachmentChip(item: PickedAttachment, onRemove: () -> Unit) {
-    val t = LocalTetherTokens.current
-    Row(
-        modifier = Modifier
-            .background(t.mineralDeep, RoundedCornerShape(TetherDimens.radiusMd))
-            .border(1.dp, t.lineStrong, RoundedCornerShape(TetherDimens.radiusMd))
-            .padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(TetherIcons.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
-        Text(
-            item.attachment.name,
-            color = t.ink,
-            fontFamily = Manrope,
-            fontWeight = TetherWeights.label,
-            fontSize = 11.8.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 140.dp),
-        )
-        Text(
-            humanSize(item.sizeBytes),
-            color = t.faint,
-            fontFamily = Manrope,
-            fontSize = 10.4.sp,
-        )
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(TetherIcons.X, contentDescription = "Remove ${item.attachment.name}", tint = t.muted, modifier = Modifier.size(13.dp))
-        }
-    }
-}
-
-private fun humanSize(bytes: Long): String = when {
-    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
-    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
-}
-
-/**
- * Read picked URIs into base64 attachments (caller supplies the IO context).
- * Skips — and counts — anything unreadable, over the per-file cap, or pushing
- * the running total (seeded with the already-picked bytes) over the total cap.
- */
-private fun readAttachments(
-    context: android.content.Context,
-    uris: List<android.net.Uri>,
-    alreadyPickedBytes: Long,
-): Pair<List<PickedAttachment>, Int> {
-    val loaded = ArrayList<PickedAttachment>()
-    var failures = 0
-    var total = alreadyPickedBytes
-    for (uri in uris) {
-        if (loaded.size >= MAX_ATTACHMENTS) { failures++; continue }
-        try {
-            var name: String? = null
-            var size = -1L
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }
-                        ?.let { name = cursor.getString(it) }
-                    cursor.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 }
-                        ?.let { if (!cursor.isNull(it)) size = cursor.getLong(it) }
-                }
-            }
-            if (size > MAX_ATTACHMENT_BYTES || (size >= 0 && total + size > MAX_TOTAL_ATTACHMENT_BYTES)) {
-                failures++
-                continue
-            }
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes == null || bytes.isEmpty() || bytes.size.toLong() > MAX_ATTACHMENT_BYTES ||
-                total + bytes.size > MAX_TOTAL_ATTACHMENT_BYTES
-            ) {
-                failures++
-                continue
-            }
-            total += bytes.size
-            loaded += PickedAttachment(
-                attachment = Attachment(
-                    name = name?.substringAfterLast('/')?.ifBlank { null } ?: "file",
-                    mediaType = context.contentResolver.getType(uri) ?: "application/octet-stream",
-                    data = Base64.encodeToString(bytes, Base64.NO_WRAP),
-                ),
-                sizeBytes = bytes.size.toLong(),
-            )
-        } catch (_: Exception) {
-            failures++
-        }
-    }
-    return Pair(loaded, failures)
 }
 
 /**

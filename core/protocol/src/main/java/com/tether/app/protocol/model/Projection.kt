@@ -125,8 +125,21 @@ data class TurnBlock(
     val subagent: SubagentThread? = null,
 )
 
+/**
+ * v15 / v112 (lib/protocol.ts AttachmentMeta): what the operator attached, as the journal keeps it.
+ * [delivery] is "image" (sent to the model as a native image) or "path" (staged to disk and named
+ * by path); absent for non-images and legacy entries. [mediaRef] is the server-materialized
+ * `ToolMediaRef` of an image's own bytes (`/api/tool-media/…`), kept raw: the transcript validates
+ * it through the same tool-media path as a tool result's pictures. The base64 bytes never reach the
+ * journal.
+ */
 @Serializable
-data class AttachmentMeta(val name: String, val mediaType: String)
+data class AttachmentMeta(
+    val name: String,
+    val mediaType: String,
+    val delivery: String? = null,
+    val mediaRef: JsonElement? = null,
+)
 
 @Serializable
 data class SubagentThread(

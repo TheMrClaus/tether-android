@@ -242,6 +242,25 @@ fun ChatScreen(
             )
         }
     }
+    // T7.4: the staged attachments (the view model's: they survive a rotation), staged under the
+    // configured server, and sent only by an explicit Send bound to the server the composer is
+    // drawn for (the client re-checks it all under its lock).
+    val stagedSet by vm.stagedAttachments.current.collectAsStateWithLifecycle()
+    val stager = remember(vm) { AttachmentStager(vm.stagedAttachments, { vm.attachmentOrigin() }) }
+    val attachments = remember(session?.id, stagedSet, consentOrigin, vm, stager) {
+        val s = session
+        val drawnFor = consentOrigin
+        if (s == null) {
+            ComposerAttachments.Unavailable
+        } else {
+            ComposerAttachments(
+                staged = vm.stagedAttachments.items(vm.attachmentOrigin(), s.id),
+                stage = { sources -> stager.stage(s.id, sources) },
+                onRemove = { id -> vm.stagedAttachments.remove(vm.attachmentOrigin(), s.id, id) },
+                send = { text, mention -> vm.sendAttachments(s.id, text, mention, drawnFor) },
+            )
+        }
+    }
     // T6.6: a handed-off source names (and links to) the session it continued in.
     val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
@@ -381,7 +400,7 @@ fun ChatScreen(
             onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
             onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
             liveness = liveness,
-            onAttachError = { message -> vm.reportLocalError(message) },
+            attachments = attachments,
             // A plain read, not a subscription: only the opening value matters here.
             initialDraft = session?.let { vm.loadedDraft(it.id) },
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },

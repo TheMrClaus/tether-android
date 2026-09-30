@@ -170,10 +170,32 @@ interface TetherClient {
 
     /**
      * Durable send with a client-minted idempotencyKey (at-most-once, see
-     * specs/protocol-spec.md §5.6). Attachments (v15) ride an idle send only
-     * and are held in memory, never persisted to disk.
+     * specs/protocol-spec.md §5.6). T7.4: text only. A message with attachments goes through
+     * [sendAttachments] alone; a non-empty [attachments] here is refused (nothing is recorded or
+     * sent), so no attachment is ever filed in the durable outbox, redelivered or queued.
      */
     fun send(sessionId: String, text: String, attachments: List<Attachment> = emptyList())
+
+    /**
+     * T7.4: the one path a message WITH attachments takes to the wire (v15 `send.attachments`, and
+     * an optional v103 [mention]). Call it ONLY from an explicit Send (a tap or the submit key), never
+     * in answer to anything received. Under the lock, in order: a live, handshaken socket of a running
+     * client; the composer drawn for THIS server ([expectedOrigin] = the socket's origin and the
+     * outbox's); the session confirmed live on it; listed, and neither read-only, handed off nor
+     * archived; idle (no active turn); nothing of this session still waiting in the outbox; the
+     * mention, if any, offered by the current catalog; the encoded frame within
+     * [AttachmentFrame.MAX_SEND_FRAME_BYTES] and within what the socket's queue can take now; then
+     * enqueued on that socket, once, under a fresh idempotency key. It is never recorded in the
+     * durable outbox, retried, queued or persisted: offline it is refused, and if the link drops
+     * before the server confirms the turn the operator is told it may not have arrived.
+     */
+    fun sendAttachments(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+    ): AttachmentSendResult = AttachmentSendResult.NotConnected
 
     fun queueAdd(sessionId: String, text: String)
     fun queueEdit(sessionId: String, queueId: String, text: String)

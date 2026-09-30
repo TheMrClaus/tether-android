@@ -4,7 +4,9 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.tether.app.client.AttachmentSendResult
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.StagedAttachments
 import com.tether.app.client.CreatedReply
 import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
@@ -130,11 +132,21 @@ class TetherViewModel(
         draftOrigin?.let { draftWrites.trySend(DraftWrite(it, sessionId, text)) }
     }
 
+    /**
+     * T7.4: the composer's staged attachments (one session on one server, memory only). They
+     * survive a rotation (this view model) but not process death, and are dropped on a server
+     * switch, a sign-out, a switch to another session, and when their session locks (read-only,
+     * handed off or archived). Only an explicit Send transmits them ([sendAttachments]).
+     */
+    val stagedAttachments = StagedAttachments()
+
     /** Another server is configured: its drafts are its own (read on demand from its namespace). */
     private fun onServerUrl(url: String?) {
         val origin = serverOrigin(url)
         // T6.7 r2: a server's words never outlive the switch to another server.
         dropServerToastUnless(origin)
+        // T7.4: attachments staged for one server are never offered to another.
+        stagedAttachments.current.value?.let { if (it.origin != origin) stagedAttachments.clear() }
         if (origin == draftOrigin) return
         draftOrigin = origin
         draftLoads.clear()
@@ -247,7 +259,13 @@ class TetherViewModel(
         }
         viewModelScope.launch {
             // T6.7 r2: the link moved to another server: that server's words are not this one's.
-            client.consentOrigin.collect { origin -> if (origin != null) dropServerToastUnless(origin) }
+            // T7.4: nor are the attachments staged for the other one.
+            client.consentOrigin.collect { origin ->
+                if (origin != null) {
+                    dropServerToastUnless(origin)
+                    stagedAttachments.current.value?.let { if (it.origin != origin) stagedAttachments.clear() }
+                }
+            }
         }
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
@@ -278,6 +296,12 @@ class TetherViewModel(
             }
         }
 
+        // T7.4: attachments staged for a session that locked (read-only, handed off, archived) go.
+        stagedAttachments.current.value?.let { staged ->
+            val s = list.firstOrNull { it.id == staged.sessionId }
+            if (s != null && (s.readOnly || !s.handedOffTo.isNullOrEmpty() || s.runtimeArchived)) stagedAttachments.clear()
+        }
+
         // Drop a selection whose session disappeared (archive).
         val selected = _selectedSessionId.value
         if (selected != null && list.none { it.id == selected }) {
@@ -304,6 +328,8 @@ class TetherViewModel(
     fun selectSession(id: String) {
         // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
         _openingHistoryId.value = null
+        // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView).
+        stagedAttachments.current.value?.let { if (it.sessionId != id) stagedAttachments.clear() }
         _selectedSessionId.value = id
         loadDraft(id)
         client.attach(id)
@@ -359,40 +385,62 @@ class TetherViewModel(
     }
 
     /**
-     * Busy turns queue; idle sessions send. Attachments ride the idle send
-     * only (the server never queues them) — the composer refuses a busy send
-     * that carries attachments before it gets here (chat-view.tsx:3171-3175),
-     * so a non-empty list here always means idle.
-     *
-     * Returns false when the message was refused (attachments while
-     * disconnected — §5.6: roll back and tell the user, draft kept by the
-     * caller) so the composer can keep the draft instead of clearing it.
+     * Busy turns queue; idle sessions send. Text only (T7.4): a message with attachments goes
+     * through [sendAttachments] alone, so a non-empty [attachments] is refused here (false, the
+     * draft and the chips kept) and never reaches the durable outbox.
      */
     fun sendOrQueue(sessionId: String, text: String, attachments: List<Attachment> = emptyList()): Boolean {
+        if (attachments.isNotEmpty()) {
+            reportLocalError(ATTACHMENTS_REFUSED_COPY)
+            return false
+        }
         val projection = client.projections.value[sessionId]
         if (projection?.activeTurnId != null) {
             client.queueAdd(sessionId, text)
             return true
         }
-        if (attachments.isNotEmpty() && client.connection.value != ConnectionState.Connected) {
-            reportLocalError("Not connected — the message and its attachments were not sent.")
-            return false
-        }
-        client.send(sessionId, text, attachments)
+        client.send(sessionId, text)
         return true
     }
 
     /**
+     * T7.4: send [text] with the attachments staged for [sessionId] (and [mention], a delegation),
+     * from an explicit Send only. [expectedOrigin] is the server the composer was drawn for; the
+     * staged set must belong to it and to [sessionId], or nothing is sent. The client re-checks the
+     * link, the origin, the session's liveness and locks, idleness and the frame size under its lock
+     * ([TetherClient.sendAttachments]). Sent: the staged set is cleared. Anything else keeps it (and
+     * the draft) and returns why.
+     */
+    fun sendAttachments(sessionId: String, text: String, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
+        val staged = stagedAttachments.current.value
+        if (staged == null || staged.sessionId != sessionId || staged.items.isEmpty()) return AttachmentSendResult.Empty
+        if (expectedOrigin == null || staged.origin != expectedOrigin) return AttachmentSendResult.NotLive
+        if (client.connection.value != ConnectionState.Connected) return AttachmentSendResult.NotConnected
+        val result = client.sendAttachments(sessionId, text, staged.items.map { it.attachment }, mention, expectedOrigin)
+        if (result == AttachmentSendResult.Sent) stagedAttachments.clear()
+        return result
+    }
+
+    /**
+     * The server origin attachments are staged under now: the configured server's (a client with
+     * none configured, such as the demo, answers with its link's origin; a signed-out client has
+     * neither).
+     */
+    fun attachmentOrigin(): String? = draftOrigin ?: client.consentOrigin.value
+
+    /**
      * T7.3: an idle send that delegates (chat-view.tsx:3150-3167: never queued — queue-add carries
-     * no mention). False when nothing was recorded (a turn runs, attachments while offline, or a
-     * mention the current catalog does not offer); the composer then keeps the draft and the chip.
+     * no mention). False when nothing was recorded (a turn runs, attachments (T7.4: those go through
+     * [sendAttachments]), or a mention the current catalog does not offer); the composer then keeps
+     * the draft and the chip.
      */
     fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): Boolean {
-        if (client.projections.value[sessionId]?.activeTurnId != null) return false
-        if (attachments.isNotEmpty() && client.connection.value != ConnectionState.Connected) {
-            reportLocalError("Not connected — the message and its attachments were not sent.")
+        // T7.4: a delegation with attachments is [sendAttachments]'s (never the durable outbox's).
+        if (attachments.isNotEmpty()) {
+            reportLocalError(ATTACHMENTS_REFUSED_COPY)
             return false
         }
+        if (client.projections.value[sessionId]?.activeTurnId != null) return false
         return client.sendDelegated(sessionId, text, attachments, mention, expectedOrigin) == com.tether.app.client.MentionResult.Sent
     }
 
@@ -416,6 +464,7 @@ class TetherViewModel(
     fun logout() {
         viewModelScope.launch {
             _logoutNotice.value = logoutNoticeFor(client.logout())
+            stagedAttachments.clear()
             _selectedSessionId.value = null
             _openingHistoryId.value = null
             // T5.3: the web's search state lives in the Dashboard, which /login unmounts.
@@ -532,6 +581,9 @@ class TetherViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client, draftStore) as T
 }
+
+/** T7.4: attachments handed to the text-only send (the composer never does; nothing is sent). */
+internal const val ATTACHMENTS_REFUSED_COPY = "Not connected — the message and its attachments were not sent."
 
 /** T6.7: an error toast's words, and whether a server wrote them ([TetherViewModel.toast]). */
 data class Toast(val text: String, val fromServer: Boolean, val origin: String? = null)
