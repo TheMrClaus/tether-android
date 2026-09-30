@@ -23,26 +23,34 @@ package com.tether.app.ui.text
  *
  * PROSE ([Rule.Prose]; bubbles, markdown, thinking, card copy, answered questions, todo items):
  * - Always tokens: the embeddings and overrides LRE RLE PDF LRO RLO (U+202A-U+202E); C0 controls
- *   except TAB, LF and the CR of a CRLF; DEL; C1; WORD JOINER; tag characters, except in the three
- *   RGI subdivision flags (U+1F3F4 + `gbeng` / `gbsct` / `gbwls` + U+E007F), which draw as flags.
+ *   except TAB, LF and the CR of a CRLF; DEL; C1; the LINE and PARAGRAPH SEPARATORS (U+2028,
+ *   U+2029: they break a line without ending the bidi paragraph); WORD JOINER; tag characters,
+ *   except in the three RGI subdivision flags (U+1F3F4 + `gbeng` / `gbsct` / `gbwls` + U+E007F).
  * - The isolates LRI RLI FSI PDI (U+2066-U+2069) and the marks LRM RLM ALM (U+200E, U+200F,
  *   U+061C) are how real RTL text is written, but they can reorder text as fully as an override
  *   (RLI + one letter per LRI...PDI draws "resrap" as "parser"; RLMs between letters do the same;
- *   RLI around "/ tmp" draws "tmp /"; RLI around "1 - 2" draws "2 - 1"). So one is drawn raw only
- *   where real RTL text needs it ([ProsePlan]); otherwise it is a token:
- *   - never on a LINE with no RTL letter (Hebrew, Arabic, ...: bidi class R or AL). There they
- *     have no job but to reorder;
+ *   RLI around "/ tmp" draws "tmp /"; RLI around "1 - 2" draws "2 - 1"; an isolated "-rf" beside
+ *   "rm" in an RTL line trades places with it). So one is drawn raw only where real RTL text needs
+ *   it ([ProsePlan]); otherwise it is a token. An RTL LETTER below is a real letter (Lu/Ll/Lt/Lo)
+ *   of bidi class R or AL: the geresh, gershayim and tatweel are not letters. A WORD GAP is
+ *   U+0020, U+00A0, U+3000 or a tab: a hair, thin or narrow space is not.
+ *   - never on a LINE with no RTL letter: there they have no job but to reorder;
+ *   - a mark is kept only when one of its nearest strong neighbours is an RTL letter, and never
+ *     when it cuts a run in two (L or digits on both sides; an LRM between two RTL letters). So a
+ *     leading RLM followed by Latin is a token;
  *   - an isolate nested inside another is always a token (with its PDI), and so is a stray PDI;
  *   - an isolate whose content has no letter of its own direction is a token (an RLI around
- *     Latin only, an LRI around Hebrew only: it only reorders);
+ *     Latin only, an LRI around Hebrew only). An LRI / FSI around neutrals only (an emoji) is an
+ *     LTR island that keeps their order and reorders nothing around it, so it is kept;
  *   - an isolate whose edge splits a word (letters or digits of the SAME direction on both sides
- *     of the edge, across punctuation but not across a space) is a token: that is how one word is
- *     cut into pieces to be drawn out of order ("r\u2069\u2066e");
- *   - a mark whose nearest strong neighbours on both sides are L or digits is a token (it cuts an
- *     LTR run in two), and so is an LRM between two RTL letters (it cuts an RTL word).
- *   What stays possible, by design: on a line that visibly holds RTL letters, whole LTR words
- *   isolated one by one and separated by spaces or punctuation take the RTL paragraph's order.
- *   That is UAX #9 doing its job for an RTL reader, not something to hide.
+ *     of the edge, across punctuation but not across a word gap) is a token;
+ *   - an isolate that could trade places with a word: its paragraph (the first strong character
+ *     outside every isolate, UAX #9 P2) runs the other way, and the nearest letter outside it on
+ *     either side, across spaces, is of the isolate's own direction (a line edge counts as the
+ *     paragraph). Without the isolate those two would read as one run; with it they reorder.
+ *   What stays possible, by design: RTL text is drawn right to left and mixed-direction text takes
+ *   the order UAX #9 gives it (a Hebrew line's "1 - 2" reads "2 - 1" with no control at all).
+ *   That is the algorithm doing its job for an RTL reader, not something to hide.
  * - Kept: ZWSP, ZWNJ, ZWJ, BOM, variation selectors and the other default-ignorables. They shape
  *   (Persian ZWNJ, emoji ZWJ sequences, VS16) or hint line breaks, and never reorder.
  * Each block is its own Text layout and Android starts a new bidi paragraph at every '\n', so
@@ -63,11 +71,15 @@ package com.tether.app.ui.text
  *
  * COPY ([forCopy], [original]): a copy never carries a hidden control the reader did not see.
  * The DANGEROUS set ([dangerous]: C0 except TAB/LF/CRLF, DEL, C1, U+202A-U+202E,
- * U+2066-U+2069, tag characters outside the three flags) is copied as its VISIBLE token text,
- * without the mark (`⟨U+001B⟩`), and the copy reports how many ("N hidden control characters
- * copied as ⟨U+…⟩"). Everything else, including every character real RTL writing needs (letters,
- * marks, ZWNJ/ZWJ), copies exactly. [original] gives the exact source text for an explicit
- * "Copy raw". Inserted break opportunities never reach a copy.
+ * U+2066-U+2069, tag characters outside the three flags), and any mark the plan made a token, is
+ * copied as its VISIBLE token text, without the mark (`⟨U+001B⟩`), and the copy reports how many
+ * ("N hidden control characters copied as ⟨U+…⟩"). Everything else, including every character
+ * real RTL writing needs (letters, the marks it kept, ZWNJ/ZWJ), copies exactly. [original] gives
+ * the exact source text for an explicit "Copy raw". Inserted break opportunities never reach a
+ * copy, and neither does a U+2060 left over when a selection cuts a token in two. A selection that
+ * STARTS between the two halves of a break opportunity keeps a leading U+200B: the copy path hands
+ * over the selected text only, no offset, and in prose a U+200B is real content, so it cannot be
+ * told apart. It is zero-width and outside the dangerous set.
  *
  * Cost: one linear pass per text; a text with nothing to escape (almost all) comes back as the
  * same String. Adjacent tokens are one styled span with a break opportunity between them, and a
@@ -155,7 +167,7 @@ object SafeText {
     internal fun isControl(cp: Int): Boolean = (cp < 0x20 && cp != 0x09 && cp != 0x0A) || cp == 0x7F || cp in 0x80..0x9F
 
     /** Prose's unconditional tokens (tags are decided per run, isolates and marks by the plan). */
-    internal fun proseAlways(cp: Int): Boolean = cp in 0x202A..0x202E || cp == MARK.code || isControl(cp)
+    internal fun proseAlways(cp: Int): Boolean = cp in 0x202A..0x202E || cp == MARK.code || isControl(cp) || cp == 0x2028 || cp == 0x2029
 
     /** Code's set (see the class doc); a CR is judged with its successor. */
     fun codeEscapes(cp: Int): Boolean {
@@ -206,7 +218,7 @@ object SafeText {
 
         fun candidate(c: Char): Boolean = when (rule) {
             Rule.Prose -> c < ' ' && c != '\t' && c != '\n' || c in '\u007F'..'\u009F' || c == '\u200E' || c == '\u200F' ||
-                c == '\u061C' || c in '\u202A'..'\u202E' || c == MARK || c in '\u2066'..'\u2069' || c == '\uDB40'
+                c == '\u061C' || c in '\u2028'..'\u202E' || c == MARK || c in '\u2066'..'\u2069' || c == '\uDB40'
             Rule.Code -> c < ' ' && c != '\t' && c != '\n' || c >= '\u007F'
         }
 
@@ -435,6 +447,9 @@ object SafeText {
                     else -> out.appendCp(u.cp, u.count)
                 }
                 from = u.end
+            } else {
+                out.append(s, from, at) // r3: a lone mark (a cut token or break): not the source's
+                from = at + 1
             }
             at = s.indexOf(MARK, if (u != null) u.end else at + 1)
         }
@@ -465,7 +480,8 @@ object SafeText {
                             out.append(s, i + 1, u.end)
                             hidden += u.count
                         }
-                        dangerous(u.cp) && !(u.cp == '\r'.code && u.count == 1 && u.end < s.length && s[u.end] == '\n') -> {
+                        // r3: a mark the plan made a token is copied as the token too (it was cutting a run).
+                        (dangerous(u.cp) || isMark(u.cp)) && !(u.cp == '\r'.code && u.count == 1 && u.end < s.length && s[u.end] == '\n') -> {
                             out.append(s, i + 1, u.end)
                             hidden += u.count
                         }
@@ -474,6 +490,10 @@ object SafeText {
                     i = u.end
                     continue
                 }
+                // r3: a mark with no whole unit after it is half a token or break a selection cut:
+                // no surface draws a raw U+2060, so the source never had it.
+                i++
+                continue
             }
             val cp = s.codePointAt(i)
             val len = Character.charCount(cp)
@@ -497,6 +517,30 @@ object SafeText {
         }
         return Copied(out.toString(), hidden)
     }
+
+    /** How many code points of the dangerous set a RAW text holds (a CRLF and the three flags are not). */
+    fun hiddenIn(raw: CharSequence): Int {
+        var n = 0
+        var i = 0
+        while (i < raw.length) {
+            val cp = Character.codePointAt(raw, i)
+            if (isTag(cp)) {
+                var e = i
+                while (e + 1 < raw.length && Character.isHighSurrogate(raw[e]) && isTag(Character.codePointAt(raw, e))) e += 2
+                if (e > i && rgiFlag(raw, i, e)) {
+                    i = e
+                    continue
+                }
+            }
+            if (dangerous(cp) && !(cp == '\r'.code && i + 1 < raw.length && raw[i + 1] == '\n')) n++
+            i += Character.charCount(cp)
+        }
+        return n
+    }
+
+    /** The notice a raw copy that holds hidden characters shows. */
+    fun includedNotice(hidden: Int): String =
+        if (hidden == 1) "Copied raw: 1 hidden control character included" else "Copied raw: $hidden hidden control characters included"
 
     /** The notice a copy with hidden characters shows. */
     fun copyNotice(hidden: Int): String =

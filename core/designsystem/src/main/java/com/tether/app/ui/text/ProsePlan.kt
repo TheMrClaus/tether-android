@@ -1,15 +1,20 @@
 package com.tether.app.ui.text
 
 /**
- * ta-blf r2: which of a text's isolates (U+2066-U+2069) and marks (U+200E, U+200F, U+061C) prose
+ * ta-blf: which of a text's isolates (U+2066-U+2069) and marks (U+200E, U+200F, U+061C) prose
  * draws raw; every other one is a token. The rules are in [SafeText]'s doc; this is the analysis.
  *
  * A plan is built over one rendered UNIT (a bubble's text, a markdown line with all its inline
  * pieces) and consumed, occurrence by occurrence and in order, as the unit's prose pieces are
  * encoded ([SafeText.encode] with the plan). [Segment.code] pieces (inline code) are drawn by the
  * code rule: they take no decision, but their letters count (they are on screen), and their
- * controls count as the visible token text they become. Lines are split at '\n' (a new bidi
- * paragraph on Android). A plan that runs out of decisions says "token": failing closed.
+ * controls count as the visible token text they become. Lines are split at '\n', the only bidi
+ * paragraph break an Android layout makes (prose draws U+2028 / U+2029 as tokens, so no other
+ * separator can hide inside a line). A plan that runs out of decisions says "token": fail closed.
+ *
+ * Classes, per code point (r3): an RTL LETTER is a letter (Lu/Ll/Lt/Lo, not a modifier letter)
+ * of bidi class R or AL, so the Hebrew geresh / gershayim and the Arabic tatweel are not; a WORD
+ * GAP is U+0020, U+00A0, U+3000 or a tab only (a hair or thin space is not a gap between words).
  */
 class ProsePlan private constructor(private val keep: BooleanArray) {
     private var next = 0
@@ -42,17 +47,38 @@ class ProsePlan private constructor(private val keep: BooleanArray) {
             return ProsePlan(analyze(s, inert))
         }
 
-        private fun hasConditional(s: String): Boolean = s.any { it == '\u200E' || it == '\u200F' || it == '\u061C' || it in '\u2066'..'\u2069' }
+        private fun hasConditional(s: String): Boolean = s.any { conditional(it) }
 
         private const val NONE_C: Byte = 0
-        private const val L: Byte = 1 // an LTR letter or any digit
-        private const val R: Byte = 2 // an RTL letter (bidi class R or AL)
-        private const val W: Byte = 3 // whitespace
-        private const val P: Byte = 4 // other visible: punctuation, symbols
+        private const val L: Byte = 1 // an LTR letter, or a drawn token (it holds "U+" and hex)
+        private const val R: Byte = 2 // an RTL letter
+        private const val W: Byte = 3 // a word gap
+        private const val P: Byte = 4 // other visible: punctuation, symbols, other spaces, R-class non-letters
         private const val F: Byte = 5 // invisible: format, combining marks
         private const val X: Byte = 6 // a conditional control itself
+        private const val D: Byte = 7 // a digit
+
+        private const val LRI = '\u2066'
+        private const val RLI = '\u2067'
+        private const val PDI = '\u2069'
+        private const val LRM = '\u200E'
 
         private fun conditional(c: Char): Boolean = c == '\u200E' || c == '\u200F' || c == '\u061C' || c in '\u2066'..'\u2069'
+
+        /** A real letter: Lu, Ll, Lt or Lo (not Lm: the tatweel is a modifier letter). */
+        internal fun realLetter(cp: Int): Boolean = when (Character.getType(cp)) {
+            Character.UPPERCASE_LETTER.toInt(), Character.LOWERCASE_LETTER.toInt(), Character.TITLECASE_LETTER.toInt(),
+            Character.OTHER_LETTER.toInt(),
+            -> true
+            else -> false
+        }
+
+        /** An RTL letter: a real letter of bidi class R or AL. */
+        internal fun rtlLetter(cp: Int): Boolean {
+            if (!realLetter(cp)) return false
+            val d = Character.getDirectionality(cp)
+            return d == Character.DIRECTIONALITY_RIGHT_TO_LEFT || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC
+        }
 
         private fun base(cp: Int): Byte {
             when (Character.getType(cp)) {
@@ -60,10 +86,9 @@ class ProsePlan private constructor(private val keep: BooleanArray) {
                 Character.COMBINING_SPACING_MARK.toInt(),
                 -> return F
             }
-            if (Character.isWhitespace(cp) || Character.isSpaceChar(cp)) return W
-            val d = Character.getDirectionality(cp)
-            if (d == Character.DIRECTIONALITY_RIGHT_TO_LEFT || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC) return R
-            if (Character.isLetterOrDigit(cp)) return L
+            if (cp == 0x20 || cp == 0xA0 || cp == 0x3000 || cp == 0x09) return W
+            if (realLetter(cp)) return if (rtlLetter(cp)) R else L
+            if (Character.isDigit(cp)) return D
             return P
         }
 
@@ -76,7 +101,7 @@ class ProsePlan private constructor(private val keep: BooleanArray) {
                 val len = Character.charCount(cp)
                 val code = inert != null && inert[i]
                 val c: Byte = when {
-                    // Drawn as a visible token (it holds "U+" and digits): count it as a letter.
+                    // Drawn as a visible token (it holds "U+" and hex): an LTR letter.
                     code && SafeText.codeEscapes(cp) -> L
                     !code && (SafeText.proseAlways(cp) || SafeText.isTag(cp)) -> L
                     !code && conditional(s[i]) -> X
@@ -100,99 +125,132 @@ class ProsePlan private constructor(private val keep: BooleanArray) {
                 if (b < 0) b = s.length
                 var here = 0
                 for (i in a until b) if (conditional(s[i]) && (inert == null || !inert[i])) here++
-                if (here > 0) analyzeLine(s, inert, a, b, keep, occ)
+                if (here > 0) analyzeLine(s, a, b, classes(s, inert, a, b), keep, occ)
                 occ += here
                 a = b + 1
             }
             return keep
         }
 
-        private fun analyzeLine(s: String, inert: BooleanArray?, a: Int, b: Int, keep: BooleanArray, firstOcc: Int) {
-            val cls = classes(s, inert, a, b)
+        /** Nearest class in [want] before / after each index, skipping the rest; [reset] clears it. */
+        private fun nearest(cls: ByteArray, map: (Byte) -> Byte, reset: (Byte) -> Boolean): Pair<ByteArray, ByteArray> {
+            val n = cls.size
+            val before = ByteArray(n)
+            val after = ByteArray(n)
+            var cur = NONE_C
+            for (k in 0 until n) {
+                before[k] = cur
+                val m = map(cls[k])
+                if (m != NONE_C) cur = m else if (reset(cls[k])) cur = NONE_C
+            }
+            cur = NONE_C
+            for (k in n - 1 downTo 0) {
+                after[k] = cur
+                val m = map(cls[k])
+                if (m != NONE_C) cur = m else if (reset(cls[k])) cur = NONE_C
+            }
+            return before to after
+        }
+
+        private fun analyzeLine(s: String, a: Int, b: Int, cls: ByteArray, keep: BooleanArray, firstOcc: Int) {
             // No RTL letter on the line: every conditional control stays a token (the default).
             if (cls.none { it == R }) return
             val len = b - a
-            // Nearest strong (L/R) before / after each index: marks.
-            val prevStrong = ByteArray(len)
-            val nextStrong = ByteArray(len)
-            // Nearest letter/digit before / after, across punctuation and invisibles, not across a space: isolate edges.
-            val prevJoin = ByteArray(len)
-            val nextJoin = ByteArray(len)
-            var cur = NONE_C
-            var join = NONE_C
-            for (k in 0 until len) {
-                prevStrong[k] = cur
-                prevJoin[k] = join
-                when (cls[k]) {
-                    L, R -> {
-                        cur = cls[k]
-                        join = cls[k]
-                    }
-                    W -> join = NONE_C
-                }
-            }
-            cur = NONE_C
-            join = NONE_C
-            for (k in len - 1 downTo 0) {
-                nextStrong[k] = cur
-                nextJoin[k] = join
-                when (cls[k]) {
-                    L, R -> {
-                        cur = cls[k]
-                        join = cls[k]
-                    }
-                    W -> join = NONE_C
-                }
-            }
-            // Prefix counts of L and R letters: an isolate's content in O(1).
+            val ld: (Byte) -> Byte = { c -> if (c == L || c == D) L else if (c == R) R else NONE_C }
+            // Marks: the nearest strong (letter or digit) on each side, across anything.
+            val (prevStrong, nextStrong) = nearest(cls, ld) { false }
+            // Isolate edges: the nearest letter or digit, across punctuation and invisibles, not across a word gap.
+            val (prevJoin, nextJoin) = nearest(cls, ld) { it == W }
+            // Swaps: the nearest LETTER outside (digits are weak), across anything.
+            val (prevLetter, nextLetter) = nearest(cls, { c -> if (c == L || c == R) c else NONE_C }) { false }
             val cntL = IntArray(len + 1)
             val cntR = IntArray(len + 1)
             for (k in 0 until len) {
-                cntL[k + 1] = cntL[k] + if (cls[k] == L) 1 else 0
+                cntL[k + 1] = cntL[k] + if (cls[k] == L || cls[k] == D) 1 else 0
                 cntR[k + 1] = cntR[k] + if (cls[k] == R) 1 else 0
             }
 
-            class Open(val occ: Int, val at: Int, val top: Boolean)
-            val stack = ArrayList<Open>()
+            // The line's conditional controls, with their plan indices.
+            val pos = ArrayList<Int>()
+            for (k in 0 until len) if (cls[k] == X) pos.add(k)
+            fun occOf(n: Int) = firstOcc + n
 
-            fun split(before: Byte, after: Byte): Boolean = before != NONE_C && before == after
+            // 1. Marks: kept only beside a real RTL letter, and never cutting a run in two.
+            val markKept = BooleanArray(len)
+            for ((n, k) in pos.withIndex()) {
+                val c = s[a + k]
+                if (c in LRI..PDI) continue
+                val l = prevStrong[k]
+                val r = nextStrong[k]
+                val cuts = l != NONE_C && l == r && (l == L || c == LRM)
+                val kept = (l == R || r == R) && !cuts
+                keep[occOf(n)] = kept
+                markKept[k] = kept
+            }
 
-            fun decide(o: Open, closeAt: Int?, closeOcc: Int) {
-                if (!o.top) return // nested: token, with its PDI (the default)
-                val from = o.at + 1
-                val to = closeAt ?: len
+            // 2. Isolate pairs (nested ones and stray PDIs stay tokens: the default).
+            class Pair2(val open: Int, val openN: Int, var close: Int = -1, var closeN: Int = -1)
+            val top = ArrayList<Pair2>()
+            val stack = ArrayList<Pair2?>()
+            for ((n, k) in pos.withIndex()) {
+                when (s[a + k]) {
+                    in LRI..'\u2068' -> stack.add(if (stack.isEmpty()) Pair2(k, n).also { top.add(it) } else null)
+                    PDI -> if (stack.isNotEmpty()) stack.removeAt(stack.size - 1)?.let { it.close = k; it.closeN = n }
+                }
+            }
+
+            // 3. The paragraph's direction (UAX #9 P2): the first strong outside every isolate; a mark
+            // drawn as a token, like any token, reads as Latin.
+            val inside = BooleanArray(len)
+            for (p in top) for (k in p.open..(if (p.close >= 0) p.close else len - 1)) inside[k] = true
+            var para = NONE_C
+            for (k in 0 until len) {
+                if (inside[k]) continue
+                val c = cls[k]
+                para = when {
+                    c == L || c == R -> c
+                    c == X && markKept[k] -> if (s[a + k] == LRM) L else R
+                    c == X -> L
+                    else -> continue
+                }
+                break
+            }
+
+            // 4. Each top-level isolate.
+            for (p in top) {
+                val from = p.open + 1
+                val to = if (p.close >= 0) p.close else len
                 val hasL = cntL[to] - cntL[from] > 0
                 val hasR = cntR[to] - cntR[from] > 0
-                val ownDirection = when (s[a + o.at]) {
-                    '\u2066' -> hasL // LRI
-                    '\u2067' -> hasR // RLI
-                    else -> hasL || hasR // FSI: whichever letter comes first
+                val kind = s[a + p.open]
+                var firstLetter = NONE_C
+                for (k in from until to) if (cls[k] == L || cls[k] == R) {
+                    firstLetter = cls[k]
+                    break
                 }
-                val openSplits = split(prevJoin[o.at], nextJoin[o.at])
-                val closeSplits = closeAt != null && split(prevJoin[closeAt], nextJoin[closeAt])
-                val k = ownDirection && !openSplits && !closeSplits
-                keep[o.occ] = k
-                if (closeOcc >= 0) keep[closeOcc] = k
-            }
-
-            var occ = firstOcc
-            for (k in 0 until len) {
-                if (cls[k] != X) continue
-                val c = s[a + k]
-                when {
-                    c in '\u2066'..'\u2068' -> stack.add(Open(occ, k, stack.isEmpty()))
-                    c == '\u2069' -> if (stack.isNotEmpty()) decide(stack.removeAt(stack.size - 1), k, occ) // else: stray, token
-                    else -> {
-                        // A mark: a token when it cuts an LTR run (L or digits both sides), or an LRM cuts an RTL word.
-                        val l = prevStrong[k]
-                        val r = nextStrong[k]
-                        val cuts = l != NONE_C && l == r && (l == L || c == '\u200E')
-                        keep[occ] = !cuts
-                    }
+                val dir: Byte = when (kind) {
+                    LRI -> L
+                    RLI -> R
+                    else -> if (firstLetter == NONE_C) L else firstLetter // FSI; none: LTR (P3)
                 }
-                occ++
+                // Its content must be of its own direction; an LTR island of neutrals only (an emoji) is allowed.
+                val own = when (kind) {
+                    RLI -> hasR
+                    LRI -> hasL || !hasR
+                    else -> true
+                }
+                val splits = (prevJoin[p.open] != NONE_C && prevJoin[p.open] == nextJoin[p.open]) ||
+                    (p.close >= 0 && prevJoin[p.close] != NONE_C && prevJoin[p.close] == nextJoin[p.close])
+                // A swap: in a paragraph of the other direction, an isolate beside a letter of its own
+                // direction orders against it. The line's edge reads as the paragraph (unknown: a match).
+                val edge = if (para == NONE_C) dir else para
+                val left = prevLetter[p.open].takeIf { it != NONE_C } ?: edge
+                val right = if (p.close >= 0) nextLetter[p.close].takeIf { it != NONE_C } ?: edge else edge
+                val swaps = (para == NONE_C || para != dir) && (left == dir || right == dir)
+                val k = own && !splits && !swaps
+                keep[occOf(p.openN)] = k
+                if (p.closeN >= 0) keep[occOf(p.closeN)] = k
             }
-            for (o in stack) decide(o, null, -1) // unterminated: ends with its line
         }
     }
 }

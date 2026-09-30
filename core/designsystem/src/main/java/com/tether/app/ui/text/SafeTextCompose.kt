@@ -120,8 +120,11 @@ fun safePreDisplay(terminal: Boolean = false): PreDisplay {
 
 // ---- copy -------------------------------------------------------------------------------------
 
-/** A copy that showed hidden controls as tokens: how many, and the exact source for "Copy raw". */
-class CopyNotice(val hidden: Int, val raw: String, val serial: Long)
+/**
+ * A copy's notice: its [message], and the exact source a "Copy raw" key would put on the clipboard
+ * ([raw]; null: the copy already was raw, no key).
+ */
+class CopyNotice(val message: String, val raw: String?, val serial: Long)
 
 /** The copy notice in scope (the transcript's); a copy outside one shows none. */
 @Stable
@@ -130,8 +133,22 @@ class CopyNotices {
         private set
     private var serial = 0L
 
+    /** A safe copy that showed [hidden] controls as tokens; "Copy raw" puts [raw] on the clipboard. */
     fun show(hidden: Int, raw: String) {
-        current = CopyNotice(hidden, raw, ++serial)
+        current = CopyNotice(SafeText.copyNotice(hidden), raw, ++serial)
+    }
+
+    /** A raw copy that included [hidden] controls (no key: it already is raw). */
+    fun showIncluded(hidden: Int) {
+        current = CopyNotice(SafeText.includedNotice(hidden), null, ++serial)
+    }
+
+    /**
+     * r3: every copy, clean or not, first clears the notice: a "Copy raw" left from an earlier copy
+     * must never put that earlier payload on the clipboard.
+     */
+    fun clear() {
+        current = null
     }
 
     fun dismiss(notice: CopyNotice) {
@@ -154,9 +171,23 @@ fun putOnClipboard(context: Context, text: String, label: String = "text"): Bool
  * the display decoded). False when the clipboard is unavailable.
  */
 fun copySafely(context: Context, display: String, notices: CopyNotices?, raw: String? = null, label: String = "text"): Boolean {
+    notices?.clear()
     val copied = SafeText.forCopy(display)
     val ok = putOnClipboard(context, copied.text, label)
     if (ok && copied.hidden > 0) notices?.show(copied.hidden, raw ?: SafeText.original(display))
+    return ok
+}
+
+/**
+ * r3: copy [raw] exactly (an explicit raw copy, e.g. the code key's long press). When it holds
+ * anything of the dangerous set, [notices] says so ("N hidden control characters included"): a raw
+ * copy is never silent about what it carries.
+ */
+fun copyRaw(context: Context, raw: String, notices: CopyNotices?, label: String = "text"): Boolean {
+    notices?.clear()
+    val ok = putOnClipboard(context, raw, label)
+    val hidden = SafeText.hiddenIn(raw)
+    if (ok && hidden > 0) notices?.showIncluded(hidden)
     return ok
 }
 
@@ -171,6 +202,7 @@ class SafeCopyClipboard(private val delegate: Clipboard, private val notices: Co
     override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
 
     override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+        notices?.clear() // r3: never leave an earlier copy's "Copy raw" behind
         if (clipEntry == null) return delegate.setClipEntry(null)
         val data = clipEntry.clipData
         val text = if (data.itemCount > 0) data.getItemAt(0).text else null
@@ -217,10 +249,11 @@ fun CopyNoticeHost(notices: CopyNotices, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        Text(SafeText.copyNotice(notice.hidden), style = type.body, color = t.ink, modifier = Modifier.weight(1f, fill = false))
+        Text(notice.message, style = type.body, color = t.ink, modifier = Modifier.weight(1f, fill = false))
+        val raw = notice.raw ?: return@Row
         TetherKey(
             onClick = {
-                putOnClipboard(context, notice.raw)
+                putOnClipboard(context, raw)
                 notices.dismiss(notice)
             },
             classes = KeyClasses.ButtonSecondary,

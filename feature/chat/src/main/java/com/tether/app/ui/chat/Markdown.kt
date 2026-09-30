@@ -93,7 +93,7 @@ import com.tether.app.ui.text.appendStyled
 import com.tether.app.ui.text.LocalCopyNotices
 import com.tether.app.ui.text.ProsePlan
 import com.tether.app.ui.text.copySafely
-import com.tether.app.ui.text.putOnClipboard
+import com.tether.app.ui.text.copyRaw
 
 /**
  * T6.1: renders the [parseMarkdown] AST the way the web paints `components/markdown.tsx` with the
@@ -812,7 +812,12 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
                     if (mark == null) {
                         Text(codeText(if (opened || !truncated) block.code else peek), style = style, color = t.ink, softWrap = false, modifier = padding)
                     } else {
-                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t, SafeText.Rule.Code) } }
+                        // r3: the find marks keep the peek too, unless the active match lies past it.
+                        val pastPeek = remember(block, mark, peek) {
+                            reveal && truncated && findRanges(block.code, mark.find.needle).getOrNull(mark.find.active - mark.base)?.let { it.last >= peek.length } == true
+                        }
+                        val body = if (opened || !truncated || pastPeek) block.code else peek
+                        val marked = remember(body, mark, t) { buildAnnotatedString { appendMarked(body, mark.cursor(), t, SafeText.Rule.Code) } }
                         MdText(marked, style, t.ink, padding, softWrap = false)
                     }
                 }
@@ -821,7 +826,7 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
         CopyKey(
             copied = copied,
             onClick = { if (copySafely(context, SafeText.code(block.code), notices, raw = block.code, label = "code")) copied = true },
-            onLongClick = { if (putOnClipboard(context, block.code, "code")) copied = true },
+            onLongClick = { if (copyRaw(context, block.code, notices, "code")) copied = true },
             modifier = Modifier.align(Alignment.TopEnd).offset(x = -t.css.spaceXs, y = t.css.spaceXs),
         )
     }
