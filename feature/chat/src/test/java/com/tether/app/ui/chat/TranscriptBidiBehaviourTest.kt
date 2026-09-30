@@ -391,6 +391,39 @@ class TranscriptBidiBehaviourTest {
         return disorder(display, level) <= disorder(withoutRawBidi(display), level)
     }
 
+    /**
+     * r5, the verifier's stricter oracle: each text laid out at ITS OWN content direction, no pair of
+     * Latin letters / digits is drawn inverted with the raw explicit bidi characters that is not
+     * also inverted without them.
+     */
+    private fun rawBidiInvertsNoNewPair(display: String, rtl: Boolean): Boolean {
+        fun invertedPairs(s: String, keepIndex: (Int) -> Int): Set<Pair<Int, Int>> {
+            val latin = BooleanArray(s.length)
+            var i = 0
+            while (i < s.length) {
+                val u = if (s[i] == SafeText.MARK) SafeText.unitAt(s, i) else null
+                if (u != null) {
+                    i = u.end
+                    continue
+                }
+                latin[i] = s[i] in 'a'..'z' || s[i] in 'A'..'Z' || s[i] in '0'..'9'
+                i++
+            }
+            val bidi = android.icu.text.Bidi()
+            bidi.setPara(s, if (rtl) android.icu.text.Bidi.LEVEL_DEFAULT_RTL else android.icu.text.Bidi.LEVEL_DEFAULT_LTR, null)
+            val drawn = bidi.visualMap.filter { it >= 0 && latin[it] }.map(keepIndex)
+            val out = HashSet<Pair<Int, Int>>()
+            for (x in drawn.indices) for (y in x + 1 until drawn.size) if (drawn[x] > drawn[y]) out.add(drawn[y] to drawn[x])
+            return out
+        }
+        val stripped = withoutRawBidi(display)
+        // Stripped index -> display index, so both sets name the same characters.
+        val map = IntArray(stripped.length)
+        var j = 0
+        for (i in display.indices) if (i < display.length && (display[i] !in '\u202A'..'\u202E' && display[i] !in '\u2066'..'\u2069' && display[i] != '\u200E' && display[i] != '\u200F' && display[i] != '\u061C')) map[j++] = i
+        return (invertedPairs(display) { it } - invertedPairs(stripped) { map[it] }).isEmpty()
+    }
+
     /** Every PoC of the four review rounds, with and without an RTL letter on its line. */
     private val allPocs: List<String> by lazy {
         val geresh = "\u05F3"
@@ -419,6 +452,14 @@ class TranscriptBidiBehaviourTest {
             "total \u2068\u05E9 100 - 900$PDI ok",
             "\u05E9 1\u061C - 2",
             "${RLM}Hello \u05E9",
+            // r5: an ALM beside a Hebrew letter.
+            "\u05EA\u05D0\u05E8\u05D9\u05DA \u05E9\u061C 2024-01-02",
+            "\u05D8\u05DC\u05E4\u05D5\u05DF \u05D1\u061C 555-1234",
+            "\u05E2\u05DE\u05D5\u05D3\u05D9\u05DD \u05E9\u061C1-10",
+            "\u05DE\u05D7\u05D9\u05E8 \u05E9\u061C 100\$12",
+            "\u05DE\u05E1\u05E4\u05E8 \u05E9\u061C1#2",
+            "Range: \u05D0\u061C 10-20",
+            "\u05E9 50%\u061C",
         )
         base + base.filter { it.none { c -> c in '0'..'9' } }.map { "\u05D0 $it" } + listOf(
             "\u05D0 " + "resrap".map { "$LRI$it$PDI" }.joinToString("\u200A"),
@@ -432,12 +473,17 @@ class TranscriptBidiBehaviourTest {
             val shown = SafeText.prose(poc)
             for (c in listOf(LRE, RLE, PDF, LRO, RLO, LRI, RLI, "\u2068", PDI)) assertFalse("raw %04X: ${hex(poc)}".format(c[0].code), shown.contains(c))
             assertTrue("rtl=$rtl ${hex(poc)} -> ${hex(shown)}", rawBidiNeverDisorders(shown, rtl))
+            assertTrue("strict rtl=$rtl ${hex(poc)} -> ${hex(shown)}", rawBidiInvertsNoNewPair(shown, rtl))
             // With no RTL letter on the line, the drawn text reads exactly in logical order.
             if (poc.none { ProsePlanProbe.rtlLetter(it.code) }) assertTrue("rtl=$rtl ${hex(shown)}", readsInOrder(shown, rtl))
         }
         // The oracle is real: raw, the PoCs change the drawing.
         for (raw in listOf("fix the $RLI$pieces$PDI bug", "\u05D0 $LRI-rf$PDI rm", "Note: \u05D0 ${LRI}approve$PDI ${LRI}not$PDI ${LRI}do$PDI \u05D1", "x ${RLI}abc \u05D0 def$PDI y", "pay ${RLI}100 to 900 \u05E9$PDI now")) {
             assertFalse(hex(raw).toString(), rawBidiNeverDisorders(raw, rtl = false))
+            assertFalse("strict ${hex(raw)}", rawBidiInvertsNoNewPair(raw, rtl = false))
+        }
+        for (raw in listOf("\u05EA\u05D0\u05E8\u05D9\u05DA \u05E9\u061C 2024-01-02", "\u05D8\u05DC\u05E4\u05D5\u05DF \u05D1\u061C 555-1234")) for (rtl in listOf(false, true)) {
+            assertFalse("strict ALM rtl=$rtl ${hex(raw)}", rawBidiInvertsNoNewPair(raw, rtl))
         }
         assertFalse(readsInOrder("rm -rf $RLI/ tmp\u05F3$PDI", rtl = false))
     }
@@ -458,6 +504,7 @@ class TranscriptBidiBehaviourTest {
             val shown = drawn.first { it.startsWith("p$n ") }
             assertEquals(poc, SafeText.original(shown))
             assertTrue("p$n ${hex(shown)}", rawBidiNeverDisorders(shown, rtl = true))
+            assertTrue("strict p$n ${hex(shown)}", rawBidiInvertsNoNewPair(shown, rtl = true))
         }
     }
 
@@ -773,6 +820,7 @@ class TranscriptBidiBehaviourTest {
             "rm", "-rf", "/", "tmp", "100", "to", "900", "1", "2", "a.txt", "https://x.io/a?b=1", "v1.2", "mv", "old", "new", "pay",
             "\u05E9\u05DC\u05D5\u05DD", "\u05E9", "\u05E2\u05D5\u05DC\u05DD", "\u0645\u0631\u062D\u0628\u0627", "\u0661\u0662\u0663",
             "\u05F3", "\u0640", " - ", ", ", ".", ":", "(", ")", " ", " ", "\u200A",
+            "$", "#", "%", "+", "1-2", "2024-01-02", "\u05D0", "\u05D1", "\u0635\u0641\u062D\u0629", "\u061C", "\u061C",
             LRI, RLI, "\u2068", PDI, PDI, "\u200E", RLM, "\u061C",
         )
         val random = kotlin.random.Random(2026)
@@ -785,6 +833,7 @@ class TranscriptBidiBehaviourTest {
             kept++
             for (rtl in listOf(false, true)) {
                 assertTrue("rtl=$rtl ${hex(src)} -> ${hex(shown)}", rawBidiNeverDisorders(shown, rtl))
+                assertTrue("strict rtl=$rtl ${hex(src)} -> ${hex(shown)}", rawBidiInvertsNoNewPair(shown, rtl))
             }
         }
         assertTrue("the fuzzer reached marks kept raw ($kept)", kept > 100)

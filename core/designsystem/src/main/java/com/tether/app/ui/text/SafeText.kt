@@ -32,7 +32,8 @@ package com.tether.app.ui.text
  *   `gbeng` / `gbsct` / `gbwls` + U+E007F).
  * - The marks LRM RLM ALM (U+200E, U+200F, U+061C) are drawn raw only beside a real RTL letter
  *   ([ProsePlan]: its nearest strong neighbour on one side is a Lu/Ll/Lt/Lo letter of class R or
- *   AL, and it does not cut a run in two); every other mark is a token.
+ *   AL, for an ALM of class AL only (r5), and it does not cut a run in two); every other mark is
+ *   a token.
  * Why isolates are never raw: an isolate (or an embedding) can order the words it holds against
  *   the words around it as fully as an override can ("mv \u2066old\u2069 \u2066new\u2069 \u05E9" reads "new old mv";
  *   "Note: \u05D0 \u2066approve\u2069 \u2066not\u2069 \u2066do\u2069 \u05D1" reads "do not approve"; an RLI around one Hebrew letter

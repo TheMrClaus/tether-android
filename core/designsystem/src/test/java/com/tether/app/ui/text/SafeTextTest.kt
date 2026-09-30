@@ -104,6 +104,26 @@ class SafeTextTest {
         assertTrue(SafeText.prose("${RLM}Hello $HEBREW").startsWith(tok(0x200F)))
     }
 
+    /** r5: an ALM is kept only beside an Arabic-class letter: beside Hebrew it turns digits into Arabic ones. */
+    @Test fun anAlmBesideAHebrewLetterIsAToken() {
+        val alm = "\u061C"
+        for (line in listOf(
+            "\u05EA\u05D0\u05E8\u05D9\u05DA \u05E9$alm 2024-01-02", "\u05D8\u05DC\u05E4\u05D5\u05DF \u05D1$alm 555-1234",
+            "\u05E2\u05DE\u05D5\u05D3\u05D9\u05DD \u05E9${alm}1-10", "\u05DE\u05D7\u05D9\u05E8 \u05E9$alm 100\$12",
+            "\u05DE\u05E1\u05E4\u05E8 \u05E9${alm}1#2", "Range: \u05D0$alm 10-20", "\u05E9 50%$alm",
+        )) assertFalse(line, SafeText.prose(line).contains(alm))
+        // Arabic keeps it: that is how the text already behaves.
+        for (line in listOf("\u0635\u0641\u062D\u0629 ${alm}1#2", "\u0627\u0644\u0646\u0633\u0628\u0629 30%$alm \u0641\u0642\u0637")) assertEquals(line, SafeText.prose(line))
+        // Two ALMs never vouch for each other; a mark stacked on another mark is a token.
+        assertFalse(SafeText.prose("\u05E2\u05D5\u05DC\u05DD$alm$alm 2024-01-02").contains(alm))
+        SafeText.prose("900$RLM$alm\u05E9\u05F3 2024").let { assertFalse(it.contains(RLM) || it.contains(alm)) }
+        // An ALM after a geresh (class R, not a letter) beside Arabic: W2 sees the geresh, so a token.
+        assertFalse(SafeText.prose("\u0645\u0631\u062D\u0628\u0627\u05F3${alm}2024-01-02").contains(alm))
+        // LRM and RLM beside Hebrew are unchanged.
+        assertEquals("\u05E9\u05DC\u05D5\u05DD$RLM.", SafeText.prose("\u05E9\u05DC\u05D5\u05DD$RLM."))
+        assertEquals("C++$LRM \u05E9", SafeText.prose("C++$LRM \u05E9"))
+    }
+
     @Test fun eachLineJudgesItsOwnMarks() {
         assertEquals("$HEBREW$RLM.\nabc${tok(0x200F)}def", SafeText.prose("$HEBREW$RLM.\nabc${RLM}def"))
     }
