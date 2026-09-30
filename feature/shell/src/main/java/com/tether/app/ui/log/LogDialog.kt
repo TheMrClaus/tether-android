@@ -1,6 +1,9 @@
 package com.tether.app.ui.log
 
 import androidx.compose.foundation.background
+import com.tether.app.client.LabelText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.proseText
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -349,7 +352,8 @@ private fun EmptyNote(text: String, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Text(
-        text,
+        // T9.1: a stats error may carry the server's words (prose rule).
+        proseText(text),
         color = t.faint,
         textAlign = TextAlign.Center,
         style = if (t.studio) cssText(type.ui, 0.8125f, 400, lineHeight = 1.65f) else cssText(type.ui, 0.74f, 400),
@@ -641,7 +645,7 @@ private fun LogRow(
     }
     val levelView: @Composable (Modifier) -> Unit = { m ->
         Text(
-            level.uppercase(Locale.ROOT),
+            LabelText.label(level).uppercase(Locale.ROOT),
             color = levelInk,
             style = cssText(type.ui, if (studio) 0.625f else 0.6f, 700, trackingEm = if (studio) 0f else 0.05f),
             maxLines = 1,
@@ -653,8 +657,9 @@ private fun LogRow(
         BaselineFlow(hGap = 8.dp, vGap = 8.dp, modifier = m) {
             Text(label, color = t.white, style = cssText(type.ui, if (studio) 0.8125f else 0.74f, 600))
             if (session != null) Text(session, color = t.muted, style = cssText(type.ui, small, 400))
-            if (turn != null) Text(turn, color = t.faint, style = cssText(type.ui, small, 400).tabularNums())
-            if (detail.isNotEmpty()) Text(detail, color = t.muted, style = cssText(type.ui, small, 400))
+            // T9.1: the turn id by the code rule, the server's outcome / reason / message by the prose rule.
+            if (turn != null) Text(codeText(turn), color = t.faint, style = cssText(type.ui, small, 400).tabularNums())
+            if (detail.isNotEmpty()) Text(proseText(detail), color = t.muted, style = cssText(type.ui, small, 400))
         }
     }
     val rowPadding = if (studio) PaddingValues(vertical = 12.dp) else PaddingValues(horizontal = t.css.spaceMd, vertical = 6.4.dp)

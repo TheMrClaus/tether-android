@@ -58,13 +58,15 @@ import com.tether.app.ui.statusline.wrapUpReading
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.proseText
 import kotlinx.coroutines.delay
 import kotlin.math.max
 
 /*
  * T6.6: the inspector's limit and MCP readings (inspector.tsx 56-130, 512-556; mcp-health-card.tsx;
  * opencode-rich-renderers.tsx 151-160). Read-only: nothing here sends anything. Every server string
- * is cleaned and bounded (LabelText) before it is drawn.
+ * is bounded and drawn by the shared text rules (LabelText for labels, code / prose rules).
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
@@ -132,8 +134,8 @@ fun InspectorLimitNotice(state: SessionView?, modifier: Modifier = Modifier, env
 }
 
 /**
- * One `McpHealthProjection`, cleaned for display. [key] is the server's raw name (the row's state
- * identity): two names that display alike never share a row's state.
+ * One `McpHealthProjection`, bounded for display: [name] is drawn by the code rule, [error] by the
+ * prose rule (com.tether.app.ui.text). [key] is the server's raw name (the row's state identity).
  */
 @Immutable
 data class McpServerView(val name: String, val status: String, val error: String?, val key: String = name) {
@@ -157,12 +159,11 @@ fun mcpServers(state: SessionView?): List<McpServerView> {
     return health.entries.mapNotNull { (_, value) ->
         val o = value as? JsObj ?: return@mapNotNull null
         val name = (o["name"] as? JsStr)?.value ?: return@mapNotNull null
-        val error = ((o["error"] as? JsStr)?.value ?: (o["failureReason"] as? JsStr)?.value)?.let { LabelText.error(it) }?.ifEmpty { null }
-        // T6.6 r2: a name the cleaning would change (bidi / invisible code points, odd spacing) is
-        // written out with them visible, so one server can never pass for another.
-        val cleaned = LabelText.label(name)
-        val shown = if (cleaned == name) cleaned else LabelText.visibleValue(name)
-        McpServerView(shown, (o["status"] as? JsStr)?.value ?: "unknown", error, key = name)
+        // T9.1: kept raw (bounded) and drawn by the shared text rules: the name as CODE (every bidi /
+        // invisible code point a visible token, so one server can never pass for another), the
+        // error as PROSE.
+        val error = ((o["error"] as? JsStr)?.value ?: (o["failureReason"] as? JsStr)?.value)?.takeIf { it.isNotBlank() }?.let { prose(it).text }
+        McpServerView(code(name).text, (o["status"] as? JsStr)?.value ?: "unknown", error, key = name)
     }.sortedWith(compareBy(java.text.Collator.getInstance()) { it.name }).take(LabelText.MAX_ITEMS)
 }
 
@@ -267,7 +268,7 @@ private fun McpServerRow(server: McpServerView, compact: Boolean, last: Boolean)
     ) {
         Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
             Text(
-                server.name,
+                codeText(server.name),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(if (compact) 0.7f else 0.76f)),
                 color = t.ink,
                 maxLines = 1,
@@ -295,9 +296,9 @@ private fun McpServerRow(server: McpServerView, compact: Boolean, last: Boolean)
                         .semantics { stateDescription = if (errorOpen) "Expanded" else "Collapsed" }
                         .padding(vertical = 12.dp),
                 )
-                if (errorOpen) Text(error, style = errorStyle, color = statusColor, modifier = Modifier.padding(bottom = t.css.spaceSm))
+                if (errorOpen) Text(proseText(error), style = errorStyle, color = statusColor, modifier = Modifier.padding(bottom = t.css.spaceSm))
             } else {
-                Text(error, style = errorStyle, color = statusColor)
+                Text(proseText(error), style = errorStyle, color = statusColor)
             }
         }
     }

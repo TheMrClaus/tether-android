@@ -296,7 +296,7 @@ private class Ctx(val taskByToolUseId: Map<String, JsObj>, val turnsById: JsObj?
  * Every run in the session, in launch order and depth-first ([collectSubagentRuns] of the web):
  * launchers, lifecycle-only threads, nested runs right after their spawner, spawned CLI children.
  */
-internal fun collectSubagentRuns(state: JsObj?): List<SubagentRun> {
+fun collectSubagentRuns(state: JsObj?): List<SubagentRun> {
     val turnOrder = state?.get("turnOrder") as? JsArr ?: return emptyList()
     val provider = str(state["provider"])
     val taskByToolUseId = HashMap<String, JsObj>()
@@ -624,7 +624,7 @@ internal fun subagentRunEntries(run: SubagentRun?, showThinking: Boolean): List<
 
 // --- Labels (subagent-runs.tsx) --------------------------------------------------------------
 
-internal val STATUS_TEXT = mapOf(RUN_RUNNING to "running", RUN_ERROR to "error", RUN_DONE to "done")
+val STATUS_TEXT = mapOf(RUN_RUNNING to "running", RUN_ERROR to "error", RUN_DONE to "done")
 internal const val UNCONFIRMED_STATUS_TEXT = "running (unconfirmed)"
 
 /** `statusLabel`: an unconfirmed running run says so in words (never by colour or icon alone). */
@@ -644,7 +644,7 @@ internal fun harnessLabel(run: SubagentRun): String? {
 }
 
 /** `usageGapReason`: why a run has no token reading. */
-internal fun usageGapReason(run: SubagentRun): String = when {
+fun usageGapReason(run: SubagentRun): String = when {
     run.spawned != null -> "A spawned ${run.provider?.takeIf { it.isNotEmpty() } ?: "CLI"} child records its token usage in its own native session"
     run.source == RunSource.THREAD ->
         "${run.provider?.takeIf { it.isNotEmpty() } ?: "The harness"} reports this sub-agent's token usage on its own thread, which is not streamed to this session"

@@ -1,5 +1,7 @@
 package com.tether.app.ui.log
 
+import com.tether.app.client.LabelText
+
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,7 +84,7 @@ object LogReadings {
     const val EmptyText = "No events logged yet. Turn and lifecycle events appear here as they happen."
 
     /** `EVENT_LABEL[entry.event] || entry.event`. */
-    fun label(entry: LogEntry): String = EventLabels[entry.event] ?: entry.event
+    fun label(entry: LogEntry): String = EventLabels[entry.event] ?: LabelText.label(entry.event)
 
     /** log-dialog.tsx `entryDetail`: the event-specific trailing detail, " · " separated. */
     fun detail(entry: LogEntry): String {
@@ -129,7 +131,7 @@ object LogReadings {
         DateTimeFormatter.ofPattern("hh:mm:ss a", locale).format(Instant.ofEpochMilli(ts).atZone(zone))
 
     /** `nameBySid`: sid → session name. */
-    fun namesById(sessions: List<AgentSession>): Map<String, String> = sessions.associate { it.id to it.name }
+    fun namesById(sessions: List<AgentSession>): Map<String, String> = sessions.associate { it.id to LabelText.label(it.name) }
 
     /** A row's session label: its name, else its short id (`nameBySid.get(sid) || shortId(sid)`). */
     fun sessionName(sid: String, names: Map<String, String>): String = names[sid]?.takeIf { it.isNotEmpty() } ?: shortId(sid)
@@ -149,7 +151,7 @@ object LogReadings {
 
     /** The Engine meta line: `mode · persistent`, or "terminal only" without a mode. */
     fun engine(stats: ServerStats): String =
-        stats.headlessMode?.takeIf { it.isNotEmpty() }?.let { if (stats.headlessPersistent) "$it · persistent" else it } ?: "terminal only"
+        LabelText.label(stats.headlessMode).takeIf { it.isNotEmpty() }?.let { if (stats.headlessPersistent) "$it · persistent" else it } ?: "terminal only"
 
     fun sessions(stats: ServerStats): String = "${stats.sessionsTotal} total · ${stats.sessionsHeadless ?: 0} chat"
 

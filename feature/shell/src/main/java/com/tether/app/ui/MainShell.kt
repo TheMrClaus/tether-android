@@ -70,6 +70,7 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.files.WorkspaceFileBrowser
 import com.tether.app.ui.files.rememberFileBrowserState
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.inspector.InspectorHost
 import com.tether.app.ui.log.LogDialog
 import com.tether.app.ui.log.LogDialogState
 import com.tether.app.ui.prefs.UiPrefs
@@ -80,12 +81,10 @@ import com.tether.app.ui.shell.ProviderAvailability
 import com.tether.app.ui.shell.TopbarActions
 import com.tether.app.ui.shell.WorkspaceHeaderActions
 import com.tether.app.ui.shell.rememberPhoneShellState
-import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
-import com.tether.app.ui.util.compactNumber
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
@@ -191,6 +190,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var copiedTetherId by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
     LaunchedEffect(copiedTetherId) { if (copiedTetherId) { delay(CopiedFeedbackMs); copiedTetherId = false } }
+    // T9.1 (dashboard.tsx:793-828): the inspector's reads, once per opened session — the diff summary
+    // for any session (the server answers null for a non-repo cwd and pushes fresh summaries after),
+    // an isolated checkout's scripts, and a checkout-pr session's change request.
+    LaunchedEffect(session?.id, connected) {
+        val s = session ?: return@LaunchedEffect
+        if (!connected) return@LaunchedEffect
+        vm.client.requestWorktreeDiff(s.id)
+        if (s.worktree != null) vm.client.requestWorktreeScripts(s.id)
+        if (s.worktree?.mode == "checkout-pr") vm.client.requestChangeRequest(s.id)
+    }
     // T4.4: a session opened by a link reads like a sidebar pick: the drawer and the previous
     // session's popover close, so the session is on screen and Back leaves the app.
     LaunchedEffect(vm) { vm.openRequests.collect { shell.onSessionSelected() } }
@@ -272,7 +281,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         )
                     }
                 },
-                inspector = { session?.let { InterimTelemetry(it, sessionView) } },
+                // T9.1: the full inspector, in the phone's telemetry sheet and the expanded column alike.
+                inspector = { session?.let { InspectorHost(vm, it, sessionView) } },
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
                 gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
@@ -458,41 +468,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             onCancel = { confirmEnd = null },
         )
     }
-}
-
-/**
- * The telemetry rows the app showed before the shell (its old Telemetry dialog), kept as the
- * panel's body until the inspector (T9.1) fills the slot.
- */
-@Composable
-private fun InterimTelemetry(session: AgentSession, state: SessionView? = null) {
-    val t = LocalTetherTokens.current
-    val rows = buildList {
-        add("Provider" to session.provider)
-        session.model?.let { add("Model" to it) }
-        session.metrics?.effort?.let { add("Effort" to it) }
-        session.metrics?.totalTokens?.let { add("Total tokens" to compactNumber(it)) }
-        session.metrics?.contextPercent?.let { add("Context" to "${it.toInt()}%") }
-        session.metrics?.gitBranch?.let { add("Branch" to it) }
-        add("Directory" to session.cwd)
-    }
-    rows.forEach { (label, value) ->
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Text(
-                label.uppercase(),
-                color = t.faint,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.strong,
-                fontSize = 9.9.sp,
-                letterSpacing = 0.06.em,
-                modifier = Modifier.weight(0.4f),
-            )
-            Text(value, color = t.ink, fontFamily = JetBrainsMono, fontSize = 11.8.sp, modifier = Modifier.weight(0.6f))
-        }
-    }
-    // T6.6 (inspector.tsx:520-556): the limit notice (Wrap-Up while it covers the turn) and MCP health.
-    com.tether.app.ui.inspector.InspectorLimitNotice(state)
-    com.tether.app.ui.inspector.InspectorMcpHealth(session.provider, session.engineGeneration, state)
 }
 
 /**

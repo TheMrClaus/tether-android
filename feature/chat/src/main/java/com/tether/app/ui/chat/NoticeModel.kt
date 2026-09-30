@@ -22,7 +22,7 @@ internal const val NOTICE_BODY_MAX = 2_000
 
 /** One provider notice (`ProviderNoticeProjection`): a Codex notice, or Claude's model fallback (v124). */
 @Immutable
-internal data class ProviderNoticeView(
+data class ProviderNoticeView(
     val noticeId: String,
     /** "info" | "warning" | "error" (anything else was folded to "warning"). */
     val level: String,
@@ -68,7 +68,7 @@ internal fun providerNoticeHeading(providerLabel: String, code: String?): String
 }
 
 /** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped. */
-internal fun providerNotices(list: JsValue?, providerLabel: String): List<ProviderNoticeView> =
+fun providerNotices(list: JsValue?, providerLabel: String): List<ProviderNoticeView> =
     (list as? JsArr)?.mapNotNull { item ->
         val o = item as? JsObj ?: return@mapNotNull null
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null

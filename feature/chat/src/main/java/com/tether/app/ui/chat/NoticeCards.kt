@@ -242,7 +242,7 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
  * `role="alert"` for an error, `status` otherwise. The level also rides in words for TalkBack.
  */
 @Composable
-internal fun ProviderNoticeRow(view: ProviderNoticeView, modifier: Modifier = Modifier) {
+fun ProviderNoticeRow(view: ProviderNoticeView, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val edge = when (view.level) {
