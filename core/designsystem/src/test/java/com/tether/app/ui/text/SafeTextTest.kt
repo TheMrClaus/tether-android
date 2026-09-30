@@ -110,7 +110,12 @@ class SafeTextTest {
             val pieces = "resrap".map { "$LRI$it$PDI" }.joinToString(gap)
             assertFalse("gap %04X".format(gap[0].code), raw(SafeText.prose("\u05F3$pieces"), LRI, PDI))
             assertFalse("gap %04X with Hebrew".format(gap[0].code), raw(SafeText.prose("$HEBREW $pieces"), LRI, PDI))
+            // In an LTR line (no swap possible) the gap rule alone decides: not a word gap, so a split word.
+            assertFalse("gap %04X in an LTR line".format(gap[0].code), raw(SafeText.prose("abc ${LRI}r$PDI$gap${LRI}e$PDI $HEBREW"), LRI, PDI))
         }
+        // A real space is a word gap: two separately isolated words in an LTR line stay raw.
+        val words = "abc ${LRI}rm$PDI ${LRI}rf$PDI $HEBREW"
+        assertEquals(words, SafeText.prose(words))
     }
 
     @Test fun aMarkIsKeptOnlyBesideARealRtlLetter() {
