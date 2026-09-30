@@ -384,7 +384,17 @@ class CommandTransmissionTest {
 
     @Test
     fun anEndlessForegroundOutputStreamStaysBoundedAndEachDeltaScansOneBlock() {
-        val (client, ws) = connected(state = commandState())
+        // An earlier, finished command turn t0 keeps its output block: a delta never rescans it.
+        val earlier = foldTree(
+            freshTree(),
+            ev("turn_started", "t0", seq = 1, ts = 1) { put("commandRun", buildJsonObject { put("command", "ls"); put("cwd", "/w"); put("logFile", "/w/0.log") }) },
+            ev("command_output_started", "t0", seq = 2, ts = 2) { put("blockId", "b0"); put("command", "ls"); put("logFile", "/w/0.log") },
+            ev("command_output_delta", "t0", seq = 3, ts = 3) { put("blockId", "b0"); put("stream", "stdout"); put("text", "a\n") },
+            ev("turn_end", "t0", seq = 4, ts = 4) { put("outcome", "ok") },
+            ev("turn_started", "t1", seq = 5, ts = 5) { put("commandRun", buildJsonObject { put("command", "npm test"); put("cwd", "/w"); put("logFile", "/w/c.log") }) },
+            ev("command_output_started", "t1", seq = 6, ts = 6) { put("blockId", "b1"); put("command", "npm test"); put("logFile", "/w/c.log") },
+        )
+        val (client, ws) = connected(state = JsCodec.toJson(earlier).toString())
         val chunk = "z".repeat(60_000)
         var seq = 6L
         for (i in 0 until 6) ws.send(eventFrame("s1", seq++, "command_output_delta", "t1", ""","blockId":"b1","stream":"${if (i % 2 == 0) "stdout" else "stderr"}","text":"#$i#$chunk""""))

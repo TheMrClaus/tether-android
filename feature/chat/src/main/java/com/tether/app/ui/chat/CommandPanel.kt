@@ -120,10 +120,14 @@ internal fun commandPanelText(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHAR
     // T7.3 r2: only the RAW tail (twice the bound, for what cleaning removes) is cleaned, so the cost
     // of a redraw follows the bound, not everything the command printed.
     val raw = commandPanelRawTail(segments, max)
+    panelCharsCleaned.addAndGet(raw.segments.sumOf { it.text.length }.toLong())
     val cleaned = raw.segments.map { OutputSegment(it.stderr, LabelText.output(it.text)) }.filter { it.text.isNotEmpty() }
     val tail = outputTail(cleaned, max)
     return CommandPanelText(tail.segments, tail.dropped + raw.dropped)
 }
+
+/** Test seam (r2): how many characters [commandPanelText] has handed to the cleaner. */
+internal val panelCharsCleaned = java.util.concurrent.atomic.AtomicLong()
 
 /** The raw tail [commandPanelText] cleans: at most `2 × max` characters of the newest output. */
 internal fun commandPanelRawTail(segments: JsArr, max: Int = COMMAND_PANEL_MAX_CHARS): OutputTail =

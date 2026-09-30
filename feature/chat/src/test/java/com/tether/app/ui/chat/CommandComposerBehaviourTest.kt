@@ -505,7 +505,9 @@ class CommandComposerBehaviourTest {
         )
         val raw = commandPanelRawTail(huge)
         assertTrue(raw.segments.sumOf { it.text.length } <= 2 * COMMAND_PANEL_MAX_CHARS)
+        val before = panelCharsCleaned.get()
         val shown = commandPanelText(huge)
+        assertTrue("cleaned ${panelCharsCleaned.get() - before}", panelCharsCleaned.get() - before <= 2L * COMMAND_PANEL_MAX_CHARS)
         assertTrue(shown.segments.sumOf { it.text.length } <= COMMAND_PANEL_MAX_CHARS)
         assertTrue(shown.dropped > 0)
     }
