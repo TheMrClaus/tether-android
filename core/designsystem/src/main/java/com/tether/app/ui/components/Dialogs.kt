@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -78,6 +79,8 @@ fun TetherDialogSurface(
     title: String? = null,
     footer: (@Composable RowScope.() -> Unit)? = null,
     scrollable: Boolean = true,
+    /** ta-28i: a title that carries server text drawn by a SafeText rule (wins over [title]). */
+    styledTitle: AnnotatedString? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -105,9 +108,9 @@ fun TetherDialogSurface(
                         bottom = if (studio) 28.dp else t.css.spaceLg,
                     ),
             ) {
-                if (title != null) {
+                if (title != null || styledTitle != null) {
                     Text(
-                        text = title,
+                        text = styledTitle ?: AnnotatedString(title.orEmpty()),
                         color = t.white,
                         style = if (studio) {
                             type.body.copy(fontSize = 22.sp, fontWeight = FontWeight(700), letterSpacing = (-0.025).em, lineHeight = 1.3.em)
@@ -138,7 +141,11 @@ fun TetherDialogSurface(
 
 /** Dialog body copy (`.confirm-dialog p`: 0.8rem muted, 1.55; Studio 14px, 1.65). */
 @Composable
-fun TetherDialogText(text: String, modifier: Modifier = Modifier) {
+fun TetherDialogText(text: String, modifier: Modifier = Modifier) = TetherDialogText(AnnotatedString(text), modifier)
+
+/** ta-28i: dialog body copy that carries server text drawn by a SafeText rule. */
+@Composable
+fun TetherDialogText(text: AnnotatedString, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val studio = t.skin.family == ThemeFamily.Studio

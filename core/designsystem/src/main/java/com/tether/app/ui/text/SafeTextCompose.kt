@@ -116,6 +116,23 @@ fun codeText(text: String, breakAnywhere: Boolean = false): AnnotatedString {
     }
 }
 
+/**
+ * ta-28i: a NAME, path or id outside the transcript (a file name, a breadcrumb, a search hit's
+ * path, a working directory) as code draws it, tokens styled, in an LTR paragraph ([codeDirection])
+ * carried by the text itself, so it lays out LTR whatever style or UI direction it is drawn in.
+ */
+@Composable
+fun codeLabel(text: String): AnnotatedString {
+    val t = LocalTetherTokens.current
+    return remember(text, t) { codeLabel(text, tokenStyle(t)) }
+}
+
+/** [codeLabel] outside composition. */
+fun codeLabel(text: String, style: SpanStyle): AnnotatedString =
+    AnnotatedString.Builder(text.length).apply {
+        withStyle(ParagraphStyle(textDirection = codeDirection)) { appendSafe(text, SafeText.Rule.Code, style) }
+    }.toAnnotatedString()
+
 /** [text] as command output draws it ([SafeText.terminal]). */
 @Composable
 fun terminalText(text: String): AnnotatedString {
