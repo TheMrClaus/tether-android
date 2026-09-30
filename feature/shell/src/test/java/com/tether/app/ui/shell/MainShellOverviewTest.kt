@@ -25,7 +25,6 @@ import com.tether.app.ui.MainShell
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.overview.OverviewTags
 import com.tether.app.ui.prefs.UiPrefs
-import com.tether.app.ui.sidebar.SidebarTags
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -87,8 +86,8 @@ class MainShellOverviewTest {
         rule.waitForIdle()
         assertEquals(emptyList<String>(), client.seenCalls)
 
-        // Open the Overview from the rail: it subscribes, and the selected session leaves the screen.
-        rule.onNodeWithTag(SidebarTags.Overview).performClick()
+        // Open the Overview from the top bar: it subscribes, and the selected session leaves the screen.
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(OverviewTags.Root).assertExists()
         assertEquals(listOf("overview-subscribe"), client.feedCalls)
@@ -110,7 +109,7 @@ class MainShellOverviewTest {
         vm.dismissToast()
 
         // Back to the Overview; open a running session: opened, not marked seen.
-        rule.onNodeWithTag(SidebarTags.Overview).performClick()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(OverviewTags.open("s2")).performScrollTo().performClick()
         rule.waitForIdle()
@@ -119,7 +118,7 @@ class MainShellOverviewTest {
         assertEquals(emptyList<String>(), client.seenCalls)
 
         // The boundary: once the session VIEW shows a settled session, its own rule marks it seen.
-        rule.onNodeWithTag(SidebarTags.Overview).performClick()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(OverviewTags.open("s1")).performScrollTo().performClick()
         rule.waitForIdle()

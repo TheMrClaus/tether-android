@@ -60,6 +60,9 @@ class NavShellTest {
     fun setUp() {
         val resolver = ApplicationProvider.getApplicationContext<Context>().contentResolver
         Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
+        // T15.4: these links are opened from Sessions (a fresh install would start on the Overview,
+        // where a link pushes Sessions and Back returns there: MainShellNavigationTest).
+        kotlinx.coroutines.runBlocking { com.tether.app.ui.prefs.UiPrefs(ApplicationProvider.getApplicationContext<Context>()).setLastView("sessions") }
         rule.setContent { UiRoot(client = client, launchIntent = launchIntent) }
         rule.waitForIdle()
     }

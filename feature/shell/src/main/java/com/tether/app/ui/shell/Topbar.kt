@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
@@ -159,6 +160,17 @@ data class TopbarState(
 /** topbar.module.css `@media (max-width: 74rem)`: the brand's margin and the nav's gap tighten. */
 internal const val TOPBAR_TIGHT_MAX = 1184
 
+/**
+ * App-only: below 64rem the expanded bar keeps the four destinations and moves Files and Accounts
+ * into the utility menu (as the web's narrow bar does). The web keeps them on its bar from 48rem,
+ * but this layout starts at 840dp, where brand, four destinations, Files, Accounts, the link state,
+ * Settings and the menu do not fit on one row.
+ */
+internal const val TOPBAR_TOOLS_INLINE_MIN = 1024
+
+/** Whether Files and Accounts are on the bar (else they are in the menu). */
+internal val TopbarState.toolsInline: Boolean get() = wide && viewportWidth >= TOPBAR_TOOLS_INLINE_MIN
+
 /** topbar.module.css `@media (max-width: 23rem)`: the link word is visually hidden (still read). */
 internal const val TOPBAR_LINK_WORD_MIN = 368
 
@@ -221,8 +233,10 @@ fun TetherTopbar(
                 )
             }
             if (wide) {
+                // `<nav aria-label="Primary">`: takes the room left between the brand and the
+                // actions (never more), so a tight window cannot push Settings off the bar.
                 Row(
-                    Modifier.fillMaxHeight().semantics { paneTitle = "Primary" },
+                    Modifier.weight(1f).fillMaxHeight().clipToBounds().semantics { paneTitle = "Primary" },
                     horizontalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 8.dp),
                 ) {
                     TopBarDestination.entries.forEach { destination ->
@@ -235,12 +249,15 @@ fun TetherTopbar(
                             modifier = Modifier.testTag(ShellTags.nav(destination)),
                         )
                     }
-                    val files = actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }
-                    NavLink("Files", active = false, host = files, reason = TopbarReasons.FILES, modifier = Modifier.testTag(ShellTags.FilesKey))
-                    NavLink("Accounts", active = false, host = actions.onOpenUsage, reason = TopbarReasons.NOT_YET, modifier = Modifier.testTag(ShellTags.AccountsKey))
+                    if (state.toolsInline) {
+                        val files = actions.onOpenFiles.takeIf { !state.fileBrowserDisabled }
+                        NavLink("Files", active = false, host = files, reason = TopbarReasons.FILES, modifier = Modifier.testTag(ShellTags.FilesKey))
+                        NavLink("Accounts", active = false, host = actions.onOpenUsage, reason = TopbarReasons.NOT_YET, modifier = Modifier.testTag(ShellTags.AccountsKey))
+                    }
                 }
+            } else {
+                Spacer(Modifier.weight(1f))
             }
-            Spacer(Modifier.weight(1f))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 // `.actions { gap: 0.5rem }`; narrow `0.15rem`.
@@ -341,6 +358,8 @@ fun TopbarMenu(
                     )
                 }
                 MenuSeparator()
+            }
+            if (!state.toolsInline) {
                 MenuItem(
                     label = "Files",
                     icon = TetherIcons.FolderOpen,
@@ -396,13 +415,13 @@ private fun BrandLink(wide: Boolean, onClick: (() -> Unit)?, modifier: Modifier 
     Box(
         modifier
             .heightIn(min = 44.dp)
+            .testTag(ShellTags.Brand)
             .clickable(interaction, indication = null, enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .clearAndSetSemantics {
                 contentDescription = "Tether — Overview"
                 role = Role.Button
             }
-            .focusRing(focused, RoundedCornerShape(t.radiusSm), t.violet)
-            .testTag(ShellTags.Brand),
+            .focusRing(focused, RoundedCornerShape(t.radiusSm), t.violet),
         contentAlignment = Alignment.Center,
     ) {
         TopbarBrand(studioDesktop = wide)

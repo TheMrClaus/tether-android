@@ -149,15 +149,20 @@ class PhoneShellBehaviourTest {
     }
 
     @Test fun headerActionsReachTheirHosts() {
-        show(PhoneShellState())
+        val state = PhoneShellState()
+        show(state)
         rule.onNodeWithContentDescription("Rename session").performClick()
         rule.onNodeWithContentDescription("End session").performClick()
-        rule.onNodeWithContentDescription("Lock").performClick()
-        rule.onNodeWithContentDescription("Browse workspace files").performClick()
-        rule.onNodeWithContentDescription("Account usage").performClick()
-        rule.onNodeWithContentDescription("Usage analytics").performClick()
-        rule.onNodeWithContentDescription("Health & event log").performClick()
-        assertEquals(listOf("rename", "end", "lock", "files", "usage", "analytics", "log"), events)
+        rule.onNodeWithContentDescription("Settings").performClick()
+        // T15.4: the phone bar folds the navigation, Files and Accounts into its utility menu; each
+        // item closes the menu, then acts.
+        for (tag in listOf(ShellTags.LockKey, ShellTags.MenuFiles, ShellTags.MenuAccounts, ShellTags.menuNav(TopBarDestination.Usage), ShellTags.LogKey, ShellTags.menuNav(TopBarDestination.Overview))) {
+            rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+            rule.onNodeWithTag(tag).performClick()
+            rule.waitForIdle()
+            assertFalse(tag, state.menuOpen)
+        }
+        assertEquals(listOf("rename", "end", "settings", "lock", "files", "usage", "analytics", "log", "nav:overview"), events)
     }
 
     @Test fun endSessionIsDisabledOnceExited() {
@@ -166,9 +171,13 @@ class PhoneShellBehaviourTest {
     }
 
     @Test fun filesKeyNeedsASession() {
-        show(PhoneShellState(), session = null)
-        rule.onNodeWithContentDescription("Browse workspace files").assertIsNotEnabled()
-        rule.onNodeWithContentDescription("Account usage").assertIsEnabled()
+        show(PhoneShellState(menuOpen = true), session = null)
+        // aria-disabled: still in the menu, with its reason.
+        rule.onNodeWithTag(ShellTags.MenuFiles).assertIsNotEnabled()
+        rule.onNodeWithText(TopbarReasons.FILES).assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.MenuAccounts).assertIsEnabled()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick() // the outside tap closes it
+        rule.waitForIdle()
         rule.onNodeWithTag(ShellTags.WorkspaceHeader).assertDoesNotExist()
         rule.onNodeWithTag(ShellTags.EmptyWorkspace).assertIsDisplayed()
         rule.onNodeWithText("Start where the work lives.").assertIsDisplayed()
@@ -191,9 +200,10 @@ class PhoneShellBehaviourTest {
 
     @Test fun talkBackNamesAndStatesNeverRelyOnColour() {
         show(PhoneShellState(), warnings = 3)
-        rule.onNodeWithContentDescription("Tether").assertExists()
-        rule.onNodeWithContentDescription("Console tools").assertExists()
-        val log = rule.onNodeWithContentDescription("Health & event log").fetchSemanticsNode()
+        rule.onNodeWithContentDescription("Tether — Overview").assertExists()
+        // The warning count is in the trigger's name, never only in its red badge.
+        rule.onNodeWithContentDescription("Menu: navigation and tools, 3 unseen warnings").performClick()
+        val log = rule.onNodeWithTag(ShellTags.LogKey).fetchSemanticsNode()
         assertEquals("3 warnings", log.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.StateDescription))
         // The status pill prints the word; its name is the word, not the dot.
         rule.onNodeWithContentDescription("Ready").assertExists()
@@ -217,6 +227,9 @@ class PhoneShellBehaviourTest {
     @Test fun emptyStageControlsHave44dpTouchTargets() {
         show(PhoneShellState(), session = null)
         assertTouchTargets()
+        // T15.4: and every item of the utility menu.
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        assertTouchTargets()
     }
 
     @Test fun renamePencilAcceptsATouchOutsideItsDrawnBounds() {
@@ -231,7 +244,8 @@ class PhoneShellBehaviourTest {
     private fun assertTouchTargets() {
         val min = with(rule.density) { 44.dp.toPx() } - 0.5f
         val nodes = allClickable(rule.onNodeWithTag(ShellTags.Shell).fetchSemanticsNode())
-        assertTrue("found clickables", nodes.size > 5)
+        // T15.4: the empty phone bar holds five controls (drawer key, brand, Settings, menu, start).
+        assertTrue("found clickables", nodes.size > 4)
         for (node in nodes) {
             val b = node.touchBoundsInRoot
             assertTrue("${describe(node)} touch ${b.width}x${b.height}px < 44dp", b.width >= min && b.height >= min)

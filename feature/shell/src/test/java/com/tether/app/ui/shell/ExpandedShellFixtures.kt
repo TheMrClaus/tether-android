@@ -113,6 +113,8 @@ fun ExpandedShellUnderTest(
                     onOpenUsageAnalytics = { onEvent("analytics") },
                     onOpenLog = { onEvent("log") },
                     onLogout = { onEvent("lock") },
+                    onOpenSettings = { onEvent("settings") },
+                    onNavigate = { onEvent("nav:${it.key}") },
                 ),
                 header = WorkspaceHeaderActions(
                     onRename = { onEvent("rename") },

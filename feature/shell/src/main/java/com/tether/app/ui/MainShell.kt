@@ -166,7 +166,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // ones behind it (Android Back plays the web's Back between views). Null current = boot: the
     // view is not resolved yet, so nothing view-specific is painted. Saved across rotation and
     // process death; resolved once per shell, like the web's once-per-load `bootView`.
-    var viewHistorySaved by rememberSaveable { mutableStateOf(ViewHistory(null).encode()) }
+    // A session already chosen by a link (a notification or deep link applied before this shell
+    // composed) resolves the boot at once: the explicit session link wins, so nothing is read.
+    var viewHistorySaved by rememberSaveable {
+        val linked = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null
+        mutableStateOf(ViewHistory(if (linked) DashboardView.Sessions else null).encode())
+    }
     val viewHistory = ViewHistory.decode(viewHistorySaved)
     val view = viewHistory.current
     val navigateTo: (DashboardView) -> Unit = { next ->
@@ -251,11 +256,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // `reopen` and the `created` follow all `pushView("sessions")`).
     LaunchedEffect(vm) { vm.selectedSessionId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
     LaunchedEffect(vm) { vm.openingHistoryId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
-    // T15.4 (dashboard.tsx bootView): resolve the view once. A session already chosen by a link
-    // (a notification or deep link applied before this shell) wins; else the remembered view; else
-    // an install that kept preferences before that record keeps last-session restoration
-    // (Sessions); a fresh install starts on the Overview. A selection made while the read is in
-    // flight has already resolved it (above), and wins.
+    // T15.4 (dashboard.tsx bootView): resolve the view once. A session chosen by a link wins
+    // (above, or while the read is in flight: the selection collectors have resolved it); else the
+    // remembered view; else an install that kept preferences before that record keeps last-session
+    // restoration (Sessions); a fresh install starts on the Overview.
     LaunchedEffect(Unit) {
         if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
         val boot = prefs.viewBoot()

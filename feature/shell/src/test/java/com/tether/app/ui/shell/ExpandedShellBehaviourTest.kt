@@ -101,8 +101,13 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
         rule.onNodeWithTag(ShellTags.MenuKey).assertDoesNotExist() // `.mobile-menu { display: none }`
         rule.onNodeWithTag(ShellTags.InspectorColumn).assertDoesNotExist() // < 100rem
         rule.onNodeWithTag(ShellTags.InspectorHandle).assertDoesNotExist()
-        rule.onNodeWithText("Files").assertIsDisplayed() // ≥ 80rem prints the tool words
-        rule.onNodeWithText("Lock").assertIsDisplayed()
+        // T15.4: the four destinations, then Files and Accounts on the bar (≥ 64rem); Lock is in the menu.
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).assertIsDisplayed()
+        rule.onNodeWithText("Files").assertIsDisplayed()
+        rule.onNodeWithText("Accounts").assertIsDisplayed()
+        rule.onNodeWithText("Lock").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Settings").assertIsDisplayed()
+        rule.onNodeWithContentDescription("More tools").assertIsDisplayed()
         rule.onNodeWithContentDescription("Secure link").assertIsDisplayed()
         rule.onNodeWithTag(ShellTags.Dial).assertIsDisplayed()
         rule.onNodeWithText("Telemetry").assertIsDisplayed()
@@ -320,17 +325,22 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
 
     @Test fun topbarKeysReachTheirHosts() {
         show()
-        rule.onNodeWithContentDescription("Browse workspace files").performClick()
-        rule.onNodeWithContentDescription("Account usage").performClick()
-        rule.onNodeWithContentDescription("Usage analytics").performClick()
-        rule.onNodeWithContentDescription("Health & event log").performClick()
-        rule.onNodeWithContentDescription("Lock").performClick()
-        assertEquals(listOf("files", "usage", "analytics", "log", "lock"), events)
+        rule.onNodeWithTag(ShellTags.FilesKey).performClick()
+        rule.onNodeWithTag(ShellTags.AccountsKey).performClick()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Usage)).performClick()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
+        rule.onNodeWithTag(ShellTags.Brand).performClick()
+        rule.onNodeWithContentDescription("Settings").performClick()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.LogKey).performClick()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.LockKey).performClick()
+        assertEquals(listOf("files", "usage", "analytics", "nav:overview", "nav:overview", "settings", "log", "lock"), events)
     }
 
     @Test fun filesNeedsASessionAndTheEmptyStageShows() {
         show(session = null, skin = TetherSkin.Tactile)
-        rule.onNodeWithContentDescription("Browse workspace files").assertIsNotEnabled()
+        rule.onNodeWithTag(ShellTags.FilesKey).assertIsNotEnabled()
         rule.onNodeWithTag(ShellTags.EmptyWorkspace).assertIsDisplayed()
         rule.onNodeWithContentDescription("Start first session").assertIsDisplayed()
     }
@@ -421,8 +431,15 @@ class ExpandedShellFoldableBehaviourTest : ExpandedBehaviourBase() {
     @Test fun foldableKeepsTheDesktopGridWithoutToolWords() {
         show(store = PanelStore(PanelPrefs(sidebarWidth = 470)))
         assertEquals(360f, widthDp(ShellTags.Sidebar), 0.5f) // stored on a wider screen, re-clamped
+        // T15.4: below 64rem Files and Accounts are in the utility menu, not on the bar.
         rule.onNodeWithText("Files").assertDoesNotExist()
-        rule.onNodeWithContentDescription("Browse workspace files").assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Usage)).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Settings").assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.MenuFiles).assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.MenuAccounts).assertIsDisplayed()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.waitForIdle()
         val stage = rule.onNodeWithTag(ShellTags.Stage).fetchSemanticsNode().boundsInRoot
         val workspace = rule.onNodeWithTag(ShellTags.Workspace).fetchSemanticsNode().boundsInRoot
         assertEquals(dpPx(23f), stage.left - workspace.left, 1f) // calc(space-lg + 7px) below 64rem

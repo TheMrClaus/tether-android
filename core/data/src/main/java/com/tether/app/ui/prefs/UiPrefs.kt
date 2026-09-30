@@ -21,10 +21,7 @@ private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesData
  * DataStore-backed UI preferences: the web's `tether.preferences.v1` fields as one
  * [TetherPreferences] model (T2.3), plus the native-only push / permission state.
  */
-class UiPrefs(
-    /** Public for tests (T15.4: a shell test owns its store, so the boot view's inputs are its own). */
-    private val store: DataStore<Preferences>,
-) {
+class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     constructor(context: Context) : this(context.applicationContext.tetherUiDataStore)
 
     private object Keys {
@@ -111,12 +108,15 @@ class UiPrefs(
 
     suspend fun setPinnedProjects(projects: List<String>) = updatePreferences { it.copy(pinnedProjects = projects) }
 
-    private companion object {
-        fun parse(prefs: Preferences): TetherPreferences =
+    companion object {
+        /** T15.4: preferences on a store of the caller's own (a shell test's, so its boot view's inputs are its own). */
+        fun on(store: DataStore<Preferences>): UiPrefs = UiPrefs(store)
+
+        private fun parse(prefs: Preferences): TetherPreferences =
             TetherPreferences.parse(prefs.asMap().entries.associate { (key, value) -> key.name to value })
 
         /** Every model field is written back, like the web's whole-object save. */
-        fun write(prefs: MutablePreferences, next: TetherPreferences) {
+        private fun write(prefs: MutablePreferences, next: TetherPreferences) {
             prefs[Keys.themeFamily] = next.theme.family.id
             prefs[Keys.themeMode] = next.theme.mode.id
             // Like the web (use-preferences.ts:334), the legacy flat id is dropped once the two axes are stored.
@@ -143,7 +143,7 @@ class UiPrefs(
             prefs[Keys.pinnedModels] = TetherPreferences.joinLines(next.pinnedModels)
         }
 
-        fun <T> MutablePreferences.putOrRemove(key: Preferences.Key<T>, value: T?) {
+        private fun <T> MutablePreferences.putOrRemove(key: Preferences.Key<T>, value: T?) {
             if (value == null) remove(key) else this[key] = value
         }
     }
