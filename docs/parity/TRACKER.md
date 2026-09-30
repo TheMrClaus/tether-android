@@ -36,7 +36,7 @@ protocol 134, native floor 129).
 **Drafts (unpublished, same cert as 0.6.0 `4f8c22de...b74d`):** 0.7.4 (code 21), 0.7.5 (code 22), **0.7.6 (code 23, `c22e8ca`,
 +T13.2 +T6.6)**. v0.7.3 is the published build. Publishing is the owner's call.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
-**Owner queue:** deploy tether #224; publish a draft if wanted; tether goes public soon - review/redact private issues and PRs first.
+**Owner queue:** deploy tether #224 (later); publish a draft if wanted; review/redact the private tether issues and PRs before the visibility flip (owner handles it).
 **Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
 ta-nrq (Firebase-free push alongside BYO-Firebase) and ta-31i (gateway-agnostic sign-in); ta-96z (accept the `__Host-` cookie name),
 ta-ylh (protocol v133), ta-yw0 (server-side interrupt turn id), ta-tgs, ta-bt9.
@@ -309,6 +309,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 | **Push supports BOTH bring-your-own-Firebase per instance AND a Firebase-free path** (corrects an earlier "skip Firebase entirely" reading; tether `docs/self-hosting-push.md` covers BYO-Firebase). FCM work continues; ta-nrq designs the Firebase-free path (e.g. UnifiedPush with a self-hosted distributor) alongside it | Self-hosters choose; nobody is forced onto a Google project | owner |
 | 2026-09-29 | **Service pages (see tether#220): path-form URLs kept only for loopback consoles; credential stripping configurable, default by name** (Tether credentials + gateway identity headers stripped, the app's own cookies pass; per-instance strip-everything option) | Dev apps with their own logins keep working; loopback use stays convenient | owner |
 | 2026-09-29 | **Beads scrub: proceed at the next quiet window** (fresh store from a neutralised export; the event timeline is dropped, notes and evidence kept); no cache purge request; git history left as is, TRACKER wording neutralised in a normal commit | Owner choice | owner |
+| 2026-09-30 | **Service-proxy strip list: keep the wider gateway list** (oauth2-proxy, Pomerium, Authentik, Authelia, Google IAP, Cloudflare Access variants) | Safer for self-hosters on any gateway | owner |
+| 2026-09-30 | **tether #224 deploy later; the owner redacts the private tether issues/PRs before the visibility flip; beads-scrub backup deleted** | Owner choice | owner |
 
 ## Session log (append-only)
 
