@@ -33,8 +33,13 @@ class TetherViewModelLogBadgeClientTest {
     @Before
     fun setUp() = Dispatchers.setMain(main)
 
+    private val vms = TestViewModels()
+
     @After
     fun tearDown() {
+        // T7.4 r2: the view model first (see TestViewModels), then the client, then Main.
+        vms.clear()
+        main.scheduler.advanceUntilIdle()
         h.close()
         Dispatchers.resetMain()
     }
@@ -61,7 +66,7 @@ class TetherViewModelLogBadgeClientTest {
     fun aReSignInStartsTheMarkOverEvenWhenTheViewModelNeverSeesTheEmptyLog() {
         h.enqueueConnect()
         h.newClient()
-        val vm = TetherViewModel(h.client, InMemoryDraftStore(), monotonicClock = { 0 })
+        val vm = vms.track(TetherViewModel(h.client, InMemoryDraftStore(), monotonicClock = { 0 }))
         h.client.start()
         val first = connect()
         first.send(warns(1, 1, 2, 3))
@@ -81,7 +86,7 @@ class TetherViewModelLogBadgeClientTest {
     fun controlTheSameFlowWithMainRunningAfterTheSignIn() {
         h.enqueueConnect()
         h.newClient()
-        val vm = TetherViewModel(h.client, InMemoryDraftStore(), monotonicClock = { 0 })
+        val vm = vms.track(TetherViewModel(h.client, InMemoryDraftStore(), monotonicClock = { 0 }))
         h.client.start()
         val first = connect()
         first.send(warns(1, 1, 2, 3))

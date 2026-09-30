@@ -4,6 +4,7 @@ import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.TetherJson
 import com.tether.app.protocol.fold.initialSessionState
 import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.ui.TestViewModels
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.InMemoryDraftStore
 import java.io.File
@@ -39,10 +40,13 @@ import org.junit.Test
 class ComposerWireTest {
     private val wire = File(System.getProperty("parity.corpus") ?: "../../parity-corpus", "wire")
     private val h = ConnectionHarness()
+    private val vms = TestViewModels()
 
     @Before fun setUp() = Dispatchers.setMain(UnconfinedTestDispatcher())
 
     @After fun tearDown() {
+        // T7.4 r2: the view model first (see TestViewModels), then the client, then Main.
+        vms.clear()
         h.close()
         Dispatchers.resetMain()
     }
@@ -79,7 +83,7 @@ class ComposerWireTest {
         client.start()
         val ws = h.nextSocket()
         h.handshake(ws)
-        val vm = TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { 0 })
+        val vm = vms.track(TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { 0 }))
         vm.selectSession(sessionId)
         h.expectFrame("attach")
         ws.send(snapshotFrame(sessionId, 58, EMPTY_STATE))
