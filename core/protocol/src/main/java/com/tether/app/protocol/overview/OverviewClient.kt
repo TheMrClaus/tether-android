@@ -100,6 +100,16 @@ object OverviewClient {
     const val FILTER_ENTRIES = 64
     const val FILTER_CHARS = 4096
 
+    /**
+     * T15.2 r2 (security review L1): the server's own caps on what a frame carries
+     * (OVERVIEW_LIMITS pageSizeMax, pendingItems, cardPending), re-applied as a frame is folded so
+     * a frame over them never grows what the screen composes. [FACET_ENTRIES] is the app's catalog
+     * bound (LabelText.MAX_ITEMS): the server does not cap facets, a node has that few workspaces.
+     */
+    const val PENDING_ITEMS = 20
+    const val CARD_PENDING = 5
+    const val FACET_ENTRIES = 200
+
     /** The Overview page's own size (components/overview/overview.tsx:23 OVERVIEW_PAGE_SIZE). */
     const val PAGE_SIZE = 24
 
@@ -158,6 +168,19 @@ object OverviewClient {
         return merged.sortedByDescending { it.ts }.take(maxOf(0, cap))
     }
 
+    private fun bounded(card: OverviewCard): OverviewCard =
+        if (card.pending.size <= CARD_PENDING) card else card.copy(pending = card.pending.take(CARD_PENDING))
+
+    private fun bounded(panel: OverviewPendingPanel): OverviewPendingPanel =
+        if (panel.items.size <= PENDING_ITEMS) panel else panel.copy(items = panel.items.take(PENDING_ITEMS))
+
+    private fun bounded(facets: OverviewFacets): OverviewFacets =
+        if (facets.workspaces.size <= FACET_ENTRIES && facets.providers.size <= FACET_ENTRIES) {
+            facets
+        } else {
+            facets.copy(workspaces = facets.workspaces.take(FACET_ENTRIES), providers = facets.providers.take(FACET_ENTRIES))
+        }
+
     private fun snapshotData(message: ServerMessage.OverviewSnapshot) = OverviewData(
         filters = message.filters,
         page = message.page,
@@ -165,9 +188,9 @@ object OverviewClient {
         pageCount = message.pageCount,
         totalCards = message.totalCards,
         counts = message.counts,
-        facets = message.facets,
-        cards = message.cards,
-        pending = message.pending,
+        facets = bounded(message.facets),
+        cards = message.cards.take(PAGE_SIZE_MAX).map(::bounded),
+        pending = bounded(message.pending),
         activitySince = message.activitySince,
         generatedAt = message.generatedAt,
     )
@@ -206,7 +229,7 @@ object OverviewClient {
         if (message.feedId != state.feedId || message.prevCursor != state.cursor) return outOfStep(state)
 
         val byId = LinkedHashMap<String, OverviewCard>()
-        for (card in message.upserts) byId[card.sessionId] = card
+        for (card in message.upserts) byId[card.sessionId] = bounded(card)
         val onPage = data.cards.mapTo(HashSet()) { it.sessionId }
         // Upserts only ever name cards already on this page (the server snapshots on any
         // membership change). An unknown id means we are out of step.
@@ -222,7 +245,7 @@ object OverviewClient {
                     cards = cards,
                     counts = message.counts,
                     totalCards = totalCards(message.counts, data.filters.statuses),
-                    pending = message.pending,
+                    pending = bounded(message.pending),
                 ),
                 activity = mergeActivity(state.activity, message.activity),
                 updatedAt = now,

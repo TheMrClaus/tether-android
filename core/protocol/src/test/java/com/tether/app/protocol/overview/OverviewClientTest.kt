@@ -258,4 +258,37 @@ class OverviewClientTest {
         )
         assertEquals(0, OverviewClient.subscription(null, null, null, -1).page)
     }
+
+    // T15.2 r2 (security review L1): the server's OVERVIEW_LIMITS re-applied as a frame is folded.
+
+    @Test fun `an oversized snapshot is folded to the server's own caps`() {
+        val manyRefs = (0 until 30).map { pending("c0", "r$it") }
+        val cards = (0 until 500).map { card("c$it", status = "waiting", pending = if (it == 0) manyRefs else emptyList()) }
+        val panel = OverviewPendingPanel((0 until 300).map { pending("c$it", "p$it") }, total = 300, outsideFilters = 0)
+        val facets = com.tether.app.protocol.model.OverviewFacets(
+            workspaces = (0 until 1_000).map { com.tether.app.protocol.model.OverviewWorkspaceFacet("/w$it", "w$it", 1) },
+            providers = (0 until 1_000).map { com.tether.app.protocol.model.OverviewProviderFacet("p$it", "claude", label = "P$it", count = 1) },
+        )
+        val data = OverviewClient.applyFrame(
+            OverviewClient.requested(OverviewClient.initial()),
+            snapshot(cards = cards).copy(pending = panel, facets = facets),
+        ).state.data!!
+        assertEquals("pageSizeMax", 48, data.cards.size)
+        assertEquals("server order kept", (0 until 48).map { "c$it" }, data.cards.map { it.sessionId })
+        assertEquals("cardPending", 5, data.cards[0].pending.size)
+        assertEquals("pendingItems", 20, data.pending.items.size)
+        assertEquals("the total still says how many wait", 300, data.pending.total)
+        assertEquals(200, data.facets.workspaces.size)
+        assertEquals(200, data.facets.providers.size)
+    }
+
+    @Test fun `an oversized delta is folded to the server's own caps`() {
+        val state = live()
+        val upsert = card("a", status = "waiting", pending = (0 until 40).map { pending("a", "r$it") })
+        val panel = OverviewPendingPanel((0 until 90).map { pending("a", "p$it") }, total = 90, outsideFilters = 0)
+        val data = OverviewClient.applyFrame(state, delta(upserts = listOf(upsert), pending = panel)).state.data!!
+        assertEquals(5, data.cards.single { it.sessionId == "a" }.pending.size)
+        assertEquals(20, data.pending.items.size)
+        assertEquals(90, data.pending.total)
+    }
 }

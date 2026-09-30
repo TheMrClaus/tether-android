@@ -259,7 +259,10 @@ private fun Toolbar(state: OverviewClientState, choice: OverviewChoice, onChoice
     // overview.tsx:161-176 — the facet options, plus a remembered choice that has no sessions now.
     val workspaceOptions = buildList {
         add(TetherSelectOption("", "All workspaces"))
-        facets?.workspaces?.forEach { add(TetherSelectOption(it.key, SafeText.line(it.label), description = SafeText.line(it.key))) }
+        facets?.workspaces?.forEach {
+            val name = OverviewPresentation.capped(it.label, OverviewPresentation.LABEL_CHARS)
+            add(TetherSelectOption(it.key, SafeText.line(name), description = SafeText.line(OverviewPresentation.capped(it.key, OverviewClient.FILTER_CHARS))))
+        }
         choice.workspace?.takeIf { w -> facets?.workspaces?.none { it.key == w } != false }?.let { w ->
             add(TetherSelectOption(w, SafeText.line(w.split("/").lastOrNull { it.isNotEmpty() } ?: w), description = "${SafeText.line(w)} — no sessions now"))
         }
@@ -520,12 +523,15 @@ private fun PendingItem(item: OverviewPending, now: Long, onReview: (String, Str
             horizontalArrangement = Arrangement.spacedBy(9.6.dp),
             verticalArrangement = Arrangement.spacedBy(9.6.dp),
         ) {
-            item.detail?.takeIf { it.isNotEmpty() }?.let { detail ->
+            item.detail?.takeIf { it.isNotEmpty() }?.let { OverviewPresentation.capped(it, OverviewPresentation.DETAIL_CHARS) }?.let { detail ->
                 // A command or path: the code rule (every hidden code point shown as a token).
+                // Its 200 characters fit in 8 lines at phone width; the full request is in the session.
                 Text(
                     codeText(detail, breakAnywhere = true),
                     style = css(type.mono, 0.78f, 500),
                     color = t.ink,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .weight(1f)
                         .widthIn(min = 120.dp)
@@ -636,13 +642,13 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             val meta = css(type.mono, 0.78f, 500)
             // ta-28i: a workspace's name is code, one line (the sidebar's rule), so a spoof shows.
             Text(
-                codeLabel(card.workspace.label),
+                codeLabel(OverviewPresentation.capped(card.workspace.label, OverviewPresentation.LABEL_CHARS)),
                 style = meta,
                 color = t.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            card.branch?.takeIf { it.isNotEmpty() }?.let { branch ->
+            card.branch?.takeIf { it.isNotEmpty() }?.let { OverviewPresentation.capped(it, OverviewPresentation.LABEL_CHARS) }?.let { branch ->
                 Text("·", style = meta, color = t.faint, modifier = Modifier.clearAndSetSemantics { })
                 Row(
                     Modifier.semantics(mergeDescendants = true) { contentDescription = "branch ${SafeText.code(branch)}" },
@@ -679,7 +685,8 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             val bodyStyle = css(type.ui, 0.92f, 400, lineHeight = 1.5f)
             val detail = status.detail?.takeIf { card.status != "running" }?.let(::prose)?.takeIf { it.isNotEmpty() }
             detail?.let { Text(it, style = bodyStyle, color = t.ink, maxLines = 3, overflow = TextOverflow.Ellipsis) }
-            excerpt?.let { e ->
+            excerpt?.let { shown ->
+                val e = shown.copy(text = OverviewPresentation.capped(shown.text, OverviewPresentation.EXCERPT_CHARS))
                 val lines = if (detail != null) 2 else 3
                 if (e.kind == "tool" || e.kind == "request") {
                     Text(codeText(e.text), style = css(type.mono, 0.8f, 500), color = t.muted, maxLines = lines, overflow = TextOverflow.Ellipsis)
@@ -895,7 +902,7 @@ private fun ActivityRow(record: OverviewActivity, onOpen: (String) -> Unit) {
     val (kindLabel, kindIcon) = activityKind(record.kind)
     val failure = record.kind == "failure"
     val rowTitle = title(record.title)
-    val workspace = record.workspace?.takeIf { it.isNotEmpty() }
+    val workspace = record.workspace?.takeIf { it.isNotEmpty() }?.let { OverviewPresentation.capped(it, OverviewPresentation.LABEL_CHARS) }
     val text = prose(record.text)
     Row(
         Modifier

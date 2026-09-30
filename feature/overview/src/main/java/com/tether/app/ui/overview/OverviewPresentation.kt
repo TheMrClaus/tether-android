@@ -2,6 +2,7 @@ package com.tether.app.ui.overview
 
 import com.tether.app.client.ConsentGuard
 import com.tether.app.client.LabelText
+import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.OverviewCard
 import com.tether.app.protocol.model.OverviewCounts
 import com.tether.app.protocol.model.OverviewFacets
@@ -196,6 +197,20 @@ object OverviewPresentation {
 
     /** Server/agent prose on one surface line (a summary, a status detail, an activity line). */
     fun prose(text: String?): String = LabelText.clean(text, LabelText.MAX_HINT)
+
+    /**
+     * T15.2 r2 (security review L1): OVERVIEW_LIMITS detailChars / excerptChars / labelChars, the
+     * server's own caps, re-applied to the text the code rule draws in full (a request's detail, a
+     * tool excerpt, a workspace name, a branch) BEFORE the rule runs, so an oversized frame costs
+     * no more than a bounded one. The prose and label rules already stop at their bound.
+     */
+    const val DETAIL_CHARS = 200
+    const val EXCERPT_CHARS = 160
+    const val LABEL_CHARS = 120
+
+    /** overview-model.mjs capText's cut (no whitespace folding: code shows what it holds), at a cluster boundary. */
+    fun capped(text: String, max: Int): String =
+        if (text.length <= max) text else TextCut.cut(text, max - 1).trimEnd() + "…"
 
     /** overview-panels.tsx — a pending request's summary as the panel draws it. */
     fun requestSummary(item: OverviewPending): String =

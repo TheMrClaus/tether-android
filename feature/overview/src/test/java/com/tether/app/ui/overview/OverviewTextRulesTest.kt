@@ -184,4 +184,41 @@ class OverviewTextRulesTest {
         val ages = agesFor(Long.MIN_VALUE)
         assertTrue("a days count, not less than a minute: $ages", ages.size == 1 && ages.single().matches(Regex("waiting \\d{10,} days")))
     }
+
+    // T15.2 r2 (security review L1): an oversized feed never grows what the screen composes.
+
+    @Test fun anOversizedSnapshotIsDrawnWithinTheServersCaps() {
+        val huge = "cd /x && " + "y".repeat(4_000_000)
+        val hugeExcerpt = "Bash: " + "z".repeat(4_000_000)
+        val ws = OverviewWorkspace("/srv/w", "w" + "q".repeat(1_000_000))
+        val branch = "b" + "r".repeat(1_000_000)
+        val items = (0 until 300).map { OverviewPending("c$it", "r$it", "approval", createdAt = f.NOW, title = "t$it", summary = "s$it", detail = huge) }
+        val cards = (0 until 500).map {
+            OverviewCard(
+                sessionId = "c$it", title = "t$it", provider = "claude", providerLabel = "Claude", workspace = ws, status = "running",
+                branch = branch, excerpt = OverviewExcerpt("tool", hugeExcerpt),
+            )
+        }
+        val snapshot = com.tether.app.protocol.ServerMessage.OverviewSnapshot(
+            feedId = "feed_1", cursor = 1, page = 0, pageSize = 24, pageCount = 21, totalCards = 500,
+            counts = f.populatedData.counts, facets = f.populatedData.facets, cards = cards,
+            pending = OverviewPendingPanel(items, 300, 0),
+        )
+        val folded = com.tether.app.protocol.overview.OverviewClient.applyFrame(
+            com.tether.app.protocol.overview.OverviewClient.requested(com.tether.app.protocol.overview.OverviewClient.initial()), snapshot, f.NOW,
+        ).state
+        render(folded)
+        val nodes = all()
+        fun tagged(prefix: String) = nodes.count { it.config.getOrElseNullable(SemanticsProperties.TestTag) { null }?.startsWith(prefix) == true }
+        assertEquals("pageSizeMax cards", 48, tagged("overview-card:"))
+        assertEquals("pendingItems", 20, tagged("overview-review-pending:"))
+        val shown = shown().map { it.replace("\u2060\u200B", "") }
+        val details = shown.filter { it.startsWith("cd /x") }
+        assertEquals(20, details.size)
+        assertTrue("detail cut to detailChars: ${details[0].length}", details.all { it.length == OverviewPresentation.DETAIL_CHARS && it.endsWith("…") })
+        val excerpts = shown.filter { it.startsWith("Bash: ") }
+        assertTrue("excerpt cut to excerptChars", excerpts.isNotEmpty() && excerpts.all { it.length == OverviewPresentation.EXCERPT_CHARS && it.endsWith("…") })
+        assertTrue("workspace and branch cut to labelChars", shown.filter { it.startsWith("wqqq") || it.startsWith("brrr") }.all { it.length == OverviewPresentation.LABEL_CHARS })
+        assertTrue("every string bounded", shown.all { it.length < 1_000 })
+    }
 }
