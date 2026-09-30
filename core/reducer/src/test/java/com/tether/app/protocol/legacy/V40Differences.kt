@@ -16,6 +16,12 @@ object V40Differences {
             Regex("""\$\.queuedMessages\[\d+]\.flushMode"""),
             "T7.1: the typed QueuedMessage carries v128's flushMode (issue #47/#183, null for the default end-of-turn flush); v40 had no such field",
         ),
+        Allowed(
+            "*",
+            "*",
+            Regex("""\$\.queuedMessages\[\d+]\.(origin|noticeKind)"""),
+            "ta-ylh: the typed QueuedMessage carries v133's origin / noticeKind (issue #211, events.mjs queued_message_added; null when absent); v40 had no such fields",
+        ),
     )
 
     fun allows(testClass: String, method: String, path: String): Boolean =
