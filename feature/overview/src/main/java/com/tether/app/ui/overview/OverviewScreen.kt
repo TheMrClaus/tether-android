@@ -1,5 +1,6 @@
 package com.tether.app.ui.overview
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -149,7 +150,8 @@ fun OverviewScreen(
     val live = OverviewPresentation.live(state, connected)
     val cards = OverviewClient.stableCardOrder(null, data?.cards)
 
-    BoxWithConstraints(modifier.fillMaxSize().testTag(OverviewTags.Root)) {
+    // `.page { background: var(--mineral) }`.
+    BoxWithConstraints(modifier.fillMaxSize().background(t.mineral).testTag(OverviewTags.Root)) {
         val narrow = maxWidth < 768.dp
         val columns = when {
             maxWidth >= 1280.dp -> 4
@@ -175,8 +177,7 @@ fun OverviewScreen(
                 onShowOutside = { onChoice(choice.copy(workspace = null, provider = null)) },
             )
 
-            // `.cardsArea`: the Sessions heading is visually hidden on the web.
-            Box(Modifier.semantics { heading(); contentDescription = "Sessions" }.size(0.dp))
+            // `.cardsArea` (its "Sessions" heading is visually hidden on the web; each card title is a heading here).
             when {
                 data == null -> SkeletonGrid(columns)
                 OverviewPresentation.noSessionsAtAll(data.facets) -> NoSessions(actions.onNewSession)
