@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -176,8 +177,15 @@ internal fun ConversationTimeline(
         // The row's top lands at 28% of the viewport (scrollOffset counts from past the top padding).
         val scrollOffset = -info.viewportStartOffset - jumpLine.roundToInt()
         scope.launch {
-            if (TimelineModel.smoothJump(distance, vh, latestReduced)) listState.animateScrollToItem(lazyIndex, scrollOffset)
-            else listState.scrollToItem(lazyIndex, scrollOffset)
+            if (!TimelineModel.smoothJump(distance, vh, latestReduced)) {
+                listState.scrollToItem(lazyIndex, scrollOffset)
+                return@launch
+            }
+            // animateScrollToItem does not honour a negative offset exactly: glide to the row, then
+            // by what is left to the line.
+            if (rowTop == null) listState.animateScrollToItem(lazyIndex)
+            val now = listState.layoutInfo.let { i -> i.visibleItemsInfo.firstOrNull { it.index == lazyIndex }?.let { (it.offset - i.viewportStartOffset).toFloat() } }
+            if (now != null) listState.animateScrollBy(now - jumpLine) else listState.scrollToItem(lazyIndex, scrollOffset)
         }
     }
 
