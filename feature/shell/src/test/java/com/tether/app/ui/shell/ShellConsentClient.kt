@@ -76,7 +76,9 @@ class ShellConsentClient : TetherClient {
     override suspend fun pair(baseUrl: String, code: String, label: String): PairResult = error("unused")
     override fun start() = Unit
     override fun stop() = Unit
-    override fun attach(sessionId: String) = Unit
+    override fun attach(sessionId: String) {
+        attachCalls += sessionId
+    }
     override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
         outbox += "send:$text"
     }
@@ -140,6 +142,23 @@ class ShellConsentClient : TetherClient {
         interruptCalls += "$sessionId@$expectedOrigin#$expectedTurnId"
         return com.tether.app.client.InterruptResult.Sent
     }
+    /** T15.2: the Overview feed the tests drive, and every call the UI made to it or to mark-seen. */
+    val overviewState = MutableStateFlow(com.tether.app.protocol.overview.OverviewClientState())
+    override val overview: StateFlow<com.tether.app.protocol.overview.OverviewClientState> get() = overviewState
+    val feedCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun subscribeOverview(subscription: com.tether.app.protocol.overview.OverviewSubscription): Boolean {
+        feedCalls += "overview-subscribe"
+        return true
+    }
+    override fun unsubscribeOverview() {
+        feedCalls += "overview-unsubscribe"
+    }
+    val seenCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun markSeen(historyId: String, seenAt: Long): Boolean {
+        seenCalls += historyId
+        return true
+    }
+    val attachCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit
