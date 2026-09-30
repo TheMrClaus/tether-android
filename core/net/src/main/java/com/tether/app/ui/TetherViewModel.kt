@@ -368,6 +368,20 @@ class TetherViewModel(
         return true
     }
 
+    /**
+     * T7.3: an idle send that delegates (chat-view.tsx:3150-3167: never queued — queue-add carries
+     * no mention). False when nothing was recorded (a turn runs, attachments while offline, or a
+     * mention the current catalog does not offer); the composer then keeps the draft and the chip.
+     */
+    fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention): Boolean {
+        if (client.projections.value[sessionId]?.activeTurnId != null) return false
+        if (attachments.isNotEmpty() && client.connection.value != ConnectionState.Connected) {
+            reportLocalError("Not connected — the message and its attachments were not sent.")
+            return false
+        }
+        return client.sendDelegated(sessionId, text, attachments, mention) == com.tether.app.client.MentionResult.Sent
+    }
+
     /** Client-side failure that never hit the server (e.g. unreadable attachment). */
     fun reportLocalError(message: String) {
         showToast(message, fromServer = false)

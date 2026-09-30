@@ -87,20 +87,22 @@ class SessionControlsModelTest {
         val advertised = listOf(
             CliCommand(name = "compact", description = null, argumentHint = null, aliases = null),
             CliCommand(name = "vim", description = "Vim mode", argumentHint = null, aliases = null),
+            CliCommand(name = "exit", description = "Exit", argumentHint = null, aliases = null),
         )
         val controls = listOf(
             SessionCommandOption(name = "compact", description = "Compact the conversation", argumentHint = null, aliases = null, supported = false),
         )
         val commands = composerCommandList(advertised, controls)
-        // Advertised wins on membership; description enriched from controls;
-        // the closed native allow-set marks only `model` supported; /model is
-        // guaranteed and sorts with the supported group first.
-        assertEquals(listOf("model", "compact", "vim"), commands.map { it.name })
-        assertEquals("Compact the conversation", commands[1].description)
-        assertTrue(commands[0].supported)
-        assertTrue(!commands[1].supported)
-        assertEquals("Switch the model for this session", commands[0].description)
-        assertEquals("[model]", commands[0].argumentHint)
+        // T7.3 (chat-view.tsx:244-274, v128): advertised wins on membership; the description is
+        // enriched from controls; every advertised command is supported except the blocked ones
+        // (exit / stop), which sort last; /model is guaranteed.
+        assertEquals(listOf("compact", "model", "vim", "exit"), commands.map { it.name })
+        assertEquals("Compact the conversation", commands[0].description)
+        assertTrue(commands.take(3).all { it.supported })
+        assertTrue(!commands[3].supported)
+        val model = commands.first { it.name == "model" }
+        assertEquals("Switch the model for this session", model.description)
+        assertEquals("[model]", model.argumentHint)
     }
 
     @Test
@@ -110,7 +112,8 @@ class SessionControlsModelTest {
             SessionCommandOption(name = "agents", description = "a", argumentHint = null, aliases = null, supported = false),
         )
         val commands = composerCommandList(null, controls)
-        assertEquals(listOf("model", "agents"), commands.map { it.name })
+        // Both dispatchable (neither is blocked), so by name.
+        assertEquals(listOf("agents", "model"), commands.map { it.name })
         assertTrue(commands.none { it.name == "model" && it.description == "Switch the model for this session" })
     }
 
@@ -149,16 +152,26 @@ class SessionControlsModelTest {
     }
 
     @Test
-    fun aliasOfANativeCommandMarksSupported() {
-        // The closed allow-set matches by name OR alias; the guaranteed-row
-        // check stays name-keyed (web parity), so a /model alias does not
-        // suppress the real /model row.
+    fun anAliasOfABlockedCommandMarksItUnsupported() {
+        // chat-view.tsx:253-259: blocked by name OR alias; the guaranteed-row check stays name-keyed,
+        // so an alias does not suppress the real /model row.
         val controls = listOf(
+            SessionCommandOption(name = "quit", description = "q", argumentHint = null, aliases = listOf("exit"), supported = true),
             SessionCommandOption(name = "m", description = "alias row", argumentHint = null, aliases = listOf("model"), supported = false),
         )
         val commands = composerCommandList(null, controls)
+        assertTrue(!commands.first { it.name == "quit" }.supported)
         assertTrue(commands.first { it.name == "m" }.supported)
         assertTrue(commands.any { it.name == "model" })
+        assertEquals("quit", commands.last().name)
+    }
+
+    @Test
+    fun theCollatorOrdersNamesAsLocaleCompare() {
+        val advertised = listOf("Zed", "alpha", "beta").map { CliCommand(name = it) }
+        val ci = com.tether.app.protocol.helpers.JsCollator { a, b -> a.lowercase().compareTo(b.lowercase()) }
+        assertEquals(listOf("alpha", "beta", "model", "Zed"), composerCommandList(advertised, emptyList(), ci).map { it.name })
+        assertEquals(listOf("Zed", "alpha", "beta", "model"), composerCommandList(advertised, emptyList()).map { it.name })
     }
 
     @Test

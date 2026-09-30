@@ -11,8 +11,17 @@ import com.tether.app.protocol.model.CliCommand
  * are field-identical to the web's ModelOption / SlashCommandInfo.
  */
 
-/** Tether-native slash commands — the closed allow-set (advertisement ≠ executable). */
-private val TETHER_NATIVE_COMMANDS = setOf("model")
+/**
+ * T7.3 (chat-view.tsx:231): commands withheld from passthrough because they would tear down the
+ * session Tether is managing, not just the turn. Everything else the CLI advertises is dispatchable.
+ */
+val TETHER_BLOCKED_COMMANDS: Set<String> = setOf("exit", "stop")
+
+/**
+ * T7.3 (chat-view.tsx:237): commands that succeed but leave the journal describing a conversation
+ * the model no longer has. Forwarded with a warning, never silently.
+ */
+val TETHER_DESYNC_COMMANDS: Set<String> = setOf("clear", "reset", "new", "compact")
 
 /** The picker always offers exactly ONE "Default" (clear) row. */
 fun isDefaultModelRow(model: SessionModelOption): Boolean =
@@ -58,15 +67,17 @@ fun activeModel(
         ?: picker.firstOrNull { it.current == true }
 
 /**
- * The composer's slash-command list. CLI advertisement and Tether execution
- * support are deliberately independent: the advertised list wins on membership
- * (replace semantics), name-only entries are enriched from controls, and the
- * closed native allow-set decides `supported`. /model is guaranteed present.
- * Sorted supported-first, then by name.
+ * chat-view.tsx:244-274 (v128) `composerCommandList`. The CLI advertises exactly the commands it can
+ * dispatch in headless mode, so membership in the advertised list IS the dispatchability signal: the
+ * advertised list wins on membership (replace semantics; the controls reply is the fallback), a
+ * name-only entry is enriched from the controls reply, and a command is `supported` unless its name
+ * or an alias is one of [TETHER_BLOCKED_COMMANDS]. /model is guaranteed present. Sorted
+ * supported-first, then by name ([collator] = `localeCompare`; the plain code-unit order when null).
  */
 fun composerCommandList(
     advertised: List<CliCommand>?,
     controls: List<SessionCommandOption>,
+    collator: com.tether.app.protocol.helpers.JsCollator? = null,
 ): List<SessionCommandOption> {
     val source: List<CliCommand> = advertised ?: controls.map {
         CliCommand(name = it.name, description = it.description, argumentHint = it.argumentHint, aliases = it.aliases)
@@ -75,13 +86,13 @@ fun composerCommandList(
     val commands = source.map { command ->
         val detail = controlByName[command.name]
         val aliases = command.aliases ?: detail?.aliases
+        val names = listOf(command.name) + aliases.orEmpty()
         SessionCommandOption(
             name = command.name,
             description = command.description ?: detail?.description ?: "",
             argumentHint = command.argumentHint ?: detail?.argumentHint,
             aliases = aliases,
-            supported = TETHER_NATIVE_COMMANDS.contains(command.name) ||
-                aliases?.any { TETHER_NATIVE_COMMANDS.contains(it) } == true,
+            supported = names.none { it in TETHER_BLOCKED_COMMANDS },
         )
     }.toMutableList()
     if (commands.none { it.name == "model" }) {
@@ -96,7 +107,12 @@ fun composerCommandList(
             ),
         )
     }
-    return commands.sortedWith(compareBy({ !it.supported }, { it.name }))
+    val byName: Comparator<SessionCommandOption> = if (collator != null) {
+        Comparator { a, b -> collator.compare(a.name, b.name) }
+    } else {
+        compareBy { it.name }
+    }
+    return commands.sortedWith(compareBy<SessionCommandOption> { !it.supported }.then(byName))
 }
 
 /**

@@ -277,6 +277,43 @@ interface TetherClient {
     fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): StopCommandResult = StopCommandResult.NotConnected
 
     /**
+     * T7.3: RUN the composer's `!` command (`run-command`, v53/v54): in the foreground (the turn slot;
+     * the agent watches and comments) or, [background], detached. An operator control: call it ONLY
+     * from a tap on the command keys or an explicit composer submit, never in answer to anything
+     * received. Sent only on a live, handshaken socket of the server that drew the composer
+     * ([expectedOrigin]), for a session confirmed live on it that is neither read-only, handed off
+     * nor archived, whose provider the server offers command mode for (`capabilities.commandRunner`),
+     * with a non-empty command within the server's limit, and — in the foreground — only while no turn
+     * runs. Each run carries a fresh idempotency key. Otherwise nothing is sent or held: no retry, no
+     * queue ([CommandGuard]).
+     */
+    fun runCommand(sessionId: String, command: String, background: Boolean, expectedOrigin: String?): RunCommandResult = RunCommandResult.NotConnected
+
+    /**
+     * T7.3: move the running FOREGROUND command to the background (`background-command`, v54; the
+     * web's Background key and Ctrl+B). An operator control under [runCommand]'s link rules, bound to
+     * the turn the key was drawn for: sent only while [expectedTurnId] is still the session's open
+     * foreground command turn in its current projection ([CommandGuard.foregroundCommandTurn]).
+     */
+    fun backgroundCommand(sessionId: String, expectedOrigin: String?, expectedTurnId: String): BackgroundCommandResult = BackgroundCommandResult.NotConnected
+
+    /**
+     * T7.3: the `providers-snapshot` catalog the server pushed on this connection (the composer's
+     * `@` Agents). Emptied with the other per-server views on a sign-in switch.
+     */
+    val providerCatalog: StateFlow<List<ProviderCatalogEntry>> get() = NO_PROVIDER_CATALOG
+
+    /** T7.3: ask for the catalog (a read; reply `providers-snapshot`). False when not sent. */
+    fun requestProviderCatalog(): Boolean = false
+
+    /**
+     * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only with a
+     * mention the current catalog offers this session ([CommandGuard.mentionOffered]); otherwise
+     * nothing is recorded.
+     */
+    fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention): MentionResult = MentionResult.NotOffered
+
+    /**
      * T6.6: dismiss ONE notice instance for every device (`dismiss-notice`, v119; the server journals
      * `notice_dismissed`, and the notice goes when that folds). Call it ONLY from a tap on the notice's
      * X, never in answer to anything received. Sent only on a live, handshaken socket of the server
@@ -588,6 +625,7 @@ private val NO_SIGNED_OUT_REASON: StateFlow<SignedOutReason?> = MutableStateFlow
 private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
 private val NO_UNCONFIRMED: StateFlow<Set<String>> = MutableStateFlow(emptySet())
 private val NO_SYNC_STATES: StateFlow<Map<String, SessionSync>> = MutableStateFlow(emptyMap())
+private val NO_PROVIDER_CATALOG: StateFlow<List<ProviderCatalogEntry>> = MutableStateFlow(emptyList())
 private val NO_CODEX_CONTROLS: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = MutableStateFlow(emptyMap())
 private val NO_OPENCODE_CONTROLS: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = MutableStateFlow(emptyMap())
 private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)

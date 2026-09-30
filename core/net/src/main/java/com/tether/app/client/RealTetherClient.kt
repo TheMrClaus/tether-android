@@ -387,6 +387,9 @@ class RealTetherClient(
     private val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     private val sessionsState = MutableStateFlow<List<AgentSession>>(emptyList())
     private val providersState = MutableStateFlow<List<ProviderInfo>>(emptyList())
+
+    /** T7.3: the `providers-snapshot` catalog of the current server (the `@` Agents). */
+    private val providerCatalogState = MutableStateFlow<List<ProviderCatalogEntry>>(emptyList())
     private val workspaceRootState = MutableStateFlow<String?>(null)
 
     // T2.1D: the v128 trees are the source of truth; the typed projections are adapted from
@@ -429,6 +432,7 @@ class RealTetherClient(
     override val connection: StateFlow<ConnectionState> = connectionState
     override val sessions: StateFlow<List<AgentSession>> = sessionsState
     override val providers: StateFlow<List<ProviderInfo>> = providersState
+    override val providerCatalog: StateFlow<List<ProviderCatalogEntry>> = providerCatalogState
     override val workspaceRoot: StateFlow<String?> = workspaceRootState
     override val projections: StateFlow<Map<String, SessionProjection>> = sessionStore.projections
     override val projectionTrees: StateFlow<Map<String, JsObj>> = sessionStore.trees
@@ -912,6 +916,7 @@ class RealTetherClient(
         sessionsState.value = emptyList()
         synchronized(lock) { listedSessionIds.clear() }
         providersState.value = emptyList()
+        providerCatalogState.value = emptyList()
         workspaceRootState.value = null
         synchronized(lock) { sessionStore.clearViews() }
         historiesState.value = emptyList()
@@ -2270,6 +2275,8 @@ class RealTetherClient(
             is ServerMessage.NodeResult -> onNodeResult(webSocket, message)
             // use-tether.ts:1047: every batch folds into the one log (seq dedupe, bootId restart).
             is ServerMessage.Log -> ifCurrent(webSocket) { eventLogState.update { it.accept(message) } }
+            // T7.3: use-tether.ts:1129 — the catalog is replaced wholesale (the `@` Agents read it).
+            is ServerMessage.ProvidersSnapshot -> ifCurrent(webSocket) { providerCatalogState.value = ProviderCatalogEntry.parse(message.entries) }
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             }
@@ -2635,11 +2642,33 @@ class RealTetherClient(
         recordAndDrain(PendingInput.KIND_QUEUE, sessionId, text)
     }
 
+    /**
+     * T7.3: a delegated send (v103 `send.mention`). The mention is checked against the catalog the
+     * CURRENT server pushed, under the lock, then recorded like any send (use-tether.ts sendText with a
+     * mention is the same durable path).
+     */
+    override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention): MentionResult {
+        val offered = synchronized(lock) {
+            val session = sessionsState.value.firstOrNull { it.id == sessionId }
+            session != null && CommandGuard.mentionOffered(session, mention, providerCatalogState.value)
+        }
+        if (!offered) return MentionResult.NotOffered
+        recordAndDrain(PendingInput.KIND_SEND, sessionId, text, attachments.ifEmpty { null }, mention)
+        if (attachments.isNotEmpty()) probeLink()
+        return MentionResult.Sent
+    }
+
     /** use-tether.ts:630 filePending: mint, record, persist, then one drain puts it on the wire. */
-    private fun recordAndDrain(kind: String, sessionId: String, text: String, attachments: List<Attachment>? = null) {
+    private fun recordAndDrain(
+        kind: String,
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>? = null,
+        mention: com.tether.app.protocol.DelegateMention? = null,
+    ) {
         val key = PendingInput.newKey()
         val evicted = synchronized(lock) {
-            val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments)
+            val result = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments, mention)
             pendingStore = result.store
             forgetLocked(result.evicted.map { it.key })
             result.evicted
@@ -2696,7 +2725,7 @@ class RealTetherClient(
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
             frames = sendable.map { record ->
                 if (record.kind == PendingInput.KIND_SEND) {
-                    ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments)
+                    ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments, record.mention)
                 } else {
                     ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
                 }
@@ -3147,6 +3176,60 @@ class RealTetherClient(
         if (result == StopCommandResult.NotConnected) emitError("The secure link is reconnecting. The command was not stopped.")
         return result
     }
+
+    /**
+     * T7.3: the one path a `!` command RUN takes to the wire. Under the lock, in order: a live,
+     * handshaken socket of a running (not halted) client; the composer drawn for THIS server
+     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; listed, and neither
+     * read-only, handed off nor archived (fail closed); the provider offered command mode by the
+     * server, a command of the right shape, and no running turn for a foreground run
+     * ([CommandGuard.checkRun]); then enqueued on that socket with a fresh idempotency key. Nothing is
+     * retried, held or persisted (use-tether.ts runCommand is a direct send too).
+     */
+    override fun runCommand(sessionId: String, command: String, background: Boolean, expectedOrigin: String?): RunCommandResult {
+        if (sessionId.isEmpty()) return RunCommandResult.Locked
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized RunCommandResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized RunCommandResult.NotLive
+            if (sessionId !in liveThisEpoch) return@synchronized RunCommandResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized RunCommandResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized RunCommandResult.Locked
+            CommandGuard.checkRun(session, providersState.value, sessionStore.tree(sessionId), command, background)?.let { return@synchronized it }
+            val frame = ClientMessage.RunCommand(sessionId, command, PendingInput.newKey(), if (background) true else null)
+            if (!ws.send(frame.encode())) return@synchronized RunCommandResult.NotConnected
+            RunCommandResult.Sent
+        }
+        if (result == RunCommandResult.NotConnected) emitError("Not connected — reconnecting. Try the command again in a moment.")
+        return result
+    }
+
+    /**
+     * T7.3: the one path a Background (Ctrl+B) takes to the wire, under [runCommand]'s link rules,
+     * bound to the turn the key was drawn for: [expectedTurnId] must still be the session's open
+     * FOREGROUND command turn in its current projection. Nothing is retried, held or persisted.
+     */
+    override fun backgroundCommand(sessionId: String, expectedOrigin: String?, expectedTurnId: String): BackgroundCommandResult {
+        if (sessionId.isEmpty()) return BackgroundCommandResult.Locked
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized BackgroundCommandResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized BackgroundCommandResult.NotLive
+            if (sessionId !in liveThisEpoch) return@synchronized BackgroundCommandResult.NotLive
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized BackgroundCommandResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized BackgroundCommandResult.Locked
+            CommandGuard.checkBackground(sessionStore.tree(sessionId), expectedTurnId)?.let { return@synchronized it }
+            if (!ws.send(ClientMessage.BackgroundCommand(sessionId).encode())) return@synchronized BackgroundCommandResult.NotConnected
+            BackgroundCommandResult.Sent
+        }
+        if (result == BackgroundCommandResult.NotConnected) emitError("The secure link is reconnecting. The command was not moved to the background.")
+        return result
+    }
+
+    /** T7.3: use-tether.ts:787 `providers-snapshot` (a read). */
+    override fun requestProviderCatalog(): Boolean = sendFrame(ClientMessage.ProvidersSnapshotRequest)
 
     /**
      * T6.6: the one path a notice's dismissal takes to the wire. Under the lock, in order: a live,

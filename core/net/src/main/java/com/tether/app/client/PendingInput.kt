@@ -48,6 +48,8 @@ object PendingInput {
         text: String,
         now: Long,
         attachments: List<Attachment>? = null,
+        /** T7.3: a v103 delegate mention riding this send (the web port shape-checks it again). */
+        mention: com.tether.app.protocol.DelegateMention? = null,
     ): AddResult {
         val input = JsObj.of(
             "key" to js(key),
@@ -55,6 +57,7 @@ object PendingInput {
             "sessionId" to js(sessionId),
             "text" to js(text),
             "attachments" to attachments?.let { list -> JsArr.of(list.map(::attachmentTree)) },
+            "mention" to mention?.let(::mentionTree),
         )
         val result = Web.addRecord(store.tree, input, now.toDouble())
         return AddResult(PendingStore(result["store"] as JsObj), records(result["evicted"]))
@@ -168,6 +171,14 @@ object PendingInput {
 
     private fun strings(value: JsValue?): List<String> = (value as? JsArr).orEmpty().mapNotNull { it.str }
 
+    private fun mentionTree(m: com.tether.app.protocol.DelegateMention): JsObj = JsObj.of(
+        "kind" to js(m.kind),
+        "provider" to js(m.provider),
+        "model" to m.model?.let(::js),
+        "reasoningEffort" to m.reasoningEffort?.let(::js),
+        "mode" to js(m.mode),
+    )
+
     private fun attachmentTree(a: Attachment): JsObj =
         JsObj.of("name" to js(a.name), "mediaType" to js(a.mediaType), "data" to js(a.data))
 }
@@ -195,6 +206,14 @@ class PendingRecord internal constructor(val tree: JsObj) {
     val attachments: List<Attachment>? get() = (tree["attachments"] as? JsArr)?.mapNotNull { value ->
         val obj = value as? JsObj ?: return@mapNotNull null
         Attachment(obj["name"].str.orEmpty(), obj["mediaType"].str.orEmpty(), obj["data"].str.orEmpty())
+    }
+
+    /** T7.3: the v103 delegate mention the send carries (the port kept it only when well-formed). */
+    val mention: com.tether.app.protocol.DelegateMention? get() {
+        val obj = tree["mention"] as? JsObj ?: return null
+        val provider = obj["provider"].str ?: return null
+        val mode = obj["mode"].str ?: return null
+        return com.tether.app.protocol.DelegateMention(provider, mode, obj["model"].str, obj["reasoningEffort"].str)
     }
 
     override fun equals(other: Any?): Boolean = other is PendingRecord && other.tree == tree

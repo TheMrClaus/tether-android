@@ -127,6 +127,12 @@ data class ProviderCapabilities(
     val collaborationModes: Boolean = false,
     val providerControls: Boolean = false,
     val providerCatalogs: Boolean = false,
+    /**
+     * T7.3 (v53, lib/protocol.ts:974): the composer's `!` command mode is offered for this
+     * provider (a server-side Tether feature, not an engine one). False when absent: the app never
+     * offers command mode unless the server says so.
+     */
+    val commandRunner: Boolean = false,
 )
 
 @Serializable
