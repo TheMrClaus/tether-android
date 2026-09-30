@@ -218,6 +218,20 @@ class AttachmentComposerBehaviourTest {
         rule.onNodeWithText("U+202E", substring = true, useUnmergedTree = true).assertExists()
         rule.onAllNodesWithText("invoice\u202Efdp.exe", useUnmergedTree = true).assertCountEquals(0)
     }
+
+    @Test
+    fun aNameWithALineFeedCarriageReturnOrTabIsOneLineInTheChipAndItsRemoveLabel() {
+        staged = listOf(StagedAttachment(10, Attachment("notes\nfinal\r\tv2.txt", "text/plain", "eA=="), 1))
+        show()
+        for (token in listOf("U+000A", "U+000D", "U+0009")) {
+            rule.onNodeWithText(token, substring = true, useUnmergedTree = true).assertExists()
+        }
+        // The remove key's spoken label names the file by the same rule: tokens, no raw break.
+        val label = rule.onNodeWithContentDescription("Remove ", substring = true).fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription].joinToString("")
+        assertTrue("label: $label", label.contains("U+000A") && label.contains("U+0009"))
+        assertTrue("a raw break in the label: $label", label.none { it == '\n' || it == '\r' || it == '\t' })
+    }
 }
 
 object ComposerAttachmentFixtures {

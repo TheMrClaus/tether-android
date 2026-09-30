@@ -42,7 +42,8 @@ import com.tether.app.ui.components.TetherSheet
 import com.tether.app.ui.components.TetherSheetRow
 import com.tether.app.ui.components.TetherSheetSurface
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import kotlinx.coroutines.CoroutineDispatcher
@@ -159,8 +160,9 @@ internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when
 
 /**
  * `.chat-attachment-chip` (globals.css 6942-7008): a 2rem thumbnail for a picture (decoded small
- * from the staged bytes) or a FileText glyph, the name (the code rule: an untrusted name shows every
- * control it holds, on one line) over its size, and the 1.6rem remove key.
+ * from the staged bytes) or a FileText glyph, the name (the one-line rule, `codeLabel`: an untrusted
+ * name shows every control it holds, TAB / LF / CR included, as a token, LTR) over its size, and the
+ * 1.6rem remove key (its label names the file by the same rule).
  */
 @Composable
 internal fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) {
@@ -190,7 +192,7 @@ internal fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) 
         }
         Column(Modifier.weight(1f, fill = false)) {
             Text(
-                codeText(item.attachment.name),
+                codeLabel(item.attachment.name),
                 color = t.ink,
                 style = type.body.copy(fontSize = 12.8.sp),
                 maxLines = 1,
@@ -198,13 +200,13 @@ internal fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) 
             )
             Text(AttachmentCopy.size(item.sizeBytes), color = t.muted, style = type.body.copy(fontSize = 11.2.sp), maxLines = 1)
         }
-        // The name is already the cleaned wire name (no controls): safe inside the spoken label.
+        // The one-line rule in the spoken label too (ta-28i): a TAB / LF / CR is named, not read out as a break.
         TetherKey(
             onClick = onRemove,
             classes = KeyClasses.IconButton,
             icon = TetherIcons.X,
             iconSize = 14.dp,
-            contentDescription = "Remove ${item.attachment.name}",
+            contentDescription = "Remove ${SafeText.line(item.attachment.name)}",
         )
     }
 }

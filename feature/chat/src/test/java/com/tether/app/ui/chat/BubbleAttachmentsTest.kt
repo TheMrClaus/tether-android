@@ -99,6 +99,29 @@ class BubbleAttachmentsTest {
     }
 }
 
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class BubbleAttachmentLineRuleTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun aNameWithALineFeedCarriageReturnOrTabShowsThemAsTokensOnOneLine() {
+        rule.setContent {
+            ChatHost(TetherSkin.Studio) {
+                CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader()) { UserBubble(BubbleFixtures.breaks) }
+            }
+        }
+        rule.waitForIdle()
+        // ta-28i one-line rule: a break in a name is a visible token, never a second line.
+        for (token in listOf("U+000A", "U+000D", "U+0009")) {
+            rule.onNodeWithText(token, substring = true, useUnmergedTree = true).assertExists()
+        }
+        val drawn = rule.onNodeWithText("report", substring = true, useUnmergedTree = true).fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString("")
+        assertTrue("a raw break was drawn: $drawn", drawn.none { it == '\n' || it == '\r' || it == '\t' })
+    }
+}
+
 object BubbleFixtures {
     const val MEDIA_URL = "/api/tool-media/0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0.png"
 
@@ -127,6 +150,10 @@ object BubbleFixtures {
 
     val pathChip: TurnBlock = decode(
         """{"blockId":"u4","kind":"user_message","text":"x","attachments":[{"name":"scan.heic","mediaType":"image/heic","delivery":"path"}]}""",
+    )
+
+    val breaks: TurnBlock = decode(
+        """{"blockId":"u6","kind":"user_message","text":"x","attachments":[{"name":"report\nfinal\r\tv2.txt","mediaType":"text/plain"}]}""",
     )
 
     val hostile: TurnBlock = decode(

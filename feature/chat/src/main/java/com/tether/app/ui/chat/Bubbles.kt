@@ -69,7 +69,7 @@ import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
 import com.tether.app.ui.theme.ThemeFamily
 import com.tether.app.ui.text.proseText
-import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.codeLabel
 
 /**
  * The resolved `.chat-bubble` box for one skin and layout class — the cascade of globals.css
@@ -360,8 +360,9 @@ fun ThinkingCard(block: TurnBlock, modifier: Modifier = Modifier) {
  * real thumbnail through the transcript's own tool-media path (the paired origin's
  * `/api/tool-media/<sha256>.<ext>` only, no redirects, bounded, the same "Image unavailable" tile
  * when it cannot load; a tap opens the viewer); every other attachment keeps its name chip, the
- * name drawn by the code rule on one line. A picture the engine could only take as a staged path
- * says so ("sent as a path"; with a thumbnail, the note under the row).
+ * name drawn by the one-line rule (`codeLabel`: TAB / LF / CR are tokens too). A picture the
+ * engine could only take as a staged path says so ("sent as a path"; with a thumbnail, the note
+ * under the row).
  *
  * Divergence (fail visible): the web chips only attachments with NO `mediaRef`, so one whose ref is
  * malformed shows nothing at all; here it keeps its chip.
@@ -410,7 +411,7 @@ private fun BubbleAttachmentChip(attachment: com.tether.app.protocol.model.Attac
             modifier = Modifier.size(12.dp),
         )
         Text(
-            codeText(attachment.name),
+            codeLabel(attachment.name),
             style = look.style.copy(fontSize = 12.8.sp),
             color = t.ink,
             maxLines = 1,
