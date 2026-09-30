@@ -54,3 +54,10 @@ CSS:
   at HH:MM: …", "Current step" on the needle) whose node is one pitch (10dp) tall, like the web's
   2px buttons. For touch, the target is the rail's 54dp-wide scrubber, with an 18dp slop around
   each slot. Keyboard focus shows the bubble and the web's focus ring.
+- **Needle when prompts are off screen**: the web picks the prompt nearest the reading line
+  across the whole transcript. A lazy list only lays out what is on screen, so Android lets an
+  on-screen prompt row win and otherwise takes the last prompt above the screen (or the first
+  below). The needle can therefore sit one prompt behind the web's for part of a scroll: near the
+  end of a reply longer than about 1.2 viewports, and when the only on-screen prompt is in the
+  bottom fifth while the previous one ends just above the top. Jumps, scrubs and copy are
+  unaffected; the window shifts by at most one slot.
