@@ -22,8 +22,9 @@ import org.robolectric.annotation.Config
  * ta-fz3 visual states of the external-link confirm sheet: `external-link-confirm` = an
  * international host (Cyrillic a in a Latin name) shown as punycode with its note, a port on its
  * own row and a percent-escaped RLO left encoded in the path; `external-link-confirm-rtl` = the
- * sheet in an RTL UI with a Hebrew path, drawn left to right character by character;
- * `external-link-mail` = a mailto link with its recipient.
+ * sheet in an RTL UI with a Hebrew path (r2: shown, and opened, percent-encoded as UTF-8), laid
+ * out left to right; `external-link-mail` = a mailto link with its recipient (r2: the query is
+ * dropped, so the Address row is the address alone).
  */
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
 

@@ -34,30 +34,41 @@ import java.text.Normalizer
  *   nothing or to plain ASCII: `goo` U+1806 `gle` becomes `google`), which holds a deviation
  *   character (`ß`, `ς`: IDNA2003 and the browsers' UTS #46 send them to different domains), with
  *   an empty label, over 253 characters, or which a browser reads as an IPv4 address but is not a
- *   canonical dotted quad (`0x7f.1`, `3627734350`). IPv6 literals are hex, `:` and `.` only.
- * - mailto: no recipient and no header; a recipient that is not exactly `local@domain` with an
- *   ASCII local part (`%` refused: an escaped `@` or `,` would split differently in the mail app);
- *   a domain that fails the host rule; any header other than `subject` and `body` (a `to`, `cc`
- *   or `bcc` header adds recipients outside the address line).
+ *   canonical dotted quad (`0x7f.1`, `3627734350`); an IPv6 literal that is not eight 16-bit hex
+ *   groups (one `::` at most, an optional dotted-quad tail; no zone id).
+ * - mailto: no recipient; a recipient that is not exactly `local@domain` with an ASCII local part
+ *   of RFC 5322 atext and dots (`%` refused: an escaped `@` or `,` would split differently in the
+ *   mail app; `#` refused: a URI parser ends the address there); a domain that fails the host rule
+ *   or is an address.
  *
  * ALLOWED hrefs become a [Target]:
  * - [Target.host] is the host in ASCII: an internationalised name as punycode (`xn--`), letters
  *   lowercased. [Target.port] is the port when the href names one, default or not; the confirm
  *   sheet shows it on its own row.
- * - [Target.display] is the target the confirm sheet shows and what opens: the scheme lowercased,
- *   the host (or each mailto domain) in ASCII, and every other character EXACTLY as written.
- *   Percent-escapes are LEFT ENCODED, never decoded: `%E2%80%AE` in a path is shown as those nine
- *   characters (it is what the browser requests), so no decoding can surface a hidden character.
- *   Drawn by the code rule and [forcedLtr].
- * - [opensDirectly]: a link whose visible label is exactly its href, and whose href is printable
- *   ASCII (so no international host and nothing the label's bidi layout could reorder), opens
- *   without the sheet; every other external link asks first.
+ * - [Target.display] is the target the confirm sheet shows and what opens, always printable
+ *   ASCII: the scheme lowercased, the host (or each mailto domain) in ASCII, every non-ASCII
+ *   character after the host PERCENT-ENCODED as UTF-8 (r2: what the browser sends anyway, so no
+ *   look-alike outside the host can draw as a delimiter), every other character exactly as
+ *   written. Percent-escapes already in the href are LEFT ENCODED, never decoded: `%E2%80%AE` in a
+ *   path is shown as those nine characters, so no decoding can surface a hidden character. Drawn
+ *   by the code rule and [forcedLtr].
+ * - mailto (r2): only the recipients open (`mailto:a@x,b@y`); the query (subject, body and every
+ *   header) is DROPPED. A mail app decodes the query before it splits it (`android.net.MailTo`),
+ *   so `subject=x%26bcc%3Dspy@evil` would add a recipient no header check on the raw text sees;
+ *   with no query there is nothing to decode. The sheet shows exactly the address that opens.
+ * - [opensDirectly]: a link opens without the sheet only when its visible label is exactly its
+ *   href, the href is printable ASCII (so no international host and nothing the label's bidi
+ *   layout could reorder) and what opens is what the label says ([Target.display] equals the href
+ *   but for ASCII case: a dropped mailto query asks), and (r2) nothing in it can mislead where it
+ *   is cut or wrapped: no `@` in an http(s) href (`https://evil.example?@bank.example`), and a host
+ *   (each mailto domain) of at most [DIRECT_HOST_CHARS] characters and [DIRECT_HOST_LABELS]
+ *   labels. Every other external link asks first.
  */
 object SafeHref {
     enum class Scheme(val prefix: String) { Http("http://"), Https("https://"), Mailto("mailto:") }
 
     /** Why a href is not a link (for tests and logs; never shown raw to the operator). */
-    enum class Refusal { Scheme, Length, CodePoint, Backslash, Authority, UserInfo, Port, Host, Recipient, Header }
+    enum class Refusal { Scheme, Length, CodePoint, Backslash, Authority, UserInfo, Port, Host, Recipient }
 
     /** A href that passed [check]. */
     class Target internal constructor(
@@ -82,6 +93,12 @@ object SafeHref {
         data class Allowed(val target: Target) : Verdict
         data class Refused(val reason: Refusal) : Verdict
     }
+
+    /** r2: a longer host (or mailto domain) never opens without the sheet: it can wrap or be cut off. */
+    const val DIRECT_HOST_CHARS: Int = 40
+
+    /** r2: a host with more labels never opens without the sheet (`bank.example.com.evil.example`). */
+    const val DIRECT_HOST_LABELS: Int = 4
 
     /** Longer hrefs are refused (bounds the host conversion; far above any real chat link). */
     const val MAX_HREF: Int = 8192
@@ -115,8 +132,14 @@ object SafeHref {
     /** The [Target] of an allowed [href], or null. */
     fun target(href: String): Target? = (check(href) as? Verdict.Allowed)?.target
 
-    /** May [target] open without the confirm sheet? Only when its visible [label] is exactly its href and the href is printable ASCII. */
-    fun opensDirectly(target: Target, label: String): Boolean = target.ascii && label == target.href
+    /** May [target] open without the confirm sheet? See the class doc: exact printable-ASCII label, what opens is what it says, a short host, no `@` in http(s). */
+    fun opensDirectly(target: Target, label: String): Boolean {
+        if (!target.ascii || label != target.href) return false
+        if (!target.display.equals(target.href, ignoreCase = true) || target.display.length != target.href.length) return false
+        val hosts = if (target.scheme == Scheme.Mailto) target.recipients.map { it.substringAfter('@') } else listOfNotNull(target.host)
+        if (target.scheme != Scheme.Mailto && '@' in target.href) return false
+        return hosts.isNotEmpty() && hosts.all { it.length <= DIRECT_HOST_CHARS && it.trimEnd('.').split('.').size <= DIRECT_HOST_LABELS }
+    }
 
     /** [display] (already drawn by the code rule) forced left to right, character by character, whatever it holds. */
     fun forcedLtr(display: String): String = "$LRO$display$PDF"
@@ -202,7 +225,7 @@ object SafeHref {
             append(scheme.prefix)
             append(host.ascii)
             if (portPart != null) append(':').append(portPart)
-            append(rest, end, rest.length)
+            appendEncoded(rest, end, rest.length)
         }
         return Verdict.Allowed(Target(href, scheme, host.ascii, port, emptyList(), host.international, display, ascii))
     }
@@ -217,9 +240,39 @@ object SafeHref {
 
     private fun ipv6(bracketed: String): AsciiHost? {
         val inner = bracketed.substring(1, bracketed.length - 1)
-        if (inner.isEmpty() || ':' !in inner) return null
-        if (inner.any { !(it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.') }) return null
+        if (!ipv6Address(inner)) return null
         return AsciiHost("[" + inner.asciiLowercase() + "]", international = false)
+    }
+
+    /** r2: RFC 4291 text form: eight 1-4 digit hex groups, one `::` at most, an optional canonical dotted-quad tail (two groups). */
+    internal fun ipv6Address(s: String): Boolean {
+        if (s.isEmpty() || s.any { !(it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.') }) return false
+        var body = s
+        var tailGroups = 0
+        val lastColon = s.lastIndexOf(':')
+        if (lastColon < 0) return false
+        val tail = s.substring(lastColon + 1)
+        if ('.' in tail) {
+            val octets = tail.split('.')
+            if (octets.size != 4 || octets.any { !canonicalOctet(it) }) return false
+            body = s.substring(0, lastColon + 1)
+            tailGroups = 2
+            // `…:1.2.3.4` leaves `…:`; only `::1.2.3.4` may end in the double colon.
+            if (body.endsWith(':') && !body.endsWith("::")) body = body.dropLast(1)
+        }
+        fun group(g: String) = g.length in 1..4 && g.all { it != '.' }
+        val dbl = body.indexOf("::")
+        if (dbl >= 0) {
+            if (body.indexOf("::", dbl + 1) >= 0) return false
+            val head = body.substring(0, dbl)
+            val rest = body.substring(dbl + 2)
+            val hg = if (head.isEmpty()) emptyList() else head.split(':')
+            val rg = if (rest.isEmpty()) emptyList() else rest.split(':')
+            if (!hg.all(::group) || !rg.all(::group)) return false
+            return hg.size + rg.size + tailGroups <= 7
+        }
+        val groups = body.split(':')
+        return groups.all(::group) && groups.size + tailGroups == 8
     }
 
     /** A DNS host (or a canonical IPv4 address) in ASCII, or null (see the class doc). */
@@ -269,47 +322,55 @@ object SafeHref {
 
     // ---- mailto -------------------------------------------------------------------------------
 
-    private const val ATEXT_EXTRA = "!#$&'*+-/=^_`{|}~."
+    /** RFC 5322 atext punctuation and dot, without `#` (a URI parser ends the address there). */
+    private const val ATEXT_EXTRA = "!$&'*+-/=^_`{|}~."
 
     private fun mailto(href: String, rest: String, ascii: Boolean): Verdict {
-        val q = rest.indexOf('?')
-        val to = if (q < 0) rest else rest.substring(0, q)
-        val query = if (q < 0) null else rest.substring(q + 1)
-        if (to.isEmpty() && query.isNullOrEmpty()) return refused(Refusal.Recipient)
+        // r2: the query is dropped (see the class doc); only the address line is read and opens.
+        val to = rest.substringBefore('?')
+        if (to.isEmpty()) return refused(Refusal.Recipient)
         val recipients = ArrayList<String>()
         var international = false
-        if (to.isNotEmpty()) {
-            for (address in to.split(',')) {
-                val at = address.indexOf('@')
-                if (at <= 0 || at != address.lastIndexOf('@')) return refused(Refusal.Recipient)
-                val local = address.substring(0, at)
-                if (local.any { !(it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in ATEXT_EXTRA) }) return refused(Refusal.Recipient)
-                if (local.startsWith('.') || local.endsWith('.') || ".." in local) return refused(Refusal.Recipient)
-                val domain = address.substring(at + 1)
-                if (domain.startsWith('[')) return refused(Refusal.Recipient)
-                val host = asciiHost(domain) ?: return refused(Refusal.Recipient)
-                if (numericLabel(host.ascii.substringAfterLast('.'))) return refused(Refusal.Recipient)
-                international = international || host.international
-                recipients.add("$local@${host.ascii}")
-            }
+        for (address in to.split(',')) {
+            val at = address.indexOf('@')
+            if (at <= 0 || at != address.lastIndexOf('@')) return refused(Refusal.Recipient)
+            val local = address.substring(0, at)
+            if (local.any { !(it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in ATEXT_EXTRA) }) return refused(Refusal.Recipient)
+            if (local.startsWith('.') || local.endsWith('.') || ".." in local) return refused(Refusal.Recipient)
+            val domain = address.substring(at + 1)
+            if (domain.startsWith('[')) return refused(Refusal.Recipient)
+            val host = asciiHost(domain) ?: return refused(Refusal.Recipient)
+            if (numericLabel(host.ascii.trimEnd('.').substringAfterLast('.'))) return refused(Refusal.Recipient)
+            international = international || host.international
+            recipients.add("$local@${host.ascii}")
         }
-        if (query != null) {
-            for (field in query.split('&')) {
-                val name = field.substringBefore('=')
-                if (name.asciiLowercase() != "subject" && name.asciiLowercase() != "body") return refused(Refusal.Header)
-            }
-        }
-        val display = buildString {
-            append(Scheme.Mailto.prefix)
-            append(recipients.joinToString(","))
-            if (query != null) append('?').append(query)
-        }
+        val display = Scheme.Mailto.prefix + recipients.joinToString(",")
         return Verdict.Allowed(Target(href, Scheme.Mailto, null, null, recipients, international, display, ascii))
     }
 
     // ---- helpers ------------------------------------------------------------------------------
 
     private fun refused(reason: Refusal): Verdict = Verdict.Refused(reason)
+
+    private const val HEX_UPPER = "0123456789ABCDEF"
+
+    /** r2: [s] from [from] to [to], every code point above U+007E percent-encoded as UTF-8, the rest as is. */
+    private fun StringBuilder.appendEncoded(s: String, from: Int, to: Int) {
+        var i = from
+        while (i < to) {
+            val cp = s.codePointAt(i)
+            val len = Character.charCount(cp)
+            if (cp <= 0x7E) {
+                append(cp.toChar())
+            } else {
+                for (b in String(Character.toChars(cp)).toByteArray(Charsets.UTF_8)) {
+                    val v = b.toInt() and 0xFF
+                    append('%').append(HEX_UPPER[v shr 4]).append(HEX_UPPER[v and 0xF])
+                }
+            }
+            i += len
+        }
+    }
 
     /** JS `/^prefix/i` without `u`: only A-Z fold (never Unicode case folding). */
     private fun String.startsWithAsciiFold(lowercasePrefix: String): Boolean {
