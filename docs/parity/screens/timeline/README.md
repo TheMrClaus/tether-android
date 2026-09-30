@@ -42,7 +42,10 @@ CSS:
   parameters.
 - **Display cleaning**: prompts, replies and attachment names go through `LabelText.clean`. Bidi
   controls and invisible code points are dropped, whitespace is collapsed, and the text is bounded
-  at the same limits.
+  at the same limits. The transcript bubble behind the `saved` shot draws the same prompt by the
+  transcript's own rule (ta-blf, `TranscriptText`): its RLO and PDF are visible `⟨U+202E⟩`
+  tokens, so it reads "Fix the ⟨U+202E⟩parser⟨U+202C⟩ bug now". The web, and these goldens
+  before ta-blf, drew "Fix the resrap bug now".
 - **Saved copy** (T13.2): an empty reply reads "Agent reply pending…" only on a live copy.
 - **Side**: the layout class picks the side (expanded = the web's desktop, rail on the left), not
   the web's 64rem media query.

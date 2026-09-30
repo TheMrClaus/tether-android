@@ -27,7 +27,7 @@ import com.tether.app.ui.theme.TetherTokens
  *
  * PROSE ([Rule.Prose]): agent/user bubbles (streaming and finished), markdown paragraphs,
  * headings, lists, quotes, table cells and link labels, thinking, card copy (results, errors, plan
- * steps).
+ * steps), the sub-agent panel's titles and notes.
  * - Escaped: the explicit embeddings and overrides LRE, RLE, PDF, LRO, RLO (U+202A-U+202E). An
  *   override is the one control that reverses the letters INSIDE a word ("gnp.exe" as "exe.png").
  *   UAX #9 has recommended isolates instead since Unicode 6.3, so real RTL prose does not need
@@ -50,7 +50,8 @@ import com.tether.app.ui.theme.TetherTokens
  *   C0/C1 controls stay too (a CRLF from the agent must not become tokens).
  *
  * CODE ([Rule.Code]): fenced blocks, inline code, tool input/output, command lines and output,
- * diffs, paths, tool/MCP names and ids. Code must show exactly what it contains (the Trojan
+ * diffs (tool edits, Codex file changes, the repository panel's git hunks), paths, attachment
+ * names, tool/MCP names and ids, the sub-agent panel's ids and paths. Code must show exactly what it contains (the Trojan
  * Source mitigation), so every code point that is invisible or reorders becomes a token. That
  * covers all twelve bidi controls, every FORMAT character (ZWSP/ZWNJ/ZWJ, WJ, BOM, soft hyphen,
  * tags), the line and paragraph separators, the other default-ignorables (variation selectors,
@@ -58,6 +59,9 @@ import com.tether.app.ui.theme.TetherTokens
  * C0/C1 controls except TAB, LF and the CR of a CRLF. Yes, an emoji's ZWJ/VS16 shows as a token
  * in code: exactness wins there. RTL LETTERS are never escaped, in code or in prose; code
  * surfaces lay out LTR ([codeDirection]) as the web's `<pre>` in its LTR page and every editor do.
+ *
+ * TERMINAL ([terminal]): the background command's output sheet (T6.4). This is CODE after the
+ * ANSI SGR colour sequences are dropped. Every other escape sequence is shown, never interpreted.
  *
  * NOT here: notices, outcome/session-error rows, the timeline bubble and command labels are
  * LABELS. They already go through `LabelText.clean` (bidi and invisible code points dropped,
