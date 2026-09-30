@@ -51,7 +51,8 @@ object HostUsageModel {
     /**
      * overview-host.tsx `useJsonPoll`'s two `setReading`s: a value replaces the reading; a failure
      * keeps the last value and records why. Native additions:
-     * - r2: only answers about [current] (the shown server's origin, `serverOrigin(serverUrl)`) count;
+     * - r2: only answers about [current] (the shown server's canonical origin,
+     *   `com.tether.app.client.serverOrigin(serverUrl)`) count;
      *   an answer about any other server is ignored outright, even into an empty reading (the
      *   client's adopted server can lag [com.tether.app.client.TetherClient.serverUrl]). An answer
      *   with no origin (signed out, local network blocked: no server was asked) always counts;

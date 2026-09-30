@@ -1,7 +1,6 @@
 package com.tether.app.client
 
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * The `Origin` this client sends to the server at [server]: `scheme://host[:port]`, the port only
@@ -16,22 +15,3 @@ internal fun consoleOrigin(server: HttpUrl): String = buildString {
     append(server.scheme).append("://").append(bracketedHost(server.host))
     if (server.port != HttpUrl.defaultPort(server.scheme)) append(':').append(server.port)
 }
-
-/**
- * A server URL as the operator typed it or the settings store holds it, as this client reads it:
- * trimmed, a trailing slash dropped, `https://` when no scheme is given. Null when unusable. The
- * one normaliser for sign-in, pairing and [serverOrigin], so they cannot drift.
- */
-internal fun normalizeServerUrl(raw: String): HttpUrl? {
-    val trimmed = raw.trim().trimEnd('/')
-    if (trimmed.isEmpty()) return null
-    val withScheme = if ("://" in trimmed) trimmed else "https://$trimmed"
-    return withScheme.toHttpUrlOrNull()
-}
-
-/**
- * T15.3 r2: the origin ([consoleOrigin]) of a server URL such as [TetherClient.serverUrl], or null
- * when there is none. Compared with a reading's `OverviewMetricsResult.origin` so a screen shows
- * only answers about the server it is showing.
- */
-fun serverOrigin(serverUrl: String?): String? = serverUrl?.let(::normalizeServerUrl)?.let(::consoleOrigin)

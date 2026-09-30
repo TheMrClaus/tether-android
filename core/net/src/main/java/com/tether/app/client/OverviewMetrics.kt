@@ -69,7 +69,8 @@ data class OverviewUsage(
 )
 
 /**
- * What one GET came to. [origin] is the paired origin (scheme://host[:port]) the call was made
+ * What one GET came to. [origin] is the paired server's canonical [serverOrigin] (`scheme://host:port`,
+ * the identity the client keys its per-server state by; r2) that the call was made
  * for, on every outcome that got that far: a screen keeps a reading only while the answers keep
  * coming from the origin it came from, so one server's numbers never stand beside another's
  * answer. Null only when there was no server to ask.
@@ -161,7 +162,10 @@ class HttpOverviewMetrics(
         val request = paired.sign(
             Request.Builder().url(target).header("Accept", "application/json").header("Cache-Control", "no-store"),
         ).get().build()
-        val origin = consoleOrigin(paired.origin)
+        // r2: the canonical identity (SettingsStore.kt serverOrigin), so a screen compares it with
+        // serverOrigin(TetherClient.serverUrl) exactly as the client's per-server state does.
+        // Never null for an HttpUrl; if it were, there is no server identity and nothing is asked.
+        val origin = serverOrigin(paired.origin.toString()) ?: return OverviewMetricsResult.SignedOut()
         // Nothing but the fixed route on the paired origin ever carries the credential.
         if (!sameOrigin(request.url, paired.origin) || request.url.encodedPath != path || request.url.query != null) {
             return OverviewMetricsResult.Unavailable(null, origin)

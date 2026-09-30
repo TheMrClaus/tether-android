@@ -198,11 +198,11 @@ class HostUsageBehaviourTest {
         assertEquals("…", tokens())
         assertFalse(everything().any { "77%" in it || "24%" in it || "450" in it || "1.28M" in it || "opencode" in it })
 
-        // Once the source answers about B, B shows. The server URL is compared as the client reads
-        // it (no scheme = https, case, default port and a trailing slash do not matter).
+        // Once the source answers about B, B shows. The server URL is compared by the client's
+        // canonical origin (case, the default port and a trailing slash do not matter).
         client.metrics.host = { OverviewMetricsResult.Ok(HostUsageFixtures.hostWarming, ORIGIN_B) }
         val asked = client.metrics.hostCalls
-        rule.runOnIdle { client.server.value = "B.test:443/" }
+        rule.runOnIdle { client.server.value = "HTTPS://B.Test:443/" }
         settle()
         advance(100)
         assertTrue("B's tile asked again", client.metrics.hostCalls > asked)

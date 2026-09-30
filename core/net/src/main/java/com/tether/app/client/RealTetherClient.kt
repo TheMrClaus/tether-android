@@ -3838,7 +3838,12 @@ class RealTetherClient(
         return LocalNetworkDenial.isBlockedByPermission(restricted = true, targetIsLocal = targetIsLocal, error = error)
     }
 
-    private fun normalizeBaseUrl(raw: String): HttpUrl? = normalizeServerUrl(raw)
+    private fun normalizeBaseUrl(raw: String): HttpUrl? {
+        val trimmed = raw.trim().trimEnd('/')
+        if (trimmed.isEmpty()) return null
+        val withScheme = if ("://" in trimmed) trimmed else "https://$trimmed"
+        return withScheme.toHttpUrlOrNull()
+    }
 
     /**
      * Attach whatever credential is in force. This is the ONLY place the two auth

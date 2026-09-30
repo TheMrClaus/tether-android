@@ -104,7 +104,8 @@ fun HostUsageHost(
     LaunchedEffect(client, server, configured, started) {
         if (!started || !configured || server == null) return@LaunchedEffect
         val source = client.overviewMetrics
-        // r2: normalised as the client reads its server URL; an answer about any other origin is dropped.
+        // r2: the canonical server identity the client keys per-server state by (SettingsStore.kt);
+        // an answer about any other origin is dropped.
         val current = serverOrigin(server)
         launch { poll(HostUsageModel.HOST_POLL_MS, { source.host() }) { host = HostUsageModel.fold(host, it, clock(), current) } }
         launch { poll(HostUsageModel.USAGE_POLL_MS, { source.usage() }) { usage = HostUsageModel.fold(usage, it, clock(), current) } }

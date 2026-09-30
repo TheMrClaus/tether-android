@@ -16,8 +16,9 @@ import com.tether.app.client.UsageCoverage
  */
 object HostUsageFixtures {
     const val GIB = 1024.0 * 1024.0 * 1024.0
-    const val ORIGIN_A = "https://a.test"
-    const val ORIGIN_B = "https://b.test"
+    /** Canonical server origins (SettingsStore.kt `serverOrigin`: the default port written out). */
+    const val ORIGIN_A = "https://a.test:443"
+    const val ORIGIN_B = "https://b.test:443"
     const val NOW = OverviewFixtures.NOW
 
     val host = HostMetrics(
