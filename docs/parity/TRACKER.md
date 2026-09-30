@@ -130,23 +130,23 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
-| T7.3 | Slash commands, run/background command, mentions | IN-PROGRESS | TheMrClaus @ 2026-09-30 06:50 |  | checkpoint 21d0f71: UI done (command mode + keys, Stop/Background while a foreground command runs, slash passthrough per web v128, @ Agents… |
+| T7.3 | Slash commands, run/background command, mentions | VERIFIED | TheMrClaus @ 2026-09-30 06:50 |  |  |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | Owns M.cmp.draft-composer, M.lib.hooks-use-draft-composer-ts and M.lib.hooks-use-keyboard-inset-ts (reassigned from T7.1: the web's draft-c… |
+| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | from T7.3 (coordinator): reuse T7.3's providerCatalog / requestProviderCatalog; the providers-snapshot matrix rows were not flipped by T7.3. |
 | T8.2 | Folder picker, workspaces | TODO |  |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | TODO |  |  |  |
-| T8.5 | Metadata draft panel, handoff brief + claim | TODO |  |  | from T6.6 verify (coordinator): the limit card's optional 'Take over in a new session' key (web chat-view limit card) is deferred here from… |
+| T8.5 | Metadata draft panel, handoff brief + claim | TODO |  |  | from T7.3 (coordinator): add the @ picker's 'Sessions on this project' section (takeover); the T7.3 mention picker is ready for it. |
 | T8.6 | Browser pane (native frame stream) — scope per T0.5 | TODO |  |  |  |
 
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T9.1 | Inspector + telemetry | TODO |  |  |  |
+| T9.1 | Inspector + telemetry | TODO |  |  | from T7.3 (coordinator): Inspector CLI version + inventory rows. |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
 | T9.3 | Scheduled actions | TODO |  |  |  |
 
@@ -334,3 +334,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | ta-96z | The app accepts the `__Host-tether_session` name (stored with the credential, sent back under it; legacy blobs unchanged, nobody signed out; `__Host-` accepted only with its prefix rules). Merged ff-only, VERIFIED (verify CONFIRMED, security PASS-WITH-FOLLOWUPS, hardening checked by the coordinator). 0.7.7 draft (code 24) built and checked. Follow-up ta-1yx. | T6.5 in progress |
 | 2026-09-30 | claude-main / Opus 5.5 | T6.5, T7.3, ta-blf | T6.5 conversation timeline merged ff-only `3dd391c`, VERIFIED (+2 rows; verify REFUTED r1 on the needle while reading a long reply, CONFIRMED r2; off-screen needle divergence recorded in the README). Filed ta-blf (transcript renders bidi controls raw). T7.3 in progress. | T7.3 review; ta-blf |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-blf | Transcript text spoofing fix merged ff-only, VERIFIED after 5 rounds: risky characters drawn as visible tokens (code: every bidi/invisible char; prose: all explicit bidi formatting chars, marks only beside real RTL letters, ALM only beside Arabic); copy carries the visible form with a notice and an explicit Copy raw; shared rules moved to core/designsystem. Follow-ups ta-28i (other surfaces), ta-fz3 (links). | T7.3 r3 (terminal rule) |
+| 2026-09-30 | claude-main / Opus 5.5 | T7.3 | T7.3 slash commands / `!` run + background commands / command output / @mentions merged ff-only `07ba88f`, VERIFIED (+8 rows). 3 rounds: command output shown through the shared terminal rule (nothing hidden), delegated sends origin- and lock-bound, durable mentions origin-keyed. Follow-ups ta-4dm, ta-10h. No agents running. | 0.7.8 draft; ta-28i, ta-fz3, T7.4 |
