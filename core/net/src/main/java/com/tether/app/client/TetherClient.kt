@@ -356,6 +356,12 @@ interface TetherClient {
 
     /** Ask for the session's available models + slash-command list. Cheap + idempotent. */
     fun requestSessionControls(sessionId: String)
+
+    /**
+     * T7.3 (v96, chat-view.tsx:2707-2710): the same read with `warm: true` — the slash palette opened,
+     * so a cold persistent engine's built-in fallback list is replaced by the CLI's real catalog.
+     */
+    fun requestWarmSessionControls(sessionId: String) = requestSessionControls(sessionId)
     fun pin(sessionId: String, pinned: Boolean)
     fun rename(sessionId: String, name: String)
     fun archive(sessionId: String)

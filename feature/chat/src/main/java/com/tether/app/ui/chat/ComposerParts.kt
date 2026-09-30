@@ -133,9 +133,13 @@ internal fun ComposerInput(
     onImeSend: () -> Unit,
     interactionSource: MutableInteractionSource,
     modifier: Modifier = Modifier,
+    /** T7.3 `.chat-input--command`: the draft is a `!` command — drawn in the mono face. */
+    command: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
-    val style = composerTextStyle(LocalTetherTypography.current.body, metrics)
+    val type = LocalTetherTypography.current
+    val base = composerTextStyle(type.body, metrics)
+    val style = if (command) base.copy(fontFamily = type.mono) else base
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val maxHeight = screenHeight * (if (metrics.phone) 0.3f else 0.6f)
     val (minHeight, padding) = when {
@@ -185,10 +189,24 @@ internal fun ComposerWell(
     metrics: ComposerMetrics,
     inputFocused: Boolean,
     modifier: Modifier = Modifier,
+    /**
+     * T7.3 (globals.css 11353-11360): `!` command mode turns the whole well into the red-edged command
+     * line — `--danger-edge` over `--danger-wash`; focused, `--danger` and a 3px `--danger-edge` ring.
+     * The rule outranks Studio's own well (0,3,0 over 0,2,0), so every skin draws it.
+     */
+    command: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val surface = if (metrics.studio) {
+    val surface = if (command) {
+        val ring = if (inputFocused) listOf(com.tether.app.ui.theme.CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.dangerEdge)) else emptyList()
+        Modifier.cssSurface(
+            RoundedCornerShape(if (metrics.studio) 16.dp else t.radiusMd),
+            t.dangerWash,
+            CssBorder(1.dp, if (inputFocused) t.danger else t.dangerEdge),
+            t.css.well + ring,
+        )
+    } else if (metrics.studio) {
         val shadow = if (inputFocused) {
             softShadow(5.dp, 22.dp, Color(20, 35, 65).copy(alpha = 0.2f), spread = (-9).dp)
         } else {

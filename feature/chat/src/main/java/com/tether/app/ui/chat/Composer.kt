@@ -82,6 +82,14 @@ import com.tether.app.client.typedModelAllowed
 import com.tether.app.client.confirmedCopy
 import com.tether.app.client.looksLikeModelId
 import com.tether.app.protocol.reduce.composerCommandList
+import com.tether.app.protocol.reduce.TETHER_BLOCKED_COMMANDS
+import com.tether.app.protocol.reduce.TETHER_DESYNC_COMMANDS
+import com.tether.app.client.CommandGuard
+import com.tether.app.client.RunCommandResult
+import com.tether.app.protocol.DelegateMention
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import com.tether.app.protocol.reduce.resolveModelArg
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyWear
@@ -209,6 +217,13 @@ fun Composer(
     handoffTarget: AgentSession? = null,
     /** T6.6: open another session (the handoff lock's link). Navigation only, never a wire mutation. */
     onOpenSession: (String) -> Unit = {},
+    /**
+     * T7.3: the `!` command mode, the foreground command's Background key and the `@` Agents
+     * (run-command / background-command / a delegated send): taps and explicit submits only, guarded.
+     */
+    runActions: ComposerCommandActions = ComposerCommandActions.Unavailable,
+    /** T7.3 (v96): the slash palette opened — ask for the live command list with `warm` (a read). */
+    onWarmControls: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -263,6 +278,72 @@ fun Composer(
         interruptRefusalCopy(onInterrupt(drawnFor))?.let(::flash)
     }
 
+    // T7.3 (chat-view.tsx:2158-2167): `!` command mode, and whether the running turn is a FOREGROUND
+    // command run (then Interrupt reads "Stop" and Background replaces Queue).
+    val foregroundTurn = remember(tree) { CommandGuard.foregroundCommandTurn(tree) }
+    val commandRunning = foregroundTurn != null && foregroundTurn == interruptTurnId
+    val commandMode = runActions.commandMode && draft.startsWith("!")
+    // T13.2's rule: a copy that is not live runs nothing (the words say why).
+    val commandLock = liveness.interruptLock
+    val readOnly = session?.readOnly == true
+    val handedOffNow = !session?.handedOffTo.isNullOrEmpty()
+
+    /** chat-view.tsx:3083-3102 dispatchCommand: `background` = the "Background" key. */
+    fun dispatchCommand(background: Boolean) {
+        if (session == null) return
+        if (picked.isNotEmpty()) {
+            flash("Command mode can’t include attachments — remove them to run a command.")
+            return
+        }
+        val command = field.text.trim().drop(1).trim() // the leading "!"
+        if (command.isEmpty()) {
+            flash("Type a command after “!” to run it.")
+            return
+        }
+        if (!background && busy) {
+            flash("Wait for the current turn to finish, or use “Send to background”.")
+            return
+        }
+        commandLock?.let {
+            flash(it)
+            return
+        }
+        val result = runActions.onRun(command, background)
+        if (result == RunCommandResult.Sent) setDraft("") else runRefusalCopy(result)?.let(::flash)
+    }
+
+    /** v54: move the foreground command of the turn the key was drawn for to the background. */
+    fun backgroundTurn(drawnFor: String) {
+        commandLock?.let {
+            flash(it)
+            return
+        }
+        backgroundRefusalCopy(runActions.onBackground(drawnFor))?.let(::flash)
+    }
+
+    // T7.3 (chat-view.tsx:2712-2834): the `@` Agents picker and the pending delegate mention. The
+    // mention belongs to the session and the server it was picked on (a switch drops it).
+    var atDismissed by remember(session?.id) { mutableStateOf(false) }
+    var delegateMention by remember(session?.id, runActions.origin) { mutableStateOf<DelegateMention?>(null) }
+    fun atQueryNow(text: String): String? =
+        if (session != null && !readOnly && !handedOffNow && !(runActions.commandMode && text.startsWith("!"))) atQueryOf(text) else null
+    val atQuery = atQueryNow(draft)
+    val agentRows = remember(atQuery, runActions.agents) { atQuery?.let { matchAgents(runActions.agents, it) } ?: emptyList() }
+    val atMenuOpen = atQuery != null && !atDismissed && agentRows.isNotEmpty()
+    val atActive = atQuery != null
+    LaunchedEffect(atActive) { if (atActive && runActions.agents.isEmpty()) runActions.onRequestAgents() }
+    fun liveAtMenu(): List<com.tether.app.client.ProviderCatalogEntry>? {
+        val q = atQueryNow(field.text) ?: return null
+        val rows = matchAgents(runActions.agents, q)
+        return if (!atDismissed && rows.isNotEmpty()) rows else null
+    }
+    fun beginDelegate(entry: com.tether.app.client.ProviderCatalogEntry) {
+        delegateMention = mentionFor(entry)
+        atDismissed = true
+        setDraft(stripAtToken(field.text))
+    }
+    val delegateEntry = delegateMention?.let { m -> runActions.agents.firstOrNull { it.provider == m.provider } }
+
     val models = controls?.models ?: emptyList()
     // T7.2: the row's state, derived from the session, its controls reply and the Codex catalog.
     val composerControls = remember(session, controls, controlActions.codex, controlActions.opencode, pinnedModels) {
@@ -281,14 +362,24 @@ fun Composer(
     // with the lifecycle), so a reconnect to the same server in the background would leave the
     // question open and armed on the new link. Stopping closes it; the operator asks again.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { escalation = null }
-    val commands = remember(projection?.cliInventory, controls) {
-        composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList())
+    // T7.3 (chat-view.tsx:2249-2273): Codex has no command catalog of its own; the one action Tether
+    // can run from the palette is compaction, once the live catalog says it is dispatchable.
+    val codexCompactReady = session?.provider == "codex" && session.engineGeneration == com.tether.app.client.CODEX_V2 &&
+        controlActions.codex?.snapshot?.compactionStatus == "ready"
+    val collator = remember { IcuJsCollator.forLocale() }
+    val commands = remember(projection?.cliInventory, controls, session?.provider, codexCompactReady, collator) {
+        if (session?.provider == "codex") {
+            if (codexCompactReady) listOf(SessionCommandOption("compact", "Summarize conversation to prevent hitting the context limit", "", supported = true)) else emptyList()
+        } else {
+            composerCommandList(projection?.cliInventory?.commands, controls?.commands ?: emptyList(), collator)
+        }
     }
 
     // The command-name fragment being typed ("/mod" -> "mod"), or null when the
-    // draft isn't a bare slash command — drives whether the menu shows.
+    // draft isn't a bare slash command — drives whether the menu shows. T7.3: every
+    // provider gets the palette (chat-view.tsx:2157); what differs is what it offers.
     fun slashQueryOf(text: String): String? =
-        if (claude && text.startsWith("/") && !text.drop(1).contains(" ")) text.drop(1) else null
+        if (text.startsWith("/") && !text.drop(1).contains(" ")) text.drop(1) else null
     fun matchesFor(query: String?): List<SessionCommandOption> {
         if (query == null) return emptyList()
         val q = query.lowercase()
@@ -300,6 +391,9 @@ fun Composer(
     val slashQuery = slashQueryOf(draft)
     val menuMatches = remember(slashQuery, commands) { matchesFor(slashQuery) }
     val menuOpen = slashQuery != null && !menuDismissed && menuMatches.isNotEmpty() && !busy
+    // v96 (chat-view.tsx:2707-2710): once per palette open, ask for the live list with `warm`.
+    val slashActive = slashQuery != null
+    LaunchedEffect(slashActive, readOnly) { if (slashActive && !readOnly) onWarmControls() }
 
     /**
      * The open menu's matches for the text in the field NOW (null = closed). Key and IME actions read
@@ -480,8 +574,6 @@ fun Composer(
         },
     )
 
-    // Native commands (currently /model) run in-app; everything else is flagged
-    // terminal-only rather than sent as prompt text (the /model-as-text bug).
     /** chat-view.tsx:3015-3027: a listed match, else a plausible id passed through (the CLI validates it), else refused. */
     fun modelCommand(arg: String) {
         val match = resolveModelArg(arg, models)
@@ -496,58 +588,69 @@ fun Composer(
         flash("“${LabelText.label(arg)}” doesn’t look like a model id. Try /model to see what the CLI offers.")
     }
 
-    fun runSlashCommand(raw: String) {
+    /**
+     * T7.3 (chat-view.tsx:2978-3056) runSlashCommand: true when the command was CONSUMED here (handled
+     * natively, dispatched as a guarded control, or refused); false to let [submit] forward the raw
+     * text to the CLI as an ordinary prompt — the web's passthrough: the CLI advertises exactly what it
+     * can dispatch headless, and a leading "/" in prompt text is its own to parse.
+     */
+    fun runSlashCommand(raw: String): Boolean {
+        val s = session ?: return false
         val body = raw.drop(1)
-        val name = body.split(Regex("\\s+")).first()
-        val arg = body.removePrefix(name).trim()
+        val parts = body.split(Regex("\\s+"))
+        val name = parts.first()
+        val arg = parts.drop(1).joinToString(" ").trim()
         val info = commands.find { it.name == name || it.aliases.orEmpty().contains(name) }
+        val canonical = info?.name ?: name
 
-        if (name == "model" || info?.name == "model") {
+        // `/model <name>` mutates what Tether owns: a guarded control (T7.2), never on Codex.
+        if (canonical == "model" || name == "model") {
             if (arg.isEmpty()) {
-                openModelPicker()
-                setDraft("")
-                return
+                // T7.2's divergence (docs/parity/screens/controls): bare /model on Claude opens the
+                // Model list; elsewhere it is forwarded to the CLI, as on the web.
+                if (claude && composerControls?.model != null) {
+                    openModelPicker()
+                    setDraft("")
+                    return true
+                }
+                return false
             }
+            if (s.provider == "codex") return false
+            if (!typedModelAllowed(s.provider) || composerControls?.model == null) return false
             modelCommand(arg)
-            return
+            return true
         }
-        if (info != null && !info.supported) {
-            flash("/${LabelText.label(info.name)} isn’t available in Tether yet — run it from a terminal (claude --resume …).")
+        // Codex's one dispatchable command: the same guarded provider action as "Compact context".
+        if (canonical == "compact" && codexCompactReady) {
+            val revision = controlActions.codex?.snapshot?.revision ?: return true
+            if (sendControl(SessionControl.CodexCompaction(revision))) setDraft("")
+            return true
+        }
+        if (canonical in TETHER_BLOCKED_COMMANDS || info?.supported == false) {
+            flash("/${LabelText.label(canonical)} would end this session — run it from a terminal instead.")
+            setDraft("")
+            return true
+        }
+        if (canonical in TETHER_DESYNC_COMMANDS) {
+            flash("/${LabelText.label(canonical)} changes what the model has in context — the transcript above is kept, but no longer matches it.")
+        }
+        return false
+    }
+
+    /** chat-view.tsx:3058-3069 acceptCommand: completing the name leaves the draft ready for an argument. */
+    fun acceptCommand(command: SessionCommandOption) {
+        menuDismissed = true
+        if (!command.supported) {
+            flash("/${LabelText.label(command.name)} would end this session — run it from a terminal instead.")
             setDraft("")
             return
         }
-        flash("Unknown command “/$name”. Type “/” to see what’s available.")
-    }
-
-    fun acceptCommand(command: SessionCommandOption) {
-        menuDismissed = true
-        if (command.name == "model" || command.aliases.orEmpty().contains("model")) {
+        if ((command.name == "model" || command.aliases.orEmpty().contains("model")) && claude && composerControls?.model != null) {
             openModelPicker()
             setDraft("")
             return
         }
-        if (!command.supported) {
-            flash("/${LabelText.label(command.name)} isn’t available in Tether yet — run it from a terminal.")
-            setDraft("")
-            return
-        }
         setDraft("/${command.name} ")
-    }
-
-    /** Slash commands are in-app control requests: never queued, no attachments. */
-    fun trySlashCommand(text: String, hasAttachments: Boolean): Boolean {
-        if (!text.startsWith("/") || hasAttachments) return false
-        if (!claude) {
-            // Round 3 (F2): `/model <arg>` pins a model on every engine with a model select but
-            // Codex, as the web does (chat-view.tsx:3015); the rest of the slash menu is T7.3's.
-            val arg = MODEL_ARG.find(text)?.groupValues?.get(1)?.trim().orEmpty()
-            val s = session ?: return false
-            if (arg.isEmpty() || !typedModelAllowed(s.provider) || composerControls?.model == null) return false
-            modelCommand(arg)
-            return true
-        }
-        runSlashCommand(text)
-        return true
     }
 
     fun submit() {
@@ -556,7 +659,31 @@ fun Composer(
         val text = field.text.trim()
         val hasAttachments = picked.isNotEmpty()
         if (text.isEmpty() && !hasAttachments) return
-        if (trySlashCommand(text, hasAttachments)) return
+        // v53/v54: `!` command mode gets first refusal (Enter runs it in the FOREGROUND).
+        if (runActions.commandMode && field.text.startsWith("!")) {
+            dispatchCommand(false)
+            return
+        }
+        if (text.startsWith("/") && !hasAttachments && runSlashCommand(text)) return
+        // P2.4 (chat-view.tsx:3145-3167): a delegation rides an idle send only, never the queue.
+        delegateMention?.let { mention ->
+            if (text.isEmpty()) {
+                flash("Describe what the delegated agent should do — the text goes to it as its prompt.")
+                return
+            }
+            if (busy) {
+                flash("Wait for the current turn to finish before delegating.")
+                return
+            }
+            if (runActions.onSendDelegated(text, picked.map { it.attachment }, mention)) {
+                setDraft("")
+                picked = emptyList()
+                delegateMention = null
+            } else {
+                flash("That agent isn’t offered for this session any more — nothing was sent.")
+            }
+            return
+        }
         if (busy && hasAttachments) {
             // Attachments only ride an idle send — ask the operator to wait
             // rather than silently dropping the files (web submit()).
@@ -580,6 +707,15 @@ fun Composer(
     fun onComposerKey(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown || field.composition != null) return false
         val enter = (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed
+        // v54 (chat-view.tsx:2185-2199): Ctrl/Cmd+B backgrounds the RUNNING foreground command, and only then.
+        val ctrl = event.isCtrlPressed || event.isMetaPressed
+        if (ctrl && !event.isShiftPressed && !event.isAltPressed && event.key == Key.B) {
+            val drawnFor = foregroundTurn?.takeIf { it == interruptTurnId }
+            if (drawnFor != null) {
+                backgroundTurn(drawnFor)
+                return true
+            }
+        }
         val menu = liveMenu()
         if (menu != null) {
             when {
@@ -589,6 +725,19 @@ fun Composer(
                 }
                 event.key == Key.Tab || enter -> {
                     menu.firstOrNull()?.let(::acceptCommand)
+                    return true
+                }
+            }
+        }
+        val at = liveAtMenu()
+        if (at != null) {
+            when {
+                event.key == Key.Escape -> {
+                    atDismissed = true
+                    return true
+                }
+                event.key == Key.Tab || enter -> {
+                    at.firstOrNull()?.let(::beginDelegate)
                     return true
                 }
             }
@@ -690,9 +839,11 @@ fun Composer(
                 } else if (session?.readOnly == true) {
                     ReplayOnlyFlag(session.provider)
                 } else {
+                if (commandMode) CommandModeFlag()
                 if (menuOpen) {
                     SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
                 }
+                if (atMenuOpen) MentionMenu(agentRows, onPick = ::beginDelegate)
 
                 val queued = projection?.queuedMessages.orEmpty()
                 if (queued.isNotEmpty()) {
@@ -721,14 +872,19 @@ fun Composer(
                     }
                 }
 
+                delegateMention?.let { mention ->
+                    DelegateBar(mention = mention, entry = delegateEntry, onChange = { delegateMention = it }, onRemove = { delegateMention = null })
+                }
+
                 val liveControls = composerControls?.takeIf { it.live && session != null }
-                ComposerWell(metrics = metrics, inputFocused = inputFocused) {
+                ComposerWell(metrics = metrics, inputFocused = inputFocused, command = commandMode) {
                     ComposerInput(
                         value = field,
                         onValueChange = { next ->
                             // Re-arm the slash menu after an Escape/dismiss once the
                             // operator keeps editing a slash (web onDraftChange).
                             if (next.text != field.text && menuDismissed) menuDismissed = false
+                            if (next.text != field.text && atDismissed) atDismissed = false
                             field = next
                         },
                         placeholder = if (busy) PLACEHOLDER_BUSY else PLACEHOLDER_IDLE,
@@ -737,9 +893,15 @@ fun Composer(
                         onKey = ::onComposerKey,
                         onImeSend = {
                             val menu = liveMenu()
-                            if (menu != null) menu.firstOrNull()?.let(::acceptCommand) else submit()
+                            val at = liveAtMenu()
+                            when {
+                                menu != null -> menu.firstOrNull()?.let(::acceptCommand)
+                                at != null -> at.firstOrNull()?.let(::beginDelegate)
+                                else -> submit()
+                            }
                         },
                         interactionSource = inputInteraction,
+                        command = commandMode,
                     )
                     ComposerToolbar(
                         metrics = metrics,
@@ -789,6 +951,12 @@ fun Composer(
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
+                            commandMode = commandMode,
+                            commandRunning = commandRunning,
+                            canRun = draft.trim().length > 1,
+                            onRun = ::dispatchCommand,
+                            onBackground = ::backgroundTurn,
+                            commandLock = commandLock,
                         )
                     }
                 }
@@ -858,9 +1026,6 @@ internal const val AUTO_CONTINUE_CONFIRM_BODY =
     "A rate/usage limit hit in this session will schedule its own continuation for right after the reset, without asking. It stays on for this session until you switch it back."
 internal const val AUTO_CONTINUE_ON_FLASH = "Auto-continue is on — a limit hit schedules its own continuation."
 internal const val AUTO_CONTINUE_OFF_FLASH = "Auto-continue is off."
-
-/** `/model <arg>`: the argument after the command name. */
-private val MODEL_ARG = Regex("^/model\\s+(.+)$", RegexOption.DOT_MATCHES_ALL)
 
 internal fun escalationBody(hint: String?): String =
     (hint?.trimEnd('.')?.let { "$it." } ?: "The agent will run without asking, including destructive commands.") +
@@ -957,6 +1122,16 @@ private fun ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
+    /** T7.3: the draft is a `!` command (idle: Send to agent + Background). */
+    commandMode: Boolean = false,
+    /** T7.3: the running turn is a foreground command (Background + Stop instead of Queue + Interrupt). */
+    commandRunning: Boolean = false,
+    /** T7.3: the draft holds a command after the "!". */
+    canRun: Boolean = false,
+    onRun: (background: Boolean) -> Unit = {},
+    onBackground: (turnId: String) -> Unit = {},
+    /** T7.3: why a command key cannot send (a copy that is not live); null = it can. */
+    commandLock: String? = null,
 ) {
     val height = if (metrics.studio || metrics.touchKeys) TetherDimens.touchTargetDp else 33.6.dp
     val labelled = !metrics.phone
@@ -968,7 +1143,55 @@ private fun ComposerActions(
         else -> 12.dp
     }
     val wear = if (!labelled) KeyWear.SendCompact else null
-    if (busy) {
+    // T7.3: one command key (`chat-send chat-send--command[-bg]`): the web's `:root .chat-send`
+    // material rule (0,2,0) outranks the variant's own colours (0,1,0), so it is drawn as a Send key;
+    // the Terminal / SendToBack glyph and the words tell them apart. Armed like every operator
+    // control (500 ms, re-armed when it moves, no touches through an overlay).
+    @Composable
+    fun CommandKey(identity: Any, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, enabled: Boolean, tag: String, onTap: () -> Unit) {
+        val arming = rememberArmedControl(identity, enabled && commandLock == null)
+        val armed = arming.armed && enabled && commandLock == null
+        TetherKey(
+            onClick = { if (armed) onTap() },
+            classes = KeyClasses.ChatSend,
+            label = if (labelled) label else null,
+            icon = icon,
+            iconSize = 18.dp,
+            fontSize = fontSize,
+            enabled = enabled && commandLock == null,
+            minHeight = height,
+            modifier = keyModifier
+                .then(arming.modifier)
+                .semantics { if (!armed) disabled() }
+                .testTag(tag),
+            contentPadding = padding,
+            wearPattern = wear,
+            contentDescription = if (commandLock == null) description else "$description, unavailable: $commandLock",
+        )
+    }
+    if (busy && commandRunning && interruptTurnId != null) {
+        // chat-view.tsx:4462-4476: a foreground command runs — Background (the touch Ctrl+B) + Stop.
+        val drawnFor = interruptTurnId
+        CommandKey(Triple("background", sessionId, drawnFor), "Background", TetherIcons.SendToBack, "Send this command to the background", true, BACKGROUND_KEY_TAG) { onBackground(drawnFor) }
+        val arming = rememberArmedControl(Triple("interrupt", sessionId, drawnFor), interruptLock == null)
+        val armed = arming.armed && interruptLock == null
+        TetherKey(
+            onClick = { if (armed) onInterrupt(drawnFor) },
+            classes = KeyClasses.ChatInterrupt,
+            label = if (labelled) "Stop" else null,
+            icon = TetherIcons.CircleStop,
+            iconSize = 18.dp,
+            fontSize = fontSize,
+            enabled = interruptLock == null,
+            minHeight = height,
+            modifier = keyModifier
+                .then(arming.modifier)
+                .semantics { if (!armed) disabled() }
+                .testTag(INTERRUPT_KEY_TAG),
+            contentPadding = padding,
+            contentDescription = if (interruptLock == null) "Stop the command" else "Stop the command, unavailable: $interruptLock",
+        )
+    } else if (busy) {
         if (labelled || canQueue) {
             TetherKey(
                 onClick = onSubmit,
@@ -1008,6 +1231,10 @@ private fun ComposerActions(
             contentPadding = padding,
             contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
         )
+    } else if (commandMode) {
+        // chat-view.tsx:4479-4499: run in the foreground (Enter) or detached.
+        CommandKey(Pair("run", sessionId), "Send to agent", TetherIcons.Terminal, "Run command and send output to the agent", canRun, RUN_KEY_TAG) { onRun(false) }
+        CommandKey(Pair("run-background", sessionId), "Background", TetherIcons.SendToBack, "Run command in the background", canRun, RUN_BACKGROUND_KEY_TAG) { onRun(true) }
     } else {
         TetherKey(
             onClick = onSubmit,

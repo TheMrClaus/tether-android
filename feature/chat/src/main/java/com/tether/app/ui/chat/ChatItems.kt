@@ -355,7 +355,8 @@ internal fun buildChatItems(
                         Vocab.BLOCK_MESSAGE -> if (block.done == true) blockTimeLabel(tree, turn, blockId, zone) else ""
                         else -> ""
                     }
-                    val raw = if (block.kind == Vocab.BLOCK_TOOL) rawFor(blockId) else null
+                    // T7.3: a `!` command's output block reads the tree too (its fields are not typed).
+                    val raw = if (block.kind == Vocab.BLOCK_TOOL || block.kind == COMMAND_OUTPUT_BLOCK) rawFor(blockId) else null
                     items.add(ChatItem.Block(turnId, block, time, opens(), raw = raw))
                     turnDenials?.byBlock?.get(blockId)?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
                 }

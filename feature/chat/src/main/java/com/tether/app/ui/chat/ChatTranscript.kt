@@ -421,6 +421,8 @@ private fun ChatRowContent(
                 Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_THINKING -> ThinkingCard(item.block)
                 Vocab.BLOCK_TOOL -> ToolBlockView(item.raw ?: remember(item.block) { item.block.asTree() }, toolRender, nested = item.grouped)
+                // T7.3: the v54 `!` command panel (command_output_started / _delta / _completed).
+                COMMAND_OUTPUT_BLOCK -> remember(item.raw) { commandOutputView(item.raw) }?.let { CommandOutputPanel(it) }
                 else -> {}
             }
             is ChatItem.Denial -> PermissionDenialCard(item.denial, item.target, item.run, nested = item.nested)

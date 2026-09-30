@@ -433,7 +433,7 @@ internal fun ControlPill(
 
 /** A [ControlPill] that opens its rows in a drop-up menu (TetherSelect `dropUp`). */
 @Composable
-private fun ControlSelect(
+internal fun ControlSelect(
     control: SelectControl,
     name: String,
     enabled: Boolean,

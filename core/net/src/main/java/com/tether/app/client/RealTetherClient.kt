@@ -3361,6 +3361,10 @@ class RealTetherClient(
         sendFrame(ClientMessage.SessionControlsRequest(sessionId))
     }
 
+    override fun requestWarmSessionControls(sessionId: String) {
+        sendFrame(ClientMessage.SessionControlsRequest(sessionId, warm = true))
+    }
+
     override fun pin(sessionId: String, pinned: Boolean) {
         sendFrame(ClientMessage.Pin(sessionId, pinned))
     }

@@ -220,6 +220,27 @@ fun ChatScreen(
             )
         }
     }
+    // T7.3: the `!` command mode (offered per provider by the server's `ready`), the foreground
+    // command's Background key and the `@` Agents (the catalog the server pushed on this link). Every
+    // send is bound to the server the composer was drawn for; the client re-checks it all.
+    val providerCatalog by vm.client.providerCatalog.collectAsStateWithLifecycle()
+    val runActions = remember(session, consentOrigin, vm, providers, providerCatalog) {
+        val s = session
+        val drawnFor = consentOrigin
+        if (s == null) {
+            ComposerCommandActions.Unavailable
+        } else {
+            ComposerCommandActions(
+                commandMode = com.tether.app.client.CommandGuard.commandModeOffered(s, providers),
+                onRun = { command, background -> vm.client.runCommand(s.id, command, background, drawnFor) },
+                onBackground = { turnId -> vm.client.backgroundCommand(s.id, drawnFor, turnId) },
+                origin = drawnFor,
+                agents = com.tether.app.client.CommandGuard.delegateAgents(s, providerCatalog),
+                onRequestAgents = { vm.client.requestProviderCatalog() },
+                onSendDelegated = { text, attachments, mention -> vm.sendDelegated(s.id, text, attachments, mention) },
+            )
+        }
+    }
     // T6.6: a handed-off source names (and links to) the session it continued in.
     val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
@@ -370,6 +391,8 @@ fun ChatScreen(
             pinnedModels = pinnedModels,
             handoffTarget = handoffTarget,
             onOpenSession = { id -> vm.selectSession(id) },
+            runActions = runActions,
+            onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
         )
     }
     CommandOutputDialog(
