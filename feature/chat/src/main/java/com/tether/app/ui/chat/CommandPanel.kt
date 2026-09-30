@@ -147,9 +147,11 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
     val text = remember(view.segments) { commandPanelText(view.segments) }
     val warning = t.warning
     val body = remember(text, warning) {
-        buildAnnotatedString {
+        val all = buildAnnotatedString {
             for (seg in text.segments) if (seg.stderr) withStyle(SpanStyle(color = warning)) { append(seg.text) } else append(seg.text)
         }
+        // A `<pre>` draws no empty line for the final newline; the caret sits on the line after.
+        if (all.text.endsWith('\n')) all.subSequence(0, all.length - 1) else all
     }
     val maxBody = (LocalConfiguration.current.screenHeightDp * 0.4f).dp
     Box(Modifier.fillMaxWidth().padding(vertical = t.css.spaceXs).testTag(COMMAND_PANEL_TAG)) {
