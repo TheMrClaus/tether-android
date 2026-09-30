@@ -109,17 +109,26 @@ class ToolMediaWireRenderTest {
             assertEquals(96.dp.roundToPx().toFloat(), shown.size.width.toFloat(), 1f)
             assertEquals(60.dp.roundToPx().toFloat(), shown.size.height.toFloat(), 1f)
         }
-        assertTrue(rule.onAllNodes(hasText("Image unavailable"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodes(hasText(MediaCopy.IMAGE_UNAVAILABLE), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         val req = server.takeRequest()
         assertEquals(url, req.path)
         assertEquals("Bearer tthr_device", req.getHeader("Authorization"))
     }
 
-    @Test fun behindASignInGatewayTheTileSaysUnavailableAndNothingIsFollowed() {
+    @Test fun behindASignInGatewayTheTileSaysSoAndNothingIsFollowed() {
         show {
             MockResponse().setResponseCode(302).setHeader("Location", "https://login.example.test/").setHeader("Content-Type", "text/html").setBody("<html>login</html>")
         }
-        rule.waitUntil(20_000) { rule.onAllNodes(hasText("Image unavailable"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(20_000) { rule.onAllNodes(hasText(MediaCopy.BLOCKED), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(1, rule.onAllNodes(hasText(MediaCopy.BLOCKED_DETAIL), useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertTrue(rule.onAllNodes(hasText(MediaCopy.IMAGE_UNAVAILABLE), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        assertTrue("nothing from the gateway's answer is shown", rule.onAllNodes(hasText("login", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertEquals("one request, the redirect never followed", 1, server.requestCount)
+    }
+
+    @Test fun anyOtherFailureKeepsTheGenericLine() {
+        show { MockResponse().setResponseCode(404).setHeader("Content-Type", "application/json; charset=utf-8").setBody("""{"error":"Not found."}""") }
+        rule.waitUntil(20_000) { rule.onAllNodes(hasText(MediaCopy.IMAGE_UNAVAILABLE), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodes(hasText(MediaCopy.BLOCKED), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 }

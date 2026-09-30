@@ -81,7 +81,7 @@ class ToolMediaClientTest {
         other.start()
         loadedButIdle(cookie = "cookie")
         h.server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", other.url(png)))
-        assertEquals(ToolMediaResult.Failed(302), h.client.toolMedia.fetch(png, 1024, ByteArrayOutputStream()))
+        assertEquals(ToolMediaResult.Blocked(302), h.client.toolMedia.fetch(png, 1024, ByteArrayOutputStream()))
         assertEquals(0, other.requestCount)
     }
 

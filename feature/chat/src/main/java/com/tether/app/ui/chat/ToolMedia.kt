@@ -94,6 +94,9 @@ import kotlinx.coroutines.withContext
 sealed interface MediaImage {
     data class Ok(val bitmap: ImageBitmap) : MediaImage
     data object TooLarge : MediaImage
+
+    /** T6.8: a sign-in gateway answered instead of Tether ([ToolMediaResult.Blocked]). */
+    data object Blocked : MediaImage
     data object Failed : MediaImage
 }
 
@@ -102,7 +105,24 @@ sealed interface MediaImage {
 sealed interface MediaVideo {
     data class Ok(val file: File) : MediaVideo
     data object TooLarge : MediaVideo
+
+    /** T6.8: a sign-in gateway answered instead of Tether ([ToolMediaResult.Blocked]). */
+    data object Blocked : MediaVideo
     data object Failed : MediaVideo
+}
+
+/**
+ * T6.8: what an unshowable picture or clip says. A sign-in page gets its own two lines (the web
+ * has no copy here: its `<img>` just breaks), worded like the sign-in screen's gateway notice;
+ * nothing from the gateway's answer is ever shown. Every other failure keeps its one line.
+ */
+internal object MediaCopy {
+    const val BLOCKED = "Blocked by a sign-in page"
+    const val BLOCKED_DETAIL = "A sign-in gateway (SSO or a proxy) answered instead of Tether. Exempt /api/tool-media/ for paired devices."
+    const val IMAGE_TOO_LARGE = "Image too large to show"
+    const val IMAGE_UNAVAILABLE = "Image unavailable"
+    const val VIDEO_TOO_LARGE = "Video too large to play"
+    const val VIDEO_UNAVAILABLE = "Video unavailable"
 }
 
 /** The seam the transcript loads media through (a fake in tests and goldens). */
@@ -460,6 +480,7 @@ class ToolMediaRepository(
                     }
                 }
                 ToolMediaResult.TooLarge -> MediaImage.TooLarge
+                is ToolMediaResult.Blocked -> MediaImage.Blocked
                 else -> MediaImage.Failed
             }
         } catch (_: java.io.IOException) {
@@ -506,6 +527,7 @@ class ToolMediaRepository(
             }
             return when {
                 result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge
+                result is ToolMediaResult.Blocked -> MediaVideo.Blocked
                 result !is ToolMediaResult.Ok -> MediaVideo.Failed
                 sha256OfFile(temp) != expected -> MediaVideo.Failed
                 !MediaMagic.matches(temp, "video/mp4") -> MediaVideo.Failed
@@ -645,21 +667,35 @@ private fun MediaTile(item: ToolMediaItem, onOpen: () -> Unit) {
         null -> Box(clickable.size(44.dp).background(t.tintXs), contentAlignment = Alignment.Center) {
             SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 14.dp)
         }
-        else -> MediaUnavailable(if (state == MediaImage.TooLarge) "Image too large to show" else "Image unavailable", clickable = Modifier.clip(shape))
+        else -> ImageUnavailable(state, clickable = Modifier.clip(shape))
     }
 }
 
 @Composable
-private fun MediaUnavailable(text: String, clickable: Modifier) {
+private fun ImageUnavailable(state: MediaImage, clickable: Modifier) = when (state) {
+    MediaImage.Blocked -> MediaUnavailable(MediaCopy.BLOCKED, clickable, detail = MediaCopy.BLOCKED_DETAIL)
+    MediaImage.TooLarge -> MediaUnavailable(MediaCopy.IMAGE_TOO_LARGE, clickable)
+    else -> MediaUnavailable(MediaCopy.IMAGE_UNAVAILABLE, clickable)
+}
+
+@Composable
+private fun MediaUnavailable(text: String, clickable: Modifier, detail: String? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(
         clickable.background(t.tintXs).padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = if (detail == null) Alignment.CenterVertically else Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
         Icon(TetherIcons.FileImage, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-        Text(text, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.muted)
+        if (detail == null) {
+            Text(text, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.muted)
+        } else {
+            Column(Modifier.widthIn(max = 280.dp)) {
+                Text(text, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.ink)
+                Text(detail, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.muted)
+            }
+        }
     }
 }
 
@@ -777,7 +813,7 @@ internal fun MediaLightbox(items: List<ToolMediaItem>, index: Int, onIndexChange
                                 },
                         )
                         null -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp)
-                        else -> MediaUnavailable(if (image == MediaImage.TooLarge) "Image too large to show" else "Image unavailable", Modifier)
+                        else -> ImageUnavailable(image, Modifier)
                     }
                 }
                 if (canPrev) {
@@ -840,7 +876,11 @@ private fun ViewerVideo(item: ToolMediaItem) {
             modifier = Modifier.fillMaxSize(),
         )
         null -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp, contentDescription = "Loading video")
-        else -> MediaUnavailable(if (v == MediaVideo.TooLarge) "Video too large to play" else "Video unavailable", Modifier)
+        else -> when (v) {
+            MediaVideo.Blocked -> MediaUnavailable(MediaCopy.BLOCKED, Modifier, detail = MediaCopy.BLOCKED_DETAIL)
+            MediaVideo.TooLarge -> MediaUnavailable(MediaCopy.VIDEO_TOO_LARGE, Modifier)
+            else -> MediaUnavailable(MediaCopy.VIDEO_UNAVAILABLE, Modifier)
+        }
     }
 }
 

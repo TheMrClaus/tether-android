@@ -111,7 +111,7 @@ class ToolMediaWireReplayTest {
         assertNull(req.getHeader("Authorization"))
     }
 
-    @Test fun behindASignInGatewayTheRedirectToItsLoginPageIsAFailureNeverFollowed() = runBlocking {
+    @Test fun behindASignInGatewayTheRedirectToItsLoginPageIsBlockedNeverFollowed() = runBlocking {
         login.start()
         signedIn(token = "tthr_device")
         h.server.enqueue(
@@ -122,8 +122,23 @@ class ToolMediaWireReplayTest {
                 .setBody("<html>login</html>"),
         )
         val sink = ByteArrayOutputStream()
-        assertEquals(ToolMediaResult.Failed(302), h.client.toolMedia.fetch(url, 32L * 1024 * 1024, sink))
+        assertEquals(ToolMediaResult.Blocked(302), h.client.toolMedia.fetch(url, 32L * 1024 * 1024, sink))
         assertEquals("nothing of the login page is kept", 0, sink.size())
         assertEquals("the bearer is never carried to the gateway's login origin", 0, login.requestCount)
+    }
+
+    @Test fun aGatewayLoginPageServedInPlaceIsBlockedAndTethersOwnRefusalIsNot() = runBlocking {
+        signedIn(token = "tthr_device")
+        val page = { code: Int -> MockResponse().setResponseCode(code).setHeader("Content-Type", "text/html; charset=utf-8").setBody("<html>login</html>") }
+        for ((response, expected) in listOf(page(200) to ToolMediaResult.Blocked(200), page(401) to ToolMediaResult.Blocked(401))) {
+            h.server.enqueue(response)
+            val sink = ByteArrayOutputStream()
+            assertEquals(expected, h.client.toolMedia.fetch(url, 32L * 1024 * 1024, sink))
+            assertEquals(0, sink.size())
+            take()
+        }
+        // What the server itself answers a revoked token (server.mjs's /api/ gate): not a gateway.
+        h.server.enqueue(MockResponse().setResponseCode(401).setHeader("Content-Type", "application/json; charset=utf-8").setBody("""{"error":"Authentication required."}"""))
+        assertEquals(ToolMediaResult.Failed(401), h.client.toolMedia.fetch(url, 32L * 1024 * 1024, ByteArrayOutputStream()))
     }
 }

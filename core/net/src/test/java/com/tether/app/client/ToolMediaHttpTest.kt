@@ -95,14 +95,37 @@ class ToolMediaHttpTest {
     @Test fun aRedirectIsNeverFollowedAndNeverTrusted() = runBlocking {
         for (code in listOf(301, 302, 303, 307, 308)) {
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", elsewhere.url("/api/tool-media/$hash.png")))
-            assertEquals(ToolMediaResult.Failed(code), media.fetch(png, 1024, ByteArrayOutputStream()))
+            // T6.8: Tether's route never redirects, so a 3xx is something in front of it.
+            assertEquals(ToolMediaResult.Blocked(code), media.fetch(png, 1024, ByteArrayOutputStream()))
             take()
         }
         assertEquals(0, elsewhere.requestCount)
     }
 
+    @Test fun aSignInPageIsBlockedButTethersOwnRefusalIsNot() = runBlocking {
+        val json = "application/json; charset=utf-8"
+        val cases = listOf(
+            MockResponse().setResponseCode(401).setHeader("Content-Type", "text/html").setBody("<html>login</html>") to ToolMediaResult.Blocked(401),
+            MockResponse().setResponseCode(403).setBody("Forbidden") to ToolMediaResult.Blocked(403),
+            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setHeader("WWW-Authenticate", "Bearer").setBody("{}") to ToolMediaResult.Blocked(401),
+            MockResponse().setResponseCode(200).setHeader("Content-Type", "text/html; charset=utf-8").setBody("<html>login</html>") to ToolMediaResult.Blocked(200),
+            // Tether's own answers (server.mjs): the /api/ gate's 401, streamToolMedia's 403 and 404.
+            MockResponse().setResponseCode(401).setHeader("Content-Type", json).setBody("""{"error":"Authentication required."}""") to ToolMediaResult.Failed(401),
+            MockResponse().setResponseCode(403).setHeader("Content-Type", json).setBody("""{"error":"That media file is not available."}""") to ToolMediaResult.Failed(403),
+            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"Not found."}""") to ToolMediaResult.Failed(404),
+            MockResponse().setResponseCode(502).setHeader("Content-Type", "text/html").setBody("<html>bad gateway</html>") to ToolMediaResult.Failed(502),
+        )
+        for ((response, expected) in cases) {
+            server.enqueue(response)
+            val sink = ByteArrayOutputStream()
+            assertEquals(expected, media.fetch(png, 1024, sink))
+            assertEquals("nothing of the page is kept", 0, sink.size())
+            take()
+        }
+    }
+
     @Test fun aContentTypeOffTheAllowListOrForAnotherExtensionFails() = runBlocking {
-        for (type in listOf("text/html", "image/svg+xml", "image/jpeg", "application/octet-stream")) {
+        for (type in listOf("image/svg+xml", "image/jpeg", "application/octet-stream", "text/plain")) {
             server.enqueue(image(type = type))
             assertEquals(type, ToolMediaResult.Failed(200), media.fetch(png, 1024, ByteArrayOutputStream()))
             take()

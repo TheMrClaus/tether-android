@@ -29,7 +29,15 @@ sealed interface ToolMediaResult {
     data object SignedOut : ToolMediaResult
     data object LocalNetworkBlocked : ToolMediaResult
 
-    /** Unreachable, a non-2xx (incl. any 3xx: never followed), or a content type off the allow-list. */
+    /**
+     * T6.8: something in front of Tether answered instead of it — a sign-in gateway (SSO or a proxy)
+     * that does not exempt this route for paired devices. Decided from the status line and headers
+     * only (see [HttpToolMedia.blockedBySignIn]); the body is never kept and a redirect's target is
+     * never read, shown or followed.
+     */
+    data class Blocked(val code: Int) : ToolMediaResult
+
+    /** Unreachable, a non-2xx that is not [Blocked], or a content type off the allow-list. */
     data class Failed(val code: Int? = null) : ToolMediaResult
 }
 
@@ -114,9 +122,12 @@ class HttpToolMedia(
 
     private fun read(response: Response, ext: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
         // A redirect is never followed, and never trusted either.
+        val declaredType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)
+        if (blockedBySignIn(response.code, declaredType, response.header("WWW-Authenticate") != null)) {
+            return ToolMediaResult.Blocked(response.code)
+        }
         if (!response.isSuccessful) return ToolMediaResult.Failed(response.code)
         val expected = ToolMediaSource.CONTENT_TYPE_BY_EXT.getValue(ext)
-        val declaredType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)
         if (declaredType != expected) return ToolMediaResult.Failed(response.code)
         val declared = response.header("Content-Length")?.toLongOrNull()
         if (declared != null && declared > maxBytes) return ToolMediaResult.TooLarge
@@ -149,9 +160,22 @@ class HttpToolMedia(
         }
     }
 
-    private companion object {
-        const val COPY_CHUNK = 64 * 1024
+    internal companion object {
+        private const val COPY_CHUNK = 64 * 1024
 
-        fun sameOrigin(a: HttpUrl, b: HttpUrl) = a.scheme == b.scheme && a.host == b.host && a.port == b.port
+        /**
+         * T6.8: is this answer a sign-in page rather than Tether? Tether's tool-media route never
+         * redirects and answers its own 401/403 as JSON without `WWW-Authenticate` (server.mjs's
+         * `/api/` gate, `streamToolMedia`). So: any 3xx; a 401/403 that is not JSON or carries
+         * `WWW-Authenticate` (ta-s4r's rule for the sign-in probe); or a 200 HTML page.
+         */
+        fun blockedBySignIn(code: Int, contentType: String?, wwwAuthenticate: Boolean): Boolean = when (code) {
+            in 300..399 -> true
+            401, 403 -> wwwAuthenticate || contentType != "application/json"
+            200 -> contentType == "text/html" || contentType == "application/xhtml+xml"
+            else -> false
+        }
+
+        private fun sameOrigin(a: HttpUrl, b: HttpUrl) = a.scheme == b.scheme && a.host == b.host && a.port == b.port
     }
 }
