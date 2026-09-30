@@ -121,7 +121,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.2 | Tool cards, rich renderers, diffs, git changes, tool/spawned media | VERIFIED | TheMrClaus @ 2026-09-28 04:21 |  |  |
 | T6.3 | Approvals, questions, permission denials/paths | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T6.4 | Subagents, spawned runs, background tasks/commands, todo bar, turn activity | VERIFIED | TheMrClaus @ 2026-09-29 01:02 |  |  |
-| T6.5 | Conversation timeline refresh | TODO |  |  | From T2.2: helpers.ConversationStoryPoints.storyPointsFromSession(state, promptMax=220, replyMax=260) is the faithful port; the timeline sh… |
+| T6.5 | Conversation timeline refresh | VERIFIED | TheMrClaus @ 2026-09-30 06:13 |  |  |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
 
@@ -130,7 +130,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
-| T7.3 | Slash commands, run/background command, mentions | TODO |  |  | from T6.7 (coordinator): while a foreground command runs, the web relabels Interrupt to 'Stop' and shows a Background key - part of T7.3's … |
+| T7.3 | Slash commands, run/background command, mentions | IN-PROGRESS | TheMrClaus @ 2026-09-30 06:50 |  | checkpoint 21d0f71: UI done (command mode + keys, Stop/Background while a foreground command runs, slash passthrough per web v128, @ Agents… |
 | T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | TODO |  |  |  |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
@@ -331,3 +331,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-29 21:30 | claude-main / Opus 5.5 | T6.7 | T6.7 merged ff-only `b65fb48`, VERIFIED (+7 matrix rows, --force past the verified blocker). 3 rounds: verify CONFIRMED r1/r2; security follow-ups (toast X under touch slop, lock every interrupt while cancelling, re-arm on toast shrink) fixed in r3 and checked by the coordinator. RESUME HERE rewritten (neutral security wording). | beads scrub (ta-l8k); T6.5/T7.3 |
 | 2026-09-29 22:00 | claude-main / Opus 5.5 | ta-l8k | Beads scrub done in a quiet window: store rebuilt from a neutralised export (461/461 ids, 37 field changes across 17 ids, 0 unexpected; ready/blocked sets identical), history flattened, `refs/dolt/data` deleted and re-pushed as a 2-commit orphan; a fresh clone of the published ref verifies. Event timeline dropped (owner-accepted); offline backup kept outside the repo. Merged worktrees removed. | T6.5 / T7.3 / ta-96z next |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-96z | The app accepts the `__Host-tether_session` name (stored with the credential, sent back under it; legacy blobs unchanged, nobody signed out; `__Host-` accepted only with its prefix rules). Merged ff-only, VERIFIED (verify CONFIRMED, security PASS-WITH-FOLLOWUPS, hardening checked by the coordinator). 0.7.7 draft (code 24) built and checked. Follow-up ta-1yx. | T6.5 in progress |
+| 2026-09-30 | claude-main / Opus 5.5 | T6.5, T7.3, ta-blf | T6.5 conversation timeline merged ff-only `3dd391c`, VERIFIED (+2 rows; verify REFUTED r1 on the needle while reading a long reply, CONFIRMED r2; off-screen needle divergence recorded in the README). Filed ta-blf (transcript renders bidi controls raw). T7.3 in progress. | T7.3 review; ta-blf |
