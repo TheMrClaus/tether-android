@@ -501,6 +501,31 @@ class OriginKeyedPendingTest {
         }
     }
 
+    /** Delegates to [inner]; clear() always fails, as a store that can write neither file does. */
+    private class FailingClear(private val inner: SettingsStore) : SettingsStore by inner {
+        override suspend fun clear() {
+            throw java.io.IOException("disk full")
+        }
+    }
+
+    /**
+     * ta-8lg: a stop() whose disk wipe FAILED never reads as a landed wipe. The slot it could not
+     * delete is still dead for this process: a sign-in to the same server replays nothing of it.
+     */
+    @Test
+    fun stopDiscardsTheUnsentInputEvenWhenItsDiskWipeFails() {
+        writeOnA { FailingClear(it) }
+        client.stop()
+        assertEquals("the wipe really failed", 2, PendingInput.fromPersisted(disk.disk).records.size)
+        a.down = false
+        loginTo(a)
+        val aws = a.nextSocket()
+        handshake(a, aws)
+        aws.send(snapshotFrame("s-a", 1, turnState("s-a")))
+        serverBarrier(aws)
+        assertTrue("a slot whose wipe failed was read back", framesUntilBarrier(a).isEmpty())
+    }
+
     // ------------------------------------------------------------------
     // 4. The 0.6.0 single slot
     // ------------------------------------------------------------------

@@ -3,11 +3,14 @@ package com.tether.app.client
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -411,6 +414,79 @@ class SignOutRaceTest {
         assertEquals(LoginResult.Success, runBlocking { client.login(base, "pw") })
         assertTrue("the sign-in waited for a clear that had failed", System.currentTimeMillis() - started < 5_000)
         assertEquals(Credential.Cookie("cookie-b"), runBlocking { settings.session().credential })
+    }
+
+    /**
+     * A client scope standing in for the app scope, whose handler records whatever reaches it. In
+     * production that scope is fail-fast with no handler: anything recorded here is a crash there.
+     */
+    private class RecordingScope {
+        val escaped = CopyOnWriteArrayList<Throwable>()
+        private val job = SupervisorJob()
+        val scope = CoroutineScope(job + Dispatchers.Default + CoroutineExceptionHandler { _, e -> escaped += e })
+
+        /** Ends every coroutine of the scope; whatever failed has reached the handler once this returns. */
+        fun drain(): List<String> {
+            job.cancel()
+            runBlocking { withTimeout(20_000) { job.join() } }
+            return escaped.map { it.javaClass.name }
+        }
+    }
+
+    /**
+     * ta-8lg: a stop() whose store clear keeps throwing is never fatal. The client scope is the
+     * app scope in production (fail-fast, no handler), so an exception out of the clear would be
+     * a crash, and in a test it poisons whichever runTest runs next in the fork. The clear is
+     * tried twice (as logoutNow() does), and the next sign-in is still released (L-1).
+     */
+    @Test
+    fun aStopWhoseClearKeepsThrowingNeverEscapesTheClientScope() {
+        h.server.start()
+        val base = h.server.url("/").toString().trimEnd('/')
+        val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
+        val recording = RecordingScope().also { extraScopes += it.scope }
+        val client = newClient(settings, scope = recording.scope)
+        client.signOutClearWaitMs = 15_000
+        connect(client)
+        val attempts = AtomicInteger()
+        settings.beforeClear = {
+            attempts.incrementAndGet()
+            throw java.io.IOException("disk full")
+        }
+        client.stop()
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
+        h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
+        h.enqueueConnect()
+        val started = System.currentTimeMillis()
+        assertEquals(LoginResult.Success, runBlocking { client.login(base, "pw") })
+        assertTrue("the sign-in waited for a clear that had failed", System.currentTimeMillis() - started < 5_000)
+        settings.beforeClear = null
+
+        assertEquals("escaped the client scope", emptyList<String>(), recording.drain())
+        assertEquals("the failed clear is tried once more, never more", 2, attempts.get())
+    }
+
+    /**
+     * ta-8lg: a clear that fails once is retried, so the stop() still leaves nothing on disk that
+     * the next process could sign back in with (no credential, no server).
+     */
+    @Test
+    fun aStopWhoseClearThrowsOnceStillLeavesTheStoreSignedOut() {
+        h.server.start()
+        val base = h.server.url("/").toString().trimEnd('/')
+        val settings = GatedSettings(InMemorySettings(initialBaseUrl = base, initialDeviceToken = "tthr_device"))
+        val recording = RecordingScope().also { extraScopes += it.scope }
+        val client = newClient(settings, scope = recording.scope)
+        connect(client)
+        settings.beforeClear = {
+            settings.beforeClear = null
+            throw java.io.IOException("disk full")
+        }
+        client.stop()
+        awaitNoStoredCredential(settings)
+        assertNull("the stop left the server configured", runBlocking { settings.session().baseUrl })
+
+        assertEquals("escaped the client scope", emptyList<String>(), recording.drain())
     }
 
     /**
