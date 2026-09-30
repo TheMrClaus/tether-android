@@ -160,8 +160,40 @@ internal object TimelineModel {
     fun replyText(point: TimelinePoint, liveCopy: Boolean): String =
         point.reply.ifEmpty { if (liveCopy) REPLY_PENDING else REPLY_NOT_SAVED }
 
-    /** conversation-timeline.tsx:138-160: the prompt whose row top is nearest the reading line (-1: none on screen). */
-    fun activeIndex(rows: List<Pair<Int, Float>>, viewportHeight: Float, size: Int): Int {
+    /**
+     * conversation-timeline.tsx:138-160: the prompt whose row top is nearest the reading line. The
+     * web measures every prompt, on screen or not; a lazy list only lays out what is on screen, so
+     * when no prompt row is ([rows] empty, e.g. mid-way through a long reply) the nearest is the
+     * last prompt above the first visible row ([firstVisibleRow], a lazy index), else the first
+     * one below it ([promptRows]: story point -> lazy index). -1: no prompt at all.
+     */
+    fun activeIndex(
+        rows: List<Pair<Int, Float>>,
+        viewportHeight: Float,
+        size: Int,
+        firstVisibleRow: Int = -1,
+        promptRows: Map<Int, Int> = emptyMap(),
+    ): Int {
+        val onScreen = nearestOnScreen(rows, viewportHeight, size)
+        if (onScreen >= 0 || firstVisibleRow < 0) return onScreen
+        var above = -1
+        var aboveRow = Int.MIN_VALUE
+        var below = -1
+        var belowRow = Int.MAX_VALUE
+        for ((index, row) in promptRows) {
+            if (index < 0 || index >= size) continue
+            if (row < firstVisibleRow && row > aboveRow) {
+                above = index
+                aboveRow = row
+            } else if (row > firstVisibleRow && row < belowRow) {
+                below = index
+                belowRow = row
+            }
+        }
+        return if (above >= 0) above else below
+    }
+
+    private fun nearestOnScreen(rows: List<Pair<Int, Float>>, viewportHeight: Float, size: Int): Int {
         val target = viewportHeight * READING_LINE
         var nearest = -1
         var distance = Float.POSITIVE_INFINITY

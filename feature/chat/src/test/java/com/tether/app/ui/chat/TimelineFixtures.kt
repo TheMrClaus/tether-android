@@ -36,6 +36,16 @@ object TimelineFixtures {
         }.toTypedArray(),
     )
 
+    /** 25 prompts; prompt 5's reply is 200 paragraphs, so a reader can be deep inside it with no prompt row on screen. */
+    val longReply: ChatFixtures.Folded by lazy {
+        val long = (1..200).joinToString("\n\n") { "Paragraph $it of the long reply." }
+        ChatFixtures.fold(
+            *(1..25).flatMap { k ->
+                ChatFixtures.turn("t$k", "Prompt $k", if (k == 5) long else "Reply $k", 3_600_000L + (k - 1) * 60_000L).toList()
+            }.toTypedArray(),
+        )
+    }
+
     /**
      * Edge prompts: an attachment-only message, a prompt carrying bidi controls and a zero-width
      * space, and a last turn still waiting for its reply.

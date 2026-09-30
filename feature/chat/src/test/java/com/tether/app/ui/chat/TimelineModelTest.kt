@@ -160,6 +160,29 @@ class TimelineModelTest {
         assertEquals(-1, TimelineModel.activeIndex(listOf(5 to 400f), 1000f, 3))
     }
 
+    @Test fun withNoPromptRowOnScreenTheNeedleIsTheNearestPromptOffScreen() {
+        // Story point -> lazy row: prompts on rows 1, 3, 5, 7 (their replies between).
+        val rows = mapOf(0 to 1, 1 to 3, 2 to 5, 3 to 7)
+        // Deep in the reply on row 4: the last prompt above it.
+        assertEquals(1, TimelineModel.activeIndex(emptyList(), 1000f, 4, firstVisibleRow = 4, promptRows = rows))
+        assertEquals(3, TimelineModel.activeIndex(emptyList(), 1000f, 4, firstVisibleRow = 8, promptRows = rows))
+        // Nothing above (a leading row 0 on screen): the first prompt below.
+        assertEquals(0, TimelineModel.activeIndex(emptyList(), 1000f, 4, firstVisibleRow = 0, promptRows = rows))
+        // A prompt row on screen still wins by distance.
+        assertEquals(2, TimelineModel.activeIndex(listOf(2 to 380f), 1000f, 4, firstVisibleRow = 4, promptRows = rows))
+        // Nothing laid out, or no prompts: no needle.
+        assertEquals(-1, TimelineModel.activeIndex(emptyList(), 1000f, 4, firstVisibleRow = -1, promptRows = rows))
+        assertEquals(-1, TimelineModel.activeIndex(emptyList(), 1000f, 0, firstVisibleRow = 4, promptRows = emptyMap()))
+        // Out-of-range story points are ignored.
+        assertEquals(1, TimelineModel.activeIndex(emptyList(), 1000f, 2, firstVisibleRow = 6, promptRows = rows))
+    }
+
+    @Test fun theLinesAreTheWebsLiterals() {
+        // conversation-timeline.tsx:143 `clientHeight * 0.4`, :176 `clientHeight * 0.28`.
+        assertEquals(0.4f, TimelineModel.READING_LINE, 0f)
+        assertEquals(0.28f, TimelineModel.JUMP_LINE, 0f)
+    }
+
     @Test fun aJumpSnapsPastTwoViewportsOrUnderReducedMotion() {
         assertTrue(TimelineModel.smoothJump(1999f, 1000f, false))
         assertFalse(TimelineModel.smoothJump(2000f, 1000f, false))

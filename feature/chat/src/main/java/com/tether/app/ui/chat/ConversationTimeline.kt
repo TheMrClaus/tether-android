@@ -210,13 +210,15 @@ internal fun ConversationTimeline(
     }
 
     // The prompt nearest the transcript's reading line (40% down): the needle.
-    val activeIndex by remember(itemKeyToSpIndex, size) {
+    // With no prompt row on screen (inside a long reply) it is the nearest prompt off screen.
+    val activeIndex by remember(itemKeyToSpIndex, storyPointToLazyIndex, size) {
         derivedStateOf {
             val info = listState.layoutInfo
             val rows = info.visibleItemsInfo.mapNotNull { item ->
                 itemKeyToSpIndex[item.key]?.let { it to (item.offset - info.viewportStartOffset).toFloat() }
             }
-            TimelineModel.activeIndex(rows, info.viewportSize.height.toFloat(), size)
+            val firstRow = info.visibleItemsInfo.firstOrNull()?.index ?: -1
+            TimelineModel.activeIndex(rows, info.viewportSize.height.toFloat(), size, firstRow, storyPointToLazyIndex)
         }
     }
 

@@ -28,6 +28,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.test.swipeDown
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.ui.TetherViewModel
@@ -45,6 +46,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+
+/** conversation-timeline.tsx:176: `node.offsetTop - scroll.clientHeight * 0.28` (the web's literal). */
+private const val WEB_JUMP_LINE = 0.28f
 
 /** Records the haptic moments instead of vibrating. */
 internal class RecordingHaptics : TetherHaptics(null) {
@@ -114,7 +118,7 @@ class TimelineBehaviourTest {
     private fun assertOnJumpLine(text: String) {
         val list = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
         val node = rule.onAllNodesWithText(text).fetchSemanticsNodes().first { it.boundsInRoot.top >= list.top }
-        val line = list.top + list.height * TimelineModel.JUMP_LINE
+        val line = list.top + list.height * WEB_JUMP_LINE
         val density = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().layoutInfo.density.density
         val top = node.boundsInRoot.top
         assertTrue("\"$text\" top $top vs jump line $line", top >= line - 2 * density && top <= line + 48 * density)
@@ -224,6 +228,55 @@ class TimelineBehaviourTest {
         assertOnJumpLine("Prompt ${expected + 1}")
         // The window stays around the prompt the scrub reached, back at slot 4.
         assertEquals(expected, rule.visibleMarks()[4])
+    }
+
+    private fun needle(): Int? = rule.visibleMarks().singleOrNull {
+        mark(it).fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription) == "Current step"
+    }
+
+    @Test fun deepInALongReplyTheNeedleStaysOnItsPrompt() {
+        val list = LazyListState()
+        rule.showTimeline(TimelineFixtures.longReply, listState = list)
+        // A reader's drag up stops follow mode (else the view stays pinned to the newest).
+        rule.onNodeWithTag("chat-transcript").performTouchInput { swipeDown() }
+        rule.waitForIdle()
+        // Find prompt 5's reply: the one row several viewports tall.
+        fun scrollTo(k: Int, offset: Int = 0) {
+            rule.runOnIdle { kotlinx.coroutines.runBlocking { list.scrollToItem(k, offset) } }
+            rule.waitForIdle()
+        }
+        val vh = rule.runOnIdle { list.layoutInfo.viewportSize.height }
+        fun sizeOf(k: Int) = rule.runOnIdle { list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == k }?.size ?: 0 }
+        val row = (0 until rule.runOnIdle { list.layoutInfo.totalItemsCount }).first { k ->
+            scrollTo(k)
+            sizeOf(k) > vh * 3
+        }
+        scrollTo(row, sizeOf(row) / 2)
+        assertTrue("no prompt row on screen", rule.onAllNodesWithText("Prompt 5").fetchSemanticsNodes().isEmpty())
+        assertEquals((0..9).toList(), rule.visibleMarks())
+        assertEquals(4, needle())
+        // The reply's first screen (prompt 5 just scrolled off above): still prompt 5.
+        scrollTo(row)
+        assertEquals(4, needle())
+        // The scroll edges: the very top and the very bottom.
+        // On screen the web's rule holds: the prompt row nearest 40% down (literal, as on the web).
+        fun nearestOnScreen(): Int {
+            val box = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
+            val line = box.top + box.height * 0.4f
+            return (1..25).mapNotNull { k ->
+                rule.onAllNodesWithText("Prompt $k").fetchSemanticsNodes()
+                    .firstOrNull { it.boundsInRoot.bottom > box.top && it.boundsInRoot.top < box.bottom }
+                    ?.let { k - 1 to kotlin.math.abs(it.boundsInRoot.top - line) }
+            }.minBy { it.second }.first
+        }
+        scrollTo(0)
+        assertEquals(nearestOnScreen(), needle())
+        assertTrue(needle()!! <= 3)
+        assertEquals((0..9).toList(), rule.visibleMarks())
+        scrollTo(rule.runOnIdle { list.layoutInfo.totalItemsCount } - 1, Int.MAX_VALUE / 2)
+        assertEquals(nearestOnScreen(), needle())
+        assertTrue(needle()!! >= 21)
+        assertEquals((15..24).toList(), rule.visibleMarks())
     }
 
     @Test fun aCancelledScrubEndsWithoutAJump() {
@@ -370,7 +423,7 @@ class TimelineExpandedBehaviourTest {
         rule.waitForIdle()
         val list = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
         val node = rule.onAllNodesWithText("Prompt ${target + 1}").fetchSemanticsNodes().first { it.boundsInRoot.top >= list.top }
-        val line = list.top + list.height * TimelineModel.JUMP_LINE
+        val line = list.top + list.height * WEB_JUMP_LINE
         val top = node.boundsInRoot.top
         assertTrue("top $top vs line $line", top >= line - 2f && top <= line + 48f)
     }
