@@ -38,8 +38,9 @@ import java.text.Normalizer
  *   groups (one `::` at most, an optional dotted-quad tail; no zone id).
  * - mailto: no recipient; a recipient that is not exactly `local@domain` with an ASCII local part
  *   of RFC 5322 atext and dots (`%` refused: an escaped `@` or `,` would split differently in the
- *   mail app; `#` refused: a URI parser ends the address there); a domain that fails the host rule
- *   or is an address.
+ *   mail app; `#` refused: a URI parser ends the address there; `/` refused, r3: `mailto://bank.
+ *   example/support@evil.example` reads like the bank); a domain that fails the host rule or is an
+ *   address.
  *
  * ALLOWED hrefs become a [Target]:
  * - [Target.host] is the host in ASCII: an internationalised name as punycode (`xn--`), letters
@@ -322,13 +323,18 @@ object SafeHref {
 
     // ---- mailto -------------------------------------------------------------------------------
 
-    /** RFC 5322 atext punctuation and dot, without `#` (a URI parser ends the address there). */
-    private const val ATEXT_EXTRA = "!$&'*+-/=^_`{|}~."
+    /**
+     * RFC 5322 atext punctuation and dot, without `#` (a URI parser ends the address there) and
+     * (r3) without `/`: `mailto://bank.example/support@evil.example` reads like a bank address, and
+     * a URI parser takes `//bank.example` for an authority.
+     */
+    private const val ATEXT_EXTRA = "!$&'*+-=^_`{|}~."
 
     private fun mailto(href: String, rest: String, ascii: Boolean): Verdict {
         // r2: the query is dropped (see the class doc); only the address line is read and opens.
         val to = rest.substringBefore('?')
-        if (to.isEmpty()) return refused(Refusal.Recipient)
+        // r3: `mailto:/…` and `mailto://…` are never an address line (a URI path or authority).
+        if (to.isEmpty() || to.startsWith('/')) return refused(Refusal.Recipient)
         val recipients = ArrayList<String>()
         var international = false
         for (address in to.split(',')) {

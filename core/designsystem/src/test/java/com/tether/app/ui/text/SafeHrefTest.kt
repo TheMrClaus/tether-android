@@ -294,6 +294,11 @@ class SafeHrefTest {
         refused("mailto:?subject=hello", Refusal.Recipient)
         refused("mailto:?to=spy@evil.com", Refusal.Recipient)
         refused("mailto:a#b@example.com", Refusal.Recipient) // a URI parser ends the address at `#`
+        // r3: `/` reads like a path to another host, and a URI parser takes `//x` for an authority.
+        refused("mailto://bank.example/support@evil.example", Refusal.Recipient)
+        refused("mailto:/support@evil.example", Refusal.Recipient)
+        refused("mailto:a/b@example.com", Refusal.Recipient)
+        refused("MAILTO://bank.example/support@evil.example", Refusal.Recipient)
         refused("mailto:", Refusal.Recipient)
         refused("mailto:ceo%40good.com@evil.com", Refusal.Recipient)
         refused("mailto:a@b@c.com", Refusal.Recipient)
