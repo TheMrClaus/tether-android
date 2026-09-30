@@ -22,6 +22,12 @@ object V40Differences {
             Regex("""\$\.queuedMessages\[\d+]\.(origin|noticeKind)"""),
             "ta-ylh: the typed QueuedMessage carries v133's origin / noticeKind (issue #211, events.mjs queued_message_added; null when absent); v40 had no such fields",
         ),
+        Allowed(
+            "*",
+            "*",
+            Regex("""\$\.turnsById\["[^"]*"]\.blocksById\["[^"]*"]\.attachments\[\d+]\.(delivery|mediaRef)"""),
+            "T7.4: the typed AttachmentMeta carries v112's delivery and mediaRef (lib/protocol.ts AttachmentMeta, null when the journal has none); v40 had no such fields",
+        ),
     )
 
     fun allows(testClass: String, method: String, path: String): Boolean =
