@@ -74,7 +74,9 @@ import com.tether.app.ui.theme.TetherTypography
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeDirection
 import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.appendSafe
 import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.tokenStyle
 
 /*
  * T6.3: the attention cards (chat-view.tsx 458-498 PermissionDenialCard, 965-1129 QuestionCard,
@@ -370,7 +372,13 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         Text(
             buildAnnotatedString {
                 append("The agent wants to run ")
-                withStyle(SpanStyle(fontFamily = type.mono, background = t.tintMd)) { append(" ${view.name} ") }
+                // ta-28i: the tool's name is code (every bidi / invisible code point a token).
+                val tokens = tokenStyle(t)
+                withStyle(SpanStyle(fontFamily = type.mono, background = t.tintMd)) {
+                    append(" ")
+                    appendSafe(view.name, SafeText.Rule.Code, tokens)
+                    append(" ")
+                }
                 append(".")
             },
             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.85f)),
@@ -736,16 +744,17 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                 Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
                 verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
             ) {
+                // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
                 question.header?.let {
                     Text(
-                        it.uppercase(),
+                        proseText(cut4k(it).uppercase()),
                         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
                         color = t.muted,
                         modifier = Modifier.padding(vertical = pMargin(0.72f)),
                     )
                 }
                 Text(
-                    cut4k(question.question),
+                    proseText(cut4k(question.question)),
                     style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
                     color = t.ink,
                     modifier = Modifier.padding(vertical = pMargin(0.9f)),
@@ -842,7 +851,12 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     }
 }
 
-private fun cut4k(s: String): String = if (s.length > CARD_TEXT_MAX) s.substring(0, CARD_TEXT_MAX) + "…" else s
+/**
+ * The card's display bound. ta-28i: cut at a character-cluster boundary ([TextCut]: never inside a
+ * surrogate pair or a combining sequence), and always on the SOURCE, before the prose rule draws it,
+ * so a token is never cut in half.
+ */
+internal fun cut4k(s: String): String = if (s.length > CARD_TEXT_MAX) com.tether.app.client.TextCut.cut(s, CARD_TEXT_MAX) + "…" else s
 
 /**
  * `.chat-question-option` on the material layer: a key face (`--key-face` on `--key-side`, the lit
@@ -877,9 +891,9 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
             .testTag("question-option"),
         verticalArrangement = Arrangement.spacedBy(1.6.dp),
     ) {
-        Text(cut4k(option.label), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.86f), fontWeight = FontWeight(500)), color = if (enabled) t.white else t.muted)
+        Text(proseText(cut4k(option.label)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.86f), fontWeight = FontWeight(500)), color = if (enabled) t.white else t.muted)
         option.description?.let {
-            Text(it, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f)), color = t.muted)
+            Text(proseText(cut4k(it)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f)), color = t.muted)
         }
     }
 }
