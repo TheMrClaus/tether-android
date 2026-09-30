@@ -346,6 +346,25 @@ class TranscriptBidiBehaviourTest {
         assertNoRawOverride()
     }
 
+    /** ta-blf r2: a Codex command's output is terminal output (colour dropped, other controls shown). */
+    @Test fun aCodexCommandsOutputIsDrawnAsTerminalOutput() {
+        val f = ChatFixtures.fold(
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k-t1") },
+            ev("user_message_accepted", "t1", ts = 1) { put("text", "Test it.") },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "c1"); put("name", "command_execution"); putJsonObject("input") { put("command", "npm test") } },
+            ev("tool_end", "t1", ts = 1) {
+                put("toolId", "c1"); put("isError", false)
+                putJsonObject("output") { put("text", "\u001B[31mFAIL\u001B[0m ${RLO}exe.txt\n\u001B[2Kx\n"); put("exitCode", 1); put("status", "completed") }
+            },
+            ev("turn_end", "t1", ts = 1) { put("outcome", "ok") },
+        )
+        show(f, richCodex = true)
+        rule.onAllNodesWithTag("tool-activity-group").fetchSemanticsNodes().let { if (it.isNotEmpty()) rule.onNodeWithTag("tool-activity-group").performClick() }
+        rule.waitForIdle()
+        rule.onNodeWithText("FAIL ${tok(0x202E)}exe.txt", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("${tok(0x1B)}[2Kx", substring = true, useUnmergedTree = true).assertExists()
+    }
+
     // ---- copy --------------------------------------------------------------------------------
 
     @Test fun aRowsSelectionCopiesHiddenControlsVisiblyAndCopyRawGivesTheOriginal() {

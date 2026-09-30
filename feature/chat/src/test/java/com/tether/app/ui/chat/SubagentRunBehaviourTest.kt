@@ -182,6 +182,24 @@ class SubagentRunBehaviourTest {
         rule.onNodeWithText("src/a.ts: 3 problems", substring = true).assertIsDisplayed()
     }
 
+    /** ta-blf r2: a spawned CLI's output is terminal output: colour dropped, every other control a visible token. */
+    @Test fun aSpawnedChildsOutputIsDrawnAsTerminalOutput() {
+        val t = SubagentFixtures.T_SUB
+        val f = ChatFixtures.fold(
+            *ChatFixtures.turn("t1", "Spawn it.", "Spawned it.", t),
+            evNullTurn("spawned_run_updated", ts = t) {
+                put("runId", "run-9"); put("origin", "spawned"); put("provider", "codex"); put("title", "Lint")
+                put("logFile", "/w/run-9.log"); put("parentTurnId", "t1"); put("status", "stopped"); put("exitCode", 1); put("startedAt", t); put("endedAt", t + 1)
+            },
+            evNullTurn("spawned_run_output", ts = t) { put("runId", "run-9"); put("text", "\u001B[31mFAIL\u001B[0m \u202Eexe.txt\n") },
+        )
+        val vm = host(client(f))
+        rule.runOnIdle { vm.selectRun("s1", "spawn::run-9") }
+        rule.waitForIdle()
+        rule.onNodeWithTag("subrun-panel").performScrollToNode(hasText("Output"))
+        rule.onNodeWithText("FAIL \u2060\u27E8U+202E\u27E9exe.txt", substring = true, useUnmergedTree = true).assertExists()
+    }
+
     @Test fun aLifecycleOnlyChildSaysItsStepsStayOnItsThread() {
         val codex = session.copy(provider = "codex")
         val vm = host(client(SubagentFixtures.codexThread, codex), codex)
