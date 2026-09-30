@@ -74,6 +74,10 @@ import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
 import com.tether.app.ui.theme.ThemeFamily
 import java.util.Locale
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.safePreDisplay
 
 /*
  * T6.2: the generic tool card (chat-view.tsx:360-390 `ToolCard`), its input renderer
@@ -261,10 +265,10 @@ internal fun toolIoStyle(): TextStyle {
  * A `pre.chat-tool-io` in its `.chat-expand` clamp: `--mineral-deep` under a `--line` rule, ink
  * pre-wrap mono, padded `space-sm space-md`; [output] adds the output's inset rule (outside
  * Studio). Long text clamps at [toolClamp] with the expand toggle, never a nested scroller.
- * ta-blf: drawn as code ([TranscriptText]), LTR.
+ * ta-blf: drawn as code ([SafeText]), LTR; as command output ([SafeText.terminal]) when [terminal].
  */
 @Composable
-internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription: String? = null, background: Color? = null) {
+internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription: String? = null, background: Color? = null, terminal: Boolean = false) {
     val t = LocalTetherTokens.current
     val studio = isStudio(t)
     val bg = background ?: t.mineralDeep
@@ -273,7 +277,7 @@ internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription
     TetherExpandablePre(
         text = preText(text),
         style = toolIoStyle().copy(textDirection = codeDirection),
-        display = codePreDisplay(),
+        display = safePreDisplay(terminal),
         color = t.ink,
         clamp = toolClamp(),
         contentDescription = contentDescription,
@@ -352,20 +356,11 @@ private fun FileEditView(model: ToolInputModel.Edit) {
 }
 
 /**
- * `word-break: break-all`: a zero-width space after every character lets a path wrap anywhere.
- * ta-blf: a [TranscriptText] token is one unit (never broken inside, so it still reads and still
- * decodes on copy).
+ * `word-break: break-all`: a break opportunity between every two characters lets a path wrap
+ * anywhere. ta-blf r2: the opportunity is [SafeText]'s zero-width WORD JOINER + ZWSP pair (never a
+ * bare U+200B), so a copy of the path never carries it, and a token stays whole.
  */
-internal fun String.breakAnywhere(): String = if (length < 2) this else buildString(length * 2) {
-    val s = this@breakAnywhere
-    var i = 0
-    while (i < s.length) {
-        val end = if (s[i] == TranscriptText.MARK) TranscriptText.tokenEnd(s, i).takeIf { it > 0 } ?: (i + 1) else i + 1
-        append(s, i, end)
-        if (end < s.length && !s[end - 1].isHighSurrogate()) append('\u200B')
-        i = end
-    }
-}
+internal fun String.breakAnywhere(): String = SafeText.breakAnywhere(this)
 
 /**
  * `DiffBlock`: at most [MAX_DIFF_ROWS] rows (then "+N more lines", faint italic), in the clamp.

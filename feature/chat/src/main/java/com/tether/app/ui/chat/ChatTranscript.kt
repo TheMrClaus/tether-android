@@ -4,6 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.CompositionLocalProvider
+import com.tether.app.ui.text.CopyNoticeHost
+import com.tether.app.ui.text.CopyNotices
+import com.tether.app.ui.text.LocalCopyNotices
+import com.tether.app.ui.text.SafeCopyClipboard
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -257,8 +261,9 @@ private fun ChatTranscriptBody(
         bottom = spacing.padding.calculateBottomPadding(),
     )
 
+    val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().background(chatWellColor(t))) {
-        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -326,6 +331,9 @@ private fun ChatTranscriptBody(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = t.css.spaceLg, bottom = t.css.spaceLg),
             )
         }
+
+        // ta-blf r2: "N hidden control characters copied as ⟨U+…⟩", with "Copy raw".
+        CopyNoticeHost(copyNotices, Modifier.align(Alignment.BottomCenter).padding(horizontal = t.css.spaceLg, vertical = t.css.spaceLg))
     }
 }
 
@@ -356,10 +364,12 @@ private fun ChatRow(
         // T6.7: the transcript's words are selectable and copyable, as on the web, one row at a time:
         // a selection can never run across the transcript or into the header and composer (the
         // runaway selection the web fixed, globals.css:136-160). Rows that are controls, not
-        // reading, stay out of it. ta-blf: the copy is the ORIGINAL text, never the drawn tokens.
+        // reading, stay out of it. ta-blf: a copy never carries a hidden control the reader did not
+        // see ([SafeCopyClipboard]; the copy notice offers "Copy raw").
         if (item.selectableText) {
             val base = androidx.compose.ui.platform.LocalClipboard.current
-            val clipboard = remember(base) { OriginalTextClipboard(base) }
+            val notices = LocalCopyNotices.current
+            val clipboard = remember(base, notices) { SafeCopyClipboard(base, notices) }
             CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboard provides clipboard) {
                 SelectionContainer { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
             }

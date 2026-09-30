@@ -66,6 +66,8 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
 import com.tether.app.ui.theme.ThemeFamily
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.codeText
 
 /**
  * The resolved `.chat-bubble` box for one skin and layout class — the cascade of globals.css

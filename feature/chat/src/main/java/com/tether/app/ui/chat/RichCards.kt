@@ -61,6 +61,13 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
 import java.util.Locale
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.tokenStyle
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.appendSafe
+import com.tether.app.ui.text.safePreDisplay
 
 /*
  * T6.2: the engine rich cards — components/codex-rich-renderers.tsx (command, file change, MCP,
@@ -187,7 +194,7 @@ private fun RichMeta(items: List<Pair<androidx.compose.ui.graphics.vector.ImageV
 
 /** `.command` / `.input` / `.output`: mono 0.76rem/1.55 ink pre-wrap under a rule, clamped. */
 @Composable
-private fun RichPre(text: String, background: Color, contentDescription: String? = null, live: Boolean = false) {
+private fun RichPre(text: String, background: Color, contentDescription: String? = null, live: Boolean = false, terminal: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
@@ -195,7 +202,7 @@ private fun RichPre(text: String, background: Color, contentDescription: String?
     TetherExpandablePre(
         text = shown,
         style = type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.55.em, textDirection = codeDirection),
-        display = codePreDisplay(),
+        display = safePreDisplay(terminal),
         color = t.ink,
         clamp = toolClamp(),
         contentDescription = contentDescription,
@@ -240,7 +247,7 @@ private fun CodexCommandCard(block: JsObj, nested: Boolean) {
         RichPre(command.command, t.graphite)
         if (meta.isNotEmpty()) RichMeta(meta.map { null to it })
         if (command.output.isNotEmpty() || command.running) {
-            RichPre(command.output.ifEmpty { "Waiting for output…" }, t.tintXs, contentDescription = "Command output", live = command.running)
+            RichPre(command.output.ifEmpty { "Waiting for output…" }, t.tintXs, contentDescription = "Command output", live = command.running, terminal = true)
         }
         command.exitCode?.let { code -> ExitLine("Exit code $code") }
     }
@@ -407,7 +414,7 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int =
     val type = LocalTetherTypography.current
     val label = cutLine(file.newPath ?: file.oldPath ?: fallbackLabel, PATH_MAX)
     // ta-blf: the path is code everywhere it shows, TalkBack's words included.
-    val spoken = remember(label) { TranscriptText.code(label) }
+    val spoken = remember(label) { SafeText.code(label) }
     Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).semantics { contentDescription = "Changes in $spoken" }) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
@@ -561,7 +568,7 @@ internal fun CodexPlanCard(plan: PlanView) {
                     val last = index == plan.steps.lastIndex
                     val token = tokenStyle(t)
                     val stepText = buildAnnotatedString {
-                        if (completed) withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendSafe(step.step, TranscriptText.Rule.Prose, token) } else appendSafe(step.step, TranscriptText.Rule.Prose, token)
+                        if (completed) withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendSafe(step.step, SafeText.Rule.Prose, token) } else appendSafe(step.step, SafeText.Rule.Prose, token)
                     }
                     val small = planLabel(step.status)
                     val smallStyle = TextStyle(fontFamily = type.ui, fontSize = rem(0.65f), letterSpacing = 0.03.em)

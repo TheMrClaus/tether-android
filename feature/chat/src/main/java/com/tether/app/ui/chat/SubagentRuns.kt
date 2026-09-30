@@ -84,6 +84,8 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.codeText
 
 /*
  * T6.4: the sub-agent run surfaces (components/subagent-runs.tsx at PARITY_BASE): the tab strip,
@@ -866,7 +868,7 @@ private fun SpawnedRunOutput(run: SubagentRun) {
                 discovered -> SpawnedNote("Launched outside Tether with this session's marker. Its status follows the child's own completion record.", running = null)
                 spawned.output.isNotEmpty() -> {
                     val text = if (spawned.outputTruncated) "${spawned.output}\n… (truncated — the full output is in the log file)" else spawned.output
-                    ToolIoPre(text, output = true)
+                    ToolIoPre(text, output = true, terminal = true) // ta-blf r2: a spawned CLI's output
                 }
                 else -> SpawnedNote(if (run.status == RUN_RUNNING) "Waiting for this agent's first output…" else "This agent printed no output.", running = run.status == RUN_RUNNING)
             }

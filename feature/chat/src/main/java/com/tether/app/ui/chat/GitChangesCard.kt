@@ -54,6 +54,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.codeDirection
 
 /*
  * T6.2: components/git-changes-card.tsx (#159 #2, v110) — the live diff of a repo session against

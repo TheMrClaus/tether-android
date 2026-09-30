@@ -1,10 +1,8 @@
 package com.tether.app.ui.chat
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -74,6 +72,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.TetherExpandableBlock
+import com.tether.app.ui.components.expandPeek
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
@@ -85,6 +84,16 @@ import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
 import kotlinx.coroutines.delay
 import kotlin.math.max
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.tokenStyle
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.appendSafe
+import com.tether.app.ui.text.appendStyled
+import com.tether.app.ui.text.LocalCopyNotices
+import com.tether.app.ui.text.ProsePlan
+import com.tether.app.ui.text.copySafely
+import com.tether.app.ui.text.putOnClipboard
 
 /**
  * T6.1: renders the [parseMarkdown] AST the way the web paints `components/markdown.tsx` with the
@@ -128,30 +137,38 @@ internal val LocalFindActiveMark = androidx.compose.runtime.staticCompositionLoc
 
 /**
  * Append [text] with every occurrence of the cursor's needle marked (markdown.tsx `emit`).
- * ta-blf: drawn by [rule] ([TranscriptText]); the marks are found in the ORIGINAL text, so the
- * find's counts never depend on what is escaped.
+ * ta-blf: drawn by [rule] ([SafeText]; prose takes its isolates and marks from [plan]). The text
+ * is encoded ONCE, whole (a flag or a CRLF a match splits stays whole), and the marks are found in
+ * the ORIGINAL text, so the find's counts never depend on what is escaped; each mark then covers
+ * the drawn units of its characters (a token is marked whole).
  */
 internal fun AnnotatedString.Builder.appendMarked(
     text: String,
     cursor: FindCursor?,
     t: TetherTokens,
-    rule: TranscriptText.Rule = TranscriptText.Rule.Prose,
+    rule: SafeText.Rule = SafeText.Rule.Prose,
+    plan: ProsePlan? = null,
 ) {
     val token = tokenStyle(t)
     if (cursor == null) {
-        appendSafe(text, rule, token)
+        appendSafe(text, rule, token, plan)
         return
     }
-    var last = 0
-    for (range in findRanges(text, cursor.needle)) {
-        if (range.first > last) appendSafe(text.substring(last, range.first), rule, token)
-        val ordinal = cursor.next++
-        val start = length
-        withStyle(SpanStyle(color = t.css.findMatchInk)) { appendSafe(text.substring(range.first, range.last + 1), rule, token) }
-        addStringAnnotation(FIND_TAG, if (ordinal == cursor.active) FIND_ACTIVE else FIND_PLAIN, start, length)
-        last = range.last + 1
+    val ranges = findRanges(text, cursor.needle)
+    if (ranges.isEmpty()) {
+        appendSafe(text, rule, token, plan)
+        return
     }
-    if (last < text.length) appendSafe(text.substring(last), rule, token)
+    val encoded = SafeText.encodeMapped(text, rule, plan)
+    val base = length
+    appendStyled(encoded.display, token)
+    for (range in ranges) {
+        val ordinal = cursor.next++
+        val start = base + encoded.displayStart(range.first)
+        val end = base + encoded.displayEnd(range.last + 1)
+        addStyle(SpanStyle(color = t.css.findMatchInk), start, end)
+        addStringAnnotation(FIND_TAG, if (ordinal == cursor.active) FIND_ACTIVE else FIND_PLAIN, start, end)
+    }
 }
 
 /** [text] as a plain prose run with its marks (a user bubble, a streaming reply): `HighlightedText`. */
@@ -183,6 +200,8 @@ internal const val COPIED_RESET_MS = 1500L
  * [nodes] as an AnnotatedString: `<strong>` = bolder, `<em>` = (synthesised) italic, `.md-code`
  * mono 0.85em with a NBSP pad each side (its background is painted by [MdText]), links violet +
  * underlined and opened through [onLink] (a Custom Tab, never a WebView).
+ * ta-blf r2: the nodes are ONE line, so one [ProsePlan] over all of them decides its isolates and
+ * marks (a word split across emphasis or a link is still one line to the bidi algorithm).
  */
 internal fun inlineAnnotated(
     nodes: List<MdInline>,
@@ -191,7 +210,24 @@ internal fun inlineAnnotated(
     baseWeight: Int,
     onLink: (String) -> Unit,
     cursor: FindCursor? = null,
-): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor) }
+): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor, linePlan(nodes)) }
+
+/** The line's pieces in reading order (inline code drawn by the code rule), for its [ProsePlan]. */
+internal fun linePlan(nodes: List<MdInline>): ProsePlan {
+    val segments = ArrayList<ProsePlan.Segment>()
+    fun walk(list: List<MdInline>) {
+        for (node in list) when (node) {
+            is MdInline.Text -> segments.add(ProsePlan.Segment(node.text))
+            is MdInline.Code -> segments.add(ProsePlan.Segment(node.text, code = true))
+            is MdInline.Link -> walk(node.children)
+            is MdInline.Span -> walk(node.children)
+            is MdInline.Strong -> walk(node.children)
+            is MdInline.Em -> walk(node.children)
+        }
+    }
+    walk(nodes)
+    return ProsePlan.of(segments)
+}
 
 private fun AnnotatedString.Builder.appendInline(
     nodes: List<MdInline>,
@@ -199,15 +235,16 @@ private fun AnnotatedString.Builder.appendInline(
     type: TetherTypography,
     weight: Int,
     onLink: (String) -> Unit,
-    cursor: FindCursor? = null,
+    cursor: FindCursor?,
+    plan: ProsePlan,
 ) {
     for (node in nodes) {
         when (node) {
-            is MdInline.Text -> appendMarked(node.text, cursor, t)
+            is MdInline.Text -> appendMarked(node.text, cursor, t, plan = plan)
             is MdInline.Code -> {
                 val start = length
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
-                withStyle(type.codeInline) { appendMarked(node.text, cursor, t, TranscriptText.Rule.Code) }
+                withStyle(type.codeInline) { appendMarked(node.text, cursor, t, SafeText.Rule.Code) }
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
                 addStringAnnotation(CODE_TAG, node.text, start, length)
             }
@@ -217,14 +254,14 @@ private fun AnnotatedString.Builder.appendInline(
                     styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
                     linkInteractionListener = { onLink(node.href) },
                 ),
-            ) { appendInline(node.children, t, type, weight, onLink, cursor) }
-            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor)
+            ) { appendInline(node.children, t, type, weight, onLink, cursor, plan) }
+            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor, plan)
             is MdInline.Strong -> {
                 val w = bolder(weight)
-                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink, cursor) }
+                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink, cursor, plan) }
             }
             is MdInline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                appendInline(node.children, t, type, weight, onLink, cursor)
+                appendInline(node.children, t, type, weight, onLink, cursor, plan)
             }
         }
     }
@@ -723,9 +760,13 @@ private class TablePolicy(private val cols: Int, private val geo: TableGeometry)
  * `CodeBlock` (markdown.tsx:39-81): the fence body in `.md-pre` (1px `--line`, `--radius-sm`,
  * `--mineral-deep`, padding `space-sm space-md`, mono 0.8rem/1.5, `white-space: pre` scrolling
  * sideways) clamped by the expandable block (9rem on a phone, 16rem wider), with a tap-to-copy
- * key riding the top-right corner. Copy puts the EXACT raw fence body on the clipboard and shows
- * a check ("Copied") for 1.5s (never the drawn tokens, ta-blf). No syntax highlighting: the web
- * renders fences as plain text.
+ * key riding the top-right corner. Copy shows a check ("Copied") for 1.5s. No syntax
+ * highlighting: the web renders fences as plain text.
+ *
+ * ta-blf r2: a tap copies the body the SAFE way ([copySafely]: a hidden terminal / bidi control is
+ * copied as its visible token, and the copy notice offers "Copy raw"); a long press copies the
+ * EXACT raw body at once. While clamped only a peek of the body is laid out (the T6.2 pre rule:
+ * the first 64 lines, 4,096 characters), so a megabyte fence, or one full of tokens, costs its peek.
  */
 @Composable
 internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
@@ -735,7 +776,11 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
     val clamp = if (phone) 9.dp * 16 else t.css.chatClamp
     val shape = RoundedCornerShape(t.radiusSm)
+    val notices = LocalCopyNotices.current
     var copied by remember(block.code) { mutableStateOf(false) }
+    val peek = remember(block.code) { expandPeek(block.code) }
+    val truncated = peek.length < block.code.length
+    var opened by remember(block.code) { mutableStateOf(false) }
     LaunchedEffect(copied) {
         if (copied) {
             delay(COPIED_RESET_MS)
@@ -752,16 +797,22 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
             // T5.3 markdown.tsx:290-296: the active match inside this fence lifts the clamp.
             val count = if (mark != null) countPlainMatches(block.code, mark.find.needle) else 0
             val reveal = mark != null && mark.find.active >= mark.base && mark.find.active < mark.base + count
-            TetherExpandableBlock(clamp = clamp, reveal = reveal) {
+            TetherExpandableBlock(
+                clamp = clamp,
+                reveal = reveal,
+                forceOverflow = truncated,
+                onOpenChange = { opened = it },
+                hiddenRows = if (truncated) { _, _ -> 0 } else null,
+            ) {
                 Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     val padding = Modifier.padding(horizontal = t.css.spaceMd + 1.dp, vertical = t.css.spaceSm + 1.dp)
                     // ta-blf: the fence shows exactly what it holds (every invisible / bidi code point a
                     // token), laid out LTR; Copy still takes the raw body.
                     val style = type.codeBlock.copy(textDirection = codeDirection)
                     if (mark == null) {
-                        Text(codeText(block.code), style = style, color = t.ink, softWrap = false, modifier = padding)
+                        Text(codeText(if (opened || !truncated) block.code else peek), style = style, color = t.ink, softWrap = false, modifier = padding)
                     } else {
-                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t, TranscriptText.Rule.Code) } }
+                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t, SafeText.Rule.Code) } }
                         MdText(marked, style, t.ink, padding, softWrap = false)
                     }
                 }
@@ -769,18 +820,12 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
         }
         CopyKey(
             copied = copied,
-            onClick = { if (copyToClipboard(context, block.code)) copied = true },
+            onClick = { if (copySafely(context, SafeText.code(block.code), notices, raw = block.code, label = "code")) copied = true },
+            onLongClick = { if (putOnClipboard(context, block.code, "code")) copied = true },
             modifier = Modifier.align(Alignment.TopEnd).offset(x = -t.css.spaceXs, y = t.css.spaceXs),
         )
     }
 }
-
-/** Put [code] on the system clipboard. False when the clipboard is unavailable (the web's silent fallback). */
-internal fun copyToClipboard(context: Context, code: String): Boolean = runCatching {
-    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
-    clipboard.setPrimaryClip(ClipData.newPlainText("code", code))
-    true
-}.getOrDefault(false)
 
 /**
  * `.md-copy-btn` under the material layer (`:root .md-copy-btn`, globals.css:8598): a key face
@@ -789,7 +834,7 @@ internal fun copyToClipboard(context: Context, code: String): Boolean = runCatch
  * `--key-face-deep` with the pressed bevel. Lucide Copy / Check at 14px.
  */
 @Composable
-private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun CopyKey(copied: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -814,7 +859,14 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = M
                 border = CssBorder(1.dp, t.keySide),
                 shadows = shadows,
             )
-            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onLongClickLabel = "Copy raw",
+                onLongClick = onLongClick,
+                onClick = onClick,
+            )
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {

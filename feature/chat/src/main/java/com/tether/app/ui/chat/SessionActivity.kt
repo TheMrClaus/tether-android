@@ -85,6 +85,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.withContext
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.proseText
+import com.tether.app.ui.text.tokenStyle
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.appendStyled
 
 /*
  * T6.4: the composer deck's session activity (chat-view.tsx 3703-3830, 4520-4525): the v56 todo
@@ -129,7 +135,8 @@ internal fun TodoBar(progress: ProgressView, sessionKey: String?) {
                 .clickable(role = Role.Button, onClick = toggle)
                 .clearAndSetSemantics {
                     role = Role.Button
-                    contentDescription = "$summary, ${progress.completed} of ${progress.total} tasks complete"
+                    // ta-blf r2: the agent's words, prose-ruled for TalkBack too.
+                    contentDescription = "${SafeText.prose(summary)}, ${progress.completed} of ${progress.total} tasks complete"
                     stateDescription = if (expanded) "Expanded" else "Collapsed"
                     onClick(if (expanded) "Collapse task list" else "Expand task list") { toggle(); true }
                     testTag = "todo-bar-head"
@@ -140,7 +147,7 @@ internal fun TodoBar(progress: ProgressView, sessionKey: String?) {
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
             Icon(TetherIcons.ListTodo, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp).alpha(0.85f))
-            Text(summary, style = TextStyle(fontFamily = type.ui, fontSize = rem(0.8f)), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(proseText(summary), style = TextStyle(fontFamily = type.ui, fontSize = rem(0.8f)), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(
                 "${progress.completed}/${progress.total}",
                 style = TextStyle(fontFamily = type.ui, fontSize = rem(0.75f), fontFeatureSettings = "tnum"),
@@ -178,7 +185,7 @@ private fun TodoItemRow(item: ProgressItem) {
         Modifier
             .fillMaxWidth()
             .clearAndSetSemantics {
-                contentDescription = "${item.label}, $word"
+                contentDescription = "${SafeText.prose(item.label)}, $word"
                 testTag = "todo-item"
             }
             .padding(vertical = 3.dp),
@@ -193,7 +200,7 @@ private fun TodoItemRow(item: ProgressItem) {
             }
         }
         Text(
-            item.label,
+            proseText(item.label),
             style = TextStyle(fontFamily = type.ui, fontSize = rem(0.8f), textDecoration = if (done) TextDecoration.LineThrough else null),
             color = if (done) ink.copy(alpha = ink.alpha * 0.65f) else ink,
             modifier = Modifier.weight(1f),
@@ -663,13 +670,13 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                     item(key = "dropped") { Text("… (earlier output not shown here — the full output is in the log file)", style = body, color = faint) }
                 }
                 items(shown.size) { i ->
-                    // ta-blf: each piece as terminal output ([TranscriptText.terminal]): SGR colour
+                    // ta-blf: each piece as terminal output ([SafeText.terminal]): SGR colour
                     // dropped, every other control, bidi or invisible code point a visible token.
                     val token = tokenStyle(t)
                     val text = remember(shown[i], warning, token) {
                         buildAnnotatedString {
                             for (piece in shown[i].pieces) {
-                                val display = TranscriptText.terminal(piece.text)
+                                val display = SafeText.terminal(piece.text)
                                 if (piece.stderr) withStyle(SpanStyle(color = warning)) { appendStyled(display, token) } else appendStyled(display, token)
                             }
                         }

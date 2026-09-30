@@ -71,6 +71,10 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TetherTypography
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.codeText
+import com.tether.app.ui.text.proseText
 
 /*
  * T6.3: the attention cards (chat-view.tsx 458-498 PermissionDenialCard, 965-1129 QuestionCard,
@@ -914,18 +918,19 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
             }
             view.items.forEach { item ->
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // ta-blf r2: the agent's question and the operator's answer are prose (SafeText).
                     item.header?.let {
                         Text(
-                            it.uppercase(),
+                            proseText(it.uppercase()),
                             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
                             color = t.muted,
                             modifier = Modifier.padding(vertical = pMargin(0.72f)),
                         )
                     }
-                    Text(item.question, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink, modifier = Modifier.padding(vertical = pMargin(0.9f)))
+                    Text(proseText(item.question), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink, modifier = Modifier.padding(vertical = pMargin(0.9f)))
                     val value = Modifier.padding(vertical = pMargin(0.9f))
                     if (item.answer != null) {
-                        Text(item.answer, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)), color = t.white, modifier = value)
+                        Text(proseText(item.answer), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)), color = t.white, modifier = value)
                     } else {
                         Text("(no selection)", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontStyle = FontStyle.Italic), color = t.muted, modifier = value)
                     }
@@ -933,7 +938,7 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
             }
             view.response?.let {
                 Text(
-                    it,
+                    proseText(it),
                     style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f), fontWeight = FontWeight(500)),
                     color = t.white,
                     modifier = Modifier.padding(vertical = pMargin(0.9f)),
@@ -975,8 +980,9 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
                 Icon(TetherIcons.Ban, contentDescription = null, tint = t.danger, modifier = Modifier.size(14.dp))
+                // ta-blf r2: names, ids, the error and the refused target are code (SafeText), LTR.
                 Text(
-                    denial.name,
+                    codeText(denial.name),
                     style = TextStyle(fontFamily = type.mono, fontSize = rem(0.8f), fontWeight = FontWeight(600)),
                     color = t.ink,
                     modifier = Modifier.weight(1f),
@@ -988,14 +994,14 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                     denial.subagent && run != null -> Row(
                         Modifier
                             .heightIn(min = TetherDimens.touchTargetDp)
-                            .clickable(role = Role.Button, onClickLabel = "Open “${run.title}”") { if (run.toolId.isNotEmpty()) consent.onFocusCall(run.runId, run.toolId) else consent.onOpenRun(run.runId) }
+                            .clickable(role = Role.Button, onClickLabel = "Open “${SafeText.code(run.title)}”") { if (run.toolId.isNotEmpty()) consent.onFocusCall(run.runId, run.toolId) else consent.onOpenRun(run.runId) }
                             .testTag("denial-origin-link"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.8.dp),
                     ) {
                         Icon(TetherIcons.Bot, contentDescription = null, tint = t.danger, modifier = Modifier.size(12.dp))
                         Text(
-                            run.title,
+                            codeText(run.title),
                             style = TextStyle(
                                 fontFamily = type.body.fontFamily,
                                 fontSize = rem(0.76f),
@@ -1016,7 +1022,7 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                 }
             }
             Text(
-                denialCopy(denial),
+                codeText(denialCopy(denial)),
                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.45f),
                 color = t.muted,
                 modifier = Modifier.padding(start = indent, top = t.css.spaceXs),
@@ -1034,8 +1040,8 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                         modifier = Modifier.padding(top = 2.dp),
                     )
                     Text(
-                        target.value.breakAnywhere(),
-                        style = TextStyle(fontFamily = type.mono, fontSize = rem(0.76f), lineHeight = rem(0.76f) * 1.4f),
+                        codeText(target.value, breakAnywhere = true),
+                        style = TextStyle(fontFamily = type.mono, fontSize = rem(0.76f), lineHeight = rem(0.76f) * 1.4f, textDirection = codeDirection),
                         color = t.ink,
                         maxLines = 4,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -1051,9 +1057,9 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
             ) {
                 val meta = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f))
-                Text(denial.reasonCode ?: denial.reason, style = meta, color = t.faint)
+                Text(codeText(denial.reasonCode ?: denial.reason), style = meta, color = t.faint)
                 Text("·", style = meta, color = t.faint, modifier = Modifier.semantics { contentDescription = "" })
-                Text(denial.toolId.breakAnywhere(), style = meta, color = t.faint)
+                Text(codeText(denial.toolId, breakAnywhere = true), style = meta.copy(textDirection = codeDirection), color = t.faint)
             }
         }
     }
