@@ -46,7 +46,6 @@ import com.tether.app.client.HostMetrics
 import com.tether.app.client.OverviewMetricsResult
 import com.tether.app.client.OverviewUsage
 import com.tether.app.client.TetherClient
-import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.FreshnessPill
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.rememberTickingNow
