@@ -266,36 +266,50 @@ class TranscriptBidiBehaviourTest {
         }
     }
 
-    @Test fun realArabicAndHebrewKeepTheirLettersTheirIsolatesAndReadRightToLeft() {
+    @Test fun realArabicAndHebrewKeepTheirLettersAndReadRightToLeft() {
+        // r4: the prompt's LRI...PDI around a file name is a token (the accepted cost); the name still reads LTR.
         val prompt = "$HEBREW \u05D1$LRI" + "npm$PDI $HEBREW"
         show(fixture(prompt, "$ARABIC\n\n$HEBREW"))
         for (text in listOf(ARABIC, HEBREW)) {
             val (shown, layout) = layoutOf(text, exact = true)
             assertEquals(text, shown)
             assertEquals(ResolvedTextDirection.Rtl, layout.getBidiRunDirection(0))
+            assertEquals(ResolvedTextDirection.Rtl, layout.getParagraphDirection(0))
             assertTrue("first ${layout.getBoundingBox(0)} last ${layout.getBoundingBox(text.length - 1)}", layout.getBoundingBox(0).left > layout.getBoundingBox(text.length - 1).left)
         }
-        // A real isolate in Hebrew text is kept raw (not a token) and "npm" still reads left to right.
-        val (shown, layout) = layoutOf(prompt, exact = true)
-        // (A glyph box at a run edge inside an RTL paragraph is not an x order; the run's direction is.)
+        val (shown, layout) = layoutOf("npm")
+        assertEquals("$HEBREW \u05D1${tok(0x2066)}npm${tok(0x2069)} $HEBREW", shown)
         val n = shown.indexOf("npm")
         for (k in n until n + 3) assertEquals(ResolvedTextDirection.Ltr, layout.getBidiRunDirection(k))
-        assertEquals(ResolvedTextDirection.Rtl, layout.getBidiRunDirection(0))
     }
 
     /**
-     * An unterminated isolate ends at its line: a markdown `<br/>` is a new bidi paragraph, so the
-     * next line's "!" is LTR. The control shows the same text with no break does leak.
+     * r4: prose lays out in its CONTENT's direction in an LTR and in an RTL UI alike: a Latin-first
+     * line is an LTR paragraph and a Hebrew-first line an RTL one, whatever the UI's direction, in a
+     * plain bubble and in markdown. (A Compose Text with no direction would take the UI's.)
      */
-    @Test fun anUnterminatedIsolateNeverReachesTheNextLine() {
-        val line = "$HEBREW $RLI$HEBREW abc"
-        show(fixture("Go.", "$line\nok!")) { Text("$line ok!", modifier = Modifier.testTag("control")) }
-        val (shown, layout) = layoutOf("$line\nok!", exact = true)
-        assertEquals(ResolvedTextDirection.Ltr, layout.getBidiRunDirection(shown.lastIndexOf('!')))
-        val control = rule.onNodeWithTag("control").fetchSemanticsNode()
-        val results = mutableListOf<TextLayoutResult>()
-        control.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
-        assertEquals("the control leaks", ResolvedTextDirection.Rtl, results.first().getBidiRunDirection("$line ok!".lastIndexOf('!')))
+    @Test fun proseTakesItsContentsDirectionInBothUiDirections() {
+        val ui = androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.LayoutDirection.Ltr)
+        val f = fixture("Latin first, then $HEBREW", "$HEBREW first, then Latin\n\nLatin first, then $HEBREW again")
+        rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides ui.value) {
+                ChatHost(TetherSkin.Machine) {
+                    ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, listState = LazyListState(), showTimeline = false)
+                }
+            }
+        }
+        for (direction in listOf(androidx.compose.ui.unit.LayoutDirection.Ltr, androidx.compose.ui.unit.LayoutDirection.Rtl)) {
+            rule.runOnIdle { ui.value = direction }
+            rule.waitForIdle()
+            for ((text, expected) in listOf(
+                "Latin first, then $HEBREW" to ResolvedTextDirection.Ltr, // the user bubble (plain prose)
+                "$HEBREW first, then Latin" to ResolvedTextDirection.Rtl, // markdown
+                "Latin first, then $HEBREW again" to ResolvedTextDirection.Ltr,
+            )) {
+                val (_, layout) = layoutOf(text, exact = true)
+                assertEquals("$direction UI: \"$text\"", expected, layout.getParagraphDirection(0))
+            }
+        }
     }
 
     // ---- r3: ordering by the Unicode Bidi Algorithm (ICU) --------------------------------------
@@ -330,7 +344,54 @@ class TranscriptBidiBehaviourTest {
 
     private val pieces = "resrap".map { "$LRI$it$PDI" }.joinToString("")
 
-    /** Every PoC of the three reviews (r1-r3), with and without an RTL letter on its line. */
+    /** [s] without its RAW explicit bidi characters (embeddings, overrides, isolates, marks). */
+    private fun withoutRawBidi(s: String) = s.filter { it !in '\u202A'..'\u202E' && it !in '\u2066'..'\u2069' && it != '\u200E' && it != '\u200F' && it != '\u061C' }
+
+    /** The paragraph level (0 LTR, 1 RTL) the UBA gives [s] from its content, defaulting to [rtl]. */
+    private fun levelOf(s: String, rtl: Boolean): Int {
+        val bidi = android.icu.text.Bidi()
+        bidi.setPara(s, if (rtl) android.icu.text.Bidi.LEVEL_DEFAULT_RTL else android.icu.text.Bidi.LEVEL_DEFAULT_LTR, null)
+        return bidi.paraLevel.toInt()
+    }
+
+    /**
+     * How out of order [s]'s Latin letters and digits (never a token's own) are drawn at [level]:
+     * the number of pairs the UBA draws in the opposite of their logical order.
+     */
+    private fun disorder(s: String, level: Int): Int {
+        val latin = BooleanArray(s.length)
+        var i = 0
+        while (i < s.length) {
+            val u = if (s[i] == SafeText.MARK) SafeText.unitAt(s, i) else null
+            if (u != null) {
+                i = u.end
+                continue
+            }
+            latin[i] = s[i] in 'a'..'z' || s[i] in 'A'..'Z' || s[i] in '0'..'9'
+            i++
+        }
+        val bidi = android.icu.text.Bidi()
+        bidi.setPara(s, level.toByte(), null)
+        val drawn = bidi.visualMap.filter { it >= 0 && latin[it] }
+        var inversions = 0
+        for (x in drawn.indices) for (y in x + 1 until drawn.size) if (drawn[x] > drawn[y]) inversions++
+        return inversions
+    }
+
+    /**
+     * r4's ordering oracle: the raw explicit bidi characters [display] still draws never make its
+     * Latin words or numbers read MORE out of order than its letters alone do (the same text with
+     * them removed), at the display's own paragraph direction. A spoof always adds disorder; a kept
+     * mark doing its job (an LRM keeping "900" with the Latin after it) can only remove some.
+     * Implicit bidi is left alone; the paragraph direction is the content's, which a leading kept
+     * mark may set.
+     */
+    private fun rawBidiNeverDisorders(display: String, rtl: Boolean): Boolean {
+        val level = levelOf(display, rtl)
+        return disorder(display, level) <= disorder(withoutRawBidi(display), level)
+    }
+
+    /** Every PoC of the four review rounds, with and without an RTL letter on its line. */
     private val allPocs: List<String> by lazy {
         val geresh = "\u05F3"
         val tatweel = "\u0640"
@@ -347,6 +408,17 @@ class TranscriptBidiBehaviourTest {
             "$tatweel " + "resrap".map { "$LRI$it$PDI" }.joinToString(""),
             "$RLM$LRI-rf$PDI rm",
             "$LRI-rf$PDI rm",
+            // r4: the verifier's and the security review's swaps.
+            "mv ${LRI}old$PDI ${LRI}new$PDI \u05E9",
+            "rm ${LRI}-rf$PDI \u05E9",
+            "Note: \u05D0 ${LRI}approve$PDI ${LRI}not$PDI ${LRI}do$PDI \u05D1",
+            "x ${RLI}abc \u05D0 def$PDI y",
+            "pay ${RLI}100 to 900 \u05E9$PDI now",
+            "copy ${RLI}a.txt b.txt \u05E9$PDI now",
+            "open ${RLI}https://evil.io/a \u05E9$PDI now",
+            "total \u2068\u05E9 100 - 900$PDI ok",
+            "\u05E9 1\u061C - 2",
+            "${RLM}Hello \u05E9",
         )
         base + base.filter { it.none { c -> c in '0'..'9' } }.map { "\u05D0 $it" } + listOf(
             "\u05D0 " + "resrap".map { "$LRI$it$PDI" }.joinToString("\u200A"),
@@ -355,18 +427,22 @@ class TranscriptBidiBehaviourTest {
         )
     }
 
-    @Test fun everyPocReadsInOrderUnderTheBidiAlgorithmInBothDirections() {
+    @Test fun everyPocDrawsItsWordsUnchangedUnderTheBidiAlgorithmInBothDirections() {
         for (poc in allPocs) for (rtl in listOf(false, true)) {
             val shown = SafeText.prose(poc)
-            assertTrue("rtl=$rtl ${hex(poc)} -> ${hex(shown)}", readsInOrder(shown, rtl))
+            for (c in listOf(LRE, RLE, PDF, LRO, RLO, LRI, RLI, "\u2068", PDI)) assertFalse("raw %04X: ${hex(poc)}".format(c[0].code), shown.contains(c))
+            assertTrue("rtl=$rtl ${hex(poc)} -> ${hex(shown)}", rawBidiNeverDisorders(shown, rtl))
+            // With no RTL letter on the line, the drawn text reads exactly in logical order.
+            if (poc.none { ProsePlanProbe.rtlLetter(it.code) }) assertTrue("rtl=$rtl ${hex(shown)}", readsInOrder(shown, rtl))
         }
-        // The check is real: raw, the PoCs do not read in order.
-        assertFalse(readsInOrder("fix the $RLI$pieces$PDI bug", rtl = false))
-        assertFalse(readsInOrder("\u05D0 $LRI-rf$PDI rm", rtl = false))
+        // The oracle is real: raw, the PoCs change the drawing.
+        for (raw in listOf("fix the $RLI$pieces$PDI bug", "\u05D0 $LRI-rf$PDI rm", "Note: \u05D0 ${LRI}approve$PDI ${LRI}not$PDI ${LRI}do$PDI \u05D1", "x ${RLI}abc \u05D0 def$PDI y", "pay ${RLI}100 to 900 \u05E9$PDI now")) {
+            assertFalse(hex(raw).toString(), rawBidiNeverDisorders(raw, rtl = false))
+        }
         assertFalse(readsInOrder("rm -rf $RLI/ tmp\u05F3$PDI", rtl = false))
     }
 
-    /** r3: in an RTL layout (Arabic / Hebrew system language) the transcript draws every PoC in order. */
+    /** r3/r4: in an RTL layout (Arabic / Hebrew system language) prose draws every PoC unchanged by its controls. */
     @Test fun anRtlLayoutDrawsEveryPocInOrder() {
         val pocs = allPocs.filter { it.none { c -> c in '0'..'9' } }.mapIndexed { n, p -> "p$n $p" }
         rule.setContent {
@@ -381,7 +457,7 @@ class TranscriptBidiBehaviourTest {
         for ((n, poc) in pocs.withIndex()) {
             val shown = drawn.first { it.startsWith("p$n ") }
             assertEquals(poc, SafeText.original(shown))
-            assertTrue("p$n ${hex(shown)}", readsInOrder(shown, rtl = true))
+            assertTrue("p$n ${hex(shown)}", rawBidiNeverDisorders(shown, rtl = true))
         }
     }
 
@@ -397,7 +473,7 @@ class TranscriptBidiBehaviourTest {
         assertTrue(code.contains("U+202E"))
     }
 
-    @Test fun theCopyKeyCopiesSafelyAndALongPressCopiesRaw() {
+    @Test fun theCopyKeyCopiesSafelyAndOnlyTheNoticeCopiesRaw() {
         show(fixture("Show me.", "```\n$FENCE\n```"))
         rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
         rule.waitForIdle()
@@ -407,13 +483,17 @@ class TranscriptBidiBehaviourTest {
         rule.onNodeWithTag(COPY_RAW_TAG).performClick()
         rule.waitForIdle()
         assertEquals(FENCE, clip())
-        // The long press: raw at once (after the key says "Copy code" again).
-        rule.mainClock.advanceTimeBy(COPIED_RESET_MS + 100)
+    }
+
+    /** r4: the key has no long press (a long press is a tap): the notice's "Copy raw" is the only raw copy path. */
+    @Test fun aLongPressOnTheCopyKeyNeverCopiesRaw() {
+        show(fixture("Show me.", "```\n$FENCE\n```"))
+        val key = rule.onAllNodesWithContentDescription("Copy code").onFirst()
+        assertFalse("no long-click action", key.fetchSemanticsNode().config.contains(SemanticsActions.OnLongClick))
+        key.performTouchInput { longClick(center) }
         rule.waitForIdle()
-        putClip("x")
-        rule.onAllNodesWithContentDescription("Copy code").onFirst().performTouchInput { longClick(center) }
-        rule.waitForIdle()
-        assertEquals(FENCE, clip())
+        assertEquals("const admin = \"${vis(0x202E)}${vis(0x2066)} x\"; // zwsp$ZWSP", clip())
+        rule.onNodeWithText(NOTICE_2).assertExists()
     }
 
     @Test fun toolOutputIsCode() {
@@ -495,20 +575,6 @@ class TranscriptBidiBehaviourTest {
         rule.waitForIdle()
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
         assertEquals("clean code", clip())
-    }
-
-    /** r3: a raw copy (the key's long press) says what hidden controls it carries; a clean one says nothing. */
-    @Test fun aLongPressRawCopySaysWhatItIncludes() {
-        show(fixture("Show me.", "```\n$FENCE\n```\n\n```\nclean code\n```"))
-        rule.onAllNodesWithContentDescription("Copy code")[0].performTouchInput { longClick(center) }
-        rule.waitForIdle()
-        assertEquals(FENCE, clip())
-        rule.onNodeWithText("Copied raw: 2 hidden control characters included").assertIsDisplayed()
-        rule.onNodeWithTag(COPY_RAW_TAG).assertDoesNotExist()
-        rule.onAllNodesWithContentDescription("Copy code").onFirst().performTouchInput { longClick(center) } // the other key says "Copied"
-        rule.waitForIdle()
-        assertEquals("clean code", clip())
-        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
     }
 
     /** r3: a bidi mark code shows as a token is copied as the token, and counted. */
@@ -693,6 +759,37 @@ class TranscriptBidiBehaviourTest {
         }
     }
 
+    // ---- r4: fuzz ---------------------------------------------------------------------------
+
+    /**
+     * r4 (the verifier's fuzzer, bounded): random mixes of commands, paths, numbers, Hebrew, Arabic,
+     * punctuation, isolates and marks. Prose never draws an isolate raw, and the marks it keeps
+     * never change how the Latin words and numbers are drawn ([rawBidiNeverDisorders]), in an LTR
+     * and an RTL UI. (A kept mark may set its line's paragraph direction, as the UBA intends; the
+     * paragraph direction test covers how the layout takes it.)
+     */
+    @Test fun fuzzNoKeptControlReordersTheWords() {
+        val pieces = listOf(
+            "rm", "-rf", "/", "tmp", "100", "to", "900", "1", "2", "a.txt", "https://x.io/a?b=1", "v1.2", "mv", "old", "new", "pay",
+            "\u05E9\u05DC\u05D5\u05DD", "\u05E9", "\u05E2\u05D5\u05DC\u05DD", "\u0645\u0631\u062D\u0628\u0627", "\u0661\u0662\u0663",
+            "\u05F3", "\u0640", " - ", ", ", ".", ":", "(", ")", " ", " ", "\u200A",
+            LRI, RLI, "\u2068", PDI, PDI, "\u200E", RLM, "\u061C",
+        )
+        val random = kotlin.random.Random(2026)
+        var kept = 0
+        repeat(20_000) {
+            val src = (0 until random.nextInt(3, 10)).joinToString("") { pieces[random.nextInt(pieces.size)] }
+            val shown = SafeText.prose(src)
+            for (c in listOf(LRI, RLI, "\u2068", PDI)) assertFalse("an isolate drawn raw: ${hex(src)}", shown.contains(c))
+            if (withoutRawBidi(shown) == shown) return@repeat
+            kept++
+            for (rtl in listOf(false, true)) {
+                assertTrue("rtl=$rtl ${hex(src)} -> ${hex(shown)}", rawBidiNeverDisorders(shown, rtl))
+            }
+        }
+        assertTrue("the fuzzer reached marks kept raw ($kept)", kept > 100)
+    }
+
     // ---- cost (r2) ---------------------------------------------------------------------------
 
     /** r2: composition + layout of a 200k-tag fence and a 1 MB fence stay within the render budget (a clamped fence lays out its peek). */
@@ -719,5 +816,15 @@ class TranscriptBidiBehaviourTest {
             assertTrue("fence $n laid out $laidOut characters", laidOut <= 2 * com.tether.app.ui.components.ExpandPeekChars)
             assertTrue(rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Show", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         }
+    }
+}
+
+/** The rule's own RTL-letter class (ProsePlan's), for the tests. */
+private object ProsePlanProbe {
+    fun rtlLetter(cp: Int): Boolean {
+        val t = Character.getType(cp)
+        val letter = t == Character.UPPERCASE_LETTER.toInt() || t == Character.LOWERCASE_LETTER.toInt() || t == Character.TITLECASE_LETTER.toInt() || t == Character.OTHER_LETTER.toInt()
+        val d = Character.getDirectionality(cp)
+        return letter && (d == Character.DIRECTIONALITY_RIGHT_TO_LEFT || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC)
     }
 }
