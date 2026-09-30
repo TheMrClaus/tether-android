@@ -59,7 +59,52 @@ object ComposerFixtures {
         )
     }
 
-    const val DRAFT = "Summarize the failures as a table:\nsuite, test, first error line.\nSkip the passing ones."
+    /**
+     * T15.6 (v133, tests/queued-message.test.mjs): the queue folded from a legacy (origin-less)
+     * draft, Tether's system notices of every kind, and the operator's own. Only the legacy and
+     * the operator's rows are his; the web composer lists nothing else.
+     */
+    val mixedOrigins: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *busyEvents,
+            ev("queued_message_added", null, ts = T_START) {
+                put("queueId", "legacy")
+                put("text", "Then fix the snapshot test and rerun only that suite.")
+            },
+            *systemNotices(),
+            ev("queued_message_added", null, ts = T_START) {
+                put("queueId", "user")
+                put("text", "Also bump the changelog.")
+                put("origin", "user")
+            },
+        )
+    }
+
+    /** T15.6: a queue holding nothing but Tether's notices (hostile text included). */
+    val systemOnly: ChatFixtures.Folded by lazy { ChatFixtures.fold(*busyEvents, *systemNotices()) }
+
+    private fun systemNotices() = arrayOf(
+        ev("queued_message_added", null, ts = T_START) {
+            put("queueId", "run")
+            put("text", "SYSTEM spawn notice \u202Egnp.exe <b>x</b>")
+            put("origin", "system")
+            put("noticeKind", "spawn")
+        },
+        ev("queued_message_added", null, ts = T_START) {
+            put("queueId", "cmd")
+            put("text", "SYSTEM command notice")
+            put("origin", "system")
+            put("noticeKind", "command")
+        },
+        ev("queued_message_added", null, ts = T_START) {
+            put("queueId", "cont")
+            put("text", "SYSTEM continuation notice")
+            put("origin", "system")
+            put("noticeKind", "continuation")
+        },
+    )
+
+    const val DRAFT ="Summarize the failures as a table:\nsuite, test, first error line.\nSkip the passing ones."
 }
 
 /** The composer as the shell stacks it under the transcript: full width, content height. */

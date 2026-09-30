@@ -1,6 +1,7 @@
 package com.tether.app.protocol.fold
 
 import com.tether.app.protocol.model.SessionView
+import com.tether.app.protocol.model.operatorQueuedMessages
 import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.reduce.fold
 import com.tether.app.protocol.reduce.foldTree
@@ -67,6 +68,8 @@ class ProtocolV133FoldTest {
         assertEquals(listOf("user", "user", "system", "user", null), typed.map { it.originKind })
         assertEquals(listOf(null, null, "spawn", null, "future"), typed.map { it.noticeKindValue })
         assertEquals("edited", typed[2].text)
+        // T15.6: the composer's list, lib/queued-message.mjs operatorQueuedMessages.
+        assertEquals(listOf("legacy", "user", "empty"), operatorQueuedMessages(typed).map { it.queueId })
     }
 
     @Test

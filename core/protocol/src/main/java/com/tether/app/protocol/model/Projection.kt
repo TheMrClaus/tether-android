@@ -1,7 +1,14 @@
 package com.tether.app.protocol.model
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -276,8 +283,11 @@ data class QueuedMessage(
     /**
      * v133 (issue #211): "user" (the operator's draft) | "system" (an automated Tether notice).
      * Absent on a pre-v133 journal entry, which replays as the operator's. Raw, like
-     * [noticeKind], so a malformed value never drops the queue; read [originKind].
+     * [noticeKind], so a malformed value never drops the queue; read [originKind]. An explicit
+     * JSON `null` is kept as [kotlinx.serialization.json.JsonNull] (T15.6): the web tells JS
+     * `null` (not the operator's) from `undefined` (the operator's), and so must this.
      */
+    @Serializable(with = KeepNullJsonElement::class)
     val origin: JsonElement? = null,
     /** v133: a system notice's kind — "spawn" | "command" | "continuation". Read [noticeKindValue]. */
     val noticeKind: JsonElement? = null,
@@ -308,6 +318,28 @@ object QueuedOrigin {
      */
     internal fun of(text: String?, absent: Boolean): String? =
         if (absent) USER else text?.takeIf { it in ORIGINS }
+}
+
+/**
+ * Port of lib/queued-message.mjs operatorQueuedMessages: the operator's own queued drafts (origin
+ * "user" or absent), in order. What the web composer lists; a system notice and an unknown or
+ * explicitly null origin are left out. Display only.
+ */
+fun operatorQueuedMessages(messages: List<QueuedMessage>): List<QueuedMessage> = messages.filter { it.isOperatorMessage }
+
+/**
+ * A raw optional [JsonElement] field that keeps JS `null` apart from `undefined`: an explicit JSON
+ * `null` decodes to [JsonNull] (the default nullable decoding would fold it into Kotlin null, i.e.
+ * "absent"), an absent key stays Kotlin null. Encodes back the same way.
+ */
+internal object KeepNullJsonElement : KSerializer<JsonElement?> {
+    override val descriptor: SerialDescriptor = JsonElement.serializer().nullable.descriptor
+
+    override fun deserialize(decoder: Decoder): JsonElement? = (decoder as JsonDecoder).decodeJsonElement()
+
+    override fun serialize(encoder: Encoder, value: JsonElement?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeSerializableValue(JsonElement.serializer(), value)
+    }
 }
 
 @Serializable

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -265,6 +266,33 @@ class ComposerBehaviourTest {
         rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()
         assertEquals(listOf("parity-queue-2"), removes)
         rule.onNodeWithContentDescription("Queued messages").assertExists()
+    }
+
+    /**
+     * T15.6 (v133): the composer lists only the operator's own drafts, as chat-view.tsx:1914
+     * operatorQueuedMessages — an origin-less (legacy) one and an origin "user" one, in order. Tether's
+     * system notices (spawn, command, continuation) are not his to edit or remove and never show.
+     */
+    @Test
+    fun onlyTheOperatorsQueuedDraftsAreListed() {
+        show(ComposerFixtures.mixedOrigins)
+        assertEquals(5, projection!!.queuedMessages.size)
+        queueRows().assertCountEquals(2)
+        rule.onNodeWithText("Then fix the snapshot test and rerun only that suite.").assertExists()
+        rule.onNodeWithText("Also bump the changelog.").assertExists()
+        rule.onAllNodesWithText("SYSTEM", substring = true).assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()
+        assertEquals("the remove key maps to the operator's row, not a hidden notice", listOf("user"), removes)
+    }
+
+    /** T15.6: a queue of Tether notices alone draws no queue panel at all (the web's `length > 0`). */
+    @Test
+    fun aQueueOfSystemNoticesAloneDrawsNoPanel() {
+        show(ComposerFixtures.systemOnly)
+        assertEquals(3, projection!!.queuedMessages.size)
+        rule.onNodeWithContentDescription("Queued messages").assertDoesNotExist()
+        queueRows().assertCountEquals(0)
+        rule.onAllNodesWithText("SYSTEM", substring = true).assertCountEquals(0)
     }
 
     /** Another device edited the message: the row follows while nobody is editing it here. */

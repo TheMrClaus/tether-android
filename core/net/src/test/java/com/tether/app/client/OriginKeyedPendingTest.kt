@@ -1033,6 +1033,24 @@ class OriginKeyedPendingTest {
         assertTrue(client.providers.value.isEmpty())
     }
 
+    /**
+     * T15.6 (ta-ylh leftover): A's `ready.hiddenAgentSessionCount` is A's. A sign-in to B clears it
+     * at once, and a pre-v135 B (whose ready carries no count) never shows A's number.
+     */
+    @Test
+    fun theHiddenAgentSessionCountIsClearedOnAServerSwitch() {
+        processOnA()
+        client.start()
+        val aws = a.nextSocket()
+        aws.send(readyFrame().replaceFirst("\"sessions\":", "\"hiddenAgentSessionCount\":3,\"sessions\":"))
+        assertEquals("hello", a.frame().type())
+        assertEquals(3, await(client.hiddenAgentSessionCount) { it != null })
+        loginTo(b)
+        assertEquals("A's hidden count shows on B", null, client.hiddenAgentSessionCount.value)
+        handshake(b, b.nextSocket())
+        assertEquals("a count-less ready from B shows A's hidden count", null, client.hiddenAgentSessionCount.value)
+    }
+
     // ------------------------------------------------------------------
     // 4. T7.3 r2: a delegate mention is durable per origin too
     // ------------------------------------------------------------------

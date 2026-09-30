@@ -142,6 +142,36 @@ class ProtocolV133To135WireTest {
         assertEquals(listOf("a-future-kind", null, null, "command"), typed.map { it.noticeKindValue })
     }
 
+    /**
+     * T15.6 (ta-ylh leftover): lib/queued-message.mjs queuedMessageOrigin(null) is null — only
+     * `undefined` replays as the operator's. The typed path must tell an explicit `"origin":null`
+     * from an absent key the way the view (and the web) does, on every decode path and a re-encode.
+     */
+    @Test
+    fun anExplicitNullOriginIsNotTheOperatorsButAnAbsentOneIs() {
+        val queue = """[{"queueId":"absent","text":"t"},{"queueId":"nulled","text":"t","origin":null,"noticeKind":null}]"""
+        val frame = snapshotWithQueue(queue)
+        val views = SessionView(frame.state!!).queuedMessages
+        assertEquals(listOf(QueuedOrigin.USER, null), views.map { it.origin })
+        assertEquals(listOf(true, false), views.map { it.isOperatorMessage })
+
+        val typed = frame.projection!!.queuedMessages
+        assertEquals(listOf("absent", "nulled"), typed.map { it.queueId })
+        assertEquals(listOf(QueuedOrigin.USER, null), typed.map { it.originKind })
+        assertEquals(listOf(true, false), typed.map { it.isOperatorMessage })
+        assertEquals(listOf(null, null), typed.map { it.noticeKindValue })
+
+        val serializer = kotlinx.serialization.builtins.ListSerializer(com.tether.app.protocol.model.QueuedMessage.serializer())
+        val fromTree = TetherJson.decodeFromJsonElement(serializer, TetherJson.parseToJsonElement(queue))
+        assertEquals(listOf(true, false), fromTree.map { it.isOperatorMessage })
+        val again = TetherJson.decodeFromString(serializer, TetherJson.encodeToString(serializer, typed))
+        assertEquals("the null/absent split survives a re-encode", listOf(true, false), again.map { it.isOperatorMessage })
+        assertFalse(
+            "an absent origin stays absent on encode",
+            TetherJson.encodeToString(com.tether.app.protocol.model.QueuedMessage.serializer(), typed[0]).contains("origin"),
+        )
+    }
+
     // ---- v134: WorktreeScript.proxyUnavailable + nullable proxy links ---------------------------
 
     private fun scripts(vararg entries: String) = ServerMessage.parse(

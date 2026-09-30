@@ -68,6 +68,7 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.model.operatorQueuedMessages
 import com.tether.app.client.ComposerControlsModel
 import com.tether.app.client.ControlResult
 import com.tether.app.client.InterruptResult
@@ -877,7 +878,9 @@ fun Composer(
                 }
                 if (atMenuOpen) MentionMenu(agentRows, onPick = ::beginDelegate)
 
-                val queued = projection?.queuedMessages.orEmpty()
+                // v133 (T15.6): only the operator's own drafts, as chat-view.tsx:1914
+                // operatorQueuedMessages — a Tether notice ("system") is not his to edit or remove.
+                val queued = operatorQueuedMessages(projection?.queuedMessages.orEmpty())
                 if (queued.isNotEmpty()) {
                     QueuedMessages(
                         queued = queued,
