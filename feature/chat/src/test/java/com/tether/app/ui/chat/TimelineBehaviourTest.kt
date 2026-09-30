@@ -65,7 +65,7 @@ internal fun ComposeContentTestRule.showTimeline(
     haptics: TetherHaptics = RecordingHaptics(),
     listState: LazyListState = LazyListState(),
     skin: TetherSkin = TetherSkin.Machine,
-) {
+): LazyListState {
     setContent {
         CompositionLocalProvider(LocalTetherHaptics provides haptics) {
             ChatHost(skin, reducedMotion = reducedMotion) {
@@ -82,6 +82,23 @@ internal fun ComposeContentTestRule.showTimeline(
         }
     }
     waitForIdle()
+    return listState
+}
+
+/**
+ * The row holding [text] has its top exactly at the web's jump line (conversation-timeline.tsx:176,
+ * `node.offsetTop - clientHeight * 0.28`), within a pixel of rounding.
+ */
+internal fun ComposeContentTestRule.assertRowOnWebJumpLine(text: String, list: LazyListState) {
+    val box = onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
+    val node = onAllNodesWithText(text).fetchSemanticsNodes().first { it.boundsInRoot.top >= box.top }
+    val (rowTop, vh) = runOnIdle {
+        val info = list.layoutInfo
+        val y = node.boundsInRoot.top - box.top
+        val row = info.visibleItemsInfo.first { (it.offset - info.viewportStartOffset) <= y && y < it.offset - info.viewportStartOffset + it.size }
+        (row.offset - info.viewportStartOffset).toFloat() to info.viewportSize.height.toFloat()
+    }
+    assertEquals("\"$text\" row top vs 28% of $vh", vh * WEB_JUMP_LINE, rowTop, 1.5f)
 }
 
 /** The prompt indices whose marks are on the rail, top to bottom. */
@@ -110,25 +127,18 @@ class TimelineBehaviourTest {
     @get:Rule val rule = createComposeRule()
 
     private fun rail() = rule.onNodeWithTag(TIMELINE_TAG)
+    private var shown = LazyListState()
     private fun mark(index: Int) = rule.onNodeWithTag(timelineMarkTag(index))
     private fun bubble() = rule.onNodeWithTag(TIMELINE_BUBBLE_TAG)
     private fun bubbleShown() = rule.onAllNodes(hasTestTag(TIMELINE_BUBBLE_TAG)).fetchSemanticsNodes().isNotEmpty()
 
-    /** [text]'s row sits on the jump line: its top a little under 28% of the transcript. */
-    private fun assertOnJumpLine(text: String) {
-        val list = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
-        val node = rule.onAllNodesWithText(text).fetchSemanticsNodes().first { it.boundsInRoot.top >= list.top }
-        val line = list.top + list.height * WEB_JUMP_LINE
-        val density = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().layoutInfo.density.density
-        val top = node.boundsInRoot.top
-        assertTrue("\"$text\" top $top vs jump line $line", top >= line - 2 * density && top <= line + 48 * density)
-    }
+    private fun assertOnJumpLine(text: String) = rule.assertRowOnWebJumpLine(text, shown)
 
     private fun jumpToLatestShown() =
         rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Jump to latest")).fetchSemanticsNodes().isNotEmpty()
 
     @Test fun theRailNamesEveryPromptForTalkBackAndMarksTheCurrentOne() {
-        rule.showTimeline(TimelineFixtures.seeded)
+        shown = rule.showTimeline(TimelineFixtures.seeded)
         val railNode = rail().fetchSemanticsNode()
         assertEquals(listOf("Conversation prompts"), railNode.config[SemanticsProperties.ContentDescription])
         assertEquals(true, railNode.config.getOrNull(SemanticsProperties.IsTraversalGroup))
@@ -147,7 +157,7 @@ class TimelineBehaviourTest {
     }
 
     @Test fun activatingAMarkJumpsToItsPromptAndStopsFollowing() {
-        rule.showTimeline(TimelineFixtures.many(12))
+        shown = rule.showTimeline(TimelineFixtures.many(12))
         assertFalse(jumpToLatestShown())
         val target = rule.visibleMarks()[3]
         mark(target).performSemanticsAction(SemanticsActions.OnClick)
@@ -158,7 +168,7 @@ class TimelineBehaviourTest {
     }
 
     @Test fun aSmoothJumpLandsOnTheSameLine() {
-        rule.showTimeline(TimelineFixtures.many(12), reducedMotion = false)
+        shown = rule.showTimeline(TimelineFixtures.many(12), reducedMotion = false)
         // A row on screen above the line, then one scrolled out above (both under 2 viewports away).
         val window = rule.visibleMarks()
         for (target in listOf(window[7], window[3])) {
@@ -170,7 +180,7 @@ class TimelineBehaviourTest {
 
     @Test fun aTouchShowsTheBubbleAtOnceAndReleaseJumps() {
         val haptics = RecordingHaptics()
-        rule.showTimeline(TimelineFixtures.many(12), haptics = haptics)
+        shown = rule.showTimeline(TimelineFixtures.many(12), haptics = haptics)
         val target = rule.visibleMarks()[2]
         rail().performTouchInput { down(slotOffset(2, 10)) }
         rule.waitForIdle()
@@ -187,7 +197,7 @@ class TimelineBehaviourTest {
     @Test fun aTouchOffTheStackDoesNothing() {
         val haptics = RecordingHaptics()
         val list = LazyListState()
-        rule.showTimeline(TimelineFixtures.seeded, haptics = haptics, listState = list)
+        shown = rule.showTimeline(TimelineFixtures.seeded, haptics = haptics, listState = list)
         val before = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
         rail().performTouchInput {
             down(Offset(width / 2f, 4f))
@@ -201,7 +211,7 @@ class TimelineBehaviourTest {
 
     @Test fun aScrubBrowsesOlderPromptsUpwardsWithOneHapticPerNewPrompt() {
         val haptics = RecordingHaptics()
-        rule.showTimeline(TimelineFixtures.many(25), haptics = haptics)
+        shown = rule.showTimeline(TimelineFixtures.many(25), haptics = haptics)
         val window = rule.visibleMarks()
         assertEquals(10, window.size)
         val start = window.last()
@@ -236,7 +246,7 @@ class TimelineBehaviourTest {
 
     @Test fun deepInALongReplyTheNeedleStaysOnItsPrompt() {
         val list = LazyListState()
-        rule.showTimeline(TimelineFixtures.longReply, listState = list)
+        shown = rule.showTimeline(TimelineFixtures.longReply, listState = list)
         // A reader's drag up stops follow mode (else the view stays pinned to the newest).
         rule.onNodeWithTag("chat-transcript").performTouchInput { swipeDown() }
         rule.waitForIdle()
@@ -281,7 +291,7 @@ class TimelineBehaviourTest {
 
     @Test fun aCancelledScrubEndsWithoutAJump() {
         val list = LazyListState()
-        rule.showTimeline(TimelineFixtures.many(25), listState = list)
+        shown = rule.showTimeline(TimelineFixtures.many(25), listState = list)
         val before = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
         rail().performTouchInput {
             down(slotOffset(9, 10))
@@ -297,7 +307,7 @@ class TimelineBehaviourTest {
     }
 
     @Test fun keyboardFocusInspectsAMarkAndEnterJumps() {
-        rule.showTimeline(TimelineFixtures.seeded)
+        shown = rule.showTimeline(TimelineFixtures.seeded)
         mark(2).requestFocus()
         rule.waitForIdle()
         assertTrue(bubbleShown())
@@ -328,7 +338,7 @@ class TimelineBehaviourTest {
     }
 
     @Test fun serverTextIsCleanedInTheMarksAndTheBubble() {
-        rule.showTimeline(TimelineFixtures.edges)
+        shown = rule.showTimeline(TimelineFixtures.edges)
         assertEquals(listOf("Jump to your message at 01:02: screenshot.png, report.pdf"), mark(0).fetchSemanticsNode().config[SemanticsProperties.ContentDescription])
         assertEquals(listOf("Jump to your message at 01:03: Fix the parser bug now"), mark(1).fetchSemanticsNode().config[SemanticsProperties.ContentDescription])
         rail().performTouchInput { down(slotOffset(1, 3)) }
@@ -338,7 +348,7 @@ class TimelineBehaviourTest {
     }
 
     @Test fun theBubbleStaysOnScreenBesideTheRail() {
-        rule.showTimeline(TimelineFixtures.seeded)
+        shown = rule.showTimeline(TimelineFixtures.seeded)
         rail().performTouchInput { down(slotOffset(4, 5)) }
         rule.waitForIdle()
         val railBounds = rail().fetchSemanticsNode().boundsInRoot
@@ -372,10 +382,12 @@ class TimelineExpandedBehaviourTest {
     private fun rail() = rule.onNodeWithTag(TIMELINE_TAG)
     private fun bubbleShown() = rule.onAllNodes(hasTestTag(TIMELINE_BUBBLE_TAG)).fetchSemanticsNodes().isNotEmpty()
 
+    private val list = LazyListState()
+
     @Composable
     private fun Host(f: ChatFixtures.Folded) {
         ChatHost(TetherSkin.Machine, WellHeightTablet, WellWidthTablet) {
-            ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, liveCopy = true)
+            ChatTranscript(projection = f.projection, tree = f.tree, showThinking = false, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, listState = list, liveCopy = true)
         }
     }
 
@@ -421,11 +433,7 @@ class TimelineExpandedBehaviourTest {
             click(slotOffset(3, 10))
         }
         rule.waitForIdle()
-        val list = rule.onNodeWithTag("chat-transcript").fetchSemanticsNode().boundsInRoot
-        val node = rule.onAllNodesWithText("Prompt ${target + 1}").fetchSemanticsNodes().first { it.boundsInRoot.top >= list.top }
-        val line = list.top + list.height * WEB_JUMP_LINE
-        val top = node.boundsInRoot.top
-        assertTrue("top $top vs line $line", top >= line - 2f && top <= line + 48f)
+        rule.assertRowOnWebJumpLine("Prompt ${target + 1}", list)
     }
 }
 
