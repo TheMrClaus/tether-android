@@ -10,6 +10,7 @@ import com.tether.app.protocol.helpers.AttachmentDraft
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
@@ -178,8 +179,8 @@ class AttachmentIntakeTest {
     @Test
     fun aCancelledReadStopsAtTheNextChunkAndStagesNothing() {
         val endless = FakeSource("stream.bin", 100 * mb, reportedSize = null)
-        var chunks = 0
-        val r = AttachmentIntake.intake(listOf(endless, FakeSource("next", 1)), emptyList(), { 1L }, active = { chunks++ < 3 })
+        // r2: the read watchdog asks too, from its own thread: the caller "goes away" after 3 chunks read.
+        val r = AttachmentIntake.intake(listOf(endless, FakeSource("next", 1)), emptyList(), { 1L }, active = { endless.read.get() < 3 * 64 * 1024 })
         assertTrue(r.added.isEmpty())
         assertTrue(r.flashes.isEmpty())
         assertTrue("read ${endless.read.get()}", endless.read.get() <= 3 * 64 * 1024)
@@ -214,6 +215,10 @@ class AttachmentIntakeTest {
         // Any other well-formed claim is kept, parameters dropped, lower-cased.
         assertEquals("text/html", AttachmentTypes.resolve("<p>".toByteArray(), "Text/HTML; charset=utf-8"))
         assertEquals("image/heic", AttachmentTypes.resolve("....ftypheic".toByteArray(), "image/heic"))
+        // r2 (verifier L1): the server's bound is 128 characters (a longer type fails the whole send).
+        val at = "a".repeat(63) + "/" + "b".repeat(64)
+        assertEquals(at, AttachmentTypes.resolve("abc".toByteArray(), at))
+        assertEquals(AttachmentTypes.OCTET, AttachmentTypes.resolve("abc".toByteArray(), "a".repeat(64) + "/" + "b".repeat(64)))
         // Malformed or hostile claims do not reach the wire.
         for (bad in listOf("", "text", "text/", "/x", "text/plain\r\nX-Evil: 1", "a/b c", "x".repeat(200) + "/y", "täxt/plain")) {
             assertEquals("claim ${bad.take(20)}", AttachmentTypes.OCTET, AttachmentTypes.resolve("abc".toByteArray(), bad))
@@ -386,5 +391,277 @@ class AttachmentIntakeTest {
         assertEquals(listOf("a.txt", "b.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
         assertTrue(store.items("http://b.example:80", "s1").isEmpty())
         assertTrue(store.items("http://a.example:80", "s2").isEmpty())
+    }
+
+    // --- r2 M1: only another app's content:// provider is ever read -------------------------------
+
+    private val context: android.content.Context get() = androidx.test.core.app.ApplicationProvider.getApplicationContext()
+
+    /** A hostile app's provider: serves [payload] for every URI, and says every one is a PNG. */
+    class PayloadProvider : android.content.ContentProvider() {
+        companion object {
+            @Volatile var payload: ByteArray = ByteArray(0)
+        }
+
+        override fun onCreate() = true
+        override fun getType(uri: android.net.Uri) = "image/png"
+        override fun openFile(uri: android.net.Uri, mode: String): android.os.ParcelFileDescriptor {
+            val f = java.io.File.createTempFile("payload", ".bin").apply {
+                writeBytes(payload)
+                deleteOnExit()
+            }
+            return android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        override fun query(uri: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): android.database.Cursor? = null
+        override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri? = null
+        override fun delete(uri: android.net.Uri, s: String?, a: Array<out String>?) = 0
+        override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
+    }
+
+    private val evil = "com.evil.provider"
+    private val own = "com.tether.test.own"
+
+    /** Installs [evil] (another package) and [own] (this app's) the way the package manager answers them. */
+    private fun policy(): AttachmentUriPolicy {
+        val pm = org.robolectric.Shadows.shadowOf(context.packageManager)
+        pm.installPackage(android.content.pm.PackageInfo().apply {
+            packageName = "com.evil"
+            applicationInfo = android.content.pm.ApplicationInfo().apply { packageName = "com.evil" }
+        })
+        pm.addOrUpdateProvider(android.content.pm.ProviderInfo().apply {
+            authority = evil
+            packageName = "com.evil"
+            name = PayloadProvider::class.java.name
+        })
+        pm.addOrUpdateProvider(android.content.pm.ProviderInfo().apply {
+            authority = own
+            packageName = context.packageName
+            name = "com.tether.test.OwnProvider"
+        })
+        org.robolectric.Robolectric.setupContentProvider(PayloadProvider::class.java, evil)
+        return AttachmentUriPolicy.of(context)
+    }
+
+    private fun clip(uri: android.net.Uri, vararg types: String) =
+        android.content.ClipData(android.content.ClipDescription("x", arrayOf(*types)), android.content.ClipData.Item(uri))
+
+    private val jpegHead = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10)
+
+    @Test
+    fun onlyAnotherAppsResolvableContentProviderIsAllowed() {
+        val p = policy()
+        assertTrue(p.allows(android.net.Uri.parse("content://$evil/x.png")))
+        assertFalse("file://", p.allows(android.net.Uri.parse("file:///data/data/${context.packageName}/files/datastore/drafts.preferences_pb")))
+        assertFalse("own provider", p.allows(android.net.Uri.parse("content://$own/drafts")))
+        assertFalse("own provider under a user prefix", p.allows(android.net.Uri.parse("content://10@$own/drafts")))
+        assertFalse("unresolved", p.allows(android.net.Uri.parse("content://com.nobody.provider/x")))
+        assertFalse("no authority", p.allows(android.net.Uri.parse("content:///x")))
+        assertFalse("android.resource", p.allows(android.net.Uri.parse("android.resource://${context.packageName}/raw/x")))
+        assertFalse("http", p.allows(android.net.Uri.parse("http://$evil/x")))
+    }
+
+    @Test
+    fun aPickerFileUriIsNeverOpenedOrAsked() {
+        val p = policy()
+        val secret = java.io.File(context.filesDir, "drafts.preferences_pb").apply { writeText("private drafts for every server") }
+        val source = ContentUriSource(context.contentResolver, android.net.Uri.fromFile(secret), p)
+        assertNull(source.open())
+        assertNull(source.displayName)
+        assertNull(source.reportedSize)
+        assertNull(source.declaredType)
+        val r = intake(listOf(source))
+        assertTrue(r.added.isEmpty())
+        assertEquals(listOf(AttachmentCopy.unreadable(AttachmentNames.FALLBACK)), r.flashes)
+    }
+
+    @Test
+    fun aPickerUriOfTheAppsOwnProviderIsNeverOpened() {
+        val source = ContentUriSource(context.contentResolver, android.net.Uri.parse("content://$own/drafts"), policy())
+        assertNull(source.open())
+        assertTrue(intake(listOf(source)).added.isEmpty())
+    }
+
+    @Test
+    fun aClipboardFileUriOwnProviderOrUnresolvedAuthorityIsNotAPicture() {
+        val p = policy()
+        val secret = java.io.File(context.filesDir, "secret.png").apply { writeBytes(pngHead + ByteArray(32)) }
+        for (uri in listOf(
+            android.net.Uri.fromFile(secret),
+            android.net.Uri.parse("content://$own/drafts"),
+            android.net.Uri.parse("content://com.nobody.provider/x"),
+        )) {
+            assertTrue("offered: $uri", ClipboardImages.sources(clip(uri, "image/png"), context.contentResolver, p).isEmpty())
+        }
+    }
+
+    @Test
+    fun aPastedItemIsAPictureOnlyIfItsBytesAreOne() {
+        val p = policy()
+        val uri = android.net.Uri.parse("content://$evil/x.png")
+        // Text behind an image/png description (and an image/png provider type): no picture.
+        PayloadProvider.payload = "not a picture at all".toByteArray()
+        val lie = ClipboardImages.sources(clip(uri, "image/png"), context.contentResolver, p)
+        assertEquals(1, lie.size)
+        val r = intake(lie)
+        assertTrue(r.added.isEmpty())
+        assertEquals(listOf(AttachmentCopy.NO_CLIPBOARD_IMAGE), r.flashes)
+        // A PNG is staged as one.
+        PayloadProvider.payload = pngHead + ByteArray(32)
+        val png = intake(ClipboardImages.sources(clip(uri, "image/png"), context.contentResolver, p)).added.single().attachment
+        assertEquals("pasted-image.png" to "image/png", png.name to png.mediaType)
+        // A JPEG claimed as a PNG goes as what its bytes are, and is named for them.
+        PayloadProvider.payload = jpegHead + ByteArray(32)
+        val jpeg = intake(ClipboardImages.sources(clip(uri, "image/png"), context.contentResolver, p)).added.single().attachment
+        assertEquals("pasted-image.jpeg" to "image/jpeg", jpeg.name to jpeg.mediaType)
+    }
+
+    @Test
+    fun aPastedPdfOrOtherNonPictureIsDropped() {
+        val pdf = object : AttachmentSource {
+            override val displayName = "pasted-image.png"
+            override val reportedSize: Long? = null
+            override val declaredType = "image/png"
+            override val imagesOnly = true
+            override fun open(): InputStream = "%PDF-1.7 ...".byteInputStream()
+        }
+        val r = intake(listOf(pdf, FakeSource("fine.txt", 4)))
+        assertEquals(listOf("fine.txt"), r.added.map { it.attachment.name })
+        assertEquals(listOf(AttachmentCopy.NO_CLIPBOARD_IMAGE), r.flashes)
+    }
+
+    // --- r2 L3: a stalled, overlong or abandoned read is ended by closing its stream -------------
+
+    /** Delivers [first] bytes, then blocks in read() until closed (Android's close unblocks a read). */
+    private class StallingSource(private val first: Int = 1) : AttachmentSource {
+        val closed = java.util.concurrent.CountDownLatch(1)
+        override val displayName = "stall.bin"
+        override val reportedSize: Long? = null
+        override val declaredType = "application/octet-stream"
+        override fun open(): InputStream = object : InputStream() {
+            var given = 0
+            override fun read(): Int = throw UnsupportedOperationException()
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (given < first) {
+                    given++
+                    b[off] = 'x'.code.toByte()
+                    return 1
+                }
+                if (!closed.await(60, java.util.concurrent.TimeUnit.SECONDS)) error("never closed")
+                throw java.io.IOException("closed")
+            }
+            override fun close() = closed.countDown()
+        }
+    }
+
+    private val quick = ReadLimits(idleMs = 200, totalMs = 60_000, pollMs = 20)
+
+    @Test
+    fun aReadThatStallsIsEndedByClosingItsStream() {
+        val stall = StallingSource()
+        val started = System.nanoTime()
+        assertSame(BoundedRead.TimedOut, readBounded(stall, limits = quick))
+        assertEquals("the stream was not closed", 0, stall.closed.count)
+        assertTrue("took ${(System.nanoTime() - started) / 1_000_000} ms", System.nanoTime() - started < 5_000_000_000)
+        // Through the intake: "Could not read", and the batch goes on.
+        val r = AttachmentIntake.intake(listOf(StallingSource(), FakeSource("ok.txt", 2)), emptyList(), { 1L }, limits = quick)
+        assertEquals(listOf("ok.txt"), r.added.map { it.attachment.name })
+        assertEquals(listOf(AttachmentCopy.unreadable("stall.bin")), r.flashes)
+    }
+
+    @Test
+    fun aReadThatTricklesPastTheTotalIsEndedToo() {
+        val trickle = object : AttachmentSource {
+            override val displayName = "slow.bin"
+            override val reportedSize: Long? = null
+            override val declaredType = "application/octet-stream"
+            override fun open(): InputStream = object : InputStream() {
+                @Volatile var shut = false
+                override fun read(): Int = throw UnsupportedOperationException()
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (shut) throw java.io.IOException("closed")
+                    Thread.sleep(30)
+                    b[off] = 'x'.code.toByte()
+                    return 1
+                }
+                override fun close() { shut = true }
+            }
+        }
+        assertSame(BoundedRead.TimedOut, readBounded(trickle, limits = ReadLimits(idleMs = 1_000, totalMs = 300, pollMs = 20)))
+    }
+
+    @Test
+    fun aCancelledPickClosesAStalledStream() {
+        val stall = StallingSource()
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        val result = java.util.concurrent.CompletableFuture.supplyAsync { readBounded(stall, active = { active.get() }, limits = ReadLimits(60_000, 60_000, 20)) }
+        Thread.sleep(100)
+        active.set(false)
+        assertSame(BoundedRead.Cancelled, result.get(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(0, stall.closed.count)
+    }
+
+    @Test
+    fun aStalledPickNeverHoldsTheStager() = runBlocking {
+        val store = StagedAttachments()
+        val stager = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = ReadLimits(60_000, 60_000, 20))
+        // Cancelled (the composer left): the stream is closed and the stager is free at once.
+        val stall = StallingSource()
+        val job = launch(Dispatchers.Default) { stager.stage("s1", listOf(stall)) }
+        Thread.sleep(100)
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        assertEquals(0, stall.closed.count)
+        withTimeout(5_000) { stager.stage("s1", listOf(FakeSource("next.txt", 2))) }
+        assertEquals(listOf("next.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+        // Timed out: the same, with the web's "Could not read".
+        val timed = AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, limits = quick)
+        assertEquals(listOf(AttachmentCopy.unreadable("stall.bin")), withTimeout(5_000) { timed.stage("s1", listOf(StallingSource())) })
+        withTimeout(5_000) { timed.stage("s1", listOf(FakeSource("after.txt", 2))) }
+        assertEquals(listOf("next.txt", "after.txt"), store.items("http://a.example:80", "s1").map { it.attachment.name })
+    }
+
+    @Test
+    fun aPickWhoseSessionIsNoLongerAllowedWhenTheReadEndsIsDiscarded() = runBlocking {
+        val store = StagedAttachments()
+        var allowed = true
+        val source = object : AttachmentSource {
+            override val displayName = "f.txt"
+            override val reportedSize: Long = 2
+            override val declaredType = "text/plain"
+            override fun open(): InputStream {
+                allowed = false // deselected or locked while it was being read
+                return "hi".byteInputStream()
+            }
+        }
+        AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, allowed = { allowed }).stage("s1", listOf(source))
+        assertNull(store.current.value)
+        // Not allowed at all: not even opened.
+        val never = FakeSource("n.txt", 2)
+        AttachmentStager(store, { "http://a.example:80" }, Dispatchers.IO, allowed = { false }).stage("s1", listOf(never))
+        assertFalse(never.opened)
+    }
+
+    // --- r2 L1: the chip thumbnail is bounded on its OUTPUT -----------------------------------------
+
+    @Test
+    fun theChipThumbnailSampleBoundsBothSidesAndTheBitmap() {
+        for ((w, h) in listOf(65535 to 191, 191 to 65535, 65535 to 1, 20000 to 20000, 4000 to 3000, 192 to 192, 48 to 32)) {
+            val sample = chipThumbnailSample(w, h) ?: continue
+            val dw = maxOf(1, w / sample).toLong()
+            val dh = maxOf(1, h / sample).toLong()
+            assertTrue("$w x $h -> $dw x $dh", dw <= CHIP_THUMB_SIDE * 2 && dh <= CHIP_THUMB_SIDE * 2)
+            assertTrue("$w x $h -> ${dw * dh * 4} bytes", dw * dh * 4 <= CHIP_THUMB_MAX_BYTES)
+        }
+        // The goldens' 48 × 32 picture is drawn as it is.
+        assertEquals(1, chipThumbnailSample(48, 32))
+    }
+
+    @Test
+    fun aCraftedWidePictureDecodesSmall() {
+        // 6000 × 8: a short side far under the chip, so the old short-side bound decoded it whole.
+        val wide = java.util.Base64.getEncoder().encodeToString(png(6000, 8))
+        val thumb = chipThumbnail(wide)
+        assertTrue(thumb != null)
+        assertTrue("decoded ${thumb!!.width} x ${thumb.height}", thumb.width <= CHIP_THUMB_SIDE * 2 && thumb.height <= CHIP_THUMB_SIDE * 2)
     }
 }

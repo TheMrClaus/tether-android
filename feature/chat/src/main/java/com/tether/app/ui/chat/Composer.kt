@@ -770,21 +770,32 @@ fun Composer(
         if (sources.isEmpty()) return
         scope.launch { currentAttachments.stage(sources).lastOrNull()?.let(::flash) }
     }
+    // M1 (r2): only another app's content:// provider is ever read (never file://, never our own).
+    val uriPolicy = remember(context) { AttachmentUriPolicy.of(context) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(com.tether.app.protocol.helpers.AttachmentDraft.MAX_ATTACHMENTS)) { uris ->
-        stageSources(uris.map { ContentUriSource(context.contentResolver, it) })
+        stageSources(uris.map { ContentUriSource(context.contentResolver, it, uriPolicy) })
     }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        stageSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it) })
+        stageSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it, uriPolicy) })
     }
     fun pasteImage() {
-        val sources = try {
-            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-            ClipboardImages.sources(clipboard?.primaryClip, context.contentResolver)
+        // The clip is read here (the clipboard answers the focused app); its items are looked at
+        // off the main thread (L3: a type query per item is a call into another app's provider).
+        val clip = try {
+            context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
         } catch (_: RuntimeException) {
             flash(AttachmentCopy.CLIPBOARD_UNREADABLE)
             return
         }
-        if (sources.isEmpty()) flash(AttachmentCopy.NO_CLIPBOARD_IMAGE) else stageSources(sources)
+        scope.launch {
+            val sources = try {
+                withContext(Dispatchers.IO) { ClipboardImages.sources(clip, context.contentResolver, uriPolicy) }
+            } catch (_: RuntimeException) {
+                flash(AttachmentCopy.CLIPBOARD_UNREADABLE)
+                return@launch
+            }
+            if (sources.isEmpty()) flash(AttachmentCopy.NO_CLIPBOARD_IMAGE) else currentAttachments.stage(sources).lastOrNull()?.let(::flash)
+        }
     }
 
     val inputInteraction = remember { MutableInteractionSource() }

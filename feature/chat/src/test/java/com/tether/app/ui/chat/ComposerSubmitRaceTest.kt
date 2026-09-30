@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -27,6 +28,7 @@ import com.tether.app.ui.theme.TetherSkin
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -68,6 +70,8 @@ class ComposerSubmitRaceTest {
     }
 
     private fun show(fixture: ChatFixtures.Folded) {
+        // r2 (M1): picks are served by another app's provider, as a picker's are.
+        ForeignPicks.install(rule.activity)
         rule.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides registryOwner) {
                 ComposerHost(TetherSkin.Machine) {
@@ -186,7 +190,7 @@ class ComposerSubmitRaceTest {
     @Test
     fun attachmentsWhileATurnRunsAreRefusedAndKept() {
         val file = File(tmp.root, "notes.txt").apply { writeText("hello") }
-        picks = listOf(Uri.fromFile(file))
+        picks = listOf(ForeignPicks.uriFor(file))
         show(ComposerFixtures.busy)
         pick(ATTACH_ROW_FILES)
         input().performTextInput("with the file")
@@ -202,7 +206,7 @@ class ComposerSubmitRaceTest {
     @Test
     fun aPickedFileIsStagedByTheRealIntakeAndGoesOnlyWithTheSendTap() {
         val file = File(tmp.root, "notes.txt").apply { writeText("hello") }
-        picks = listOf(Uri.fromFile(file))
+        picks = listOf(ForeignPicks.uriFor(file))
         show(ComposerFixtures.idle)
         pick(ATTACH_ROW_FILES)
         assertEquals(emptyList<Pair<String, List<Attachment>>>(), attachmentSends)
@@ -220,10 +224,24 @@ class ComposerSubmitRaceTest {
     fun theImageRowStagesThePhotoPickersPicturesUnderTheirSniffedType() {
         val bitmap = android.graphics.Bitmap.createBitmap(20, 10, android.graphics.Bitmap.Config.ARGB_8888)
         val file = File(tmp.root, "photo").apply { outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
-        picks = listOf(Uri.fromFile(file))
+        picks = listOf(ForeignPicks.uriFor(file))
         show(ComposerFixtures.idle)
         pick(ATTACH_ROW_IMAGES)
         assertEquals("image/png", store.items(ORIGIN, ComposerFixtures.SESSION_ID).single().attachment.mediaType)
+    }
+
+    /** r2 (M1): a picker result naming a file:// URI (the app's own files) is never read or staged. */
+    @Test
+    fun aFileUriPickIsNeverReadOrStaged() {
+        val file = File(rule.activity.filesDir, "drafts.preferences_pb").apply { writeText("private drafts") }
+        picks = listOf(Uri.fromFile(file))
+        show(ComposerFixtures.idle)
+        rule.onNodeWithContentDescription("Add attachment").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription(ATTACH_ROW_FILES).performClick()
+        rule.waitUntil(20_000) { rule.onAllNodesWithText(AttachmentCopy.unreadable(AttachmentNames.FALLBACK)).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(store.items(ORIGIN, ComposerFixtures.SESSION_ID).isEmpty())
+        assertEquals(0, rule.onAllNodesWithRemove().size)
     }
 
     private fun androidx.compose.ui.test.junit4.AndroidComposeTestRule<*, *>.onAllNodesWithRemove() =

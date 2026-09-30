@@ -246,7 +246,8 @@ fun ChatScreen(
     // configured server, and sent only by an explicit Send bound to the server the composer is
     // drawn for (the client re-checks it all under its lock).
     val stagedSet by vm.stagedAttachments.current.collectAsStateWithLifecycle()
-    val stager = remember(vm) { AttachmentStager(vm.stagedAttachments, { vm.attachmentOrigin() }) }
+    // r2: a pick is staged only while its session is still the selected, listed, unlocked one.
+    val stager = remember(vm) { AttachmentStager(vm.stagedAttachments, { vm.attachmentOrigin() }, allowed = vm::attachmentsAllowed) }
     val attachments = remember(session?.id, stagedSet, consentOrigin, vm, stager) {
         val s = session
         val drawnFor = consentOrigin

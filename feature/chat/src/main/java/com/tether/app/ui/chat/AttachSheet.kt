@@ -119,26 +119,30 @@ class ComposerAttachments(
 /**
  * Stages picks into [store] for one session on the server [originNow] names. Picks are read one
  * batch at a time (a second pick waits for the first, so neither overwrites the other); a batch
- * whose set was dropped while it was being read (a server or session switch, a lock, a sign-out) is
- * discarded, never added to what replaced it.
+ * whose set was dropped while it was being read (a server or session switch, a lock, a sign-out:
+ * each bumps [StagedAttachments.generation], staged or not) is discarded, never added to what
+ * replaced it. r2: [allowed] must also still hold for the session when the read is done (it is
+ * the one selected, listed and unlocked), or the batch is discarded.
  */
 class AttachmentStager(
     private val store: StagedAttachments,
     private val originNow: () -> String?,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val allowed: (sessionId: String) -> Boolean = { true },
+    private val limits: ReadLimits = ReadLimits.DEFAULT,
 ) {
     private val mutex = Mutex()
 
     suspend fun stage(sessionId: String, sources: List<AttachmentSource>): List<String> = mutex.withLock {
-        if (sources.isEmpty()) return@withLock emptyList()
+        if (sources.isEmpty() || !allowed(sessionId)) return@withLock emptyList()
         val origin = originNow()
         val generation = store.generation
         val existing = store.items(origin, sessionId)
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        // Cancelled (the composer left, the session switched): the read stops at its next chunk,
-        // and withContext throws, so nothing read is staged.
-        val result = withContext(io) { AttachmentIntake.intake(sources, existing, store::newId, active = { job?.isActive != false }) }
-        if (store.generation != generation || originNow() != origin) return@withLock result.flashes
+        // Cancelled (the composer left, the session switched): the read watchdog closes the stream
+        // (L3), and withContext throws, so nothing read is staged.
+        val result = withContext(io) { AttachmentIntake.intake(sources, existing, store::newId, active = { job?.isActive != false }, limits = limits) }
+        if (store.generation != generation || originNow() != origin || !allowed(sessionId)) return@withLock result.flashes
         val now = store.items(origin, sessionId)
         if (result.added.isNotEmpty()) store.set(origin, sessionId, (now + result.added).take(AttachmentDraft.MAX_ATTACHMENTS))
         result.flashes
@@ -222,17 +226,44 @@ private fun rememberChipThumbnail(item: StagedAttachment): ImageBitmap? {
 
 internal const val CHIP_THUMB_SIDE = 96
 
+/** L1 (r2): the most a chip thumbnail's decoded bitmap may take (192 × 192 ARGB is 144 KiB). */
+internal const val CHIP_THUMB_MAX_BYTES: Long = 256L * 1024
+
+/**
+ * L1 (r2): the power-of-two sample for a [width] × [height] chip thumbnail, bounded on the OUTPUT:
+ * both decoded sides at most 2 × [CHIP_THUMB_SIDE] and the bitmap at most [CHIP_THUMB_MAX_BYTES]
+ * ([BoundedMediaDecoder.plan]). A bound on the short side alone let a crafted wide picture (a few KB
+ * of GIF, 65535 × 191) decode at about 50 MB per chip. Null: not drawn (past the pixel cap).
+ */
+internal fun chipThumbnailSample(width: Int, height: Int, bytesPerPixel: Int = 4): Int? =
+    BoundedMediaDecoder.plan(width, height, bytesPerPixel, CHIP_THUMB_SIDE * 2, CHIP_THUMB_MAX_BYTES)
+
 /** Decode [base64] small (the staged bytes are at most 9 MB; the decode is sampled). Null: not a picture. */
 internal fun chipThumbnail(base64: String): ImageBitmap? = try {
     val bytes = java.util.Base64.getDecoder().decode(base64)
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    val bounds = BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+    }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth.toLong() * bounds.outHeight > MediaLimits.MAX_IMAGE_PIXELS) {
+    val sample = chipThumbnailSample(bounds.outWidth, bounds.outHeight, if (bounds.outConfig == android.graphics.Bitmap.Config.RGBA_F16) 8 else 4)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || sample == null) {
         null
     } else {
-        var sample = 1
-        while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= CHIP_THUMB_SIDE) sample *= 2
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        when {
+            bitmap == null -> null
+            // A decoder that did not honour the sample: never kept.
+            bitmap.allocationByteCount > CHIP_THUMB_MAX_BYTES -> {
+                bitmap.recycle()
+                null
+            }
+            else -> bitmap.asImageBitmap()
+        }
     }
 } catch (_: OutOfMemoryError) {
     null

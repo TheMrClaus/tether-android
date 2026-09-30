@@ -118,6 +118,8 @@ class AttachmentComposerBehaviourTest {
         rule.waitForIdle()
         rule.onNodeWithContentDescription("Paste image").performClick()
         rule.waitForIdle()
+        // r2 (L3): the clip's items are looked at off the main thread.
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(AttachmentCopy.NO_CLIPBOARD_IMAGE).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText(AttachmentCopy.NO_CLIPBOARD_IMAGE).assertExists()
         // The sheet closed first (attach-sheet.tsx run()); nothing was staged or sent.
         rule.onAllNodesWithText(ATTACH_SHEET_TITLE).assertCountEquals(0)

@@ -1,10 +1,12 @@
 package com.tether.app.ui.chat
 
 import android.content.ContentResolver
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.CancellationSignal
 import android.provider.OpenableColumns
 import com.tether.app.client.AttachmentFrame
 import com.tether.app.client.StagedAttachment
@@ -12,6 +14,13 @@ import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.helpers.AttachmentDraft
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -24,7 +33,12 @@ import kotlin.math.roundToInt
  * - its type is decided from its first bytes for the formats the server sends to the model
  *   natively, never from the provider's claim alone;
  * - its display name is cleaned before it goes on the wire and is drawn through the code rule;
- *   it is never used as a path.
+ *   it is never used as a path;
+ * - (r2, M1) only a `content://` URI of ANOTHER app's provider is ever read ([AttachmentUriPolicy]):
+ *   never a `file://` URI (opened inside this process, with its access to the app's own files) and
+ *   never one of the app's own providers;
+ * - (r2, L3) a read that stalls, runs too long or whose pick went away is ended by closing its
+ *   stream ([readBounded]); closing unblocks a read stuck in the provider.
  */
 
 /** One item a row handed over (a picked document or picture, a clipboard picture). */
@@ -38,20 +52,71 @@ interface AttachmentSource {
     /** The provider's claimed MIME type (untrusted; null: none). */
     val declaredType: String?
 
+    /**
+     * A pasted picture (the clipboard row: images only). It is kept only when its BYTES are a
+     * picture ([AttachmentTypes.sniff]), whatever the clip claimed, and is named for what they are.
+     */
+    val imagesOnly: Boolean get() = false
+
     /** The bytes, or null when the provider cannot open them. */
     fun open(): InputStream?
+
+    /** [open], ended early when [signal] is cancelled (a provider that honours it stops opening). */
+    fun open(signal: CancellationSignal): InputStream? = open()
 }
 
-/** A document, a Photo Picker picture or a clipboard picture, read through the [resolver]. */
+/**
+ * M1 (T7.4 r2): the only URIs an attachment is ever read from. Everything a picker result or the
+ * clipboard hands over names content chosen by ANOTHER app, which may be hostile:
+ * - the scheme must be `content`: a `file://` URI would be opened inside this process, with its
+ *   access to the app's own private files (the drafts store holds every paired server's drafts);
+ * - its authority must resolve to an installed provider (one that does not is refused, fail
+ *   closed), and that provider must not be one of this app's own: a URI naming one of them would
+ *   have the app attach its own data. A user prefix (`10@media`) is looked up without it, so an
+ *   own provider under another user's prefix is refused too.
+ * [providerPackage] answers the package that owns an authority (null: none resolves).
+ */
+class AttachmentUriPolicy(private val ownPackage: String, private val providerPackage: (authority: String) -> String?) {
+    fun allows(uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        val authority = uri.authority?.substringAfterLast('@')
+        if (authority.isNullOrEmpty()) return false
+        val owner = try {
+            providerPackage(authority)
+        } catch (_: RuntimeException) {
+            null
+        } ?: return false
+        return owner != ownPackage
+    }
+
+    companion object {
+        /** The installed providers as the package manager resolves them, against this app's package. */
+        fun of(context: Context): AttachmentUriPolicy {
+            val pm = context.packageManager
+            return AttachmentUriPolicy(context.packageName) { authority -> pm.resolveContentProvider(authority, 0)?.packageName }
+        }
+    }
+}
+
+/**
+ * A document, a Photo Picker picture or a clipboard picture, read through the [resolver]. Nothing
+ * about a URI the [policy] refuses is asked of anyone (no name, size or type query, no open): it
+ * reads as unopenable ("Could not read").
+ */
 class ContentUriSource(
     private val resolver: ContentResolver,
     private val uri: Uri,
+    private val policy: AttachmentUriPolicy,
     private val nameOverride: String? = null,
     private val typeOverride: String? = null,
+    override val imagesOnly: Boolean = false,
 ) : AttachmentSource {
+    private val allowed: Boolean by lazy { policy.allows(uri) }
+
     private val columns: Pair<String?, Long?> by lazy {
         var name: String? = null
         var size: Long? = null
+        if (!allowed) return@lazy name to size
         try {
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
@@ -67,8 +132,14 @@ class ContentUriSource(
 
     override val displayName: String? get() = nameOverride ?: columns.first
     override val reportedSize: Long? get() = columns.second?.takeIf { it >= 0 }
-    override val declaredType: String? get() = typeOverride ?: runCatching { resolver.getType(uri) }.getOrNull()
-    override fun open(): InputStream? = resolver.openInputStream(uri)
+    override val declaredType: String?
+        get() = typeOverride ?: if (allowed) runCatching { resolver.getType(uri) }.getOrNull() else null
+
+    override fun open(): InputStream? = open(CancellationSignal())
+
+    // ContentResolver.openInputStream is this for a content URI, without the signal.
+    override fun open(signal: CancellationSignal): InputStream? =
+        if (allowed) resolver.openAssetFileDescriptor(uri, "r", signal)?.createInputStream() else null
 }
 
 /** The web's flash copy for staging (chat-view.tsx), plus the native frame bound's. */
@@ -153,6 +224,9 @@ object AttachmentTypes {
 
     private val MIME = Regex("^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$")
 
+    /** protocol-validate.mjs LIMITS.ATTACHMENT_MEDIA_TYPE_BYTES: a longer type fails the whole send. */
+    const val MAX_MEDIA_TYPE_CHARS = 128
+
     /** The native format [head] starts with (PNG, JPEG, GIF, WebP, PDF), or null. */
     fun sniff(head: ByteArray): String? {
         if (MediaMagic.matches(head, "image/png")) return "image/png"
@@ -166,14 +240,15 @@ object AttachmentTypes {
     /**
      * The type to send (the web sends `file.type || "application/octet-stream"`, the browser's
      * type from the extension). Here: the sniffed native format when the bytes are one; otherwise
-     * the provider's claim when it is a well-formed type that is NOT one of the native formats (a
-     * claim of PNG, JPEG, GIF, WebP or PDF the bytes do not back would reach the model as a broken
-     * image or document, so it goes as a plain file instead); otherwise [OCTET].
+     * the provider's claim when it is a well-formed type of at most [MAX_MEDIA_TYPE_CHARS]
+     * characters (the server's bound; ASCII by the pattern) that is NOT one of the native formats
+     * (a claim of PNG, JPEG, GIF, WebP or PDF the bytes do not back would reach the model as a
+     * broken image or document, so it goes as a plain file instead); otherwise [OCTET].
      */
     fun resolve(bytes: ByteArray, declared: String?): String {
         sniff(bytes.copyOf(minOf(bytes.size, 16)))?.let { return it }
         val claim = declared?.substringBefore(';')?.trim()?.lowercase() ?: return OCTET
-        if (!MIME.matches(claim) || claim in NATIVE) return OCTET
+        if (claim.length > MAX_MEDIA_TYPE_CHARS || !MIME.matches(claim) || claim in NATIVE) return OCTET
         return claim
     }
 }
@@ -184,31 +259,94 @@ sealed interface BoundedRead {
     data object TooLarge : BoundedRead
     data object Failed : BoundedRead
     data object Cancelled : BoundedRead
+
+    /** L3: the provider stalled (no bytes for [ReadLimits.idleMs]) or took past [ReadLimits.totalMs]. */
+    data object TimedOut : BoundedRead
+}
+
+/**
+ * L3 (T7.4 r2): how long one source may take. A read that delivers nothing for [idleMs], or is not
+ * done after [totalMs], is ended by closing its stream (a picked cloud file may be slow; a provider
+ * that never answers must not hold the stager, and an IO thread, forever). [pollMs] is how often the
+ * watchdog looks (the same look ends a read whose pick was cancelled).
+ */
+class ReadLimits(val idleMs: Long, val totalMs: Long, val pollMs: Long = 100) {
+    companion object {
+        val DEFAULT = ReadLimits(idleMs = 30_000, totalMs = 120_000)
+    }
+}
+
+/** L3: the one daemon thread that ends stalled or abandoned reads (it only ever closes streams). */
+internal object ReadWatchdog {
+    private val timer: ScheduledExecutorService by lazy {
+        ScheduledThreadPoolExecutor(1) { r -> Thread(r, "attachment-read-watchdog").apply { isDaemon = true } }
+            .apply { removeOnCancelPolicy = true }
+    }
+
+    fun every(pollMs: Long, check: () -> Unit): ScheduledFuture<*> =
+        timer.scheduleWithFixedDelay({ runCatching(check) }, pollMs, pollMs, TimeUnit.MILLISECONDS)
 }
 
 /**
  * Read [source] in chunks, aborting as soon as more than [max] bytes arrive (the provider's size
  * claim only sizes the first buffer; it is never trusted to bound the read), or as soon as [active]
- * says the caller went away (a cancelled pick stops reading at the next chunk).
+ * says the caller went away. L3: a watchdog ([ReadWatchdog]) ends the open and the read when
+ * [active] goes false or [limits] run out, by cancelling the open's signal and closing the stream:
+ * a read blocked inside the provider is unblocked by the close (Android signals the threads blocked
+ * on a descriptor it closes), so a cancelled or stalled pick never keeps its thread or the stager.
  */
 fun readBounded(
     source: AttachmentSource,
     max: Long = AttachmentDraft.MAX_ATTACHMENT_BYTES.toLong(),
     chunk: Int = 64 * 1024,
     active: () -> Boolean = { true },
+    limits: ReadLimits = ReadLimits.DEFAULT,
 ): BoundedRead {
     val claimed = source.reportedSize
     if (claimed != null && claimed > max) return BoundedRead.TooLarge
+    val signal = CancellationSignal()
+    val stream = AtomicReference<InputStream?>(null)
+    val ended = AtomicBoolean(false)
+    val timedOut = AtomicBoolean(false)
+    val started = System.nanoTime()
+    val progress = AtomicLong(started)
+    fun end() {
+        if (!ended.compareAndSet(false, true)) return
+        runCatching { signal.cancel() }
+        stream.get()?.let { runCatching { it.close() } }
+    }
+    fun ms(since: Long) = (System.nanoTime() - since) / 1_000_000
+    val watch = ReadWatchdog.every(limits.pollMs) {
+        if (!active()) {
+            end()
+        } else if (ms(progress.get()) > limits.idleMs || ms(started) > limits.totalMs) {
+            timedOut.set(true)
+            end()
+        }
+    }
+    fun why(): BoundedRead = when {
+        !active() -> BoundedRead.Cancelled
+        timedOut.get() -> BoundedRead.TimedOut
+        else -> BoundedRead.Failed
+    }
     return try {
-        val input = source.open() ?: return BoundedRead.Failed
-        input.use { stream ->
+        val input = source.open(signal) ?: return why()
+        stream.set(input)
+        // Ended while it was opening: the watchdog could not close what it did not have yet.
+        if (ended.get()) {
+            runCatching { input.close() }
+            return why()
+        }
+        input.use { s ->
             val out = ByteArrayOutputStream(((claimed ?: chunk.toLong()).coerceIn(1, max.coerceAtMost(Int.MAX_VALUE.toLong()))).toInt())
             val buffer = ByteArray(chunk)
             var total = 0L
             while (true) {
                 if (!active()) return BoundedRead.Cancelled
-                val n = stream.read(buffer)
+                val n = s.read(buffer)
+                if (ended.get()) return why()
                 if (n < 0) break
+                progress.set(System.nanoTime())
                 total += n
                 if (total > max) return BoundedRead.TooLarge
                 out.write(buffer, 0, n)
@@ -218,7 +356,12 @@ fun readBounded(
     } catch (_: OutOfMemoryError) {
         BoundedRead.TooLarge
     } catch (_: Exception) {
-        BoundedRead.Failed
+        // A close by the watchdog surfaces here as the read's IOException (or the open's
+        // OperationCanceledException).
+        why()
+    } finally {
+        watch.cancel(false)
+        stream.get()?.let { runCatching { it.close() } }
     }
 }
 
@@ -314,6 +457,7 @@ object AttachmentIntake {
         newId: () -> Long,
         prepare: (ByteArray, String) -> ImageShrink.Prepared = ImageShrink::prepare,
         active: () -> Boolean = { true },
+        limits: ReadLimits = ReadLimits.DEFAULT,
     ): Result {
         val added = ArrayList<StagedAttachment>()
         val flashes = ArrayList<String>()
@@ -325,7 +469,7 @@ object AttachmentIntake {
                 flashes += AttachmentCopy.COUNT
                 break
             }
-            val name = AttachmentNames.wire(source.displayName)
+            var name = AttachmentNames.wire(source.displayName)
             val claimed = source.reportedSize
             if (claimed != null && claimed > AttachmentDraft.MAX_ATTACHMENT_BYTES) {
                 flashes += AttachmentCopy.tooLarge(name)
@@ -335,17 +479,27 @@ object AttachmentIntake {
                 flashes += AttachmentCopy.TOTAL
                 break
             }
-            val bytes = when (val read = readBounded(source, active = active)) {
+            val bytes = when (val read = readBounded(source, active = active, limits = limits)) {
                 is BoundedRead.Bytes -> read.bytes
                 BoundedRead.Cancelled -> return Result(emptyList(), emptyList())
                 BoundedRead.TooLarge -> {
                     flashes += AttachmentCopy.tooLarge(name)
                     continue
                 }
-                BoundedRead.Failed -> {
+                BoundedRead.Failed, BoundedRead.TimedOut -> {
                     flashes += AttachmentCopy.unreadable(name)
                     continue
                 }
+            }
+            // M1: a pasted picture is one only if its bytes say so (not the clip's claim).
+            var sniffedPicture: String? = null
+            if (source.imagesOnly) {
+                sniffedPicture = AttachmentTypes.sniff(bytes.copyOf(minOf(bytes.size, 16)))?.takeIf { it in MediaLimits.IMAGE_TYPES }
+                if (sniffedPicture == null) {
+                    flashes += AttachmentCopy.NO_CLIPBOARD_IMAGE
+                    continue
+                }
+                name = AttachmentNames.wire(ClipboardImages.pastedName(sniffedPicture))
             }
             // The size the provider did not (or did not truthfully) report: the web's file.size check.
             if (claimed == null || claimed != bytes.size.toLong()) {
@@ -357,7 +511,7 @@ object AttachmentIntake {
             val attachment: Attachment
             val size: Long
             try {
-                val prepared = prepare(bytes, AttachmentTypes.resolve(bytes, source.declaredType))
+                val prepared = prepare(bytes, sniffedPicture ?: AttachmentTypes.resolve(bytes, source.declaredType))
                 attachment = Attachment(
                     name = name,
                     mediaType = prepared.mediaType.ifEmpty { AttachmentTypes.OCTET },
@@ -388,18 +542,25 @@ object AttachmentIntake {
  * pasteImageFromClipboard (chat-view.tsx:2596-2622): every image the clipboard offers is staged
  * like a picked file, named `pasted-image.<subtype>` (the subtype before any `+`, "png" when none).
  * Text on the clipboard is not an attachment (the web's row pastes images only).
+ *
+ * M1 (T7.4 r2): the clip is another app's. Only an item the [AttachmentUriPolicy] allows is
+ * considered at all (a `file://` URI, one of this app's own providers or an authority that does not
+ * resolve is dropped before anything is asked of it); the claimed type only pre-filters; the item is
+ * kept only if its bytes are a picture ([AttachmentSource.imagesOnly]), and named for them.
+ * Blocking (a type query per item): call it off the main thread.
  */
 object ClipboardImages {
-    /** The clip's image items, as sources; null when the clipboard could not be read. */
-    fun sources(clip: android.content.ClipData?, resolver: ContentResolver): List<AttachmentSource> {
+    /** The clip's image items, as sources. */
+    fun sources(clip: android.content.ClipData?, resolver: ContentResolver, policy: AttachmentUriPolicy): List<AttachmentSource> {
         if (clip == null) return emptyList()
         val found = ArrayList<AttachmentSource>()
         for (i in 0 until clip.itemCount) {
             val uri = clip.getItemAt(i)?.uri ?: continue
+            if (!policy.allows(uri)) continue
             val type = runCatching { resolver.getType(uri) }.getOrNull()?.lowercase()
                 ?: (0 until clip.description.mimeTypeCount).map { clip.description.getMimeType(it).lowercase() }.firstOrNull { it.startsWith("image/") }
             if (type == null || !type.startsWith("image/")) continue
-            found += ContentUriSource(resolver, uri, nameOverride = pastedName(type), typeOverride = type)
+            found += ContentUriSource(resolver, uri, policy, nameOverride = pastedName(type), typeOverride = type, imagesOnly = true)
         }
         return found
     }
