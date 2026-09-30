@@ -38,8 +38,14 @@ class TetherViewModelAttachmentTest {
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
 
+    private val vms = TestViewModels()
+
     @After
-    fun tearDown() = Dispatchers.resetMain()
+    fun tearDown() {
+        // r2 hygiene: the view models' scopes end before Main is reset (see TestViewModels).
+        vms.clear()
+        Dispatchers.resetMain()
+    }
 
     private class Call(val sessionId: String, val text: String, val attachments: List<Attachment>, val mention: DelegateMention?, val origin: String?)
 
@@ -48,6 +54,7 @@ class TetherViewModelAttachmentTest {
         val link = MutableStateFlow<String?>(A)
         val conn = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
         val list = MutableStateFlow(listOf(session("s1"), session("s2")))
+        val conf = MutableStateFlow(true)
         var answer = AttachmentSendResult.Sent
         val calls = mutableListOf<Call>()
         val plainSends = mutableListOf<Pair<String, List<Attachment>>>()
@@ -55,6 +62,7 @@ class TetherViewModelAttachmentTest {
         override val consentOrigin: StateFlow<String?> get() = link
         override val connection: StateFlow<ConnectionState> get() = conn
         override val sessions: StateFlow<List<AgentSession>> get() = list
+        override val configured: StateFlow<Boolean> get() = conf
         override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
             calls += Call(sessionId, text, attachments, mention, expectedOrigin)
             return answer
@@ -66,7 +74,7 @@ class TetherViewModelAttachmentTest {
     }
 
     private fun TestScope.vm(client: AttachClient = AttachClient()): Pair<TetherViewModel, AttachClient> {
-        val vm = TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { testScheduler.currentTime })
+        val vm = vms.track(TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { testScheduler.currentTime }))
         advanceUntilIdle()
         return vm to client
     }
@@ -195,6 +203,99 @@ class TetherViewModelAttachmentTest {
         assertTrue(client.plainSends.isEmpty())
         assertEquals(true, vm.sendOrQueue("s1", "plain"))
         assertEquals(listOf("plain" to emptyList<Attachment>()), client.plainSends)
+    }
+
+    // --- r2: every drop trigger drops a FIRST pick still being read (L4a, verifier M1) ---------------
+
+    @Test
+    fun aSwitchToAnotherSessionDropsAFirstPickStillBeingReadButReselectingKeepsIt() = runTest(dispatcher) {
+        val (vm, _) = vm()
+        vm.selectSession("s1")
+        val g = vm.stagedAttachments.generation
+        // A rotation re-selects the same session: a pick being read for it is kept.
+        vm.selectSession("s1")
+        assertEquals(g, vm.stagedAttachments.generation)
+        // Nothing staged yet, and still: another selection ends the pick for s1.
+        vm.selectSession("s2")
+        assertTrue("no drop with nothing staged", vm.stagedAttachments.generation > g)
+        assertEquals(false, vm.attachmentsAllowed("s1"))
+        assertEquals(true, vm.attachmentsAllowed("s2"))
+    }
+
+    @Test
+    fun theSelectedSessionLockingDropsAFirstPickStillBeingRead() = runTest(dispatcher) {
+        for (locked in listOf(session("s1").copy(readOnly = true), session("s1").copy(handedOffTo = "s9"), session("s1").copy(runtimeArchived = true))) {
+            val (vm, client) = vm()
+            vm.selectSession("s1")
+            advanceUntilIdle()
+            assertEquals(true, vm.attachmentsAllowed("s1"))
+            val g = vm.stagedAttachments.generation
+            client.list.value = listOf(session("s1").copy(updatedAt = 2), session("s2"))
+            advanceUntilIdle()
+            assertEquals("an unlocked update drops nothing", g, vm.stagedAttachments.generation)
+            client.list.value = listOf(locked.copy(updatedAt = 3), session("s2"))
+            advanceUntilIdle()
+            assertTrue("locked, nothing staged: $locked", vm.stagedAttachments.generation > g)
+            assertEquals(false, vm.attachmentsAllowed("s1"))
+        }
+    }
+
+    @Test
+    fun aServerChangeOrALinkMoveDropsAFirstPickStillBeingRead() = runTest(dispatcher) {
+        val (vm, client) = vm()
+        var g = vm.stagedAttachments.generation
+        client.url.value = URL_B
+        advanceUntilIdle()
+        assertTrue(vm.stagedAttachments.generation > g)
+        g = vm.stagedAttachments.generation
+        // The link drops and comes back to the same server: nothing is dropped.
+        client.link.value = null
+        advanceUntilIdle()
+        client.link.value = A
+        advanceUntilIdle()
+        assertEquals(g, vm.stagedAttachments.generation)
+        client.link.value = B
+        advanceUntilIdle()
+        assertTrue(vm.stagedAttachments.generation > g)
+    }
+
+    @Test
+    fun aRevocationWithTheSameServerUrlDropsThemAndAnyPickBeingRead() = runTest(dispatcher) {
+        val (vm, client) = vm()
+        vm.selectSession("s1")
+        vm.stage()
+        val g = vm.stagedAttachments.generation
+        // Revoked (or signed out elsewhere): configured goes false, the server URL stays.
+        client.conf.value = false
+        advanceUntilIdle()
+        assertEquals(null, vm.stagedAttachments.current.value)
+        assertTrue(vm.stagedAttachments.generation > g)
+        // Re-paired to the same server: nothing from before comes back.
+        client.conf.value = true
+        advanceUntilIdle()
+        assertTrue(vm.staged().isEmpty())
+    }
+
+    @Test
+    fun aSessionThatLeavesTheListDropsThem() = runTest(dispatcher) {
+        val (vm, client) = vm()
+        vm.selectSession("s1")
+        vm.stage()
+        client.list.value = listOf(session("s2"))
+        advanceUntilIdle()
+        assertEquals(null, vm.stagedAttachments.current.value)
+        assertEquals(false, vm.attachmentsAllowed("s1"))
+    }
+
+    @Test
+    fun signingOutDropsAPickBeingReadAtOnce() = runTest(dispatcher) {
+        val (vm, _) = vm()
+        vm.selectSession("s1")
+        val g = vm.stagedAttachments.generation
+        vm.logout()
+        // Before the logout's own call returns (nothing has run yet on Main).
+        assertTrue(vm.stagedAttachments.generation > g)
+        advanceUntilIdle()
     }
 
     private companion object {

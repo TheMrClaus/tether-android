@@ -135,18 +135,41 @@ class TetherViewModel(
     /**
      * T7.4: the composer's staged attachments (one session on one server, memory only). They
      * survive a rotation (this view model) but not process death, and are dropped on a server
-     * switch, a sign-out, a switch to another session, and when their session locks (read-only,
-     * handed off or archived). Only an explicit Send transmits them ([sendAttachments]).
+     * switch, a sign-out or revocation (configured going false), a switch to another session, and
+     * when their session locks (read-only, handed off or archived) or leaves the list. Only an
+     * explicit Send transmits them ([sendAttachments]).
+     *
+     * r2 (L4, verifier M1): every one of those triggers drops ([StagedAttachments.clear], which
+     * bumps its generation) whether or not anything is staged yet, so a FIRST pick still being read
+     * when it fires is discarded too, never staged into the session or server it no longer belongs
+     * to; the stager also re-checks [attachmentsAllowed] when the read is done.
      */
     val stagedAttachments = StagedAttachments()
+
+    /** The link origin last seen (T7.4 r2: a move to another server drops what is staged or being read). */
+    private var lastLinkOrigin: String? = null
+
+    /**
+     * T7.4 r2: may a pick for [sessionId] be staged now? Only for the selected session, while it is
+     * listed and not locked (read-only, handed off, archived).
+     */
+    fun attachmentsAllowed(sessionId: String): Boolean {
+        if (_selectedSessionId.value != sessionId) return false
+        val session = client.sessions.value.firstOrNull { it.id == sessionId } ?: return false
+        return !attachmentsLocked(session)
+    }
+
+    private fun attachmentsLocked(s: AgentSession): Boolean = s.readOnly || !s.handedOffTo.isNullOrEmpty() || s.runtimeArchived
 
     /** Another server is configured: its drafts are its own (read on demand from its namespace). */
     private fun onServerUrl(url: String?) {
         val origin = serverOrigin(url)
         // T6.7 r2: a server's words never outlive the switch to another server.
         dropServerToastUnless(origin)
-        // T7.4: attachments staged for one server are never offered to another.
-        stagedAttachments.current.value?.let { if (it.origin != origin) stagedAttachments.clear() }
+        // T7.4: attachments staged for one server are never offered to another (r2: nor is a pick
+        // still being read when the server changes).
+        val staged = stagedAttachments.current.value
+        if ((staged != null && staged.origin != origin) || origin != draftOrigin) stagedAttachments.clear()
         if (origin == draftOrigin) return
         draftOrigin = origin
         draftLoads.clear()
@@ -263,9 +286,17 @@ class TetherViewModel(
             client.consentOrigin.collect { origin ->
                 if (origin != null) {
                     dropServerToastUnless(origin)
-                    stagedAttachments.current.value?.let { if (it.origin != origin) stagedAttachments.clear() }
+                    val staged = stagedAttachments.current.value
+                    val moved = lastLinkOrigin != null && lastLinkOrigin != origin
+                    if ((staged != null && staged.origin != origin) || moved) stagedAttachments.clear()
+                    lastLinkOrigin = origin
                 }
             }
+        }
+        // T7.4 r2 (L4b): signed out or revoked, even with the same server URL kept (a re-pairing
+        // to the same server starts with nothing staged, and nothing still being read lands).
+        viewModelScope.launch {
+            client.configured.collect { configured -> if (!configured) stagedAttachments.clear() }
         }
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
@@ -296,11 +327,14 @@ class TetherViewModel(
             }
         }
 
-        // T7.4: attachments staged for a session that locked (read-only, handed off, archived) go.
-        stagedAttachments.current.value?.let { staged ->
-            val s = list.firstOrNull { it.id == staged.sessionId }
-            if (s != null && (s.readOnly || !s.handedOffTo.isNullOrEmpty() || s.runtimeArchived)) stagedAttachments.clear()
-        }
+        // T7.4: attachments staged for a session that locked (read-only, handed off, archived) go;
+        // r2: so do those of a session that left the list (verifier L3), and a lock of the SELECTED
+        // session drops a first pick still being read for it (nothing staged yet: L4a).
+        val staged = stagedAttachments.current.value
+        val stagedGone = staged != null && list.firstOrNull { it.id == staged.sessionId }.let { it == null || attachmentsLocked(it) }
+        val selectedNow = _selectedSessionId.value
+        val selectedLocked = selectedNow != null && list.firstOrNull { it.id == selectedNow }?.let(::attachmentsLocked) == true
+        if (stagedGone || selectedLocked) stagedAttachments.clear()
 
         // Drop a selection whose session disappeared (archive).
         val selected = _selectedSessionId.value
@@ -328,8 +362,10 @@ class TetherViewModel(
     fun selectSession(id: String) {
         // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
         _openingHistoryId.value = null
-        // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView).
-        stagedAttachments.current.value?.let { if (it.sessionId != id) stagedAttachments.clear() }
+        // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView);
+        // r2: another selection drops a first pick still being read for the previous one as well.
+        val staged = stagedAttachments.current.value
+        if ((staged != null && staged.sessionId != id) || _selectedSessionId.value != id) stagedAttachments.clear()
         _selectedSessionId.value = id
         loadDraft(id)
         client.attach(id)
@@ -462,6 +498,8 @@ class TetherViewModel(
     val logoutNotice: StateFlow<String?> = _logoutNotice.asStateFlow()
 
     fun logout() {
+        // T7.4 r2: nothing staged, or still being read, outlives the decision to sign out.
+        stagedAttachments.clear()
         viewModelScope.launch {
             _logoutNotice.value = logoutNoticeFor(client.logout())
             stagedAttachments.clear()
