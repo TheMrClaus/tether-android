@@ -332,6 +332,7 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | The app **matches the web's Studio-only appearance** (Light / Dark / Follow system); retired theme families migrate to Studio (T15.5). Supersedes the 2026-09-26 six-skin entry once T15.5 lands | Owner answer (card) | owner |
 | 2026-09-30 | T6.8 root cause: the owner's sign-in gateway still fronts `/api`, and the app (correctly) never follows its login redirect, so tool images show "Image unavailable". Fix on the gateway + tether README exempt list (ta-p5l); the app only explains the failure better | Owner answers (card): tile shows "Image unavailable", gateway still there | owner |
 | 2026-09-30 | Chat links keep the current direct-open rule (exact short ASCII label==href, no `@`, settled, not clamped); everything else asks first. No "always ask" | Owner answer (card) | owner |
+| 2026-09-30 | T7.4: attachments go **inline on the WebSocket send, like the web** (no upload route). Port the web's image shrinking (long edge 1568, JPEG 0.8), keep the web's limits, and refuse any send frame over a safe cap below OkHttp's 16 MiB queue limit, before sending (a logged divergence for large non-image sets). Sheet rows = the web's four (no camera or text-clipboard rows). Offline sends with attachments are refused; the in-memory queue is T13.3's. The oversized-frame socket drop on main is fixed in T7.4 | The maker found the brief assumed an upload route the web doesn't have, and OkHttp closes the socket on a >16 MiB frame | claude-main (coordinator default) |
 
 ## Session log (append-only)
 
