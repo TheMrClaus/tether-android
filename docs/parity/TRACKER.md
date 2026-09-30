@@ -125,7 +125,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T6.5 | Conversation timeline refresh | VERIFIED | TheMrClaus @ 2026-09-30 06:13 |  |  |
 | T6.6 | Notices/dismiss, rate limit, model fallback, handoff/read-only, MCP health | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
 | T6.7 | Interrupt/kill/errors; selection & copy | VERIFIED | TheMrClaus @ 2026-09-29 15:38 |  |  |
-| T6.8 | Tool screenshots do not show in the conversation (owner report) | IN-PROGRESS | executor-T6.8 @ 2026-09-30 15:46 |  | maker started: reading code path and preparing isolated repro |
+| T6.8 | Tool screenshots do not show in the conversation (owner report) | TODO | executor-T6.8 @ 2026-09-30 15:46 |  | coordinator: unblocked with the owner's answers. Remaining app work: the tile says why an image is unavailable (e.g. a sign-in page answere… |
 
 ### Phase 7 — Composer
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -201,8 +201,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
-| T15.1 | Overview feed client (v131) | IN-PROGRESS | executor-T15.1 @ 2026-09-30 15:46 |  |  |
-| T15.2 | Overview screen | TODO |  |  |  |
+| T15.1 | Overview feed client (v131) | DONE | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
+| T15.2 | Overview screen | IN-PROGRESS | executor-T15.1 @ 2026-09-30 16:19 |  |  |
 | T15.3 | Overview host + daily usage panels | TODO |  |  |  |
 | T15.4 | Top-bar navigation | TODO |  |  |  |
 | T15.5 | Studio-only appearance + theme migration | TODO |  |  |  |
@@ -330,6 +330,8 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | **Catch-up batch 1 = Phase 15** (web v129-v135 since PARITY_BASE `7d65611`): Overview feed/screen/host+usage/top bar (T15.1-T15.4), Studio-only appearance (T15.5), v133-v135 wire (ta-ylh widened) + UI (T15.6/T15.7), re-baseline and PARITY_BASE bump (T15.8). P14 (1.0.0) now depends on P15 | The owner found Overview and other web features missing; they postdate the frozen base | owner request, coordinator scoping |
 | 2026-09-30 | Overview, full telemetry (T9.1, rescoped to the web's whole inspector) and attachments with image thumbnails (T7.4) run **in parallel** after ta-28i/ta-fz3; tool screenshots not showing on device is a P1 bug (T6.8) | Owner answers (card) | owner |
 | 2026-09-30 | The app **matches the web's Studio-only appearance** (Light / Dark / Follow system); retired theme families migrate to Studio (T15.5). Supersedes the 2026-09-26 six-skin entry once T15.5 lands | Owner answer (card) | owner |
+| 2026-09-30 | T6.8 root cause: the owner's sign-in gateway still fronts `/api`, and the app (correctly) never follows its login redirect, so tool images show "Image unavailable". Fix on the gateway + tether README exempt list (ta-p5l); the app only explains the failure better | Owner answers (card): tile shows "Image unavailable", gateway still there | owner |
+| 2026-09-30 | Chat links keep the current direct-open rule (exact short ASCII label==href, no `@`, settled, not clamped); everything else asks first. No "always ask" | Owner answer (card) | owner |
 
 ## Session log (append-only)
 
@@ -358,3 +360,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3 | Host restart interrupted the four reviewers (verifier + security review for ta-28i and ta-fz3). Checked worktrees: maker branches clean at 1602901 / ce416a4, nothing to checkpoint; all four resumed in context. | verdicts -> fix rounds or merge |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8, T15.1 | Review r1 done for both (see RESUME HERE); r2 fix rounds sent to the makers. Follow-ups filed: ta-w58, ta-4mm, ta-j8r, ta-3xc, ta-td0 (from ta-28i), ta-08y (from ta-fz3). Started T6.8 and T15.1->T15.2. | r2 re-review; T9.1, T7.4 |
 | 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8, T15.1 | Second host restart. ta-fz3 r2 landed (`3ba3d25`), re-verify was in flight; ta-28i r2 had 5 commits (to `3a680f8`), gate pending; T6.8 uncommitted tests checkpointed as a WIP commit; T15.1 at 2 commits. All four resumed in context. | r2 verdicts; security re-check of ta-fz3 r2 |
+| 2026-09-30 | claude-main / Opus 5.5 | ta-28i, ta-fz3, T6.8 | ta-28i r2 gate run by the coordinator: green on `3a680f8` (4532 tests); re-verify + security re-check running. ta-fz3 r2: security PASS-WITH-FOLLOW-UPS, verify REFUTED on streamed links (settle timer) -> small r3 (settle on content change, table-cell links ask, no `/` in mailto local parts). T6.8: no app bug; owner confirmed the gateway -> ta-p5l (README exempt list). | ta-28i verdicts; ta-fz3 r3; T6.8 tile copy |
