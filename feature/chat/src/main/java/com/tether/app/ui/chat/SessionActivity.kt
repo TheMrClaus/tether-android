@@ -663,16 +663,22 @@ internal fun CommandOutputSurface(command: BackgroundCommandView, actions: Comma
                     item(key = "dropped") { Text("… (earlier output not shown here — the full output is in the log file)", style = body, color = faint) }
                 }
                 items(shown.size) { i ->
-                    val text = remember(shown[i], warning) {
+                    // ta-blf: each piece as terminal output ([TranscriptText.terminal]): SGR colour
+                    // dropped, every other control, bidi or invisible code point a visible token.
+                    val token = tokenStyle(t)
+                    val text = remember(shown[i], warning, token) {
                         buildAnnotatedString {
-                            for (piece in shown[i].pieces) if (piece.stderr) withStyle(SpanStyle(color = warning)) { append(piece.text) } else append(piece.text)
+                            for (piece in shown[i].pieces) {
+                                val display = TranscriptText.terminal(piece.text)
+                                if (piece.stderr) withStyle(SpanStyle(color = warning)) { appendStyled(display, token) } else appendStyled(display, token)
+                            }
                         }
                     }
-                    Text(text, style = body, color = t.ink, modifier = Modifier.fillMaxWidth())
+                    Text(text, style = body.copy(textDirection = codeDirection), color = t.ink, modifier = Modifier.fillMaxWidth())
                 }
             }
             Text(
-                (if (command.outputTruncated) "Live view truncated — full output: " else "Full output: ") + command.logFile,
+                codeText((if (command.outputTruncated) "Live view truncated — full output: " else "Full output: ") + command.logFile),
                 style = TextStyle(fontFamily = type.ui, fontSize = rem(0.68f)),
                 color = t.muted,
                 modifier = Modifier

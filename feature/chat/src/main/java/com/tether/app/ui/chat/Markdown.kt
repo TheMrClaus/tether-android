@@ -126,25 +126,35 @@ internal class FindCursor(val needle: String, val active: Int, start: Int) {
  */
 internal val LocalFindActiveMark = androidx.compose.runtime.staticCompositionLocalOf<((androidx.compose.ui.geometry.Rect) -> Unit)?> { null }
 
-/** Append [text] with every occurrence of the cursor's needle marked (markdown.tsx `emit`). */
-internal fun AnnotatedString.Builder.appendMarked(text: String, cursor: FindCursor?, t: TetherTokens) {
+/**
+ * Append [text] with every occurrence of the cursor's needle marked (markdown.tsx `emit`).
+ * ta-blf: drawn by [rule] ([TranscriptText]); the marks are found in the ORIGINAL text, so the
+ * find's counts never depend on what is escaped.
+ */
+internal fun AnnotatedString.Builder.appendMarked(
+    text: String,
+    cursor: FindCursor?,
+    t: TetherTokens,
+    rule: TranscriptText.Rule = TranscriptText.Rule.Prose,
+) {
+    val token = tokenStyle(t)
     if (cursor == null) {
-        append(text)
+        appendSafe(text, rule, token)
         return
     }
     var last = 0
     for (range in findRanges(text, cursor.needle)) {
-        if (range.first > last) append(text.substring(last, range.first))
+        if (range.first > last) appendSafe(text.substring(last, range.first), rule, token)
         val ordinal = cursor.next++
         val start = length
-        withStyle(SpanStyle(color = t.css.findMatchInk)) { append(text.substring(range.first, range.last + 1)) }
+        withStyle(SpanStyle(color = t.css.findMatchInk)) { appendSafe(text.substring(range.first, range.last + 1), rule, token) }
         addStringAnnotation(FIND_TAG, if (ordinal == cursor.active) FIND_ACTIVE else FIND_PLAIN, start, length)
         last = range.last + 1
     }
-    if (last < text.length) append(text.substring(last))
+    if (last < text.length) appendSafe(text.substring(last), rule, token)
 }
 
-/** [text] as a plain run with its marks (a user bubble, a streaming reply): `HighlightedText`. */
+/** [text] as a plain prose run with its marks (a user bubble, a streaming reply): `HighlightedText`. */
 internal fun markedPlain(text: String, marks: FindMarks, t: TetherTokens): AnnotatedString =
     buildAnnotatedString { appendMarked(text, FindCursor(marks.needle, marks.active, 0), t) }
 
@@ -197,7 +207,7 @@ private fun AnnotatedString.Builder.appendInline(
             is MdInline.Code -> {
                 val start = length
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
-                withStyle(type.codeInline) { appendMarked(node.text, cursor, t) }
+                withStyle(type.codeInline) { appendMarked(node.text, cursor, t, TranscriptText.Rule.Code) }
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
                 addStringAnnotation(CODE_TAG, node.text, start, length)
             }
@@ -714,7 +724,8 @@ private class TablePolicy(private val cols: Int, private val geo: TableGeometry)
  * `--mineral-deep`, padding `space-sm space-md`, mono 0.8rem/1.5, `white-space: pre` scrolling
  * sideways) clamped by the expandable block (9rem on a phone, 16rem wider), with a tap-to-copy
  * key riding the top-right corner. Copy puts the EXACT raw fence body on the clipboard and shows
- * a check ("Copied") for 1.5s. No syntax highlighting: the web renders fences as plain text.
+ * a check ("Copied") for 1.5s (never the drawn tokens, ta-blf). No syntax highlighting: the web
+ * renders fences as plain text.
  */
 @Composable
 internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
@@ -744,11 +755,14 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
             TetherExpandableBlock(clamp = clamp, reveal = reveal) {
                 Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     val padding = Modifier.padding(horizontal = t.css.spaceMd + 1.dp, vertical = t.css.spaceSm + 1.dp)
+                    // ta-blf: the fence shows exactly what it holds (every invisible / bidi code point a
+                    // token), laid out LTR; Copy still takes the raw body.
+                    val style = type.codeBlock.copy(textDirection = codeDirection)
                     if (mark == null) {
-                        Text(block.code, style = type.codeBlock, color = t.ink, softWrap = false, modifier = padding)
+                        Text(codeText(block.code), style = style, color = t.ink, softWrap = false, modifier = padding)
                     } else {
-                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t) } }
-                        MdText(marked, type.codeBlock, t.ink, padding, softWrap = false)
+                        val marked = remember(block, mark, t) { buildAnnotatedString { appendMarked(block.code, mark.cursor(), t, TranscriptText.Rule.Code) } }
+                        MdText(marked, style, t.ink, padding, softWrap = false)
                     }
                 }
             }

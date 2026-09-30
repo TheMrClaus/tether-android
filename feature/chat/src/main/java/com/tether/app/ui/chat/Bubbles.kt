@@ -191,7 +191,8 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
         val text = block.text
         if (!text.isNullOrEmpty()) {
             // T5.3: `HighlightedText` — the find marks over the plain text, when it has any.
-            if (find != null) MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink) else Text(text, style = look.style, color = look.ink)
+            // ta-blf: prose ([TranscriptText]): an override or embedding shows as a token.
+            if (find != null) MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink) else Text(proseText(text), style = look.style, color = look.ink)
         }
         val attachments = block.attachments
         if (!attachments.isNullOrEmpty()) {
@@ -212,7 +213,7 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
                         tint = look.ink,
                         modifier = Modifier.size(12.dp),
                     )
-                    Text(attachment.name, style = type.timestamp.copy(fontSize = 12.2.sp), color = look.ink, maxLines = 1)
+                    Text(codeText(attachment.name), style = type.timestamp.copy(fontSize = 12.2.sp), color = look.ink, maxLines = 1)
                 }
             }
         }
@@ -242,7 +243,7 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Stri
             } else if (find != null) {
                 MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink)
             } else {
-                Text(text, style = look.style, color = look.ink)
+                Text(proseText(text), style = look.style, color = look.ink)
             }
         }
         if (!done) StreamingCaret(look.style)

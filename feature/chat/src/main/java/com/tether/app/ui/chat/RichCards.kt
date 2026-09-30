@@ -122,10 +122,10 @@ private fun RichHead(title: String, status: String?, failed: Boolean, modifier: 
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         icons()
-        Text(cutLine(title, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f))
+        Text(codeText(cutLine(title, PATH_MAX)), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.weight(1f))
         if (status != null) {
             Text(
-                status.uppercase(Locale.ROOT),
+                codeText(status.uppercase(Locale.ROOT)),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f), fontWeight = FontWeight(650), letterSpacing = 0.04.em),
                 color = if (failed) t.danger else t.muted,
                 modifier = Modifier.semantics { contentDescription = status },
@@ -156,7 +156,7 @@ private fun RichCopy(text: String, color: Color? = null, background: Color = Col
                 modifier = Modifier.padding(bottom = t.css.spaceXs).semantics { contentDescription = label },
             )
         }
-        Text(remember(text) { capHead(text) }, style = type.body.copy(fontSize = rem(0.82f), lineHeight = 1.5.em), color = color ?: t.ink)
+        Text(proseText(remember(text) { capHead(text) }), style = type.body.copy(fontSize = rem(0.82f), lineHeight = 1.5.em), color = color ?: t.ink)
     }
 }
 
@@ -179,7 +179,7 @@ private fun RichMeta(items: List<Pair<androidx.compose.ui.graphics.vector.ImageV
         items.forEach { (icon, text) ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                 if (icon != null) HeadIcon(icon, t.muted, 12.dp)
-                Text(text, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
+                Text(codeText(text), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
             }
         }
     }
@@ -194,7 +194,8 @@ private fun RichPre(text: String, background: Color, contentDescription: String?
     val shown = remember(text, live) { preText(if (live) capTail(text) else capHead(text)) }
     TetherExpandablePre(
         text = shown,
-        style = type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.55.em),
+        style = type.codeBlock.copy(fontSize = rem(0.76f), lineHeight = 1.55.em, textDirection = codeDirection),
+        display = codePreDisplay(),
         color = t.ink,
         clamp = toolClamp(),
         contentDescription = contentDescription,
@@ -279,10 +280,10 @@ private fun CodexFileChangeCard(block: JsObj, nested: Boolean) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
                         ) {
-                            Text(cutLine(change.path, PATH_MAX).breakAnywhere(), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, modifier = Modifier.weight(1f))
+                            Text(codeText(cutLine(change.path, PATH_MAX), breakAnywhere = true), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink, modifier = Modifier.weight(1f))
                             // `.tag`: 0.64rem/0.04em uppercase muted on `--graphite-raised`.
                             Text(
-                                change.kind.uppercase(Locale.ROOT),
+                                codeText(change.kind.uppercase(Locale.ROOT)),
                                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.64f), letterSpacing = 0.04.em),
                                 color = t.muted,
                                 modifier = Modifier
@@ -361,8 +362,8 @@ private fun CodexCollaborationCard(block: JsObj, nested: Boolean) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
                     ) {
-                        Text(cutLine(agent.id, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f))
-                        Text(cutLine(agent.state, PATH_MAX), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
+                        Text(codeText(cutLine(agent.id, PATH_MAX)), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.weight(1f))
+                        Text(codeText(cutLine(agent.state, PATH_MAX)), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted)
                     }
                 }
                 if (view.agentsTotal > view.agents.size) {
@@ -405,14 +406,16 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int =
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val label = cutLine(file.newPath ?: file.oldPath ?: fallbackLabel, PATH_MAX)
-    Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).semantics { contentDescription = "Changes in $label" }) {
+    // ta-blf: the path is code everywhere it shows, TalkBack's words included.
+    val spoken = remember(label) { TranscriptText.code(label) }
+    Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).semantics { contentDescription = "Changes in $spoken" }) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
             HeadIcon(TetherIcons.FileDiff, t.ink)
-            Text(label.breakAnywhere(), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink)
+            Text(codeText(label, breakAnywhere = true), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)), color = t.ink)
         }
         // Collapsed, only a peek of rows is built (the clamp shows a few); open, up to [rowLimit].
         var open by remember { mutableStateOf(false) }
@@ -420,7 +423,7 @@ internal fun DiffFile(file: DiffFileView, fallbackLabel: String, rowLimit: Int =
         val total = file.totalRows
         TetherExpandableBlock(clamp = toolClamp(), onOpenChange = { open = it }, forceOverflow = limit > DIFF_PEEK_ROWS) {
             val more = if (open && total > limit) moreLinesLabel(total - limit) else null
-            UnifiedDiffRows(file.rows, label, if (open) limit else minOf(limit, DIFF_PEEK_ROWS), more)
+            UnifiedDiffRows(file.rows, spoken, if (open) limit else minOf(limit, DIFF_PEEK_ROWS), more)
         }
     }
 }
@@ -477,8 +480,8 @@ private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String, limit:
                     rows.forEach { row ->
                         val (bg, ink) = colors(row.kind)
                         Text(
-                            row.text.ifEmpty { " " },
-                            style = if (row.kind == "more") style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) else style,
+                            codeText(row.text.ifEmpty { " " }),
+                            style = (if (row.kind == "more") style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) else style).copy(textDirection = codeDirection),
                             color = if (row.kind == "more") t.faint else ink,
                             softWrap = false,
                             modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = t.css.spaceSm),
@@ -556,8 +559,9 @@ internal fun CodexPlanCard(plan: PlanView) {
                     val tint = if (inProgress) t.violet else t.muted
                     val sep = t.tintSm
                     val last = index == plan.steps.lastIndex
+                    val token = tokenStyle(t)
                     val stepText = buildAnnotatedString {
-                        if (completed) withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(step.step) } else append(step.step)
+                        if (completed) withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendSafe(step.step, TranscriptText.Rule.Prose, token) } else appendSafe(step.step, TranscriptText.Rule.Prose, token)
                     }
                     val small = planLabel(step.status)
                     val smallStyle = TextStyle(fontFamily = type.ui, fontSize = rem(0.65f), letterSpacing = 0.03.em)

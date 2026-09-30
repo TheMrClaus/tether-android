@@ -228,13 +228,13 @@ fun SubagentTabs(
 private fun TabLabel(text: String, ink: Color, modifier: Modifier = Modifier) {
     val type = LocalTetherTypography.current
     val size = if (currentLayoutClass() == TetherLayoutClass.Phone) rem(0.78f) else rem(0.8f)
-    Text(text, style = TextStyle(fontFamily = type.ui, fontSize = size), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+    Text(proseText(text), style = TextStyle(fontFamily = type.ui, fontSize = size), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 
 @Composable
 private fun TabMeta(text: String, color: Color) {
     val type = LocalTetherTypography.current
-    Text(text, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = color, maxLines = 1)
+    Text(codeText(text), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = color, maxLines = 1)
 }
 
 /**
@@ -318,7 +318,7 @@ private fun SubrunChip(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         leading?.invoke()
-        Text(text, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = ink ?: t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(codeText(text), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = ink ?: t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -442,7 +442,7 @@ private fun RosterRow(run: SubagentRun, active: Boolean, first: Boolean, onSelec
             RunStatusIcon(run.status, 12.dp, if (isError) t.danger else ink)
             RunHarness(run, ink)
             Text(
-                run.title,
+                proseText(run.title),
                 style = TextStyle(fontFamily = type.ui, fontSize = rem(0.78f)),
                 color = t.ink,
                 maxLines = 1,
@@ -451,7 +451,7 @@ private fun RosterRow(run: SubagentRun, active: Boolean, first: Boolean, onSelec
             )
             Spacer(Modifier.weight(1f))
             run.agentType?.takeIf { it.isNotEmpty() }?.let {
-                Text(it, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted, maxLines = 1)
+                Text(codeText(it), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.68f)), color = t.muted, maxLines = 1)
             }
         }
         SubagentRunStats(run)
@@ -643,7 +643,7 @@ private fun RunHead(run: SubagentRun) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
             Icon(TetherIcons.Bot, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
             Text(
-                run.title,
+                proseText(run.title),
                 style = TextStyle(fontFamily = type.ui, fontSize = rem(0.95f), fontWeight = FontWeight(600)),
                 color = t.white,
                 maxLines = 2,
@@ -711,15 +711,17 @@ private fun ThreadNote(run: SubagentRun) {
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
         Text(
-            "${run.provider?.takeIf { it.isNotEmpty() } ?: "The harness"} ran this sub-agent in its own thread. Only its lifecycle " +
-                "is reported to this session — its steps and token usage stay on that thread.",
+            proseText(
+                "${run.provider?.takeIf { it.isNotEmpty() } ?: "The harness"} ran this sub-agent in its own thread. Only its lifecycle " +
+                    "is reported to this session — its steps and token usage stay on that thread.",
+            ),
             style = TextStyle(fontFamily = type.ui, fontSize = rem(0.82f)),
             color = t.muted,
         )
         val meta = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f))
-        run.agentPath?.takeIf { it.isNotEmpty() }?.let { Text("Agent path · $it", style = meta, color = t.faint) }
-        run.agentThreadId?.takeIf { it.isNotEmpty() }?.let { Text("Thread · $it", style = meta, color = t.faint) }
-        if (run.lifecycle.isNotEmpty()) Text("Lifecycle · ${run.lifecycle.joinToString(" → ")}", style = meta, color = t.faint)
+        run.agentPath?.takeIf { it.isNotEmpty() }?.let { Text(codeText("Agent path · $it"), style = meta, color = t.faint) }
+        run.agentThreadId?.takeIf { it.isNotEmpty() }?.let { Text(codeText("Thread · $it"), style = meta, color = t.faint) }
+        if (run.lifecycle.isNotEmpty()) Text(codeText("Lifecycle · ${run.lifecycle.joinToString(" → ")}"), style = meta, color = t.faint)
     }
 }
 

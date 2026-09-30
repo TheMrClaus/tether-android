@@ -356,8 +356,16 @@ private fun ChatRow(
         // T6.7: the transcript's words are selectable and copyable, as on the web, one row at a time:
         // a selection can never run across the transcript or into the header and composer (the
         // runaway selection the web fixed, globals.css:136-160). Rows that are controls, not
-        // reading, stay out of it.
-        if (item.selectableText) SelectionContainer { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) } else ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone)
+        // reading, stay out of it. ta-blf: the copy is the ORIGINAL text, never the drawn tokens.
+        if (item.selectableText) {
+            val base = androidx.compose.ui.platform.LocalClipboard.current
+            val clipboard = remember(base) { OriginalTextClipboard(base) }
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboard provides clipboard) {
+                SelectionContainer { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
+            }
+        } else {
+            ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone)
+        }
     }
 }
 

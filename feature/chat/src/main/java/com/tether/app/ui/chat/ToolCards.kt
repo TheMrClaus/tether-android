@@ -188,7 +188,7 @@ internal fun ToolHead(icon: @Composable () -> Unit, name: String?, status: Strin
         icon()
         if (!name.isNullOrEmpty()) {
             Text(
-                cutLine(name, PATH_MAX),
+                codeText(cutLine(name, PATH_MAX)),
                 style = TextStyle(fontFamily = type.mono, fontSize = size, fontWeight = FontWeight(680)),
                 color = t.ink,
                 modifier = Modifier.weight(1f),
@@ -261,6 +261,7 @@ internal fun toolIoStyle(): TextStyle {
  * A `pre.chat-tool-io` in its `.chat-expand` clamp: `--mineral-deep` under a `--line` rule, ink
  * pre-wrap mono, padded `space-sm space-md`; [output] adds the output's inset rule (outside
  * Studio). Long text clamps at [toolClamp] with the expand toggle, never a nested scroller.
+ * ta-blf: drawn as code ([TranscriptText]), LTR.
  */
 @Composable
 internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription: String? = null, background: Color? = null) {
@@ -271,7 +272,8 @@ internal fun ToolIoPre(text: String, output: Boolean = false, contentDescription
     val doubleRule = output && !studio
     TetherExpandablePre(
         text = preText(text),
-        style = toolIoStyle(),
+        style = toolIoStyle().copy(textDirection = codeDirection),
+        display = codePreDisplay(),
         color = t.ink,
         clamp = toolClamp(),
         contentDescription = contentDescription,
@@ -325,7 +327,7 @@ private fun FileEditView(model: ToolInputModel.Edit) {
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
             Text(
-                cutLine(model.filePath, PATH_MAX).breakAnywhere(),
+                codeText(cutLine(model.filePath, PATH_MAX), breakAnywhere = true),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.76f)),
                 color = t.ink,
                 modifier = Modifier.weight(1f, fill = false),
@@ -349,11 +351,19 @@ private fun FileEditView(model: ToolInputModel.Edit) {
     }
 }
 
-/** `word-break: break-all`: a zero-width space after every character lets a path wrap anywhere. */
+/**
+ * `word-break: break-all`: a zero-width space after every character lets a path wrap anywhere.
+ * ta-blf: a [TranscriptText] token is one unit (never broken inside, so it still reads and still
+ * decodes on copy).
+ */
 internal fun String.breakAnywhere(): String = if (length < 2) this else buildString(length * 2) {
-    this@breakAnywhere.forEachIndexed { i, c ->
-        append(c)
-        if (i < this@breakAnywhere.length - 1 && !c.isHighSurrogate()) append('\u200B')
+    val s = this@breakAnywhere
+    var i = 0
+    while (i < s.length) {
+        val end = if (s[i] == TranscriptText.MARK) TranscriptText.tokenEnd(s, i).takeIf { it > 0 } ?: (i + 1) else i + 1
+        append(s, i, end)
+        if (end < s.length && !s[end - 1].isHighSurrogate()) append('\u200B')
+        i = end
     }
 }
 
@@ -411,7 +421,7 @@ private fun DiffLine(gutter: String, text: String, bg: Color, gutterInk: Color, 
             // T6.7: `.diff-gutter { user-select: none }`: a copied diff is the lines, not the +/- marks.
             androidx.compose.foundation.text.selection.DisableSelection { Text(gutter, style = style, color = gutterInk) }
         }
-        Text(text, style = style, color = ink, modifier = Modifier.weight(1f).padding(horizontal = t.css.spaceSm))
+        Text(codeText(text), style = style.copy(textDirection = codeDirection), color = ink, modifier = Modifier.weight(1f).padding(horizontal = t.css.spaceSm))
     }
 }
 
@@ -587,7 +597,7 @@ private fun SubagentToolCard(entry: JsObj, tileLimit: Int) {
         ) {
             ToolStateIcon(state, 12.dp)
             asString(entry["name"])?.let {
-                Text(it, style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f), fontWeight = FontWeight(600)), color = t.ink, modifier = Modifier.weight(1f))
+                Text(codeText(it), style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f), fontWeight = FontWeight(600)), color = t.ink, modifier = Modifier.weight(1f))
             } ?: Spacer(Modifier.weight(1f))
             StatusLabel(toolStatusText(entry), error = false)
         }

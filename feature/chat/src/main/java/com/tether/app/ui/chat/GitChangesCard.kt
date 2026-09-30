@@ -192,7 +192,7 @@ fun GitChangesCard(
                 )
             }
             Text(
-                changesBase(diff),
+                codeText(changesBase(diff)),
                 style = type.body.copy(fontSize = rem(0.72f)),
                 color = t.muted,
                 modifier = Modifier.padding(start = t.css.spaceMd, end = t.css.spaceMd, bottom = t.css.spaceSm),
@@ -282,7 +282,7 @@ private fun FileRow(fullPath: String, word: String, open: Boolean, fileDiff: Ser
                 modifier = Modifier.widthIn(min = 104.dp),
             )
             Text(
-                path,
+                codeText(path),
                 style = TextStyle(fontFamily = type.mono, fontSize = rem(0.74f)),
                 color = t.ink,
                 maxLines = 1,
@@ -294,7 +294,7 @@ private fun FileRow(fullPath: String, word: String, open: Boolean, fileDiff: Ser
             Column(Modifier.fillMaxWidth().background(t.mineralDeep).topRule(t.line).padding(top = 1.dp)) {
                 when {
                     fileDiff == null -> HunkNote("Loading diff…")
-                    !fileDiff.error.isNullOrEmpty() -> HunkNote(fileDiff.error!!)
+                    !fileDiff.error.isNullOrEmpty() -> HunkNote(fileDiff.error!!, server = true)
                     fileDiff.binary -> HunkNote("Binary file — no text diff.")
                     fileDiff.hunks.isNotEmpty() -> {
                         HunkPre(fileDiff.hunks)
@@ -308,10 +308,10 @@ private fun FileRow(fullPath: String, word: String, open: Boolean, fileDiff: Ser
 }
 
 @Composable
-private fun HunkNote(text: String) {
+private fun HunkNote(text: String, server: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    Text(text, style = type.body.copy(fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm))
+    Text(if (server) proseText(text) else androidx.compose.ui.text.AnnotatedString(text), style = type.body.copy(fontSize = rem(0.72f)), color = t.muted, modifier = Modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm))
 }
 
 /**
@@ -345,7 +345,7 @@ private fun HunkPre(hunks: String) {
                     "hunk" -> Color.Transparent to t.accent
                     else -> Color.Transparent to t.muted
                 }
-                Text(line.ifEmpty { " " }, style = style, color = ink, softWrap = false, modifier = Modifier.fillMaxWidth().background(bg))
+                Text(codeText(line.ifEmpty { " " }), style = style.copy(textDirection = codeDirection), color = ink, softWrap = false, modifier = Modifier.fillMaxWidth().background(bg))
             }
             if (totalLines > lines.size) {
                 Text(moreLinesLabel(totalLines - lines.size), style = style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = t.faint, softWrap = false)

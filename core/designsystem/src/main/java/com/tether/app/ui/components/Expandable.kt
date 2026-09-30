@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Constraints
@@ -227,6 +228,8 @@ fun TetherExpandablePre(
     clamp: Dp = LocalTetherTokens.current.css.chatClamp,
     textModifier: Modifier = Modifier,
     onCollapseShift: ((deltaPx: Float) -> Unit)? = null,
+    /** ta-blf: how the (peeked) text is drawn; null: as is. A stable instance (it keys a remember). */
+    display: PreDisplay? = null,
 ) {
     var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     // Line tops are in the text's own space; the clamp cut is measured from the block top, so the
@@ -257,8 +260,11 @@ fun TetherExpandablePre(
             }
         },
     ) {
+        // The peek is cut from the ORIGINAL text (its bound stays in source characters), then drawn.
+        val raw = if (opened || !truncated) text else peek
+        val shown = remember(raw, display) { display?.show(raw) ?: AnnotatedString(raw) }
         Text(
-            if (opened || !truncated) text else peek,
+            shown,
             style = style,
             color = color,
             onTextLayout = { layoutResult = it },
@@ -271,6 +277,14 @@ fun TetherExpandablePre(
             ),
         )
     }
+}
+
+/**
+ * ta-blf: how a [TetherExpandablePre] draws its text, e.g. with invisible and bidi code points made
+ * visible (feature/chat `TranscriptText`). Applied after the peek is cut.
+ */
+fun interface PreDisplay {
+    fun show(text: String): AnnotatedString
 }
 
 /** How much of a clamped text is laid out: the first 64 lines, at most 4,096 characters. */
