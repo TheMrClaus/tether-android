@@ -34,7 +34,7 @@ End session / per-row selection (`b65fb48`; 7 rows).
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
 **Drafts (unpublished, same cert as 0.6.0 `4f8c22de...b74d`):** 0.7.4 (code 21), 0.7.5 (code 22), **0.7.6 (code 23, `c22e8ca`,
-+T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. v0.7.3 is the published build. Publishing is the owner's call.
++T13.2 +T6.6)**. **0.7.7 (code 24, `85a989f`, +T6.7)** built and checked - same cert, versionCode 24. **0.7.8 (code 25, `07ba88f`, +ta-96z +T6.5 +ta-blf +T7.3)** built and checked - same cert, versionCode 25. v0.7.3 is the published build. Publishing is the owner's call.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
 **Owner queue:** deploy tether #224 (later); publish a draft if wanted; review/redact the private tether issues and PRs before the visibility flip (owner handles it).
 **Next frontier (`bd ready`):** T6.5 timeline, T7.3 slash/run commands, T7.4 attach sheet, T8.x, T10.x, T13.3 outbox; design tasks
