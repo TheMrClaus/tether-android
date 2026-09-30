@@ -33,6 +33,7 @@ include(":core:designsystem")
 include(":feature:auth")
 include(":feature:chat")
 include(":feature:files")
+include(":feature:overview")
 include(":feature:sidebar")
 include(":feature:shell")
 

@@ -1,15 +1,15 @@
-// Main shell: the phone layout (topbar, workspace header, drawer, telemetry panel) and the expanded
-// desktop layout (T4.2: rail | workspace | inspector columns, resize handles), hosting
-// :feature:sidebar and :feature:chat, plus toasts.
+// T15.2 the Overview (components/overview/, OVERVIEW_STUDIO_PLAN.md §4): counts, filters, the
+// attention-first session cards, pending requests and recent activity over the v131 feed (T15.1).
+// Read-only: it only subscribes; opening or reviewing hands off to the shell's existing handlers.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
-    // T4.1 + T4.3: JVM screenshot tests of the shell states and the statusline components (recordRoborazziDebug / verifyRoborazziDebug).
+    // JVM screenshot tests of the Overview states (recordRoborazziDebug / verifyRoborazziDebug).
     alias(libs.plugins.roborazzi)
 }
 
 android {
-    namespace = "com.tether.app.feature.shell"
+    namespace = "com.tether.app.feature.overview"
     buildFeatures {
         compose = true
     }
@@ -21,39 +21,27 @@ android {
     }
 }
 
-// T4.1 + T4.3: goldens live in the source tree (checked in), one PNG per state × skin × size; verifyRoborazziDebug fails on any difference.
+// Goldens live in the source tree (checked in), one PNG per state x skin x size; verifyRoborazziDebug fails on any difference.
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
 }
 tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
 dependencies {
-    implementation(project(":feature:chat"))
-    implementation(project(":feature:sidebar"))
-    // T11.1: the workspace file browser behind the topbar's Files key.
-    implementation(project(":feature:files"))
-    // T15.2: the Overview screen (components/overview/), shown in the workspace area.
-    implementation(project(":feature:overview"))
-    implementation(project(":core:protocol"))
     implementation(project(":core:net"))
-    implementation(project(":core:data"))
+    implementation(project(":core:protocol"))
     implementation(project(":core:designsystem"))
-    // T4.3: the faithful lib/format.ts port (protocol.helpers.Format) and the projection views.
-    implementation(project(":core:reducer"))
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
-    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.lucide.icons)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
-    // The v128 fold + event builders, so the mapping tests read real folded projections.
-    testImplementation(testFixtures(project(":core:reducer")))
-    testImplementation(libs.kotlinx.serialization.json)
     testImplementation(composeBom)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
