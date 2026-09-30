@@ -183,7 +183,7 @@ internal fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) 
                 thumb,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(t.radiusSm)),
+                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(t.radiusSm)).testTag("staged-attachment-thumb"),
             )
         } else {
             Icon(TetherIcons.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
