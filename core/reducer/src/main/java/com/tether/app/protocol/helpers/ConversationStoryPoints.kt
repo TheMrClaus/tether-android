@@ -14,9 +14,8 @@ import java.time.ZoneId
 /**
  * T2.2: faithful port of lib/conversation-story-points.ts over the v128 projection tree (the
  * reducer's JsObj). The web's limits are [PROMPT_MAX] = 220 / [REPLY_MAX] = 260; they are
- * parameters so the Android timeline can keep passing its deliberate wider-bubble 270/320
- * (owner decision, logged on T2.2) once it is rewired onto this port — see
- * reduce/ConversationStoryPoints.kt, the typed-model version the UI uses today.
+ * parameters: the Android timeline (T6.5, feature/chat TimelineModel) passes its deliberate
+ * wider-bubble 270/320 (owner decision, logged on T2.2).
  */
 object ConversationStoryPoints {
 

@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -50,7 +51,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.Vocab
-import com.tether.app.protocol.reduce.storyPointsFromSession
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
@@ -69,9 +69,6 @@ import java.time.ZoneId
  * the row's key every time a transcript row actually (re)composes. Null in production.
  */
 internal val LocalChatRowObserver = staticCompositionLocalOf<((String) -> Unit)?> { null }
-
-/** Width the conversation timeline rail (T6.5) takes at the transcript's right edge. */
-private val TimelineRailWidth: Dp = 54.dp
 
 /** `.chat-scroll` padding and gaps for one skin × layout class (globals.css 4802-4827, 8457, 11235, 11930; studio.css 370-371, 453). */
 internal class TranscriptSpacing(val padding: PaddingValues, val scrollGap: Dp, val turnGap: Dp)
@@ -131,11 +128,16 @@ internal fun ChatTranscript(
     showApprovals: Boolean = true,
     /** T6.4: open a finished background command's output (its transcript chip). Keep it stable. */
     onOpenCommand: (commandId: String) -> Unit = {},
+    /**
+     * T6.5 (T13.2's saved-copy rule): true only while this copy is live ([ChatFreshness.isLive]).
+     * Otherwise the timeline never says a reply is on its way.
+     */
+    liveCopy: Boolean = false,
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy)
     }
 }
 
@@ -156,6 +158,7 @@ private fun ChatTranscriptBody(
     showApprovals: Boolean,
     consentSessionId: String?,
     onOpenCommand: (String) -> Unit,
+    liveCopy: Boolean,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -175,8 +178,9 @@ private fun ChatTranscriptBody(
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
 
-    // Story points: the conversation timeline rail (T6.5) indexes operator prompts.
-    val storyPoints = remember(projection) { storyPointsFromSession(projection) }
+    // Story points: the conversation timeline rail (T6.5) indexes operator prompts. They come from
+    // the tree (T2.2's faithful port of lib/conversation-story-points.ts) at the owner's limits.
+    val storyPoints = remember(tree) { TimelineModel.points(tree) }
     val storyPointIndex = remember(storyPoints) {
         storyPoints.withIndex().associate { (i, sp) -> "${sp.turnId}:${sp.blockId}" to i }
     }
@@ -199,6 +203,9 @@ private fun ChatTranscriptBody(
         m
     }
     val hasTimeline = showTimeline && storyPoints.isNotEmpty()
+    // conversation-timeline.module.css: the desktop rail docks left in the stage's gutter, the
+    // mobile one right; here the layout class decides (the expanded layout is the web's desktop).
+    val timelineSide = if (phone) TimelineSide.Right else TimelineSide.Left
 
     var sticky by remember { mutableStateOf(true) }
     val followGuard = remember {
@@ -242,8 +249,10 @@ private fun ChatTranscriptBody(
     val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark[0] = it }
 
     val layoutPadding = PaddingValues(
-        start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr),
-        end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr) + if (hasTimeline) TimelineRailWidth else 0.dp,
+        start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr) +
+            if (hasTimeline && timelineSide == TimelineSide.Left) timelineColumnWidth(timelineSide) else 0.dp,
+        end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr) +
+            if (hasTimeline && timelineSide == TimelineSide.Right) timelineColumnWidth(timelineSide) else 0.dp,
         top = spacing.padding.calculateTopPadding(),
         bottom = spacing.padding.calculateBottomPadding(),
     )
@@ -290,11 +299,15 @@ private fun ChatTranscriptBody(
 
         if (hasTimeline) {
             ConversationTimeline(
-                storyPoints = storyPoints,
+                points = storyPoints,
                 listState = listState,
                 storyPointToLazyIndex = storyPointToLazyIndex,
                 itemKeyToSpIndex = itemKeyToSpIndex,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                side = timelineSide,
+                liveCopy = liveCopy,
+                zone = zone,
+                onScrolledUp = { sticky = false },
+                modifier = Modifier.align(if (timelineSide == TimelineSide.Right) AbsoluteAlignment.CenterRight else AbsoluteAlignment.CenterLeft),
             )
         }
 

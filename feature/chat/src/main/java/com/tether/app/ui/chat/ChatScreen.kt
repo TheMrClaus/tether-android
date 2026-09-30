@@ -339,6 +339,7 @@ fun ChatScreen(
                         null
                     },
                     onOpenCommand = onOpenCommand,
+                    liveCopy = liveNow,
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                 ) }
