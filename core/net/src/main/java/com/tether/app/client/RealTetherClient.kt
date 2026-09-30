@@ -571,16 +571,18 @@ class RealTetherClient(
         loginResponse.use { response ->
             when (response.code) {
                 200 -> {
-                    val cookie = response.headers("set-cookie")
-                        .firstOrNull { it.startsWith("tether_session=") }
-                        ?.substringAfter("tether_session=")
-                        ?.substringBefore(';')
-                    if (cookie.isNullOrEmpty()) {
-                        return@withContext LoginResult.Unreachable("The server did not return a session cookie.")
+                    // ta-96z: either session cookie name (`__Host-` preferred), stored with the
+                    // name it came under and sent back under that name alone.
+                    val cookie = when (val issued = sessionCookieFrom(response.request.url, response.headers("set-cookie"))) {
+                        is SessionCookieResult.Found -> issued.cookie
+                        SessionCookieResult.Missing ->
+                            return@withContext LoginResult.Unreachable("The server did not return a session cookie.")
+                        SessionCookieResult.Ambiguous ->
+                            return@withContext LoginResult.Unreachable("The server returned conflicting session cookies.")
                     }
                     // ta-jt9 I-3: the server has minted a session: adopt it whatever happens
                     // to the caller, or it is never stored nor revoked.
-                    withContext(NonCancellable) { adoptCredential(normalized, Credential.Cookie(cookie)) }
+                    withContext(NonCancellable) { adoptCredential(normalized, cookie) }
                     return@withContext LoginResult.Success
                 }
                 // Tether's own refusal is JSON `{error}` and never carries a challenge
@@ -3561,7 +3563,9 @@ class RealTetherClient(
      * device token is not ambient (no page can attach it) and is sent as before.
      */
     private fun Request.Builder.authorize(credential: Credential?, server: HttpUrl): Request.Builder = when (credential) {
-        is Credential.Cookie -> header("Cookie", "tether_session=${credential.value}").header("Origin", consoleOrigin(server))
+        // ta-96z: ONE Cookie header, under the name the server issued this cookie as, and never
+        // both names: one credential, presented exactly as it was issued.
+        is Credential.Cookie -> header("Cookie", "${credential.name}=${credential.value}").header("Origin", consoleOrigin(server))
         is Credential.DeviceToken -> header("Authorization", "Bearer ${credential.value}")
         null -> this
     }

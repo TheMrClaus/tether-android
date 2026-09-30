@@ -8,7 +8,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Seals a credential (the `tether_session` cookie value or a `tthr_` device
+ * Seals a credential (the session cookie, see Credential.Cookie.toStored, or a `tthr_` device
  * token) for storage at rest. [aad] binds a blob to the slot it was written for,
  * so a ciphertext copied from one slot into another does not decrypt.
  *

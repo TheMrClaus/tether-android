@@ -36,10 +36,50 @@ import kotlinx.coroutines.withContext
  * See specs/protocol-spec.md §1.
  */
 sealed interface Credential {
-    /** Password login: the raw `tether_session` cookie VALUE (still URL-encoded). */
-    data class Cookie(val value: String) : Credential {
+    /**
+     * Password login: the raw session cookie VALUE (still URL-encoded) and the [name] the
+     * server issued it under, which is the name it is sent back under (ta-96z). tether#224
+     * names the cookie [HOST_NAME] for a browser over HTTPS and [LEGACY_NAME] otherwise (every
+     * native client until `NATIVE_PROTOCOL_FLOOR` moves on); only those two are ever accepted.
+     */
+    data class Cookie(val value: String, val name: String = LEGACY_NAME) : Credential {
+        init {
+            require(name == LEGACY_NAME || name == HOST_NAME) { "not a session cookie name" }
+        }
+
         /** Redacted: a credential must never reach a log, a crash report or a string template. */
         override fun toString(): String = "Cookie(***)"
+
+        /**
+         * The sealed-at-rest plaintext. A [LEGACY_NAME] cookie is its bare value, byte for byte
+         * what every build before ta-96z stored (so a downgrade reads it unchanged); any other
+         * name is `name;value`. A legacy value never contained `;` (it was read up to the first
+         * `;` of a Set-Cookie), which is what tells the two apart; see [fromStored].
+         */
+        fun toStored(): String = if (name == LEGACY_NAME && ';' !in value) value else "$name;$value"
+
+        companion object {
+            /** The name every native client has been issued so far (lib/console-cookie.mjs). */
+            const val LEGACY_NAME = "tether_session"
+
+            /** tether#224: the browser-over-HTTPS name; it wins over [LEGACY_NAME]. */
+            const val HOST_NAME = "__Host-tether_session"
+
+            /**
+             * Read [toStored]'s plaintext back. No `;` = a value stored before ta-96z (or a
+             * legacy-named one since), issued as [LEGACY_NAME]: nobody is signed out by the
+             * upgrade. Otherwise the text before the first `;` must be exactly one of the two
+             * names; anything else is not ours and reads as null (the caller drops it).
+             */
+            fun fromStored(stored: String): Cookie? {
+                val split = stored.indexOf(';')
+                if (split < 0) return if (stored.isEmpty()) null else Cookie(stored)
+                val name = stored.substring(0, split)
+                val value = stored.substring(split + 1)
+                if (value.isEmpty() || (name != LEGACY_NAME && name != HOST_NAME)) return null
+                return Cookie(value, name)
+            }
+        }
     }
 
     /** Paired device: a `tthr_…` bearer token from POST /api/devices/claim. */
@@ -145,8 +185,8 @@ object PendingSlots {
 }
 
 /** Cookie wins over a device token (the narrower, older grant); empty = absent. */
-fun credentialInForce(cookie: String?, deviceToken: String?): Credential? = when {
-    !cookie.isNullOrEmpty() -> Credential.Cookie(cookie)
+fun credentialInForce(cookie: Credential.Cookie?, deviceToken: String?): Credential? = when {
+    cookie != null && cookie.value.isNotEmpty() -> cookie
     !deviceToken.isNullOrEmpty() -> Credential.DeviceToken(deviceToken)
     else -> null
 }
@@ -162,7 +202,7 @@ interface SettingsStore {
     /** Normalized server origin, e.g. "https://tether.example.com" — null until login/pairing. */
     val baseUrl: Flow<String?>
 
-    /** Raw tether_session cookie VALUE (still URL-encoded) — null unless password-logged-in. */
+    /** Raw session cookie VALUE (still URL-encoded) — null unless password-logged-in. */
     val cookie: Flow<String?>
 
     /** Paired-device bearer token (`tthr_…`) — null unless paired. */
@@ -171,10 +211,11 @@ interface SettingsStore {
     /**
      * The persisted credential, whichever kind it is. Cookie wins if both are
      * somehow present (a password login is the older, narrower grant, so
-     * preferring it can never silently escalate to the device token).
+     * preferring it can never silently escalate to the device token). A cookie
+     * carries the name it was issued under ([Credential.Cookie.name]), which
+     * [cookie] alone does not: no default here, so no store can drop it.
      */
     val credential: Flow<Credential?>
-        get() = combine(cookie, deviceToken, ::credentialInForce)
 
     /**
      * The server URL and the credential in force, read as ONE consistent pair.
@@ -252,7 +293,10 @@ interface SettingsStore {
  *   [loadLocked]) and deletes them.
  * - [credentialStore] (`credentials/tether_credentials.preferences_pb`): each
  *   credential sealed by [cipher] (AES-256-GCM under a non-exportable Keystore
- *   key in production), Base64. The AAD is `slot|origin`: a blob only opens for
+ *   key in production), Base64. The cookie slot's plaintext is
+ *   [Credential.Cookie.toStored]: the bare value for the legacy cookie name (the
+ *   pre-ta-96z format, unchanged), `name;value` for the `__Host-` one. The AAD
+ *   is `slot|origin`: a blob only opens for
  *   the slot AND the server origin it was sealed for, so a URL that changed
  *   without its credential (a torn write) reads as logged out instead of
  *   presenting server A's credential to server B.
@@ -308,7 +352,7 @@ class DataStoreSettings(
      */
     private val suspectFailuresKey = intPreferencesKey("credential_key_suspect_failures")
 
-    private data class Credentials(val cookie: String?, val deviceToken: String?) {
+    private data class Credentials(val cookie: Credential.Cookie?, val deviceToken: String?) {
         override fun toString(): String = "Credentials(cookie=${if (cookie == null) "null" else "***"}, " +
             "deviceToken=${if (deviceToken == null) "null" else "***"})"
     }
@@ -357,11 +401,13 @@ class DataStoreSettings(
 
     override val baseUrl: Flow<String?> = dataStore.data.map { it[baseUrlKey] }
 
-    override val cookie: Flow<String?> = credentialFlow { it.cookie }
+    override val cookie: Flow<String?> = credentialFlow { it.cookie?.value }
 
     override val deviceToken: Flow<String?> = credentialFlow { it.deviceToken }
 
-    private fun credentialFlow(pick: (Credentials) -> String?): Flow<String?> = flow {
+    override val credential: Flow<Credential?> = credentialFlow { credentialInForce(it.cookie, it.deviceToken) }
+
+    private fun <T> credentialFlow(pick: (Credentials) -> T): Flow<T> = flow {
         ensureLoaded()
         emitAll(credentials.filterNotNull().map(pick))
     }.distinctUntilChanged()
@@ -414,6 +460,11 @@ class DataStoreSettings(
             prefs[legacyCookieKey]?.takeIf { it.isNotEmpty() }?.let { cookieSlot = Slot.Opened(it, reseal = true) }
             prefs[legacyDeviceTokenKey]?.takeIf { it.isNotEmpty() }?.let { tokenSlot = Slot.Opened(it, reseal = true) }
         }
+        // ta-96z: the cookie slot holds [Credential.Cookie.toStored]. A value from before
+        // ta-96z reads as the legacy name, unchanged on disk; one that names anything but
+        // the two session cookies is not ours: dead, like any blob that does not open.
+        val cookie = (cookieSlot as? Slot.Opened)?.let { Credential.Cookie.fromStored(it.value) }
+        if (cookieSlot is Slot.Opened && cookie == null) cookieSlot = Slot.Dead
 
         // Bring the sealed file in line: dead blobs go, migrated values are sealed
         // for the origin (or held in memory only), unavailable ones stay as they are.
@@ -442,7 +493,7 @@ class DataStoreSettings(
         }
         retryPending = unavailable
         credentials.value = Credentials(
-            (cookieSlot as? Slot.Opened)?.value,
+            cookie,
             (tokenSlot as? Slot.Opened)?.value,
         )
     }
@@ -537,12 +588,14 @@ class DataStoreSettings(
                 //     other: two live credentials would make "which one is in
                 //     force" ambiguous on the next launch.
                 val next = when (credential) {
-                    is Credential.Cookie -> Credentials(credential.value, null)
+                    is Credential.Cookie -> Credentials(credential, null)
                     is Credential.DeviceToken -> Credentials(null, credential.value)
                 }
                 val origin = originOf(baseUrl)
                 fun sealNext(): Pair<String?, String?> = Pair(
-                    origin?.let { o -> next.cookie?.let { sealSlot(it, SLOT_COOKIE, o) } },
+                    // The name is sealed WITH the value (one slot, same AAD): bound to the
+                    // origin, never apart from its value, and gone with it on every clear.
+                    origin?.let { o -> next.cookie?.let { sealSlot(it.toStored(), SLOT_COOKIE, o) } },
                     origin?.let { o -> next.deviceToken?.let { sealSlot(it, SLOT_DEVICE_TOKEN, o) } },
                 )
                 lastSealFailure = null
@@ -752,9 +805,11 @@ class InMemorySettings(
     initialCookie: String? = null,
     initialDeviceToken: String? = null,
     initialLegacyPendingInput: String? = null,
+    /** The name [initialCookie] was issued under (ta-96z); the legacy name, as every pre-ta-96z store. */
+    initialCookieName: String = Credential.Cookie.LEGACY_NAME,
 ) : SettingsStore {
     private val baseUrlState = MutableStateFlow(initialBaseUrl)
-    private val cookieState = MutableStateFlow(initialCookie)
+    private val cookieState = MutableStateFlow(initialCookie?.let { Credential.Cookie(it, initialCookieName) })
     private val deviceTokenState = MutableStateFlow(initialDeviceToken)
 
     // Pending slots by key (PendingSlots naming), guarded by [lock].
@@ -774,8 +829,10 @@ class InMemorySettings(
     private val lock = Any()
 
     override val baseUrl: Flow<String?> = baseUrlState
-    override val cookie: Flow<String?> = cookieState
+    override val cookie: Flow<String?> = cookieState.map { it?.value }.distinctUntilChanged()
     override val deviceToken: Flow<String?> = deviceTokenState
+    override val credential: Flow<Credential?> =
+        combine(cookieState, deviceTokenState, ::credentialInForce).distinctUntilChanged()
 
     override suspend fun session(): Session = synchronized(lock) {
         Session(baseUrlState.value, credentialInForce(cookieState.value, deviceTokenState.value))
@@ -789,7 +846,7 @@ class InMemorySettings(
             migrateLocked()
             baseUrlState.value = baseUrl
             when (credential) {
-                is Credential.Cookie -> cookieState.value = credential.value
+                is Credential.Cookie -> cookieState.value = credential
                 is Credential.DeviceToken -> deviceTokenState.value = credential.value
             }
         }
