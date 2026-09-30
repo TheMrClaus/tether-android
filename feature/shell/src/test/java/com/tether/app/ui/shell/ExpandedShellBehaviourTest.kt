@@ -14,6 +14,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -431,13 +432,16 @@ class ExpandedShellFoldableBehaviourTest : ExpandedBehaviourBase() {
     @Test fun foldableKeepsTheDesktopGridWithoutToolWords() {
         show(store = PanelStore(PanelPrefs(sidebarWidth = 470)))
         assertEquals(360f, widthDp(ShellTags.Sidebar), 0.5f) // stored on a wider screen, re-clamped
-        // T15.4: below 64rem Files and Accounts are in the utility menu, not on the bar.
-        rule.onNodeWithText("Files").assertDoesNotExist()
+        // T15.4 r2: the bar keeps what fits whole (measured) and the menu lists the rest.
         rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Usage)).assertIsDisplayed()
         rule.onNodeWithContentDescription("Settings").assertIsDisplayed()
         rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
-        rule.onNodeWithTag(ShellTags.MenuFiles).assertIsDisplayed()
-        rule.onNodeWithTag(ShellTags.MenuAccounts).assertIsDisplayed()
+        rule.waitForIdle()
+        for ((onBar, inMenu) in listOf(ShellTags.FilesKey to ShellTags.MenuFiles, ShellTags.AccountsKey to ShellTags.MenuAccounts)) {
+            val bar = rule.onAllNodesWithTag(onBar).fetchSemanticsNodes().size
+            val menu = rule.onAllNodesWithTag(inMenu).fetchSemanticsNodes().size
+            assertEquals("$onBar on the bar XOR in the menu", 1, bar + menu)
+        }
         rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
         rule.waitForIdle()
         val stage = rule.onNodeWithTag(ShellTags.Stage).fetchSemanticsNode().boundsInRoot
