@@ -98,6 +98,9 @@ class ConnectionHarness {
     lateinit var client: RealTetherClient
     lateinit var settings: InMemorySettings
 
+    /** Runs on the server's reader thread before a client frame is recorded (a test may block it). */
+    @Volatile var onServerMessage: ((String) -> Unit)? = null
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
             sockets.put(webSocket)
@@ -105,6 +108,7 @@ class ConnectionHarness {
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             log.add("${System.identityHashCode(webSocket)}:${text.take(40)}")
+            onServerMessage?.invoke(text)
             received.put(text)
         }
 

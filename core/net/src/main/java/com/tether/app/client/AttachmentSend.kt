@@ -14,8 +14,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * queue past [OKHTTP_QUEUE_BYTES] (RealWebSocket.MAX_QUEUE_SIZE, 16 MiB). The web's own caps (18 MB
  * of files, about 24 MB once base64-encoded) would pass that, so the app also bounds the ENCODED
  * frame: at most [MAX_SEND_FRAME_BYTES], and never more than the queue can take at the moment of the
- * send. A frame over either bound is refused before anything goes out; an oversized frame never
- * reaches the socket, so it can never close it. The server's own frame bound (protocol-validate
+ * send. A frame over either bound is refused before anything goes out, so an oversized frame never
+ * reaches the socket. The queue check and the send are taken together under the client's lock, but
+ * other frames (the resync `attach`, pings, the durable outbox's sends) are handed to the socket
+ * outside that lock, so in a rare race one of them can grow the queue between the check and the
+ * send. OkHttp's own check then refuses the frame: it closes the socket (1001) and nothing of the
+ * frame is sent; the send reports [AttachmentSendResult.NotConnected] and is never retried (the
+ * operator sends it again deliberately). The server's own frame bound (protocol-validate
  * LIMITS.WS_FRAME_BYTES, 32 MiB, its `maxPayload`) is not announced to the client; the app's bound
  * is below it, so it is never the one that decides.
  *
@@ -66,6 +71,38 @@ object AttachmentFrame {
         return n
     }
 }
+
+/**
+ * T7.4 r2: the link half of [TetherClient.sendAttachments]'s gate, as the client holds it under its
+ * lock: the socket (bound, its origin, open, handshaken), the outbox (loaded, and bound to the
+ * socket's server), whether connecting is halted (stopped, a version halt, backgrounded), and
+ * whether the session is confirmed live on this socket. Pure, so every clause is tested alone
+ * ([attachmentLinkRefusal]): today most of them are implied by the live check (a session is only
+ * live on an open, handshaken socket of the outbox's server), and each is kept as defence in depth.
+ */
+internal class AttachmentLink(
+    val socketBound: Boolean,
+    val socketOrigin: String?,
+    val socketOpen: Boolean,
+    val handshakeDone: Boolean,
+    val pendingLoaded: Boolean,
+    val halted: Boolean,
+    val pendingOrigin: String?,
+    val sessionLive: Boolean,
+)
+
+/** Why [link] may not carry a message with attachments drawn for [expectedOrigin] (null: it may). */
+internal fun attachmentLinkRefusal(link: AttachmentLink, expectedOrigin: String?): AttachmentSendResult? = when {
+    !link.socketBound || link.socketOrigin == null || !link.socketOpen || !link.handshakeDone || !link.pendingLoaded || link.halted ->
+        AttachmentSendResult.NotConnected
+    expectedOrigin == null || expectedOrigin != link.socketOrigin || link.pendingOrigin != link.socketOrigin -> AttachmentSendResult.NotLive
+    !link.sessionLive -> AttachmentSendResult.NotLive
+    else -> null
+}
+
+/** OkHttp closes the socket rather than queue past its bound: a frame that would pass it now waits. */
+internal fun attachmentQueueRefusal(queuedBytes: Long, frameBytes: Long): AttachmentSendResult? =
+    if (queuedBytes + frameBytes > AttachmentFrame.OKHTTP_QUEUE_BYTES) AttachmentSendResult.LinkBusy else null
 
 /** What an attempt to send a message with attachments came to ([TetherClient.sendAttachments]). */
 enum class AttachmentSendResult {

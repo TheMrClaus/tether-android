@@ -229,6 +229,36 @@ class AttachmentTransmissionTest {
         assertEquals(ConnectionState.Connected, client.connection.value)
     }
 
+    /**
+     * r2 (verifier L2): a frame the socket's send queue cannot take NOW (a large frame still going
+     * out ahead of it) is refused as LinkBusy before the socket is handed it; OkHttp would otherwise
+     * close the socket (1001) rather than queue past 16 MiB. The server stops reading (its reader is
+     * held on the first frame), so the second frame stays queued in the client.
+     */
+    @Test
+    fun aFrameTheSocketQueueCannotTakeNowWaitsAndTheSocketStaysUp() {
+        val (client, _) = connected()
+        val origin = client.consentOrigin.value
+        val release = java.util.concurrent.CountDownLatch(1)
+        h.onServerMessage = { text -> if (text.contains("hold.bin")) release.await(30, TimeUnit.SECONDS) }
+        try {
+            assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "hold", listOf(Attachment("hold.bin", "application/octet-stream", "eA==")), null, origin))
+            val big = "A".repeat((AttachmentFrame.MAX_SEND_FRAME_BYTES - 4096).toInt())
+            // Queued behind the held reader: at most the loopback buffers (about 10 MB here) drain.
+            assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "first", listOf(Attachment("a.bin", "application/octet-stream", big)), null, origin))
+            assertEquals(AttachmentSendResult.LinkBusy, client.sendAttachments("s1", "second", listOf(Attachment("b.bin", "application/octet-stream", big)), null, origin))
+            assertEquals(ConnectionState.Connected, client.connection.value)
+            assertEquals("the socket was closed", null, h.serverCloses.poll(200, TimeUnit.MILLISECONDS))
+        } finally {
+            h.onServerMessage = null
+            release.countDown()
+        }
+        // Once the queue drains, the next one goes (nothing was lost or closed).
+        val sent = h.framesUntilBarrier().filter { it.type() == "send" }
+        assertEquals(listOf("hold", "first"), sent.map { it.str("text") })
+        assertEquals(ConnectionState.Connected, client.connection.value)
+    }
+
     @Test
     fun utf8LengthCountsWhatTheSocketWillCarry() {
         for (s in listOf("", "abc", "é", "€", "😀", "a😀é€", "\uD800x", "x\uDC00")) {

@@ -2749,19 +2749,28 @@ class RealTetherClient(
         val frameBytes = AttachmentFrame.utf8Length(frame)
         if (frameBytes > AttachmentFrame.MAX_SEND_FRAME_BYTES) return AttachmentSendResult.TooLarge
         val result = synchronized(lock) {
-            val ws = socket
-            val origin = socketOrigin
-            if (ws == null || origin == null || !socketOpen || !handshakeDone || !pendingLoaded || haltedLocked()) return@synchronized AttachmentSendResult.NotConnected
-            if (expectedOrigin == null || expectedOrigin != origin || pendingOrigin != origin) return@synchronized AttachmentSendResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized AttachmentSendResult.NotLive
+            val link = AttachmentLink(
+                socketBound = socket != null,
+                socketOrigin = socketOrigin,
+                socketOpen = socketOpen,
+                handshakeDone = handshakeDone,
+                pendingLoaded = pendingLoaded,
+                halted = haltedLocked(),
+                pendingOrigin = pendingOrigin,
+                sessionLive = sessionId in liveThisEpoch,
+            )
+            attachmentLinkRefusal(link, expectedOrigin)?.let { return@synchronized it }
+            val ws = socket ?: return@synchronized AttachmentSendResult.NotConnected
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized AttachmentSendResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized AttachmentSendResult.Locked
             val tree = sessionStore.tree(sessionId) ?: return@synchronized AttachmentSendResult.NotLive
             if (tree["activeTurnId"] is JsStr) return@synchronized AttachmentSendResult.Busy
             if (pendingStore.records.any { it.sessionId == sessionId }) return@synchronized AttachmentSendResult.PendingAhead
             if (mention != null && !CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized AttachmentSendResult.NotOffered
-            // OkHttp closes the socket rather than queue past its bound: never hand it such a frame.
-            if (ws.queueSize() + frameBytes > AttachmentFrame.OKHTTP_QUEUE_BYTES) return@synchronized AttachmentSendResult.LinkBusy
+            // OkHttp closes the socket rather than queue past its bound: a frame that would pass it
+            // now is not handed over. Frames sent outside this lock can still grow the queue before
+            // the send below (rare): OkHttp then refuses it, closing the socket; nothing is sent.
+            attachmentQueueRefusal(ws.queueSize(), frameBytes)?.let { return@synchronized it }
             if (!ws.send(frame)) return@synchronized AttachmentSendResult.NotConnected
             attachmentsInFlight[key] = sessionId
             while (attachmentsInFlight.size > ATTACHMENTS_IN_FLIGHT_REMEMBERED) attachmentsInFlight.remove(attachmentsInFlight.keys.first())
