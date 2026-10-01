@@ -963,6 +963,10 @@ fun Composer(
                         metrics = metrics,
                         width = deckWidth - deck.start - deck.end,
                         onAttach = { attachSheetOpen = true },
+                        // ta-ceo: on a phone the Stop confirmation takes the attach and settings keys'
+                        // room for the moment it is open (its price must be read whole; the web phone
+                        // hides the words instead, globals.css:7894).
+                        showAttach = !(metrics.phone && confirmingStop),
                         // The web keeps the paperclip live while a turn runs; submit() asks the operator to wait.
                         attachEnabled = session != null,
                         totals = if (projection != null && session != null) {
@@ -976,8 +980,6 @@ fun Composer(
                         } else {
                             null
                         },
-                        // ta-ceo: on a phone the Stop confirmation takes the settings key's room (its
-                        // words must be read; the web phone hides them, globals.css:7894).
                         settingsKey = if (liveControls != null && !wideRow && !(metrics.phone && confirmingStop)) {
                             { mod ->
                                 val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || liveControls.autoContinue != null || handlers.openProviderControls != null
@@ -1127,6 +1129,7 @@ private fun ComposerToolbar(
     onAttach: () -> Unit,
     attachEnabled: Boolean,
     totals: (@Composable () -> Unit)?,
+    showAttach: Boolean = true,
     options: (@Composable () -> Unit)? = null,
     settingsKey: (@Composable (Modifier) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit,
@@ -1142,16 +1145,18 @@ private fun ComposerToolbar(
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         val attachSize = TetherDimens.touchTargetDp
-        TetherKey(
-            onClick = onAttach,
-            classes = KeyClasses.Attach,
-            icon = TetherIcons.Paperclip,
-            iconSize = 18.dp,
-            enabled = attachEnabled,
-            minHeight = attachSize,
-            modifier = Modifier.size(attachSize),
-            contentDescription = "Add attachment",
-        )
+        if (showAttach) {
+            TetherKey(
+                onClick = onAttach,
+                classes = KeyClasses.Attach,
+                icon = TetherIcons.Paperclip,
+                iconSize = 18.dp,
+                enabled = attachEnabled,
+                minHeight = attachSize,
+                modifier = Modifier.size(attachSize),
+                contentDescription = "Add attachment",
+            )
+        }
         // Phone (globals.css:11936): the sheet key takes the free width; wider it sits at content width.
         if (settingsKey != null) {
             settingsKey(if (metrics.phone) Modifier.weight(1f) else Modifier.widthIn(max = 280.dp))
@@ -1312,7 +1317,8 @@ private fun RowScope.ComposerActions(
                     .testTag(STOP_ANYWAY_KEY_TAG),
                 contentPadding = 16.dp,
                 contentDescription = "$stopCost — stop anyway",
-                maxLines = 3,
+                // The price is never cut: the key grows a line instead.
+                maxLines = Int.MAX_VALUE,
             )
             return
         }
