@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -169,6 +170,21 @@ class InspectorUiTest {
     fun theRosterStartsClosedWithNoRunSelected() {
         show(InspectorBoards.fullModel, InspectorBoards.fullState)
         rule.onNodeWithTag("subrun-roster").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+    }
+
+    /**
+     * ta-dl4: the account-limits section's top rule and the empty note's own rule are both the web's
+     * (`.inspector .usage-windows` border-top, `.telemetry-empty` border-top); between them sit the
+     * section's padding-top (`.inspector .usage-section`, space-md, after the 1px rule) and the note's
+     * margin-top (space-xl); then the note's rule and its padding-top (space-lg) above its text.
+     * The section's bounds start at its rule.
+     */
+    @Test
+    fun theEmptyLimitsNoteSitsBelowTheSectionsPaddingAsOnTheWeb() {
+        show(InspectorBoards.sparseModel)
+        val section = rule.onNodeWithTag(InspectorTags.Limits).getUnclippedBoundsInRoot()
+        val note = rule.onNodeWithText("Telemetry appears after the agent completes its first response.").getUnclippedBoundsInRoot()
+        assertEquals((1 + 12 + 24 + 16).toFloat(), (note.top - section.top).value, 0.5f)
     }
 
     @Test

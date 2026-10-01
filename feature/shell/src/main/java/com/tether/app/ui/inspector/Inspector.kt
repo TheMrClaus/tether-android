@@ -580,7 +580,11 @@ private fun LimitsPanel(limits: LimitsSection) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Column(
-        Modifier.fillMaxWidth().padding(top = t.css.spaceLg).topRule(t.line).padding(top = 1.dp).semantics { contentDescription = "Account limits" }.testTag(InspectorTags.Limits),
+        // `.inspector .usage-windows` (margin-top space-lg, the top rule) also carries `.usage-section`,
+        // whose later `.inspector .usage-section` padding-top (space-md) wins over its `padding-top: 0`
+        // (ta-dl4): the band between this rule and the empty note's own rule is space-md + space-xl.
+        Modifier.fillMaxWidth().padding(top = t.css.spaceLg).semantics { contentDescription = "Account limits" }.testTag(InspectorTags.Limits)
+            .topRule(t.line).padding(top = 1.dp + t.css.spaceMd),
     ) {
         limits.windows.forEach { (label, reading) ->
             Meter(label, reading.percent?.let { "$it%" } ?: "—", reading.percent, reading.caption)
