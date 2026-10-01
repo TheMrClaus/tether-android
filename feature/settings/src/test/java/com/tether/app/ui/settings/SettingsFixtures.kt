@@ -63,6 +63,7 @@ fun SettingsUnderTest(
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
     providers: ProvidersBinding = ProvidersBinding.None,
+    nodes: NodesBinding = NodesBinding.None,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -77,6 +78,7 @@ fun SettingsUnderTest(
                 claudeAccounts = claudeAccounts,
                 serverSettings = serverSettings,
                 providers = providers,
+                nodes = nodes,
             )
         }
     }

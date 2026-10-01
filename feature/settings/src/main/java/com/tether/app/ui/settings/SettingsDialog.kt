@@ -211,6 +211,18 @@ fun SettingsDialog(
         writer = providersWriter,
         fresh = freshProfiles,
     )
+    // T10.3: the node registry (sent to every principal on hello, secret-free) and the requests
+    // the Nodes panel makes, held here so a tab change neither cancels one nor loses its answer.
+    val nodeList by client.nodes.collectAsStateWithLifecycle()
+    val consoleProtocol by client.serverProtocolVersion.collectAsStateWithLifecycle()
+    val nodesWriter = remember(client) { ClientNodesWriter(client) }
+    val nodeActions = rememberNodesActions(nodesWriter)
+    val nodesBinding = NodesBinding(
+        list = if (signedIn) nodeList else emptyList(),
+        origin = origin,
+        actions = nodeActions,
+        consoleProtocol = consoleProtocol,
+    )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
@@ -226,6 +238,7 @@ fun SettingsDialog(
             claudeAccounts = claudeAccounts,
             serverSettings = serverBinding,
             providers = providersBinding,
+            nodes = nodesBinding,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -262,6 +275,8 @@ fun SettingsFrame(
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
     /** ta-q6p: the Engines tab's Custom providers editor. */
     providers: ProvidersBinding = ProvidersBinding.None,
+    /** T10.3: the Nodes tab. */
+    nodes: NodesBinding = NodesBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -329,6 +344,7 @@ fun SettingsFrame(
                         claudeAccounts = claudeAccounts,
                         serverSettings = serverSettings,
                         providers = providers,
+                        nodes = nodes,
                     )
                 }
             }
@@ -532,6 +548,14 @@ internal val SettingsDialogProperties = DialogProperties(
 
 /** settings-dialog.tsx:2000, the banner's words. */
 const val RESTART_REQUIRED = "Some changes need a server restart to take effect."
+
+/** T10.3: the app's [NodesWriter]: the client's origin-bound, requestId-matched node requests. */
+private class ClientNodesWriter(private val client: TetherClient) : NodesWriter {
+    override suspend fun add(origin: String, credential: com.tether.app.client.NodeCredential, label: String?, baseUrl: String?) =
+        client.addNode(origin, credential, label, baseUrl)
+    override suspend fun probe(origin: String, nodeId: String) = client.probeNode(origin, nodeId)
+    override suspend fun remove(origin: String, nodeId: String) = client.removeNode(origin, nodeId)
+}
 
 /** The app's [ServerSettingsWriter]: the client's origin-bound settings writes. */
 private class ClientSettingsWriter(private val client: TetherClient) : ServerSettingsWriter {

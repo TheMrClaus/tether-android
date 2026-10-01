@@ -266,9 +266,19 @@ internal fun serverCommit(patch: JsonObject?, send: (JsonObject) -> Boolean): Co
     else -> CommitOutcome.Refused(CommitOutcome.NOT_CONNECTED)
 }
 
-/** ta-dh1: `.settings-server-input`'s box (shared by [CommitField] and the engine fields): the edge, the fill, the placeholder. */
+/**
+ * ta-dh1: `.settings-server-input`'s box (shared by [CommitField] and the engine fields): the edge, the fill, the placeholder.
+ * T10.3: [alignTop] for a multi-line field (the Nodes credential's textarea): text from the top, the placeholder wrapping.
+ */
 @Composable
-internal fun ServerFieldBox(enabled: Boolean, focused: Boolean, style: androidx.compose.ui.text.TextStyle, placeholder: AnnotatedString?, inner: @Composable () -> Unit) {
+internal fun ServerFieldBox(
+    enabled: Boolean,
+    focused: Boolean,
+    style: androidx.compose.ui.text.TextStyle,
+    placeholder: AnnotatedString?,
+    inner: @Composable () -> Unit,
+    alignTop: Boolean = false,
+) {
     val t = LocalTetherTokens.current
     Box(
         Modifier
@@ -276,9 +286,9 @@ internal fun ServerFieldBox(enabled: Boolean, focused: Boolean, style: androidx.
             .heightIn(min = 44.dp)
             .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), emptyList())
             .padding(horizontal = 12.dp, vertical = 10.dp),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = if (alignTop) Alignment.TopStart else Alignment.CenterStart,
     ) {
-        if (placeholder != null) Text(placeholder, style = style, color = t.faint, maxLines = 1)
+        if (placeholder != null) Text(placeholder, style = style, color = t.faint, maxLines = if (alignTop) Int.MAX_VALUE else 1)
         inner()
     }
 }

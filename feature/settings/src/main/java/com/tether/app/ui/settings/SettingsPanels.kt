@@ -48,12 +48,15 @@ internal fun SettingsPanel(
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
     providers: ProvidersBinding = ProvidersBinding.None,
+    nodes: NodesBinding = NodesBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
         SettingsTab.Appearance -> AppearancePanel(prefs, live, narrow)
         SettingsTab.Devices -> DevicesPanel(prefs, narrow)
-        SettingsTab.Nodes -> NodesPanel(narrow)
+        // T10.3: keyed on the server, so another server's form starts empty (the credential masked
+        // and dropped, nothing half-typed carried over); its requests are bound to their server.
+        SettingsTab.Nodes -> key(nodes.origin) { NodesPanel(narrow, nodes) }
         SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts, serverSettings, providers)
         // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
         // masked, every half-typed field dropped; a dropped edit is bound to its own server).
@@ -196,12 +199,10 @@ private fun DevicesPanel(prefs: UiPrefs, narrow: Boolean) {
     }
 }
 
-/** Nodes (settings-dialog.tsx:2115-2117 `NodesSection`): the slot for T10.3. */
+/** Nodes (settings-dialog.tsx 887c222 :2104 `NodesSection`; T10.3, NodesSection.kt). */
 @Composable
-private fun NodesPanel(narrow: Boolean) {
-    SettingsSection("Nodes", AnnotatedString("Other Tether hosts this console can reach."), narrow, last = true) {
-        ComingSoonNote("The node list, with each node's status and the add, probe and remove controls, is coming to the app in a later update.")
-    }
+private fun NodesPanel(narrow: Boolean, nodes: NodesBinding) {
+    NodesSection(nodes, narrow)
 }
 
 /**
