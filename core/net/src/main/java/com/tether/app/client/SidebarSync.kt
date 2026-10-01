@@ -17,13 +17,16 @@ import kotlinx.serialization.json.buildJsonObject
  *  - `session-order` → sessionOrders[cwd] (864-865);
  *  - `seen` → forwarded to the preferences store (869-873); kept here as the newest seenAt per
  *    historyId so a late subscriber still sees it;
- *  - `server-settings` → the last frame (1120).
+ *  - `server-settings` → the last frame (1120);
+ *  - `advanced-settings` → the last frame (1140; ta-t7l, the Claude CLI picker). Both settings
+ *    frames are per server, so [clear] drops them with the sidebar on a server switch.
  */
 internal class SidebarSync {
     val historiesByCwd = MutableStateFlow<Map<String, List<HistorySession>>>(emptyMap())
     val sessionOrders = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val remoteSeen = MutableStateFlow<Map<String, Long>>(emptyMap())
     val serverSettings = MutableStateFlow<ServerMessage.ServerSettings?>(null)
+    val advancedSettings = MutableStateFlow<ServerMessage.AdvancedSettings?>(null)
 
     /** Folds one frame; returns false for a frame this class does not own. */
     fun onFrame(message: ServerMessage): Boolean {
@@ -35,6 +38,7 @@ internal class SidebarSync {
                 if (known != null && known >= message.seenAt) current else current + (message.historyId to message.seenAt)
             }
             is ServerMessage.ServerSettings -> serverSettings.value = message
+            is ServerMessage.AdvancedSettings -> advancedSettings.value = message
             else -> return false
         }
         return true
@@ -51,6 +55,7 @@ internal class SidebarSync {
         sessionOrders.value = emptyMap()
         remoteSeen.value = emptyMap()
         serverSettings.value = null
+        advancedSettings.value = null
     }
 
     companion object {

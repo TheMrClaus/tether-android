@@ -564,6 +564,7 @@ class RealTetherClient(
     override val sessionOrders: StateFlow<Map<String, List<String>>> = sidebarSync.sessionOrders
     override val remoteSeen: StateFlow<Map<String, Long>> = sidebarSync.remoteSeen
     override val serverSettings: StateFlow<ServerMessage.ServerSettings?> = sidebarSync.serverSettings
+    override val advancedSettings: StateFlow<ServerMessage.AdvancedSettings?> = sidebarSync.advancedSettings
 
     // T5.2: the unicast `created` reply to this socket's own create/resume (use-tether.ts:291).
     private val createdState = MutableStateFlow<CreatedReply?>(null)
@@ -2417,8 +2418,8 @@ class RealTetherClient(
                 historiesState.value = message.sessions
                 sidebarSync.onFrame(message)
             }
-            // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt).
-            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings ->
+            // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt); ta-t7l: v16 advanced settings.
+            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
@@ -3748,6 +3749,13 @@ class RealTetherClient(
 
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean = sendFrame(SidebarSync.setPinnedWorkspaces(pinned))
 
+    override fun requestAdvancedSettings(): Boolean = sendFrame(ClientMessage.AdvancedSettingsRequest)
+
+    override fun setServerSettings(patch: JsonObject, origin: String): Boolean =
+        patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
+
+    override fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = sendFrameFor(origin, message)
+
     // T5.3 search (SearchSync.kt).
     override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)
 
@@ -3943,6 +3951,18 @@ class RealTetherClient(
         val text = message.encode()
         synchronized(lock) {
             val ws = (if (socketOpen && handshakeDone) socket else null) ?: return false
+            return ws.send(text)
+        }
+    }
+
+    /**
+     * ta-t7l: [sendFrame], but only on a live socket opened for [origin] (checked under the lock
+     * the send takes): a settings write drawn from one server is dropped after a switch.
+     */
+    private fun sendFrameFor(origin: String, message: ClientMessage): Boolean {
+        val text = message.encode()
+        synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return false
             return ws.send(text)
         }
     }

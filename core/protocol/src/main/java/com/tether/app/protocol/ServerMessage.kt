@@ -239,6 +239,11 @@ sealed interface ServerMessage {
     /**
      * [settings]: ServerSettings, raw. [envForced]: setting key -> forced by env
      * (non-boolean values dropped). [detected]: Record<string, EngineDetection>, raw.
+     *
+     * ta-t7l: decoded tolerantly (a missing or wrongly typed part is empty / false, never a dropped
+     * frame), so this frame never lands in [Unknown.raw] with its secrets. [settings] carries the
+     * server's `password` and `proxyToken` in plaintext: [toString] prints no setting VALUE, only
+     * the keys, so a stray log line cannot leak them.
      */
     data class ServerSettings(
         val settings: JsonObject,
@@ -246,7 +251,11 @@ sealed interface ServerMessage {
         val restartRequired: Boolean,
         val discovered: List<ClaudeCliVersion>,
         val detected: JsonObject,
-    ) : ServerMessage
+    ) : ServerMessage {
+        override fun toString(): String =
+            "ServerSettings(settings=${settings.keys.sorted()}, envForced=$envForced, restartRequired=$restartRequired, " +
+                "discovered=$discovered, detected=${detected.keys.sorted()})"
+    }
 
     /** Retired server-side (the request is answered with `error`), still in the TS union. [agents]: AcpAgentEntry[], raw. */
     data class AcpAgents(val agents: List<JsonObject>) : ServerMessage
@@ -798,23 +807,25 @@ private object ServerDecoders {
         "opencode-control-result" to { r ->
             ServerMessage.OpencodeControlResult(r.str("sessionId"), r.bool("ok"), r.str("message"))
         },
+        // ta-t7l: both settings frames decode tolerantly: a missing or wrongly typed part is its empty
+        // value (the web reads them with `?.` / `?? ""` throughout), never a dropped frame.
         "advanced-settings" to { r ->
             ServerMessage.AdvancedSettings(
                 claudeCliVersion = r.o.str("claudeCliVersion"),
-                discovered = r.list("discovered", ClaudeCliVersion.serializer()),
-                envForced = r.bool("envForced"),
+                discovered = r.optList("discovered", ClaudeCliVersion.serializer()).orEmpty(),
+                envForced = r.o.boolOrNull("envForced") == true,
                 envPath = r.o.str("envPath"),
-                effectiveSource = r.str("effectiveSource"),
+                effectiveSource = r.o.str("effectiveSource").orEmpty(),
                 effectiveVersion = r.o.str("effectiveVersion"),
             )
         },
         "server-settings" to { r ->
             ServerMessage.ServerSettings(
-                settings = r.obj("settings"),
-                envForced = r.boolMap("envForced"),
-                restartRequired = r.bool("restartRequired"),
-                discovered = r.list("discovered", ClaudeCliVersion.serializer()),
-                detected = r.obj("detected"),
+                settings = r.o.obj("settings") ?: JsonObject(emptyMap()),
+                envForced = if (r.o.obj("envForced") != null) r.boolMap("envForced") else emptyMap(),
+                restartRequired = r.o.boolOrNull("restartRequired") == true,
+                discovered = r.optList("discovered", ClaudeCliVersion.serializer()).orEmpty(),
+                detected = r.o.obj("detected") ?: JsonObject(emptyMap()),
             )
         },
         "acp-agents" to { r -> ServerMessage.AcpAgents(r.objList("agents")) },

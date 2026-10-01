@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.NodeSummary
 import com.tether.app.protocol.ServerMessage
@@ -15,6 +16,7 @@ import com.tether.app.protocol.tree.JsObj
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonObject
 
 /**
  * The seam between the protocol/data layer and the Compose UI.
@@ -619,6 +621,23 @@ interface TetherClient {
     /** v128 `set-server-settings {pinnedWorkspaces}`: the owner-level kept sidebar workspaces. */
     fun setPinnedWorkspaces(pinned: List<String>): Boolean = false
 
+    /** v16: the last `advanced-settings` frame (null until one arrives on this server). */
+    val advancedSettings: StateFlow<ServerMessage.AdvancedSettings?> get() = NO_ADVANCED_SETTINGS
+
+    /** v16 `advanced-settings` request (Settings opening asks for it, dashboard.tsx:1333). */
+    fun requestAdvancedSettings(): Boolean = false
+
+    /**
+     * ta-t7l: v50 `set-server-settings {settings: patch}` (a Partial<ServerSettings>: only the keys
+     * that changed, see [ServerSettingsPatch]), sent only when the live socket was opened for
+     * [origin], the server the patch was drawn from: an edit made against one server is never
+     * delivered to another. Returns whether it was sent; the server answers with `server-settings`.
+     */
+    fun setServerSettings(patch: JsonObject, origin: String): Boolean = false
+
+    /** ta-t7l: v16 `set-advanced-settings` (the Claude CLI picker), bound to [origin] like [setServerSettings]. */
+    fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = false
+
     // ------------------------------------------------------------------
     // T5.2 resume: defaults keep other implementations (test doubles) compiling.
     // ------------------------------------------------------------------
@@ -706,6 +725,7 @@ private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = 
 private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableStateFlow(emptyMap())
 private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
 private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
+private val NO_ADVANCED_SETTINGS: StateFlow<ServerMessage.AdvancedSettings?> = MutableStateFlow(null)
 private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(null)
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())

@@ -595,9 +595,13 @@ sealed interface ClientMessage {
         override fun toJsonObject() = frame("server-settings") {}
     }
 
-    /** [settings]: a Partial<ServerSettings> patch (only present keys change), raw. */
+    /**
+     * [settings]: a Partial<ServerSettings> patch (only present keys change), raw. ta-t7l: a patch
+     * may carry a new `password` or `proxyToken`, so [toString] names the keys and no value.
+     */
     data class SetServerSettings(val settings: JsonObject) : ClientMessage {
         override fun toJsonObject() = frame("set-server-settings") { put("settings", settings) }
+        override fun toString(): String = "SetServerSettings(settings=${settings.keys.sorted()})"
     }
 
     data object DetectEngines : ClientMessage {
