@@ -37,9 +37,9 @@ The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRobo
   open, Enter / Tab accept the first match and Escape closes it.
 - **Queue rows.** Each queued message is editable in place: Enter or leaving the field commits the
   trimmed text once (`queue-edit`), a blank row is removed (`queue-remove`), an unchanged one sends
-  nothing, the ✕ key removes it, and a `next-call` row says "Queued — sends at the next tool boundary."
-  and offers "Interrupt now" (`interrupt`). While not being edited a row follows the server text
-  (another device edited it). Status is always in words (the icon's description), never colour alone.
+  nothing, the ✕ key removes it, and a `next-call` row offers "Interrupt now" (`interrupt`). While not
+  being edited a row follows the server text (another device edited it). Status is always in words (the
+  line under the row since ta-ceo), never colour alone.
 - **Drafts.** Per server origin and session (`<origin>|tether:draft:<sessionId>` in the drafts
   DataStore): written on every change, removed when empty (on send), kept across a session switch,
   a rotation (the view model) and process death (the file), and never shown to another server. A
@@ -63,3 +63,46 @@ The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRobo
 5. `components/draft-composer.tsx` (the matrix row) is the web's NEW-SESSION composer (provider,
    folder, worktree, first message); its surface is T8.1's. T7.1 ports the session composer that
    `chat-view.tsx` renders, which is what this task's text describes.
+
+## ta-ceo: a deferred message waits in words, and Stop names its price (tether 887c222, issue #229)
+
+Web: `lib/queue-wait.mjs` (ported as `QueueWait`, core/reducer), `engines/events.mjs:425-462`
+runningToolIds / openToolCount / liveBackgroundTaskCount (ported in `fold/LiveWork.kt`),
+`components/chat-view.tsx:1410-1548` (QueuedMessageRow), `:1973-1979` (liveWork, stopCost) and
+`:4543-4572` (the Interrupt key), `app/globals.css:7125-7137` (`.chat-queue-wait`).
+
+- **Every queued row has a line under it.** An end-of-turn row reads "Queued — sends after the current
+  turn"; a `next-call` row reads `deferredWaitCopy`: "Queued — waiting for a safe boundary (1 tool
+  running · 7 background tasks live · waiting 7m 00s)", or "Queued — sends at the next tool call or when
+  the turn ends" when nothing is live. The wait runs from the row's journal-stamped `queuedAt` (v136,
+  decoded by T15.8) to the event-anchored server now (`serverNow`, as the run row), ticking each second;
+  an unstamped row shows no wait and never asks.
+- **The choice.** After 60 s with work still live: "Delivers at the next safe boundary or when the turn
+  ends. Interrupting stops <cost without its verb>." and Keep waiting (which acknowledges it for the
+  row). Interrupt now stays beside the text as the other option.
+- **Interrupt now** with live work asks first: "<cost> — it cannot be undone." · Stop anyway · Keep
+  waiting; without live work it interrupts at once, as before.
+- **The composer's Interrupt** with live work: the first press shows Keep running and "<cost> — Stop
+  anyway"; the second interrupts. A foreground command's Stop is unchanged (the web's `!commandRunning`).
+
+Goldens (no web counterpart: the S0.4 seeder has no queue scene): `composer-deferred-choice` (phone,
+tablet, 1.3×), `composer-deferred-confirm` (phone), `composer-stop-confirm` (phone, tablet, 1.3×), Studio
+light and dark; `composer-queue` re-recorded for the new lines.
+
+Decisions where the web is silent or unsafe:
+
+1. **Both confirmations keep T6.7 / T13.2's rules.** "Stop anyway" (row and composer) is a new control,
+   so it arms afresh (500 ms; a double tap never passes through), is bound to the turn it was drawn for,
+   and is locked on a copy that is not live. A confirmation is dropped when its turn changes or the
+   session changes, when the price disappears (it does not come back by itself), or when the copy stops
+   being live. The web keeps `confirmStop` / `confirmingInterrupt` across all of these.
+2. **The phone shows the price.** The web's phone hides `.chat-send` labels (globals.css:7894), so its
+   confirmation is an empty key and an icon key. Here the pair is always labelled; for that moment the
+   attach and settings keys give up their room and the Stop key's legend wraps rather than being cut.
+3. **A copy that is not live stops counting.** Its wait freezes where it stood (T13.2, as the run row).
+4. **TalkBack.** The choice and the confirmation are announced politely; the ticking wait is not a live
+   region (it would speak every second). The row icon no longer carries the status (the words are on
+   screen); the composer pair reads "Keep the turn running" and "<cost> — stop anyway" (the web's
+   aria-labels).
+5. **Counts.** As the web client: no warm-child level signal and no de-duplication of a task launched by
+   a running tool (the server's `_liveWork` does both; the browser has neither).
