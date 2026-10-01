@@ -146,6 +146,12 @@ private const val MIRROR_BIND_TIMEOUT_MS = 5_000L
 /** Upper bound on the frame thread's wait for a seqless event's mirror cursor clear (T13.1). */
 private const val SEQLESS_CLEAR_WAIT_MS = 2_000L
 
+/** ta-exi: start()'s reads of the stored settings before it fails closed (see readSessionForStart). */
+private const val SETTINGS_READ_ATTEMPTS = 3
+
+/** ta-exi: the pause between those reads. */
+private const val SETTINGS_READ_RETRY_MS = 250L
+
 /** §3.1 rule 5: mirror-restored sessions re-attached on `ready`, beyond pinned ones. */
 private const val MIRROR_REATTACH_RECENT = 10
 
@@ -274,6 +280,12 @@ class RealTetherClient(
      * Bound to the origin in force; wiped with its data key on logout and revocation.
      */
     mirror: JournalMirror? = null,
+    /**
+     * ta-exi: how long the stored-settings collector ([configured], [serverUrl],
+     * [storedSettingsLoaded]) waits before it resubscribes after a store error. Reset by its
+     * next successful read.
+     */
+    private val settingsBackoff: Backoff = Backoff(),
 ) : TetherClient {
 
     // T13.1: frame -> mirror writes (null when the mirror is off).
@@ -567,12 +579,30 @@ class RealTetherClient(
         // One writer for all three, in this order: whoever sees storedSettingsLoaded sees the stored
         // server URL and sign-in state with it (T4.4 cold-start deep links).
         scope.launch {
-            combine(settings.baseUrl, settings.credential) { base, credential ->
-                base to (!base.isNullOrEmpty() && credential != null)
-            }.collect { (base, configured) ->
-                serverUrlState.value = base
-                configuredState.value = configured
-                storedSettingsLoadedState.value = true
+            // ta-exi: never fatal (this runs on the app scope: an escape is a crash) and never
+            // dead. A store that fails to read reads as signed out: the login screen, never a
+            // signed-in UI the store can no longer back, and never a UI still waiting for the
+            // first read. The server URL keeps its last stored value (a prefill, not a sign-in).
+            // Then the collector resubscribes with a backoff, so a store that reads again
+            // brings the stored sign-in back.
+            while (true) {
+                try {
+                    combine(settings.baseUrl, settings.credential) { base, credential ->
+                        base to (!base.isNullOrEmpty() && credential != null)
+                    }.collect { (base, configured) ->
+                        settingsBackoff.reset()
+                        serverUrlState.value = base
+                        configuredState.value = configured
+                        storedSettingsLoadedState.value = true
+                    }
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    configuredState.value = false
+                    storedSettingsLoadedState.value = true
+                }
+                delay(settingsBackoff.next())
             }
         }
     }
@@ -1450,7 +1480,21 @@ class RealTetherClient(
             // a server switch and pair URL A with credential B. Whichever
             // credential the install holds — a password cookie from a pre-pairing
             // version still resolves here, so upgrading never logs anyone out.
-            val session = settings.session()
+            val session = readSessionForStart()
+            if (session == null) {
+                // ta-exi: the store did not read (after a short retry). Fail closed: nothing is
+                // adopted from it, not the server either, and nothing is bound to it. Only a pair
+                // already in memory (a sign-in in this process that no sign-out has undone) keeps
+                // connecting; otherwise the login screen shows (no signed-out reason: no server
+                // said anything). The next start() reads again.
+                val connect = synchronized(lock) {
+                    val signedIn = baseUrlValue != null && credentialValue != null
+                    if (!signedIn) connectionState.value = ConnectionState.AuthRequired
+                    signedIn
+                }
+                if (connect) connectNow()
+                return@launch
+            }
             val switch = synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
                 if (signOutEpoch != startEpoch || signOutClearsInFlight.value > 0 ||
@@ -1553,6 +1597,24 @@ class RealTetherClient(
         }
     }
 
+    /**
+     * start()'s snapshot, tried [SETTINGS_READ_ATTEMPTS] times [settingsReadRetryMs] apart (a
+     * transient I/O error). Null = the store did not read: never a partial or guessed snapshot.
+     */
+    private suspend fun readSessionForStart(): Session? {
+        repeat(SETTINGS_READ_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(settingsReadRetryMs)
+            try {
+                return settings.session()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Tried again, then null.
+            }
+        }
+        return null
+    }
+
     /** stop()'s store clear: true = it landed. A failure is reported only by the result. */
     private suspend fun clearSettingsQuietly(): Boolean = try {
         settings.clear()
@@ -1608,6 +1670,9 @@ class RealTetherClient(
         //    in; with no credential, the next start purges whatever of the mirror is left.
         // The store retries its own delete and falls back to a tombstone; one
         // more attempt here covers a store that threw before getting that far.
+        // ta-exi: runCatching also takes a CancellationException, on purpose: this runs only
+        // NonCancellable (logout()), so one is the store's own, never this logout's (as the hook's,
+        // ta-jt9 L-C); rethrowing it would end the logout here, skipping the shred and the revoke (M-1).
         try {
             if (runCatching { settings.clearCredential() }.isFailure) {
                 runCatching { settings.clearCredential() }
@@ -2053,6 +2118,9 @@ class RealTetherClient(
                 // compare-and-clear under the store's own lock (ta-jt9 L-X): a
                 // separate read then clear could delete that newer login's.
                 settings.clearCredentialIf(credential)
+            } catch (e: CancellationException) {
+                // ta-exi: never swallowed (as stop()'s clearSettingsQuietly); the finally still runs.
+                throw e
             } catch (_: Exception) {
                 // Worst case the dead credential survives a restart; the next
                 // probe rejects it again.
@@ -3744,6 +3812,10 @@ class RealTetherClient(
     /** Test seam: how long a sign-in waits for a sign-out's store clear to land (ta-jt9 L-1). */
     @Volatile
     internal var signOutClearWaitMs: Long = LOGOUT_CALL_TIMEOUT_MS
+
+    /** Test seam: the pause between start()'s settings reads (production: [SETTINGS_READ_RETRY_MS]). */
+    @Volatile
+    internal var settingsReadRetryMs: Long = SETTINGS_READ_RETRY_MS
 
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile

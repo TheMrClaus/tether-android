@@ -126,7 +126,8 @@ interface TetherClient {
     /**
      * True once [configured] and [serverUrl] reflect the stored settings. Before the store is
      * first read they say "signed out, no server", which a cold-start deep link (T4.4) must not
-     * mistake for the truth.
+     * mistake for the truth. A store that fails to read also sets it, with [configured] false
+     * (ta-exi: fail closed, and nothing waits on it forever).
      */
     val storedSettingsLoaded: StateFlow<Boolean> get() = SETTINGS_LOADED
 
