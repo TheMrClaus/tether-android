@@ -75,6 +75,18 @@ class DraftComposerModelTest {
             sends += sessionId to text
         }
 
+        /** As the real client: only on the create's server and socket, still live. */
+        override fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean {
+            if (connection.value != ConnectionState.Connected) return false
+            if (consentOrigin.value != expectedOrigin || linkEpoch.value != expectedEpoch) return false
+            sends += sessionId to text
+            return true
+        }
+
+        val records = mutableMapOf<String, CreateReplyRecord>()
+
+        override fun createReply(requestId: String): CreateReplyRecord? = records[requestId]
+
         override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
             attachmentSends += Triple(sessionId, text, attachments.size)
             return attachmentResult
@@ -82,16 +94,21 @@ class DraftComposerModelTest {
 
         private var seq = 0L
 
-        fun created(id: String, requestId: String?, seq: Long = ++this.seq) {
+        /** The reply as the real client records it: stamped with the socket it came on. */
+        fun created(id: String, requestId: String?, seq: Long = ++this.seq, epoch: Long = linkEpoch.value) {
             this.seq = maxOf(this.seq, seq)
-            createdSessions.value = CreatedReply(session(id), seq, requestId)
+            val reply = CreatedReply(session(id), seq, requestId, epoch)
+            createdSessions.value = reply
+            if (requestId != null) records[requestId] = CreateReplyRecord.Created(reply)
         }
 
         private var errorSeq = 0L
 
-        fun error(message: String, requestId: String?, seq: Long = ++errorSeq) {
+        fun error(message: String, requestId: String?, seq: Long = ++errorSeq, epoch: Long = linkEpoch.value) {
             errorSeq = maxOf(errorSeq, seq)
-            createErrors.value = CreateErrorReply(message, seq, requestId)
+            val reply = CreateErrorReply(message, seq, requestId, epoch)
+            createErrors.value = reply
+            if (requestId != null) records[requestId] = CreateReplyRecord.Failed(reply)
         }
     }
 
@@ -103,6 +120,8 @@ class DraftComposerModelTest {
         val store: DraftStore,
         val saved: MutableList<Saved>,
         val ids: MutableList<String>,
+        /** Every session the engine reported its own create made (the view model selects it). */
+        val opened: MutableList<String>,
     )
 
     private fun TestScope.harness(
@@ -113,6 +132,7 @@ class DraftComposerModelTest {
     ): Harness {
         val saved = mutableListOf<Saved>()
         val ids = mutableListOf<String>()
+        val opened = mutableListOf<String>()
         var n = 0
         val model = DraftComposerModel(
             client = client,
@@ -124,10 +144,11 @@ class DraftComposerModelTest {
                 saved += Saved(origin, sessionId, text)
             },
             newRequestId = { "req-${++n}".also { ids += it } },
+            onSessionCreated = { opened += it },
         )
         model.onOrigin(A)
         runCurrent()
-        return Harness(client, model, store, saved, ids)
+        return Harness(client, model, store, saved, ids, opened)
     }
 
     /** What the view model does with each input, in its order. */
@@ -452,6 +473,134 @@ class DraftComposerModelTest {
         runCurrent()
         assertTrue(h.client.sends.isEmpty())
         assertEquals("keep me here", h.model.state.value.text)
+        assertEquals("the session itself is still opened", listOf("new"), h.opened)
+    }
+
+    // --- r2: replies across the socket, the reply timeout, redaction ----------------------------------
+
+    /** r2 (verifier P4): the right token on a later socket never completes the create. */
+    @Test
+    fun aMatchingTokenOnANewSocketNeverCompletesTheCreate() = runTest {
+        val h = harness()
+        h.model.submitChoice(claude, A)
+        h.client.created("elsewhere", "req-1", epoch = 2)
+        assertNull(h.deliverCreated())
+        h.client.error("refused elsewhere", "req-1", epoch = 2)
+        assertEquals(false, h.deliverError())
+        assertTrue(h.model.state.value.creating)
+        assertTrue(h.opened.isEmpty())
+        // On the create's own socket it does (positive control).
+        h.client.created("new", "req-1", epoch = 1)
+        assertEquals("new", h.deliverCreated())
+    }
+
+    /** r2 (security F2): a create whose reply never comes unlocks after 30 s; never resent. */
+    @Test
+    fun aCreateWithNoReplyUnlocksInTimeAndSaysTheSessionMayExist() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("claude")
+        h.model.setText("still mine")
+        h.model.submit(A)
+        advanceTimeBy(DraftComposerModel.CREATE_REPLY_TIMEOUT_MS - 1)
+        runCurrent()
+        assertTrue(h.model.state.value.creating)
+        advanceTimeBy(2)
+        runCurrent()
+        val s = h.model.state.value
+        assertFalse(s.creating)
+        assertEquals(DRAFT_REPLY_TIMEOUT_COPY, s.error)
+        assertEquals("still mine", s.text)
+        assertEquals("never resent", 1, h.client.requests.size)
+        // Its late reply is not acted on (the session shows in the list; nothing is sent into it).
+        h.client.created("late", "req-1")
+        assertNull(h.deliverCreated())
+        assertTrue(h.client.sends.isEmpty())
+        assertTrue(h.opened.isEmpty())
+    }
+
+    @Test
+    fun aReplyThatArrivedTheTimerStopsAndTheDraftIsNotUnlockedTwice() = runTest {
+        val h = harness()
+        h.model.submitChoice(claude, A)
+        h.client.error("Refused.", "req-1")
+        h.deliverError()
+        advanceTimeBy(DraftComposerModel.CREATE_REPLY_TIMEOUT_MS + 1)
+        runCurrent()
+        assertEquals("Refused.", h.model.state.value.error)
+    }
+
+    /** r2 (security F2): at the timeout, an answer the client recorded but nobody delivered still stands. */
+    @Test
+    fun anAnswerRecordedButNotDeliveredStandsAtTheTimeout() = runTest {
+        val h = harness()
+        h.model.submitChoice(claude, A)
+        h.client.created("new", "req-1") // recorded; its delivery was lost
+        advanceTimeBy(DraftComposerModel.CREATE_REPLY_TIMEOUT_MS + 1)
+        runCurrent()
+        assertEquals(listOf("new"), h.opened)
+        assertEquals("", h.model.state.value.error)
+        assertEquals(1, h.model.state.value.completed)
+    }
+
+    /**
+     * r2 (security F2): the socket that answered goes before the `created` collector runs (the
+     * link collector first, across a reconnect): the session was created and is opened, never
+     * reported as not created; its first message cannot go on the new socket, so it is the new
+     * session's draft.
+     */
+    @Test
+    fun aDropSeenBeforeTheCreatedItAnsweredStillCompletesTheCreate() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("claude")
+        h.model.setText("my first words")
+        h.model.submit(A)
+        h.client.created("new", "req-1") // handled and recorded by the client on socket 1
+        h.client.connection.value = ConnectionState.Connecting
+        h.client.linkEpoch.value = 2
+        h.client.connection.value = ConnectionState.Connected
+        h.model.onLink(ConnectionState.Connected, 2) // the link collector runs first
+        runCurrent()
+        val s = h.model.state.value
+        assertFalse(s.creating)
+        assertEquals("not reported as not created", "", s.error)
+        assertEquals(listOf("new"), h.opened)
+        assertTrue("never sent on the new socket", h.client.sends.isEmpty())
+        assertEquals("my first words", h.saved.single().text)
+        // The created collector runs late: nothing happens twice.
+        assertNull(h.deliverCreated())
+        assertEquals(listOf("new"), h.opened)
+    }
+
+    @Test
+    fun aRefusalSeenAfterTheDropStillShowsTheServersWords() = runTest {
+        val h = harness()
+        h.model.submitChoice(claude, A)
+        h.client.error("Skipping tool approvals needs a browser sign-in, not a paired device.", "req-1")
+        h.model.onLink(ConnectionState.Disconnected, 1)
+        assertEquals("Skipping tool approvals needs a browser sign-in, not a paired device.", h.model.state.value.error)
+    }
+
+    /** r2 (security F3): neither the state nor the request nor the frame logs the prompt or the profile. */
+    @Test
+    fun nothingPrivateReachesToString() = runTest {
+        val h = harness()
+        h.client.providerCatalog.value = listOf(ProviderCatalogEntry("work-account-7", "claude", "ready", emptyList(), profileId = "work-account-7"))
+        h.client.providerCatalogLive.value = true
+        h.model.refresh()
+        h.model.selectProvider("work-account-7")
+        h.model.setText("the secret plan")
+        h.model.setAttachments(listOf(Attachment(name = "private.png", mediaType = "image/png", data = "AAAA")))
+        h.model.setCwd("/home/me/secret-project")
+        h.model.submit(A)
+        val texts = listOf(h.model.state.value.toString(), h.client.requests.single().toString(), h.client.frames.single().toString())
+        for (t in texts) {
+            for (secret in listOf("the secret plan", "private.png", "AAAA", "work-account-7", "secret-project")) {
+                assertFalse("$secret in $t", t.contains(secret))
+            }
+        }
+        assertTrue(texts[2], texts[2].contains("profile=***"))
     }
 
     @Test

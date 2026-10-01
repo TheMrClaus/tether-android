@@ -9,7 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -38,6 +38,7 @@ class TetherViewModelResumeTest {
         val resumed = mutableListOf<String>()
         override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
         override val createdSessions = MutableStateFlow<CreatedReply?>(null)
+        override val createErrors = MutableStateFlow<com.tether.app.client.CreateErrorReply?>(null)
 
         override val connection = MutableStateFlow<com.tether.app.client.ConnectionState>(com.tether.app.client.ConnectionState.Connected)
         override val consentOrigin = MutableStateFlow<String?>("https://a.example:443")
@@ -50,6 +51,16 @@ class TetherViewModelResumeTest {
         override fun send(sessionId: String, text: String, attachments: List<com.tether.app.protocol.Attachment>) {
             sent += sessionId to text
         }
+
+        override fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean {
+            if (consentOrigin.value != expectedOrigin) return false
+            sent += sessionId to text
+            return true
+        }
+
+        /** ta-8cv r2: the replies in order, never conflated (the real client's createdReplies). */
+        val replies = kotlinx.coroutines.flow.MutableSharedFlow<CreatedReply>(extraBufferCapacity = 16)
+        override val createdReplies: kotlinx.coroutines.flow.Flow<CreatedReply> = replies
 
         override fun createNewSession(request: com.tether.app.client.NewSessionRequest, expectedOrigin: String?): com.tether.app.client.NewSessionResult {
             requests += request
@@ -64,7 +75,9 @@ class TetherViewModelResumeTest {
 
         fun created(session: AgentSession, requestId: String? = null) {
             sessions.value = listOf(session) + sessions.value.filter { it.id != session.id }
-            createdSessions.value = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1, requestId)
+            val reply = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1, requestId)
+            createdSessions.value = reply
+            replies.tryEmit(reply)
         }
     }
 
@@ -76,7 +89,7 @@ class TetherViewModelResumeTest {
     private fun history(id: String) = HistorySession(historyId = id, provider = "claude", name = id, cwd = "/w", updatedAt = 1)
 
     private fun TestScope.vm(client: ResumeClient) =
-        TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { testScheduler.currentTime }).also { advanceUntilIdle() }
+        TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { testScheduler.currentTime }).also { runCurrent() }
 
     @Test fun aSentResumeOpensTheRowAndTheCreatedReplySelectsItsSession() = runTest(dispatcher) {
         val client = ResumeClient()
@@ -90,7 +103,7 @@ class TetherViewModelResumeTest {
         assertNull("the previous chat does not stay on screen during the round trip", vm.selectedSessionId.value)
 
         client.created(session("fresh", historyId = "hist-1"))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("fresh", vm.selectedSessionId.value)
         assertNull(vm.openingHistoryId.value)
         assertEquals("attached exactly once", listOf("fresh"), client.attached)
@@ -103,10 +116,10 @@ class TetherViewModelResumeTest {
         client.sessions.value = listOf(session("ended", historyId = "hist-1"))
         val vm = vm(client)
         vm.resumeHistory(history("hist-1"))
-        advanceUntilIdle()
+        runCurrent()
         assertNull(vm.selectedSessionId.value)
         client.created(session("resumed", historyId = "hist-1"))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("resumed", vm.selectedSessionId.value)
     }
 
@@ -115,11 +128,11 @@ class TetherViewModelResumeTest {
         val vm = vm(client)
         vm.resumeHistory(history("hist-1"))
         client.created(session("live", historyId = "hist-1"))
-        advanceUntilIdle()
+        runCurrent()
         vm.selectSession("other")
         vm.resumeHistory(history("hist-1"))
         client.created(session("live", historyId = "hist-1"))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("live", vm.selectedSessionId.value)
     }
 
@@ -137,7 +150,7 @@ class TetherViewModelResumeTest {
         val client = ResumeClient()
         val vm = vm(client)
         vm.resumeHistory(history("gone"))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("gone", vm.openingHistoryId.value)
         // dashboard.tsx:227 selectActiveId: every explicit selection retires it.
         vm.selectSession("s1")
@@ -161,29 +174,64 @@ class TetherViewModelResumeTest {
         )
         // ta-8cv: another device's new session landing in the list is NOT this create's.
         client.sessions.value = listOf(session("someone-elses"))
-        advanceUntilIdle()
+        runCurrent()
         assertNull(vm.selectedSessionId.value)
         client.created(session("new"), requestId = client.requests.single().requestId)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("new", vm.selectedSessionId.value)
         assertEquals(listOf("new"), client.attached)
     }
 
-    /** ta-8cv: while a create is in flight, a resume's reply (no requestId) never takes its place. */
-    @Test fun aResumesReplyDoesNotHijackAPendingCreate() = runTest(dispatcher) {
+    /**
+     * ta-8cv r2 (verifier P3): a resume that overlaps a create opens as it lands (the web's dashboard
+     * opens every `created`); it never completes the create, which still opens ITS session when its
+     * own reply lands, and the resumed one is never lost if the create fails.
+     */
+    @Test fun aResumeOverlappingACreateOpensAndTheCreateStillCompletesOnItsOwnReply() = runTest(dispatcher) {
         val client = ResumeClient()
         val vm = vm(client)
         vm.resumeHistory(history("hist-1"))
         vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
         client.created(session("resumed", historyId = "hist-1"))
-        advanceUntilIdle()
-        assertNull("the resume's reply is not selected over the pending create", vm.selectedSessionId.value)
-        assertNull("its row is no longer opening", vm.openingHistoryId.value)
-        assertTrue(vm.draftComposer.state.value.creating)
+        runCurrent()
+        assertEquals("the resumed session opens", "resumed", vm.selectedSessionId.value)
+        assertNull(vm.openingHistoryId.value)
+        assertTrue("the create still waits for its own reply", vm.draftComposer.state.value.creating)
         client.created(session("new"), requestId = client.requests.single().requestId)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("new", vm.selectedSessionId.value)
-        assertEquals(listOf("new"), client.attached)
+        assertEquals(listOf("resumed", "new"), client.attached)
+    }
+
+    @Test fun aResumeOverlappingACreateThatFailsStaysOpen() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.resumeHistory(history("hist-1"))
+        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
+        client.created(session("resumed", historyId = "hist-1"))
+        runCurrent()
+        client.createErrors.value = com.tether.app.client.CreateErrorReply("refused", 1, client.requests.single().requestId)
+        runCurrent()
+        assertFalse(vm.draftComposer.state.value.creating)
+        assertEquals("refused", vm.draftComposer.state.value.error)
+        assertEquals("resumed", vm.selectedSessionId.value)
+    }
+
+    /** ta-8cv r2 (security F2): two replies in one burst (a resume's and the create's) are both acted on. */
+    @Test fun twoRepliesInOneBurstAreBothActedOn() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.resumeHistory(history("hist-1"))
+        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
+        // Both land before the collector runs: the latest-value flow would keep only the second.
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        client.created(session("resumed", historyId = "hist-1"))
+        assertEquals("resumed", client.createdSessions.value?.session?.id)
+        runCurrent()
+        assertFalse("the create completed on its own reply", vm.draftComposer.state.value.creating)
+        assertEquals(1, vm.draftComposer.state.value.completed)
+        assertEquals("both opened, in order", listOf("new", "resumed"), client.attached)
+        assertEquals("resumed", vm.selectedSessionId.value)
     }
 
     /** ta-8cv: the first message goes out once, from the matched reply, into the selected session. */
@@ -195,10 +243,10 @@ class TetherViewModelResumeTest {
         composer.setText("first words")
         assertEquals(com.tether.app.client.DraftSubmitResult.Sent, composer.submit("https://a.example:443"))
         client.created(session("other"), requestId = "not-mine")
-        advanceUntilIdle()
+        runCurrent()
         assertTrue(client.sent.isEmpty())
         client.created(session("new"), requestId = client.requests.single().requestId)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(listOf("new" to "first words"), client.sent)
         assertEquals("new", vm.selectedSessionId.value)
     }
@@ -207,7 +255,7 @@ class TetherViewModelResumeTest {
     @Test fun anOrphanedFirstMessageBecomesTheNewSessionsDraft() = runTest(dispatcher) {
         val client = ResumeClient()
         val store = InMemoryDraftStore()
-        val vm = TetherViewModel(client, store, monotonicClock = { testScheduler.currentTime }).also { advanceUntilIdle() }
+        val vm = TetherViewModel(client, store, monotonicClock = { testScheduler.currentTime }).also { runCurrent() }
         val composer = vm.draftComposer
         composer.selectProvider("claude")
         composer.setText("do not lose me")
@@ -215,7 +263,7 @@ class TetherViewModelResumeTest {
         // The link went to another server between the reply and the first send.
         client.consentOrigin.value = "https://b.example:443"
         client.created(session("new"), requestId = client.requests.single().requestId)
-        advanceUntilIdle()
+        runCurrent()
         assertTrue("never sent", client.sent.isEmpty())
         assertEquals("do not lose me", store.read("https://a.example:443", "new"))
         assertEquals("do not lose me", vm.drafts.value["new"])
@@ -228,15 +276,15 @@ class TetherViewModelResumeTest {
         val vm = vm(client)
         vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
         client.created(session("stale"), requestId = "not-this-one")
-        advanceUntilIdle()
+        runCurrent()
         assertNull(vm.selectedSessionId.value)
         assertTrue(vm.draftComposer.state.value.creating)
         // No create in flight: a stray create reply is still never followed.
         client.created(session("new"), requestId = client.requests.single().requestId)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("new", vm.selectedSessionId.value)
         client.created(session("late"), requestId = "another")
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("new", vm.selectedSessionId.value)
     }
 }

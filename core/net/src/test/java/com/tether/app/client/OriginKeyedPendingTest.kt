@@ -29,6 +29,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -1170,5 +1171,44 @@ class OriginKeyedPendingTest {
         assertEquals(NewSessionResult.NotOffered, client.createNewSession(drawnOnA, "/w", b.origin()))
         assertTrue(framesUntilBarrier(b).none { it.type() == "create" })
         assertTrue("A saw a create", a.allFrames.none { it.contains("\"create\"") })
+    }
+
+    /**
+     * ta-8cv r2 (security F1): the draft composer's first message for a session A just created is
+     * recorded only while, in the same step under the client's lock, the outbox and the live socket
+     * are still A's and the create's. A sign-in switch to B (login runs on IO) landing after the
+     * composer decided to send and before the record leaves nothing in B's outbox, and nothing of
+     * the prompt reaches B.
+     */
+    @Test
+    fun aFirstMessageForASessionCreatedOnAIsNeverFiledForB() {
+        val c = processOnA()
+        c.start()
+        val ws = a.nextSocket()
+        ws.send(readyWithClaude)
+        assertEquals("hello", a.frame().type())
+        await(c.connection) { it == ConnectionState.Connected }
+        val originA = c.consentOrigin.value!!
+        val epochA = c.linkEpoch.value
+        ws.send(
+            """{"type":"created","session":{"id":"s-new","provider":"claude","name":"n","cwd":"/w","status":"ready",
+               "startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"},"requestId":"r-1"}""",
+        )
+        await(c.sessions) { list -> list.any { it.id == "s-new" } }
+        // Positive control, still on A: recorded, and on A's wire.
+        assertTrue(c.sendFirst("s-new", "first words for A", originA, epochA))
+        assertTrue(framesUntilBarrier(a).any { it.type() == "send" && it.s("text") == "first words for A" })
+
+        loginTo(b)
+        assertFalse("the switch landed: refused, nothing recorded", c.sendFirst("s-new", "private prompt for A only", originA, epochA))
+        val bws = b.nextSocket()
+        bws.send(readyWithClaude)
+        assertEquals("hello", b.frame().type())
+        await(c.connection) { it == ConnectionState.Connected }
+        assertFalse("B's socket is not the create's", c.sendFirst("s-new", "private prompt for A only", originA, c.linkEpoch.value))
+        assertFalse("nor is B the create's server", c.sendFirst("s-new", "private prompt for A only", b.origin(), c.linkEpoch.value))
+        assertTrue(framesUntilBarrier(b).none { it.type() == "send" })
+        assertTrue("nothing of the prompt reached B", b.allFrames.none { it.contains("private prompt for A only") })
+        assertTrue("nor A", a.allFrames.none { it.contains("private prompt for A only") })
     }
 }

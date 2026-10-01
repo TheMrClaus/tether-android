@@ -13,6 +13,7 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.SessionModelOption
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 
 /** ta-895: the New session picker's seeded catalog (the owner's case: two Claude accounts). */
 object NewSessionFixtures {
@@ -78,6 +79,9 @@ class PickerClient(
     override val consentOrigin = MutableStateFlow<String?>(NewSessionFixtures.ORIGIN)
     override val createdSessions = MutableStateFlow<CreatedReply?>(null)
     override val createErrors = MutableStateFlow<CreateErrorReply?>(null)
+    // Delegation forwards the interface's defaults to [inner]: these read THIS client's replies.
+    override val createdReplies = createdSessions.filterNotNull()
+    override val createErrorReplies = createErrors.filterNotNull()
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
 
     var catalogRequests = 0

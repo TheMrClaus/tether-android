@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.WebSocket
@@ -290,6 +291,77 @@ class NewSessionTransmissionTest {
             assertEquals("Skipping tool approvals needs a browser sign-in, not a paired device.", engine.state.value.error)
             assertFalse(engine.state.value.creating)
             assertEquals("never resent", 1, creates().size)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** ta-8cv r2 (security F2): two replies back to back are both carried, in order, stamped and recorded. */
+    @Test
+    fun twoRepliesBackToBackAreBothCarriedAndRecorded() {
+        val (client, ws) = withCatalog()
+        val got = java.util.concurrent.CopyOnWriteArrayList<CreatedReply>()
+        val errors = java.util.concurrent.CopyOnWriteArrayList<CreateErrorReply>()
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { client.createdReplies.collect { got += it } }
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { client.createErrorReplies.collect { errors += it } }
+            ws.send(createdFrame("new", "r-1"))
+            ws.send(createdFrame("resumed", null))
+            ws.send("""{"type":"error","message":"no","requestId":"r-2"}""")
+            ws.send("""{"type":"error","message":"other"}""")
+            h.await(client.createErrors) { it?.message == "other" }
+            assertEquals("the latest-value flow keeps only the last", "resumed", client.createdSessions.value?.session?.id)
+            assertEquals(listOf("new", "resumed"), got.map { it.session.id })
+            assertEquals(listOf("r-2", null), errors.map { it.requestId })
+            assertTrue(got.all { it.linkEpoch == client.linkEpoch.value })
+            assertEquals("new", (client.createReply("r-1") as CreateReplyRecord.Created).reply.session.id)
+            assertEquals("no", (client.createReply("r-2") as CreateReplyRecord.Failed).reply.message)
+            assertEquals(null, client.createReply("r-3"))
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /**
+     * ta-8cv r2 (security F2), end to end: the server answers the create and the socket closes; the
+     * link is seen gone BEFORE the `created` is delivered. The answer the client recorded stands:
+     * the session is opened, never reported as not created, and its first message (which cannot go
+     * on another socket) is kept as that session's draft.
+     */
+    @Test
+    fun aDropSeenBeforeTheCreatedStillCompletesTheCreateEndToEnd() {
+        val (client, ws) = withCatalog()
+        val origin = client.consentOrigin.value
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
+        try {
+            val engine = DraftComposerModel(
+                client,
+                com.tether.app.ui.prefs.InMemoryDraftStore(),
+                scope,
+                { "/w" },
+                saveSessionDraft = { _, sessionId, text -> saved += "$sessionId:$text" },
+                newRequestId = { "e2e-3" },
+                onSessionCreated = { opened += it },
+            )
+            engine.refresh()
+            engine.selectProvider("claude")
+            engine.setText("first words")
+            assertEquals(DraftSubmitResult.Sent, engine.submit(origin))
+            val epoch = client.linkEpoch.value
+            ws.send(createdFrame("s-new", "e2e-3"))
+            h.await(client.createdSessions) { it?.requestId == "e2e-3" }
+            h.enqueueConnect()
+            ws.close(1001, null)
+            h.await(client.connection) { it == ConnectionState.Disconnected }
+            engine.onLink(client.connection.value, epoch)
+            assertFalse(engine.state.value.creating)
+            assertEquals("", engine.state.value.error)
+            assertEquals(listOf("s-new"), opened)
+            assertEquals(listOf("s-new:first words"), saved)
+            assertTrue("nothing was sent", h.received.toList().none { it.contains("\"type\":\"send\"") })
         } finally {
             scope.cancel()
         }
