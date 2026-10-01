@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.tether.app.ui.components.DisabledOpacity
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.softShadow
 import com.tether.app.ui.icons.TetherIcons
@@ -123,7 +124,11 @@ internal fun SettingsSection(
     }
 }
 
-/** `.settings-row` title (`strong`, 14/650, 1.5) and caption (`small`, 12 muted, 1.6). */
+/**
+ * `.settings-row` title (`strong`, 14/650, 1.5) and caption (`small`, 12 muted, 1.6). [locked]
+ * (ta-t7l): the `.settings-env-badge` Lock glyph after the title, named "Set by environment"
+ * (settings-dialog.tsx:144), for a value an environment variable forces.
+ */
 @Composable
 internal fun SettingsRowText(
     title: String,
@@ -131,6 +136,7 @@ internal fun SettingsRowText(
     modifier: Modifier = Modifier,
     tip: String? = null,
     titleColor: Color = LocalTetherTokens.current.ink,
+    locked: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -138,6 +144,14 @@ internal fun SettingsRowText(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, color = titleColor, style = settingsText(type.ui, 14f, 650, lineHeight = 1.5f))
+            if (locked) {
+                Icon(
+                    TetherIcons.Lock,
+                    contentDescription = ENV_LOCK_LABEL,
+                    tint = t.muted,
+                    modifier = Modifier.testTag(SettingsTags.EnvLock).padding(start = 5.dp).size(12.dp),
+                )
+            }
             if (tip != null) SettingsTip(tip, open = tipOpen, onToggle = { tipOpen = !tipOpen })
         }
         if (caption != null) {
@@ -242,11 +256,12 @@ internal fun SettingsToggleRow(
     narrow: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    locked: Boolean = false,
 ) {
     SettingsRow(
         narrow = narrow,
         inline = true,
-        modifier = modifier.toggleable(
+        modifier = modifier.alpha(if (enabled) 1f else DisabledOpacity).toggleable(
             value = checked,
             enabled = enabled,
             interactionSource = remember { MutableInteractionSource() },
@@ -254,7 +269,7 @@ internal fun SettingsToggleRow(
             role = Role.Switch,
             onValueChange = { onToggle() },
         ),
-        text = { m -> SettingsRowText(title, AnnotatedString(caption), m, tip = tip) },
+        text = { m -> SettingsRowText(title, AnnotatedString(caption), m, tip = tip, locked = locked) },
         control = { SettingsSwitchTrack(checked) },
     )
 }
@@ -360,3 +375,6 @@ internal fun ComingSoonNote(text: String, modifier: Modifier = Modifier) {
         Text(text, color = t.muted, style = settingsText(type.ui, 13f, 400, lineHeight = 1.6f))
     }
 }
+
+/** The env lock's accessible name (settings-dialog.tsx:144 `aria-label="Set by environment"`). */
+internal const val ENV_LOCK_LABEL = "Set by environment"

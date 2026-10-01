@@ -62,6 +62,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.ServerSettingsView
 import com.tether.app.client.TetherClient
 import com.tether.app.client.serverOrigin
 import com.tether.app.ui.components.CssBorder
@@ -98,6 +99,7 @@ object SettingsDialogTags {
 internal object SettingsTags {
     const val TipBubble = "settings-tip-bubble"
     const val ComingSoon = "settings-coming-soon"
+    const val EnvLock = "settings-env-lock"
 }
 
 /**
@@ -164,6 +166,17 @@ fun SettingsDialog(
     val server by client.serverUrl.collectAsStateWithLifecycle()
     val configured by client.configured.collectAsStateWithLifecycle()
     val claudeAccounts = ClaudeAccountsBinding(client.claudeAccounts, if (configured) serverOrigin(server) else null)
+    // ta-t7l: Advanced and Metadata, read from the client's per-server frames and written back to
+    // the server they were drawn from (the client refuses a write once the socket is another's).
+    val advanced by client.advancedSettings.collectAsStateWithLifecycle()
+    LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestAdvancedSettings() }
+    val writer = remember(client) { ClientSettingsWriter(client) }
+    val serverBinding = ServerSettingsBinding(
+        settings = serverSettings?.let(ServerSettingsView::of),
+        advanced = advanced,
+        origin = if (configured) serverOrigin(server) else null,
+        writer = writer,
+    )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = LocalView.current
@@ -177,6 +190,7 @@ fun SettingsDialog(
             onClose = onDismiss,
             layout = layout,
             claudeAccounts = claudeAccounts,
+            serverSettings = serverBinding,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -209,6 +223,8 @@ fun SettingsFrame(
      */
     initialPreferences: TetherPreferences? = null,
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
+    /** ta-t7l: the Advanced and Metadata tabs' server settings; its `restartRequired` also raises the banner. */
+    serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -262,7 +278,8 @@ fun SettingsFrame(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (restartRequired) RestartBanner(narrow)
+                // settings-dialog.tsx:1998: the server's own `restartRequired`, as its last reply says.
+                if (restartRequired || serverSettings.settings?.restartRequired == true) RestartBanner(narrow)
                 Box(Modifier.testTag(SettingsDialogTags.panel(state.tab))) {
                     SettingsPanel(
                         tab = state.tab,
@@ -272,6 +289,7 @@ fun SettingsFrame(
                         currentWorkspace = currentWorkspace,
                         narrow = narrow,
                         claudeAccounts = claudeAccounts,
+                        serverSettings = serverSettings,
                     )
                 }
             }
@@ -464,3 +482,9 @@ private fun rememberDialogIn(): Animatable<Float, *> {
 
 /** settings-dialog.tsx:2000, the banner's words. */
 const val RESTART_REQUIRED = "Some changes need a server restart to take effect."
+
+/** The app's [ServerSettingsWriter]: the client's origin-bound settings writes. */
+private class ClientSettingsWriter(private val client: TetherClient) : ServerSettingsWriter {
+    override fun patch(patch: kotlinx.serialization.json.JsonObject, origin: String) = client.setServerSettings(patch, origin)
+    override fun cliVersion(message: com.tether.app.protocol.ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
+}

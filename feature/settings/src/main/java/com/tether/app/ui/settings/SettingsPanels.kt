@@ -3,6 +3,7 @@ package com.tether.app.ui.settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -11,6 +12,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import com.tether.app.client.ServerSetting
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
@@ -44,6 +46,7 @@ internal fun SettingsPanel(
     currentWorkspace: String,
     narrow: Boolean,
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
+    serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
@@ -51,8 +54,10 @@ internal fun SettingsPanel(
         SettingsTab.Devices -> DevicesPanel(prefs, narrow)
         SettingsTab.Nodes -> NodesPanel(narrow)
         SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts)
-        SettingsTab.Metadata -> MetadataPanel(narrow)
-        SettingsTab.Advanced -> AdvancedPanel(narrow)
+        // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
+        // masked, every half-typed field dropped; a dropped edit is bound to its own server).
+        SettingsTab.Metadata -> key(serverSettings.origin) { MetadataPanel(narrow, serverSettings) }
+        SettingsTab.Advanced -> key(serverSettings.origin) { AdvancedPanel(narrow, serverSettings) }
     }
 }
 
@@ -222,23 +227,102 @@ private fun EnginesPanel(narrow: Boolean, claudeAccounts: ClaudeAccountsBinding)
     }
 }
 
-/** Metadata (settings-dialog.tsx `settings-panel-metadata`): the slot for ta-t7l. */
+/**
+ * Metadata (settings-dialog.tsx 887c222 :2257-2320): the master switch, then the provider
+ * selection: Mode, and the provider / model as a select of the configured fallback list (with a
+ * "Custom" row for a hand-entered value) or, without a readable list, a free-text field.
+ */
 @Composable
-private fun MetadataPanel(narrow: Boolean) {
-    SettingsSection(
-        "Metadata generation",
-        AnnotatedString("Atomic one-shot LLM calls that draft session titles, branch names, commit messages, and PR title+body. Runs alongside the agent without interrupting the turn."),
-        narrow,
-        last = true,
-    ) {
-        ComingSoonNote("The metadata settings and their provider selection are coming to the app in a later update.")
+private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
+    val view = binding.settings
+    Column {
+        if (view == null) {
+            SettingsSection(MetadataRows.GENERATION, AnnotatedString(MetadataRows.GENERATION_CAPTION), narrow, last = true) { ServerSettingsLoading() }
+            return@Column
+        }
+        SettingsSection(MetadataRows.GENERATION, AnnotatedString(MetadataRows.GENERATION_CAPTION), narrow) {
+            ServerToggleRow(MetadataRows.enabled, view, binding, narrow)
+        }
+        SettingsSection(MetadataRows.SELECTION, AnnotatedString(MetadataRows.SELECTION_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("selection")), last = true) {
+            ServerSelectRow(MetadataRows.mode, MetadataRows.modes, view, binding, narrow)
+            val manual = view.choice(ServerSetting.MetadataGenerationMode) == "manual"
+            val providers = MetadataRows.parseProviders(view.text(ServerSetting.MetadataGenerationProviders))
+            val row = ServerRow(ServerSetting.MetadataGenerationProvider, MetadataRows.PROVIDER, "", "", MetadataRows.PROVIDER_PLACEHOLDER)
+            if (providers != null) {
+                ServerSelectRow(
+                    row,
+                    MetadataRows.providerOptions(view, providers),
+                    view,
+                    binding,
+                    narrow,
+                    description = MetadataRows.providerSelectDescription(manual),
+                    tip = MetadataRows.PROVIDER_SELECT_TIP,
+                )
+            } else {
+                ServerTextRow(row.copy(description = MetadataRows.providerTextDescription(manual), tip = MetadataRows.PROVIDER_TEXT_TIP), view, binding, narrow)
+            }
+        }
     }
 }
 
-/** Advanced (settings-dialog.tsx `settings-panel-advanced`): the slot for ta-t7l. */
+/**
+ * Advanced (settings-dialog.tsx 887c222 :2321-2449), in the web's order: Network, Authentication
+ * (the two secrets, masked), Storage, GitHub connection, Session lifecycle, Session defaults, then
+ * Claude CLI. Every row writes at once (`set-server-settings` with only its key); a value an
+ * environment variable forces is locked. The restart banner above follows the server's
+ * `restartRequired` in its reply. None of these rows sets what the server RUNS (the engine homes,
+ * commands and launch command are on Engines, ta-dh1, behind a confirmation).
+ *
+ * Not here: the GitHub connection card (the `/api/github/connection` routes, MATRIX row `/api/github/...`, T8.4)
+ * holds its place with a note; the active Codex / opencode session's provider controls
+ * (settings-dialog.tsx:2380-2420, shown on the web only while such a session is open) stay in that
+ * session's composer (T7.2).
+ */
 @Composable
-private fun AdvancedPanel(narrow: Boolean) {
-    SettingsSection("Server settings", AnnotatedString("How the server runs: network, authentication, storage, session lifecycle and defaults, and the Claude CLI."), narrow, last = true) {
-        ComingSoonNote("The server's advanced settings are coming to the app in a later update. A change that needs a restart is flagged at the top of Settings.")
+private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding) {
+    val view = binding.settings
+    Column {
+        if (view == null) {
+            SettingsSection("Server settings", null, narrow) { ServerSettingsLoading() }
+        } else {
+            SettingsSection(AdvancedRows.NETWORK, AnnotatedString(AdvancedRows.NETWORK_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("network"))) {
+                ServerTextRow(AdvancedRows.host, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.port, view, binding, narrow)
+            }
+            SettingsSection(AdvancedRows.AUTH, AnnotatedString(AdvancedRows.AUTH_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("auth"))) {
+                ServerSecretRow(AdvancedRows.password, view, binding, narrow)
+                ServerSecretRow(AdvancedRows.proxyToken, view, binding, narrow)
+            }
+            SettingsSection(AdvancedRows.STORAGE, AnnotatedString(AdvancedRows.STORAGE_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("storage"))) {
+                ServerTextRow(AdvancedRows.stateDir, view, binding, narrow)
+                ServerTextRow(AdvancedRows.workspaceRoot, view, binding, narrow)
+            }
+            // T8.4 (MATRIX `/api/github/*`): GitHubConnectionSection is not ported in this slice.
+            SettingsSection(AdvancedRows.GITHUB, AnnotatedString(AdvancedRows.GITHUB_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.GitHub)) {
+                ComingSoonNote(AdvancedRows.GITHUB_LATER)
+            }
+            SettingsSection(AdvancedRows.LIFECYCLE, AnnotatedString(AdvancedRows.LIFECYCLE_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("lifecycle"))) {
+                ServerToggleRow(AdvancedRows.claudePersistent, view, binding, narrow)
+                ServerToggleRow(AdvancedRows.claudeTaskTelemetry, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.warmMaxSessions, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.maxConcurrentTurns, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.warmIdleEvictionMs, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.warmBgHardCapMs, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.warmSweepMs, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
+                ServerSelectRow(AdvancedRows.messageInterruptMode, AdvancedRows.messageInterruptModes, view, binding, narrow)
+                ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
+                ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)
+            }
+            SettingsSection(AdvancedRows.DEFAULTS, AnnotatedString(AdvancedRows.DEFAULTS_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("defaults"))) {
+                ServerSelectRow(AdvancedRows.defaultPermissionMode, AdvancedRows.permissionModes, view, binding, narrow)
+                ServerSelectRow(AdvancedRows.defaultSandboxPolicy, AdvancedRows.sandboxPolicies, view, binding, narrow)
+                ServerToggleRow(AdvancedRows.defaultUseWorktree, view, binding, narrow)
+                ServerRootsRow(AdvancedRows.allowedRoots, view, binding, narrow)
+                ServerRootsRow(AdvancedRows.spawnExtraWritableRoots, view, binding, narrow)
+                ServerSelectRow(AdvancedRows.preferSpawnAgent, AdvancedRows.preferSpawnAgents, view, binding, narrow)
+            }
+        }
+        ClaudeCliSection(binding, narrow)
     }
 }
