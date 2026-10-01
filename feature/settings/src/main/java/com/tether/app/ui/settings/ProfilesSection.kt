@@ -232,7 +232,8 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                 val subtitle = if (command.isEmpty()) AnnotatedString(p.extends) else buildAnnotatedString {
                     append(p.extends)
                     append(" · ")
-                    append(codeLabel(command.joinToString(" ")))
+                    // Mono with no ligatures, so `--flag` is never drawn as a dash.
+                    withStyle(SpanStyle(fontFamily = type.mono, fontFeatureSettings = "liga 0, calt 0")) { append(codeLabel(command.joinToString(" "))) }
                 }
                 Text(subtitle, color = t.muted, maxLines = 2, style = settingsText(type.ui, 12f, 400, lineHeight = 1.5f), modifier = Modifier.testTag(ProfileTags.subtitle(p.id)))
             }

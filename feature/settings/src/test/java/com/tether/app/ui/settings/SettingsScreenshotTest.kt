@@ -47,6 +47,7 @@ enum class SettingsShot(
     val restart: Boolean = false,
     val accounts: AccountsShot? = null,
     val server: ServerShot? = null,
+    val profiles: ProfilesShot? = null,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
@@ -68,6 +69,30 @@ enum class SettingsShot(
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
     EnginesMissing("settings-engines-missing", SettingsTab.Engines, server = ServerShot.EnginesMissing),
     EnginesLocked("settings-engines-locked", SettingsTab.Engines, server = ServerShot.EnginesLocked),
+    Profiles("settings-profiles", SettingsTab.Engines, profiles = ProfilesShot.Loaded),
+    ProfilesEnv("settings-profiles-env", SettingsTab.Engines, profiles = ProfilesShot.Masked),
+    ProfilesRevealed("settings-profiles-revealed", SettingsTab.Engines, profiles = ProfilesShot.Revealed),
+}
+
+/**
+ * ta-q6p: the Custom providers seeds, timing-free like the others: the list is built HERE and handed
+ * in, so the first frame is the drawn editor and nothing is fetched or written (the writer behind it
+ * fails the shot if asked). `settings-profiles` the section's top (the caption and the Gemini CLI
+ * acp card), `-env` the env editor with its value masked, `-revealed` the same with the value shown
+ * (an obviously FAKE key; the one tap of the shot, a synchronous state change on the hand clock).
+ */
+enum class ProfilesShot(val scrollTo: String, val reveal: Boolean = false) {
+    Loaded(ProfileTags.Section),
+    Masked(ProfileTags.row("gemini", ProfileTags.ENV)),
+    Revealed(ProfileTags.row("gemini", ProfileTags.ENV), reveal = true),
+    ;
+
+    fun binding() = ProvidersBinding(ProfileFixtures.list(), ProfileFixtures.ORIGIN, NeverWritesProviders)
+}
+
+/** The providers writer behind a seeded shot: a write is a timing dependency (and a bug), so it fails the shot. */
+private object NeverWritesProviders : ProvidersWriter {
+    override fun setProviders(write: com.tether.app.client.ProvidersWrite, origin: String): Boolean = error("a seeded shot must not write")
 }
 
 /**
@@ -186,6 +211,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             initialPreferences = stored,
             claudeAccounts = shot.accounts?.binding() ?: ClaudeAccountsBinding.None,
             serverSettings = shot.server?.binding() ?: ServerSettingsBinding.None,
+            providers = shot.profiles?.binding() ?: ProvidersBinding.None,
         )
     }
     mainClock.advanceTimeBy(600)
@@ -195,7 +221,12 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
-    (shot.accounts?.scrollTo ?: shot.server?.scrollTo)?.let { scrollTo ->
+    if (shot.profiles?.reveal == true) {
+        onNodeWithTag(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
+    (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo)?.let { scrollTo ->
         // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
         // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
         // shows), and the scroll runs out on the hand-driven clock.
@@ -246,7 +277,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata and the engine cards; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards and the custom providers; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -255,6 +286,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
