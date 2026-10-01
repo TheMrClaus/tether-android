@@ -2,6 +2,7 @@ package com.tether.app.ui.settings
 
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
+import com.tether.app.client.ProvidersRefusal
 import com.tether.app.client.ProvidersWrite
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.TetherJson
@@ -19,9 +20,9 @@ object ProfileFixtures {
     /** Goldens: an obviously fake value for the revealed shot. */
     const val FAKE_KEY = "FAKE-demo-api-key-0000"
 
-    fun gemini(env: String = FAKE_KEY, command: String = """["gemini","--experimental-acp"]""") =
-        """{"id":"gemini","extends":"acp","label":"Gemini CLI","command":$command,"homeDir":"/srv/homes/gemini",""" +
-            """"env":{"GEMINI_API_KEY":"$env"},"dropEnv":["GEMINI"],"enabled":true,"order":1,"verifiedThrough":"0.43.0"}"""
+    fun gemini(env: String = FAKE_KEY, command: String = """["gemini","--experimental-acp"]""", extraEnv: String = "", extends: String = "acp") =
+        """{"id":"gemini","extends":"$extends","label":"Gemini CLI","command":$command,"homeDir":"/srv/homes/gemini",""" +
+            """"env":{"GEMINI_API_KEY":"$env"$extraEnv},"dropEnv":["GEMINI"],"enabled":true,"order":1,"verifiedThrough":"0.43.0"}"""
 
     const val WORK = """{"id":"claude-work","extends":"claude","label":"Claude Code (work)","homeDir":"/srv/homes/claude-work",""" +
         """"models":[{"id":"claude-opus-4","isDefault":true},{"id":"claude-sonnet-4","label":"Sonnet"}],"disallowedTools":["WebSearch"],"enabled":true}"""
@@ -32,11 +33,11 @@ object ProfileFixtures {
 
     fun profiles(vararg p: String) = "[${p.joinToString(",")}]"
 
-    fun list(profiles: String = profiles(gemini(), WORK, zai()), generation: Long = 1): ProvidersList =
-        ProvidersList.of(ServerMessage.parse("""{"type":"providers","profiles":$profiles}""") as ServerMessage.Providers, generation)
+    fun list(profiles: String = profiles(gemini(), WORK, zai()), generation: Long = 1, epoch: Long = 0L): ProvidersList =
+        ProvidersList.of(ServerMessage.parse("""{"type":"providers","profiles":$profiles}""") as ServerMessage.Providers, generation, epoch)
 
-    fun list(objects: List<JsonObject>, generation: Long): ProvidersList =
-        ProvidersList.of(ServerMessage.Providers(objects), generation)
+    fun list(objects: List<JsonObject>, generation: Long, epoch: Long = 0L): ProvidersList =
+        ProvidersList.of(ServerMessage.Providers(objects), generation, epoch)
 
     fun binding(list: ProvidersList? = list(), writer: ProvidersWriter = ProvidersWriter.None, origin: String? = ORIGIN) =
         ProvidersBinding(list, origin, writer)
@@ -57,19 +58,22 @@ class RecordingProvidersWriter(
     private val reply: (ProvidersWrite) -> Unit = {},
 ) : ProvidersWriter {
     val writes = mutableListOf<Pair<ProvidersWrite, String>>()
-    val refused = mutableListOf<String>()
+    val refused = mutableListOf<ProvidersRefusal>()
+
+    /** A refusal to answer every write with (as the client would, e.g. a write in flight). */
+    var refuseWith: ProvidersRefusal? = null
 
     /** The frames as sent. */
     fun frames(): List<JsonObject> = writes.map { ProfileFixtures.json(it.first.message.encode()) }
 
-    override fun setProviders(write: ProvidersWrite, origin: String): Boolean {
-        val why = ProvidersPatch.refusal(write, newest())
+    override fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? {
+        val why = refuseWith ?: ProvidersPatch.refusal(write, newest())
         if (why != null) {
             refused += why
-            return false
+            return why
         }
         writes += write to origin
         reply(write)
-        return true
+        return null
     }
 }

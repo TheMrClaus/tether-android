@@ -63,6 +63,18 @@ import com.tether.app.client.ProfileLimits
 import com.tether.app.client.ProfileModel
 import com.tether.app.client.ProvidersPatch
 import com.tether.app.client.SecretText
+import com.tether.app.client.EnvChange
+import com.tether.app.client.RiskyEnvKeys
+import com.tether.app.client.RunsSnapshot
+import com.tether.app.client.jsTrim
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.ParagraphStyle
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.styledDisplay
+import com.tether.app.ui.text.tokenStyle
+import kotlinx.coroutines.delay
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
@@ -117,6 +129,20 @@ object ProfileTags {
     const val Confirm = "profile-confirm-change"
     const val Cancel = "profile-confirm-cancel"
 
+    // r2: the env and engine confirmations, the refusal notes.
+    const val ConfirmAction = "profile-confirm-action"
+    const val ConfirmNewMasked = "profile-confirm-new-masked"
+    const val ConfirmNewValue = "profile-confirm-new-value"
+    const val ConfirmNewReveal = "profile-confirm-new-reveal"
+    const val ConfirmNowMasked = "profile-confirm-now-masked"
+    const val ConfirmNowValue = "profile-confirm-now-value"
+    const val ConfirmNowReveal = "profile-confirm-now-reveal"
+    const val ConfirmCommand = "profile-confirm-command"
+    const val ConfirmHome = "profile-confirm-home"
+    const val Notice = "profiles-notice"
+    fun notice(id: String) = "profile-notice:$id"
+    fun envNewNote(id: String) = "profile-env-new-note:$id"
+
     const val LABEL = "label"
     const val ID = "id"
     const val EXTENDS = "extends"
@@ -130,6 +156,32 @@ object ProfileTags {
 }
 
 /**
+ * What the editor's rows act through (r2): the binding, the epoch of the list they draw (a review
+ * carries it, so a reconnect closes it), the opener of a confirmation and the reporter of what
+ * became of a write (a refusal is never silent, security F4).
+ */
+internal class ProfileActions(
+    val binding: ProvidersBinding,
+    val epoch: Long,
+    val review: (ProfileReview) -> Unit,
+    /** What became of a write on profile id; `built` is the list it was built from (epoch, generation). */
+    private val report: (id: String, result: ProvidersSend, quiet: Boolean, built: Pair<Long, Long>?) -> Unit,
+    /** Says [message] on profile [id]'s card. */
+    val notice: (id: String, message: String) -> Unit,
+) {
+    /** A plain edit of profile [id]; a refusal shows on its card unless [quiet] (a field says it itself). */
+    fun send(id: String, edit: ProfileEdit, quiet: Boolean = false): ProvidersSend {
+        val built = binding.latest()?.let { it.epoch to it.generation }
+        return binding.send(edit).also { report(id, it, quiet, built) }
+    }
+
+    fun confirmed(r: ProfileReview): ProvidersSend {
+        val built = binding.latest()?.let { it.epoch to it.generation }
+        return binding.sendConfirmed(r.edit, r.snapshot).also { report(r.profileId, it, false, built) }
+    }
+}
+
+/**
  * Custom providers (settings-dialog.tsx 887c222 :621-1000 `ProfilesEditor`, drawn at :2237 under
  * Claude accounts), for ONE server (the panel keys it on [ProvidersBinding.origin], so another
  * server's editor starts from nothing: every env value masked, no half-typed field, no pending
@@ -139,23 +191,54 @@ object ProfileTags {
  * - every write is the WHOLE list (`set-providers` replaces it), built when it is sent from the
  *   client's newest list with one edit applied ([ProvidersBinding.send]). Each field is filled from
  *   its own server value and refilled when that value changes (the web's `key={value}` remount),
- *   so a concurrent edit elsewhere is shown, and never undone by a write from here;
- * - a profile's command and home set what the server RUNS: a field never writes on its own (not
- *   on a focus loss, a close, a tab change or a recreation). Done only opens [ProfileConfirmDialog],
- *   which shows the new value and the current one by the exact rule; its Change key builds the
- *   write at that moment from the newest list. Cancel, Back and a tap outside send nothing;
+ *   so a concurrent edit elsewhere is shown, and never undone by a write from here. r2: a write
+ *   while the last one still waits for its broadcast is refused, and a list from before a
+ *   reconnect is never written back;
+ * - what a profile RUNS (its command, home, engine and the [RiskyEnvKeys] env entries) is sent only
+ *   from a confirmation that shows the change ([ProfileConfirmDialog], [ExtendsConfirmDialog],
+ *   [EnvConfirmDialog]); the write carries what the confirmation showed as "Now" and is refused if
+ *   the profile runs anything else by then. Cancel, Back and a tap outside send nothing;
  * - env VALUES are secrets: masked by default (a fixed mask, the value not in the composition),
  *   revealed per row by a tap, re-masked on close, tab change, server switch, rotation and ON_STOP;
  *   the revealed field uses the password keyboard, offers no copy or cut, and sends only on Done;
  * - everything else follows the web (it writes as the web's blur does), but a configuration change
- *   never commits anything.
+ *   never commits anything;
+ * - r2 (security F4): a write that is refused says so (on the field, or on the card), and one the
+ *   server never confirms within [com.tether.app.client.ProvidersInFlight.TIMEOUT_MS] says so too.
  */
 @Composable
 internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val list = binding.list?.takeIf { binding.origin != null }
-    var pending by remember { mutableStateOf<ProfileRunsReview?>(null) }
+    var pending by remember { mutableStateOf<ProfileReview?>(null) }
+    var notices by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // The list the last sent write was built from (epoch, generation): unconfirmed if it is still the newest after the timeout.
+    var lastSent by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    val actions = remember(binding, list?.epoch) {
+        ProfileActions(
+            binding,
+            list?.epoch ?: 0L,
+            review = { pending = it },
+            report = { id, result, quiet, built ->
+                when (result) {
+                    ProvidersSend.Sent -> {
+                        notices = notices - id - ""
+                        lastSent = built
+                    }
+                    is ProvidersSend.Refused -> if (!quiet) notices = notices + (id to ProfileRows.notSaved(result.reason))
+                    ProvidersSend.NoChange -> Unit
+                }
+            },
+            notice = { id, message -> notices = notices + (id to message) },
+        )
+    }
+    LaunchedEffect(lastSent) {
+        val sent = lastSent ?: return@LaunchedEffect
+        delay(com.tether.app.client.ProvidersInFlight.TIMEOUT_MS)
+        val newest = binding.latest()
+        if (newest != null && newest.epoch == sent.first && newest.generation == sent.second) notices = notices + ("" to ProfileRows.UNCONFIRMED)
+    }
     val caption = buildAnnotatedString {
         val code = SpanStyle(fontFamily = type.mono)
         append(ProfileRows.CAPTION_1)
@@ -181,6 +264,7 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
         }
         val editable = list.writable
         if (!editable) ComingSoonNote(ProfileRows.READ_ONLY, modifier = Modifier.padding(bottom = 16.dp).testTag(ProfileTags.ReadOnly))
+        notices[""]?.let { NoticeLine(it, ProfileTags.Notice, Modifier.padding(bottom = 16.dp)) }
         if (list.profiles.isEmpty()) {
             // `.telemetry-empty`: the muted line.
             Text(
@@ -191,11 +275,11 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             )
         }
         list.profiles.forEachIndexed { index, profile ->
-            key(index, profile.id) { ProfileCard(profile, binding, editable, narrow, onReview = { pending = it }) }
+            key(index, profile.id) { ProfileCard(profile, actions, editable, narrow, notices[profile.id]) }
         }
         if (editable) {
             TetherKey(
-                onClick = { binding.send(ProfileEdit.Add) },
+                onClick = { actions.send("", ProfileEdit.Add) },
                 classes = KeyClasses.ButtonSecondary,
                 label = ProfileRows.ADD,
                 icon = TetherIcons.Plus,
@@ -204,15 +288,33 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             )
         }
     }
-    PendingProfileRuns(pending, binding) { pending = null }
+    PendingReview(pending, binding, actions) { pending = null }
+}
+
+/** A refusal or an unconfirmed write, said in the attention ink and announced. */
+@Composable
+private fun NoticeLine(text: String, tag: String, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Text(
+        text,
+        color = t.attentionInk,
+        style = settingsText(type.ui, 12f, 500, lineHeight = 1.5f),
+        modifier = modifier
+            .testTag(tag)
+            .fillMaxWidth()
+            .cssSurface(RoundedCornerShape(8.dp), t.attentionBg, null, emptyList())
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 /** `.engine-card` (:642-834): the head (glyph, name, engine and command, the switch), then the body's rows. */
 @Composable
-private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean, narrow: Boolean, onReview: (ProfileRunsReview) -> Unit) {
+private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, narrow: Boolean, notice: String?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val latest by rememberUpdatedState(binding)
+    val latest by rememberUpdatedState(actions)
     Column(
         Modifier
             .testTag(ProfileTags.card(p.id))
@@ -247,7 +349,8 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         role = Role.Switch,
-                        onValueChange = { latest.send(ProfileEdit.Enabled(p.id)) },
+                        // r2 (security F8): the value asked for, not a toggle of whatever is newest.
+                        onValueChange = { on -> latest.send(p.id, ProfileEdit.Enabled(p.id, on)) },
                     )
                     .semantics { contentDescription = ProfileRows.switchLabel(p) }
                     .sizeIn(minWidth = 48.dp, minHeight = 44.dp),
@@ -256,14 +359,15 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                 SettingsSwitchTrack(p.enabled)
             }
         }
+        if (notice != null) NoticeLine(notice, ProfileTags.notice(p.id), Modifier.padding(top = 12.dp))
         Spacer(Modifier.height(t.css.spaceSm + 12.dp))
         RowRule()
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
             ProfileTextRow(p, ProfileTags.LABEL, ProfileRows.LABEL, AnnotatedString(ProfileRows.LABEL_CAPTION), p.label, editable, narrow, first = true) {
-                latest.send(ProfileEdit.Label(p.id, it))
+                ProfileRows.outcome(latest.send(p.id, ProfileEdit.Label(p.id, it), quiet = true))
             }
             ProfileTextRow(p, ProfileTags.ID, ProfileRows.ID, AnnotatedString(ProfileRows.ID_CAPTION), p.id, editable, narrow) {
-                latest.send(ProfileEdit.Rename(p.id, it))
+                ProfileRows.outcome(latest.send(p.id, ProfileEdit.Rename(p.id, it), quiet = true))
             }
             SettingsRow(
                 narrow = narrow,
@@ -274,7 +378,8 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                         TetherSelect(
                             options = ProfileLimits.EXTENDS.map { TetherSelectOption(it, it) },
                             selectedValue = p.extends,
-                            onSelect = { latest.send(ProfileEdit.Extends(p.id, it.value)) },
+                            // r2 (owner decision B): another engine is confirmed first.
+                            onSelect = { choice -> ProfileRows.reviewExtends(p, choice.value, latest.epoch)?.let(latest.review) },
                             enabled = editable,
                             placeholder = LabelText.visibleValue(p.extends),
                             contentDescription = ProfileRows.field(p, ProfileTags.EXTENDS),
@@ -289,19 +394,19 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                     withStyle(SpanStyle(fontFamily = type.mono)) { append(ProfileRows.COMMAND_EXAMPLE) }
                     append(ProfileRows.COMMAND_CAPTION_2)
                 }
-                ProfileRunsRow(p, home = false, editable, narrow, onReview, ProfileRows.COMMAND, caption, ProfileRows.COMMAND_EXAMPLE)
+                ProfileRunsRow(p, home = false, editable, narrow, actions, ProfileRows.COMMAND, caption, ProfileRows.COMMAND_EXAMPLE)
             }
             val homeCaption = when {
                 p.extends == "acp" -> AnnotatedString(ProfileRows.HOME_ACP)
                 !p.homeDir.isNullOrEmpty() -> codeLabel(p.homeDir!!)
                 else -> AnnotatedString(ProfileRows.HOME_OPTIONAL)
             }
-            ProfileRunsRow(p, home = true, editable, narrow, onReview, ProfileRows.HOME, homeCaption, ProfileRows.HOME_PLACEHOLDER)
+            ProfileRunsRow(p, home = true, editable, narrow, actions, ProfileRows.HOME, homeCaption, ProfileRows.HOME_PLACEHOLDER)
             SettingsRow(
                 narrow = true,
                 modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.ENV)),
                 text = { m -> SettingsRowText(ProfileRows.ENV, AnnotatedString(ProfileRows.ENV_CAPTION), m) },
-                control = { m -> EnvEditor(p, binding, editable, narrow, m) },
+                control = { m -> EnvEditor(p, actions, editable, narrow, m) },
             )
             val dropCaption = buildAnnotatedString {
                 append(ProfileRows.DROP_ENV_CAPTION_1)
@@ -309,16 +414,16 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                 append(ProfileRows.DROP_ENV_CAPTION_2)
             }
             ProfileTextRow(p, ProfileTags.DROP_ENV, ProfileRows.DROP_ENV, dropCaption, p.dropEnv.joinToString(","), editable, narrow, placeholder = ProfileRows.DROP_ENV_EXAMPLE, label = "drop env prefixes") {
-                latest.send(ProfileEdit.DropEnv(p.id, it))
+                ProfileRows.outcome(latest.send(p.id, ProfileEdit.DropEnv(p.id, it), quiet = true))
             }
             ProfileTextRow(
                 p, ProfileTags.TOOLS, ProfileRows.TOOLS, AnnotatedString(ProfileRows.toolsCaption(p.extends)), p.disallowedTools.joinToString(","),
                 editable && p.extends == "claude", narrow, placeholder = ProfileRows.TOOLS_PLACEHOLDER, label = "disallowed tools",
             ) {
-                latest.send(ProfileEdit.DisallowedTools(p.id, it))
+                ProfileRows.outcome(latest.send(p.id, ProfileEdit.DisallowedTools(p.id, it), quiet = true))
             }
             ProfileTextRow(p, ProfileTags.ORDER, ProfileRows.ORDER, AnnotatedString(ProfileRows.ORDER_CAPTION), p.order?.toString().orEmpty(), editable, narrow, digits = true) {
-                latest.send(ProfileEdit.Order(p.id, it))
+                ProfileRows.outcome(latest.send(p.id, ProfileEdit.Order(p.id, it), quiet = true))
             }
             if (p.extends == "acp") {
                 val verified = buildAnnotatedString {
@@ -327,7 +432,7 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                     append(ProfileRows.VERIFIED_CAPTION_2)
                 }
                 ProfileTextRow(p, ProfileTags.VERIFIED, ProfileRows.VERIFIED, verified, p.verifiedThrough.orEmpty(), editable, narrow, placeholder = ProfileRows.VERIFIED_PLACEHOLDER, label = "verified through") {
-                    latest.send(ProfileEdit.VerifiedThrough(p.id, it))
+                    ProfileRows.outcome(latest.send(p.id, ProfileEdit.VerifiedThrough(p.id, it), quiet = true))
                 }
             }
             for (list in ModelList.entries) {
@@ -338,12 +443,12 @@ private fun ProfileCard(p: Profile, binding: ProvidersBinding, editable: Boolean
                         val (title, caption) = if (list == ModelList.Models) ProfileRows.MODELS to ProfileRows.MODELS_CAPTION else ProfileRows.ADDITIONAL to ProfileRows.ADDITIONAL_CAPTION
                         SettingsRowText(title, AnnotatedString(caption), m)
                     },
-                    control = { m -> ModelListEditor(p, list, binding, editable, narrow, m) },
+                    control = { m -> ModelListEditor(p, list, actions, editable, narrow, m) },
                 )
             }
             if (editable) {
                 TetherKey(
-                    onClick = { latest.send(ProfileEdit.Remove(p.id)) },
+                    onClick = { latest.send(p.id, ProfileEdit.Remove(p.id)) },
                     classes = KeyClasses.ButtonSecondary,
                     label = ProfileRows.REMOVE,
                     contentDescription = "${ProfileRows.REMOVE} ${ProfileRows.name(p)}",
@@ -373,7 +478,7 @@ private fun ProfileTextRow(
     placeholder: String = "",
     label: String = what,
     digits: Boolean = false,
-    onCommit: (String) -> Unit,
+    onCommit: (String) -> CommitOutcome,
 ) {
     val shown = remember(value) { LabelText.withoutHidden(value) }
     SettingsRow(
@@ -400,8 +505,8 @@ private fun ProfileTextRow(
 
 /**
  * The command or home row (what the profile RUNS): like the engine rows (EnginesSection.kt), the
- * field never writes; Done hands its review to [onReview] (the confirmation). While it holds an
- * edit Done would review, its caption says it is not saved yet.
+ * field never writes; Done opens its review (the confirmation). While it holds an edit Done would
+ * review, its caption says it is not saved yet.
  */
 @Composable
 private fun ProfileRunsRow(
@@ -409,7 +514,7 @@ private fun ProfileRunsRow(
     home: Boolean,
     editable: Boolean,
     narrow: Boolean,
-    onReview: (ProfileRunsReview) -> Unit,
+    actions: ProfileActions,
     title: String,
     caption: AnnotatedString,
     placeholder: String,
@@ -420,10 +525,12 @@ private fun ProfileRunsRow(
     val shown = remember(raw) { LabelText.withoutHidden(raw) }
     var text by remember(shown) { mutableStateOf(shown) }
     val latestProfile by rememberUpdatedState(p)
+    val latestActions by rememberUpdatedState(actions)
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
-    fun review(profile: Profile, typed: String) = if (home) ProfileRows.reviewHome(profile, typed, shown) else ProfileRows.reviewCommand(profile, typed, shown)
-    val edited = editable && review(p, text) != null
+    fun review(profile: Profile, typed: String, epoch: Long) =
+        if (home) ProfileRows.reviewHome(profile, typed, shown, epoch) else ProfileRows.reviewCommand(profile, typed, shown, epoch)
+    val edited = editable && review(p, text, 0L) != null
     SettingsRow(
         narrow = narrow,
         modifier = Modifier.testTag(ProfileTags.row(p.id, what)),
@@ -446,7 +553,7 @@ private fun ProfileRunsRow(
                 cursorBrush = SolidColor(t.violet),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
-                    review(latestProfile, text)?.let(onReview)
+                    review(latestProfile, text, latestActions.epoch)?.let(latestActions.review)
                     focusManager.clearFocus()
                 }),
                 modifier = m
@@ -461,39 +568,50 @@ private fun ProfileRunsRow(
 }
 
 /**
- * The pending command or home, confirmed or dropped (slice 4's machinery): a tap on Change only
- * ASKS; the write is built in the frame after it ([SideEffect]) from the newest list
- * ([ProvidersBinding.sendConfirmed]), once per confirmation (a double tap included). The
- * confirmation goes, sending nothing, when the list goes (signed out, another server), stops being
- * writable, loses the profile, or what the profile runs changes from what it showed as "Now".
+ * The pending confirmation, confirmed or dropped (slice 4's machinery): a tap on its confirm key
+ * only ASKS; the write is built in the frame after it ([SideEffect]) from the newest list, with
+ * what the confirmation showed as "Now" (r2, verifier F2: one read, the build refuses any other),
+ * once per confirmation (a double tap included). It goes, sending nothing, when the list goes
+ * (signed out, another server), stops being writable, came on another socket (r2, a reconnect),
+ * loses the profile, or the profile runs anything else than it showed; the card says so.
  */
 @Composable
-private fun PendingProfileRuns(pending: ProfileRunsReview?, binding: ProvidersBinding, onDone: () -> Unit) {
+private fun PendingReview(pending: ProfileReview?, binding: ProvidersBinding, actions: ProfileActions, onDone: () -> Unit) {
     val r = pending ?: return
-    val profile = binding.list?.takeIf { binding.origin != null && it.writable }?.profile(r.profileId)
-    if (profile == null || ProfileRows.runsNow(profile, r.home) != r.now) return SideEffect { onDone() }
+    val list = binding.list?.takeIf { binding.origin != null && it.writable }
+    val profile = list?.profile(r.profileId)
+    if (list == null || profile == null) return SideEffect { onDone() }
+    if (list.epoch != r.epoch || RunsSnapshot.of(profile) != r.snapshot) {
+        return SideEffect {
+            actions.notice(r.profileId, ProfileRows.CHANGED_WHILE_CONFIRMING)
+            onDone()
+        }
+    }
     var asked by remember(r) { mutableStateOf(false) }
     val fired = remember(r) { booleanArrayOf(false) }
     if (asked) {
         SideEffect {
             if (!fired[0]) {
                 fired[0] = true
-                // Built NOW, from the newest list; what the profile runs must still be what was shown.
-                val newest = binding.latest()?.profile(r.profileId)
-                if (newest != null && ProfileRows.runsNow(newest, r.home) == r.now) binding.sendConfirmed(r.edit)
+                actions.confirmed(r)
             }
             onDone()
         }
         return
     }
-    ProfileConfirmDialog(r, onConfirm = { asked = true }, onCancel = onDone)
+    val confirm = { asked = true }
+    when (r) {
+        is ProfileRunsReview -> ProfileConfirmDialog(r, onConfirm = confirm, onCancel = onDone)
+        is ExtendsReview -> ExtendsConfirmDialog(r, onConfirm = confirm, onCancel = onDone)
+        is EnvReview -> EnvConfirmDialog(r, onConfirm = confirm, onCancel = onDone)
+    }
 }
 
 /**
- * The confirmation for what a profile runs: the value that will be sent, then the current one, each
- * part on its own line and drawn by the exact rule ([ConfirmValueField]), so what is confirmed is
- * what is sent; the note when typing was rewritten (trimmed, or split at spaces). Change ignores
- * taps for [CONFIRM_ARM_MS] after the dialog appears ([ArmedConfirmKey]).
+ * The confirmation for a profile's command or home: the value that will be sent, then the current
+ * one, each part on its own line and drawn by the exact rule ([ConfirmValueField]), so what is
+ * confirmed is what is sent; the note when typing was rewritten (trimmed, or split at spaces).
+ * Change ignores taps for [CONFIRM_ARM_MS] after the dialog appears ([ArmedConfirmKey]).
  */
 @Composable
 internal fun ProfileConfirmDialog(r: ProfileRunsReview, onConfirm: () -> Unit, onCancel: () -> Unit) {
@@ -523,26 +641,184 @@ internal fun ProfileConfirmDialog(r: ProfileRunsReview, onConfirm: () -> Unit, o
     }
 }
 
-// ---- the env editor (:349-440) ---------------------------------------------------------------------
-
-/** EnvEditor: one entry per key (its name, its masked value, reveal and remove), then the add row. */
+/**
+ * r2 (owner decision B): the confirmation of another engine: the engine it changes to and the one
+ * now, then the command and the home as the new engine will run them (a Claude profile's command
+ * is hidden in the editor but the server still uses it, so it is shown here).
+ */
 @Composable
-private fun EnvEditor(p: Profile, binding: ProvidersBinding, editable: Boolean, narrow: Boolean, modifier: Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        p.envKeys.forEach { envKey -> key(envKey) { EnvEntry(p, envKey, binding, editable, narrow) } }
-        if (editable) EnvAddRow(p, binding, narrow)
+internal fun ExtendsConfirmDialog(r: ExtendsReview, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    TetherDialog(
+        onDismiss = onCancel,
+        title = ProfileRows.extendsTitle(r),
+        footer = {
+            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ProfileTags.Cancel))
+            ArmedConfirmKey(ProfileRows.ENGINE_ACTION, ProfileTags.Confirm, onConfirm)
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().testTag(ProfileTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TetherDialogText(ProfileRows.extendsBody(r))
+            ConfirmValueField(ProfileRows.ENGINE_NEW, listOf(r.to), "", ProfileTags.ConfirmNew)
+            ConfirmValueField(ProfileRows.ENGINE_NOW, listOf(r.from), "", ProfileTags.ConfirmNow)
+            ConfirmValueField(ProfileRows.ENGINE_COMMAND, r.command, "Empty — no command (the engine's own)", ProfileTags.ConfirmCommand)
+            ConfirmValueField(ProfileRows.ENGINE_HOME, listOfNotNull(r.home?.ifEmpty { null }), "Empty — the engine's dedicated home", ProfileTags.ConfirmHome)
+        }
     }
 }
 
 /**
- * One env entry. Its KEY is not secret: an ordinary field, renamed as the web's blur does. Its
- * VALUE is: masked ([MaskedWell]) until its own Reveal; revealed, the field holds it as it is
- * (password keyboard, no copy or cut) and sends only on Done ([CommitField] with neither blur nor
- * leave commits).
+ * r2 (owner decision A): the confirmation of a risky env key's add, change, rename or remove. The
+ * action and the key names are plain text (names by the exact rule); the values stay MASKED, each
+ * with its own reveal inside the dialog (plain text that cannot be selected or copied).
  */
 @Composable
-private fun EnvEntry(p: Profile, envKey: String, binding: ProvidersBinding, editable: Boolean, narrow: Boolean) {
-    val latest by rememberUpdatedState(binding)
+internal fun EnvConfirmDialog(r: EnvReview, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    TetherDialog(
+        onDismiss = onCancel,
+        title = ProfileRows.envTitle(r),
+        footer = {
+            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ProfileTags.Cancel))
+            ArmedConfirmKey(ProfileRows.ENV_CONFIRM, ProfileTags.Confirm, onConfirm)
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().testTag(ProfileTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TetherDialogText(ProfileRows.ENV_BODY)
+            val c = r.change
+            val keys = when (c) {
+                is EnvChange.Rename -> listOf(c.from, "→", c.to)
+                else -> c.keys
+            }
+            val action = remember(c, t) {
+                AnnotatedString.Builder().apply {
+                    append(ProfileRows.envAction(c))
+                    append(" ")
+                    withStyle(ParagraphStyle(textDirection = codeDirection)) {
+                        withStyle(SpanStyle(fontFamily = type.mono)) {
+                            keys.forEachIndexed { i, k ->
+                                if (i > 0) append(" ")
+                                if (k == "→") append(k) else append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(k)), tokenStyle(t)))
+                            }
+                        }
+                    }
+                }.toAnnotatedString()
+            }
+            Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(ProfileRows.ENV_ACTION_LABEL, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
+                Text(
+                    action,
+                    color = t.ink,
+                    style = settingsText(type.ui, 13f, 600, lineHeight = 1.5f),
+                    modifier = Modifier
+                        .testTag(ProfileTags.ConfirmAction)
+                        .fillMaxWidth()
+                        .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+            when (c) {
+                is EnvChange.Add -> MaskedConfirmValue(ProfileRows.CONFIRM_NEW_VALUE, c.value, ProfileTags.ConfirmNewMasked, ProfileTags.ConfirmNewValue, ProfileTags.ConfirmNewReveal)
+                is EnvChange.Change -> {
+                    MaskedConfirmValue(ProfileRows.CONFIRM_NEW_VALUE, c.value, ProfileTags.ConfirmNewMasked, ProfileTags.ConfirmNewValue, ProfileTags.ConfirmNewReveal)
+                    MaskedConfirmValue(ProfileRows.CONFIRM_NOW_VALUE, r.nowValue, ProfileTags.ConfirmNowMasked, ProfileTags.ConfirmNowValue, ProfileTags.ConfirmNowReveal)
+                }
+                is EnvChange.Remove -> MaskedConfirmValue(ProfileRows.CONFIRM_NOW_VALUE, r.nowValue, ProfileTags.ConfirmNowMasked, ProfileTags.ConfirmNowValue, ProfileTags.ConfirmNowReveal)
+                is EnvChange.Rename -> Unit
+            }
+        }
+    }
+}
+
+/** A value of a confirmation, masked until its own reveal ([rememberMaskedReveal]); revealed, drawn by the exact rule. */
+@Composable
+private fun MaskedConfirmValue(label: String, value: SecretText?, maskedTag: String, valueTag: String, revealTag: String) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    var revealed by rememberMaskedReveal()
+    val revealLabel = "$label of the variable"
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (revealed && value != null) {
+                // Only here is the plaintext read: drawn by the exact rule, in a Text (not selectable, not copyable).
+                val plain = value.reveal()
+                val shown = if (plain.isEmpty()) AnnotatedString(ProfileRows.ENV_EMPTY_VALUE) else AnnotatedString.Builder().apply {
+                    withStyle(ParagraphStyle(textDirection = codeDirection)) { append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(plain)), tokenStyle(t))) }
+                }.toAnnotatedString()
+                Text(
+                    shown,
+                    color = if (plain.isEmpty()) t.muted else t.ink,
+                    style = settingsText(type.mono, 13f, 400, lineHeight = 1.5f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(valueTag)
+                        .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            } else {
+                MaskedWell(
+                    tag = maskedTag,
+                    description = ServerRowCopy.maskedDescription(label, value?.isEmpty != false),
+                    hasValue = value?.isEmpty == false,
+                    placeholder = if (value?.isEmpty != false) ProfileRows.ENV_EMPTY_VALUE else "",
+                    narrow = false,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (value != null && !value.isEmpty) {
+                TetherKey(
+                    onClick = { revealed = !revealed },
+                    classes = KeyClasses.IconButton,
+                    icon = if (revealed) TetherIcons.EyeOff else TetherIcons.Eye,
+                    iconSize = 14.dp,
+                    contentDescription = if (revealed) ServerRowCopy.hide(revealLabel) else ServerRowCopy.reveal(revealLabel),
+                    modifier = Modifier.testTag(revealTag),
+                )
+            }
+        }
+    }
+}
+
+// ---- the env editor (:349-440) ---------------------------------------------------------------------
+
+/** EnvEditor: one entry per key (its name, its masked value, reveal and remove), then the add row. */
+@Composable
+private fun EnvEditor(p: Profile, actions: ProfileActions, editable: Boolean, narrow: Boolean, modifier: Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        p.envKeys.forEach { envKey -> key(envKey) { EnvEntry(p, envKey, actions, editable, narrow) } }
+        if (editable) EnvAddRow(p, actions, narrow)
+    }
+}
+
+/**
+ * One env change from the editor: a [RiskyEnvKeys] key opens its confirmation (r2, owner decision
+ * A); any other saves at once. A name already set on the profile is refused (r2, security F9).
+ */
+private fun envCommit(p: Profile, change: EnvChange, actions: ProfileActions, edit: ProfileEdit, quiet: Boolean): CommitOutcome {
+    val collides = when (change) {
+        is EnvChange.Rename -> change.to != change.from && change.to in p.envKeys
+        is EnvChange.Add -> change.key in p.envKeys
+        else -> false
+    }
+    if (collides) return CommitOutcome.Refused(ProfileRows.NOT_SAVED_COLLISION)
+    ProfileRows.reviewEnv(p, change, actions.epoch)?.let {
+        actions.review(it)
+        return CommitOutcome.Reviewing
+    }
+    return ProfileRows.outcome(actions.send(p.id, edit, quiet))
+}
+
+/**
+ * One env entry. Its KEY is not secret: an ordinary field, renamed as the web's blur does (a risky
+ * name, old or new, only by Done, into its confirmation). Its VALUE is: masked ([MaskedWell]) until
+ * its own Reveal; revealed, the field holds it as it is (password keyboard, no copy or cut) and
+ * sends only on Done ([CommitField] with neither blur nor leave commits).
+ */
+@Composable
+private fun EnvEntry(p: Profile, envKey: String, actions: ProfileActions, editable: Boolean, narrow: Boolean) {
+    val latest by rememberUpdatedState(actions)
+    val latestProfile by rememberUpdatedState(p)
     val secret = p.envValue(envKey)
     var revealed by rememberMaskedReveal()
     val valueLabel = ProfileRows.valueLabel(envKey)
@@ -556,12 +832,20 @@ private fun EnvEntry(p: Profile, envKey: String, binding: ProvidersBinding, edit
                 enabled = editable,
                 narrow = narrow,
                 placeholder = "",
-                onCommit = { latest.send(ProfileEdit.EnvKey(p.id, envKey, it)) },
+                blurCommits = { typed -> !RiskyEnvKeys.risky(envKey) && !RiskyEnvKeys.risky(jsTrim(typed)) },
+                onCommit = { typed ->
+                    val to = jsTrim(typed)
+                    if (to.isEmpty() || to == envKey) {
+                        CommitOutcome.Nothing
+                    } else {
+                        envCommit(latestProfile, EnvChange.Rename(envKey, to), latest, ProfileEdit.EnvKey(p.id, envKey, typed), quiet = true)
+                    }
+                },
                 modifier = Modifier.weight(1f),
             )
             if (editable) {
                 TetherKey(
-                    onClick = { latest.send(ProfileEdit.EnvRemove(p.id, envKey)) },
+                    onClick = { envCommit(latestProfile, EnvChange.Remove(envKey), latest, ProfileEdit.EnvRemove(p.id, envKey), quiet = false) },
                     classes = KeyClasses.IconButton,
                     icon = TetherIcons.X,
                     iconSize = 14.dp,
@@ -586,7 +870,9 @@ private fun EnvEntry(p: Profile, envKey: String, binding: ProvidersBinding, edit
                     commitOnBlur = false,
                     commitOnLeave = false,
                     noCopy = true,
-                    onCommit = { latest.send(ProfileEdit.EnvValue(p.id, envKey, SecretText(it))) },
+                    onCommit = { v ->
+                        envCommit(latestProfile, EnvChange.Change(envKey, SecretText(v)), latest, ProfileEdit.EnvValue(p.id, envKey, SecretText(v)), quiet = true)
+                    },
                     modifier = Modifier.weight(1f),
                 )
             } else {
@@ -616,23 +902,36 @@ private fun EnvEntry(p: Profile, envKey: String, binding: ProvidersBinding, edit
 /**
  * The add row (:415-437): NAME, the value, and Add (or Done in either field). The value is a secret
  * too: masked until revealed (typing needs the reveal, so a masked-looking field never holds
- * plaintext in the semantics tree), password keyboard, no copy or cut. Nothing is sent until Add.
+ * plaintext in the semantics tree), password keyboard, no copy or cut. Nothing is sent until Add;
+ * a risky NAME opens its confirmation; a NAME the profile has is refused and said so.
  */
 @Composable
-private fun EnvAddRow(p: Profile, binding: ProvidersBinding, narrow: Boolean) {
-    val latest by rememberUpdatedState(binding)
+private fun EnvAddRow(p: Profile, actions: ProfileActions, narrow: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val latest by rememberUpdatedState(actions)
+    val latestProfile by rememberUpdatedState(p)
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf<String?>(null) }
     var revealed by rememberMaskedReveal()
     val add: () -> Unit = {
-        // The web clears the draft after its Add; here only once it was sent (a refused write keeps it).
-        if (com.tether.app.client.jsTrim(name).isNotEmpty() && latest.send(ProfileEdit.EnvAdd(p.id, name, SecretText(value)))) {
-            name = ""
-            value = ""
+        val key = jsTrim(name)
+        if (key.isNotEmpty()) {
+            when (val outcome = envCommit(latestProfile, EnvChange.Add(key, SecretText(value)), latest, ProfileEdit.EnvAdd(p.id, name, SecretText(value)), quiet = true)) {
+                // The web clears the draft after its Add; here only once it was sent (a refused write keeps it).
+                CommitOutcome.Sent -> {
+                    name = ""
+                    value = ""
+                    note = null
+                }
+                is CommitOutcome.Refused -> note = outcome.message
+                CommitOutcome.Reviewing, CommitOutcome.Nothing -> note = null
+            }
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        DraftField(name, { name = it }, ProfileRows.ENV_NEW_NAME, ProfileTags.envNewName(p.id), ProfileRows.ENV_NAME_PLACEHOLDER, narrow, onDone = add, modifier = Modifier.fillMaxWidth())
+        DraftField(name, { name = it; note = null }, ProfileRows.ENV_NEW_NAME, ProfileTags.envNewName(p.id), ProfileRows.ENV_NAME_PLACEHOLDER, narrow, onDone = add, modifier = Modifier.fillMaxWidth())
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (revealed) {
                 DraftField(
@@ -656,6 +955,14 @@ private fun EnvAddRow(p: Profile, binding: ProvidersBinding, narrow: Boolean) {
                 iconSize = 14.dp,
                 contentDescription = if (revealed) ServerRowCopy.hide(ProfileRows.ENV_NEW_VALUE) else ServerRowCopy.reveal(ProfileRows.ENV_NEW_VALUE),
                 modifier = Modifier.testTag(ProfileTags.envNewReveal(p.id)),
+            )
+        }
+        note?.let {
+            Text(
+                it,
+                color = t.attentionInk,
+                style = settingsText(type.ui, 12f, 500, lineHeight = 1.5f),
+                modifier = Modifier.testTag(ProfileTags.envNewNote(p.id)).semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
         TetherKey(
@@ -712,8 +1019,8 @@ private data class ModelDraft(val initialId: String, val id: TextFieldValue, val
  * configuration change.
  */
 @Composable
-private fun ModelListEditor(p: Profile, list: ModelList, binding: ProvidersBinding, editable: Boolean, narrow: Boolean, modifier: Modifier) {
-    val latest by rememberUpdatedState(binding)
+private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions, editable: Boolean, narrow: Boolean, modifier: Modifier) {
+    val latest by rememberUpdatedState(actions)
     val rows = p.models(list)
     var draft by remember { mutableStateOf<ModelDraft?>(null) }
     val activity = LocalContext.current.findActivity()
@@ -721,13 +1028,13 @@ private fun ModelListEditor(p: Profile, list: ModelList, binding: ProvidersBindi
         val d = draft
         if (d != null) {
             draft = null
-            latest.send(ProfileEdit.Model(p.id, list, ModelOp.Add(d.initialId, d.id.text, d.label)))
+            latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.Add(d.initialId, d.id.text, d.label)))
         }
     }
     val defaultRow = rows.indexOfFirst { it.isDefault }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         rows.forEachIndexed { index, row ->
-            key(index, row.id) { ModelRowView(p, list, index, row, index == defaultRow, binding, editable, narrow) }
+            key(index, row.id) { ModelRowView(p, list, index, row, index == defaultRow, actions, editable, narrow) }
         }
         draft?.let { d ->
             DraftModelRow(
@@ -752,8 +1059,8 @@ private fun ModelListEditor(p: Profile, list: ModelList, binding: ProvidersBindi
 }
 
 @Composable
-private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileModel, isDefault: Boolean, binding: ProvidersBinding, editable: Boolean, narrow: Boolean) {
-    val latest by rememberUpdatedState(binding)
+private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileModel, isDefault: Boolean, actions: ProfileActions, editable: Boolean, narrow: Boolean) {
+    val latest by rememberUpdatedState(actions)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val shownId = remember(row.id) { LabelText.withoutHidden(row.id) }
@@ -764,12 +1071,12 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
                 enabled = editable,
                 narrow = narrow,
                 placeholder = "",
-                onCommit = { latest.send(ProfileEdit.Model(p.id, list, ModelOp.SetId(index, row.id, it))) },
+                onCommit = { ProfileRows.outcome(latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetId(index, row.id, it)), quiet = true)) },
                 modifier = Modifier.weight(1f),
             )
             if (editable) {
                 TetherKey(
-                    onClick = { latest.send(ProfileEdit.Model(p.id, list, ModelOp.Remove(index, row.id))) },
+                    onClick = { latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.Remove(index, row.id))) },
                     classes = KeyClasses.IconButton,
                     icon = TetherIcons.X,
                     iconSize = 14.dp,
@@ -787,7 +1094,7 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
                 enabled = editable,
                 narrow = narrow,
                 placeholder = ProfileRows.MODEL_LABEL_PLACEHOLDER,
-                onCommit = { latest.send(ProfileEdit.Model(p.id, list, ModelOp.SetLabel(index, row.id, it))) },
+                onCommit = { ProfileRows.outcome(latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetLabel(index, row.id, it)), quiet = true)) },
                 modifier = Modifier.weight(1f),
             )
             DefaultRadio(
@@ -795,7 +1102,7 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
                 enabled = editable,
                 description = ProfileRows.defaultLabel(row.id),
                 tag = ProfileTags.modelDefault(p.id, list, index),
-                onSelect = { latest.send(ProfileEdit.Model(p.id, list, ModelOp.SetDefault(index, row.id))) },
+                onSelect = { latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetDefault(index, row.id))) },
             )
         }
     }

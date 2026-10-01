@@ -92,7 +92,7 @@ enum class ProfilesShot(val scrollTo: String, val reveal: Boolean = false) {
 
 /** The providers writer behind a seeded shot: a write is a timing dependency (and a bug), so it fails the shot. */
 private object NeverWritesProviders : ProvidersWriter {
-    override fun setProviders(write: com.tether.app.client.ProvidersWrite, origin: String): Boolean = error("a seeded shot must not write")
+    override fun setProviders(write: com.tether.app.client.ProvidersWrite, origin: String): com.tether.app.client.ProvidersRefusal? = error("a seeded shot must not write")
 }
 
 /**

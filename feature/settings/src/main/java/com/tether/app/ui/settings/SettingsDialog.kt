@@ -200,11 +200,14 @@ fun SettingsDialog(
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestProviders() }
     val providersWriter = remember(client) { ProvidersWriter { write, o -> client.setProviders(write, o) } }
     val freshProfiles: () -> ProvidersList? = remember(client) { { client.providerProfiles.value } }
+    // r2: the editor's own in-flight guard lives as long as the client (the client applies the same rule).
+    val providersInFlight = remember(client) { com.tether.app.client.ProvidersInFlight() }
     val providersBinding = ProvidersBinding(
         list = profiles?.takeIf { signedIn },
         origin = origin,
         writer = providersWriter,
         fresh = freshProfiles,
+        inFlight = providersInFlight,
     )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {

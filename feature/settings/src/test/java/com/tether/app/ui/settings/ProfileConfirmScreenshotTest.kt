@@ -33,6 +33,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapProfileConfirm(skin
         parts = listOf("/opt/gemini/bin/gem\u200Bini", "--experimental-acp", "--sandbox"),
         now = listOf("gemini", "--experimental-acp"),
         normalized = true,
+        snapshot = com.tether.app.client.RunsSnapshot.of(ProfileFixtures.list().profile("gemini")!!),
     )
     setContent {
         TetherTheme(skin.mode) {

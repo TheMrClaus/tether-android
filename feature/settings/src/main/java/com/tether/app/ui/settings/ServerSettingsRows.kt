@@ -59,6 +59,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import kotlinx.serialization.json.JsonObject
 import com.tether.app.client.LabelText
 import com.tether.app.client.ServerSetting
 import com.tether.app.client.ServerSettingsPatch
@@ -114,7 +117,12 @@ private fun caption(forced: Boolean, description: String) = AnnotatedString(if (
  * or a blur: while the activity [isChangingConfigurations][android.app.Activity.isChangingConfigurations]
  * neither the focus loss nor the disposal it causes commits anything, so a half-typed value is
  * never sent. [accept]: an edit that fails it leaves the field as it was (nothing is rewritten).
- * [noCopy]: copy and cut put nothing on the clipboard and are not offered (a revealed secret).
+* [noCopy]: copy and cut put nothing on the clipboard and are not offered (a revealed secret).
+ *
+ * ta-q6p r2 (security F4): [onCommit] says what became of the value ([CommitOutcome]). A refused
+ * send is never silent: the field keeps the text, Done can send it again, and a short note under
+ * the field says why. [blurCommits]: whether a focus loss or leaving commits THIS text (false: the
+ * field keeps it and says Done reviews it, the env rows' risky names).
  */
 @Composable
 internal fun CommitField(
@@ -124,13 +132,14 @@ internal fun CommitField(
     enabled: Boolean,
     narrow: Boolean,
     placeholder: String,
-    onCommit: (String) -> Unit,
+    onCommit: (String) -> CommitOutcome,
     modifier: Modifier = Modifier,
     keyboardType: KeyboardType = KeyboardType.Text,
     accept: (String) -> Boolean = { true },
     commitOnBlur: Boolean = true,
     commitOnLeave: Boolean = true,
     noCopy: Boolean = false,
+    blurCommits: (String) -> Boolean = { true },
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -139,49 +148,122 @@ internal fun CommitField(
     val recreating = { activity?.isChangingConfigurations == true }
     var text by remember(shown) { mutableStateOf(shown) }
     // The last value handed to [onCommit] for this server value: Done then the focus loss it
-    // causes is one write, not two.
+    // causes is one write, not two. r2: a refused value is not "sent", so Done can try again.
     var sent by remember(shown) { mutableStateOf<String?>(null) }
+    var note by remember(shown) { mutableStateOf<String?>(null) }
+    // The value last refused (or under review): a focus loss or leaving never retries it (only Done does).
+    var refused by remember(shown) { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf(false) }
-    val commit: () -> Unit = {
-        if (text != shown && text != sent) {
-            sent = text
-            onCommit(text)
+    val commit: (Boolean) -> Unit = { retry ->
+        if (text != shown && text != sent && (retry || text != refused)) {
+            when (val outcome = onCommit(text)) {
+                CommitOutcome.Sent, CommitOutcome.Nothing -> {
+                    sent = text
+                    refused = null
+                    note = null
+                }
+                // A review opened (a confirmation): nothing sent yet; Done may open it again, a blur does not.
+                CommitOutcome.Reviewing -> {
+                    refused = text
+                    note = null
+                }
+                is CommitOutcome.Refused -> {
+                    sent = null
+                    refused = text
+                    note = outcome.message
+                }
+            }
         }
     }
     val latestCommit by rememberUpdatedState(commit)
     val leaves by rememberUpdatedState(commitOnLeave)
-    DisposableEffect(Unit) { onDispose { if (leaves && !recreating()) latestCommit() } }
+    val latestBlurCommits by rememberUpdatedState(blurCommits)
+    val latestText by rememberUpdatedState(text)
+    DisposableEffect(Unit) { onDispose { if (leaves && !recreating() && latestBlurCommits(latestText)) latestCommit(false) } }
     val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
-    NoCopyScope(noCopy) {
-    BasicTextField(
-        value = text,
-        onValueChange = { if (accept(it)) text = it },
-        enabled = enabled,
-        singleLine = true,
-        textStyle = style.copy(color = t.ink),
-        cursorBrush = SolidColor(t.violet),
-        keyboardOptions = KeyboardOptions(
-            keyboardType = keyboardType,
-            // A secret or a path is never learned or corrected by the keyboard.
-            autoCorrectEnabled = false,
-            imeAction = ImeAction.Done,
-        ),
-        keyboardActions = KeyboardActions(onDone = {
-            commit()
-            focusManager.clearFocus()
-        }),
-        modifier = modifier
-            .testTag(tag)
-            .semantics { contentDescription = label }
-            .onFocusChanged { f ->
-                if (focused && !f.isFocused && commitOnBlur && !recreating()) commit()
-                focused = f.isFocused
-            },
-        decorationBox = { inner ->
-            ServerFieldBox(enabled, focused, style, if (text.isEmpty() && placeholder.isNotEmpty()) AnnotatedString(placeholder) else null, inner)
-        },
-    )
+    Column(modifier) {
+        NoCopyScope(noCopy) {
+            BasicTextField(
+                value = text,
+                onValueChange = {
+                    if (accept(it)) {
+                        if (it != text) note = null
+                        text = it
+                    }
+                },
+                enabled = enabled,
+                singleLine = true,
+                textStyle = style.copy(color = t.ink),
+                cursorBrush = SolidColor(t.violet),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = keyboardType,
+                    // A secret or a path is never learned or corrected by the keyboard.
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = {
+                    commit(true)
+                    focusManager.clearFocus()
+                }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(tag)
+                    .semantics { contentDescription = label }
+                    .onFocusChanged { f ->
+                        if (focused && !f.isFocused && commitOnBlur && !recreating()) {
+                            if (blurCommits(text)) commit(false) else if (text != shown && text != sent && text != refused) note = CommitOutcome.REVIEW_ON_DONE
+                        }
+                        focused = f.isFocused
+                    },
+                decorationBox = { inner ->
+                    ServerFieldBox(enabled, focused, style, if (text.isEmpty() && placeholder.isNotEmpty()) AnnotatedString(placeholder) else null, inner)
+                },
+            )
+        }
+        note?.let { n ->
+            Text(
+                n,
+                color = t.attentionInk,
+                style = settingsText(type.ui, 12f, 500, lineHeight = 1.5f),
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .testTag(CommitFieldTags.note(tag))
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
     }
+}
+
+/** ta-q6p r2: what became of a committed value. */
+sealed interface CommitOutcome {
+    /** Sent to the server. */
+    data object Sent : CommitOutcome
+
+    /** Nothing to send for it (the server's value already, or not a value the row writes). */
+    data object Nothing : CommitOutcome
+
+    /** A confirmation opened for it: nothing is sent until it is confirmed. */
+    data object Reviewing : CommitOutcome
+
+    /** Not sent, and why (shown under the field). */
+    data class Refused(val message: String) : CommitOutcome
+
+    companion object {
+        const val NOT_CONNECTED = "Not saved: not connected to the server. Try again."
+        const val REVIEW_ON_DONE = "Not saved yet — press Done to review this change."
+    }
+}
+
+/** ta-q6p r2: the tags of a [CommitField]'s parts. */
+object CommitFieldTags {
+    fun note(tag: String) = "commit-note:$tag"
+}
+
+/** A server-settings row's commit: nothing for no patch, sent, or refused (no live socket for the row's server). */
+internal fun serverCommit(patch: JsonObject?, send: (JsonObject) -> Boolean): CommitOutcome = when {
+    patch == null -> CommitOutcome.Nothing
+    send(patch) -> CommitOutcome.Sent
+    else -> CommitOutcome.Refused(CommitOutcome.NOT_CONNECTED)
 }
 
 /** ta-dh1: `.settings-server-input`'s box (shared by [CommitField] and the engine fields): the edge, the fill, the placeholder. */
@@ -281,7 +363,7 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
                 enabled = !forced,
                 narrow = narrow,
                 placeholder = row.placeholder,
-                onCommit = { binding.send(ServerSettingsPatch.text(view, s, it, shown)) },
+                onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
                 modifier = m.serverInputWidth(narrow),
             )
         },
@@ -331,7 +413,7 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
                         commitOnBlur = false,
                         commitOnLeave = false,
                         noCopy = true,
-                        onCommit = { binding.send(ServerSettingsPatch.text(view, s, it, shown)) },
+                        onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -437,7 +519,7 @@ internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: 
                     // r2: an edit that is not all digits (a paste of "6e4" or "-5") is refused as a
                     // whole, never rewritten into another number that would then be sent.
                     accept = { typed -> typed.length <= MAX_DIGITS && typed.all { it in '0'..'9' } },
-                    onCommit = { binding.send(ServerSettingsPatch.number(view, s, it)) },
+                    onCommit = { serverCommit(ServerSettingsPatch.number(view, s, it), binding::send) },
                     modifier = Modifier.widthIn(max = 144.dp).fillMaxWidth(),
                 )
             }

@@ -8,20 +8,34 @@ import com.tether.app.client.ProfileRunsEdit
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
 import com.tether.app.client.ProvidersWrite
+import com.tether.app.client.ProvidersBuild
+import com.tether.app.client.ProvidersInFlight
+import com.tether.app.client.ProvidersRefusal
+import com.tether.app.client.RunsSnapshot
+import com.tether.app.client.EnvChange
+import com.tether.app.client.SecretText
 import com.tether.app.client.jsTrim
 
 /**
  * ta-q6p: where the Custom providers editor sends its writes. The app's is the client
  * ([com.tether.app.client.TetherClient.setProviders]), which sends a write only on a socket opened
- * for [origin] and only when it passes [ProvidersPatch.refusal] against its newest list.
+ * for [origin], built from a list that came on that socket, with no other write in flight, and
+ * only when it passes [ProvidersPatch.refusal] against its newest list. Null: sent.
  */
 fun interface ProvidersWriter {
-    fun setProviders(write: ProvidersWrite, origin: String): Boolean
+    fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal?
 
     /** No client (previews, a signed-out frame): nothing is ever sent. */
     object None : ProvidersWriter {
-        override fun setProviders(write: ProvidersWrite, origin: String) = false
+        override fun setProviders(write: ProvidersWrite, origin: String) = ProvidersRefusal.NotConnected
     }
+}
+
+/** ta-q6p r2: what became of an editor action. */
+sealed interface ProvidersSend {
+    data object Sent : ProvidersSend
+    data object NoChange : ProvidersSend
+    data class Refused(val reason: ProvidersRefusal) : ProvidersSend
 }
 
 /**
@@ -33,7 +47,8 @@ fun interface ProvidersWriter {
  *
  * Every write is built when it is sent, from [latest]: the client's NEWEST list ([fresh]), not the
  * composed one (which may be a frame behind), so an edit made while another client's broadcast
- * landed applies to that broadcast and never undoes it.
+ * landed applies to that broadcast and never undoes it. r2: [inFlight] refuses a write while the
+ * last one sent from here still waits for its broadcast (the client applies the same rule).
  */
 data class ProvidersBinding(
     val list: ProvidersList?,
@@ -41,24 +56,34 @@ data class ProvidersBinding(
     val writer: ProvidersWriter = ProvidersWriter.None,
     /** The client's newest list, read when a write is built. Null: [list] is the newest (tests, previews). */
     val fresh: (() -> ProvidersList?)? = null,
+    val inFlight: ProvidersInFlight = ProvidersInFlight(),
 ) {
     /** The newest list of this binding's server, or null without one. */
     fun latest(): ProvidersList? = if (origin == null) null else fresh?.invoke() ?: list
 
-    /** A plain edit, applied to the newest list and sent to this binding's server; false when nothing was sent. */
-    fun send(edit: ProfileEdit): Boolean {
-        val o = origin ?: return false
+    /** A plain edit, applied to the newest list and sent to this binding's server. */
+    fun send(edit: ProfileEdit): ProvidersSend {
         val newest = latest()
-        val write = ProvidersPatch.write(newest, edit) ?: return false
-        return ProvidersPatch.refusal(write, newest) == null && writer.setProviders(write, o)
+        return deliver(ProvidersPatch.build(newest, edit), newest)
     }
 
-    /** A command or home the user CONFIRMED, applied to the newest list at that moment. */
-    fun sendConfirmed(edit: ProfileRunsEdit): Boolean {
-        val o = origin ?: return false
+    /** A change of what a profile runs the user CONFIRMED against [expectedNow], applied to the newest list at that moment. */
+    fun sendConfirmed(edit: ProfileRunsEdit, expectedNow: RunsSnapshot): ProvidersSend {
         val newest = latest()
-        val write = ProvidersPatch.confirmed(newest, edit) ?: return false
-        return ProvidersPatch.refusal(write, newest) == null && writer.setProviders(write, o)
+        return deliver(ProvidersPatch.confirmed(newest, edit, expectedNow), newest)
+    }
+
+    private fun deliver(build: ProvidersBuild, newest: ProvidersList?): ProvidersSend {
+        val o = origin ?: return ProvidersSend.Refused(ProvidersRefusal.NotConnected)
+        val write = when (build) {
+            is ProvidersBuild.Ready -> build.write
+            ProvidersBuild.NoChange -> return ProvidersSend.NoChange
+            is ProvidersBuild.Refused -> return ProvidersSend.Refused(build.reason)
+        }
+        (ProvidersPatch.refusal(write, newest) ?: inFlight.refusal(newest))?.let { return ProvidersSend.Refused(it) }
+        writer.setProviders(write, o)?.let { return ProvidersSend.Refused(it) }
+        inFlight.sent(write)
+        return ProvidersSend.Sent
     }
 
     companion object {
@@ -67,25 +92,67 @@ data class ProvidersBinding(
 }
 
 /**
- * ta-q6p: a profile's command or home waiting for its confirmation (owner decision 2026-10-01:
- * what the server runs is confirmed, the new value shown). [parts]: what will be sent (a command's
- * binary and arguments; a home is one part, none when cleared); [now]: what the profile runs now,
- * as the confirmation opened (it closes if that changes); [normalized]: typing was rewritten into
- * [parts] (trimmed, or split at spaces), which the confirmation says. Never saved state.
+ * ta-q6p: a change of what a profile runs, waiting for its confirmation (owner decisions
+ * 2026-10-01). [snapshot]: what the profile runs as the confirmation opened (its engine, command,
+ * home and risky env keys; the confirmation closes if that changes, and the write carries it, so
+ * the server never gets a change built on another "Now"); [epoch]: the socket its list came on (a
+ * reconnect closes it). Never saved state; [toString] prints no value.
+ */
+sealed interface ProfileReview {
+    val profileId: String
+    val name: String
+    val snapshot: RunsSnapshot
+    val epoch: Long
+    val edit: ProfileRunsEdit
+}
+
+/**
+ * A command or home: [parts] what will be sent (a home is one part, none when cleared), [now]
+ * what runs now; [normalized]: typing was rewritten into [parts] (trimmed, or split at spaces).
  */
 data class ProfileRunsReview(
-    val profileId: String,
-    val name: String,
+    override val profileId: String,
+    override val name: String,
     val extends: String,
     val home: Boolean,
     val parts: List<String>,
     val now: List<String>,
     val normalized: Boolean,
-) {
-    val edit: ProfileRunsEdit
+    override val snapshot: RunsSnapshot,
+    override val epoch: Long = 0L,
+) : ProfileReview {
+    override val edit: ProfileRunsEdit
         get() = if (home) ProfileRunsEdit.Home(profileId, parts.firstOrNull().orEmpty()) else ProfileRunsEdit.Command(profileId, parts)
 
     override fun toString(): String = "ProfileRunsReview($profileId, home=$home)"
+}
+
+/** r2 (owner decision B): the engine, from [from] to [to], with the command and home the new engine will run. */
+data class ExtendsReview(
+    override val profileId: String,
+    override val name: String,
+    val from: String,
+    val to: String,
+    val command: List<String>,
+    val home: String?,
+    override val snapshot: RunsSnapshot,
+    override val epoch: Long = 0L,
+) : ProfileReview {
+    override val edit: ProfileRunsEdit get() = ProfileRunsEdit.Extends(profileId, to)
+    override fun toString(): String = "ExtendsReview($profileId, $from -> $to)"
+}
+
+/** r2 (owner decision A): a risky env key's add, change, rename or remove; [nowValue] the key's value now (a secret). */
+data class EnvReview(
+    override val profileId: String,
+    override val name: String,
+    val change: EnvChange,
+    val nowValue: SecretText?,
+    override val snapshot: RunsSnapshot,
+    override val epoch: Long = 0L,
+) : ProfileReview {
+    override val edit: ProfileRunsEdit get() = ProfileRunsEdit.Env(profileId, change)
+    override fun toString(): String = "EnvReview($profileId, ${change::class.simpleName}:${change.keys})"
 }
 
 /** The Custom providers section (settings-dialog.tsx 887c222 :621-1000 `ProfilesEditor`), the web's words verbatim. */
@@ -183,21 +250,21 @@ object ProfileRows {
      * web's blur (:706-710): split at spaces, sent when the joined text differs from the profile's.
      * [shown] is what the field was filled with: an untouched field asks nothing.
      */
-    fun reviewCommand(p: Profile, typed: String, shown: String): ProfileRunsReview? {
+    fun reviewCommand(p: Profile, typed: String, shown: String, epoch: Long = 0L): ProfileRunsReview? {
         if (typed == shown) return null
         val parts = ProvidersPatch.commandParts(typed)
         val now = p.command ?: emptyList()
         if (parts.joinToString(" ") == now.joinToString(" ") || !ProvidersPatch.commandFits(parts)) return null
-        return ProfileRunsReview(p.id, name(p), p.extends, home = false, parts = parts, now = now, normalized = parts.joinToString(" ") != typed)
+        return ProfileRunsReview(p.id, name(p), p.extends, home = false, parts = parts, now = now, normalized = parts.joinToString(" ") != typed, snapshot = RunsSnapshot.of(p), epoch = epoch)
     }
 
     /** Done in the home field (:735): the trimmed value, when it differs from the profile's. */
-    fun reviewHome(p: Profile, typed: String, shown: String): ProfileRunsReview? {
+    fun reviewHome(p: Profile, typed: String, shown: String, epoch: Long = 0L): ProfileRunsReview? {
         if (typed == shown) return null
         val value = jsTrim(typed)
         val now = p.homeDir.orEmpty()
         if (value == now || value.length > ProfileLimits.HOME) return null
-        return ProfileRunsReview(p.id, name(p), p.extends, home = true, parts = listOfNotNull(value.ifEmpty { null }), now = listOfNotNull(now.ifEmpty { null }), normalized = value != typed)
+        return ProfileRunsReview(p.id, name(p), p.extends, home = true, parts = listOfNotNull(value.ifEmpty { null }), now = listOfNotNull(now.ifEmpty { null }), normalized = value != typed, snapshot = RunsSnapshot.of(p), epoch = epoch)
     }
 
     /** What the profile runs now, in the form a review names it (the confirmation closes when this changes). */
@@ -223,4 +290,81 @@ object ProfileRows {
     }
 
     fun confirmAction(r: ProfileRunsReview) = if (r.home) "Change home" else "Change command"
+
+    // ---- r2: the engine (owner decision B) ------------------------------------------------------
+
+    /** Picking another engine: what to confirm (null for the same one). */
+    fun reviewExtends(p: Profile, to: String, epoch: Long = 0L): ExtendsReview? {
+        if (to == p.extends || to !in ProfileLimits.EXTENDS) return null
+        return ExtendsReview(p.id, name(p), p.extends, to, p.command ?: emptyList(), p.homeDir, RunsSnapshot.of(p), epoch)
+    }
+
+    fun extendsTitle(r: ExtendsReview) = "Change the ${r.name} engine?"
+
+    fun extendsBody(r: ExtendsReview): String = "The profile will run on another engine, with the command and home below. " +
+        (if (r.to == "claude") "For Claude, the command's first part is the CLI path: the editor hides it, but the server still uses it. " else "") +
+        "Hidden or direction-changing characters are shown as ⟨U+…⟩ marks."
+
+    const val ENGINE_NEW = "Engine — change to"
+    const val ENGINE_NOW = "Engine — now"
+    const val ENGINE_COMMAND = "Command it will run"
+    const val ENGINE_HOME = "Home it will use"
+    const val ENGINE_ACTION = "Change engine"
+
+    // ---- r2: the risky env keys (owner decision A) -----------------------------------------------
+
+    /** An env change on [p]: a review when it touches a risky key, else null (it saves as before). */
+    fun reviewEnv(p: Profile, change: EnvChange, epoch: Long = 0L): EnvReview? {
+        if (!change.risky) return null
+        val nowKey = when (change) {
+            is EnvChange.Change -> change.key
+            is EnvChange.Remove -> change.key
+            is EnvChange.Rename -> change.from
+            is EnvChange.Add -> null
+        }
+        return EnvReview(p.id, name(p), change, nowKey?.let(p::envValue), RunsSnapshot.of(p), epoch)
+    }
+
+    /** The action, in plain text (key names are drawn by the exact rule beside it). */
+    fun envAction(c: EnvChange): String = when (c) {
+        is EnvChange.Add -> "Add"
+        is EnvChange.Change -> "Change the value of"
+        is EnvChange.Rename -> "Rename"
+        is EnvChange.Remove -> "Remove"
+    }
+
+    fun envTitle(r: EnvReview) = "Change what ${r.name} runs?"
+
+    const val ENV_BODY = "This variable decides what the server runs for this profile, or where its CLI reads its config. Values stay hidden: reveal one to check it. Hidden or direction-changing characters are shown as ⟨U+…⟩ marks."
+    const val ENV_ACTION_LABEL = "Change"
+    const val CONFIRM_NEW_VALUE = "New value"
+    const val CONFIRM_NOW_VALUE = "Value now"
+    const val ENV_EMPTY_VALUE = "Empty"
+    const val ENV_CONFIRM = "Confirm change"
+
+    // ---- r2 (security F4): refused writes are never silent --------------------------------------
+
+    const val NOT_SAVED_CHANGED = "Not saved: the list changed. Try again."
+    const val NOT_SAVED_IN_FLIGHT = "Not saved: the last change is still being saved. Try again in a moment."
+    const val NOT_SAVED_COLLISION = "Not saved: this profile already has a variable with that name."
+    const val NOT_SAVED_OFFLINE = "Not saved: not connected to the server. Try again."
+    const val NOT_SAVED_INVALID = "Not saved: the server would refuse this value."
+    const val CHANGED_WHILE_CONFIRMING = "Not saved: what this profile runs changed while you were confirming. Review it and try again."
+    const val UNCONFIRMED = "The server hasn't confirmed the last change. Check the list before you edit again."
+
+    fun notSaved(reason: ProvidersRefusal): String = when (reason) {
+        ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT
+        ProvidersRefusal.Collision -> NOT_SAVED_COLLISION
+        ProvidersRefusal.NotConnected -> NOT_SAVED_OFFLINE
+        ProvidersRefusal.Invalid -> NOT_SAVED_INVALID
+        ProvidersRefusal.Changed -> CHANGED_WHILE_CONFIRMING
+        ProvidersRefusal.NotWritable, ProvidersRefusal.Gone, ProvidersRefusal.Stale, ProvidersRefusal.NeedsConfirmation, ProvidersRefusal.Unconfirmed -> NOT_SAVED_CHANGED
+    }
+
+    /** A field's outcome for an editor action. */
+    fun outcome(send: ProvidersSend): CommitOutcome = when (send) {
+        ProvidersSend.Sent -> CommitOutcome.Sent
+        ProvidersSend.NoChange -> CommitOutcome.Nothing
+        is ProvidersSend.Refused -> CommitOutcome.Refused(notSaved(send.reason))
+    }
 }

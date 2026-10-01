@@ -36,6 +36,7 @@ import com.tether.app.client.ModelList
 import com.tether.app.client.ProfileEdit
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
+import com.tether.app.client.ProvidersRefusal
 import com.tether.app.client.SecretText
 import com.tether.app.ui.settings.ProfileFixtures.FAKE_KEY
 import com.tether.app.ui.settings.ProfileFixtures.ORIGIN
@@ -285,6 +286,10 @@ class ProfilesBehaviourTest {
         compose.onNodeWithContentDescription("zai extends").performScrollTo().performClick()
         compose.waitForIdle()
         compose.onNodeWithContentDescription("codex").performClick()
+        compose.waitForIdle()
+        // r2 (owner decision B): another engine is confirmed first.
+        assertEquals(2, w.writes.size)
+        confirm()
         waitForWrites(w, 3)
         assertEquals(frame(gemini(), zai().replace("\"enabled\":false", "\"enabled\":true").replace("\"extends\":\"claude\"", "\"extends\":\"codex\"")), w.frames()[2])
     }
@@ -379,7 +384,10 @@ class ProfilesBehaviourTest {
         typeAndDone(field("claude-work", ProfileTags.LABEL), "Work")
         compose.waitForIdle()
         assertEquals(emptyList<Any>(), w.writes)
-        assertEquals(listOf("built from an older list"), w.refused)
+        assertEquals(listOf(ProvidersRefusal.Stale), w.refused)
+        // ... and it is not silent.
+        tag(CommitFieldTags.note(field("claude-work", ProfileTags.LABEL))).assertExists()
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_CHANGED))
     }
 
     // ---- what a profile runs: confirmed, never sent otherwise -------------------------------------
@@ -410,7 +418,7 @@ class ProfilesBehaviourTest {
         show(writer = w)
         typeAndDone(field("claude-work", ProfileTags.HOME), "")
         assertTrue(texts().contains("Change the Claude Code (work) home?"))
-        assertEquals(ProfileRows.emptyValue(ProfileRunsReview("claude-work", "", "claude", true, emptyList(), emptyList(), false)), textOf(ProfileTags.ConfirmNew))
+        assertEquals("Empty \u2014 the engine's dedicated home", textOf(ProfileTags.ConfirmNew))
         assertEquals("/srv/homes/claude-work", SafeText.original(textOf(ProfileTags.ConfirmNow)))
         confirm()
         waitForWrites(w, 1)
@@ -595,7 +603,7 @@ class ProfilesBehaviourTest {
     @Test fun noPlainEditChangesWhatAProfileRuns() {
         val list = ProfileFixtures.list()
         val edits = listOf(
-            ProfileEdit.Enabled("gemini"), ProfileEdit.Label("gemini", "G"), ProfileEdit.Rename("gemini", "g2"), ProfileEdit.Extends("gemini", "codex"),
+            ProfileEdit.Enabled("gemini", false), ProfileEdit.Label("gemini", "G"), ProfileEdit.Rename("gemini", "g2"),
             ProfileEdit.EnvKey("gemini", "GEMINI_API_KEY", "K"), ProfileEdit.EnvValue("gemini", "GEMINI_API_KEY", SecretText("v")),
             ProfileEdit.EnvRemove("gemini", "GEMINI_API_KEY"), ProfileEdit.EnvAdd("gemini", "N", SecretText("v")), ProfileEdit.DropEnv("gemini", "X"),
             ProfileEdit.DisallowedTools("claude-work", "Task"), ProfileEdit.Order("gemini", "3"), ProfileEdit.VerifiedThrough("gemini", "1.0"),
@@ -614,10 +622,14 @@ class ProfilesBehaviourTest {
         }
         // A forged write reaching the binding's writer is refused there (the client applies the same rule).
         val w = RecordingProvidersWriter(newest = { list })
-        val forged = ProvidersPatch.confirmed(list, com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")))!!
-        assertTrue(w.setProviders(forged, ORIGIN))
-        val stale = ProvidersPatch.confirmed(ProfileFixtures.list(generation = 0), com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")))!!
-        assertFalse(w.setProviders(stale, ORIGIN))
+        val now = com.tether.app.client.RunsSnapshot.of(list.profile("gemini")!!)
+        val ok = ProvidersPatch.confirmed(list, com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")), now).writeOrNull!!
+        assertEquals(null, w.setProviders(ok, ORIGIN))
+        val older = ProfileFixtures.list(generation = 0)
+        val stale = ProvidersPatch.confirmed(older, com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")), now).writeOrNull!!
+        assertEquals(ProvidersRefusal.Stale, w.setProviders(stale, ORIGIN))
+        // The editor's risky changes are not plain edits.
+        assertEquals(com.tether.app.client.ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation), ProvidersPatch.build(list, ProfileEdit.EnvAdd("gemini", "PATH", SecretText("/tmp"))))
     }
 
     // ---- the env values (secrets) ----------------------------------------------------------------
