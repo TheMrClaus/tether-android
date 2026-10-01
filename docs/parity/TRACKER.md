@@ -24,13 +24,13 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-10-01 09:45 CEST):** `main` @ `e537965b` (gate green 4238), **ta-895 merged + VERIFIED** (New session lists every Claude account/profile from the live catalog and creates on the chosen profileId; fail closed, never a silent default). **v0.10.0 PUBLISHED as Latest** (code 28, `e537965b`, cert checked, asset `tether-0.10.0.apk`). In flight: ta-ceo (maker).
+**Resume point (2026-10-01 10:25 CEST):** `main` @ `fea4f063` (gate green 4277). **v0.10.0 PUBLISHED as Latest** (code 28, `e537965b`: ta-895, New session lists every Claude account/profile, cert checked). **ta-ceo merged + VERIFIED** after the release (deferred queued message wait/choice, Stop confirms its cost; ships in the next release). Nothing in flight.
 **Merged + verified overnight:** T15.4 top bar, ta-ylh (v133-v135 decode; hello stays 132), T7.4 attachments + thumbnails, T15.6 operator-only queue,
 T15.3 Overview host & usage, ta-vmg/ta-x9c flakes, T15.5 Studio-only, T15.7 service Open links, ta-dl4 inspector leftovers, T15.8 re-baseline
 (PARITY_BASE 887c222 / v137 for protocol corpora + matrix), ta-exi (store-read failures fail closed). **Owner:** confirm two coordinator
 defaults in the Decision log (hello stays 132 until the server is deployed at >= the new version; T15.7 Open via the pinned console link),
 try a service Open on the device (the browser may not send the console cookie on an app-started navigation), exempt the app's routes at the
-gateway (#230). **Next (`bd ready`):** ta-ceo (#229 deferred-message UI), ta-ebc (#231 plan names), ta-ccu (tokens re-baseline), ta-lx3 (tether
+gateway (#230). **Next (`bd ready`):** ta-ebc (#231 plan names), ta-ccu (tokens re-baseline), ta-lx3 (tether
 screens exporter), then the P3 follow-ups.
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
@@ -398,3 +398,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 07:00 | claude-main / Opus 5.5 | ta-895 | Owner report: the New session sheet shows no Claude accounts. Root cause: the picker lists only base providers and create sends no profileId (the catalog with profile rows is already decoded for @-delegation). Filed ta-895 (P1, related to T8.1) as the next item. | ta-895 |
 | 2026-10-01 09:45 | claude-main / Opus 5.5 (new coordinator session) | ta-895, release | Took over from disk (main gate re-run green 4188). ta-895 maker (security-executor) -> verify CONFIRMED, security PASS-WITH-FOLLOWUPS (look-alike ids cut before the -2 suffix, refused rows looked tappable, empty live catalog fell back to defaults, legacy no-profile create path); all fixed in r2, checked by the coordinator with the verifier's scratch tests (10/10). Merged ff-only `e537965b`, VERIFIED (gate 4238). T8.1 note: the web's create also sends permissionMode/sandboxPolicy. v0.10.0 (code 28) dispatched. | publish v0.10.0; ta-ceo |
 | 2026-10-01 09:50 | claude-main / Opus 5.5 | release, ta-ceo | v0.10.0 (code 28, `e537965b`) built by android-release.yml, cert SHA-256 4f8c22de...b74d and versionName/Code checked, asset renamed tether-0.10.0.apk, Highlights first, PUBLISHED as Latest. ta-ceo dispatched (executor). | ta-ceo verify |
+| 2026-10-01 10:25 | claude-main / Opus 5.5 | ta-ceo | ta-ceo (executor) -> verify CONFIRMED (helpers byte-identical to the web's queue-wait.mjs over 543 inputs; turn/session/lock/double-tap probes on Stop anyway; the maker's test flush is test-only). Rebased, gate 4277 on `fea4f063`, merged ff-only, VERIFIED with its matrix row. Follow-up ta-7n0 (P4, phone Stop anyway padding). | ta-ebc, ta-ccu, ta-lx3 |
