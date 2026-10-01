@@ -19,7 +19,7 @@ import org.junit.Test
 
 /**
  * ta-9q2 request shapes for the three device-readable Claude-accounts GETs (tether 887c222
- * server.mjs ~8145, ~8172, ~8278): only the fixed routes, by GET, on the paired origin, with the
+ * server.mjs:8145, :8172, :8276): only the fixed routes, by GET, on the paired origin, with the
  * credential; a redirect never followed; a sign-in gateway told apart from Tether's own answers;
  * the body bounded; anything that is not the route's JSON unavailable.
  */

@@ -262,7 +262,7 @@ object ClaudeAccountsPresentation {
 
     /**
      * ClaudeAccountSyncSection: shown once two sync-eligible accounts are listed and the config is
-     * read (settings-dialog.tsx:1380 `syncCapableAccounts.length < 2 || !config` → nothing).
+     * read (settings-dialog.tsx:1309 `syncCapableAccounts.length < 2 || !config` → nothing).
      */
     fun sync(accounts: List<ClaudeAccount>, sync: ClaudeAccountsSync?, timeOf: (Long) -> String): SyncView? {
         if (accounts.size < 2 || sync == null) return null

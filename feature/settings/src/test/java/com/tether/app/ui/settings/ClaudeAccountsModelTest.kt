@@ -182,7 +182,7 @@ class ClaudeAccountsModelTest {
         assertFalse(ClaudeAccountsModel.wantsPlanRetry(listOf(account(plan = ClaudeAccountPlan("Team", null, ClaudeAccountPlanSource.Unknown)))))
     }
 
-    /** settings-dialog.tsx:1380 and :1864: two accounts to mount it, two sync-eligible ones and a config to show it. */
+    /** settings-dialog.tsx:1864 and :1309: two accounts to mount it, two sync-eligible ones and a config to show it. */
     @Test fun theSyncSectionShowsOnlyWithTwoEligibleAccountsAndItsConfig() {
         val sync = AccountsFixtures.SYNC
         assertFalse(ClaudeAccountsModel.wantsSync(ClaudeAccountsState()))
