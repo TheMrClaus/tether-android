@@ -81,6 +81,8 @@ fun ExpandedShellUnderTest(
     onEvent: (String) -> Unit = {},
     /** Non-null: the real preference-store binding instead of [store]. */
     persisted: PersistedPanels? = null,
+    /** ta-abm: the hosted surfaces (the draft's launching stage rides here). */
+    slots: PhoneShellSlots = expandedSlots(),
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
@@ -111,7 +113,7 @@ fun ExpandedShellUnderTest(
                     onCopyPath = { onEvent("copyPath") },
                     onCopyTetherId = { onEvent("copyId") },
                 ),
-                slots = expandedSlots(),
+                slots = slots,
             )
           }
         }

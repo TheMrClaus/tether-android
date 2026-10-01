@@ -73,6 +73,8 @@ fun ShellUnderTest(
     reducedMotion: Boolean = true,
     unseenWarnings: Int = 0,
     onEvent: (String) -> Unit = {},
+    /** ta-abm: the hosted surfaces (the draft's launching stage rides here). */
+    slots: PhoneShellSlots = placeholderSlots(),
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
@@ -101,7 +103,7 @@ fun ShellUnderTest(
                     onCopyPath = { onEvent("copyPath") },
                     onCopyTetherId = { onEvent("copyId") },
                 ),
-                slots = placeholderSlots(),
+                slots = slots,
             )
           }
         }
