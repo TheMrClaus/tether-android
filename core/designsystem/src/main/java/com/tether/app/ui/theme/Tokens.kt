@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
  * The Tether token set the UI reads via [LocalTetherTokens]. Since T3.1 (PLAN D9) every value
  * comes from [GeneratedTokens] (generated from the web's app/globals.css + app/studio.css);
  * nothing here is hand-copied. This class is the stable, named facade the components already
- * use; [css] exposes the complete typed skin (all ~126 custom properties) for anything newer.
+ * use; [css] exposes the complete typed skin (all ~109 custom properties) for anything newer.
  * Material3's ColorScheme is only mapped for interop (dialogs, text selection).
  */
 

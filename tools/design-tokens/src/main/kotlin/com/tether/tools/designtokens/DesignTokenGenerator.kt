@@ -216,9 +216,8 @@ private fun fail(msg: String): Nothing = throw TokenSpecError(msg)
  * only taken when it parses every value.
  */
 val KIND_HINTS: Map<String, Kind> = mapOf(
-    "--key-label-tracking" to Kind.EM,
-    "--key-label-transform" to Kind.STRING,
-    "--perf-dots" to Kind.STRING,
+    // --key-label-tracking (EM), --key-label-transform and --perf-dots (STRING) left with the
+    // retired material tokens (tether 887c222).
     "--tint-boost" to Kind.NUMBER,
 )
 

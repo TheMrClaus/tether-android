@@ -141,8 +141,9 @@ class GeneratedTokensTest {
                 }
             }
         }
-        // Every category is exercised (2 skins × tokens in it).
-        listOf("color", "length", "em", "int/ms", "float", "easing", "shadow", "string").forEach {
+        // Every category the corpus has is exercised (2 skins × tokens in it). `em` has had no token
+        // since --key-label-tracking was retired (tether 887c222); its branch above stays for the next.
+        listOf("color", "length", "int/ms", "float", "easing", "shadow", "string").forEach {
             assertTrue("category $it covered: $seen", (seen[it] ?: 0) > 0)
         }
     }

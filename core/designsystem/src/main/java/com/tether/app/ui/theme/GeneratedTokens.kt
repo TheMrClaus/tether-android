@@ -1,9 +1,9 @@
 // GENERATED FILE — DO NOT EDIT. PLAN D9 / T3.1.
-// Source: parity-corpus/tokens/design-tokens.json — tether 356b456 (scripts/export-design-tokens.mjs),
-// protocol v128, from app/globals.css + app/studio.css.
+// Source: parity-corpus/tokens/design-tokens.json — tether 887c222 (scripts/export-design-tokens.mjs),
+// protocol v137, from app/globals.css + app/studio.css.
 // Generator: tools/design-tokens. Regenerate: ./gradlew generateDesignTokens
 // Drift check: ./gradlew verifyDesignTokens (wired into :core:designsystem:check).
-// 2 skins, 126 tokens. Category mapping:
+// 2 skins, 109 tokens. Category mapping:
 //   color      #hex / rgb() / rgba() / transparent -> Color (sRGB ARGB; alpha quantized like Compose's Color(Float...))
 //   rgb_triple bare `r g b` channel triple (read as rgb(var(--x) / a) in CSS) -> opaque Color
 //   length     px / rem length (bare 0 allowed) -> Dp; 1px = 1dp, 1rem = 16dp
@@ -26,8 +26,8 @@ import androidx.compose.ui.unit.TextUnitType
 
 /** Provenance of the token corpus this file was generated from. */
 object DesignTokenSource {
-    const val TETHER_SHA: String = "356b456"
-    const val PROTOCOL_VERSION: Int = 128
+    const val TETHER_SHA: String = "887c222"
+    const val PROTOCOL_VERSION: Int = 137
     const val EXPORTER: String = "scripts/export-design-tokens.mjs"
     val SOURCES: List<String> = listOf("app/globals.css", "app/studio.css")
 }
@@ -88,16 +88,16 @@ data class SkinTokens(
     val attentionInk: Color,
     /** `--bay-floor` (color) */
     val bayFloor: Color,
-    /** `--bevel-pressed` (shadow) */
-    val bevelPressed: List<CssShadow>,
-    /** `--bevel-raised` (shadow) */
-    val bevelRaised: List<CssShadow>,
-    /** `--bevel-raised-sm` (shadow) */
-    val bevelRaisedSm: List<CssShadow>,
-    /** `--bezel` (shadow) */
-    val bezel: List<CssShadow>,
     /** `--border` (color) */
     val border: Color,
+    /** `--brand-blue` (color) */
+    val brandBlue: Color,
+    /** `--brand-claude` (color) */
+    val brandClaude: Color,
+    /** `--brand-ink` (color) */
+    val brandInk: Color,
+    /** `--brand-paper` (color) */
+    val brandPaper: Color,
     /** `--brick` (color) */
     val brick: Color,
     /** `--brick-deep` (color) */
@@ -140,8 +140,6 @@ data class SkinTokens(
     val durationFast: Int,
     /** `--ease-out` (easing) */
     val easeOut: CssCubicBezier,
-    /** `--edge-highlight` (shadow) */
-    val edgeHighlight: List<CssShadow>,
     /** `--faint` (color) */
     val faint: Color,
     /** `--find-match-active-bg` (color) */
@@ -170,24 +168,12 @@ data class SkinTokens(
     val keyFaceDeep: Color,
     /** `--key-face-hover` (color) */
     val keyFaceHover: Color,
-    /** `--key-label-tracking` (em) */
-    val keyLabelTracking: TextUnit,
-    /** `--key-label-transform` (string) */
-    val keyLabelTransform: String,
     /** `--key-side` (color) */
     val keySide: Color,
-    /** `--key-slit` (length) */
-    val keySlit: Dp,
     /** `--line` (color) */
     val line: Color,
     /** `--line-strong` (color) */
     val lineStrong: Color,
-    /** `--lit-faint` (color) */
-    val litFaint: Color,
-    /** `--lit-soft` (color) */
-    val litSoft: Color,
-    /** `--lit-strong` (color) */
-    val litStrong: Color,
     /** `--mineral` (color) */
     val mineral: Color,
     /** `--mineral-deep` (color) */
@@ -196,12 +182,8 @@ data class SkinTokens(
     val muted: Color,
     /** `--panel-veil` (color) */
     val panelVeil: Color,
-    /** `--perf-dots` (string) */
-    val perfDots: String,
     /** `--press-shade` (color) */
     val pressShade: Color,
-    /** `--press-travel` (length) */
-    val pressTravel: Dp,
     /** `--question-bg` (color) */
     val questionBg: Color,
     /** `--question-border` (color) */
@@ -218,24 +200,14 @@ data class SkinTokens(
     val radiusSm: Dp,
     /** `--rail-width` (length) */
     val railWidth: Dp,
-    /** `--rocker-ms` (duration) */
-    val rockerMs: Int,
     /** `--running` (color) */
     val running: Color,
     /** `--scrim` (color) */
     val scrim: Color,
-    /** `--seam-lip` (color) */
-    val seamLip: Color,
     /** `--selection-bg` (color) */
     val selectionBg: Color,
     /** `--shadow-floating` (shadow) */
     val shadowFloating: List<CssShadow>,
-    /** `--shadow-key` (shadow) */
-    val shadowKey: List<CssShadow>,
-    /** `--shadow-key-pressed` (shadow) */
-    val shadowKeyPressed: List<CssShadow>,
-    /** `--shadow-key-sm` (shadow) */
-    val shadowKeySm: List<CssShadow>,
     /** `--shadow-menu` (shadow) */
     val shadowMenu: List<CssShadow>,
     /** `--shadow-menu-a` (number) */
@@ -296,12 +268,6 @@ data class SkinTokens(
     val violetWash: Color,
     /** `--warning` (color) */
     val warning: Color,
-    /** `--wear-hi` (color) */
-    val wearHi: Color,
-    /** `--wear-lo` (color) */
-    val wearLo: Color,
-    /** `--well` (shadow) */
-    val well: List<CssShadow>,
     /** `--white` (color) */
     val white: Color,
     /** `--z-backdrop` (int) */
@@ -329,11 +295,11 @@ data class SkinTokens(
         "--attention-border" to attentionBorder,
         "--attention-ink" to attentionInk,
         "--bay-floor" to bayFloor,
-        "--bevel-pressed" to bevelPressed,
-        "--bevel-raised" to bevelRaised,
-        "--bevel-raised-sm" to bevelRaisedSm,
-        "--bezel" to bezel,
         "--border" to border,
+        "--brand-blue" to brandBlue,
+        "--brand-claude" to brandClaude,
+        "--brand-ink" to brandInk,
+        "--brand-paper" to brandPaper,
         "--brick" to brick,
         "--brick-deep" to brickDeep,
         "--brick-side" to brickSide,
@@ -355,7 +321,6 @@ data class SkinTokens(
         "--duration" to duration,
         "--duration-fast" to durationFast,
         "--ease-out" to easeOut,
-        "--edge-highlight" to edgeHighlight,
         "--faint" to faint,
         "--find-match-active-bg" to findMatchActiveBg,
         "--find-match-bg" to findMatchBg,
@@ -370,22 +335,14 @@ data class SkinTokens(
         "--key-face" to keyFace,
         "--key-face-deep" to keyFaceDeep,
         "--key-face-hover" to keyFaceHover,
-        "--key-label-tracking" to keyLabelTracking,
-        "--key-label-transform" to keyLabelTransform,
         "--key-side" to keySide,
-        "--key-slit" to keySlit,
         "--line" to line,
         "--line-strong" to lineStrong,
-        "--lit-faint" to litFaint,
-        "--lit-soft" to litSoft,
-        "--lit-strong" to litStrong,
         "--mineral" to mineral,
         "--mineral-deep" to mineralDeep,
         "--muted" to muted,
         "--panel-veil" to panelVeil,
-        "--perf-dots" to perfDots,
         "--press-shade" to pressShade,
-        "--press-travel" to pressTravel,
         "--question-bg" to questionBg,
         "--question-border" to questionBorder,
         "--question-ink" to questionInk,
@@ -394,15 +351,10 @@ data class SkinTokens(
         "--radius-md" to radiusMd,
         "--radius-sm" to radiusSm,
         "--rail-width" to railWidth,
-        "--rocker-ms" to rockerMs,
         "--running" to running,
         "--scrim" to scrim,
-        "--seam-lip" to seamLip,
         "--selection-bg" to selectionBg,
         "--shadow-floating" to shadowFloating,
-        "--shadow-key" to shadowKey,
-        "--shadow-key-pressed" to shadowKeyPressed,
-        "--shadow-key-sm" to shadowKeySm,
         "--shadow-menu" to shadowMenu,
         "--shadow-menu-a" to shadowMenuA,
         "--shadow-menu-up" to shadowMenuUp,
@@ -433,9 +385,6 @@ data class SkinTokens(
         "--violet-strong" to violetStrong,
         "--violet-wash" to violetWash,
         "--warning" to warning,
-        "--wear-hi" to wearHi,
-        "--wear-lo" to wearLo,
-        "--well" to well,
         "--white" to white,
         "--z-backdrop" to zBackdrop,
         "--z-modal" to zModal,
@@ -471,19 +420,11 @@ private fun studioTokens(): SkinTokens = SkinTokens(
     attentionBorder = Color(0xFFE7C98D),
     attentionInk = Color(0xFF80570F),
     bayFloor = Color(0xFFF4F6FA),
-    bevelPressed = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bevelRaised = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bevelRaisedSm = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bezel = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     border = Color(0xFFE4E8F0),
+    brandBlue = Color(0xFF4D6BFE),
+    brandClaude = Color(0xFFD97757),
+    brandInk = Color(0xFF0D0D0D),
+    brandPaper = Color(0xFFFFFFFF),
     brick = Color(0xFFBE3C49),
     brickDeep = Color(0xFFA52F3B),
     brickSide = Color(0xFFA52F3B),
@@ -505,9 +446,6 @@ private fun studioTokens(): SkinTokens = SkinTokens(
     duration = 200,
     durationFast = 140,
     easeOut = CssCubicBezier(0.22f, 1f, 0.36f, 1f),
-    edgeHighlight = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     faint = Color(0xFF6B778C),
     findMatchActiveBg = Color(0xFFFFB700),
     findMatchBg = Color(0xFFFFE45C),
@@ -522,22 +460,14 @@ private fun studioTokens(): SkinTokens = SkinTokens(
     keyFace = Color(0xFFFFFFFF),
     keyFaceDeep = Color(0xFFF4F6FA),
     keyFaceHover = Color(0xFFEEF2F8),
-    keyLabelTracking = TextUnit(0f, TextUnitType.Em),
-    keyLabelTransform = "none",
     keySide = Color(0xFFDDE3EE),
-    keySlit = Dp(0f),
     line = Color(0xFFE4E8F0),
     lineStrong = Color(0xFFCBD3E2),
-    litFaint = Color(0x00000000),
-    litSoft = Color(0x00000000),
-    litStrong = Color(0x00000000),
     mineral = Color(0xFFF4F6FA),
     mineralDeep = Color(0xFFF8F9FC),
     muted = Color(0xFF5E6C83),
     panelVeil = Color(0xFFFFFFFF),
-    perfDots = "none",
     pressShade = Color(0x3D1B2428),
-    pressTravel = Dp(0f),
     questionBg = Color(0xFFF0F5FF),
     questionBorder = Color(0xFFBBCCEF),
     questionInk = Color(0xFF3156A1),
@@ -546,22 +476,11 @@ private fun studioTokens(): SkinTokens = SkinTokens(
     radiusMd = Dp(12f),
     radiusSm = Dp(8f),
     railWidth = Dp(272f),
-    rockerMs = 110,
     running = Color(0xFF178263),
     scrim = Color(0x6B0E182B),
-    seamLip = Color(0x00000000),
     selectionBg = Color(0xFFDCE5FF),
     shadowFloating = listOf(
         CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(12f), blur = Dp(40f), spread = Dp(-12f), color = Color(0x330E1A32)),
-    ),
-    shadowKey = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    shadowKeyPressed = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    shadowKeySm = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
     ),
     shadowMenu = listOf(
         CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(8f), blur = Dp(24f), spread = Dp(0f), color = Color(0x1F142341)),
@@ -603,11 +522,6 @@ private fun studioTokens(): SkinTokens = SkinTokens(
     violetStrong = Color(0xFF2B4FC9),
     violetWash = Color(0xFFEDF2FF),
     warning = Color(0xFF926416),
-    wearHi = Color(0x00000000),
-    wearLo = Color(0x00000000),
-    well = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     white = Color(0xFF182238),
     zBackdrop = 40,
     zModal = 50,
@@ -630,19 +544,11 @@ private fun studioDarkTokens(): SkinTokens = SkinTokens(
     attentionBorder = Color(0xFF705936),
     attentionInk = Color(0xFFEAC47D),
     bayFloor = Color(0xFF101725),
-    bevelPressed = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bevelRaised = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bevelRaisedSm = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    bezel = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     border = Color(0xFF2B374E),
+    brandBlue = Color(0xFF4D6BFE),
+    brandClaude = Color(0xFFD97757),
+    brandInk = Color(0xFF0D0D0D),
+    brandPaper = Color(0xFFFFFFFF),
     brick = Color(0xFFBC3E50),
     brickDeep = Color(0xFFA83445),
     brickSide = Color(0xFFA83445),
@@ -664,9 +570,6 @@ private fun studioDarkTokens(): SkinTokens = SkinTokens(
     duration = 200,
     durationFast = 140,
     easeOut = CssCubicBezier(0.22f, 1f, 0.36f, 1f),
-    edgeHighlight = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     faint = Color(0xFF99A8C2),
     findMatchActiveBg = Color(0xFFFFD21F),
     findMatchBg = Color(0xFFC2A63A),
@@ -681,22 +584,14 @@ private fun studioDarkTokens(): SkinTokens = SkinTokens(
     keyFace = Color(0xFF1D2940),
     keyFaceDeep = Color(0xFF141D2E),
     keyFaceHover = Color(0xFF293851),
-    keyLabelTracking = TextUnit(0f, TextUnitType.Em),
-    keyLabelTransform = "none",
     keySide = Color(0xFF34425A),
-    keySlit = Dp(0f),
     line = Color(0xFF2B374E),
     lineStrong = Color(0xFF3D4D69),
-    litFaint = Color(0x00000000),
-    litSoft = Color(0x00000000),
-    litStrong = Color(0x00000000),
     mineral = Color(0xFF101725),
     mineralDeep = Color(0xFF131C2C),
     muted = Color(0xFFAAB7CD),
     panelVeil = Color(0xFF172032),
-    perfDots = "none",
     pressShade = Color(0x80000000),
-    pressTravel = Dp(0f),
     questionBg = Color(0xFF1C2E4A),
     questionBorder = Color(0xFF405A88),
     questionInk = Color(0xFFABC5FF),
@@ -705,22 +600,11 @@ private fun studioDarkTokens(): SkinTokens = SkinTokens(
     radiusMd = Dp(12f),
     radiusSm = Dp(8f),
     railWidth = Dp(272f),
-    rockerMs = 110,
     running = Color(0xFF6BD6B0),
     scrim = Color(0xAD050A14),
-    seamLip = Color(0x00000000),
     selectionBg = Color(0xFF354C7E),
     shadowFloating = listOf(
         CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(12f), blur = Dp(40f), spread = Dp(-12f), color = Color(0x330E1A32)),
-    ),
-    shadowKey = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    shadowKeyPressed = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
-    shadowKeySm = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
     ),
     shadowMenu = listOf(
         CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(8f), blur = Dp(24f), spread = Dp(0f), color = Color(0x52000000)),
@@ -762,11 +646,6 @@ private fun studioDarkTokens(): SkinTokens = SkinTokens(
     violetStrong = Color(0xFF8BA5FA),
     violetWash = Color(0xFF24365C),
     warning = Color(0xFFEAC47D),
-    wearHi = Color(0x00000000),
-    wearLo = Color(0x00000000),
-    well = listOf(
-        CssShadow(inset = false, offsetX = Dp(0f), offsetY = Dp(0f), blur = Dp(0f), spread = Dp(0f), color = Color(0x00000000)),
-    ),
     white = Color(0xFFF0F4FC),
     zBackdrop = 40,
     zModal = 50,

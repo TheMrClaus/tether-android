@@ -1,11 +1,27 @@
 {
+  "chrome": {
+    "manifest": {
+      "background_color": "#ffffff",
+      "theme_color": "#172032"
+    },
+    "metaThemeColor": [
+      {
+        "color": "#ffffff",
+        "media": "(prefers-color-scheme: light)"
+      },
+      {
+        "color": "#172032",
+        "media": "(prefers-color-scheme: dark)"
+      }
+    ]
+  },
   "generatedBy": "scripts/export-design-tokens.mjs",
   "modes": [
     "light",
     "dark",
     "system"
   ],
-  "protocolVersion": 128,
+  "protocolVersion": 137,
   "skinMap": {
     "dark": "studio-dark",
     "light": "studio"
@@ -125,25 +141,25 @@
           "raw": "#f4f6fa",
           "resolved": "#f4f6fa"
         },
-        "--bevel-pressed": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bevel-raised": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bevel-raised-sm": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bezel": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
         "--border": {
           "raw": "var(--line)",
           "resolved": "#e4e8f0"
+        },
+        "--brand-blue": {
+          "raw": "#4d6bfe",
+          "resolved": "#4d6bfe"
+        },
+        "--brand-claude": {
+          "raw": "#d97757",
+          "resolved": "#d97757"
+        },
+        "--brand-ink": {
+          "raw": "#0d0d0d",
+          "resolved": "#0d0d0d"
+        },
+        "--brand-paper": {
+          "raw": "#fff",
+          "resolved": "#fff"
         },
         "--brick": {
           "raw": "#be3c49",
@@ -229,10 +245,6 @@
           "raw": "cubic-bezier(0.22, 1, 0.36, 1)",
           "resolved": "cubic-bezier(0.22, 1, 0.36, 1)"
         },
-        "--edge-highlight": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
         "--faint": {
           "raw": "#6b778c",
           "resolved": "#6b778c"
@@ -289,21 +301,9 @@
           "raw": "#eef2f8",
           "resolved": "#eef2f8"
         },
-        "--key-label-tracking": {
-          "raw": "0",
-          "resolved": "0"
-        },
-        "--key-label-transform": {
-          "raw": "none",
-          "resolved": "none"
-        },
         "--key-side": {
           "raw": "#dde3ee",
           "resolved": "#dde3ee"
-        },
-        "--key-slit": {
-          "raw": "0px",
-          "resolved": "0px"
         },
         "--line": {
           "raw": "#e4e8f0",
@@ -312,18 +312,6 @@
         "--line-strong": {
           "raw": "#cbd3e2",
           "resolved": "#cbd3e2"
-        },
-        "--lit-faint": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--lit-soft": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--lit-strong": {
-          "raw": "transparent",
-          "resolved": "transparent"
         },
         "--mineral": {
           "raw": "#f4f6fa",
@@ -341,17 +329,9 @@
           "raw": "#ffffff",
           "resolved": "#ffffff"
         },
-        "--perf-dots": {
-          "raw": "none",
-          "resolved": "none"
-        },
         "--press-shade": {
           "raw": "rgb(27 36 40 / 0.24)",
           "resolved": "rgb(27 36 40 / 0.24)"
-        },
-        "--press-travel": {
-          "raw": "0px",
-          "resolved": "0px"
         },
         "--question-bg": {
           "raw": "#f0f5ff",
@@ -385,10 +365,6 @@
           "raw": "17rem",
           "resolved": "17rem"
         },
-        "--rocker-ms": {
-          "raw": "110ms",
-          "resolved": "110ms"
-        },
         "--running": {
           "raw": "#178263",
           "resolved": "#178263"
@@ -397,10 +373,6 @@
           "raw": "rgb(14 24 43 / 0.42)",
           "resolved": "rgb(14 24 43 / 0.42)"
         },
-        "--seam-lip": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
         "--selection-bg": {
           "raw": "#dce5ff",
           "resolved": "#dce5ff"
@@ -408,18 +380,6 @@
         "--shadow-floating": {
           "raw": "0 12px 40px -12px rgb(14 26 50 / 0.2)",
           "resolved": "0 12px 40px -12px rgb(14 26 50 / 0.2)"
-        },
-        "--shadow-key": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--shadow-key-pressed": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--shadow-key-sm": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
         },
         "--shadow-menu": {
           "raw": "0 8px 24px rgb(var(--contact) / var(--shadow-menu-a)), 0 1px 4px rgb(var(--contact) / calc(var(--shadow-menu-a) * 0.5))",
@@ -540,18 +500,6 @@
         "--warning": {
           "raw": "#926416",
           "resolved": "#926416"
-        },
-        "--wear-hi": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--wear-lo": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--well": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
         },
         "--white": {
           "raw": "#182238",
@@ -689,25 +637,25 @@
           "raw": "#101725",
           "resolved": "#101725"
         },
-        "--bevel-pressed": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bevel-raised": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bevel-raised-sm": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--bezel": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
         "--border": {
           "raw": "var(--line)",
           "resolved": "#2b374e"
+        },
+        "--brand-blue": {
+          "raw": "#4d6bfe",
+          "resolved": "#4d6bfe"
+        },
+        "--brand-claude": {
+          "raw": "#d97757",
+          "resolved": "#d97757"
+        },
+        "--brand-ink": {
+          "raw": "#0d0d0d",
+          "resolved": "#0d0d0d"
+        },
+        "--brand-paper": {
+          "raw": "#fff",
+          "resolved": "#fff"
         },
         "--brick": {
           "raw": "#bc3e50",
@@ -793,10 +741,6 @@
           "raw": "cubic-bezier(0.22, 1, 0.36, 1)",
           "resolved": "cubic-bezier(0.22, 1, 0.36, 1)"
         },
-        "--edge-highlight": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
         "--faint": {
           "raw": "#99a8c2",
           "resolved": "#99a8c2"
@@ -853,21 +797,9 @@
           "raw": "#293851",
           "resolved": "#293851"
         },
-        "--key-label-tracking": {
-          "raw": "0",
-          "resolved": "0"
-        },
-        "--key-label-transform": {
-          "raw": "none",
-          "resolved": "none"
-        },
         "--key-side": {
           "raw": "#34425a",
           "resolved": "#34425a"
-        },
-        "--key-slit": {
-          "raw": "0px",
-          "resolved": "0px"
         },
         "--line": {
           "raw": "#2b374e",
@@ -876,18 +808,6 @@
         "--line-strong": {
           "raw": "#3d4d69",
           "resolved": "#3d4d69"
-        },
-        "--lit-faint": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--lit-soft": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--lit-strong": {
-          "raw": "transparent",
-          "resolved": "transparent"
         },
         "--mineral": {
           "raw": "#101725",
@@ -905,17 +825,9 @@
           "raw": "#172032",
           "resolved": "#172032"
         },
-        "--perf-dots": {
-          "raw": "none",
-          "resolved": "none"
-        },
         "--press-shade": {
           "raw": "rgb(0 0 0 / 0.5)",
           "resolved": "rgb(0 0 0 / 0.5)"
-        },
-        "--press-travel": {
-          "raw": "0px",
-          "resolved": "0px"
         },
         "--question-bg": {
           "raw": "#1c2e4a",
@@ -949,10 +861,6 @@
           "raw": "17rem",
           "resolved": "17rem"
         },
-        "--rocker-ms": {
-          "raw": "110ms",
-          "resolved": "110ms"
-        },
         "--running": {
           "raw": "#6bd6b0",
           "resolved": "#6bd6b0"
@@ -961,10 +869,6 @@
           "raw": "rgb(5 10 20 / 0.68)",
           "resolved": "rgb(5 10 20 / 0.68)"
         },
-        "--seam-lip": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
         "--selection-bg": {
           "raw": "#354c7e",
           "resolved": "#354c7e"
@@ -972,18 +876,6 @@
         "--shadow-floating": {
           "raw": "0 12px 40px -12px rgb(14 26 50 / 0.2)",
           "resolved": "0 12px 40px -12px rgb(14 26 50 / 0.2)"
-        },
-        "--shadow-key": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--shadow-key-pressed": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
-        "--shadow-key-sm": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
         },
         "--shadow-menu": {
           "raw": "0 8px 24px rgb(var(--contact) / var(--shadow-menu-a)), 0 1px 4px rgb(var(--contact) / calc(var(--shadow-menu-a) * 0.5))",
@@ -1105,18 +997,6 @@
           "raw": "#eac47d",
           "resolved": "#eac47d"
         },
-        "--wear-hi": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--wear-lo": {
-          "raw": "transparent",
-          "resolved": "transparent"
-        },
-        "--well": {
-          "raw": "0 0 0 transparent",
-          "resolved": "0 0 0 transparent"
-        },
         "--white": {
           "raw": "#f0f4fc",
           "resolved": "#f0f4fc"
@@ -1144,5 +1024,5 @@
     "app/globals.css",
     "app/studio.css"
   ],
-  "tetherSha": "356b456"
+  "tetherSha": "887c222"
 }
