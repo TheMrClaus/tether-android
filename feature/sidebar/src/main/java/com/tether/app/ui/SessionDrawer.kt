@@ -15,6 +15,7 @@ import com.tether.app.client.ConnectionState
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.settings.SettingsDialog
 import com.tether.app.ui.sidebar.SessionSidebar
 import com.tether.app.ui.sidebar.SidebarController
 import com.tether.app.ui.sidebar.SidebarModel
@@ -211,7 +212,8 @@ fun SessionDrawer(
             },
         )
     }
-    if (settingsOpen) InterimSettingsDialog(prefs, onDismiss = { settingsOpen = false })
+    // T10.1: the Settings dialog (feature/settings); "Use current" takes this list's current workspace.
+    if (settingsOpen) SettingsDialog(client, prefs, currentWorkspace = current.orEmpty(), onDismiss = { settingsOpen = false })
 }
 
 /** dashboard.tsx:842 — the sidebar filter's content search waits this long after the last keystroke. */

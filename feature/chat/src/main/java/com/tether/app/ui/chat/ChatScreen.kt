@@ -300,7 +300,9 @@ fun ChatScreen(
     ) {
     Column(Modifier.fillMaxSize().background(t.mineralDeep)) {
         if (session != null && showWorkspaceHeader) {
-            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow, origin = consentOrigin)
+            // T10.1: Settings → General's "Confirm before ending" (dashboard.tsx:1170-1180); until read, it asks.
+            val confirmBeforeEnd by remember(prefs) { prefs.preferences.map { it.confirmBeforeEnd }.distinctUntilChanged() }.collectAsStateWithLifecycle(true)
+            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow, origin = consentOrigin, confirmBeforeEnd = confirmBeforeEnd)
         }
 
         if (session != null && runs.isNotEmpty()) {
@@ -552,9 +554,10 @@ private data class ChatEndDraw(val sessionId: String, val drawnFor: String?)
  * the link is up and this session's copy is live, so End session may send. [origin] (r3): the
  * server ([com.tether.app.client.TetherClient.consentOrigin]) the header is drawn for; the confirmation is bound to the
  * session and the origin it was opened for, and acts only while both still hold.
+ * [confirmBeforeEnd] (T10.1): off, End session sends at once instead of asking.
  */
 @Composable
-private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean, origin: String?) {
+private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean, origin: String?, confirmBeforeEnd: Boolean = true) {
     val t = LocalTetherTokens.current
     var showTelemetry by remember { mutableStateOf(false) }
     var confirmEnd by remember { mutableStateOf<ChatEndDraw?>(null) }
@@ -597,7 +600,12 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             }
             if (session.status != "exited") {
                 TetherKey(
-                    onClick = { if (endAllowed) confirmEnd = ChatEndDraw(session.id, origin) },
+                    onClick = {
+                        if (endAllowed) {
+                            if (confirmBeforeEnd) confirmEnd = ChatEndDraw(session.id, origin)
+                            else vm.client.kill(session.id, origin, requireLive = true)
+                        }
+                    },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,

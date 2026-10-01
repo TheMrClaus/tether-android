@@ -21,10 +21,18 @@ import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.TetherTheme
 import kotlinx.serialization.json.put
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -60,10 +68,9 @@ class MainShellEndSessionTest {
         rule.waitForIdle()
     }
 
-    private fun host(client: ShellConsentClient) {
+    private fun host(client: ShellConsentClient, prefs: UiPrefs = UiPrefs(ApplicationProvider.getApplicationContext())) {
         val vm = TetherViewModel(client)
         vm.selectSession("s1")
-        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
             TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
         }
@@ -152,6 +159,48 @@ class MainShellEndSessionTest {
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$OTHER_ORIGIN:true"), client.killCalls)
+    }
+
+    @get:Rule val tmp = TemporaryFolder()
+
+    /** A preference store of this test's own, with Settings → General's "Confirm before ending" set. */
+    private fun prefsConfirming(confirm: Boolean): UiPrefs {
+        val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + storeJob)) { File(tmp.root, "ui.preferences_pb") }
+        return UiPrefs.on(store).also { prefs -> runBlocking { prefs.updatePreferences { it.copy(confirmBeforeEnd = confirm) } } }
+    }
+
+    private val storeJob = Job()
+
+    @After fun closeStore() = storeJob.cancel()
+
+    /**
+     * T10.1 (dashboard.tsx:1170-1180 `endSession`): with "Confirm before ending" off, the header's
+     * End session sends at once, bound to the server it was drawn for; no question is asked.
+     */
+    @Test
+    fun withConfirmBeforeEndOffTheHeaderEndsAtOnce() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client, prefsConfirming(false))
+        // The stored value is read before the key is used.
+        rule.mainClock.advanceTimeBy(700)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+    }
+
+    /** On (the default), the same key asks first and ends nothing until confirmed. */
+    @Test
+    fun withConfirmBeforeEndOnTheHeaderAsks() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client, prefsConfirming(true))
+        rule.mainClock.advanceTimeBy(700)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertExists()
+        assertTrue(client.killCalls.isEmpty())
     }
 
     private companion object {

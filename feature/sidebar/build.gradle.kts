@@ -29,6 +29,8 @@ dependencies {
     implementation(project(":core:net"))
     implementation(project(":core:data"))
     implementation(project(":core:designsystem"))
+    // T10.1: the Settings dialog the footer opens when no host supplies one.
+    implementation(project(":feature:settings"))
     // T5.1: the verified sidebar helpers (protocol.helpers: SessionSidebar, SidebarOrder, SidebarWorkspaces, Format).
     implementation(project(":core:reducer"))
 

@@ -45,6 +45,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -88,8 +89,8 @@ internal fun SettingsSection(
     title: String,
     caption: AnnotatedString?,
     narrow: Boolean,
-    last: Boolean = false,
     modifier: Modifier = Modifier,
+    last: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -273,7 +274,7 @@ internal fun SettingsSwitchTrack(checked: Boolean) {
     ) {
         Box(
             Modifier
-                .offset(x = 3.dp + knob, y = 3.dp)
+                .offset { IntOffset((3.dp + knob).roundToPx(), 3.dp.roundToPx()) }
                 .size(18.dp)
                 .cssSurface(CircleShape, Color.White, null, listOf(softShadow(1.dp, 3.dp, Color(16, 30, 58).copy(alpha = 0.14f)))),
         )

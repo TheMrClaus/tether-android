@@ -50,9 +50,8 @@ class ChatSyncTest {
 
     private val session = chatSession("s1", historyId = null)
 
-    private fun host(client: ChatTestClient, shown: AgentSession = session, header: Boolean = false) {
+    private fun host(client: ChatTestClient, shown: AgentSession = session, header: Boolean = false, prefs: UiPrefs = UiPrefs(ApplicationProvider.getApplicationContext())) {
         val vm = TetherViewModel(client)
-        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
@@ -339,6 +338,33 @@ class ChatSyncTest {
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@https://other.example:true"), client.killCalls)
+    }
+
+    @get:Rule val tmp = org.junit.rules.TemporaryFolder()
+    private val storeJob = kotlinx.coroutines.Job()
+
+    @org.junit.After fun closeStore() = storeJob.cancel()
+
+    /**
+     * T10.1 (dashboard.tsx:1170-1180): with Settings → General's "Confirm before ending" off, the
+     * chat header's End session sends at once (still live-gated and bound to its server).
+     */
+    @Test
+    fun theChatHeadersEndSessionHonoursConfirmBeforeEnd() {
+        val running = session.copy(status = "active")
+        val client = ChatTestClient().also { it.reports = true }
+        client.show(running, ApprovalFixtures.write, live = true)
+        client.sync.value = live("s1")
+        val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + storeJob),
+        ) { java.io.File(tmp.root, "ui.preferences_pb") }
+        val prefs = UiPrefs.on(store)
+        kotlinx.coroutines.runBlocking { prefs.updatePreferences { it.copy(confirmBeforeEnd = false) } }
+        host(client, running, header = true, prefs = prefs)
+        rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
+        assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
     }
 
     private fun confirmKey() = rule.onNodeWithTag(END_SESSION_CONFIRM_TAG)

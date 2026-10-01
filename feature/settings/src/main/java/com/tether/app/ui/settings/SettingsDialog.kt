@@ -3,7 +3,7 @@ package com.tether.app.ui.settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -60,6 +63,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.TetherClient
+import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherKey
@@ -223,8 +227,9 @@ fun SettingsFrame(
                 .then(caseModifier)
                 .cssSurface(shape, t.graphite, null, if (narrow) emptyList() else StudioDialog.shadows)
                 .clip(shape)
-                // The <dialog> swallows taps: only Back, Close, Cancel and Save dismiss it.
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {}),
+                // The <dialog> swallows taps: only Back, Close, Cancel and Save dismiss it. A plain
+                // gesture sink, not a clickable, so the panels' text is never merged into one node.
+                .pointerInput(Unit) { detectTapGestures { } },
         ) {
             SettingsHeader(narrow, onClose)
             SettingsTabStrip(state.tab, narrow, onSelect = { state.tab = it })
@@ -287,51 +292,78 @@ private fun SettingsHeader(narrow: Boolean, onClose: () -> Unit) {
 }
 
 /**
- * `.settings-tabs` (settings-dialog.tsx:1980-1996; globals.css 3002-3035, studio.css 557-565, 968):
- * one row that never wraps and scrolls sideways on a narrow screen; each tab a 44dp pill, the
- * selected one in the violet wash. Tabs announce as tabs with their selection.
+ * `.settings-tabs` (settings-dialog.tsx:1980-1996; globals.css 3002-3035 and 10769-10797 under
+ * studio.css 557-565, 968): an inset strip (12dp above, 24dp in from the case, 12dp on a phone)
+ * in a 1px `--line-strong` edge at `--radius-key`; one row that never wraps. Each tab is a 44dp pill
+ * (`flex: 1 0 auto`: its own width plus an equal share of what is left), the selected one in the
+ * violet wash; when they do not fit (a phone) the row scrolls sideways. Tabs announce as tabs
+ * with their selection.
  */
 @Composable
 private fun SettingsTabStrip(selected: SettingsTab, narrow: Boolean, onSelect: (SettingsTab) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    Column {
-        Row(
-            Modifier
+    val shape = RoundedCornerShape(t.radiusKey)
+    val padH = if (narrow) 12.dp else 24.dp
+    val padV = if (narrow) 10.dp else 12.dp
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = if (narrow) 12.dp else 24.dp, end = if (narrow) 12.dp else 24.dp, top = 12.dp),
+    ) {
+        val inner = maxWidth - 2.dp - padH * 2
+        Layout(
+            modifier = Modifier
                 .testTag(SettingsDialogTags.Tabs)
                 .fillMaxWidth()
+                .cssSurface(shape, t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
+                .clip(shape)
                 .horizontalScroll(rememberScrollState())
                 .selectableGroup()
-                .padding(horizontal = if (narrow) 12.dp else 24.dp, vertical = if (narrow) 10.dp else 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            SettingsTab.entries.forEach { tab ->
-                val active = tab == selected
-                Box(
-                    Modifier
-                        .testTag(SettingsDialogTags.tab(tab))
-                        .heightIn(min = 44.dp)
-                        .background(if (active) t.violetWash else Color.Transparent, RoundedCornerShape(8.dp))
-                        .selectable(
-                            selected = active,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            role = Role.Tab,
-                            onClick = { onSelect(tab) },
+                .padding(horizontal = padH, vertical = padV),
+            content = {
+                SettingsTab.entries.forEach { tab ->
+                    val active = tab == selected
+                    Box(
+                        Modifier
+                            .testTag(SettingsDialogTags.tab(tab))
+                            .heightIn(min = 44.dp)
+                            .background(if (active) t.violetWash else Color.Transparent, RoundedCornerShape(8.dp))
+                            .selectable(
+                                selected = active,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                role = Role.Tab,
+                                onClick = { onSelect(tab) },
+                            )
+                            .padding(horizontal = if (narrow) 12.dp else 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            tab.label,
+                            color = if (active) t.violetStrong else t.muted,
+                            maxLines = 1,
+                            style = settingsText(type.ui, 13f, 650),
                         )
-                        .padding(horizontal = if (narrow) 12.dp else 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        tab.label,
-                        color = if (active) t.violetStrong else t.muted,
-                        maxLines = 1,
-                        style = settingsText(type.ui, 13f, 600),
-                    )
+                    }
+                }
+            },
+        ) { measurables, constraints ->
+            val gap = 4.dp.roundToPx()
+            val natural = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
+            val used = natural.sum() + gap * (measurables.size - 1)
+            val extra = ((inner.roundToPx() - used).coerceAtLeast(0)) / measurables.size.coerceAtLeast(1)
+            val placeables = measurables.mapIndexed { i, m -> m.measure(Constraints.fixedWidth(natural[i] + extra)) }
+            val height = placeables.maxOf { it.height }
+            val width = placeables.sumOf { it.width } + gap * (placeables.size - 1)
+            layout(width, height) {
+                var x = 0
+                placeables.forEach { p ->
+                    p.place(x, (height - p.height) / 2)
+                    x += p.width + gap
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
     }
 }
 

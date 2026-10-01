@@ -86,7 +86,9 @@ import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
@@ -225,6 +227,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
+    // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
+    // Off, the header's End session sends at once; on (and until the stored value is read), it asks.
+    val confirmBeforeEndFlow = remember(prefs) { prefs.preferences.map { it.confirmBeforeEnd }.distinctUntilChanged() }
+    val confirmBeforeEnd by confirmBeforeEndFlow.collectAsStateWithLifecycle(initialValue = true)
     // ta-28i: the working directory and the session id are server text: a copy carries them the SAFE
     // way (a hidden control as its visible token), and the notice's "Copy raw" is the only raw path.
     // r2: one-line names (TAB / LF / CR are tokens) copied strictly: EVERY token counts, a zero-width
@@ -343,7 +349,14 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         val headerActions = WorkspaceHeaderActions(
                 onRename = { renaming = session },
                 // r3: the confirmation is bound to the session AND the server it was opened for.
-                onEndSession = { confirmEnd = session?.let { EndTarget(it, consentOrigin) } },
+                onEndSession = {
+                    session?.let {
+                        // The key is enabled only while the session's copy is live; the client
+                        // re-checks the live set and the origin either way (requireLive).
+                        if (confirmBeforeEnd) confirmEnd = EndTarget(it, consentOrigin)
+                        else vm.client.kill(it.id, consentOrigin, requireLive = true)
+                    }
+                },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
                 onCopyPath = {
                     session?.let {
@@ -537,8 +550,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         )
     }
 
-    // T15.4: the top bar's Settings and the rail footer's open the same sheet.
-    if (settingsOpen) com.tether.app.ui.InterimSettingsDialog(prefs, onDismiss = { settingsOpen = false })
+    // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
+    if (settingsOpen) ShellSettings(vm, prefs, workspaceRoot, onDismiss = { settingsOpen = false })
 
     if (showLogoutConfirm) {
         TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {
@@ -608,6 +621,19 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             onCancel = { confirmEnd = null },
         )
     }
+}
+
+/**
+ * T10.1: the Settings dialog with the sidebar's current workspace (use-tether.ts `currentWorkspace`:
+ * the operator's pick, else the last-opened or default folder, else the server's root) for
+ * General's "Use current", read here so the shell itself never recomposes on preference changes.
+ */
+@Composable
+private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: String?, onDismiss: () -> Unit) {
+    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
+    val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
+    val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
+    com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss)
 }
 
 /**

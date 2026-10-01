@@ -44,10 +44,7 @@ class SidebarController(
      * (dashboard.tsx:140), else the server's root.
      */
     fun currentWorkspace(picked: String?, prefs: TetherPreferences, workspaceRoot: String?): String? =
-        picked?.takeIf { it.isNotEmpty() }
-            ?: prefs.lastOpenedSession?.cwd?.takeIf { it.isNotEmpty() }
-            ?: prefs.defaultWorkspace.takeIf { it.isNotEmpty() }
-            ?: workspaceRoot?.takeIf { it.isNotEmpty() }
+        resolveCurrentWorkspace(picked, prefs, workspaceRoot)
 
     /** v128 `pinnedWorkspaces` from the server-settings frame: a string array, or null ("never written"). */
     fun serverPinned(settings: ServerMessage.ServerSettings?): List<String>? =
@@ -253,5 +250,15 @@ class SidebarController(
     companion object {
         /** use-tether.ts:1316. */
         const val REDISCOVER_INTERVAL_MS = 20_000L
+
+        /**
+         * [currentWorkspace]'s rule on its own, for a host without a controller (T10.1: the shell's
+         * Settings, whose "Use current" takes the sidebar's current workspace, as the web's does).
+         */
+        fun resolveCurrentWorkspace(picked: String?, prefs: TetherPreferences, workspaceRoot: String?): String? =
+            picked?.takeIf { it.isNotEmpty() }
+                ?: prefs.lastOpenedSession?.cwd?.takeIf { it.isNotEmpty() }
+                ?: prefs.defaultWorkspace.takeIf { it.isNotEmpty() }
+                ?: workspaceRoot?.takeIf { it.isNotEmpty() }
     }
 }
