@@ -791,9 +791,10 @@ class NodeRegistryTest {
     fun aRequestDrawnForAnotherServerIsNeverSent() {
         val ws = connected()
         val other = "https://other-console.example.test"
-        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.addNode(other, NodeCredential("parity-FAKE-bundle-for-b")) })
-        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode(other, "node-a") })
-        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.removeNode(other, "node-a") })
+        // Bounded (get(): 10 s): a frame that did go out would wait for an answer, and fail here rather than hang.
+        assertEquals(NodeRequestOutcome.NotSent, request { h.client.addNode(other, NodeCredential("parity-FAKE-bundle-for-b")) }.get())
+        assertEquals(NodeRequestOutcome.NotSent, request { h.client.probeNode(other, "node-a") }.get())
+        assertEquals(NodeRequestOutcome.NotSent, request { h.client.removeNode(other, "node-a") }.get())
         h.serverBarrier(ws)
         assertTrue("a frame drawn for another server went out", h.framesUntilBarrier().none { it.type()!!.startsWith("node-") })
         assertEquals(0, h.client.pendingNodeRequestCount())
