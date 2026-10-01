@@ -287,4 +287,47 @@ class TetherViewModelResumeTest {
         runCurrent()
         assertEquals("new", vm.selectedSessionId.value)
     }
+
+    // --- ta-abm: the new-session sheet's open flag (dashboard.tsx draftOpen) -------------------------
+
+    @Test fun theSheetStaysOpenThroughItsCreateAndClosesOnItsCreated() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.openDraft()
+        vm.draftComposer.refresh()
+        vm.draftComposer.selectProvider("claude")
+        vm.draftComposer.setText("first words")
+        assertEquals(com.tether.app.client.DraftSubmitResult.Sent, vm.draftComposer.submit("https://a.example:443"))
+        runCurrent()
+        assertTrue("still composing while the create is in flight", vm.draftOpen.value)
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        runCurrent()
+        assertFalse(vm.draftOpen.value)
+        assertEquals("new", vm.selectedSessionId.value)
+        assertEquals(listOf("new" to "first words"), client.sent)
+    }
+
+    @Test fun aSelectionAResumeAndAServerSwitchCloseTheSheetOnlyTheSwitchDropsTheDraft() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.openDraft()
+        vm.draftComposer.setText("kept")
+        client.sessions.value = listOf(session("s1"))
+        runCurrent()
+        vm.selectSession("s1")
+        assertFalse(vm.draftOpen.value)
+        assertEquals("kept", vm.draftComposer.state.value.text)
+        vm.openDraft()
+        vm.resumeHistory(history("h1"))
+        assertFalse(vm.draftOpen.value)
+        assertEquals("kept", vm.draftComposer.state.value.text)
+        vm.openDraft()
+        vm.closeDraft()
+        assertFalse(vm.draftOpen.value)
+        vm.openDraft()
+        client.serverUrl.value = "https://b.example:443"
+        runCurrent()
+        assertFalse(vm.draftOpen.value)
+        assertEquals("", vm.draftComposer.state.value.text)
+    }
 }

@@ -730,6 +730,79 @@ class DraftComposerModelTest {
         assertEquals(JsObj.EMPTY, h.model.preferences())
     }
 
+    // --- ta-abm: the draft is its server's ------------------------------------------------------------
+
+    @Test
+    fun aServerSwitchDropsTheDraftAndAPickStillBeingRead() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("claude")
+        h.model.setText("for A only")
+        h.model.setCwd("/srv/a-project")
+        h.model.setAttachments(listOf(Attachment(name = "a.png", mediaType = "image/png", data = "AAAA")))
+        val reading = h.model.attachmentGeneration
+        h.model.onOrigin(B)
+        runCurrent()
+        val s = h.model.state.value
+        assertEquals("", s.text)
+        assertTrue(s.staged.isEmpty())
+        assertEquals("no provider carried over", JsStr(""), s.form["key"])
+        assertEquals("the folder is re-seeded from the workspace", JsStr("/w"), s.form["cwd"])
+        val late = StagedAttachment(h.model.newAttachmentId(), Attachment(name = "late.png", mediaType = "image/png", data = "AAAA"), 3)
+        assertFalse("a pick read for A never lands in B's draft", h.model.addAttachments(listOf(late), reading))
+        assertTrue(h.model.state.value.staged.isEmpty())
+        assertTrue(h.model.addAttachments(listOf(late), h.model.attachmentGeneration))
+    }
+
+    @Test
+    fun aServerSwitchLetsGoOfTheCreateInFlight() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("claude")
+        h.model.setText("hello")
+        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertTrue(h.model.state.value.creating)
+        h.model.onOrigin(B)
+        runCurrent()
+        assertFalse(h.model.state.value.creating)
+        assertEquals("", h.model.state.value.error)
+        h.client.created("late", "req-1")
+        assertNull("its reply opens nothing", h.deliverCreated())
+        assertTrue(h.opened.isEmpty())
+        assertTrue(h.client.sends.isEmpty())
+    }
+
+    @Test
+    fun aPickFinishingAfterTheFirstTurnTookTheAttachmentsIsDropped() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("claude")
+        h.model.setText("look")
+        val reading = h.model.attachmentGeneration
+        h.model.setAttachments(listOf(Attachment(name = "a.png", mediaType = "image/png", data = "AAAA")))
+        h.model.submit(A)
+        val late = StagedAttachment(h.model.newAttachmentId(), Attachment(name = "late.png", mediaType = "image/png", data = "AAAA"), 3)
+        assertFalse("nothing is added while a create holds the draft", h.model.addAttachments(listOf(late), reading))
+        h.client.created("new", "req-1")
+        h.deliverCreated()
+        h.client.liveSessions.value = setOf("new")
+        runCurrent()
+        assertEquals(listOf(Triple("new", "look", 1)), h.client.attachmentSends)
+        assertFalse(h.model.addAttachments(listOf(late), reading))
+        assertTrue(h.model.state.value.staged.isEmpty())
+    }
+
+    @Test
+    fun stagedAttachmentsKeepTheirIdsAndSizesAndOneCanBeRemoved() = runTest {
+        val h = harness()
+        h.model.setAttachments(listOf(Attachment(name = "a.png", mediaType = "image/png", data = "AAAAAA=="), Attachment(name = "b.txt", mediaType = "text/plain", data = "aGk=")))
+        val staged = h.model.state.value.staged
+        assertEquals(listOf(4L, 2L), staged.map { it.sizeBytes })
+        assertNotEquals(staged[0].id, staged[1].id)
+        h.model.removeAttachment(staged[0].id)
+        assertEquals(listOf("b.txt"), h.model.state.value.attachments.map { it.name })
+    }
+
     // --- requestIds ---------------------------------------------------------------------------------------
 
     @Test

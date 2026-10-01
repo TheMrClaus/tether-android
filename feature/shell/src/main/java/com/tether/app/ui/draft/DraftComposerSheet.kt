@@ -72,6 +72,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag as testTagProperty
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -728,8 +729,8 @@ internal fun WorkspacePopover(cwd: String, quickPicks: List<WorkspaceQuickPick>,
                             contentDescription = label
                             this.selected = selected
                             onClick("Use this folder") { onPick(pick.path); true }
+                            testTagProperty = DraftComposerTags.quickPick(pick.path)
                         }
-                        .testTag(DraftComposerTags.quickPick(pick.path))
                         .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
