@@ -3212,6 +3212,20 @@ class RealTetherClient(
         }
     })
 
+    /**
+     * ta-9q2: Settings' Claude accounts (`GET /api/claude-accounts`, `/sync`, `/<id>/status`), over
+     * [authHttp] with the same per-call (server, credential) read as [files]. GET only: the
+     * owner-grade writes (403 to a device token) are never sent.
+     */
+    override val claudeAccounts: ClaudeAccountsSource = HttpClaudeAccounts(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
     // ------------------------------------------------------------------
     // Fire-and-forget commands
     // ------------------------------------------------------------------

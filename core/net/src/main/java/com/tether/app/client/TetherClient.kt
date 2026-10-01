@@ -491,6 +491,14 @@ interface TetherClient {
     val overviewMetrics: OverviewMetricsSource get() = OverviewMetricsSource.Unavailable
 
     /**
+     * ta-9q2: Settings' Claude accounts, READ ONLY: `GET /api/claude-accounts`, `/sync` and
+     * `/<id>/status` on the paired server, with the credential in force and never following a
+     * redirect (see [HttpClaudeAccounts]). The owner-grade writes are not reachable through it. The
+     * default refuses every call without touching the network.
+     */
+    val claudeAccounts: ClaudeAccountsSource get() = ClaudeAccountsSource.Unavailable
+
+    /**
      * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
      * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
      * session's cached hunks, so an expanded file refetches. Emptied with the other server views.
