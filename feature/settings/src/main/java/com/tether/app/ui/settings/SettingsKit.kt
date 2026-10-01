@@ -208,18 +208,20 @@ internal fun RowRule() {
 /**
  * `.settings-row`: at least 78dp, 17dp above and below, the text beside its control 24dp apart
  * (16 on a phone). On a phone (globals.css 3219) the control drops under the text and fills the
- * row, unless [inline] (the `.settings-toggle` switch keeps its row, globals.css 3224).
+ * row, unless [inline] (the `.settings-toggle` switch keeps its row, globals.css 3224). [rule]:
+ * the rule above it (ta-dh1: an engine card's first row has none, studio.css 645).
  */
 @Composable
 internal fun SettingsRow(
     narrow: Boolean,
     modifier: Modifier = Modifier,
     inline: Boolean = false,
+    rule: Boolean = true,
     text: @Composable (Modifier) -> Unit,
     control: (@Composable (Modifier) -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        RowRule()
+        if (rule) RowRule()
         if (narrow && !inline) {
             Column(
                 modifier.fillMaxWidth().heightIn(min = 78.dp).padding(vertical = 17.dp),

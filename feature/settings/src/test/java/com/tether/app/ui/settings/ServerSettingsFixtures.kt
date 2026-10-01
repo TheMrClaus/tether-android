@@ -44,6 +44,13 @@ object ServerFixtures {
             "preferSpawnAgent" to "deny", "pinnedWorkspaces" to null,
             "metadataGenerationEnabled" to true, "metadataGenerationMode" to "manual",
             "metadataGenerationProvider" to "anthropic:claude-3-5-haiku-latest", "metadataGenerationProviders" to PROVIDERS,
+            // ta-dh1: the Engines tab. Claude's home is empty (the real HOME, issue #86); OpenCode,
+            // Reasonix, Pi and DeepSeek Harness have none (their switches are blocked).
+            "headlessModes" to "claude,codex", "claudeHome" to "", "codexHome" to "/srv/homes/codex",
+            "opencodeHome" to null, "reasonixHome" to null, "piHome" to null, "dshHome" to null,
+            "claudeCommand" to "claude", "codexCommand" to "codex", "opencodeCommand" to "opencode",
+            "reasonixCommand" to "reasonix", "piCommand" to "pi", "dshCommand" to "dsh",
+            "claudeLaunchCommand" to "", "shareHostConfig" to true,
         )
         base.putAll(overrides)
         return JsonObject(base.mapValues { (_, v) -> toJson(v) })
@@ -58,17 +65,36 @@ object ServerFixtures {
         else -> error("unsupported $v")
     }
 
+    /**
+     * ta-dh1: what the host-CLI scan found (fake paths): Claude, Codex, Reasonix and Pi installed,
+     * OpenCode not found (its config home detected), no entry yet for DeepSeek Harness ("scanning…").
+     */
+    val DETECTED: JsonObject = json(
+        """{
+            "claude":{"engine":"claude","found":true,"binPath":"/home/op/.local/bin/claude","version":"2.1.284","source":"host install","configDir":"/home/op/.claude","configPresent":true},
+            "codex":{"engine":"codex","found":true,"binPath":"/home/op/.codex/bin/codex","version":"0.159.0","source":"user PATH","configDir":"/home/op/.codex","configPresent":true},
+            "opencode":{"engine":"opencode","found":false,"binPath":null,"version":null,"source":"not found","configDir":"/home/op/.config/opencode","configPresent":false},
+            "reasonix":{"engine":"reasonix","found":true,"binPath":"/opt/reasonix/bin/reasonix","version":"1.39.4","source":"bundled","configDir":"/home/op/.reasonix","configPresent":false},
+            "pi":{"engine":"pi","found":true,"binPath":"/home/op/.local/bin/pi","version":null,"source":"user PATH","configDir":"/home/op/.pi/agent","configPresent":false}
+        }""",
+    )
+
     fun frame(
         settings: JsonObject = settingsJson(),
         envForced: Map<String, Boolean> = mapOf("stateDir" to true),
         restartRequired: Boolean = false,
-    ) = ServerMessage.ServerSettings(settings, envForced, restartRequired, emptyList(), JsonObject(emptyMap()))
+        detected: JsonObject = DETECTED,
+    ) = ServerMessage.ServerSettings(settings, envForced, restartRequired, emptyList(), detected)
 
     fun view(
         settings: JsonObject = settingsJson(),
         envForced: Map<String, Boolean> = mapOf("stateDir" to true),
         restartRequired: Boolean = false,
-    ) = ServerSettingsView.of(frame(settings, envForced, restartRequired))
+        detected: JsonObject = DETECTED,
+    ) = ServerSettingsView.of(frame(settings, envForced, restartRequired, detected))
+
+    /** [settings] with [patch] applied, as the server's reply would carry it. */
+    fun applied(settings: JsonObject, patch: JsonObject) = JsonObject(settings + patch)
 
     val ADVANCED = ServerMessage.AdvancedSettings(
         claudeCliVersion = null,
@@ -86,7 +112,8 @@ object ServerFixtures {
         advanced: ServerMessage.AdvancedSettings? = ADVANCED,
         origin: String? = ORIGIN,
         writer: ServerSettingsWriter = ServerSettingsWriter.None,
-    ) = ServerSettingsBinding(view, advanced, origin, writer)
+        replies: Long = 0L,
+    ) = ServerSettingsBinding(view, advanced, origin, writer, replies)
 
     fun json(text: String): JsonObject = TetherJson.parseToJsonElement(text).jsonObject
 }
@@ -95,6 +122,9 @@ object ServerFixtures {
 class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSettingsWriter {
     val patches = mutableListOf<Pair<JsonObject, String>>()
     val cli = mutableListOf<Pair<ClientMessage.SetAdvancedSettings, String>>()
+
+    /** ta-dh1: each `detect-engines` ("Scan again"), by the origin it was bound to. */
+    val scans = mutableListOf<String>()
 
     /** The frames as sent: `{"type":"set-server-settings","settings":…}`. */
     fun frames(): List<JsonObject> = patches.map { ClientMessage.SetServerSettings(it.first).toJsonObject() }
@@ -107,6 +137,11 @@ class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSett
 
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean {
         cli += message to origin
+        return true
+    }
+
+    override fun detectEngines(origin: String): Boolean {
+        scans += origin
         return true
     }
 }

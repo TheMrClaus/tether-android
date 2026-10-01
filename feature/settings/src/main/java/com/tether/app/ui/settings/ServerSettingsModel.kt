@@ -1,8 +1,12 @@
 package com.tether.app.ui.settings
 
+import com.tether.app.client.EngineCard
+import com.tether.app.client.EngineDetection
 import com.tether.app.client.LabelText
 import com.tether.app.client.ServerSetting
+import com.tether.app.client.ServerSettingsPatch
 import com.tether.app.client.ServerSettingsView
+import com.tether.app.client.jsTrim
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.TetherJson
@@ -19,10 +23,14 @@ interface ServerSettingsWriter {
     fun patch(patch: JsonObject, origin: String): Boolean
     fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean
 
+    /** ta-dh1: `detect-engines` ("Scan again"), bound to [origin] like the writes. */
+    fun detectEngines(origin: String): Boolean
+
     /** No client (previews, a signed-out frame): nothing is ever sent. */
     object None : ServerSettingsWriter {
         override fun patch(patch: JsonObject, origin: String) = false
         override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = false
+        override fun detectEngines(origin: String) = false
     }
 }
 
@@ -40,11 +48,16 @@ data class ServerSettingsBinding(
     val advanced: ServerMessage.AdvancedSettings?,
     val origin: String?,
     val writer: ServerSettingsWriter = ServerSettingsWriter.None,
+    /** ta-dh1: how many `server-settings` replies have arrived ("Scan again" is busy until the next). */
+    val replies: Long = 0L,
 ) {
     /** A write to the server this binding was drawn from; false (nothing sent) without one. */
     fun send(patch: JsonObject?): Boolean = patch != null && origin != null && writer.patch(patch, origin)
 
     fun sendCli(message: ClientMessage.SetAdvancedSettings?): Boolean = message != null && origin != null && writer.cliVersion(message, origin)
+
+    /** ta-dh1: "Scan again", to the server this binding was drawn from. */
+    fun scan(): Boolean = origin != null && writer.detectEngines(origin)
 
     companion object {
         val None = ServerSettingsBinding(null, null, null)
@@ -268,4 +281,130 @@ object ServerRowCopy {
     fun reveal(label: String) = "Reveal $label"
     fun hide(label: String) = "Hide $label"
     fun maskedDescription(label: String, empty: Boolean) = if (empty) "$label, not set" else "$label, hidden"
+}
+
+/**
+ * ta-dh1: an engine value waiting for its confirmation: the [value] that will be sent (the web's
+ * `.trim()` of what was typed, or a detected home as it came), and whether trimming changed what
+ * was typed ([trimmed]: the confirmation says so). Never saved state: a recreation drops it.
+ */
+data class EngineEdit(val engine: EngineCard, val setting: ServerSetting, val value: String, val trimmed: Boolean)
+
+/** The Engines tab (settings-dialog.tsx 887c222 :2107-2249), the web's words verbatim. */
+object EngineRows {
+    const val TITLE = "Engines"
+    const val CAPTION = "Enable or disable headless engines. Toggling takes effect immediately — no restart."
+    const val SCAN = "Scan again"
+
+    /** While a scan is in flight (the web's key has no busy state; see [SCAN_TIMEOUT_MS]). */
+    const val SCANNING = "Scanning…"
+
+    /** A scan whose reply never comes stops being busy after this (the wire corpus waits 60 s for one). */
+    const val SCAN_TIMEOUT_MS = 60_000L
+
+    const val HOME = "Home"
+    const val COMMAND = "Command"
+    const val LAUNCH = "Launch command"
+    const val COMMAND_CAPTION = "CLI binary name or path"
+    const val HOME_PLACEHOLDER = "/path/to/home"
+    const val LAUNCH_EXAMPLE = "jean-claude run -- claude"
+    const val DETECTED_HOME = "Detected home"
+
+    /** A field holding an edit not yet confirmed (the web saves on blur; here only the confirmation does). */
+    const val UNSAVED = "Not saved yet — press Done to review the change"
+    const val USE_DETECTED = "Use detected"
+
+    /** The card's subtitle (:2145): `version · source`, "not found", or "scanning…" before any detection. */
+    fun status(det: EngineDetection?): String = when {
+        det == null -> "scanning…"
+        det.found -> "${det.version?.let(LabelText::visibleValue) ?: "installed"} · ${EngineDetection.sourceLabel(det.source)}"
+        else -> "not found"
+    }
+
+    /** The home row's caption (:2164). */
+    fun homeCaption(view: ServerSettingsView, engine: EngineCard): String = when {
+        view.forced(engine.home) -> ServerRowCopy.SET_BY_ENV
+        view.needsHome(engine) -> "Required — set a directory before enabling"
+        engine.homeOptional -> "Optional — defaults to your real HOME"
+        else -> "Dedicated credential home"
+    }
+
+    fun commandCaption(view: ServerSettingsView, engine: EngineCard): String =
+        if (view.forced(engine.command)) ServerRowCopy.SET_BY_ENV else COMMAND_CAPTION
+
+    /** The switch's name (`aria-label`) and, as its state, the web's `title` (:2155). */
+    fun switchLabel(engine: EngineCard) = "Enable ${engine.label}"
+
+    fun switchHint(view: ServerSettingsView, engine: EngineCard, enabled: Boolean): String = when {
+        view.forced(ServerSetting.HeadlessModes) -> "Engines are set by environment"
+        view.needsHome(engine) -> "Set a home directory first"
+        enabled -> "Disable this engine"
+        else -> "Enable this engine"
+    }
+
+    /** A field's label (`aria-label`, :2178 / :2210 / :2227). */
+    fun fieldLabel(engine: EngineCard, setting: ServerSetting): String = "${engine.label} ${what(engine, setting)}"
+
+    /** What [setting] is on [engine]'s card, in lower case. */
+    fun what(engine: EngineCard, setting: ServerSetting): String = when (setting) {
+        engine.home -> "home"
+        engine.launch -> "launch command"
+        else -> "command"
+    }
+
+    /**
+     * Done in a field: what to confirm, or null when there is nothing to send. As the web's blur
+     * (:2175): the trimmed value, when it differs from the server's. [shown] is what the field was
+     * filled with: an untouched field asks nothing. A value past the server's limit asks nothing
+     * either (the field refuses one; the server would).
+     */
+    fun review(view: ServerSettingsView, engine: EngineCard, setting: ServerSetting, typed: String, shown: String): EngineEdit? {
+        if (typed == shown || view.forced(setting)) return null
+        val value = jsTrim(typed)
+        if (value == view.text(setting) || !ServerSettingsPatch.fits(setting, value)) return null
+        return EngineEdit(engine, setting, value, trimmed = value != typed)
+    }
+
+    /** "Use detected" (:2194): the detected home as it came, confirmed like a typed one. */
+    fun useDetected(view: ServerSettingsView, engine: EngineCard): EngineEdit? {
+        val dir = view.detection(engine)?.configDir?.takeIf { it.isNotEmpty() } ?: return null
+        if (!view.needsHome(engine) || view.forced(engine.home) || !ServerSettingsPatch.fits(engine.home, dir)) return null
+        return EngineEdit(engine, engine.home, dir, trimmed = false)
+    }
+
+    // The confirmation (owner decision 2026-10-01: what the server runs is confirmed, showing the new value).
+    fun confirmTitle(edit: EngineEdit) = "Change the ${edit.engine.label} ${what(edit.engine, edit.setting)}?"
+
+    fun confirmBody(edit: EngineEdit): String = when (edit.setting) {
+        edit.engine.home -> "New ${edit.engine.label} sessions run with the home below. Hidden or direction-changing characters are shown as ⟨U+…⟩ marks."
+        edit.engine.launch -> "Every Claude session the server spawns starts through the command below. Hidden or direction-changing characters are shown as ⟨U+…⟩ marks."
+        else -> "The server runs the command below for new ${edit.engine.label} sessions. Hidden or direction-changing characters are shown as ⟨U+…⟩ marks."
+    }
+
+    const val CONFIRM_NOW = "Now"
+    const val CONFIRM_NEW = "Change to"
+    const val TRIMMED = "Spaces at the start and end were removed."
+
+    fun confirmAction(edit: EngineEdit) = "Change ${what(edit.engine, edit.setting)}"
+
+    /** What an empty value means, in the confirmation (server.mjs 887c222 :996-1015, `providerCommands`). */
+    fun emptyValue(engine: EngineCard, setting: ServerSetting): String = when (setting) {
+        engine.home -> if (engine.homeOptional) "Empty — your real HOME" else "Empty — not set"
+        engine.launch -> "Empty — no wrapper"
+        else -> "Empty — runs “${engine.id}”"
+    }
+}
+
+/** Host config (settings-dialog.tsx 887c222 :2245-2251). */
+object HostConfigRows {
+    const val TITLE = "Host config"
+    const val NOTE_LEAD = "Not the same as Claude account sync above: this links your ONE real host CLI into an ISOLATED engine home (relevant only when a dedicated home is configured, e.g. "
+    const val NOTE_CODE = "TETHER_CLAUDE_HOME"
+    const val NOTE_TAIL = "). Claude account sync instead shares plugins/skills/hooks/MCP servers BETWEEN your several real Claude accounts."
+    val shareHostConfig = ServerRow(
+        ServerSetting.ShareHostConfig,
+        "Share host config",
+        "Link an isolated engine home to your ONE real host CLI's skills, MCP servers, commands & agents",
+        "When on (default), a Tether session running in an ISOLATED engine home inherits the skills, MCP servers, slash commands and sub-agents from your own host CLI config (~/.claude, ~/.codex, ~/.config/opencode, ~/.reasonix) so it behaves like one in your terminal. Claude runs with your real HOME by default (issue #86) — no isolated home, so this is a no-op for Claude unless TETHER_CLAUDE_HOME opts back into one; the other engines keep dedicated homes with transcripts isolated there. Turn off for full isolation (e.g. Docker/sandboxed hosts). Requires restart. This is UNRELATED to Claude account sync above, which propagates config between your several separate Claude account identities, not between a host and an isolated home.",
+    )
 }

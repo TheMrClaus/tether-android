@@ -67,6 +67,10 @@ class ServerSettingsModelTest {
             AdvancedRows.messageInterruptMode, AdvancedRows.claudeModelFallback, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
             AdvancedRows.defaultSandboxPolicy, AdvancedRows.defaultUseWorktree, AdvancedRows.preferSpawnAgent, MetadataRows.enabled, MetadataRows.mode,
         ).map { it.setting } + listOf(AdvancedRows.allowedRoots.setting, AdvancedRows.spawnExtraWritableRoots.setting, ServerSetting.MetadataGenerationProvider, ServerSetting.MetadataGenerationProviders)
-        assertEquals(ServerSetting.entries.toSet(), rows.toSet())
+        // ta-dh1: the Engines tab's keys: each card's home, command and launch command, the switches'
+        // list, and Host config's toggle.
+        val engines = com.tether.app.client.EngineCard.entries.flatMap { listOfNotNull(it.home, it.command, it.launch) } +
+            listOf(ServerSetting.HeadlessModes, HostConfigRows.shareHostConfig.setting)
+        assertEquals(ServerSetting.entries.toSet(), (rows + engines).toSet())
     }
 }

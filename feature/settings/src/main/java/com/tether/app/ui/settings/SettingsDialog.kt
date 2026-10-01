@@ -177,12 +177,17 @@ fun SettingsDialog(
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestAdvancedSettings() }
     val writer = remember(client) { ClientSettingsWriter(client) }
     val origin = if (configured) serverOrigin(server) else null
+    val replies by client.serverSettingsReplies.collectAsStateWithLifecycle()
+    // ta-dh1 (ta-cc5, the engines part): the frame is read once per frame, not per recomposition.
+    val signedIn = origin != null
+    val view = remember(serverSettings, signedIn) { serverSettings?.takeIf { signedIn }?.let(ServerSettingsView::of) }
     val serverBinding = ServerSettingsBinding(
         // r2: signed out (no origin), no settings: the client also drops the frames then.
-        settings = serverSettings?.takeIf { origin != null }?.let(ServerSettingsView::of),
+        settings = view,
         advanced = advanced,
         origin = origin,
         writer = writer,
+        replies = replies,
     )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
@@ -506,4 +511,5 @@ const val RESTART_REQUIRED = "Some changes need a server restart to take effect.
 private class ClientSettingsWriter(private val client: TetherClient) : ServerSettingsWriter {
     override fun patch(patch: JsonObject, origin: String) = client.setServerSettings(patch, origin)
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
+    override fun detectEngines(origin: String) = client.detectEngines(origin)
 }

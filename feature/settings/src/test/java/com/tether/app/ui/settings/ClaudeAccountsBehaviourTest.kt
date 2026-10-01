@@ -88,8 +88,9 @@ class ClaudeAccountsBehaviourTest {
         compose.waitUntil(5_000) { "sync" in fake.calls }
         compose.waitForIdle()
         assertEquals(listOf("list", "sync"), fake.calls.toList())
-        // The section sits between the engines slot and the profiles slot, as on the web.
-        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
+        // The section sits between the engines and the profiles slot, as on the web (ta-dh1: the
+        // engines and Host config are drawn now, so only the profiles slot is left).
+        assertEquals(1, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
     }
 
     @Test fun eachAccountShowsItsLabelPlanOrganizationStatusAndPath() {

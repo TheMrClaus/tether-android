@@ -175,21 +175,35 @@ private fun CommitField(
                 focused = f.isFocused
             },
         decorationBox = { inner ->
-            Box(
-                Modifier
-                    .alpha(if (enabled) 1f else 0.55f)
-                    .heightIn(min = 44.dp)
-                    .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), emptyList())
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (text.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style, color = t.faint, maxLines = 1)
-                inner()
-            }
+            ServerFieldBox(enabled, focused, style, if (text.isEmpty() && placeholder.isNotEmpty()) AnnotatedString(placeholder) else null, inner)
         },
     )
     }
 }
+
+/** ta-dh1: `.settings-server-input`'s box (shared by [CommitField] and the engine fields): the edge, the fill, the placeholder. */
+@Composable
+internal fun ServerFieldBox(enabled: Boolean, focused: Boolean, style: androidx.compose.ui.text.TextStyle, placeholder: AnnotatedString?, inner: @Composable () -> Unit) {
+    val t = LocalTetherTokens.current
+    Box(
+        Modifier
+            .alpha(if (enabled) 1f else 0.55f)
+            .heightIn(min = 44.dp)
+            .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), emptyList())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (placeholder != null) Text(placeholder, style = style, color = t.faint, maxLines = 1)
+        inner()
+    }
+}
+
+/** ta-dh1: the server field's text style (mono 13, 16 on a phone). */
+@Composable
+internal fun serverFieldStyle(narrow: Boolean) = settingsText(LocalTetherTypography.current.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
+
+/** ta-dh1: [serverInputWidth] for the engine rows. */
+internal fun Modifier.serverFieldWidth(narrow: Boolean): Modifier = serverInputWidth(narrow)
 
 /** The activity hosting [this] context (a dialog's themed wrapper included), or null. */
 private tailrec fun Context.findActivity(): Activity? = when (this) {
