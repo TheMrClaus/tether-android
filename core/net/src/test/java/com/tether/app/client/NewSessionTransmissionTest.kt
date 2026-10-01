@@ -151,6 +151,23 @@ class NewSessionTransmissionTest {
         assertTrue(creates().isEmpty())
     }
 
+    /** r2 (F3): an empty snapshot (or one where nothing decodes) is live and offers nothing. */
+    @Test
+    fun anEmptyLiveCatalogCreatesNothingNotEvenTheDefault() {
+        val (client, ws) = withCatalog()
+        ws.send(catalogFrame())
+        h.await(client.providerCatalog) { it.isEmpty() }
+        assertTrue(client.providerCatalogLive.value)
+        val origin = client.consentOrigin.value
+        assertEquals(NewSessionResult.NotOffered, client.createNewSession(claudeChoice, "/w", origin))
+        assertEquals(NewSessionResult.NotOffered, client.createNewSession(workChoice, "/w", origin))
+        ws.send(catalogFrame("""{"key":"work"}""", """{"provider":"claude","status":"ready"}"""))
+        h.serverBarrier(ws)
+        assertTrue(client.providerCatalog.value.isEmpty())
+        assertEquals(NewSessionResult.NotOffered, client.createNewSession(claudeChoice, "/w", origin))
+        assertTrue(creates().isEmpty())
+    }
+
     @Test
     fun nothingReceivedEverProducesACreate() {
         val (client, ws) = withCatalog()

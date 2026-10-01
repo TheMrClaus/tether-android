@@ -23,12 +23,18 @@ import org.robolectric.annotation.Config
  * `catalog` = the owner's case: two Claude accounts and an ACP profile first, then the default rows
  * (one ready, one whose model list failed, one loading, one unavailable); `pending` = this
  * connection's catalog not in yet, the base providers standing in; `not-offered` = a tapped row the
- * refreshed catalog dropped (nothing created, the picker says so).
+ * refreshed catalog dropped (nothing created, the picker says so); r2: `look-alike` = two accounts
+ * with the same long nickname (the same label, ids that differ only in a "-2" at the end) beside
+ * the default row; `refused` = rows the client would refuse (a duplicated key, a malformed row, an
+ * unknown status), drawn disabled; `empty` = an empty live catalog (nothing to start, no default).
  */
 enum class NewSessionShot(val id: String) {
     Catalog("new-session-catalog"),
     Pending("new-session-pending"),
     NotOffered("new-session-not-offered"),
+    LookAlike("new-session-look-alike"),
+    Refused("new-session-refused"),
+    Empty("new-session-empty"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -36,7 +42,13 @@ private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOp
 private fun AndroidComposeTestRule<*, ComponentActivity>.snapPicker(shot: NewSessionShot, skin: TetherSkin, name: String) {
     mainClock.autoAdvance = false
     val live = shot != NewSessionShot.Pending
-    val rows = NewSessionGuard.rows(if (live) NewSessionFixtures.catalog else null, NewSessionFixtures.providers)
+    val catalog = when (shot) {
+        NewSessionShot.LookAlike -> NewSessionFixtures.lookAlike
+        NewSessionShot.Refused -> NewSessionFixtures.refused
+        NewSessionShot.Empty -> emptyList()
+        else -> NewSessionFixtures.catalog
+    }
+    val rows = NewSessionGuard.rows(if (live) catalog else null, NewSessionFixtures.providers)
     setContent {
         TetherTheme(choiceFor(skin)) {
             CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -75,6 +87,9 @@ class NewSessionPickerFontScaleScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
     @Test fun picker() = rule.snapPicker(NewSessionShot.Catalog, skin, "new-session-catalog-font-1.3x")
+
+    /** r2 (F1): at 1.3× the look-alike ids still show their ends (they wrap). */
+    @Test fun lookAlike() = rule.snapPicker(NewSessionShot.LookAlike, skin, "new-session-look-alike-font-1.3x")
 
     companion object {
         @JvmStatic

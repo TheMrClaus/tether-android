@@ -5,12 +5,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertAll
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.isNotEnabled
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.tether.app.client.NewSessionChoice
+import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionResult
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.ui.NEW_SESSION_LOADING_COPY
@@ -19,6 +25,10 @@ import com.tether.app.ui.NEW_SESSION_NOT_OFFERED_COPY
 import com.tether.app.ui.NEW_SESSION_PENDING_TAG
 import com.tether.app.ui.NEW_SESSION_ROW_TAG
 import com.tether.app.ui.NewSessionDialog
+import com.tether.app.ui.PROFILE_ID_SHOWN
+import com.tether.app.ui.newSessionRowEnabled
+import com.tether.app.ui.newSessionRowTags
+import com.tether.app.ui.profileIdParts
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
@@ -151,6 +161,72 @@ class NewSessionPickerBehaviourTest {
         rule.waitForIdle()
         rule.onNodeWithTag(NEW_SESSION_PENDING_TAG, useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "work", useUnmergedTree = true).assertExists()
+    }
+
+    /** r2 (F1): two accounts with the same long nickname never look alike. */
+    @Test
+    fun twoAccountsWithTheSameLongNicknameAreToldApart() {
+        val client = PickerClient().apply { providerCatalog.value = NewSessionFixtures.lookAlike }
+        open(client)
+        val id = NewSessionFixtures.LOOK_ALIKE_ID
+        val first = description(NEW_SESSION_ROW_TAG + id)
+        val second = description(NEW_SESSION_ROW_TAG + "$id-2")
+        val label = "Claude Code (${NewSessionFixtures.NICKNAME})"
+        assertTrue(first, first.startsWith("$label, tag "))
+        assertTrue(second, second.startsWith("$label, tag "))
+        assertTrue(second, second.contains("profile $id-2"))
+        val rows = NewSessionGuard.rows(NewSessionFixtures.lookAlike, NewSessionFixtures.providers)
+        val tags = newSessionRowTags(rows)
+        assertEquals(3, tags.size)
+        assertTrue(tags[0] != null && tags[1] != null && tags[0] != tags[1])
+        assertTrue(tags[0]!!.matches(Regex("#[0-9a-f]{6}")))
+        assertNull("a label of its own carries no tag", tags[2])
+        assertEquals(tags[0], newSessionRowTags(rows)[0])
+    }
+
+    /** r2 (F1): an id is never cut at its end; a very long one is cut in the middle. */
+    @Test
+    fun aProfileIdKeepsItsEnd() {
+        val id = NewSessionFixtures.LOOK_ALIKE_ID + "-2"
+        assertEquals(listOf(id), profileIdParts(id))
+        val long = "a".repeat(120) + "-tail-2"
+        val parts = profileIdParts(long)
+        assertEquals(2, parts.size)
+        assertTrue(parts[1], parts[1].endsWith("-tail-2"))
+        assertTrue(parts.sumOf { it.length } <= PROFILE_ID_SHOWN)
+        // Never inside a surrogate pair (a flag, an emoji) at either cut.
+        val emoji = "\uD83D\uDE00".repeat(80)
+        val cut = profileIdParts(emoji)
+        assertTrue(cut.all { p -> p.isNotEmpty() && !Character.isLowSurrogate(p.first()) && !Character.isHighSurrogate(p.last()) })
+    }
+
+    /** r2 (F2): a row the client would refuse is drawn disabled and says so. */
+    @Test
+    fun rowsThatCanNeverCreateAreDisabled() {
+        val client = PickerClient().apply { providerCatalog.value = NewSessionFixtures.refused }
+        open(client)
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "odd", useUnmergedTree = true).assertIsNotEnabled()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "future", useUnmergedTree = true).assertIsNotEnabled()
+        rule.onAllNodesWithTag(NEW_SESSION_ROW_TAG + "dup", useUnmergedTree = true).assertCountEquals(2).assertAll(isNotEnabled())
+        assertTrue(description(NEW_SESSION_ROW_TAG + "odd").endsWith("Not offered"))
+        assertTrue(description(NEW_SESSION_ROW_TAG + "future").endsWith("Not offered"))
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "odd", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertTrue(client.choices.isEmpty())
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).assertIsEnabled()
+        val rows = NewSessionGuard.rows(NewSessionFixtures.refused, NewSessionFixtures.providers)
+        assertEquals(listOf(false, false, false, false, true), rows.map(::newSessionRowEnabled))
+    }
+
+    /** r2 (F3): an empty live catalog draws no rows and no default, as the web does. */
+    @Test
+    fun anEmptyLiveCatalogShowsNothingToStart() {
+        val client = PickerClient().apply { providerCatalog.value = emptyList() }
+        open(client)
+        rule.onNodeWithText("No providers available.").assertExists()
+        rule.onNodeWithTag(NEW_SESSION_PENDING_TAG, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).assertDoesNotExist()
+        assertTrue(client.choices.isEmpty())
     }
 
     @Test

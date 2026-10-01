@@ -86,13 +86,19 @@ class NewSessionGuardTest {
 
     @Test
     fun withoutALiveCatalogTheBaseProvidersStandInAsDefaultRowsAcpLeftOut() {
-        for (live in listOf(null, emptyList<ProviderCatalogEntry>())) {
-            val rows = NewSessionGuard.rows(live, providers)
-            assertEquals(listOf("claude", "codex", "pi"), rows.map { it.choice.key })
-            assertTrue(rows.all { it.choice.profileId == null && it.entry == null })
-            assertEquals(listOf(true, true, false), rows.map { it.creatable })
-            assertEquals(listOf("ready", "ready", "unavailable"), rows.map { it.status })
-        }
+        val rows = NewSessionGuard.rows(null, providers)
+        assertEquals(listOf("claude", "codex", "pi"), rows.map { it.choice.key })
+        assertTrue(rows.all { it.choice.profileId == null && it.entry == null })
+        assertEquals(listOf(true, true, false), rows.map { it.creatable })
+        assertEquals(listOf("ready", "ready", "unavailable"), rows.map { it.status })
+    }
+
+    /** r2 (F3): an empty LIVE catalog is what the server offers: nothing, and no default stands in. */
+    @Test
+    fun anEmptyLiveCatalogOffersNoRowAndNoDefault() {
+        assertTrue(NewSessionGuard.rows(emptyList(), providers).isEmpty())
+        assertNull(NewSessionGuard.resolve(NewSessionChoice("claude", "claude", null), emptyList(), providers, "/w"))
+        assertNull(NewSessionGuard.resolve(choice(catalog[0]), emptyList(), providers, "/w"))
     }
 
     // --- resolve: the create a tap may produce --------------------------------------------------

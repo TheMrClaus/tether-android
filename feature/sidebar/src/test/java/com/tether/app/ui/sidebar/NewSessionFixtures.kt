@@ -34,6 +34,28 @@ object NewSessionFixtures {
         ProviderCatalogEntry("opencode", "opencode", "loading", emptyList(), label = "OpenCode"),
         ProviderCatalogEntry("pi", "pi", "unavailable", emptyList(), label = "Pi"),
     )
+
+    /**
+     * r2 (F1): two accounts added with the same long nickname. The server labels both
+     * `Claude Code (<nickname>)` and only the second id gets "-2" (lib/claude-accounts.mjs
+     * deriveAccountId, addAccount), so the label is the same and the ids differ at their END.
+     */
+    const val NICKNAME = "Marketing and growth experiments team"
+    const val LOOK_ALIKE_ID = "claude-marketing-and-growth-experiments-team"
+    val lookAlike = listOf(
+        ProviderCatalogEntry(LOOK_ALIKE_ID, "claude", "ready", models(3), label = "Claude Code ($NICKNAME)", profileId = LOOK_ALIKE_ID, extends = "claude"),
+        ProviderCatalogEntry("$LOOK_ALIKE_ID-2", "claude", "ready", models(3), label = "Claude Code ($NICKNAME)", profileId = "$LOOK_ALIKE_ID-2", extends = "claude"),
+        ProviderCatalogEntry("claude", "claude", "ready", models(4), label = "Claude Code"),
+    )
+
+    /** r2 (F2): rows the client would refuse whatever their status says. */
+    val refused = listOf(
+        ProviderCatalogEntry("dup", "claude", "ready", emptyList(), label = "Claude (dup)", profileId = "dup", extends = "claude"),
+        ProviderCatalogEntry("dup", "claude", "ready", emptyList(), label = "Claude (dup again)", profileId = "dup", extends = "claude"),
+        ProviderCatalogEntry("odd", "claude", "ready", emptyList(), label = "Odd", profileId = "not-the-key"),
+        ProviderCatalogEntry("future", "claude", "paused", emptyList(), label = "Future", profileId = "future"),
+        ProviderCatalogEntry("claude", "claude", "ready", emptyList(), label = "Claude"),
+    )
 }
 
 /**

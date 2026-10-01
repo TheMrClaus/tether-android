@@ -332,9 +332,10 @@ private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, 
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
-                when (row.status) {
-                    "ready" -> if (state.isNotEmpty()) Text(state, style = type.body.copy(fontSize = rem(0.7f)), color = t.faint)
-                    "loading" -> StateLabel(TetherIcons.Loader, state)
+                when {
+                    row.status == "loading" -> StateLabel(TetherIcons.Loader, state)
+                    row.status == "ready" && row.creatable -> if (state.isNotEmpty()) Text(state, style = type.body.copy(fontSize = rem(0.7f)), color = t.faint)
+                    // Error, Unavailable, and (r2) every "Not offered" row: the warning mark.
                     else -> StateLabel(TetherIcons.TriangleAlert, state)
                 }
                 Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
