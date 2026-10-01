@@ -168,6 +168,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val draftOpen by vm.draftOpen.collectAsStateWithLifecycle()
     val draft by vm.draftComposer.state.collectAsStateWithLifecycle()
     val draftLaunching = draftOpen && draft.creating
+    val draftCatalog by vm.client.providerCatalog.collectAsStateWithLifecycle()
+    val draftCatalogLive by vm.client.providerCatalogLive.collectAsStateWithLifecycle()
     // dashboard.tsx openDraft: raising the sheet closes the drawer.
     LaunchedEffect(draftOpen) { if (draftOpen) shell.closeDrawer() }
 
@@ -419,7 +421,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 launching = if (!draftLaunching) null else {
                     {
                         val row = com.tether.app.client.NewSessionGuard.rows(
-                            if (vm.client.providerCatalogLive.value) vm.client.providerCatalog.value else null,
+                            if (draftCatalogLive) draftCatalog else null,
                             providers,
                         ).firstOrNull { it.choice.key == (draft.form["key"] as? com.tether.app.protocol.tree.JsStr)?.value }
                         com.tether.app.ui.draft.DraftLaunching(

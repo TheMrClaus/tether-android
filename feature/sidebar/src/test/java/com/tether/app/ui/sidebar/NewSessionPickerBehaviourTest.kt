@@ -55,13 +55,15 @@ class NewSessionPickerBehaviourTest {
     private fun open(client: PickerClient, selectedKey: String? = null): MutableList<NewSessionRow> {
         val picked = mutableListOf<NewSessionRow>()
         val rows = NewSessionGuard.rows(if (client.providerCatalogLive.value) client.providerCatalog.value else null, client.providers.value)
+        val providers = client.providers.value
+        val pending = !client.providerCatalogLive.value
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.Studio)) {
                 Column {
                     NewSessionPickerBody(
                         rows = rows,
-                        providers = client.providers.value,
-                        catalogPending = !client.providerCatalogLive.value,
+                        providers = providers,
+                        catalogPending = pending,
                         notice = null,
                         selectedKey = selectedKey,
                         pickLabel = { "Choose $it" },
