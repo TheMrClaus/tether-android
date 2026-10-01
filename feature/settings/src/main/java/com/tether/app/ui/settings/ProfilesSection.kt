@@ -694,12 +694,11 @@ internal fun EnvConfirmDialog(r: EnvReview, onConfirm: () -> Unit, onCancel: () 
                 AnnotatedString.Builder().apply {
                     append(ProfileRows.envAction(c))
                     append(" ")
-                    withStyle(ParagraphStyle(textDirection = codeDirection)) {
-                        withStyle(SpanStyle(fontFamily = type.mono)) {
-                            keys.forEachIndexed { i, k ->
-                                if (i > 0) append(" ")
-                                if (k == "→") append(k) else append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(k)), tokenStyle(t)))
-                            }
+                    // The names inline, by the exact rule (a bidi control in a name is a visible token, so it cannot reorder the line).
+                    withStyle(SpanStyle(fontFamily = type.mono)) {
+                        keys.forEachIndexed { i, k ->
+                            if (i > 0) append(" ")
+                            if (k == "→") append(k) else append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(k)), tokenStyle(t)))
                         }
                     }
                 }.toAnnotatedString()
