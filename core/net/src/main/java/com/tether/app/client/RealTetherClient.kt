@@ -1395,6 +1395,13 @@ class RealTetherClient(
     private fun mirrorOriginLocked(): String? = if (mirrorLink == null) null else socketOrigin
 
     /**
+     * ta-dl4: a session the server listed or this client subscribed to (an open session is both);
+     * the per-session inspector replies ([worktreeScripts], [changeRequests]) keep only these, so a
+     * flood of server-sent ids cannot grow them. Caller holds [lock].
+     */
+    private fun knownSessionLocked(sessionId: String): Boolean = sessionId in listedSessionIds || sessionId in subscribed
+
+    /**
      * [mirrorOriginLocked], for a frame about [sessionId]: null unless the session is listed,
      * subscribed, holds pending input or was restored from the mirror (L3). Caller holds [lock].
      */
@@ -2392,12 +2399,15 @@ class RealTetherClient(
                 }
             }
             // T9.1: use-tether.ts:918-921 (keyed by the snapshot's own sessionId) and 940-941.
+            // ta-dl4: kept only for a known session (the L3 rule), so server-sent ids cannot grow them.
             is ServerMessage.WorktreeScripts -> ifCurrent(webSocket) {
                 val id = (message.snapshot["sessionId"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
-                if (!id.isNullOrEmpty()) worktreeScriptsState.value = worktreeScriptsState.value + (id to message.snapshot)
+                if (!id.isNullOrEmpty() && knownSessionLocked(id)) worktreeScriptsState.value = worktreeScriptsState.value + (id to message.snapshot)
             }
             is ServerMessage.ChangeRequest -> ifCurrent(webSocket) {
-                changeRequestsState.value = changeRequestsState.value + (message.sessionId to ChangeRequestReading(message.changeRequest, message.unknown))
+                if (knownSessionLocked(message.sessionId)) {
+                    changeRequestsState.value = changeRequestsState.value + (message.sessionId to ChangeRequestReading(message.changeRequest, message.unknown))
+                }
             }
             is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
                 if (!requestedGitFileDiffs.remove(message.sessionId to message.path)) return@ifCurrent
@@ -2435,6 +2445,10 @@ class RealTetherClient(
             sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
             listedSessionIds.clear()
             message.sessions.mapTo(listedSessionIds) { it.id }
+            // ta-dl4: a session the server no longer lists (and this client is not subscribed to)
+            // drops its inspector replies.
+            worktreeScriptsState.value = worktreeScriptsState.value.filterKeys(::knownSessionLocked)
+            changeRequestsState.value = changeRequestsState.value.filterKeys(::knownSessionLocked)
             mirrorOriginLocked()?.let { mirrorLink?.sessions(it, message.sessions, full = true) }
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
