@@ -702,8 +702,9 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
                     while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
                 }
             }
-            .background(t.dangerWash, RoundedCornerShape(TetherDimens.radiusSm))
-            .border(1.dp, t.brick, RoundedCornerShape(TetherDimens.radiusSm))
+            // studio.css:404 `:root .error-toast { border-radius: 0.875rem }`.
+            .background(t.dangerWash, RoundedCornerShape(14.dp))
+            .border(1.dp, t.brick, RoundedCornerShape(14.dp))
             .padding(12.dp)
             .testTag(ERROR_TOAST_TAG),
         verticalAlignment = Alignment.CenterVertically,
