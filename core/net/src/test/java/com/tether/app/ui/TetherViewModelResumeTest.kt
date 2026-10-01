@@ -43,7 +43,13 @@ class TetherViewModelResumeTest {
         override val consentOrigin = MutableStateFlow<String?>("https://a.example:443")
         override val providers = MutableStateFlow(listOf(com.tether.app.protocol.model.ProviderInfo("claude", "Claude", "C", true)))
         override val workspaceRoot = MutableStateFlow<String?>("/w")
+        override val serverUrl = MutableStateFlow<String?>("https://a.example:443")
         val requests = mutableListOf<com.tether.app.client.NewSessionRequest>()
+        val sent = mutableListOf<Pair<String, String>>()
+
+        override fun send(sessionId: String, text: String, attachments: List<com.tether.app.protocol.Attachment>) {
+            sent += sessionId to text
+        }
 
         override fun createNewSession(request: com.tether.app.client.NewSessionRequest, expectedOrigin: String?): com.tether.app.client.NewSessionResult {
             requests += request
@@ -178,6 +184,42 @@ class TetherViewModelResumeTest {
         advanceUntilIdle()
         assertEquals("new", vm.selectedSessionId.value)
         assertEquals(listOf("new"), client.attached)
+    }
+
+    /** ta-8cv: the first message goes out once, from the matched reply, into the selected session. */
+    @Test fun theDraftsFirstMessageGoesToItsOwnNewSession() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        val composer = vm.draftComposer
+        composer.selectProvider("claude")
+        composer.setText("first words")
+        assertEquals(com.tether.app.client.DraftSubmitResult.Sent, composer.submit("https://a.example:443"))
+        client.created(session("other"), requestId = "not-mine")
+        advanceUntilIdle()
+        assertTrue(client.sent.isEmpty())
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        advanceUntilIdle()
+        assertEquals(listOf("new" to "first words"), client.sent)
+        assertEquals("new", vm.selectedSessionId.value)
+    }
+
+    /** ta-8cv: an orphaned first message is the new session's draft (stored and shown), never resent. */
+    @Test fun anOrphanedFirstMessageBecomesTheNewSessionsDraft() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val store = InMemoryDraftStore()
+        val vm = TetherViewModel(client, store, monotonicClock = { testScheduler.currentTime }).also { advanceUntilIdle() }
+        val composer = vm.draftComposer
+        composer.selectProvider("claude")
+        composer.setText("do not lose me")
+        composer.submit("https://a.example:443")
+        // The link went to another server between the reply and the first send.
+        client.consentOrigin.value = "https://b.example:443"
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        advanceUntilIdle()
+        assertTrue("never sent", client.sent.isEmpty())
+        assertEquals("do not lose me", store.read("https://a.example:443", "new"))
+        assertEquals("do not lose me", vm.drafts.value["new"])
+        assertEquals("", composer.state.value.text)
     }
 
     /** ta-8cv (negative control): a create's reply with another requestId is never selected. */

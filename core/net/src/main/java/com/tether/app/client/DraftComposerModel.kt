@@ -404,8 +404,9 @@ class DraftComposerModel(
         }
         if (p.attachments.isEmpty()) {
             _state.update { it.copy(creating = false, completed = it.completed + 1) }
-            // The durable send path (SYNC_DESIGN §5.2): at most once under its own key, after the
-            // new session's snapshot; only while the link is still on the server it was created on.
+            // The durable send path (SYNC_DESIGN §5.2): a first transmission now, at most once under
+            // its own key (a redelivery reuses it); only while the link is still on the server and
+            // socket the session was created on.
             if (client.consentOrigin.value == p.origin && client.linkEpoch.value == p.linkEpoch) {
                 client.send(sessionId, p.prompt)
                 onFirstSent()

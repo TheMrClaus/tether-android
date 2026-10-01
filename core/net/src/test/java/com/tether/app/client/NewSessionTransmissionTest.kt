@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.WebSocket
@@ -216,5 +217,81 @@ class NewSessionTransmissionTest {
         h.serverBarrier(ws)
         assertTrue(client.providerCatalogLive.value)
         assertTrue(creates().isEmpty())
+    }
+
+    private fun createdFrame(id: String, requestId: String?): String =
+        """{"type":"created","session":{"id":"$id","provider":"claude","name":"n","cwd":"/w","status":"ready",""" +
+            """"startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}""" +
+            (if (requestId != null) ""","requestId":"$requestId"""" else "") + "}"
+
+    /**
+     * ta-8cv, end to end through the real client and its socket: the draft composer's create goes out
+     * with the web's frame; a resume's `created` and another create's do not complete it; the one
+     * echoing its requestId does; the first message then goes out once, through the durable send,
+     * under a fresh idempotency key.
+     */
+    @Test
+    fun theDraftComposersCreateAndFirstMessageEndToEnd() {
+        val (client, ws) = withCatalog()
+        val origin = client.consentOrigin.value
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            val engine = DraftComposerModel(client, com.tether.app.ui.prefs.InMemoryDraftStore(), scope, { "/w" }, newRequestId = { "e2e-1" })
+            engine.refresh()
+            assertTrue(engine.selectProvider("work"))
+            engine.setText("hello from the draft")
+            assertEquals(DraftSubmitResult.Sent, engine.submit(origin))
+            val create = creates().single()
+            assertEquals(coldKeys + "profileId", create.keys)
+            assertEquals("e2e-1", create.str("requestId"))
+            assertEquals("workspace-write", create.str("sandboxPolicy"))
+            assertEquals("bypassPermissions", create.str("permissionMode"))
+
+            ws.send(createdFrame("resumed", null))
+            val resumed = h.await(client.createdSessions) { it?.session?.id == "resumed" }!!
+            assertEquals(null, engine.onCreated(resumed))
+            ws.send(createdFrame("foreign", "someone-else"))
+            val foreign = h.await(client.createdSessions) { it?.session?.id == "foreign" }!!
+            assertEquals(null, engine.onCreated(foreign))
+            assertTrue(engine.state.value.creating)
+
+            ws.send(createdFrame("s-new", "e2e-1"))
+            val mine = h.await(client.createdSessions) { it?.requestId == "e2e-1" }!!
+            assertEquals("s-new", engine.onCreated(mine))
+            assertFalse(engine.state.value.creating)
+            // A first transmission goes out at once (pending-input.mjs: tries 0), as the web's send
+            // right after `created` does; the server orders it after the create.
+            val send = h.framesUntilBarrier().single { it.type() == "send" }
+            assertEquals("s-new", send.str("sessionId"))
+            assertEquals("hello from the draft", send.str("text"))
+            assertTrue(send.str("idempotencyKey")!!.isNotEmpty())
+            assertEquals("", engine.state.value.text)
+            // Once only.
+            assertEquals(null, engine.onCreated(mine))
+            assertTrue(h.framesUntilBarrier().none { it.type() == "send" || it.type() == "create" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** ta-8cv: the server's refusal of THIS create (its requestId echoed) unlocks the draft with its words. */
+    @Test
+    fun aRefusalEchoingTheRequestIdUnlocksTheDraftEndToEnd() {
+        val (client, ws) = withCatalog()
+        val origin = client.consentOrigin.value
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            val engine = DraftComposerModel(client, com.tether.app.ui.prefs.InMemoryDraftStore(), scope, { "/w" }, newRequestId = { "e2e-2" })
+            assertEquals(DraftSubmitResult.Sent, engine.submitChoice(claudeChoice, origin))
+            ws.send("""{"type":"error","message":"unrelated"}""")
+            assertEquals(false, engine.onCreateError(h.await(client.createErrors) { it != null }!!))
+            ws.send("""{"type":"error","message":"Skipping tool approvals needs a browser sign-in, not a paired device.","requestId":"e2e-2"}""")
+            assertEquals(true, engine.onCreateError(h.await(client.createErrors) { it?.requestId == "e2e-2" }!!))
+            assertEquals("Skipping tool approvals needs a browser sign-in, not a paired device.", engine.state.value.error)
+            assertFalse(engine.state.value.creating)
+            assertEquals("never resent", 1, creates().size)
+        } finally {
+            scope.cancel()
+        }
     }
 }
