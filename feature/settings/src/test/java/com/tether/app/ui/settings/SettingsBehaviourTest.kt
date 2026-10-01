@@ -1,6 +1,7 @@
 package com.tether.app.ui.settings
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import com.tether.app.ui.prefs.PreferenceKeys
 import com.tether.app.ui.theme.ThemeMode
@@ -59,6 +61,23 @@ class SettingsBehaviourTest {
 
     private fun waitClosed(count: Int = 1) = compose.waitUntil(5_000) { closes == count }
 
+    /**
+     * r3: flip a General switch by its own click action (not a tap at the row's centre, whose
+     * neighbour is the tip's 48dp touch area), then wait until the draft holds the flip.
+     */
+    private fun flip(t: GeneralToggle) {
+        val before = state.draft?.isOn(t)
+        toggle(t).performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntil(5_000) { state.draft?.isOn(t) == (before == false) }
+    }
+
+    /** r3: wait until the store holds every one of [expected], rather than reading it once right after the close. */
+    private fun waitStored(vararg expected: Pair<String, Any?>) {
+        compose.waitUntil(5_000) { store.stored().let { raw -> expected.all { (k, v) -> raw[k] == v } } }
+        val raw = store.stored()
+        for ((k, v) in expected) assertEquals(k, v, raw[k])
+    }
+
     @Test fun theSevenTabsShowGeneralFirstAndSwitchPanels() {
         show()
         SettingsTab.entries.forEach { t ->
@@ -100,9 +119,9 @@ class SettingsBehaviourTest {
     @Test fun aToggleEditsTheDraftAndOnlySaveWritesIt() {
         show()
         toggle(GeneralToggle.ShowEndedSessions).assertIsOn()
-        toggle(GeneralToggle.ShowEndedSessions).performClick()
-        toggle(GeneralToggle.ConfirmBeforeEnd).performClick()
-        toggle(GeneralToggle.ShowThinking).performClick()
+        flip(GeneralToggle.ShowEndedSessions)
+        flip(GeneralToggle.ConfirmBeforeEnd)
+        flip(GeneralToggle.ShowThinking)
         compose.waitForIdle()
         toggle(GeneralToggle.ShowEndedSessions).assertIsOff()
         toggle(GeneralToggle.ConfirmBeforeEnd).assertIsOff()
@@ -112,15 +131,12 @@ class SettingsBehaviourTest {
 
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         waitClosed()
-        val raw = store.stored()
-        assertEquals(false, raw[PreferenceKeys.SHOW_ENDED_SESSIONS])
-        assertEquals(false, raw[PreferenceKeys.CONFIRM_BEFORE_END])
-        assertEquals(true, raw[PreferenceKeys.SHOW_THINKING])
+        waitStored(PreferenceKeys.SHOW_ENDED_SESSIONS to false, PreferenceKeys.CONFIRM_BEFORE_END to false, PreferenceKeys.SHOW_THINKING to true)
     }
 
     @Test fun cancelAndCloseDropTheDraft() {
         show()
-        toggle(GeneralToggle.ConfirmBeforeEnd).performClick()
+        flip(GeneralToggle.ConfirmBeforeEnd)
         compose.onNodeWithTag(SettingsDialogTags.Cancel).performClick()
         waitClosed(1)
         compose.onNodeWithContentDescription("Close").performClick()
@@ -140,7 +156,7 @@ class SettingsBehaviourTest {
         assertEquals("", store.stored()[PreferenceKeys.DEFAULT_WORKSPACE])
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         waitClosed()
-        assertEquals(CURRENT, store.stored()[PreferenceKeys.DEFAULT_WORKSPACE])
+        waitStored(PreferenceKeys.DEFAULT_WORKSPACE to CURRENT)
     }
 
     /** A stored folder is server text: drawn by the code-label rule, a hidden control as a token. */
@@ -159,7 +175,7 @@ class SettingsBehaviourTest {
      */
     @Test fun appearanceAppliesAtOnceAndSaveKeepsIt() {
         show()
-        toggle(GeneralToggle.ShowThinking).performClick()
+        flip(GeneralToggle.ShowThinking)
         tab(SettingsTab.Appearance).performClick()
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
@@ -172,10 +188,7 @@ class SettingsBehaviourTest {
 
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         waitClosed()
-        val raw = store.stored()
-        assertEquals("dark", raw[PreferenceKeys.THEME_MODE])
-        assertEquals("retro", raw[PreferenceKeys.LOGIN_VARIANT])
-        assertEquals(true, raw[PreferenceKeys.SHOW_THINKING])
+        waitStored(PreferenceKeys.THEME_MODE to "dark", PreferenceKeys.LOGIN_VARIANT to "retro", PreferenceKeys.SHOW_THINKING to true)
     }
 
     /**

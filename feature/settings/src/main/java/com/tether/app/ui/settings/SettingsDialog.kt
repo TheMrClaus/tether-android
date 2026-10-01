@@ -81,9 +81,11 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.protocol.ClientMessage
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Test tags of the dialog's parts. */
 object SettingsDialogTags {
@@ -243,11 +245,12 @@ fun SettingsFrame(
         // Never before the first read (see [SettingsDialogState.edit]).
         val draft = state.draft ?: return@save
         saving = true
-        // Written before the dialog closes, so leaving composition never cancels the write. Storage
-        // that refuses the write closes the dialog all the same (the web's localStorage save is
-        // best effort too); nothing is half-applied, the model is written in one edit.
+        // Written before the dialog closes. Storage that refuses the write closes the dialog all the
+        // same (the web's localStorage save is best effort too); nothing is half-applied, the model
+        // is written in one edit. ta-t7l r3: the write is NonCancellable, so the dialog leaving
+        // composition while it is in flight (Back during a slow write) cannot drop it.
         scope.launch {
-            runCatching { prefs.updatePreferences(draft::applyTo) }
+            withContext(NonCancellable) { runCatching { prefs.updatePreferences(draft::applyTo) } }
             saving = false
             onClose()
         }

@@ -1,5 +1,9 @@
 package com.tether.app.ui.settings
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
@@ -7,6 +11,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import com.tether.app.ui.prefs.PreferenceKeys
@@ -94,5 +99,67 @@ class SettingsLoadingTest {
         assertEquals(false, raw[PreferenceKeys.CONFIRM_BEFORE_END])
         assertEquals(false, raw[PreferenceKeys.SHOW_THINKING])
         assertEquals("/srv/kept", raw[PreferenceKeys.DEFAULT_WORKSPACE])
+    }
+}
+
+/** A store whose writes wait until [open] is set: a slow write. */
+private class SlowWriteStore(private val real: DataStore<Preferences>) : DataStore<Preferences> {
+    val open = MutableStateFlow(false)
+    override val data: Flow<Preferences> = real.data
+    override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+        open.first { it }
+        return real.updateData(transform)
+    }
+}
+
+/**
+ * ta-t7l r3: Save closes the dialog only after the General draft's write has landed, and a dialog
+ * that leaves composition while the write is in flight (Back during a slow write) still writes it.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class SettingsSaveTest {
+    private val tmp = TemporaryFolder()
+    private val store = PrefsStore(tmp)
+    private val compose = createComposeRule()
+
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
+
+    private fun stored() = runBlocking { store.store.data.first().asMap().mapKeys { it.key.name } }
+
+    @Test fun saveClosesOnlyAfterTheWriteLands() {
+        val slow = SlowWriteStore(store.store)
+        val state = SettingsDialogState()
+        var closes = 0
+        compose.setContent { SettingsUnderTest(UiPrefs.on(slow), state, onClose = { closes++ }) }
+        compose.waitUntil(5_000) { state.draft != null }
+        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntil(5_000) { state.draft?.showThinking == true }
+        compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
+        compose.waitForIdle()
+        // The write is held: not stored, and the dialog is still open.
+        assertEquals(0, closes)
+        assertEquals(null, stored()[PreferenceKeys.SHOW_THINKING])
+        slow.open.value = true
+        compose.waitUntil(5_000) { closes == 1 }
+        // Closed: the write had already landed.
+        assertEquals(true, stored()[PreferenceKeys.SHOW_THINKING])
+    }
+
+    @Test fun aDialogDismissedWhileSavingStillWrites() {
+        val slow = SlowWriteStore(store.store)
+        val state = SettingsDialogState()
+        var shown by mutableStateOf(true)
+        compose.setContent { if (shown) SettingsUnderTest(UiPrefs.on(slow), state) }
+        compose.waitUntil(5_000) { state.draft != null }
+        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntil(5_000) { state.draft?.showThinking == true }
+        compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
+        compose.waitForIdle()
+        // Back while the write is held: the dialog leaves composition (its scope is cancelled).
+        shown = false
+        compose.waitForIdle()
+        slow.open.value = true
+        compose.waitUntil(5_000) { stored()[PreferenceKeys.SHOW_THINKING] == true }
     }
 }
