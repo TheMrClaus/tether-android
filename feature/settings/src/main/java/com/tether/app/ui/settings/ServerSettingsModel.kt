@@ -35,7 +35,7 @@ interface ServerSettingsWriter {
 }
 
 /**
- * ta-t7l: what the Advanced and Metadata tabs draw and where their writes go, for ONE server
+ * ta-t7l: what the Advanced, Metadata and (ta-dh1) Engines tabs draw and where their writes go, for ONE server
  * ([origin]). [settings] is the last `server-settings` frame (null until the server replies, the
  * web's `serverSettings`), [advanced] the last `advanced-settings` frame (the Claude CLI picker).
  * Both arrive from the client's flows; a screenshot builds them by hand, so nothing is fetched in a

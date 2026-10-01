@@ -271,8 +271,8 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  * environment variable forces is locked. The restart banner above follows the server's
  * `restartRequired` in its reply. One row here sets what the server RUNS: the Claude CLI picker
  * (which binary a new Claude session spawns), so a pick is confirmed first, the new CLI shown
- * (ClaudeCliConfirmDialog; r2). The engine homes, commands and launch command are on Engines (ta-dh1),
- * behind the same kind of confirmation.
+ * (ClaudeCliConfirmDialog; r2). The engine homes, commands and launch command are on Engines (ta-dh1,
+ * EnginesSection.kt), behind the same kind of confirmation (EngineConfirmDialog).
  *
  * Not here: the GitHub connection card (the `/api/github/connection` routes, MATRIX row `/api/github/...`, T8.4)
  * holds its place with a note; the active Codex / opencode session's provider controls
