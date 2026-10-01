@@ -127,14 +127,29 @@ sealed interface ClaudeAccountsResult<out T> {
     data class Blocked(val code: Int, override val origin: String) : ClaudeAccountsResult<Nothing>
 
     /**
-     * Tether's JSON refusal with its `error` sentence (a status read of an unknown account is 404
-     * "No such Claude account.", of a profile Tether does not drive 409): the web shows `data.error`.
-     * [error] is raw server text, bounded; drawn by the label rule.
+     * r2: one of the status route's OWN refusals (server.mjs `claudeAccountReply` at 887c222),
+     * recognised by its status and its fixed shape; the web shows its `data.error`, and this client
+     * shows the same sentence from [ClaudeAccountRefusal], never the reply's text. Any other non-2xx
+     * (a gateway's `502 {"error": …}` included) is [Unavailable].
      */
-    data class Refused(val code: Int, val error: String, override val origin: String) : ClaudeAccountsResult<Nothing>
+    data class Refused(val code: Int, val reason: ClaudeAccountRefusal, override val origin: String) : ClaudeAccountsResult<Nothing>
 
     /** Unreachable, any other answer, a body over the cap, or a body this client cannot use. */
     data class Unavailable(val code: Int?, override val origin: String) : ClaudeAccountsResult<Nothing>
+}
+
+/**
+ * r2: the status route's two refusals (lib/claude-accounts.mjs `claudeAccountReply` at 887c222),
+ * each recognised by a fixed mark of Tether's own reply, with the server's sentence as fixed copy.
+ */
+enum class ClaudeAccountRefusal(val sentence: String) {
+    /** 404 `{"error":"No such Claude account."}`: recognised by that exact sentence. */
+    NoSuchAccount("No such Claude account."),
+
+    /** 409 `{"error": …, "error_code":"not-managed"}`: recognised by the error_code. */
+    NotManaged(
+        "That profile's CLAUDE_CONFIG_DIR is not a Tether-managed account directory, so Tether will not sign it in or out. Edit it in Settings → Engines instead.",
+    ),
 }
 
 /** The three device-readable GETs, with the paired credential. There is deliberately no write here. */
@@ -189,6 +204,8 @@ class HttpClaudeAccounts(
         }
     }
 
+    // r2: the list and sync routes have no refusal of their own (server.mjs:8145, :8172 answer 200 or
+    // the /api/ gate's 401); only the status route's two are recognised.
     override suspend fun list(): ClaudeAccountsResult<List<ClaudeAccount>> = get(ClaudeAccountsSource.LIST_PATH, ClaudeAccountsJson::accounts)
 
     override suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync> = get(ClaudeAccountsSource.SYNC_PATH, ClaudeAccountsJson::sync)
@@ -204,10 +221,14 @@ class HttpClaudeAccounts(
                     ?: ClaudeAccountsResult.SignedOut()
             }
         }
-        return get(ClaudeAccountsSource.statusPath(accountId), ClaudeAccountsJson::status)
+        return get(ClaudeAccountsSource.statusPath(accountId), ClaudeAccountsJson::status, ClaudeAccountsJson::statusRefusal)
     }
 
-    private suspend fun <T> get(path: String, parse: (JsonObject) -> T?): ClaudeAccountsResult<T> {
+    private suspend fun <T> get(
+        path: String,
+        parse: (JsonObject) -> T?,
+        refusal: (Int, JsonObject) -> ClaudeAccountRefusal? = { _, _ -> null },
+    ): ClaudeAccountsResult<T> {
         val paired = when (val a = authority()) {
             FilesAuthority.SignedOut -> return ClaudeAccountsResult.SignedOut()
             FilesAuthority.LocalNetworkBlocked -> return ClaudeAccountsResult.LocalNetworkBlocked
@@ -225,7 +246,7 @@ class HttpClaudeAccounts(
         val call = http.newCall(request)
         call.timeout().timeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         return try {
-            callCancellably(call) { response -> read(response, origin, parse) }
+            callCancellably(call) { response -> read(response, origin, parse, refusal) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: IOException) {
@@ -237,7 +258,12 @@ class HttpClaudeAccounts(
         }
     }
 
-    private fun <T> read(response: Response, origin: String, parse: (JsonObject) -> T?): ClaudeAccountsResult<T> {
+    private fun <T> read(
+        response: Response,
+        origin: String,
+        parse: (JsonObject) -> T?,
+        refusal: (Int, JsonObject) -> ClaudeAccountRefusal?,
+    ): ClaudeAccountsResult<T> {
         val declaredType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)
         if (HttpToolMedia.blockedBySignIn(response.code, declaredType, response.header("WWW-Authenticate") != null)) {
             return ClaudeAccountsResult.Blocked(response.code, origin)
@@ -246,10 +272,11 @@ class HttpClaudeAccounts(
             response.code == 401 -> return ClaudeAccountsResult.SignedOut(origin)
             response.code == 403 -> return ClaudeAccountsResult.Forbidden(origin)
             response.code != 200 -> {
-                // The server's json() refusal carries its sentence; anything else is just unavailable.
-                if (declaredType != "application/json" || response.code !in 400..599) return ClaudeAccountsResult.Unavailable(response.code, origin)
-                val error = readCapped(response)?.let(ClaudeAccountsJson::parseObject)?.let(ClaudeAccountsJson::error)
-                return if (error != null) ClaudeAccountsResult.Refused(response.code, error, origin) else ClaudeAccountsResult.Unavailable(response.code, origin)
+                // r2: only a refusal recognisably the route's own is named; its words are fixed copy,
+                // never the reply's text. Anything else (a gateway's JSON error too) is unavailable.
+                if (declaredType != "application/json" || response.code !in 400..499) return ClaudeAccountsResult.Unavailable(response.code, origin)
+                val reason = readCapped(response)?.let(ClaudeAccountsJson::parseObject)?.let { refusal(response.code, it) }
+                return if (reason != null) ClaudeAccountsResult.Refused(response.code, reason, origin) else ClaudeAccountsResult.Unavailable(response.code, origin)
             }
             // The server's json() always says so; a 200 in any other type is not its answer.
             declaredType != "application/json" -> return ClaudeAccountsResult.Unavailable(response.code, origin)
@@ -314,14 +341,19 @@ object ClaudeAccountsJson {
     /** lib/providers-registry.mjs `ID_PATTERN` and `PROFILE_ID_MAX`. */
     private val ACCOUNT_ID = Regex("^[a-z][a-z0-9-]{0,63}$")
 
-    /** The deepest of the three bodies is four levels (`accounts[].plan.raw`). */
+    /**
+     * The deepest thing read is four levels down (`accounts[].plan`, `lastResult.entries[]`). r2:
+     * a container that opens deeper than this is replaced by `null` before parsing
+     * ([com.tether.app.protocol.ServerMessage.flattenDeeperThan]), so a deep subtree the client
+     * never reads (a nested `plan.raw`) costs neither the parser's stack nor the row.
+     */
     private const val MAX_DEPTH = 8
 
     fun isAccountId(id: String): Boolean = ACCOUNT_ID.matches(id)
 
     fun parseObject(text: String): JsonObject? = try {
-        if (com.tether.app.protocol.ServerMessage.nestsDeeperThan(text, MAX_DEPTH)) null
-        else com.tether.app.protocol.TetherJson.parseToJsonElement(text) as? JsonObject
+        val bounded = com.tether.app.protocol.ServerMessage.flattenDeeperThan(text, MAX_DEPTH)
+        com.tether.app.protocol.TetherJson.parseToJsonElement(bounded) as? JsonObject
     } catch (_: Exception) {
         null
     }
@@ -430,8 +462,15 @@ object ClaudeAccountsJson {
         )
     }
 
-    /** A JSON refusal's `error` sentence. */
-    fun error(obj: JsonObject): String? = string(obj["error"], MAX_TEXT)?.takeIf { it.isNotBlank() }
+    /**
+     * r2: the status route's own refusals (lib/claude-accounts.mjs `claudeAccountReply`): 404 with
+     * exactly its sentence, 409 with `error_code: "not-managed"`. Null for anything else.
+     */
+    fun statusRefusal(code: Int, obj: JsonObject): ClaudeAccountRefusal? = when {
+        code == 404 && string(obj["error"], MAX_TEXT) == ClaudeAccountRefusal.NoSuchAccount.sentence -> ClaudeAccountRefusal.NoSuchAccount
+        code == 409 && string(obj["error_code"], MAX_CODE) == "not-managed" -> ClaudeAccountRefusal.NotManaged
+        else -> null
+    }
 
     private fun string(element: JsonElement?, max: Int): String? {
         val p = element as? JsonPrimitive ?: return null

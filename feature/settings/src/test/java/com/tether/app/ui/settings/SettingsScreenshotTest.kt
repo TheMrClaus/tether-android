@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performSemanticsAction
 import com.tether.app.client.ClaudeAccount
+import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
 import com.tether.app.client.ClaudeAccountsResult
 import com.tether.app.client.ClaudeAccountsSource
@@ -70,7 +71,7 @@ enum class AccountsShot(val scrollTo: String) {
             accounts = AccountsFixtures.LIST,
             statuses = mapOf(
                 "claude-work" to AccountStatusState.Known(AccountsFixtures.LOGGED_IN),
-                "claude-fresh" to AccountStatusState.Failed(AccountsFault.Refused("No such Claude account.")),
+                "claude-fresh" to AccountStatusState.Failed(AccountsFault.Refused(ClaudeAccountRefusal.NoSuchAccount)),
             ),
             sync = AccountsFixtures.SYNC,
         )

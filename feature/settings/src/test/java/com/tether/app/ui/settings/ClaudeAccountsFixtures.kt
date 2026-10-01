@@ -1,6 +1,7 @@
 package com.tether.app.ui.settings
 
 import com.tether.app.client.ClaudeAccount
+import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
 import com.tether.app.client.ClaudeAccountsJson
 import com.tether.app.client.ClaudeAccountsResult
@@ -58,6 +59,7 @@ class FakeAccounts(
     private val statuses: Map<String, ClaudeAccountsResult<ClaudeAccountStatus>> = mapOf("claude-work" to ClaudeAccountsResult.Ok(AccountsFixtures.LOGGED_IN, origin)),
     private val hangList: Boolean = false,
     private val listGate: (suspend () -> Unit)? = null,
+    private val statusGate: (suspend () -> Unit)? = null,
 ) : ClaudeAccountsSource {
     val calls: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var listed = 0
@@ -76,7 +78,8 @@ class FakeAccounts(
 
     override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> {
         calls += "status:$accountId"
-        return statuses[accountId] ?: ClaudeAccountsResult.Refused(404, "No such Claude account.", origin)
+        statusGate?.invoke()
+        return statuses[accountId] ?: ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, origin)
     }
 
     fun binding() = ClaudeAccountsBinding(this, origin, AccountsFixtures.TIME)

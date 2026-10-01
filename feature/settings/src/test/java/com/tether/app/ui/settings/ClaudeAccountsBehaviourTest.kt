@@ -3,6 +3,7 @@ package com.tether.app.ui.settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -203,6 +204,50 @@ class ClaudeAccountsBehaviourTest {
         assertEquals(listOf("status:claude-work", "status:claude-fresh"), fake.calls.filter { it.startsWith("status") })
         // The others are untouched.
         assertTrue(everything().contains("Status unknown"))
+    }
+
+    /** r2: two taps on Check in one frame send ONE status read (each runs `claude auth status` on the server). */
+    @Test fun twoTapsInOneFrameAskOnce() {
+        val gate = CompletableDeferred<Unit>()
+        val fake = FakeAccounts(statusGate = { gate.await() })
+        show(fake.binding())
+        waitFor("Claude Code (work)")
+        val check = tag(ClaudeAccountsTags.check("claude-work")).performScrollTo()
+        val click = check.fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        // Both taps before any recomposition: the key is still drawn enabled for the second.
+        compose.runOnUiThread {
+            click()
+            click()
+        }
+        compose.waitForIdle()
+        assertEquals(1, fake.calls.count { it == "status:claude-work" })
+        // A third tap while the first is in flight sends nothing either.
+        compose.runOnUiThread { click() }
+        compose.waitForIdle()
+        assertEquals(1, fake.calls.count { it == "status:claude-work" })
+        // Once the answer lands, Check asks again.
+        gate.complete(Unit)
+        waitFor("Logged in — work@example.com")
+        tag(ClaudeAccountsTags.check("claude-work")).performClick()
+        compose.waitUntil(5_000) { fake.calls.count { it == "status:claude-work" } == 2 }
+    }
+
+    /** r2: two accounts whose titles could pass for each other each show their profile id, by the one-line rule. */
+    @Test fun lookAlikeAccountsShowTheirIds() {
+        val json = """{"accounts":[
+            {"id":"claude-work","label":"Work"},
+            {"id":"claude-work-2","label":"W\u043Erk"},
+            {"id":"claude-home","label":"Home"}]}"""
+        show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding())
+        waitFor("Home")
+        for (id in listOf("claude-work", "claude-work-2")) {
+            val node = tag(ClaudeAccountsTags.id(id)).fetchSemanticsNode()
+            val drawn = node.config[SemanticsProperties.Text].joinToString("") { it.text }
+            // Breakable anywhere, but the whole id, end included.
+            assertEquals(id, drawn.replace("\u2060\u200B", ""))
+            assertEquals("profile $id", node.config[SemanticsProperties.ContentDescription].single())
+        }
+        tag(ClaudeAccountsTags.id("claude-home")).assertDoesNotExist()
     }
 
     @Test fun whileLoadingItSaysSo() {

@@ -172,8 +172,26 @@ class ClaudeAccountsJsonTest {
     }
 
     @Test fun anUnusableBodyIsNoObject() {
-        for (text in listOf("", "not json", "[]", "null", "42", "\"x\"", "{\"accounts\":", "[".repeat(100_000), "{\"a\":" + "[".repeat(20) + "]".repeat(20) + "}")) {
+        for (text in listOf("", "not json", "[]", "null", "42", "\"x\"", "{\"accounts\":", "[".repeat(100_000), "{\"a\":" + "[".repeat(100_000))) {
             assertNull(text.take(20), ClaudeAccountsJson.parseObject(text))
         }
+    }
+
+    /**
+     * r2: a subtree deeper than anything read (a nested `plan.raw`, a newer field) is dropped before
+     * parsing, not the body: the rows and their plans stay, and the parser never sees the depth.
+     */
+    @Test fun aDeepSubtreeIsDroppedAndTheRowsKept() {
+        val deep = "[".repeat(50_000) + "]".repeat(50_000)
+        val body = """{"accounts":[
+            {"id":"claude-a","label":"A","plan":{"label":"Max 5x","source":"profile","raw":{"nested":$deep,"probe":"$RAW_SENTINEL"}},"future":{"x":$deep}},
+            {"id":"claude-b","label":"B"}],"extra":$deep}"""
+        val rows = accounts(body)!!
+        assertEquals(listOf("claude-a", "claude-b"), rows.map { it.id })
+        assertEquals(ClaudeAccountPlan("Max 5x", null, ClaudeAccountPlanSource.Profile), rows[0].plan)
+        assertFalse(rows.toString().contains(RAW_SENTINEL))
+        // The sync body the same way: its entries stay counted.
+        val sync = ClaudeAccountsJson.sync(obj("""{"config":{"mode":"all","x":$deep},"lastResult":{"status":"ok","entries":[{"status":"linked","meta":$deep}]}}"""))!!
+        assertEquals(1, sync.lastResult!!.changed)
     }
 }

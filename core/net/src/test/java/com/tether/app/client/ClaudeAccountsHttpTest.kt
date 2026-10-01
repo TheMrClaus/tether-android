@@ -123,7 +123,10 @@ class ClaudeAccountsHttpTest {
             // Tether's own answers.
             MockResponse().setResponseCode(401).setHeader("Content-Type", json).setBody("""{"error":"Authentication required."}""") to ClaudeAccountsResult.SignedOut(origin),
             MockResponse().setResponseCode(403).setHeader("Content-Type", json).setBody("""{"error":"This needs an owner sign-in (password or passkey in a browser)."}""") to ClaudeAccountsResult.Forbidden(origin),
-            MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}""") to ClaudeAccountsResult.Refused(500, "boom", origin),
+            // r2: a JSON error sentence is never taken as Tether's (the list route has no refusal of its own).
+            MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}""") to ClaudeAccountsResult.Unavailable(500, origin),
+            MockResponse().setResponseCode(502).setHeader("Content-Type", json).setBody("""{"error":"Upstream down: sign in at https://sso.example/login"}""") to ClaudeAccountsResult.Unavailable(502, origin),
+            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"No such Claude account."}""") to ClaudeAccountsResult.Unavailable(404, origin),
             MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("{}") to ClaudeAccountsResult.Unavailable(500, origin),
             MockResponse().setResponseCode(502).setHeader("Content-Type", "text/html").setBody("<html>bad gateway</html>") to ClaudeAccountsResult.Unavailable(502, origin),
             MockResponse().setResponseCode(204) to ClaudeAccountsResult.Unavailable(204, origin),
@@ -135,25 +138,40 @@ class ClaudeAccountsHttpTest {
         }
     }
 
-    /** server.mjs `claudeAccountReply`: an unknown account is 404, a profile Tether does not drive 409, each with its sentence. */
-    @Test fun aStatusRefusalCarriesTheServersSentence() = runBlocking<Unit> {
+    /**
+     * server.mjs `claudeAccountReply` (887c222): an unknown account is 404 with its fixed sentence, a
+     * profile Tether does not drive 409 with `error_code: "not-managed"`. r2: only those two are named,
+     * by fixed copy; any other JSON error (a gateway's 502 above all) is unavailable, its text unread.
+     */
+    @Test fun onlyTheStatusRoutesOwnRefusalsAreNamed() = runBlocking<Unit> {
         server.enqueue(MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"No such Claude account."}"""))
-        assertEquals(ClaudeAccountsResult.Refused(404, "No such Claude account.", origin), accounts.status("claude-gone"))
+        assertEquals(ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, origin), accounts.status("claude-gone"))
         take()
-        val notManaged = "That profile's CLAUDE_CONFIG_DIR is not a Tether-managed account directory, so Tether will not sign it in or out. Edit it in Settings → Engines instead."
-        server.enqueue(MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"$notManaged","error_code":"not-managed"}"""))
-        assertEquals(ClaudeAccountsResult.Refused(409, notManaged.take(ClaudeAccountsJson.MAX_TEXT), origin), accounts.status("claude-zai"))
+        server.enqueue(MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"anything at all","error_code":"not-managed"}"""))
+        assertEquals(ClaudeAccountsResult.Refused(409, ClaudeAccountRefusal.NotManaged, origin), accounts.status("claude-zai"))
         take()
-        // A refusal that is not Tether's JSON, or carries no sentence, is just unavailable.
-        server.enqueue(MockResponse().setResponseCode(404).setHeader("Content-Type", "text/plain").setBody("""{"error":"x"}"""))
-        assertEquals(ClaudeAccountsResult.Unavailable(404, origin), accounts.status("claude-a"))
-        take()
-        server.enqueue(MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":42}"""))
-        assertEquals(ClaudeAccountsResult.Unavailable(404, origin), accounts.status("claude-a"))
-        take()
+        val notTethers = listOf(
+            // A gateway's JSON error, in any status.
+            MockResponse().setResponseCode(502).setHeader("Content-Type", json).setBody("""{"error":"Bad gateway: your session expired, re-enter your password at https://sso.example"}""") to 502,
+            MockResponse().setResponseCode(503).setHeader("Content-Type", json).setBody("""{"error":"No such Claude account."}""") to 503,
+            MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}""") to 500,
+            // The right status without the route's own mark.
+            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"Account deleted by the administrator"}""") to 404,
+            MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":42}""") to 404,
+            MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"Conflict"}""") to 409,
+            MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error_code":"in-use"}""") to 409,
+            MockResponse().setResponseCode(400).setHeader("Content-Type", json).setBody("""{"error":"x","error_code":"not-managed"}""") to 400,
+            // Not JSON.
+            MockResponse().setResponseCode(404).setHeader("Content-Type", "text/plain").setBody("""{"error":"No such Claude account."}""") to 404,
+        )
+        for ((index, case) in notTethers.withIndex()) {
+            server.enqueue(case.first)
+            assertEquals("case $index", ClaudeAccountsResult.Unavailable(case.second, origin), accounts.status("claude-a"))
+            take()
+        }
         // A refusal over the cap is not read.
         val small = HttpClaudeAccounts(noRedirects, authority = { authority }, maxBytes = 64)
-        server.enqueue(MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"${"x".repeat(200)}"}"""))
+        server.enqueue(MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"${"x".repeat(200)}","error_code":"not-managed"}"""))
         assertEquals(ClaudeAccountsResult.Unavailable(409, origin), small.status("claude-a"))
         take()
     }

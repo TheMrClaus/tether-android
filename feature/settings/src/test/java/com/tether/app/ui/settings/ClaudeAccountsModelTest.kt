@@ -3,6 +3,7 @@ package com.tether.app.ui.settings
 import com.tether.app.client.ClaudeAccount
 import com.tether.app.client.ClaudeAccountPlan
 import com.tether.app.client.ClaudeAccountPlanSource
+import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
 import com.tether.app.client.ClaudeAccountsResult
 import com.tether.app.client.ClaudeSyncCategories
@@ -77,8 +78,57 @@ class ClaudeAccountsModelTest {
         assertSame(checking, ClaudeAccountsModel.foldStatus(checking, "claude-work", ClaudeAccountsResult.Ok(AccountsFixtures.LOGGED_IN, ORIGIN), OTHER_ORIGIN))
         val known = ClaudeAccountsModel.foldStatus(checking, "claude-work", ClaudeAccountsResult.Ok(AccountsFixtures.LOGGED_IN, ORIGIN), ORIGIN)
         assertEquals(AccountStatusState.Known(AccountsFixtures.LOGGED_IN), known.statuses["claude-work"])
-        val refused = ClaudeAccountsModel.foldStatus(known, "claude-fresh", ClaudeAccountsResult.Refused(404, "No such Claude account.", ORIGIN), ORIGIN)
-        assertEquals(AccountStatusState.Failed(AccountsFault.Refused("No such Claude account.")), refused.statuses["claude-fresh"])
+        val refused = ClaudeAccountsModel.foldStatus(known, "claude-fresh", ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, ORIGIN), ORIGIN)
+        assertEquals(AccountStatusState.Failed(AccountsFault.Refused(ClaudeAccountRefusal.NoSuchAccount)), refused.statuses["claude-fresh"])
+    }
+
+    /** r2: a second Check of an account already being checked is refused, so the caller asks once. */
+    @Test fun anAccountBeingCheckedIsNotCheckedAgain() {
+        val checking = ClaudeAccountsModel.checking(loaded(), "claude-work")
+        assertSame(checking, ClaudeAccountsModel.checking(checking, "claude-work"))
+        // Once its answer lands, it may be checked again; another account meanwhile, at any time.
+        val known = ClaudeAccountsModel.foldStatus(checking, "claude-work", ClaudeAccountsResult.Ok(AccountsFixtures.LOGGED_IN, ORIGIN), ORIGIN)
+        assertEquals(AccountStatusState.Checking, ClaudeAccountsModel.checking(known, "claude-work").statuses["claude-work"])
+        assertEquals(AccountStatusState.Checking, ClaudeAccountsModel.checking(checking, "claude-fresh").statuses["claude-fresh"])
+    }
+
+    /** r2: titles that could pass for one another (ta-895's rule, plus a confusable fold). */
+    @Test fun lookAlikeTitlesAreFound() {
+        val cyrillicO = "\u043E"
+        val collide = listOf(
+            listOf("Work", "Work"),
+            listOf("Claude Code (work)", "Claude Code (w${cyrillicO}rk)"),
+            listOf("Claude Code (work)", "claude code (WORK)"),
+            listOf("Work", "W0rk"),
+            listOf("Billing", "BiIIing"),
+            listOf("Team", "T\u0435am"),
+            listOf("modern", "rnodern"),
+            listOf("Work", "Work "),
+            listOf("Ｗｏｒｋ", "Work"),
+            listOf("Café", "Cafe"),
+        )
+        for (pair in collide) assertEquals(pair.toString(), setOf(0, 1), LookAlike.collisions(pair))
+        for (pair in listOf(listOf("Work", "Home"), listOf("Claude Code (work)", "Claude Code (work-2)"), listOf("A", "B"))) {
+            assertEquals(pair.toString(), emptySet<Int>(), LookAlike.collisions(pair))
+        }
+        assertEquals(setOf(0, 2), LookAlike.collisions(listOf("Work", "Home", "W${cyrillicO}rk")))
+    }
+
+    @Test fun aLookAlikeCardNamesItsIdAndAUniqueOneDoesNot() {
+        val accounts = listOf(
+            account(id = "claude-work", label = "Claude Code (work)"),
+            account(id = "claude-work-2", label = "Claude Code (w\u043Erk)"),
+            account(id = "claude-home", label = "Claude Code (home)"),
+        )
+        val cards = ClaudeAccountsPresentation.cards(accounts, emptyMap())
+        assertEquals(listOf("claude-work", "claude-work-2", null), cards.map { it.idLine })
+        // The sync section's primary account names its id too when its title collides.
+        val sync = ClaudeAccountsSync(ClaudeSyncConfig(ClaudeSyncMode.All, ClaudeSyncCategories(true, true, true, true), "claude-work-2"), null)
+        assertEquals("Claude Code (w\u043Erk) · claude-work-2", ClaudeAccountsPresentation.sync(accounts, sync, time)!!.rows[1].value)
+        val unique = sync.copy(config = sync.config.copy(primaryAccountId = "claude-home"))
+        assertEquals("Claude Code (home)", ClaudeAccountsPresentation.sync(accounts, unique, time)!!.rows[1].value)
+        // No collision in the seeded list.
+        assertTrue(ClaudeAccountsPresentation.view(loaded(), time).cards.all { it.idLine == null })
     }
 
     /** settings-dialog.tsx `statusCopy`. */
@@ -90,7 +140,8 @@ class ClaudeAccountsModelTest {
         assertEquals("Logged in", copy(AccountStatusState.Known(ClaudeAccountStatus(true, "claude.ai", null, null))))
         assertEquals("Not logged in", copy(AccountStatusState.Known(ClaudeAccountStatus(false, "none", null, null))))
         assertEquals("Status unknown — unrecognized-status-output", copy(AccountStatusState.Known(ClaudeAccountStatus(false, null, null, "unrecognized-status-output"))))
-        assertEquals("Status unknown — No such Claude account.", copy(AccountStatusState.Failed(AccountsFault.Refused("No such Claude account."))))
+        assertEquals("Status unknown — No such Claude account.", copy(AccountStatusState.Failed(AccountsFault.Refused(ClaudeAccountRefusal.NoSuchAccount))))
+        assertTrue(copy(AccountStatusState.Failed(AccountsFault.Refused(ClaudeAccountRefusal.NotManaged))).startsWith("Status unknown — That profile's CLAUDE_CONFIG_DIR is not a Tether-managed"))
         assertEquals("Status unknown — Status check failed.", copy(AccountStatusState.Failed(AccountsFault.Unavailable(500))))
         assertEquals("Status unknown — Status check failed.", copy(AccountStatusState.Failed(AccountsFault.Unavailable(null))))
         assertEquals("Status unknown — Blocked by a sign-in page", copy(AccountStatusState.Failed(AccountsFault.Blocked(302))))
@@ -104,8 +155,9 @@ class ClaudeAccountsModelTest {
         val error = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Unavailable(500)), time)
         assertEquals(ClaudeAccountsPresentation.Notice(false, "Could not load Claude accounts."), error.notice)
         assertTrue(error.cards.isEmpty())
-        val refused = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Refused("Disk full.")), time)
-        assertEquals("Disk full.", refused.notice!!.text)
+        // r2: the list shows no server sentence, ever: fixed copy for every failure.
+        val refused = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Refused(ClaudeAccountRefusal.NoSuchAccount)), time)
+        assertEquals(ClaudeAccountsPresentation.LIST_ERROR, refused.notice!!.text)
         val blocked = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Blocked(302)), time)
         assertEquals(ClaudeAccountsPresentation.Notice(true, ClaudeAccountsPresentation.BLOCKED, ClaudeAccountsPresentation.BLOCKED_DETAIL), blocked.notice)
         val signedOut = ClaudeAccountsPresentation.view(ClaudeAccountsModel.signedOut(), time)
@@ -158,10 +210,6 @@ class ClaudeAccountsModelTest {
         assertNull(blank.organization)
         // The bound.
         assertTrue(ClaudeAccountsPresentation.card(account(label = "x".repeat(500)), null).title.length <= 80)
-        assertEquals(
-            "Status unknown — boom",
-            ClaudeAccountsPresentation.statusCopy(AccountStatusState.Failed(AccountsFault.Refused("boom$rlo\n"))),
-        )
     }
 
     /** #231: nothing on this side can hold `raw`: every derived value of the sentinel payload is clean. */

@@ -2,6 +2,7 @@ package com.tether.app.ui.settings
 
 import com.tether.app.client.ClaudeAccount
 import com.tether.app.client.ClaudeAccountPlanSource
+import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
 import com.tether.app.client.ClaudeAccountsResult
 import com.tether.app.client.ClaudeAccountsSource
@@ -41,8 +42,8 @@ sealed interface AccountsFault {
     /** T6.8: a sign-in gateway answered instead of Tether. */
     data class Blocked(val code: Int) : AccountsFault
 
-    /** Tether's own refusal sentence (raw server text, bounded). */
-    data class Refused(val error: String) : AccountsFault
+    /** r2: one of the status route's own refusals, recognised by the reader; drawn as fixed copy. */
+    data class Refused(val reason: ClaudeAccountRefusal) : AccountsFault
 
     data class Unavailable(val code: Int?) : AccountsFault
 }
@@ -86,7 +87,7 @@ object ClaudeAccountsModel {
         is ClaudeAccountsResult.Forbidden -> AccountsFault.Forbidden
         ClaudeAccountsResult.LocalNetworkBlocked -> AccountsFault.LocalNetworkBlocked
         is ClaudeAccountsResult.Blocked -> AccountsFault.Blocked(result.code)
-        is ClaudeAccountsResult.Refused -> AccountsFault.Refused(result.error)
+        is ClaudeAccountsResult.Refused -> AccountsFault.Refused(result.reason)
         is ClaudeAccountsResult.Unavailable -> AccountsFault.Unavailable(result.code)
     }
 
@@ -109,10 +110,17 @@ object ClaudeAccountsModel {
     fun wantsPlanRetry(accounts: List<ClaudeAccount>?): Boolean =
         accounts.orEmpty().any { it.plan?.source == ClaudeAccountPlanSource.Credentials }
 
-    /** `checkStatus(id)`'s "loading" (only for an account of this server that may be asked). */
-    fun checking(state: ClaudeAccountsState, id: String): ClaudeAccountsState =
-        if (state.accounts.orEmpty().none { it.id == id && it.checkable }) state
-        else state.copy(statuses = state.statuses + (id to AccountStatusState.Checking))
+    /**
+     * `checkStatus(id)`'s "loading", only for an account of this server that may be asked. r2: an
+     * account already being checked is refused (the SAME state comes back), so two taps in one frame
+     * ask once: each status read runs `claude auth status` on the server. A caller asks the source
+     * only when this returns a new state.
+     */
+    fun checking(state: ClaudeAccountsState, id: String): ClaudeAccountsState = when {
+        state.statuses[id] == AccountStatusState.Checking -> state
+        state.accounts.orEmpty().none { it.id == id && it.checkable } -> state
+        else -> state.copy(statuses = state.statuses + (id to AccountStatusState.Checking))
+    }
 
     /** settings-dialog.tsx:1443-1453 `checkStatus`: the answer, or the reason as the status. */
     fun foldStatus(state: ClaudeAccountsState, id: String, result: ClaudeAccountsResult<ClaudeAccountStatus>, current: String?): ClaudeAccountsState {
@@ -182,6 +190,11 @@ object ClaudeAccountsPresentation {
         val canRename: Boolean,
         /** Raw CLAUDE_CONFIG_DIR (bounded), drawn by the path rule; null = [NO_HOME]. */
         val configDir: String?,
+        /**
+         * r2 (ta-895's rule): the raw profile id, drawn by the one-line rule under the title, set only
+         * when this card's title could pass for another's ([LookAlike]); null = not drawn.
+         */
+        val idLine: String? = null,
     )
 
     /** The list error row or the blocked notice (settings-dialog.tsx:1666-1670, plus T6.8's native notice). */
@@ -201,7 +214,14 @@ object ClaudeAccountsPresentation {
             return View(notice, loading = false, cards = emptyList(), sync = null)
         }
         val accounts = state.accounts ?: return View(null, loading = true, cards = emptyList(), sync = null)
-        return View(null, loading = false, cards = accounts.map { card(it, state.statuses[it.id]) }, sync = sync(accounts, state.sync, timeOf))
+        return View(null, loading = false, cards = cards(accounts, state.statuses), sync = sync(accounts, state.sync, timeOf))
+    }
+
+    /** The cards, each with its id drawn when its title could pass for another card's. */
+    fun cards(accounts: List<ClaudeAccount>, statuses: Map<String, AccountStatusState>): List<Card> {
+        val cards = accounts.map { card(it, statuses[it.id]) }
+        val alike = LookAlike.collisions(cards.map { it.title })
+        return cards.mapIndexed { i, c -> if (i in alike) c.copy(idLine = c.id) else c }
     }
 
     fun card(account: ClaudeAccount, status: AccountStatusState?): Card = Card(
@@ -236,16 +256,19 @@ object ClaudeAccountsPresentation {
 
     /** `data.error || "Status check failed."`, and the native reasons the web has no words for. */
     fun statusError(fault: AccountsFault): String = when (fault) {
-        is AccountsFault.Refused -> LabelText.error(fault.error).ifEmpty { STATUS_ERROR }
+        is AccountsFault.Refused -> fault.reason.sentence
         AccountsFault.SignedOut -> "Signed out"
         AccountsFault.LocalNetworkBlocked -> "Local network access is blocked"
         is AccountsFault.Blocked -> BLOCKED
         AccountsFault.Forbidden, is AccountsFault.Unavailable -> STATUS_ERROR
     }
 
-    /** `data.error || "Could not load Claude accounts."`. */
+    /**
+     * `data.error || "Could not load Claude accounts."`. r2: the list route has no refusal of its own,
+     * so no server sentence is ever shown here; the fixed copy stands for every failure.
+     */
     fun listError(fault: AccountsFault): String = when (fault) {
-        is AccountsFault.Refused -> LabelText.error(fault.error).ifEmpty { LIST_ERROR }
+        is AccountsFault.Refused -> LIST_ERROR
         AccountsFault.SignedOut -> "Signed out — sign in again to see Claude accounts."
         AccountsFault.LocalNetworkBlocked -> "Local network access is blocked"
         is AccountsFault.Blocked -> BLOCKED
@@ -279,8 +302,13 @@ object ClaudeAccountsPresentation {
             }
             if (config.mode != ClaudeSyncMode.None) {
                 val primary = capable.firstOrNull { it.id == config.primaryAccountId }
+                val titles = accounts.map { card(it, null).title }
+                val alike = LookAlike.collisions(titles)
                 val value = when {
-                    primary != null -> card(primary, null).title
+                    // r2: a title that could pass for another's names its id too (escaped, one line).
+                    primary != null -> accounts.indexOf(primary).let { i ->
+                        if (i in alike) "${titles[i]} · ${LabelText.visibleValue(primary.id)}" else titles[i]
+                    }
                     primaryMissing -> "Choose a primary account…"
                     else -> "None"
                 }
@@ -309,5 +337,53 @@ object ClaudeAccountsPresentation {
         }
         val whenText = result.ranAt?.let(timeOf).orEmpty()
         return "Last synced ${if (whenText.isNotEmpty()) "at $whenText — " else ""}${result.changed} updated, ${result.upToDate} already current."
+    }
+}
+
+/**
+ * r2: whether drawn account titles could pass for one another, so a card names its profile id
+ * (ta-895's New session picker rule, there for exact duplicates). Two titles collide when their
+ * SKELETONS are equal, a small fold in the spirit of UTS #39 confusable detection (the app has no
+ * ICU SpoofChecker): NFKC, combining marks dropped, case folded, the Cyrillic and Greek letters
+ * that draw like Latin ones mapped to them, `0`→`o`, `1` / `i` / `|`→`l`, `rn`→`m`, `vv`→`w`, and
+ * spaces and punctuation ignored. It catches the usual look-alikes ("Work" twice, Cyrillic "Wоrk",
+ * "W0rk", "Work " / "work"); it is not a full confusables table.
+ */
+object LookAlike {
+    private val TO_LATIN: Map<Int, Char> = buildMap {
+        fun put(from: String, to: String) = from.forEachIndexed { i, c -> put(c.code, to[i]) }
+        // Cyrillic, lower and upper case.
+        put("абвгеіїјкмнорстухѕԁӏԛԝүһ", "abbrelljkmhopctyxsdlqwyh")
+        put("АВЕІЇЈКМНОРСТУХЅԀӀԚԜҮҺ", "abelljkmhopctyxsdlqwyh")
+        // Greek.
+        put("αβεικνορτυχ", "abelkvoptux")
+        put("ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "abezhlkmnoptyx")
+        // Latin and digit look-alikes.
+        put("ı0o1il|ſ", "loolllls")
+    }
+
+    fun skeleton(title: String): String {
+        val decomposed = java.text.Normalizer.normalize(java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFKC), java.text.Normalizer.Form.NFD)
+        val out = StringBuilder(decomposed.length)
+        var i = 0
+        while (i < decomposed.length) {
+            val cp = decomposed.codePointAt(i)
+            i += Character.charCount(cp)
+            if (Character.getType(cp) == Character.NON_SPACING_MARK.toInt()) continue
+            val mapped = TO_LATIN[cp] ?: TO_LATIN[Character.toLowerCase(cp)]
+            when {
+                mapped != null -> out.append(mapped)
+                Character.isLetterOrDigit(cp) -> out.appendCodePoint(Character.toLowerCase(cp))
+                else -> Unit
+            }
+        }
+        return out.toString().replace("rn", "m").replace("vv", "w")
+    }
+
+    /** The indices of [titles] whose skeleton another title shares. */
+    fun collisions(titles: List<String>): Set<Int> {
+        val skeletons = titles.map(::skeleton)
+        val counts = skeletons.groupingBy { it }.eachCount()
+        return skeletons.indices.filterTo(HashSet()) { (counts[skeletons[it]] ?: 0) > 1 }
     }
 }

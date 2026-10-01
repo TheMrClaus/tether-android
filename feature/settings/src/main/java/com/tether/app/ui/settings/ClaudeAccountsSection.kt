@@ -33,13 +33,21 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.client.LabelText
+import com.tether.app.client.TextCut
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.appendStyled
+import com.tether.app.ui.text.codeDirection
 import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.tokenStyle
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import java.text.DateFormat
@@ -62,6 +70,7 @@ object ClaudeAccountsTags {
     fun plan(id: String) = "claude-account-plan:$id"
     fun organization(id: String) = "claude-account-org:$id"
     fun status(id: String) = "claude-account-status:$id"
+    fun id(id: String) = "claude-account-id:$id"
     fun path(id: String) = "claude-account-path:$id"
     fun check(id: String) = "claude-account-check:$id"
     fun rename(id: String) = "claude-account-rename:$id"
@@ -120,11 +129,14 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
         view = ClaudeAccountsPresentation.view(state, timeOf),
         narrow = narrow,
         onRetry = { reload++ },
-        onCheck = { id ->
-            if (current != null) {
-                state = ClaudeAccountsModel.checking(state, id)
-                scope.launch(checks) { state = ClaudeAccountsModel.foldStatus(state, id, source.status(id), current) }
-            }
+        onCheck = onCheck@{ id ->
+            if (current == null) return@onCheck
+            // r2: asked only when the state moved to Checking: a second tap in the same frame (or
+            // any tap while one is in flight, or for an id that may not be asked) sends nothing.
+            val next = ClaudeAccountsModel.checking(state, id)
+            if (next === state) return@onCheck
+            state = next
+            scope.launch(checks) { state = ClaudeAccountsModel.foldStatus(state, id, source.status(id), current) }
         },
     )
 }
@@ -296,6 +308,17 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, narrow: Boolean, 
                         Tag(ClaudeAccountsPresentation.PRE_EXISTING, Modifier.align(Alignment.CenterVertically).semantics { contentDescription = ClaudeAccountsPresentation.PRE_EXISTING_TIP })
                     }
                 }
+                card.idLine?.let { id ->
+                    // r2: this title could pass for another's: the profile id tells them apart.
+                    Text(
+                        accountIdText(id),
+                        style = settingsText(type.mono, 11.5f, 400, lineHeight = 1.5f),
+                        color = t.faint,
+                        modifier = Modifier
+                            .testTag(ClaudeAccountsTags.id(card.id))
+                            .semantics { contentDescription = "profile ${LabelText.visibleValue(id)}" },
+                    )
+                }
                 Text(
                     card.status,
                     color = t.muted,
@@ -329,6 +352,39 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, narrow: Boolean, 
         CardRow(narrow = narrow, title = "Remove account", caption = AnnotatedString("Deletes the profile entry from Tether")) {
             OwnerKey("Remove", TetherIcons.Trash2, "Remove ${card.title}", ClaudeAccountsTags.remove(card.id))
         }
+    }
+}
+
+/** r2: an id longer than this is cut in the MIDDLE, so its end (a "-2" suffix) always shows (ta-895). */
+internal const val ACCOUNT_ID_SHOWN = 96
+
+/** The raw parts of [id] to draw: the whole id, or its head and tail cut at cluster boundaries. */
+internal fun accountIdParts(id: String): List<String> {
+    if (id.length <= ACCOUNT_ID_SHOWN) return listOf(id)
+    val half = (ACCOUNT_ID_SHOWN - 1) / 2
+    val headEnd = TextCut.boundaryAtOrBefore(id, half)
+    val tailStart = TextCut.boundaryAtOrBefore(id, id.length - half, floor = headEnd)
+    return listOf(id.substring(0, headEnd), id.substring(tailStart))
+}
+
+/**
+ * A profile id as drawn (ta-895's New session picker): the one-line rule ([SafeText.Rule.Line]:
+ * hidden code points and line breaks as tokens) in an LTR paragraph, breakable anywhere, never cut
+ * at its end.
+ */
+@Composable
+private fun accountIdText(id: String): AnnotatedString {
+    val t = LocalTetherTokens.current
+    return remember(id, t) {
+        val style = tokenStyle(t)
+        AnnotatedString.Builder(id.length * 2).apply {
+            withStyle(ParagraphStyle(textDirection = codeDirection)) {
+                accountIdParts(id).forEachIndexed { i, part ->
+                    if (i > 0) append("…")
+                    appendStyled(SafeText.breakAnywhere(SafeText.encode(part, SafeText.Rule.Line)), style)
+                }
+            }
+        }.toAnnotatedString()
     }
 }
 
