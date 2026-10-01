@@ -208,10 +208,10 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
 | T15.3 | Overview host + daily usage panels | VERIFIED | security-executor-T15.3 @ 2026-09-30 20… |  |  |
 | T15.4 | Top-bar navigation | VERIFIED | executor-T15.4 @ 2026-09-30 20:30 |  |  |
-| T15.5 | Studio-only appearance + theme migration | DONE | executor-T15.5 @ 2026-09-30 23:01 | `bd show` |  |
+| T15.5 | Studio-only appearance + theme migration | VERIFIED | executor-T15.5 @ 2026-09-30 23:01 | `bd show` |  |
 | T15.6 | Queue origin labels (v133) + hidden session count (v135) | VERIFIED | executor-T15.6 @ 2026-09-30 23:41 |  |  |
-| T15.7 | Worktree service links after v134 | TODO |  |  |  |
-| T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | TODO |  |  |  |
+| T15.7 | Worktree service links after v134 | IN-PROGRESS | security-executor-T15.7 @ 2026-10-01 00… |  | coordinator re-brief (decision logged in TRACKER 2026-10-01): option 1 - Open = proxyAuthUrl pinned to exactly /api/worktree/open?session=<… |
+| T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | IN-PROGRESS | executor-T15.8 @ 2026-10-01 00:43 |  |  |
 
 ---
 
@@ -377,3 +377,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-10-01 01:30 | claude-main / Opus 5.5 | T15.4, T15.5 | T15.4 r2 re-verify CONFIRMED -> merged ff-only `cee8ea80`, VERIFIED (gate 4741; follow-up ta-2qv). Started T15.5 (Studio-only appearance; rebases over T7.4 at the end). | T7.4 r3; T15.3 r2; ta-ylh; flakes; T15.5 |
 | 2026-10-01 02:20 | claude-main / Opus 5.5 | ta-ylh, T15.6 | ta-ylh: coordinator ran the gate (maker hit its command limit): green 4757 on `f1b3b639`; verify CONFIRMED -> merged ff-only `f1b3b639`, VERIFIED (advertised hello stays 132). Started T15.6 (queue labels, hidden count, createdVia; + the two ta-ylh lows). | T7.4 r3; T15.3 r2; T15.5; T15.6; flakes |
 | 2026-10-01 03:00 | claude-main / Opus 5.5 | T7.4, T15.3, T15.5, T15.6, ta-vmg, ta-x9c | T7.4 r3 CONFIRMED + security PASS-WITH-FOLLOW-UPS -> merged `cfa7ce90` VERIFIED (+2 matrix rows). T15.6 CONFIRMED -> merged `71abae3c` VERIFIED (follow-up ta-e7j). T15.3 r2 rechecked -> merged with the flake fixes (ta-vmg: v2 compose rule + off-main write check; ta-x9c: await the typed projection) at `4c925b3a`, all VERIFIED (gate 4968). T15.5 verify REFUTED (Machine window background) -> r2 done -> final rebase. | T15.5 final gate + recheck; v0.9.0 |
+| 2026-10-01 02:50 | claude-main / Opus 5.5 | T15.5, T15.7, T15.8 | T15.5 r2 rechecked (golden audit: exactly the 18 expected Studio re-records, 898 retired removed, none left) -> merged ff-only `fe71970d`, VERIFIED (gate 4133). T15.7 re-briefed after the maker found proxyAuthUrl is the console-side /api/worktree/open link (decision logged). Started T15.8 re-baseline at tether `887c222` (protocol 137: #229, #231 since the snapshot). | T15.7; T15.8; v0.9.0 in the morning |
