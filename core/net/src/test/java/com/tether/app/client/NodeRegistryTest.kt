@@ -78,6 +78,9 @@ class NodeRegistryTest {
 
     private fun <T> request(block: suspend () -> T): Deferred<T> = h.scope.async { block() }
 
+    /** T10.3: the harness server's origin, the one every node request here is drawn for. */
+    private fun origin(): String = serverOrigin(h.server.url("/").toString())!!
+
     private fun <T> Deferred<T>.get(): T = runBlocking { withTimeout(10_000) { await() } }
 
     private fun JsonObject.s(key: String): String? = this[key]?.jsonPrimitive?.content
@@ -280,7 +283,7 @@ class NodeRegistryTest {
             assertEquals(listOf("from-b"), h.client.nodes.value.map { it.nodeId })
 
             // The next node request (and its credential) goes to B, never to A.
-            val add = request { h.client.addNode(NodeCredential("parity-fake-bundle")) }
+            val add = request { h.client.addNode(serverOrigin(b.url())!!, NodeCredential("parity-fake-bundle")) }
             val frame = b.frame()
             assertEquals("node-add", frame.type())
             assertEquals("parity-fake-bundle", frame.s("credential"))
@@ -498,7 +501,7 @@ class NodeRegistryTest {
             assertFalse("OkHttp refuses the oversized frame", h.client.markSeen("x".repeat(17 * 1024 * 1024), 1L))
             assertEquals(ConnectionState.Connected, h.client.connection.value)
 
-            assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode("node-a") })
+            assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode(origin(), "node-a") })
             awaitErrors(1)
             assertEquals(listOf(NodeRegistryRules.NOT_SENT_MESSAGE), errors.toList())
             awaitNoPendingRequests()
@@ -526,7 +529,7 @@ class NodeRegistryTest {
     @Test
     fun addNodeSendsOneFrameWithARequestIdAndResolvesOnItsResult() {
         val ws = connected()
-        val call = request { h.client.addNode(NodeCredential("  parity-fake-bundle \n"), label = "  Peer ", baseUrl = "   ") }
+        val call = request { h.client.addNode(origin(), NodeCredential("  parity-fake-bundle \n"), label = "  Peer ", baseUrl = "   ") }
         val frame = h.expectFrame("node-add")
         // The web form trims, and the hook omits a blank label/baseUrl.
         assertEquals("parity-fake-bundle", frame.s("credential"))
@@ -550,9 +553,9 @@ class NodeRegistryTest {
     @Test
     fun outOfOrderResultsResolveTheirOwnRequests() {
         val ws = connected()
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         val probeId = h.expectFrame("node-probe").also { assertEquals("node-a", it.s("nodeId")) }.s("requestId")!!
-        val remove = request { h.client.removeNode("node-b") }
+        val remove = request { h.client.removeNode(origin(), "node-b") }
         val removeId = h.expectFrame("node-remove").also { assertEquals("node-b", it.s("nodeId")) }.s("requestId")!!
         assertTrue(probeId != removeId)
 
@@ -573,7 +576,7 @@ class NodeRegistryTest {
     @Test
     fun anUnknownOrMissingRequestIdUpdatesNodeResultButEndsNoRequest() {
         val ws = connected()
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         val probeId = h.expectFrame("node-probe").s("requestId")!!
 
         ws.send(nodeResult(false, "node-someone-else", "x", "No such node."))
@@ -592,7 +595,7 @@ class NodeRegistryTest {
     @Test
     fun aCorrelatedErrorFrameEndsTheRequestAndIsStillShown() {
         val ws = connected()
-        val add = request { h.client.addNode(NodeCredential("parity-fake-bundle")) }
+        val add = request { h.client.addNode(origin(), NodeCredential("parity-fake-bundle")) }
         val id = h.expectFrame("node-add").s("requestId")!!
         ws.send("""{"type":"error","message":"Could not add that node.","requestId":"$id"}""")
         assertEquals(NodeRequestOutcome.ServerError("Could not add that node."), add.get())
@@ -608,7 +611,7 @@ class NodeRegistryTest {
     @Test
     fun anUnansweredRequestTimesOutAndALateResultOnlyUpdatesNodeResult() {
         val ws = connected()
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         val id = h.expectFrame("node-probe").s("requestId")!!
         h.scheduler.await { it == NodeRegistryRules.REQUEST_TIMEOUT_MS }.fire()
         assertEquals(NodeRequestOutcome.TimedOut, probe.get())
@@ -624,9 +627,9 @@ class NodeRegistryTest {
     @Test
     fun aDroppedLinkEndsEveryPendingRequestAtOnceAndNothingIsResent() {
         val ws = connected()
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         h.expectFrame("node-probe")
-        val add = request { h.client.addNode(NodeCredential("parity-fake-bundle")) }
+        val add = request { h.client.addNode(origin(), NodeCredential("parity-fake-bundle")) }
         h.expectFrame("node-add")
         assertEquals(2, h.client.pendingNodeRequestCount())
 
@@ -653,8 +656,8 @@ class NodeRegistryTest {
     fun withoutALiveLinkNothingIsSentAndTheWebsRefusalIsShown() {
         h.newClient(configured = false)
         errorCollector = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { collectToasts() }
-        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode("node-a") })
-        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.addNode(NodeCredential("parity-fake-bundle")) })
+        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode(origin(), "node-a") })
+        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.addNode(origin(), NodeCredential("parity-fake-bundle")) })
         awaitErrors(2)
         assertEquals(List(2) { NodeRegistryRules.NOT_SENT_MESSAGE }, errors.toList())
         assertEquals(0, h.client.pendingNodeRequestCount())
@@ -664,7 +667,7 @@ class NodeRegistryTest {
     @Test
     fun aCancelledCallerLeavesNoPendingRequest() {
         connected()
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         h.expectFrame("node-probe")
         assertEquals(1, h.client.pendingNodeRequestCount())
         runBlocking { probe.cancel(); probe.join() }
@@ -678,16 +681,16 @@ class NodeRegistryTest {
         // Empty after trimming: the web keeps its button disabled; nothing shown.
         assertEquals(
             NodeRequestOutcome.Invalid(NodeRegistryRules.EMPTY_CREDENTIAL_MESSAGE),
-            runBlocking { h.client.addNode(NodeCredential("   ")) },
+            runBlocking { h.client.addNode(origin(), NodeCredential("   ")) },
         )
         // Server bounds (protocol-validate.mjs): shown, as the server's error would be.
-        val longLabel = runBlocking { h.client.addNode(NodeCredential("parity-fake-bundle"), label = "é".repeat(33)) }
+        val longLabel = runBlocking { h.client.addNode(origin(), NodeCredential("parity-fake-bundle"), label = "é".repeat(33)) }
         assertEquals(NodeRequestOutcome.Invalid("node-add.label must be a bounded string (<=64 chars)"), longLabel)
-        val longCredential = runBlocking { h.client.addNode(NodeCredential("x".repeat(4097))) }
+        val longCredential = runBlocking { h.client.addNode(origin(), NodeCredential("x".repeat(4097))) }
         assertEquals(NodeRequestOutcome.Invalid("node-add.credential must be a bounded non-empty string"), longCredential)
-        val badId = runBlocking { h.client.probeNode("n".repeat(129)) }
+        val badId = runBlocking { h.client.probeNode(origin(), "n".repeat(129)) }
         assertEquals(NodeRequestOutcome.Invalid("node-probe.nodeId must be a bounded non-empty string"), badId)
-        assertEquals(NodeRequestOutcome.Invalid("node-remove.nodeId must be a bounded non-empty string"), runBlocking { h.client.removeNode("") })
+        assertEquals(NodeRequestOutcome.Invalid("node-remove.nodeId must be a bounded non-empty string"), runBlocking { h.client.removeNode(origin(), "") })
         awaitErrors(4)
         assertEquals(4, errors.size)
         assertTrue("nothing went out", h.framesUntilBarrier().isEmpty())
@@ -703,14 +706,14 @@ class NodeRegistryTest {
         // ever refuses a device token it answers with a node-result or an error
         // frame, and either one reaches the caller as a plain outcome.
         val ws = connected(deviceToken = "parity-fake-device-token")
-        val add = request { h.client.addNode(NodeCredential("parity-fake-bundle")) }
+        val add = request { h.client.addNode(origin(), NodeCredential("parity-fake-bundle")) }
         val addId = h.expectFrame("node-add").s("requestId")!!
         ws.send(nodeResult(false, addId, message = "Manage nodes from a browser session, not from a paired device."))
         val refused = add.get() as NodeRequestOutcome.Answered
         assertFalse(refused.result.ok)
         assertEquals("Manage nodes from a browser session, not from a paired device.", refused.result.message)
 
-        val probe = request { h.client.probeNode("node-a") }
+        val probe = request { h.client.probeNode(origin(), "node-a") }
         val probeId = h.expectFrame("node-probe").s("requestId")!!
         ws.send("""{"type":"error","message":"Forbidden.","requestId":"$probeId"}""")
         assertEquals(NodeRequestOutcome.ServerError("Forbidden."), probe.get())
@@ -733,19 +736,19 @@ class NodeRegistryTest {
             val ws = connected()
             // Answered (ok and not ok), a correlated error, a timeout, a link loss:
             // every path the credential could leak through.
-            val a1 = request { h.client.addNode(credential, label = "Peer") }
+            val a1 = request { h.client.addNode(origin(), credential, label = "Peer") }
             val f1 = h.expectFrame("node-add")
             ws.send(nodeResult(false, f1.s("requestId"), message = "That credential could not be read. Re-copy it from the peer."))
             outcomes += a1.get()
-            val a2 = request { h.client.addNode(credential) }
+            val a2 = request { h.client.addNode(origin(), credential) }
             val f2 = h.expectFrame("node-add")
             ws.send("""{"type":"error","message":"Could not add that node.","requestId":"${f2.s("requestId")}"}""")
             outcomes += a2.get()
-            val a3 = request { h.client.addNode(credential) }
+            val a3 = request { h.client.addNode(origin(), credential) }
             val f3 = h.expectFrame("node-add")
             h.scheduler.await { it == NodeRegistryRules.REQUEST_TIMEOUT_MS }.fire()
             outcomes += a3.get()
-            val a4 = request { h.client.addNode(credential) }
+            val a4 = request { h.client.addNode(origin(), credential) }
             val f4 = h.expectFrame("node-add")
             ws.close(1001, null)
             outcomes += a4.get()
@@ -778,5 +781,102 @@ class NodeRegistryTest {
         assertFalse("errors flow", errors.any { it.contains(secret) })
         assertFalse("nodeResult", h.client.nodeResult.value.toString().contains(secret))
         assertTrue(out.toString().contains("NodeCredential(***)"))
+    }
+
+    // ------------------------------------------------------------------
+    // T10.3: bound to the drawing origin; exact frames; a later socket never answers
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aRequestDrawnForAnotherServerIsNeverSent() {
+        val ws = connected()
+        val other = "https://other-console.example.test"
+        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.addNode(other, NodeCredential("parity-FAKE-bundle-for-b")) })
+        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode(other, "node-a") })
+        assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.removeNode(other, "node-a") })
+        h.serverBarrier(ws)
+        assertTrue("a frame drawn for another server went out", h.framesUntilBarrier().none { it.type()!!.startsWith("node-") })
+        assertEquals(0, h.client.pendingNodeRequestCount())
+        // Control: the same request for THIS server goes out.
+        val probe = request { h.client.probeNode(origin(), "node-a") }
+        val id = h.expectFrame("node-probe").s("requestId")!!
+        ws.send(nodeResult(true, id, "node-a", "Reachable."))
+        assertTrue(probe.get() is NodeRequestOutcome.Answered)
+    }
+
+    @Test
+    fun theNodeFramesAreExactlyTheWebsJson() {
+        val ws = connected()
+        val add = request { h.client.addNode(origin(), NodeCredential(" parity-FAKE-bundle "), label = " Workstation ", baseUrl = " http://10.0.0.2:4173 ") }
+        val addFrame = h.expectFrame("node-add")
+        val addId = addFrame.s("requestId")!!
+        assertEquals(
+            TetherJson.parseToJsonElement(
+                """{"type":"node-add","credential":"parity-FAKE-bundle","label":"Workstation","baseUrl":"http://10.0.0.2:4173","requestId":"$addId"}""",
+            ),
+            addFrame,
+        )
+        ws.send(nodeResult(true, addId, "node-w", "Reachable."))
+        add.get()
+        // Blank label and base URL are omitted, as use-tether.ts addNode does.
+        val bare = request { h.client.addNode(origin(), NodeCredential("parity-FAKE-bundle"), label = "  ", baseUrl = "") }
+        val bareFrame = h.expectFrame("node-add")
+        val bareId = bareFrame.s("requestId")!!
+        assertEquals(TetherJson.parseToJsonElement("""{"type":"node-add","credential":"parity-FAKE-bundle","requestId":"$bareId"}"""), bareFrame)
+        ws.send(nodeResult(false, bareId, message = "That credential could not be read. Re-copy it from the peer."))
+        bare.get()
+        val probe = request { h.client.probeNode(origin(), "node-w") }
+        val probeFrame = h.expectFrame("node-probe")
+        val probeId = probeFrame.s("requestId")!!
+        assertEquals(TetherJson.parseToJsonElement("""{"type":"node-probe","nodeId":"node-w","requestId":"$probeId"}"""), probeFrame)
+        ws.send(nodeResult(true, probeId, "node-w", "Reachable."))
+        probe.get()
+        val remove = request { h.client.removeNode(origin(), "node-w") }
+        val removeFrame = h.expectFrame("node-remove")
+        val removeId = removeFrame.s("requestId")!!
+        assertEquals(TetherJson.parseToJsonElement("""{"type":"node-remove","nodeId":"node-w","requestId":"$removeId"}"""), removeFrame)
+        ws.send(nodeResult(true, removeId, "node-w", "Node removed."))
+        remove.get()
+        awaitNoPendingRequests()
+    }
+
+    @Test
+    fun aResultArrivingOnALaterSocketNeverAnswersAnEarlierRequest() {
+        val ws = connected()
+        val first = request { h.client.probeNode(origin(), "node-a") }
+        val oldId = h.expectFrame("node-probe").s("requestId")!!
+        h.enqueueConnect()
+        ws.close(1001, null)
+        assertEquals(NodeRequestOutcome.LinkLost, first.get())
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        h.scheduler.await(::isReconnectDelay).fire()
+        val next = h.nextSocket()
+        h.handshake(next)
+        // A new request on the new socket; the old request's id answered there ends nothing.
+        val second = request { h.client.probeNode(origin(), "node-a") }
+        val newId = h.expectFrame("node-probe").s("requestId")!!
+        assertTrue(newId != oldId)
+        next.send(nodeResult(true, oldId, "node-a", "Reachable."))
+        h.serverBarrier(next)
+        assertFalse("the earlier request's id answered the new one", second.isCompleted)
+        assertEquals(NodeRequestOutcome.LinkLost, first.get())
+        next.send(nodeResult(false, newId, "node-a", "The node did not respond in time (timed out)."))
+        val answered = second.get() as NodeRequestOutcome.Answered
+        assertEquals("The node did not respond in time (timed out).", answered.result.message)
+        awaitNoPendingRequests()
+    }
+
+    @Test
+    fun theConsolesProtocolVersionIsPublishedAndDroppedWithTheRegistry() {
+        h.enqueueConnect()
+        h.newClient()
+        h.client.start()
+        val ws = h.nextSocket()
+        assertNull(h.client.serverProtocolVersion.value)
+        h.handshake(ws, readyFrame(protocolVersion = 140))
+        h.await(h.client.serverProtocolVersion) { it == 140 }
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
+        runBlocking { h.client.logout() }
+        h.await(h.client.serverProtocolVersion) { it == null }
     }
 }

@@ -203,7 +203,8 @@ private const val REDIRECT_MESSAGE =
  * becomes [nodeResult]. addNode/removeNode/probeNode send ONE frame tagged with
  * a fresh requestId and end on its `node-result` (or a correlated `error`), on
  * the socket going away (LinkLost, from detachSocketLocked), or on
- * [nodeRequestTimeoutMs]. Never queued, persisted or retried. The registry is
+ * [nodeRequestTimeoutMs]. Never queued, persisted or retried. T10.3: each is
+ * drawn for an origin and goes out only on a socket opened for it. The registry is
  * kept across a reconnect (the web never clears it) and emptied on logout, a
  * server-side sign-out and a new sign-in.
  *
@@ -485,6 +486,9 @@ class RealTetherClient(
     override val nodes: StateFlow<List<NodeSummary>> = nodesState
     override val eventLog: StateFlow<EventLog> = eventLogState
     override val nodeResult: StateFlow<NodeActionResult?> = nodeResultState
+    // T10.3: the console's own protocol version (its `ready`), for the Nodes panel's skew warning.
+    private val serverProtocolVersionState = MutableStateFlow<Int?>(null)
+    override val serverProtocolVersion: StateFlow<Int?> = serverProtocolVersionState
     override val signedOutReason: StateFlow<SignedOutReason?> = signedOutReasonState
     override val serverUrl: StateFlow<String?> = serverUrlState
     override val connection: StateFlow<ConnectionState> = connectionState
@@ -2605,6 +2609,7 @@ class RealTetherClient(
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
             hiddenAgentSessionCountState.value = message.hiddenAgentSessionCount
+            serverProtocolVersionState.value = message.protocolVersion
             handshakeDone = true
             consentOriginState.value = socketOrigin
             publishConsentLocked()
@@ -3918,24 +3923,24 @@ class RealTetherClient(
     // v109 node registry
     // ------------------------------------------------------------------
 
-    override suspend fun addNode(credential: NodeCredential, label: String?, baseUrl: String?): NodeRequestOutcome =
+    override suspend fun addNode(origin: String, credential: NodeCredential, label: String?, baseUrl: String?): NodeRequestOutcome =
         when (val fields = NodeRegistryRules.nodeAdd(credential, label, baseUrl)) {
             is NodeAddFields.Refused -> refuseNodeRequest(fields.message, fields.emit)
             // The frame (and the credential in it) is built inside the send and
             // not referenced after it: nothing here outlives ws.send().
-            is NodeAddFields.Ok -> nodeRequest { requestId ->
+            is NodeAddFields.Ok -> nodeRequest(origin) { requestId ->
                 ClientMessage.NodeAdd(credential.value, fields.label, fields.baseUrl, requestId)
             }
         }
 
-    override suspend fun removeNode(nodeId: String): NodeRequestOutcome {
+    override suspend fun removeNode(origin: String, nodeId: String): NodeRequestOutcome {
         NodeRegistryRules.nodeIdProblem("node-remove", nodeId)?.let { return refuseNodeRequest(it, emit = true) }
-        return nodeRequest { requestId -> ClientMessage.NodeRemove(nodeId, requestId) }
+        return nodeRequest(origin) { requestId -> ClientMessage.NodeRemove(nodeId, requestId) }
     }
 
-    override suspend fun probeNode(nodeId: String): NodeRequestOutcome {
+    override suspend fun probeNode(origin: String, nodeId: String): NodeRequestOutcome {
         NodeRegistryRules.nodeIdProblem("node-probe", nodeId)?.let { return refuseNodeRequest(it, emit = true) }
-        return nodeRequest { requestId -> ClientMessage.NodeProbe(nodeId, requestId) }
+        return nodeRequest(origin) { requestId -> ClientMessage.NodeProbe(nodeId, requestId) }
     }
 
     private fun refuseNodeRequest(message: String, emit: Boolean): NodeRequestOutcome {
@@ -3949,10 +3954,10 @@ class RealTetherClient(
      * the timeout). Never queued, never retried (use-tether.ts sends once too).
      * The waiter is always removed, including when the caller is cancelled.
      */
-    private suspend fun nodeRequest(build: (requestId: String) -> ClientMessage): NodeRequestOutcome {
+    private suspend fun nodeRequest(origin: String, build: (requestId: String) -> ClientMessage): NodeRequestOutcome {
         val requestId = "node-" + UUID.randomUUID()
         val waiter = CompletableDeferred<NodeRequestOutcome>()
-        val sent = transmitNodeRequest(requestId, waiter, build)
+        val sent = transmitNodeRequest(origin, requestId, waiter, build)
         if (sent == null) {
             emitError(NodeRegistryRules.NOT_SENT_MESSAGE)
             return NodeRequestOutcome.NotSent
@@ -3981,15 +3986,18 @@ class RealTetherClient(
      * calls back (probeLink sends under the lock the same way). Null = no live
      * socket (nothing registered); false = OkHttp refused it. Not a suspend
      * function: the encoded frame (node-add's credential) dies with this call.
+     * T10.3: only a socket opened for [origin] (the server the caller drew its
+     * screen from) counts as live: after a switch, the frame goes nowhere.
      */
     private fun transmitNodeRequest(
+        origin: String,
         requestId: String,
         waiter: CompletableDeferred<NodeRequestOutcome>,
         build: (requestId: String) -> ClientMessage,
     ): Boolean? {
         val text = build(requestId).encode()
         synchronized(lock) {
-            val ws = (if (socketOpen && handshakeDone) socket else null) ?: return null
+            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return null
             nodeRequests[requestId] = waiter
             return ws.send(text)
         }
@@ -4075,6 +4083,7 @@ class RealTetherClient(
         synchronized(lock) { providersWanted = false }
         nodesState.value = emptyList()
         nodeResultState.value = null
+        serverProtocolVersionState.value = null
         eventLogState.update { EventLog(generation = it.generation + 1) }
         // T15.1: signed out (Lock) or signed in anew: no overview data or subscription survives it.
         synchronized(lock) { overviewSync.clear() }

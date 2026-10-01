@@ -10,6 +10,13 @@ package com.tether.app.client
  * The native client does the same, and additionally tags each request with a
  * `requestId` (the server echoes it on the reply) so a caller can await its own
  * answer. Nothing is queued, persisted or retried, exactly as on the web.
+ *
+ * T10.3: every request names the server ORIGIN the caller drew its screen from
+ * and goes out only on a live socket opened for that origin (the other
+ * Settings writes' rule): a credential typed for one server never reaches
+ * another. A reply can only end a request on the socket that carried it (the
+ * waiters end, LinkLost, when that socket goes), so an answer on a later socket
+ * never counts.
  */
 
 /**

@@ -606,19 +606,30 @@ interface TetherClient {
     val nodeResult: StateFlow<NodeActionResult?> get() = NO_NODE_RESULT
 
     /**
+     * T10.3: the PROTOCOL_VERSION the server named in this connection's `ready` (the console's
+     * own version, which the web's Nodes panel compares a peer's against). Null until a ready of
+     * the current sign-in arrives; emptied with the node registry.
+     */
+    val serverProtocolVersion: StateFlow<Int?> get() = NO_SERVER_PROTOCOL
+
+    /**
      * `node-add`: register a peer from its credential bundle. [label] and
      * [baseUrl] are trimmed and omitted when blank (the web form + hook);
      * [baseUrl] overrides the bundle's own hint. The credential is sent once and
      * never kept, logged or persisted (see [NodeCredential]).
+     *
+     * T10.3: [origin] is the server the caller drew its screen from ([serverOrigin]); the frame
+     * goes out only on a live socket opened for it (checked under the lock the send takes), else
+     * [NodeRequestOutcome.NotSent]: a credential typed for one server never reaches another.
      */
-    suspend fun addNode(credential: NodeCredential, label: String? = null, baseUrl: String? = null): NodeRequestOutcome =
+    suspend fun addNode(origin: String, credential: NodeCredential, label: String? = null, baseUrl: String? = null): NodeRequestOutcome =
         NodeRequestOutcome.NotSent
 
-    /** `node-remove`: forget a peer (the server also deletes its stored bearer). */
-    suspend fun removeNode(nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
+    /** `node-remove`: forget a peer (the server also deletes its stored bearer). Bound to [origin] like [addNode]. */
+    suspend fun removeNode(origin: String, nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
 
-    /** `node-probe`: re-check a peer now; its new status arrives in [nodes]. */
-    suspend fun probeNode(nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
+    /** `node-probe`: re-check a peer now; its new status arrives in [nodes]. Bound to [origin] like [addNode]. */
+    suspend fun probeNode(origin: String, nodeId: String): NodeRequestOutcome = NodeRequestOutcome.NotSent
 
     // ------------------------------------------------------------------
     // v7 in-UI operational event log + /api/stats (the Health & Event Log dialog, T4.5).
@@ -847,6 +858,7 @@ private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(nu
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
+private val NO_SERVER_PROTOCOL: StateFlow<Int?> = MutableStateFlow(null)
 private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_SCRIPTS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject>> = MutableStateFlow(emptyMap())
