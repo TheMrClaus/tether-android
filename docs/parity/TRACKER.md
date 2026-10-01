@@ -159,7 +159,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T10.1 | Settings dialog, all tabs | TODO |  |  |  |
+| T10.1 | Settings dialog, all tabs | TODO |  |  | Split into 5 slices (coordinator, after a read-only plan): ta-k3f shell+General+Appearance; ta-9q2 Claude accounts read-only + plan names (… |
 | T10.2 | Session settings sheet | TODO |  |  |  |
 | T10.3 | Nodes settings | TODO |  |  | from T6.7 (coordinator): show NodeRequestOutcome.ServerError text cleaned through LabelText in Nodes settings. |
 | T10.4 | Paired devices + sign-in security (device-token view) | TODO |  |  | OWNER DECISION 2026-09-27 (ta-xax): a paired phone is fully trusted; only owner-grade actions (device management, passkeys, claude-accounts… |
@@ -404,3 +404,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 10:45 | claude-main / Opus 5.5 | owner answers, ta-3uk, ta-ccu, ta-lx3 | Owner (relayed, live-checked): server at protocol 137, #224/#230 deployed, app routes gateway-exempt; hello hold lifted -> ta-3uk filed and dispatched (advertise 137 = TARGET). T15.7 device test still pending. ta-ccu and ta-lx3 makers running. | ta-3uk verify -> 0.11.0 (ta-ceo + ta-3uk) |
 | 2026-10-01 12:30 | claude-main / Opus 5.5 | ta-ccu, ta-lx3, ta-3uk | All three verify CONFIRMED (ta-ccu: export reproduced byte-identical, 0 goldens moved; ta-3uk: 676-case match with evaluateHello; ta-lx3: coordinator check, tether#232 merged `4b05be74`). Stacked (VENDORED/PARITY_BASE conflict resolved: UI base whole at 887c222), gate 4276 on `efd840dd`, merged ff-only, all VERIFIED. Worktrees removed (incl. our tether worktrees). v0.11.0 (code 29) dispatched. | publish 0.11.0; then ta-ebc with T10.1, T8.1, bd ready |
 | 2026-10-01 12:45 | claude-main / Opus 5.5 | release | v0.11.0 (code 29, `efd840dd`: ta-ceo, ta-3uk, ta-ccu, ta-lx3) built by android-release.yml; cert SHA-256 4f8c22de...b74d and versionName/Code checked; asset renamed, Highlights first; PUBLISHED as Latest. | ta-ebc with T10.1; T8.1; bd ready |
+| 2026-10-01 14:00 | claude-main / Opus 5.5 | T10.1, ta-k3f, ta-9q2 | T10.1 split into 5 slices (ta-k3f, ta-9q2, ta-t7l, ta-dh1, ta-q6p); owner decided the settings write rules (Decision log). ta-k3f Settings shell + General + Appearance: verify REFUTED r1 (rotation closed Settings), fixed r2; r3/r4 fixed screenshot flakes the gate exposed under load; merged ff-only `d8b00b21`, VERIFIED (gate run twice: 4321 tests). Follow-up ta-ufx. ta-9q2 (Claude accounts + plan names, with ta-ebc) maker running. | ta-9q2 verify + security review |
