@@ -156,26 +156,25 @@ class TolerantDecodingTest {
         assertEquals(setOf("type", "protocolVersion", "client"), hello.keys)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         assertEquals(setOf("type", "protocolVersion"), ClientMessage.Hello().toJsonObject().keys)
-        // ta-koy: the app speaks v132; the native floor it documents stays 129.
-        // ta-ylh: the wire types model v135 (T15.8: v137), but the ADVERTISED hello stays 132 — see the pin below.
+        // ta-koy: the native floor the app documents stays 129. ta-3uk: the wire types model v137
+        // and the ADVERTISED hello is the same version — see the pin below.
         assertEquals(137, TARGET_PROTOCOL_VERSION)
         assertEquals(129, NATIVE_PROTOCOL_FLOOR)
     }
 
     /**
-     * ta-ylh OWNER GATE: the version the app ADVERTISES in `hello` is pinned at 132. A server
+     * ta-3uk: the version the app ADVERTISES in `hello` is TARGET_PROTOCOL_VERSION (137). A server
      * refuses a native hello newer than its own PROTOCOL_VERSION (lib/hello-compat.mjs,
-     * server_too_old) and the deployed server was last known at 133, so 135 would lock the app
-     * out. Raise this only after the owner confirms the deployed server is at >= the new value
-     * (a separate owner-gated step, not a protocol catch-up task).
+     * server_too_old), so this needs a server at >= 137 (the owner's deployed server is at 137).
      */
     @Test
-    fun advertisedHelloVersionIsPinnedAt132UntilTheOwnerGate() {
-        assertEquals(132, PROTOCOL_VERSION)
-        assertEquals(132, ClientMessage.Hello(client = HELLO_CLIENT_ANDROID).protocolVersion)
+    fun advertisedHelloVersionIsTheModelledVersion137() {
+        assertEquals(137, PROTOCOL_VERSION)
+        assertEquals(TARGET_PROTOCOL_VERSION, PROTOCOL_VERSION)
+        assertEquals(137, ClientMessage.Hello(client = HELLO_CLIENT_ANDROID).protocolVersion)
         val sent = ClientMessage.Hello(PROTOCOL_VERSION, HELLO_CLIENT_ANDROID).toJsonObject()
-        assertEquals(132, sent["protocolVersion"]!!.jsonPrimitive.content.toInt())
-        assertTrue("the types may run ahead of the hello, never behind it", PROTOCOL_VERSION <= TARGET_PROTOCOL_VERSION)
+        assertEquals(137, sent["protocolVersion"]!!.jsonPrimitive.content.toInt())
+        assertEquals("android", sent["client"]!!.jsonPrimitive.content)
     }
 
     @Test

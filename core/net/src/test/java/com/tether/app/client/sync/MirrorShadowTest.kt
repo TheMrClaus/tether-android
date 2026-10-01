@@ -133,7 +133,7 @@ class MirrorShadowTest {
     @Test
     fun theSessionListIsMirrored() {
         h.boot(
-            ready = """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+            ready = """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
                 "sessions":[{"id":"a","provider":"claude","name":"Alpha","cwd":"/w","status":"ready","startedAt":1,"updatedAt":5,
                 "pinned":true,"runtimeArchived":false,"mode":"headless"}]}""",
         )

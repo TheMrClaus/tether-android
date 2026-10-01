@@ -111,7 +111,7 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         val failProbes = AtomicInteger(0)
 
         override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
-            "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}""")
+            "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
             // The client's own post-sign-in check carries the session; only the login
             // screen's uncredentialed sign-in probe is counted (and can be held or failed).
             "/api/auth/session" -> if (request.getHeader("Cookie") == "tether_session=s3ss10n") {

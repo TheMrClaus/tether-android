@@ -23,26 +23,25 @@ import kotlinx.serialization.json.longOrNull
  * QueuedMessage.queuedAt (v136). v137 only adds `plan` to the HTTP
  * `/api/claude-accounts` rows, which this app does not read yet.
  *
- * NOT what the app advertises: see [PROTOCOL_VERSION].
+ * Also what the app advertises: [PROTOCOL_VERSION] is defined as this value.
  */
 const val TARGET_PROTOCOL_VERSION: Int = 137
 
 /**
  * The protocol version the RUNTIME speaks: the `hello` this app sends. The
  * server serves it anywhere inside its native window
- * `nativeProtocolFloor <= v <= server PROTOCOL_VERSION` (S1.1 / D5); see
- * :core:net Compatibility for the client side of that decision.
+ * `nativeProtocolFloor <= v <= server PROTOCOL_VERSION` (S1.1 / D5; tether
+ * lib/hello-compat.mjs); see :core:net Compatibility for the client side of
+ * that decision.
  *
- * ta-ylh: held at 132, below [TARGET_PROTOCOL_VERSION], ON PURPOSE. A server
- * refuses a native hello NEWER than its own PROTOCOL_VERSION (server_too_old),
- * and the deployed server was last known at 133, so advertising 135 would lock
- * the app out until the owner deploys. Nothing on the server is gated on the
- * client's advertised version (the v133-v137 fields reach every client; T15.8
- * re-checked at 887c222), so the
- * app decodes them tolerantly while it still says 132. Raising this is an OWNER
- * GATE: only once the deployed server is at >= the new value.
+ * ta-3uk: defined as [TARGET_PROTOCOL_VERSION], so the advertised and the
+ * modelled versions cannot drift apart (ta-ylh had held the hello at 132 until
+ * the owner's server was deployed at 137). The cost: a server refuses a native
+ * hello NEWER than its own PROTOCOL_VERSION (server_too_old), so advertising
+ * this requires a server at >= this version; anything older gets the app's
+ * "update the server" copy.
  */
-const val PROTOCOL_VERSION: Int = 132
+const val PROTOCOL_VERSION: Int = TARGET_PROTOCOL_VERSION
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be

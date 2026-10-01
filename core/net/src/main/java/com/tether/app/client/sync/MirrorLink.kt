@@ -22,8 +22,8 @@ import kotlinx.coroutines.CompletableDeferred
  * MirrorVersionTest pins the SHA to `parity-corpus/corpus-manifest.json`, so a corpus re-sync
  * must bump it.
  *
- * ta-ylh: keyed on TARGET, not the advertised PROTOCOL_VERSION (held at 132 for the owner gate):
- * the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
+ * ta-ylh: keyed on TARGET, the protocol the port models (since ta-3uk the advertised
+ * PROTOCOL_VERSION is defined as TARGET, so the two cannot split again): the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
  * port must not be reused, although the corpus did not move. T15.8: the corpus moved to 887c222.
  */
 const val REDUCER_CORPUS_SHA = "887c22214126fa662192e2a3adf6f2dd44e69cd6"

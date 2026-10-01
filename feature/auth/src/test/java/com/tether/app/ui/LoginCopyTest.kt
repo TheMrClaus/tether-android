@@ -1,9 +1,12 @@
 package com.tether.app.ui
 
+import com.tether.app.client.Compatibility
+import com.tether.app.client.IncompatibleReason
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
+import com.tether.app.protocol.ServerMessage
 import com.tether.app.ui.prefs.LoginVariant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -110,5 +113,22 @@ class LoginCopyTest {
         assertEquals(true, usernameHintFor(null, " "))
         assertEquals(false, usernameHintFor(probe, ""))
         assertEquals(false, usernameHintFor(null, "operator"))
+    }
+
+    /** ta-3uk: a v136 server's native server_too_old reply to the 137 hello reads as "update the server". */
+    @Test
+    fun serverTooOldMismatchReadsAsUpdateTheServer() {
+        val frame = ServerMessage.VersionMismatch(
+            136,
+            "This Tether server is older than the app — update the server to reconnect.",
+            nativeProtocolFloor = 129,
+            serverProtocolVersion = 136,
+            reason = "server_too_old",
+        )
+        val incompatibility = Compatibility.fromMismatch(frame)
+        assertEquals(IncompatibleReason.ServerTooOld, incompatibility.reason)
+        assertEquals("This server is older than the app. Update the server, then connect.", versionCopy(incompatibility))
+        // The /healthz pre-flight against the same server reads the same.
+        assertEquals(versionCopy(incompatibility), versionCopy(Compatibility.evaluate(136, 129)!!))
     }
 }

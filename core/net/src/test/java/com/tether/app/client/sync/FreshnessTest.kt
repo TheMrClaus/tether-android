@@ -143,7 +143,7 @@ class FreshnessTest {
     private fun sync(id: String, predicate: (SessionSync?) -> Boolean): SessionSync? = h.await(h.client.syncStates) { predicate(it[id]) }[id]
 
     private fun ready(vararg ids: String) =
-        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,"sessions":[""" +
+        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,"sessions":[""" +
             ids.joinToString(",") {
                 """{"id":"$it","provider":"claude","name":"n-$it","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"pinned":false,"runtimeArchived":false,"mode":"headless"}"""
             } + "]}"

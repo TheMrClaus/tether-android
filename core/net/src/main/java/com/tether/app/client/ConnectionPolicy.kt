@@ -116,7 +116,8 @@ data class Incompatibility(
  * `nativeProtocolFloor <= v <= PROTOCOL_VERSION` (lib/hello-compat.mjs). The
  * server's `version_mismatch` reply to our hello is authoritative; the same
  * window evaluated on `/healthz` and `ready` lets the app decide before (or
- * without) that reply.
+ * without) that reply. The client version defaults to PROTOCOL_VERSION, which
+ * is TARGET_PROTOCOL_VERSION (ta-3uk), so a server below it is ServerTooOld.
  */
 object Compatibility {
 

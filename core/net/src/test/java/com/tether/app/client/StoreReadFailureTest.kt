@@ -363,7 +363,7 @@ class StoreReadFailureTest {
         assertNothingInForce(client, before)
 
         // The clear in flight was released: a sign-in does not wait for it.
-        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
         h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
         h.enqueueConnect()
         val started = System.currentTimeMillis()

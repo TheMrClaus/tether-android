@@ -79,7 +79,7 @@ class RealTetherClientTest {
         // login(): healthz, then the password POST.
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"ok":true,"uptimeMs":1,"sessions":0,"outstandingBackground":0,"protocolVersion":132,"nativeProtocolFloor":129}"""),
+                .setBody("""{"ok":true,"uptimeMs":1,"sessions":0,"outstandingBackground":0,"protocolVersion":137,"nativeProtocolFloor":129}"""),
         )
         server.enqueue(
             MockResponse().setResponseCode(200)
@@ -117,7 +117,7 @@ class RealTetherClientTest {
         // First frame: ready (workspaceRoot null so no browse/discover follow).
         serverSocket!!.send(
             """
-            {"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,
+            {"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,
              "sessions":[{"id":"s1","provider":"claude","name":"session one","cwd":"/w","status":"ready","startedAt":1,"updatedAt":10,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}],
              "providers":[{"id":"claude","label":"Claude","glyph":"C","available":true}],
              "workspaceRoot":null}
@@ -126,7 +126,7 @@ class RealTetherClientTest {
         // ready -> hello (v129, native) before anything else.
         val hello = nextFrame()
         assertEquals("hello", hello["type"]!!.jsonPrimitive.content)
-        assertEquals("132", hello["protocolVersion"]!!.jsonPrimitive.content)
+        assertEquals("137", hello["protocolVersion"]!!.jsonPrimitive.content)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         await(client.connection) { it == ConnectionState.Connected }
         assertEquals("s1", await(client.sessions) { it.isNotEmpty() }.single().id)
@@ -197,7 +197,7 @@ class RealTetherClientTest {
         // re-attach set, so an attach() issued the instant Connected was observed went out
         // twice. An Unconfined collector runs INSIDE onReady() at the moment Connected is
         // published, which makes the old race deterministic.
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""))
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .addHeader("Set-Cookie", "tether_session=c3; Path=/")
@@ -216,7 +216,7 @@ class RealTetherClientTest {
             }
             assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
             val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
-            serverSocket.send("""{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
+            serverSocket.send("""{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
             await(client.connection) { it == ConnectionState.Connected }
 
             assertEquals("hello", nextFrame()["type"]!!.jsonPrimitive.content)
@@ -234,7 +234,7 @@ class RealTetherClientTest {
     fun gapTriggersExactlyOneReAttachAndSnapshotHeals() {
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""),
+                .setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""),
         )
         server.enqueue(
             MockResponse().setResponseCode(200)
@@ -248,7 +248,7 @@ class RealTetherClientTest {
         client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope)
         assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
         val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
-        serverSocket.send("""{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        serverSocket.send("""{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
         await(client.connection) { it == ConnectionState.Connected }
         assertEquals("hello", nextFrame()["type"]!!.jsonPrimitive.content)
 
@@ -290,7 +290,7 @@ class RealTetherClientTest {
 
     @Test
     fun readyOutsideTheNativeWindowStopsPermanently() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""))
         server.enqueue(
             MockResponse().setResponseCode(200)
                 .addHeader("Set-Cookie", "tether_session=c3; Path=/")
@@ -304,10 +304,10 @@ class RealTetherClientTest {
         assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
         val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
         // The server's floor moved past this app: client too old.
-        serverSocket.send("""{"type":"ready","protocolVersion":134,"nativeProtocolFloor":133,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        serverSocket.send("""{"type":"ready","protocolVersion":140,"nativeProtocolFloor":138,"sessions":[],"providers":[],"workspaceRoot":null}""")
         val state = await(client.connection) { it is ConnectionState.VersionMismatch }
         assertEquals(
-            Incompatibility(IncompatibleReason.ClientTooOld, serverProtocolVersion = 134, nativeProtocolFloor = 133),
+            Incompatibility(IncompatibleReason.ClientTooOld, serverProtocolVersion = 140, nativeProtocolFloor = 138),
             (state as ConnectionState.VersionMismatch).incompatibility,
         )
     }
@@ -315,16 +315,20 @@ class RealTetherClientTest {
     @Test
     fun loginFailuresMapToResults() {
         // Bad password.
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""))
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"That password is not correct."}"""))
         // Rate limited.
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""))
         server.enqueue(MockResponse().setResponseCode(429).setBody("""{"error":"Too many attempts. Try again in a few minutes."}"""))
         // Outside the native window straight from healthz: a v128 server (no
-        // nativeProtocolFloor) is too old; a floor above 132 (this app's protocol) means this app is.
+        // nativeProtocolFloor) is too old; a floor above 137 (this app's protocol) means this app is.
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":128}"""))
         server.enqueue(
-            MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":133,"nativeProtocolFloor":133}"""),
+            MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":140,"nativeProtocolFloor":138}"""),
+        )
+        // ta-3uk: a v136 server (floor 129) is below this app's 137: server too old, before any password is sent.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":136,"nativeProtocolFloor":129}"""),
         )
         server.start()
 
@@ -343,9 +347,15 @@ class RealTetherClientTest {
             runBlocking { client.login(base, "pw") },
         )
         assertEquals(
-            LoginResult.VersionMismatch(Incompatibility(IncompatibleReason.ClientTooOld, 133, 133)),
+            LoginResult.VersionMismatch(Incompatibility(IncompatibleReason.ClientTooOld, 140, 138)),
             runBlocking { client.login(base, "pw") },
         )
+        val requestsBefore = server.requestCount
+        assertEquals(
+            LoginResult.VersionMismatch(Incompatibility(IncompatibleReason.ServerTooOld, 136, 129)),
+            runBlocking { client.login(base, "pw") },
+        )
+        assertEquals("only /healthz was asked", requestsBefore + 1, server.requestCount)
 
         // Unreachable server.
         val unreachable = runBlocking { client.login("http://127.0.0.1:1", "pw") }
@@ -362,7 +372,7 @@ class RealTetherClientTest {
     private fun enqueuePairHandshake() {
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129,"pairing":true}"""),
+                .setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""),
         )
         server.enqueue(
             MockResponse().setResponseCode(200)
@@ -430,19 +440,19 @@ class RealTetherClientTest {
     @Test
     fun pairFailuresMapToResultsAndStoreNothing() {
         // Rejected code (unknown / expired / already claimed all look like this).
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129,"pairing":true}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""))
         server.enqueue(
             MockResponse().setResponseCode(401)
                 .setBody("""{"error":"That pairing code is not valid or has expired."}"""),
         )
         // Rate limited.
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129,"pairing":true}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""))
         server.enqueue(
             MockResponse().setResponseCode(429)
                 .setBody("""{"error":"Too many pairing attempts. Try again in a few minutes."}"""),
         )
         // A server without the pairing capability: never even attempts a claim.
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""))
         // Protocol mismatch short-circuits ahead of pairing entirely.
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"protocolVersion":128,"pairing":true}"""))
         server.start()
@@ -482,7 +492,7 @@ class RealTetherClientTest {
         assertEquals(PairResult.Success, runBlocking { client.pair(server.url("/").toString(), "ABCDEFGH", "Pixel 9") })
 
         val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
-        serverSocket.send("""{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        serverSocket.send("""{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
         await(client.connection) { it == ConnectionState.Connected }
         repeat(4) { server.takeRequest() } // healthz, claim, auth probe, upgrade
 
@@ -504,7 +514,7 @@ class RealTetherClientTest {
     fun sessionControlsReplyIsRoutedAndCommandsSend() {
         server.enqueue(
             MockResponse().setResponseCode(200)
-                .setBody("""{"ok":true,"protocolVersion":132,"nativeProtocolFloor":129}"""),
+                .setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""),
         )
         server.enqueue(
             MockResponse().setResponseCode(200)
@@ -518,7 +528,7 @@ class RealTetherClientTest {
         client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope)
         assertEquals(LoginResult.Success, runBlocking { client.login(server.url("/").toString(), "pw") })
         val serverSocket = serverSockets.poll(10, TimeUnit.SECONDS)!!
-        serverSocket.send("""{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
+        serverSocket.send("""{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[],"providers":[],"workspaceRoot":null}""")
         await(client.connection) { it == ConnectionState.Connected }
         assertEquals("hello", nextFrame()["type"]!!.jsonPrimitive.content)
 

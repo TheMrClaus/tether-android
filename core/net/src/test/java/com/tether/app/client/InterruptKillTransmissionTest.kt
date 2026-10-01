@@ -371,7 +371,7 @@ class InterruptKillTransmissionTest {
         fun url(): String = server.url("/").toString().trimEnd('/')
 
         fun enqueueLoginAndConnect(cookie: String) {
-            server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_132))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody("{}")
                     .addHeader("Set-Cookie", "tether_session=$cookie; Path=/; HttpOnly"),

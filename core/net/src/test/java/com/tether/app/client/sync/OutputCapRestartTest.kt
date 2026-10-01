@@ -33,7 +33,7 @@ class OutputCapRestartTest {
     fun tearDown() = h.close()
 
     private val ready =
-        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"ready",
             "startedAt":1,"updatedAt":1,"pinned":false,"runtimeArchived":false,"mode":"headless"}]}"""
 

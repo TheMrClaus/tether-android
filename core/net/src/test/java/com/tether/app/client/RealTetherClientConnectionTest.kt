@@ -72,7 +72,7 @@ class RealTetherClientConnectionTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun handshakeIsReadyThenHelloThenAttachAndHelloCarriesAndroid132() {
+    fun handshakeIsReadyThenHelloThenAttachAndHelloCarriesAndroid137() {
         h.enqueueConnect()
         h.newClient()
         h.client.attach("s1") // before any socket: subscribe only
@@ -83,7 +83,7 @@ class RealTetherClientConnectionTest {
 
         // Wire order proves nothing left the client before `ready`: hello is first.
         val hello = h.expectFrame("hello")
-        assertEquals(132L, hello["protocolVersion"]!!.jsonPrimitive.longOrNull)
+        assertEquals(137L, hello["protocolVersion"]!!.jsonPrimitive.longOrNull)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         val a1 = h.expectFrame("attach")
         val a2 = h.expectFrame("attach")
@@ -97,8 +97,8 @@ class RealTetherClientConnectionTest {
     @Test
     fun anyServerInsideTheNativeWindowIsAccepted() {
         // Strict ready.protocolVersion equality is gone: a newer server whose
-        // floor still admits v129 serves this app.
-        val ws = connected(readyFrame(protocolVersion = 135, floor = 120))
+        // floor still admits this app's version serves it.
+        val ws = connected(readyFrame(protocolVersion = 140, floor = 120))
         assertEquals(ConnectionState.Connected, h.client.connection.value)
         attachAndSnapshot(ws, "s1", 1)
     }
@@ -157,12 +157,19 @@ class RealTetherClientConnectionTest {
     @Test
     fun helloReplyServerTooOldAndWebStyleMismatchAreServerTooOld() {
         val ws = connected()
+        // ta-3uk: the exact frame a v136 server (lib/hello-compat.mjs) sends to this app's 137 hello.
         ws.send(
-            """{"type":"version_mismatch","requiredVersion":129,"nativeProtocolFloor":129,
-               "serverProtocolVersion":129,"reason":"server_too_old"}""",
+            """{"type":"version_mismatch","requiredVersion":136,"message":"This Tether server is older than the app — update the server to reconnect.",
+               "nativeProtocolFloor":129,"serverProtocolVersion":136,"reason":"server_too_old"}""",
         )
         val state = h.await(h.client.connection) { it is ConnectionState.VersionMismatch } as ConnectionState.VersionMismatch
         assertEquals(IncompatibleReason.ServerTooOld, state.incompatibility.reason)
+        assertEquals(136, state.incompatibility.serverProtocolVersion)
+        assertEquals(129, state.incompatibility.nativeProtocolFloor)
+        assertTrue(state.incompatibility.message!!.contains("update the server"))
+        // Terminal like client_too_old: closed, no automatic reconnect (the banner's Retry is the way out).
+        assertEquals(1000, h.serverCloses.poll(10, TimeUnit.SECONDS))
+        assertTrue(h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
 
         // A server that answered with the web (strict) frame only names its version.
         val web = Compatibility.fromMismatch(
