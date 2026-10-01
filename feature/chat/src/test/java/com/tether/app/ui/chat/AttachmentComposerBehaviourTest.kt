@@ -57,7 +57,7 @@ class AttachmentComposerBehaviourTest {
 
     private fun show(fixture: ChatFixtures.Folded = ComposerFixtures.idle, commandMode: Boolean = false) {
         rule.setContent {
-            ComposerHost(TetherSkin.Machine) {
+            ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = ComposerFixtures.session,
                     projection = fixture.projection,

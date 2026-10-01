@@ -103,7 +103,7 @@ private fun ToolCardRunningPreview() {
     }
 }
 
-@Preview(name = "Composer idle", showBackground = true, backgroundColor = 0xFF0B0F10)
+@Preview(name = "Composer idle", showBackground = true, backgroundColor = 0xFF101725)
 @Composable
 private fun ComposerIdlePreview() {
     PreviewSurface {
@@ -126,7 +126,7 @@ private fun ComposerIdlePreview() {
     }
 }
 
-@Preview(name = "Composer busy", showBackground = true, backgroundColor = 0xFF0B0F10)
+@Preview(name = "Composer busy", showBackground = true, backgroundColor = 0xFF101725)
 @Composable
 private fun ComposerBusyPreview() {
     val turn = TurnProjection(

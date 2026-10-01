@@ -110,7 +110,7 @@ class AttachSheetTabletScreenshotTest(private val skin: TetherSkin) {
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark, TetherSkin.Machine).map { arrayOf<Any>(it) }
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
     }
 }
 
