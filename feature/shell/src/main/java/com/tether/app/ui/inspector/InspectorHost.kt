@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tether.app.client.serverOrigin
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.TetherViewModel
@@ -26,11 +27,14 @@ fun ColumnScope.InspectorHost(vm: TetherViewModel, session: AgentSession, view: 
     val scripts by vm.client.worktreeScripts.collectAsStateWithLifecycle()
     val changeRequests by vm.client.changeRequests.collectAsStateWithLifecycle()
     val selected by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
+    // T15.7: a service's "Open" link resolves only against the paired server's canonical origin.
+    val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
+    val origin = serverOrigin(serverUrl)
     val now = rememberTickingNow(60_000)
     val runs = remember(view) { collectSubagentRuns(view?.obj) }
     val replies = InspectorReplies(diffs[session.id], scripts[session.id], changeRequests[session.id])
-    val model = remember(session, providers, view, runs, selected[session.id], replies, now) {
-        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv(now.toDouble()))
+    val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin) {
+        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv(now.toDouble()), origin)
     }
     Inspector(
         model = model,

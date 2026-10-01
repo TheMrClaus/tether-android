@@ -109,8 +109,17 @@ val LocalLinkOpener = staticCompositionLocalOf<LinkOpener> { CustomTabLinkOpener
 
 // ---- ta-fz3: confirm before an external link opens ---------------------------------------------
 
-/** An external link waiting for the operator's confirmation: what the sheet shows, and the opener it was tapped under. Never saved. */
-class PendingLink internal constructor(val target: SafeHref.Target, internal val opener: LinkOpener, val serial: Long)
+/**
+ * An external link waiting for the operator's confirmation: what the sheet shows, and the opener it
+ * was tapped under. Never saved. [service] (T15.7): a worktree service's "Open" link, shown by
+ * [ServiceLinkConfirmDialog] with this service hostname; null for a chat link.
+ */
+class PendingLink internal constructor(
+    val target: SafeHref.Target,
+    internal val opener: LinkOpener,
+    val serial: Long,
+    val service: String? = null,
+)
 
 /** What a tap on a link did. */
 enum class LinkDecision {
@@ -166,6 +175,26 @@ class ExternalLinkGate {
         }
         pending = PendingLink(target, opener, ++serial)
         return LinkDecision.Confirm
+    }
+
+    /**
+     * T15.7: a worktree service's "Open" link ([href], already pinned by the caller to the console's
+     * worktree-open route on the paired origin). It ALWAYS asks first, whatever its label: the sheet
+     * names [service] (the service's own hostname) and says the browser must be signed in to the
+     * console. Never in the app: [opener] must be the external one. An http(s) [href] that [SafeHref]
+     * would rewrite or refuses is no link ([LinkDecision.Refused]).
+     */
+    fun requestService(opener: LinkOpener, href: String, service: String): LinkDecision {
+        val target = SafeHref.target(href) ?: return LinkDecision.Refused
+        if (target.scheme == SafeHref.Scheme.Mailto || target.display != href) return LinkDecision.Refused
+        pending = PendingLink(target, opener, ++serial, service)
+        return LinkDecision.Confirm
+    }
+
+    /** T15.7: the service link [href] went away (the service stopped, the row left): its pending sheet closes. */
+    fun dropService(href: String) {
+        val link = pending ?: return
+        if (link.service != null && link.target.display == href) pending = null
     }
 
     /** The Open key: opens [link] if it is still the pending one (once), and closes the sheet. */
@@ -230,12 +259,23 @@ fun ExternalLinkConfirmHost(gate: ExternalLinkGate) {
     val link = gate.pending ?: return
     val context = LocalContext.current
     val t = LocalTetherTokens.current
-    ExternalLinkConfirmDialog(
-        target = link.target,
-        identity = link.serial,
-        onConfirm = { gate.confirm(link, context, t.graphite) },
-        onCancel = gate::cancel,
-    )
+    val service = link.service
+    if (service != null) {
+        ServiceLinkConfirmDialog(
+            service = service,
+            target = link.target,
+            identity = link.serial,
+            onConfirm = { gate.confirm(link, context, t.graphite) },
+            onCancel = gate::cancel,
+        )
+    } else {
+        ExternalLinkConfirmDialog(
+            target = link.target,
+            identity = link.serial,
+            onConfirm = { gate.confirm(link, context, t.graphite) },
+            onCancel = gate::cancel,
+        )
+    }
 }
 
 const val EXTERNAL_LINK_SHEET_TAG = "external-link-confirm"
@@ -245,10 +285,13 @@ const val EXTERNAL_LINK_HOST_TAG = "external-link-host"
 const val EXTERNAL_LINK_PORT_TAG = "external-link-port"
 const val EXTERNAL_LINK_TO_TAG = "external-link-to"
 const val EXTERNAL_LINK_TARGET_TAG = "external-link-target"
+const val SERVICE_LINK_SHEET_TAG = "service-link-confirm"
+const val SERVICE_LINK_SERVICE_TAG = "service-link-service"
 
 internal const val EXTERNAL_LINK_BODY = "This link leaves Tether. Check where it goes before you open it."
 internal const val EXTERNAL_MAIL_BODY = "This link opens your mail app. Check who it writes to before you open it."
 internal const val EXTERNAL_LINK_IDN_NOTE = "International domain name, shown in its ASCII (punycode) form."
+const val SERVICE_LINK_BODY = "Opens in your browser through your Tether console. Your browser needs to be signed in to Tether."
 
 /**
  * ta-fz3: the confirm sheet (the program's confirm dialog, [TetherDialog]). It shows where the
@@ -300,17 +343,66 @@ fun ExternalLinkConfirmDialog(
     }
 }
 
-/** One labelled value of the sheet: [value] by the code rule, mono, forced LTR; TalkBack reads "label: value". */
+/**
+ * T15.7: the confirm sheet for a worktree service's "Open" link. The same sheet and armed Open key
+ * as [ExternalLinkConfirmDialog]; it names the SERVICE ([service], its own hostname, by the line
+ * rule: every hidden, reordering or line-breaking code point a visible token) and says the link
+ * goes through the console, so the browser must be signed in to Tether. The link itself (the
+ * console's worktree-open route; it carries no secret, the handoff is minted on the click) is shown
+ * too, so what opens is on screen.
+ */
 @Composable
-private fun LinkField(label: String, value: String, tag: String) {
+fun ServiceLinkConfirmDialog(
+    service: String,
+    target: SafeHref.Target,
+    identity: Any,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val arming = rememberArmedControl(identity, actionable = true)
+    TetherDialog(
+        onDismiss = onCancel,
+        title = "Open this service?",
+        footer = {
+            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(EXTERNAL_LINK_CANCEL_TAG))
+            TetherKey(
+                onClick = { if (arming.armed) onConfirm() },
+                classes = KeyClasses.ButtonPrimary,
+                label = "Open in browser",
+                icon = TetherIcons.ExternalLink,
+                enabled = arming.armed,
+                modifier = arming.modifier.testTag(EXTERNAL_LINK_OPEN_TAG),
+            )
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().testTag(SERVICE_LINK_SHEET_TAG), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            TetherDialogText(SERVICE_LINK_BODY)
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LinkField("Service", service, SERVICE_LINK_SERVICE_TAG, SafeText.Rule.Line)
+                    LinkField("Link", target.display, EXTERNAL_LINK_TARGET_TAG)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One labelled value of the sheet: [value] by [rule] (the code rule; T15.7: the line rule for a
+ * server-named hostname), mono, forced LTR; TalkBack reads "label: value" as drawn.
+ */
+@Composable
+private fun LinkField(label: String, value: String, tag: String, rule: SafeText.Rule = SafeText.Rule.Code) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val drawn = forcedLtrCode(value)
+    val drawn = forcedLtrCode(value, rule)
+    // A link target is printable ASCII already; a server-named value is read as drawn (its tokens).
+    val spoken = if (rule == SafeText.Rule.Code) value else SafeText.line(value)
     Column(
         Modifier
             .fillMaxWidth()
             .clearAndSetSemantics {
-                contentDescription = "$label: $value"
+                contentDescription = "$label: $spoken"
                 testTag = tag
             },
     ) {
@@ -324,12 +416,12 @@ private fun LinkField(label: String, value: String, tag: String) {
     }
 }
 
-/** [text] by the code rule (tokens styled), breakable anywhere, then forced LTR ([SafeHref.forcedLtr]). */
+/** [text] by [rule] (the code rule by default; tokens styled), breakable anywhere, then forced LTR ([SafeHref.forcedLtr]). */
 @Composable
-private fun forcedLtrCode(text: String): AnnotatedString {
+private fun forcedLtrCode(text: String, rule: SafeText.Rule = SafeText.Rule.Code): AnnotatedString {
     val t = LocalTetherTokens.current
-    return remember(text, t) {
-        val display = SafeText.breakAnywhere(SafeText.code(text))
+    return remember(text, t, rule) {
+        val display = SafeText.breakAnywhere(if (rule == SafeText.Rule.Line) SafeText.line(text) else SafeText.code(text))
         AnnotatedString.Builder(display.length + 2).apply {
             withStyle(ParagraphStyle(textDirection = TextDirection.Ltr)) { appendStyled(SafeHref.forcedLtr(display), tokenStyle(t)) }
         }.toAnnotatedString()

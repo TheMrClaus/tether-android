@@ -38,6 +38,7 @@ import com.tether.app.ui.statusline.taskReading
 import com.tether.app.ui.statusline.windowReading
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -239,12 +240,25 @@ data class ServiceRow(
     val status: String,
     val failed: Boolean,
     val command: Seg,
-    /** A running service's own address (proxyHost), shown as text: the app opens no service page. */
+    /** A running service's own address (proxyHost), shown as plain text (T9.1); only with [open]. */
     val address: Seg?,
-    /** Why a running service has no address of its own. */
+    /** Why a running service has no address of its own (also when its link failed the T15.7 pin). */
     val unavailable: String?,
     val error: Seg?,
+    /** T15.7: the "Open" link, pinned by [ServiceOpenLink]; null = no link. */
+    val open: ServiceOpen? = null,
 )
+
+/**
+ * T15.7: a running service's "Open" link: [url] (the console's pinned worktree-open route, resolved
+ * against the paired origin) opens in the external browser after the confirm sheet, which shows
+ * [host] (the service's own hostname, `proxyHost`, drawn by the line rule). [toString] never
+ * prints the URL, so a model dumped into a log or a test failure does not carry it.
+ */
+@Immutable
+data class ServiceOpen(val url: String, val host: Seg) {
+    override fun toString(): String = "ServiceOpen(url=<redacted>)"
+}
 
 // --- Inputs ----------------------------------------------------------------------------------
 
@@ -268,6 +282,8 @@ fun inspectorModel(
     selectedRunId: String?,
     replies: InspectorReplies,
     env: ReadingEnv,
+    /** T15.7: the paired server's canonical origin (`serverOrigin(serverUrl)`); null = no service link. */
+    serverOrigin: String? = null,
 ): InspectorModel {
     val activeRun = selectedRunId?.let { id -> runs.firstOrNull { it.runId == id } }
     val metrics = TelemetryMetrics.from(session.metrics)
@@ -279,7 +295,7 @@ fun inspectorModel(
         repository = repository(session, replies),
         limits = limits(session, env),
         mcpHealth = session.provider != "opencode" && state != null,
-        services = if (session.worktree != null) services(replies.worktreeScripts) else null,
+        services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
             providerNotices(state.obj["providerNotices"], "Codex").map { it.copy(dismissKey = null) }
@@ -531,8 +547,11 @@ private val UNAVAILABLE_COPY = mapOf(
 private fun JsonObject.strings(key: String): List<String> =
     (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.orEmpty()
 
-/** worktree-services-card.tsx, display only; null when the card would be an empty frame. */
-internal fun services(snapshot: JsonObject?): ServicesSection? {
+/**
+ * worktree-services-card.tsx; null when the card would be an empty frame. Display only but for
+ * T15.7's "Open" link, which exists only for [sessionId] on [serverOrigin] (see [ServiceOpenLink]).
+ */
+internal fun services(snapshot: JsonObject?, sessionId: String? = null, serverOrigin: String? = null): ServicesSection? {
     if (snapshot == null) return null
     val scripts = (snapshot["scripts"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty().take(LabelText.MAX_ITEMS)
     val setupStatus = snapshot.string("setupStatus")
@@ -558,11 +577,11 @@ internal fun services(snapshot: JsonObject?): ServicesSection? {
         count = if (scripts.isEmpty()) "none declared" else "${scripts.size} declared",
         setup = setup,
         configWarnings = warnings.map(::prose),
-        scripts = scripts.mapNotNull(::serviceRow),
+        scripts = scripts.mapNotNull { serviceRow(it, sessionId, serverOrigin) },
     )
 }
 
-private fun serviceRow(o: JsonObject): ServiceRow? {
+private fun serviceRow(o: JsonObject, sessionId: String?, serverOrigin: String?): ServiceRow? {
     val name = o.string("name") ?: return null
     val status = o.string("status") ?: "idle"
     val failed = status == "failed"
@@ -574,21 +593,38 @@ private fun serviceRow(o: JsonObject): ServiceRow? {
         if (service && port != null) append(" · :${numberToString(port)}")
         if (failed && exit != null) append(" · exit ${numberToString(exit)}")
     }
+    // The web shows "Open" (and its "not configured" text) for a RUNNING service only.
     val live = service && status == "running"
-    val authUrl = o.string("proxyAuthUrl")?.takeIf { it.isNotEmpty() }
+    val open = if (live) serviceOpen(o, name, sessionId, serverOrigin) else null
     return ServiceRow(
         name = code(name),
         status = words,
         failed = failed,
         command = code(o.string("command").orEmpty()),
-        address = if (live && authUrl != null) o.string("proxyHost")?.takeIf { it.isNotEmpty() }?.let(::code) else null,
-        unavailable = if (live && authUrl == null) {
+        address = open?.host,
+        unavailable = if (live && open == null) {
             UNAVAILABLE_COPY[o.string("proxyUnavailable") ?: "not-configured"] ?: UNAVAILABLE_COPY.getValue("not-configured")
         } else {
             null
         },
         error = o.string("error")?.takeIf { it.isNotEmpty() }?.let(::prose),
+        open = open,
     )
+}
+
+/**
+ * T15.7: the row's "Open" link, or null. Fail closed: a service the server gives a reason for
+ * (`proxyUnavailable` present and not null, whatever its value) or no `proxyHost` (the confirm sheet
+ * must name the service) has no link, nor has any `proxyAuthUrl` [ServiceOpenLink.resolve] refuses.
+ * The "On this machine" link (`proxyPath`, the console's loopback-only path form) is never offered:
+ * the app is not a browser on the daemon's machine (TRACKER Decision log, 2026-10-01).
+ */
+private fun serviceOpen(o: JsonObject, name: String, sessionId: String?, serverOrigin: String?): ServiceOpen? {
+    if (sessionId == null) return null
+    if (o["proxyUnavailable"].let { it != null && it !is JsonNull }) return null
+    val host = o.string("proxyHost")?.takeIf { it.isNotEmpty() } ?: return null
+    val url = ServiceOpenLink.resolve(o.string("proxyAuthUrl"), sessionId, name, serverOrigin) ?: return null
+    return ServiceOpen(url, code(host))
 }
 
 // ---- Runtime details

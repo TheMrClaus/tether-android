@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,7 +50,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.SessionView
+import com.tether.app.ui.chat.CustomTabLinkOpener
+import com.tether.app.ui.chat.ExternalLinkConfirmHost
+import com.tether.app.ui.chat.ExternalLinkGate
 import com.tether.app.ui.chat.GitChangesCard
+import com.tether.app.ui.chat.LinkOpener
+import com.tether.app.ui.chat.LocalExternalLinkGate
 import com.tether.app.ui.chat.ProviderNoticeRow
 import com.tether.app.ui.chat.SubagentRoster
 import com.tether.app.ui.components.CssBorder
@@ -82,7 +89,9 @@ import com.tether.app.ui.theme.TetherTokens
  * Plugins, then the Runtime details disclosure and the acp capability set. Display only: no key here
  * sends anything but the reads the web's inspector makes (a file's diff hunks); the reset actions
  * ("Use reset"), the change-request refresh, the draft actions and the service controls belong to
- * T9.2 / T8.3 / T8.5 and are omitted.
+ * T9.2 / T8.3 / T8.5 and are omitted. T15.7 adds a running service's "Open" link (confirm first,
+ * external browser); the web's "On this machine" link (the console's loopback-only path form) is
+ * not offered in the app.
  */
 
 object InspectorTags {
@@ -96,6 +105,7 @@ object InspectorTags {
     const val Changes = "inspector-changes"
     const val Limits = "inspector-limits"
     const val Services = "inspector-services"
+    const val ServiceOpen = "inspector-service-open"
     const val CodexNotices = "inspector-codex-notices"
     const val SessionDivider = "inspector-session-divider"
     const val Runtime = "inspector-runtime"
@@ -113,6 +123,12 @@ fun ColumnScope.Inspector(
     fileDiffs: Map<String, ServerMessage.GitDiffFile>?,
     onRequestFileDiff: (String) -> Unit,
     env: () -> ReadingEnv = ReadingEnv::current,
+    /**
+     * T15.7: how a service's "Open" link leaves the app: the external browser (a browsable-only
+     * Custom Tab intent, no app credential). Deliberately NOT [com.tether.app.ui.chat.LocalLinkOpener]
+     * (whose session-link routing could keep a console URL in the app). Tests may observe it.
+     */
+    serviceOpener: LinkOpener = CustomTabLinkOpener,
 ) {
     Column(Modifier.fillMaxWidth().testTag(InspectorTags.Root)) {
         IdentityHeading(model.identity)
@@ -131,7 +147,7 @@ fun ColumnScope.Inspector(
             val servers = remember(state) { mcpServers(state) }
             McpHealthCard(servers, "MCP health", compact = true)
         }
-        model.services?.let { ServicesCard(it) }
+        model.services?.let { ServicesCard(it, serviceOpener) }
         if (model.codexNotices.isNotEmpty()) {
             Column(
                 Modifier.fillMaxWidth().padding(top = LocalTetherTokens.current.css.spaceLg).semantics { contentDescription = "Codex notices" }.testTag(InspectorTags.CodexNotices),
@@ -591,9 +607,17 @@ private fun LimitsPanel(limits: LimitsSection) {
 
 // --- Services --------------------------------------------------------------------------------
 
-/** worktree-services-card.tsx, display only: the MCP card's frame, rows in words. */
+/**
+ * worktree-services-card.tsx: the MCP card's frame, rows in words. Display only but for T15.7's
+ * "Open" link: a tap only raises the confirm sheet of the link gate in scope (UiRoot's, one per
+ * server, dropped on pause, stop, Lock and a server switch; or this card's own), and only its armed
+ * Open key hands the link to [opener].
+ */
 @Composable
-private fun ServicesCard(services: ServicesSection) {
+private fun ServicesCard(services: ServicesSection, opener: LinkOpener) {
+    val providedGate = LocalExternalLinkGate.current
+    val gate = providedGate ?: remember { ExternalLinkGate() }
+    if (providedGate == null) ExternalLinkConfirmHost(gate)
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusMd)
@@ -638,7 +662,7 @@ private fun ServicesCard(services: ServicesSection) {
             Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp)) {
                 services.scripts.forEachIndexed { i, row ->
                     val last = i == services.scripts.lastIndex
-                    ServiceItem(row, Modifier.then(if (last) Modifier else Modifier.bottomRule(tint)))
+                    ServiceItem(row, Modifier.then(if (last) Modifier else Modifier.bottomRule(tint)), gate, opener)
                 }
             }
         }
@@ -646,7 +670,7 @@ private fun ServicesCard(services: ServicesSection) {
 }
 
 @Composable
-private fun ServiceItem(row: ServiceRow, modifier: Modifier) {
+private fun ServiceItem(row: ServiceRow, modifier: Modifier, gate: ExternalLinkGate, opener: LinkOpener) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val problem = if (row.failed) t.warning else t.muted
@@ -661,8 +685,34 @@ private fun ServiceItem(row: ServiceRow, modifier: Modifier) {
         }
         RuledText(listOf(row.command), mono, t.muted)
         row.address?.let { RuledText(listOf(app("Own address "), it), mono, t.ink) }
+        row.open?.let { open -> ServiceOpenKey(open, gate, opener) }
         row.unavailable?.let { Text(it, style = mono, color = t.warning, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
         row.error?.let { RuledText(listOf(it), mono, t.warning, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+    }
+}
+
+/**
+ * T15.7: `.links a` "Open" with its external-link glyph (ink, 0.72rem, 2.75rem tall). It never
+ * opens anything itself: the tap asks the gate, which always shows the confirm sheet first. When
+ * the link goes away (the service stopped, the row or the inspector left), its pending sheet closes.
+ */
+@Composable
+private fun ServiceOpenKey(open: ServiceOpen, gate: ExternalLinkGate, opener: LinkOpener) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    DisposableEffect(open.url, gate) { onDispose { gate.dropService(open.url) } }
+    Row(
+        Modifier
+            .heightIn(min = 44.dp)
+            .widthIn(min = 44.dp)
+            .clickable(role = Role.Button, onClickLabel = "Open in browser") { gate.requestService(opener, open.url, open.host.text) }
+            .semantics(mergeDescendants = true) { contentDescription = "Open" }
+            .testTag(InspectorTags.ServiceOpen),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.8.dp),
+    ) {
+        Text("Open", style = cssText(type.ui, 0.72f, 400), color = t.ink)
+        Icon(TetherIcons.ExternalLink, contentDescription = null, tint = t.ink, modifier = Modifier.size(12.dp))
     }
 }
 
