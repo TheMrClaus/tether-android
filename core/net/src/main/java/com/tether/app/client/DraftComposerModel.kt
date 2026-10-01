@@ -30,8 +30,11 @@ data class DraftComposerState(
     /** lib/draft-form.ts DraftUserModified. */
     val modified: JsObj = DraftForm.INITIAL_USER_MODIFIED,
     val text: String = "",
-    /** Staged for the first turn; memory only (never persisted, as on the web). */
-    val attachments: List<Attachment> = emptyList(),
+    /**
+     * Staged for the first turn; memory only (never persisted, as on the web). ta-abm: each with its
+     * stable id and raw size (the composer's chips, the web's AttachmentDraft).
+     */
+    val staged: List<StagedAttachment> = emptyList(),
     /** A `create` is in flight: the composer is locked until its own reply, an error or a drop. */
     val creating: Boolean = false,
     /** The inline error ("" = none): readiness, a refusal, the server's own words, a dropped link. */
@@ -39,12 +42,15 @@ data class DraftComposerState(
     /** How many creates of this draft have been answered by their own `created` (the picker closes on one). */
     val completed: Long = 0,
 ) {
+    /** The wire attachments of [staged], in order. */
+    val attachments: List<Attachment> get() = staged.map { it.attachment }
+
     /**
      * ta-8cv r2 (security F3): redacted. The prompt, the attachments and the form (its key is a
      * profile id on a profile row; its folder and picks) never reach a log.
      */
     override fun toString(): String =
-        "DraftComposerState(text=${text.length} chars, attachments=${attachments.size}, creating=$creating, " +
+        "DraftComposerState(text=${text.length} chars, attachments=${staged.size}, creating=$creating, " +
             "error=${if (error.isEmpty()) "none" else "set"}, completed=$completed)"
 }
 
@@ -162,6 +168,9 @@ class DraftComposerModel(
     /** The configured server is [origin] (canonical; null = none): its own preferences, read once. */
     fun onOrigin(origin: String?) {
         if (origin == prefsOrigin) return
+        // ta-abm: the draft is that server's: its text, folder, picks and attachments go with it (an
+        // in-flight create is let go of too; its reply could only come from the server left behind).
+        if (prefsOrigin != null) dropDraft()
         prefsOrigin = origin
         preferences = JsObj.EMPTY
         prefsPending = if (origin != null) mutableListOf() else null
@@ -180,6 +189,12 @@ class DraftComposerModel(
             if (picks.isNotEmpty()) prefsWrites.trySend(origin to preferences)
             refresh()
         }
+    }
+
+    private fun dropDraft() {
+        pending?.let(::settle)
+        submitting = false
+        _state.update { s -> dropAttachments(s).let { DraftComposerState(completed = it.completed) } }
     }
 
     private fun persist(pick: (JsObj) -> JsObj) {
@@ -232,7 +247,40 @@ class DraftComposerModel(
 
     fun setText(text: String) = _state.update { it.copy(text = text) }
 
-    fun setAttachments(attachments: List<Attachment>) = _state.update { it.copy(attachments = attachments) }
+    /** Replaces what is staged with [attachments] (each gets a fresh id; its size is its decoded length). */
+    fun setAttachments(attachments: List<Attachment>) =
+        setStagedAttachments(attachments.map { StagedAttachment(newAttachmentId(), it, decodedSize(it.data)) })
+
+    fun setStagedAttachments(items: List<StagedAttachment>) = _state.update { it.copy(staged = items) }
+
+    private var nextAttachmentId = 1L
+
+    /** A fresh id for a newly staged attachment. */
+    fun newAttachmentId(): Long = nextAttachmentId++
+
+    /**
+     * ta-abm: bumped whenever the staged attachments are dropped (sent, given up on, the draft
+     * dropped with its server): a pick still being read then is discarded, never added to the next.
+     */
+    var attachmentGeneration: Long = 0L
+        private set
+
+    /**
+     * ta-abm: the composer's pick, read under [generation]: appended (up to the web's cap) only while
+     * nothing dropped the staged set since and no create holds the draft. True when it was added.
+     */
+    fun addAttachments(items: List<StagedAttachment>, generation: Long): Boolean {
+        if (items.isEmpty() || generation != attachmentGeneration || _state.value.creating) return false
+        _state.update { it.copy(staged = (it.staged + items).take(com.tether.app.protocol.helpers.AttachmentDraft.MAX_ATTACHMENTS)) }
+        return true
+    }
+
+    fun removeAttachment(id: Long) = _state.update { s -> s.copy(staged = s.staged.filterNot { it.id == id }) }
+
+    private fun dropAttachments(s: DraftComposerState): DraftComposerState {
+        attachmentGeneration++
+        return s.copy(staged = emptyList())
+    }
 
     /** The picker's row tap (SET_PROVIDER_FROM_USER): mode/model/effort re-resolve from that row's preferences. */
     fun selectProvider(key: String): Boolean {
@@ -481,7 +529,7 @@ class DraftComposerModel(
 
     /** The first message is on its way: the draft starts over (RESET re-seeds the workspace, issue #78). */
     private fun onFirstSent() {
-        _state.update { it.copy(text = "", attachments = emptyList()) }
+        _state.update { dropAttachments(it).copy(text = "") }
         dispatch(JsObj.of("type" to JsStr("RESET"), "cwd" to workspaceCwd()?.let(::JsStr)))
     }
 
@@ -497,7 +545,7 @@ class DraftComposerModel(
             } catch (_: Exception) {
                 return@launch // storage unavailable: the draft text stays here instead
             }
-            _state.update { it.copy(text = "", attachments = emptyList()) }
+            _state.update { dropAttachments(it).copy(text = "") }
         }
     }
 
@@ -562,6 +610,12 @@ class DraftComposerModel(
     }
 
     companion object {
+        /** A staged attachment's raw size from its base64 [data] (padding excluded). */
+        internal fun decodedSize(data: String): Long {
+            val pad = data.takeLast(2).count { it == '=' }
+            return maxOf(0L, data.length / 4L * 3L - pad)
+        }
+
         const val FIRST_SEND_LIVE_TIMEOUT_MS = 20_000L
 
         /** r2 (security F2): a create's reply is awaited this long, then the draft unlocks. */

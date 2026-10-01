@@ -36,23 +36,28 @@ import com.tether.app.ui.theme.TetherWeights
 
 // The drawer's interim dialogs, kept from the pre-parity drawer until their web surfaces land:
 // the folder picker (T8.2); Settings is feature/settings (T10.1); the New session picker is
-// NewSessionPicker.kt (ta-895, until T8.1's draft composer). The web renders these OUTSIDE `.session-sidebar`, so the host composes them
+// NewSessionPicker.kt's rows (ta-895; ta-abm: the draft composer sheet's provider stage). The web renders these OUTSIDE `.session-sidebar`, so the host composes them
 // outside the sidebar's token scope.
 
-/** Interim folder picker for "Add workspace" (T8.2 replaces it with folder-picker-dialog). */
+/**
+ * Interim folder picker for "Add workspace" and (ta-abm) the new-session sheet's "Browse for another
+ * folder…" (T8.2 replaces it with folder-picker-dialog). [title] is the web's per-use title
+ * (FolderPickerDialog's `title` prop: "Choose a working folder" from the draft composer).
+ */
 @Composable
-internal fun FolderPickerDialog(
+fun FolderPickerDialog(
     directories: DirectoryListing?,
     current: String?,
     onDismiss: () -> Unit,
     onBrowse: (String) -> Unit,
     onChoose: (String) -> Unit,
+    title: String = "Choose a folder",
 ) {
     val t = LocalTetherTokens.current
     val effectiveWorkspace = current
     val listing = directories
     val pickerCurrent = listing?.current ?: effectiveWorkspace
-    TetherDialog(onDismiss = { onDismiss() }, title = "Choose a folder") {
+    TetherDialog(onDismiss = { onDismiss() }, title = title) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

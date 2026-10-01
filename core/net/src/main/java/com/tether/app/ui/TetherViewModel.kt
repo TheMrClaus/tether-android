@@ -86,6 +86,27 @@ class TetherViewModel(
     )
 
     /**
+     * ta-abm (T8.1 slice 2): dashboard.tsx `draftOpen` — the operator is composing a new session.
+     * Held here with the draft itself, so a rotation, a recreated shell or a session switch neither
+     * closes the sheet nor loses what is in it. It stays true across the create round trip (the sheet
+     * gives way to the launching stage while [DraftComposerModel] is creating, and comes back with
+     * the prompt and the error when the create fails); a `created`, a selection, a resume and a
+     * server switch close it (dashboard.tsx 781, selectSession, reopen; the web's /login unmounts it).
+     */
+    private val _draftOpen = MutableStateFlow(false)
+    val draftOpen: StateFlow<Boolean> = _draftOpen.asStateFlow()
+
+    /** dashboard.tsx openDraft: raise the new-session sheet over whatever is on screen (nothing is deselected). */
+    fun openDraft() {
+        _draftOpen.value = true
+    }
+
+    /** dashboard.tsx closeDraft: the sheet goes; the draft (text, folder, provider, attachments) stays. */
+    fun closeDraft() {
+        _draftOpen.value = false
+    }
+
+    /**
      * The selected sub-agent run tab per session (null/absent = the whole
      * session transcript). Owned here — like the web's dashboard — NOT in the
      * composable, so it survives recomposition; consumers resolve the id by
@@ -202,6 +223,8 @@ class TetherViewModel(
         // ta-8cv: the draft composer's preferences are that server's own.
         draftComposer.onOrigin(origin)
         if (origin == draftOrigin) return
+        // ta-abm: the dropped draft's sheet goes with its server.
+        _draftOpen.value = false
         draftOrigin = origin
         draftLoads.clear()
         _drafts.value = emptyMap()
@@ -394,6 +417,8 @@ class TetherViewModel(
     fun selectSession(id: String) {
         // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
         _openingHistoryId.value = null
+        // ta-abm (dashboard.tsx selectSession): a selection closes the new-session sheet; the draft stays.
+        _draftOpen.value = false
         // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView);
         // r2: another selection drops a first pick still being read for the previous one as well.
         val staged = stagedAttachments.current.value
@@ -542,6 +567,8 @@ class TetherViewModel(
             stagedAttachments.clear()
             _selectedSessionId.value = null
             _openingHistoryId.value = null
+            // ta-abm: so does the new-session sheet (the draft itself is the server's, kept in memory).
+            _draftOpen.value = false
             // T5.3: the web's search state lives in the Dashboard, which /login unmounts.
             _globalSearchOpen.value = false
             _globalSearchForm.value = GlobalSearchForm()
@@ -565,6 +592,7 @@ class TetherViewModel(
      */
     fun resumeHistory(history: HistorySession): Boolean {
         if (!client.resume(history)) return false
+        _draftOpen.value = false
         _openingHistoryId.value = history.historyId
         _selectedSessionId.value = null
         return true
@@ -596,6 +624,8 @@ class TetherViewModel(
 
     private fun openCreated(sessionId: String) {
         _openingHistoryId.value = null
+        // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
+        _draftOpen.value = false
         if (_selectedSessionId.value == sessionId) return
         selectSession(sessionId)
     }

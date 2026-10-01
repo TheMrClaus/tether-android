@@ -84,7 +84,6 @@ fun SessionDrawer(
     val openingHistoryId by vm.openingHistoryId.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
     var harness by remember { mutableStateOf<String?>(null) }
-    var providerPicker by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -189,7 +188,8 @@ fun SessionDrawer(
             onResume = vm::resumeHistory,
             onQuery = { query = it },
             onHarness = { harness = it },
-            onNewSession = { providerPicker = true },
+            // ta-abm: the new-session sheet is the shell's (dashboard.tsx openDraft); the draft is the view model's.
+            onNewSession = vm::openDraft,
             onBrowseWorkspace = {
                 folderPicker = true
                 client.browse(current ?: workspaceRoot)
@@ -200,8 +200,6 @@ fun SessionDrawer(
     )
 
     // Outside the sidebar's token scope: the web raises these outside `.session-sidebar`.
-    // ta-895: every catalog row (each Claude account, each profile), created on the row picked.
-    if (providerPicker) NewSessionDialog(vm, onDismiss = { providerPicker = false })
     if (folderPicker) {
         FolderPickerDialog(
             directories = directories,

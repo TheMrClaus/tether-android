@@ -103,6 +103,12 @@ class PhoneShellSlots(
      * workspace's header, stage and empty stage (the host passes no session meanwhile).
      */
     val overview: (@Composable () -> Unit)? = null,
+    /**
+     * ta-abm (dashboard.tsx `draftLaunching`): the new session's hand-off stage. Non-null while the
+     * draft's create is in flight: it takes the workspace column ahead of the Overview and the empty
+     * stage (the host passes no session meanwhile).
+     */
+    val launching: (@Composable () -> Unit)? = null,
 )
 
 /**
@@ -200,7 +206,10 @@ fun PhoneShell(
                 } else {
                     // T15.2: the Overview takes the workspace column when it is showing (no session is).
                     val overview = slots.overview
-                    if (overview != null) {
+                    val launching = slots.launching
+                    if (launching != null) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) { launching() }
+                    } else if (overview != null) {
                         Box(Modifier.weight(1f).fillMaxWidth()) { overview() }
                     } else {
                         EmptyWorkspace(

@@ -344,7 +344,7 @@ private fun RowIcon(icon: ImageVector) {
  * edge or shadow, 2.25rem, 0.72rem. The touch target is 44dp tall around the visual cap.
  */
 @Composable
-internal fun ControlPill(
+fun ControlPill(
     label: String,
     enabled: Boolean,
     contentDescription: String,

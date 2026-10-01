@@ -163,6 +163,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
     val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
+    // ta-abm (dashboard.tsx:345): Send pressed, the create in flight — the sheet gives way to the
+    // hand-off stage, which takes the workspace ahead of the session, the Overview and the empty stage.
+    val draftOpen by vm.draftOpen.collectAsStateWithLifecycle()
+    val draft by vm.draftComposer.state.collectAsStateWithLifecycle()
+    val draftLaunching = draftOpen && draft.creating
+    // dashboard.tsx openDraft: raising the sheet closes the drawer.
+    LaunchedEffect(draftOpen) { if (draftOpen) shell.closeDrawer() }
 
     // T15.4 (dashboard.tsx view model, lib/dashboard-view.mjs): the top-level view on screen and the
     // ones behind it (Android Back plays the web's Back between views). Null current = boot: the
@@ -225,7 +232,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         fileBrowser.sessionName = session?.name.orEmpty()
     }
     var showLogoutConfirm by remember { mutableStateOf(false) }
-    var showProviderPicker by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
@@ -410,7 +416,22 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 statusline = { expanded ->
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
-                overview = if (view == null) {
+                launching = if (!draftLaunching) null else {
+                    {
+                        val row = com.tether.app.client.NewSessionGuard.rows(
+                            if (vm.client.providerCatalogLive.value) vm.client.providerCatalog.value else null,
+                            providers,
+                        ).firstOrNull { it.choice.key == (draft.form["key"] as? com.tether.app.protocol.tree.JsStr)?.value }
+                        com.tether.app.ui.draft.DraftLaunching(
+                            text = draft.text,
+                            attachments = draft.attachments,
+                            providerLabel = com.tether.app.ui.draft.draftProviderLabel(row, providers),
+                        )
+                    }
+                },
+                overview = if (draftLaunching) {
+                    null
+                } else if (view == null) {
                     // Boot: no view-specific content yet (the web's "boot" view paints none).
                     { Box(Modifier.fillMaxSize()) }
                 } else if (!overviewOpen) {
@@ -436,7 +457,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                                     reviewTarget = id to requestId
                                     openFromOverview(id)
                                 },
-                                onNewSession = { showProviderPicker = true },
+                                onNewSession = vm::openDraft,
                                 onOpenEventLog = {
                                     vm.openLog()
                                     showLog = true
@@ -474,7 +495,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 state = shell,
                 panels = persisted.panels,
                 onPanelsChange = persisted.onChange,
-                session = session,
+                session = session.takeUnless { draftLaunching },
                 workspaceRoot = workspaceRoot,
                 emptyStage = emptyStage,
                 topbar = topbarActions,
@@ -484,20 +505,20 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
-                onStartSession = { showProviderPicker = true },
+                onStartSession = vm::openDraft,
                 current = current,
                 showRail = showRail,
             )
         } else {
             PhoneShell(
                 state = shell,
-                session = session,
+                session = session.takeUnless { draftLaunching },
                 workspaceRoot = workspaceRoot,
                 emptyStage = emptyStage,
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
-                onStartSession = { showProviderPicker = true },
+                onStartSession = vm::openDraft,
                 topbar = topbarActions,
                 header = headerActions,
                 slots = slots,
@@ -581,8 +602,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
 
-    // ta-895: the same New session picker as the drawer's (every catalog row, created on the row picked).
-    if (showProviderPicker) com.tether.app.ui.NewSessionDialog(vm, onDismiss = { showProviderPicker = false })
+    // ta-abm (T8.1 slice 2): the new-session sheet, raised by every New session key (the drawer's,
+    // a block's "+", the Overview's, the empty stage's); the draft it draws is the view model's.
+    com.tether.app.ui.draft.DraftComposerHost(vm, prefs)
 
     renaming?.let { target ->
         var name by remember(target.id) { mutableStateOf(target.name) }

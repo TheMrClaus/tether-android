@@ -85,7 +85,7 @@ internal fun ColumnScope.AttachSheetRows(onClose: () -> Unit, onPickImages: () -
 
 /** The modal sheet (a bottom sheet on a phone, a centred card from 48rem). */
 @Composable
-internal fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
+fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
     TetherSheet(onDismiss = onDismiss, title = ATTACH_SHEET_TITLE) {
         Column(Modifier.testTag(ATTACH_SHEET_TAG)) { AttachSheetRows(onDismiss, onPickImages, onPasteImage, onPickFiles) }
     }
@@ -171,7 +171,7 @@ internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when
  * 1.6rem remove key (its label names the file by the same rule).
  */
 @Composable
-internal fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) {
+fun StagedAttachmentChip(item: StagedAttachment, onRemove: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusMd)

@@ -297,7 +297,11 @@ private fun WorkspaceColumn(
             } else {
                 // T15.2: the Overview takes the whole workspace when it is showing (no session is).
                 val overview = slots.overview
-                if (overview != null) {
+                val launching = slots.launching
+                if (launching != null) {
+                    // ta-abm: the draft's hand-off stage (dashboard.tsx `draftLaunching`).
+                    Box(Modifier.weight(1f).fillMaxWidth()) { launching() }
+                } else if (overview != null) {
                     Box(Modifier.weight(1f).fillMaxWidth()) { overview() }
                 } else {
                     EmptyWorkspace(

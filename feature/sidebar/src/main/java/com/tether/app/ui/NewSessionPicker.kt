@@ -17,11 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -32,6 +28,7 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -42,15 +39,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.tether.app.client.ConnectionState
-import com.tether.app.client.DRAFT_NOT_LIVE_COPY
 import com.tether.app.client.DRAFT_NOT_OFFERED_COPY
-import com.tether.app.client.DraftSubmitResult
 import com.tether.app.client.LabelText
-import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionRow
-import com.tether.app.client.READINESS_MODELS_LOADING
 import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.components.TetherDialog
@@ -65,29 +56,21 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
 
-// ta-895: the New session picker (interim until T8.1's draft composer). It lists what the web's
+// ta-895: the New session picker's provider and profile rows. It lists what the web's
 // draft composer offers: the `providers-snapshot` catalog (model-browser.tsx ModelBrowser's "all"
 // view, `entries.map(ProviderRow)`), so every Claude account and every custom or ACP profile is its
 // own row, in the server's order (lib/provider-catalog.mjs: profiles first, then the default rows).
 // A tap creates the session on that row (no model is pinned: the engine's default, as the web's
 // create does until the operator picks one). The model browser itself is ta-2uq.
-// ta-8cv: the tap goes through the T8.1 draft composer engine, so the create carries the web's
-// permission mode (Claude Auto by default) and the explicit Claude sandbox; the composer sheet is
-// slice 2.
+// ta-abm (T8.1 slice 2): the interim dialog that created on a tap is gone. These rows are now the
+// draft composer sheet's provider stage (feature:shell DraftComposerSheet): a tap picks the row
+// (SET_PROVIDER_FROM_USER) and the sheet's Send creates the session with its first message. The
+// model browser (ta-2uq, slice 3) replaces this stage with the web's ModelSelector chip.
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
-/** use-draft-composer.ts readiness, for a row still loading (nothing is sent). */
-internal const val NEW_SESSION_LOADING_COPY = READINESS_MODELS_LOADING
-
 /** The live catalog no longer offers the row as drawn (nothing was created). */
 internal const val NEW_SESSION_NOT_OFFERED_COPY = DRAFT_NOT_OFFERED_COPY
-
-/** The picker was drawn for another server than the one now connected (nothing was sent). */
-internal const val NEW_SESSION_NOT_LIVE_COPY = DRAFT_NOT_LIVE_COPY
-
-/** No live link (the client also raises its reconnecting toast). */
-internal const val NEW_SESSION_NOT_CONNECTED_COPY = "The secure link is reconnecting. The session was not created."
 
 /** Shown while this connection's catalog is not in yet (the base providers stand in). */
 internal const val NEW_SESSION_CATALOG_PENDING_COPY = "Loading accounts and profiles…"
@@ -95,71 +78,10 @@ internal const val NEW_SESSION_CATALOG_PENDING_COPY = "Loading accounts and prof
 /** ta-8cv: the create went out; the dialog waits for the server's answer to it. */
 internal const val NEW_SESSION_CREATING_COPY = "Starting the session…"
 
-internal const val NEW_SESSION_ROW_TAG = "new-session-row-"
+const val NEW_SESSION_ROW_TAG = "new-session-row-"
 internal const val NEW_SESSION_NOTICE_TAG = "new-session-notice"
-internal const val NEW_SESSION_PENDING_TAG = "new-session-pending"
+const val NEW_SESSION_PENDING_TAG = "new-session-pending"
 internal const val NEW_SESSION_CREATING_TAG = "new-session-creating"
-
-/**
- * ta-895: "New session", wired to the client. Opening it asks for a fresh catalog (and again when
- * the link comes back while it is open), and it draws the profile rows only from the catalog the
- * current socket delivered ([com.tether.app.client.TetherClient.providerCatalogLive]); until then the
- * base providers stand in as their default rows.
- *
- * ta-8cv: a tap goes through the draft composer ([TetherViewModel.createNewSession]: the web's frame
- * with the explicit mode and sandbox and a fresh requestId; the client re-checks it under its lock).
- * While that create is in flight the rows are locked and the dialog says so; it closes when the
- * server's `created` for THAT create lands (the view model selects that session). A refusal before
- * the wire, the server's own `error` for it (in the server's words), or a dropped link: the dialog
- * says why, unlocks and stays open. Nothing is retried.
- */
-@Composable
-fun NewSessionDialog(vm: TetherViewModel, onDismiss: () -> Unit) {
-    val client = vm.client
-    val composer = vm.draftComposer
-    val connection by client.connection.collectAsStateWithLifecycle()
-    val catalog by client.providerCatalog.collectAsStateWithLifecycle()
-    val live by client.providerCatalogLive.collectAsStateWithLifecycle()
-    val providers by client.providers.collectAsStateWithLifecycle()
-    val origin by client.consentOrigin.collectAsStateWithLifecycle()
-    // A new opening shows its own words, never an earlier opening's (cleared before the first read).
-    val openedAt = remember {
-        composer.clearError()
-        composer.state.value.completed
-    }
-    val draft by composer.state.collectAsStateWithLifecycle()
-    val connected = connection == ConnectionState.Connected
-    LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
-    LaunchedEffect(draft.completed) { if (draft.completed > openedAt) onDismiss() }
-    var notice by remember { mutableStateOf<String?>(null) }
-    val rows = NewSessionGuard.rows(if (live) catalog else null, providers)
-    TetherDialog(onDismiss = onDismiss, title = "New session") {
-        NewSessionPickerBody(
-            rows = rows,
-            providers = providers,
-            catalogPending = !live,
-            notice = if (draft.creating) null else notice ?: draft.error.takeIf { it.isNotEmpty() },
-            creating = draft.creating,
-        ) { row ->
-            if (composer.state.value.creating) return@NewSessionPickerBody
-            notice = null
-            if (row.status == "loading") {
-                notice = NEW_SESSION_LOADING_COPY
-                return@NewSessionPickerBody
-            }
-            when (vm.createNewSession(row.choice, origin)) {
-                // Sent: wait for its own reply. Busy / NotReady: the draft composer says why (or one is in flight).
-                DraftSubmitResult.Sent, DraftSubmitResult.Busy, DraftSubmitResult.NotReady -> Unit
-                DraftSubmitResult.NotOffered -> {
-                    notice = NEW_SESSION_NOT_OFFERED_COPY
-                    client.requestProviderCatalog()
-                }
-                DraftSubmitResult.NotLive -> notice = NEW_SESSION_NOT_LIVE_COPY
-                DraftSubmitResult.NotConnected -> notice = NEW_SESSION_NOT_CONNECTED_COPY
-            }
-        }
-    }
-}
 
 /**
  * The picker's body (stateless): a pending line while the catalog is not in, then one row per
@@ -179,6 +101,10 @@ fun ColumnScope.NewSessionPickerBody(
     catalogPending: Boolean,
     notice: String?,
     creating: Boolean = false,
+    /** ta-abm: the row the draft has picked (drawn checked and announced selected); null = none. */
+    selectedKey: String? = null,
+    /** ta-abm: what a tap on a row does, in words ("Choose …" in the sheet). */
+    pickLabel: (name: String) -> String = { "Start a new session on $it" },
     onPick: (NewSessionRow) -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -221,7 +147,10 @@ fun ColumnScope.NewSessionPickerBody(
     }
     val tags = newSessionRowTags(rows)
     rows.forEachIndexed { index, row ->
-        NewSessionRowView(row, tags[index], glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, locked = creating, onPick = onPick)
+        NewSessionRowView(
+            row, tags[index], glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, locked = creating,
+            selected = selectedKey != null && row.choice.key == selectedKey, pickLabel = pickLabel, onPick = onPick,
+        )
     }
     if (notice != null) {
         Row(
@@ -333,7 +262,16 @@ private fun profileIdText(id: String): AnnotatedString {
 }
 
 @Composable
-private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, last: Boolean, locked: Boolean, onPick: (NewSessionRow) -> Unit) {
+private fun NewSessionRowView(
+    row: NewSessionRow,
+    tag: String?,
+    glyph: String?,
+    last: Boolean,
+    locked: Boolean,
+    selected: Boolean,
+    pickLabel: (String) -> String,
+    onPick: (NewSessionRow) -> Unit,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val name = newSessionRowLabel(row)
@@ -348,7 +286,7 @@ private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, 
         state.takeIf { it.isNotEmpty() },
         error,
     ).joinToString(", ")
-    val clickLabel = "Start a new session on $name"
+    val clickLabel = pickLabel(name)
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -358,6 +296,7 @@ private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, 
                     role = Role.Button
                     contentDescription = description
                     testTag = NEW_SESSION_ROW_TAG + row.choice.key
+                    if (selected) this.selected = true
                     if (enabled) onClick(clickLabel) { onPick(row); true } else disabled()
                 }
                 .heightIn(min = 44.dp)
@@ -388,7 +327,12 @@ private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, 
                     // Error, Unavailable, and (r2) every "Not offered" row: the warning mark.
                     else -> StateLabel(TetherIcons.TriangleAlert, state)
                 }
-                Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
+                // ta-abm: the draft's pick is checked (`.tether-select-option.is-selected`'s Check, in violet).
+                if (selected) {
+                    Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+                } else {
+                    Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
+                }
             }
         }
         if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
@@ -418,7 +362,11 @@ private fun CatalogGlyph(provider: String, glyph: String?) {
     }
 }
 
-/** For the goldens: [NewSessionPickerBody] without the wiring. */
+/**
+ * For the goldens: [NewSessionPickerBody] without the wiring, in the dialog case ta-895 shot it in.
+ * ta-abm: kept as the rows' own goldens (their rendering is unchanged); the sheet's goldens show
+ * them in place.
+ */
 @Composable
 internal fun NewSessionPickerPreview(rows: List<NewSessionRow>, providers: List<ProviderInfo>, catalogPending: Boolean, notice: String?) {
     TetherDialog(onDismiss = {}, title = "New session") {
