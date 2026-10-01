@@ -171,7 +171,7 @@ would duplicate T1.3's persistence and add a cross-store transaction problem.
 | `sync_state` | `session_id` | `cursor`, `last_verified_at`, `level` (`list`\|`full`), `bytes` | `cursor` is written in the **same transaction** as the rows it covers. `last_verified_at` means the server confirmed head on a live connection. |
 | `meta` | `key` | `value` | Schema/app version, origin, `reducer_version`, data-key id. |
 
-`reducer_version` = the vendored corpus manifest SHA plus the protocol the reducer port models (`TARGET_PROTOCOL_VERSION`; since ta-ylh it can run ahead of the advertised hello version). See §2.4 for why.
+`reducer_version` = the vendored corpus manifest SHA plus the protocol the reducer port models (`TARGET_PROTOCOL_VERSION`; ta-ylh let it run ahead of the advertised hello version, and since ta-3uk the two are equal again, though the key stays on TARGET). See §2.4 for why.
 
 ### 2.3 Write path
 
