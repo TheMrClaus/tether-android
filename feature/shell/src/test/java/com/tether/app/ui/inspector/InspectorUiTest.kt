@@ -4,7 +4,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -117,6 +124,51 @@ class InspectorUiTest {
         rule.onNodeWithTag(InspectorTags.SessionDivider).assertExists()
         rule.onNodeWithTag(InspectorTags.ShowSession).performClick()
         assertEquals(listOf<String?>(null), selections)
+    }
+
+    /**
+     * ta-dl4: the roster is open while a run is selected (inspector.tsx:403 `open={Boolean(activeRun)}`).
+     * React re-applies the `<details open>` attribute only when the prop changes, so the user's own
+     * collapse stands across re-renders until the selection clears or returns.
+     */
+    @Test
+    fun theRosterIsOpenWhileARunIsSelectedAndTheUsersToggleStandsUntilThatChanges() {
+        val run = InspectorBoards.fullModel.runs.single()
+        var selected by mutableStateOf<String?>(run.runId)
+        var tick by mutableIntStateOf(0)
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Studio)) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    @Suppress("UNUSED_EXPRESSION") tick
+                    val model = InspectorBoards.model(InspectorBoards.full, InspectorBoards.fullState, InspectorBoards.fullReplies, selectedRunId = selected)
+                    Inspector(model, InspectorBoards.fullState, { selected = it }, fileDiffs = null, onRequestFileDiff = {}, env = { InspectorBoards.env })
+                }
+            }
+        }
+        fun roster(state: String) = rule.onNodeWithTag("subrun-roster").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
+        roster("Expanded")
+        // The user collapses it; a re-render with the same selection keeps it collapsed.
+        rule.onNodeWithTag("subrun-roster").performClick()
+        roster("Collapsed")
+        tick++
+        roster("Collapsed")
+        // The selection clears: closed. A run selected again: open.
+        rule.onNodeWithTag(InspectorTags.ShowSession).performClick()
+        roster("Collapsed")
+        selected = run.runId
+        roster("Expanded")
+        // With no run selected the user may still open it, and it stays open.
+        selected = null
+        roster("Collapsed")
+        rule.onNodeWithTag("subrun-roster").performClick()
+        tick++
+        roster("Expanded")
+    }
+
+    @Test
+    fun theRosterStartsClosedWithNoRunSelected() {
+        show(InspectorBoards.fullModel, InspectorBoards.fullState)
+        rule.onNodeWithTag("subrun-roster").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
     }
 
     @Test

@@ -355,18 +355,24 @@ fun SubagentRunStats(run: SubagentRun) {
 /**
  * `SubagentRoster`: the collapsible "Subagents N" summary at the top of the Session tab, closed by
  * default; each row selects its run's tab. `.subrun-roster-transcript` adds `space-lg` below it.
+ *
+ * [open] is the web's `<details open={open}>` prop (the inspector passes `Boolean(activeRun)`).
+ * React re-applies that attribute only when the prop's value changes, so the roster follows [open]
+ * on each change while the user's own toggle stands in between; `null` (the transcript's roster)
+ * leaves it uncontrolled and closed.
  */
 @Composable
 fun SubagentRoster(
     runs: List<SubagentRun>,
     activeRunId: String?,
     onSelect: (String?) -> Unit,
+    open: Boolean? = null,
 ) {
     val summary = remember(runs) { subagentRosterSummary(runs) }
     if (summary.total == 0) return
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var expanded by rememberSaveable(open) { mutableStateOf(open ?: false) }
     val shape = RoundedCornerShape(t.radiusMd)
     val line = t.line
     val summaryText = rosterSummaryText(summary) { Format.compactNumber(it) }

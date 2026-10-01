@@ -134,7 +134,7 @@ fun ColumnScope.Inspector(
         IdentityHeading(model.identity)
         if (model.runs.isNotEmpty()) {
             Spacer(Modifier.padding(top = LocalTetherTokens.current.css.spaceMd))
-            SubagentRoster(model.runs, model.activeRunId, onSelectRun)
+            SubagentRoster(model.runs, model.activeRunId, onSelectRun, open = model.activeRunId != null)
         }
         when (val usage = model.usage) {
             is SessionUsage -> SessionUsageSection(usage)
