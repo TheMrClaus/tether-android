@@ -172,8 +172,8 @@ class EnginesBehaviourTest {
         assertEquals("codex", editable(ServerSetting.CodexCommand))
         assertEquals("/srv/homes/codex", editable(ServerSetting.CodexHome))
         assertTrue(all.contains("/home/op/.claude"))
-        // Only the custom-providers slot is left on this tab (ta-q6p).
-        assertEquals(1, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
+        // ta-q6p drew Custom providers: no slot is left on this tab.
+        assertEquals(0, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
     }
 
     @Test fun beforeTheServerRepliesTheEnginesWait() {
