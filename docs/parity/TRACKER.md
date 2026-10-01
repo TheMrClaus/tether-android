@@ -24,12 +24,12 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-09-30 late evening CEST):** `main` @ `1c5af15`. **Merged + verified today:** ta-96z, T6.5, ta-blf, T7.3,
-ta-28i (`27fd169`), ta-fz3 (`7569d54`), T6.8 (`8f6f15a`), ta-p5l (tether #230 `cac6a5a`), **ta-8lg** (`1293f0b`, stop() clear never
-fatal), **T9.1** (`e2ae7c8`, the web's full inspector in the telemetry sheet), **T15.1 + T15.2** (`1c5af15`, Overview feed + screen,
-sidebar entry). **In progress:** T7.4 attachments r2 (security M1 clipboard file:// + verify M1 staged-set race + lows + a T7.4 test
-leak that keeps the gate red), T15.3 Overview host/usage panels, T15.4 top bar. Owner: exempt the app's HTTP routes at his gateway
-(tether README, #230).
+**Resume point (2026-10-01 night CEST):** `main` @ `4c925b3a` (gate green 4968). **Merged + verified since 0.8.0:** **T15.4** top bar
+(`cee8ea80`), **ta-ylh** v133-v135 decode, advertised hello stays 132 (`f1b3b639`), **T7.4** attachments + bubble thumbnails (3 rounds,
+`cfa7ce90`), **T15.6** composer shows only the operator's queued drafts (`71abae3c`), **T15.3** Overview host & usage tile + **ta-vmg /
+ta-x9c** gate flakes fixed (`4c925b3a`). **In progress:** T15.5 Studio-only appearance (r2 done; final rebase over the landed branches).
+**Next:** publish v0.9.0 in the morning (owner: coordinator publishes, minor bump). Owner: exempt the app's HTTP routes at his gateway
+(tether README, #230); deploy server main before the app may advertise > 132.
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), NOT deployed** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
@@ -136,7 +136,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T7.1 | Draft composer, persisted drafts, queue UI | VERIFIED | TheMrClaus @ 2026-09-28 04:59 |  |  |
 | T7.2 | Model/Effort/Mode row, fast mode, model browser, codex/opencode controls | VERIFIED | TheMrClaus @ 2026-09-29 07:09 |  |  |
 | T7.3 | Slash commands, run/background command, mentions | VERIFIED | TheMrClaus @ 2026-09-30 06:50 |  |  |
-| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | DONE | security-executor-T7.4 @ 2026-09-30 16:… |  |  |
+| T7.4 | Attach sheet (camera/photos/files/clipboard) + limits | VERIFIED | security-executor-T7.4 @ 2026-09-30 16:… |  |  |
 
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -206,10 +206,10 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ta-ylh | Speak protocol v135 (wire only) | TODO |  |  |  |
 | T15.1 | Overview feed client (v131) | VERIFIED | executor-T15.1 @ 2026-09-30 15:46 | `bd show` |  |
 | T15.2 | Overview screen | VERIFIED | executor-T15.1 @ 2026-09-30 16:19 |  |  |
-| T15.3 | Overview host + daily usage panels | DONE | security-executor-T15.3 @ 2026-09-30 20… |  |  |
+| T15.3 | Overview host + daily usage panels | VERIFIED | security-executor-T15.3 @ 2026-09-30 20… |  |  |
 | T15.4 | Top-bar navigation | VERIFIED | executor-T15.4 @ 2026-09-30 20:30 |  |  |
-| T15.5 | Studio-only appearance + theme migration | IN-PROGRESS | executor-T15.5 @ 2026-09-30 23:01 |  | checkpoint 21f34efa (WIP): main sources compile. done: token JSON filtered to Studio pair (tools/parity/studio-only-tokens.py) + generator … |
-| T15.6 | Queue origin labels (v133) + hidden session count (v135) | IN-PROGRESS | executor-T15.6 @ 2026-09-30 23:41 |  |  |
+| T15.5 | Studio-only appearance + theme migration | DONE | executor-T15.5 @ 2026-09-30 23:01 | `bd show` |  |
+| T15.6 | Queue origin labels (v133) + hidden session count (v135) | VERIFIED | executor-T15.6 @ 2026-09-30 23:41 |  |  |
 | T15.7 | Worktree service links after v134 | TODO |  |  |  |
 | T15.8 | Re-baseline: exporters, corpora, matrix rows, PARITY_BASE bump | TODO |  |  |  |
 
@@ -375,3 +375,4 @@ Android status at T0.5 (app 0.5.1 / protocol 40):
 | 2026-10-01 00:55 | claude-main / Opus 5.5 | T7.4, T15.3, T15.4, ta-ylh, ta-vmg, ta-x9c | All five overnight lanes stopped (usage limit 00:50 + connection errors); resumed each from its transcript with its uncommitted work intact (T7.4 r3 WIP, T15.3 r2 WIP rebased, ta-ylh WIP in 12 files, T15.4 r2 re-verify mid-mutants, flakes not started); makers told to checkpoint-commit first. T15.3 verify CONFIRMED earlier (r2 = origin check + JSON content type). | T7.4 r3; T15.3 r2; T15.4 verdict; ta-ylh; flakes |
 | 2026-10-01 01:30 | claude-main / Opus 5.5 | T15.4, T15.5 | T15.4 r2 re-verify CONFIRMED -> merged ff-only `cee8ea80`, VERIFIED (gate 4741; follow-up ta-2qv). Started T15.5 (Studio-only appearance; rebases over T7.4 at the end). | T7.4 r3; T15.3 r2; ta-ylh; flakes; T15.5 |
 | 2026-10-01 02:20 | claude-main / Opus 5.5 | ta-ylh, T15.6 | ta-ylh: coordinator ran the gate (maker hit its command limit): green 4757 on `f1b3b639`; verify CONFIRMED -> merged ff-only `f1b3b639`, VERIFIED (advertised hello stays 132). Started T15.6 (queue labels, hidden count, createdVia; + the two ta-ylh lows). | T7.4 r3; T15.3 r2; T15.5; T15.6; flakes |
+| 2026-10-01 03:00 | claude-main / Opus 5.5 | T7.4, T15.3, T15.5, T15.6, ta-vmg, ta-x9c | T7.4 r3 CONFIRMED + security PASS-WITH-FOLLOW-UPS -> merged `cfa7ce90` VERIFIED (+2 matrix rows). T15.6 CONFIRMED -> merged `71abae3c` VERIFIED (follow-up ta-e7j). T15.3 r2 rechecked -> merged with the flake fixes (ta-vmg: v2 compose rule + off-main write check; ta-x9c: await the typed projection) at `4c925b3a`, all VERIFIED (gate 4968). T15.5 verify REFUTED (Machine window background) -> r2 done -> final rebase. | T15.5 final gate + recheck; v0.9.0 |
