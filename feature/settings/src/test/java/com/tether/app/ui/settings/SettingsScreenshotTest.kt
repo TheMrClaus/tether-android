@@ -2,7 +2,15 @@ package com.tether.app.ui.settings
 
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performSemanticsAction
+import com.tether.app.client.ClaudeAccount
+import com.tether.app.client.ClaudeAccountStatus
+import com.tether.app.client.ClaudeAccountsResult
+import com.tether.app.client.ClaudeAccountsSource
+import com.tether.app.client.ClaudeAccountsSync
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.tether.app.ui.components.TetherLayoutClass
@@ -24,15 +32,64 @@ import org.robolectric.annotation.Config
  * tablet 1280×800 @1: the centred dialog), both Studio skins, plus 1.3× font. Fresh preferences
  * but the skin's mode (the web reference's own state: ended sessions and confirm on, thinking off,
  * no default folder).
- * `settings-general` / `-appearance` / `-devices` / `-engines` are those tabs (Engines stands for
- * the panels a later slice fills); `settings-restart` is General under the restart banner.
+ * `settings-general` / `-appearance` / `-devices` / `-engines` are those tabs; `settings-restart` is
+ * General under the restart banner. ta-9q2: the Engines shots are scrolled to Claude accounts:
+ * `-engines` the seeded list (two accounts checked: one signed in, one refused), `-engines-sync`
+ * its read-only sync rows, `-engines-loading` / `-blocked` / `-error` the other states.
  */
-enum class SettingsShot(val id: String, val tab: SettingsTab, val restart: Boolean = false) {
+enum class SettingsShot(val id: String, val tab: SettingsTab, val restart: Boolean = false, val accounts: AccountsShot? = null) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
     Devices("settings-devices", SettingsTab.Devices),
-    Engines("settings-engines", SettingsTab.Engines),
+    Engines("settings-engines", SettingsTab.Engines, accounts = AccountsShot.Loaded),
+    EnginesSync("settings-engines-sync", SettingsTab.Engines, accounts = AccountsShot.Sync),
+    EnginesLoading("settings-engines-loading", SettingsTab.Engines, accounts = AccountsShot.Loading),
+    EnginesBlocked("settings-engines-blocked", SettingsTab.Engines, accounts = AccountsShot.Blocked),
+    EnginesError("settings-engines-error", SettingsTab.Engines, accounts = AccountsShot.Error),
     Restart("settings-restart", SettingsTab.General, restart = true),
+}
+
+/**
+ * The Claude accounts seeds of the Engines shots, and where each is scrolled to. Timing-free by
+ * construction, like the preferences: the section's state is built HERE and handed in as its
+ * initial state, so the first frame is the seeded section and the source is never asked (no fetch,
+ * no tap, no round trip). The source behind it would fail the shot if it were.
+ */
+enum class AccountsShot(val scrollTo: String) {
+    Loaded(ClaudeAccountsTags.Section),
+    Sync(ClaudeAccountsTags.Sync),
+    Loading(ClaudeAccountsTags.Section),
+    Blocked(ClaudeAccountsTags.Section),
+    Error(ClaudeAccountsTags.Section),
+    ;
+
+    fun seed(): ClaudeAccountsState {
+        val origin = AccountsFixtures.ORIGIN
+        val loaded = ClaudeAccountsState(
+            origin = origin,
+            accounts = AccountsFixtures.LIST,
+            statuses = mapOf(
+                "claude-work" to AccountStatusState.Known(AccountsFixtures.LOGGED_IN),
+                "claude-fresh" to AccountStatusState.Failed(AccountsFault.Refused("No such Claude account.")),
+            ),
+            sync = AccountsFixtures.SYNC,
+        )
+        return when (this) {
+            Loaded, Sync -> loaded
+            Loading -> ClaudeAccountsState(origin = origin)
+            Blocked -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Blocked(302))
+            Error -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Unavailable(500))
+        }
+    }
+
+    fun binding() = ClaudeAccountsBinding(NeverAsked, AccountsFixtures.ORIGIN, AccountsFixtures.TIME, initial = seed())
+}
+
+/** The source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
+private object NeverAsked : ClaudeAccountsSource {
+    override suspend fun list(): ClaudeAccountsResult<List<ClaudeAccount>> = error("a seeded shot must not read the list")
+    override suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync> = error("a seeded shot must not read the sync state")
+    override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> = error("a seeded shot must not read a status")
 }
 
 fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, skin: TetherSkin, size: String, name: String = shot.id) {
@@ -53,10 +110,24 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             layout = if (size == "tablet") TetherLayoutClass.Expanded else TetherLayoutClass.Phone,
             restartRequired = shot.restart,
             initialPreferences = stored,
+            claudeAccounts = shot.accounts?.binding() ?: ClaudeAccountsBinding.None,
         )
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
+    shot.accounts?.let { accounts ->
+        // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
+        // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
+        // shows), and the scroll runs out on the hand-driven clock.
+        val body = onNodeWithTag(SettingsDialogTags.Body)
+        val target = onNodeWithTag(accounts.scrollTo, useUnmergedTree = true)
+        repeat(2) {
+            val delta = target.fetchSemanticsNode().positionInRoot.y - body.fetchSemanticsNode().positionInRoot.y
+            if (kotlin.math.abs(delta) > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            mainClock.advanceTimeBy(1_000)
+            waitForIdle()
+        }
+    }
     onRoot().captureRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
@@ -95,7 +166,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General and Appearance, Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance and the Claude accounts list, Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -104,6 +175,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

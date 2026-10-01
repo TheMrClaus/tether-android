@@ -88,7 +88,11 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     val timeOf = binding.timeOf
     val current = binding.origin
     val source = binding.source
-    var state by remember(source, current) { mutableStateOf(if (current == null) ClaudeAccountsModel.signedOut() else ClaudeAccountsState()) }
+    // A seed counts only for the server it was built for.
+    val seed = binding.initial?.takeIf { current != null && it.origin == current }
+    var state by remember(source, current) {
+        mutableStateOf(seed ?: if (current == null) ClaudeAccountsModel.signedOut() else ClaudeAccountsState())
+    }
     var reload by remember(source, current) { mutableIntStateOf(0) }
     var planRetried by remember(source, current) { mutableStateOf(false) }
 
@@ -98,7 +102,7 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     DisposableEffect(checks) { onDispose { checks.cancel() } }
 
     LaunchedEffect(source, current, reload) {
-        if (current == null) return@LaunchedEffect
+        if (current == null || (seed != null && reload == 0)) return@LaunchedEffect
         state = ClaudeAccountsModel.foldList(state, source.list(), current)
         if (!planRetried && state.listFault == null && ClaudeAccountsModel.wantsPlanRetry(state.accounts)) {
             planRetried = true
@@ -108,7 +112,7 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     }
     val wantsSync = ClaudeAccountsModel.wantsSync(state)
     LaunchedEffect(source, current, wantsSync) {
-        if (current == null || !wantsSync || state.sync != null) return@LaunchedEffect
+        if (current == null || seed != null || !wantsSync || state.sync != null) return@LaunchedEffect
         state = ClaudeAccountsModel.foldSync(state, source.sync(), current)
     }
 
@@ -269,7 +273,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, narrow: Boolean, 
                 modifier = Modifier.testTag(ClaudeAccountsTags.check(card.id)),
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = if (narrow) Alignment.Top else Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             // `.provider-glyph.provider-claude` with the letter C (aria-hidden), Studio's raised square.
             Box(
                 Modifier.size(32.dp).background(t.graphiteRaised, RoundedCornerShape(7.dp)),

@@ -242,6 +242,28 @@ class ClaudeAccountsBehaviourTest {
         assertEquals(listOf("list"), fake.calls.toList())
     }
 
+    /** The goldens' seam: a seed is the first frame and nothing is read on opening; a seed for another server is ignored. */
+    @Test fun aSeedIsShownAtOnceAndOnlyForItsServer() {
+        val seeded = ClaudeAccountsState(origin = ORIGIN, accounts = AccountsFixtures.LIST.take(1))
+        val fake = FakeAccounts()
+        show(ClaudeAccountsBinding(fake, ORIGIN, AccountsFixtures.TIME, initial = seeded))
+        assertTrue(everything().contains("Claude Code (default)"))
+        assertFalse(everything().contains("Claude Code (work)"))
+        assertTrue(fake.calls.isEmpty())
+        // Check still asks.
+        tag(ClaudeAccountsTags.check("claude-default")).performScrollTo().performClick()
+        compose.waitUntil(5_000) { "status:claude-default" in fake.calls }
+    }
+
+    @Test fun aSeedForAnotherServerIsIgnored() {
+        val fake = FakeAccounts()
+        val foreign = ClaudeAccountsState(origin = OTHER_ORIGIN, accounts = AccountsFixtures.decode("""{"accounts":[{"id":"claude-x","label":"Foreign"}]}"""))
+        show(ClaudeAccountsBinding(fake, ORIGIN, AccountsFixtures.TIME, initial = foreign))
+        waitFor("Claude Code (work)")
+        assertFalse(everything().contains("Foreign"))
+        assertEquals("list", fake.calls.first())
+    }
+
     @Test fun signedOutAsksNothing() {
         val fake = FakeAccounts()
         show(ClaudeAccountsBinding(fake, null))

@@ -15,11 +15,16 @@ import com.tether.app.client.LabelText
  * canonical origin of the server it is signed in to (null when signed out). Every answer about any
  * other origin is dropped ([ClaudeAccountsModel]). [timeOf] draws a sync time (the web's
  * `toLocaleTimeString`; a seam for the goldens).
+ *
+ * [initial] (the goldens' seam, as `initialPreferences` is SettingsFrame's): a state already built
+ * for [origin]. The section's first frame is then that state, and it does not read the list or
+ * the sync state on opening (Retry and Check still ask the source). Null (the app): it reads both.
  */
 data class ClaudeAccountsBinding(
     val source: ClaudeAccountsSource,
     val origin: String?,
     val timeOf: (Long) -> String = ::localTime,
+    val initial: ClaudeAccountsState? = null,
 ) {
     companion object {
         /** No client (previews): nothing is fetched and the section says it is signed out. */
