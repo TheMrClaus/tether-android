@@ -65,6 +65,9 @@ enum class SettingsShot(
     AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
+    EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
+    EnginesMissing("settings-engines-missing", SettingsTab.Engines, server = ServerShot.EnginesMissing),
+    EnginesLocked("settings-engines-locked", SettingsTab.Engines, server = ServerShot.EnginesLocked),
 }
 
 /**
@@ -76,6 +79,9 @@ enum class SettingsShot(
  * `-advanced` the top (Network, the masked secrets, Storage), `-revealed` the password shown,
  * `-locked` env-forced rows (and the CLI forced), `-lifecycle` / `-defaults` / `-cli` the later
  * sections, `-metadata` the provider select (manual), `-metadata-text` the free-text fallback.
+ * ta-dh1: `settings-engines-cards` the Engines tab's top (Scan again, Claude Code and Codex on),
+ * `-missing` OpenCode (not found, no home: its switch blocked, the detected home offered),
+ * `-locked` the engines and Codex's home and command set by the environment.
  */
 enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false) {
     Advanced,
@@ -86,12 +92,19 @@ enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false)
     Cli(ServerSettingsTags.section("cli")),
     Metadata,
     MetadataText,
+    Engines,
+    EnginesMissing(EngineTags.card(com.tether.app.client.EngineCard.Opencode)),
+    EnginesLocked(EngineTags.card(com.tether.app.client.EngineCard.Codex)),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
         Locked -> ServerFixtures.binding(
             view = ServerFixtures.view(envForced = mapOf("host" to true, "port" to true, "password" to true, "stateDir" to true, "workspaceRoot" to true)),
             advanced = ServerFixtures.ADVANCED_FORCED,
+            writer = NeverWrites,
+        )
+        EnginesLocked -> ServerFixtures.binding(
+            view = ServerFixtures.view(envForced = mapOf("stateDir" to true, "headlessModes" to true, "codexHome" to true, "codexCommand" to true)),
             writer = NeverWrites,
         )
         MetadataText -> ServerFixtures.binding(
@@ -232,7 +245,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced and Metadata; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata and the engine cards; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -241,6 +254,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
