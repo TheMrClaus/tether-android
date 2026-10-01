@@ -51,15 +51,6 @@ class MotionAndHapticsTest {
         assertEquals(StatusTone.History, statusToneOf("something-new"))
     }
 
-    @Test fun perfDotsParseOrNone() {
-        assertEquals(null, perfDotColor("none"))
-        val dark = tokensFor(TetherSkin.StudioDark).css.perfDots
-        val light = tokensFor(TetherSkin.Studio).css.perfDots
-        assertTrue(dark, perfDotColor(dark) != null || dark == "none")
-        assertTrue(light, perfDotColor(light) != null || light == "none")
-        assertEquals(null, perfDotColor(tokensFor(TetherSkin.Studio).css.perfDots))
-    }
-
     @Test fun rockerGeometryMatchesTheCss() {
         // Studio's 40×24 track with an 18px cap at 3px, +16px when on.
         val s = rockerGeometry()

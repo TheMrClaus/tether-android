@@ -73,14 +73,15 @@ sealed interface EmptyStage {
 /**
  * `<section className="empty-workspace">` at the phone layout: the empty state lives in the same
  * screen well as the transcript — `--mineral-deep` floor, `1px --line-strong`, `--radius-lg`,
- * `--well` shading, margin `space-md`, padding `space-xl space-lg`, content centred
+ * margin `space-md`, padding `space-xl space-lg`, content centred
  * (globals.css 2218-2295, 11241-11269, 11713-11717). The orbit turns once per 24s (static under
  * reduced motion). Studio forks this stage into `StudioWelcome` (T8.1); [studioWelcome] is that
  * slot, and until it is filled Studio renders this composition in its own tokens.
  *
  * [expanded] (from 48rem, T4.2): the well is seated in the bay like the chat screen —
- * `margin: calc(space-lg + 7px)`, `padding: space-2xl space-xl`, the `--bezel` ring and its
- * contact shade (globals.css 11241-11252) — and the title follows `clamp(1.7rem, 2.6vw, 2.15rem)`
+ * `margin: calc(space-lg + 7px)`, `padding: space-2xl space-xl`, the contact shade
+ * (globals.css 11241-11252; the `--well` / `--bezel` shading was retired at tether 887c222, both
+ * transparent in Studio) — and the title follows `clamp(1.7rem, 2.6vw, 2.15rem)`
  * of [viewportWidth] (11257).
  */
 @Composable
@@ -106,7 +107,7 @@ fun EmptyWorkspace(
                 RoundedCornerShape(t.radiusLg),
                 t.mineralDeep,
                 CssBorder(1.dp, t.lineStrong),
-                if (expanded) t.css.well + t.css.bezel + softShadow(2.dp, 6.dp, t.contact.copy(alpha = 0.1f), spread = 7.dp) else t.css.well,
+                if (expanded) listOf(softShadow(2.dp, 6.dp, t.contact.copy(alpha = 0.1f), spread = 7.dp)) else emptyList(),
             )
             .padding(1.dp)
             .verticalScroll(rememberScrollState())

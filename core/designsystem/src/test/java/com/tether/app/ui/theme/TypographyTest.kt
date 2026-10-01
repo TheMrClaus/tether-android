@@ -144,11 +144,12 @@ class TypographyTest {
     }
 
     @Test
-    fun keyLabelReadsTheKeyLabelTokens() {
+    fun keyLabelIsUntrackedAndUntransformed() {
+        // Studio's retired --key-label-tracking / --key-label-transform were 0 / none.
         for (skin in TetherSkin.entries) {
             val k = typographyFor(skin).keyLabel
-            assertEquals(skin.tokens.keyLabelTracking, k.style.letterSpacing)
-            assertEquals(skin.tokens.keyLabelTransform == "uppercase", k.uppercase)
+            assertEquals(TextUnit(0f, TextUnitType.Em), k.style.letterSpacing)
+            assertFalse(k.uppercase)
         }
     }
 

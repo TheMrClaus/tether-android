@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.KeyClass
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeySize
-import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.SelectTriggerStyle
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
@@ -148,7 +147,9 @@ fun SeamsBoard() {
             Box(Modifier.fillMaxWidth().height(24.dp).background(t.graphite))
             TetherSeam()
             Box(Modifier.fillMaxWidth().height(24.dp).background(t.mineral))
-            Box(Modifier.fillMaxWidth().background(t.graphite).padding(vertical = 8.dp)) { PerfDivider() }
+            // The perf divider's band: `--perf-dots` was `none` in Studio (retired at tether 887c222),
+            // so it never drew; the band and its label stay so the board keeps its golden.
+            Box(Modifier.fillMaxWidth().background(t.graphite).padding(vertical = 8.dp))
         }
     }
     StateRow("vertical seam") {

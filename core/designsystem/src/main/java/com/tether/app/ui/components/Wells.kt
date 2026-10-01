@@ -38,12 +38,12 @@ import com.tether.app.ui.theme.TetherTokens
 /**
  * Recessed wells: text inputs, filters, pickers, plates (globals.css 8923-8944). A well is a
  * pocket machined into the panel — `1px solid var(--line-strong)`, `var(--mineral-deep)` floor,
- * and the skin's `--well` shadow list (two inset shades + a lit outer lip), drawn layer for layer.
- * Focus is `border-color: var(--violet-strong)` plus a `0 0 0 3px var(--focus-glow)` halo
- * (violet = focus). Studio's `--well` is transparent, so its wells are flat fields.
+ * no shadow: Studio's `--well` was transparent and was retired at tether 887c222, so its wells
+ * are flat fields. Focus is `border-color: var(--violet-strong)` plus a `0 0 0 3px
+ * var(--focus-glow)` halo (violet = focus).
  */
 fun wellShadows(t: TetherTokens, focused: Boolean): List<CssShadow> =
-    if (focused) t.css.well + CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.focusGlow) else t.css.well
+    if (focused) listOf(CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.focusGlow)) else emptyList()
 
 /** The well surface on any shape; content goes inside. */
 fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false): Modifier =

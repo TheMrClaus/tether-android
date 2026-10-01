@@ -77,7 +77,11 @@ object KeyClasses {
     val IconButton: Set<KeyClass> = setOf(KeyClass.IconButton)
 }
 
-/** Which drop-shadow scale a neutral key uses: `--shadow-key` or the compact `--shadow-key-sm`. */
+/**
+ * A regular or compact key. The web's `--shadow-key` / `--shadow-key-sm` scales it chose between
+ * were retired with the Machine-era material tokens (tether 887c222); Studio draws neither, so
+ * the size no longer changes the key's look.
+ */
 enum class KeySize { Regular, Small }
 
 /** Interaction state that changes the key's material (focus is a separate, colour-free ring). */
@@ -159,14 +163,14 @@ private val neutralRest: KeyComputed.(KeyContext) -> Unit = { c ->
     // globals.css 8592-8606
     border = c.t.keySide
     face = c.t.keyFace
-    shadows = listOf(hardShadow(1.dp, c.t.litStrong, inset = true), hardShadow(0.dp, c.t.litSoft, x = 1.dp, inset = true)) +
-        (if (c.size == KeySize.Small) c.t.css.shadowKeySm else c.t.css.shadowKey)
+    // The --lit-* bevels and --shadow-key(-sm) were retired (tether 887c222); all were transparent.
+    shadows = emptyList()
     ink = c.t.ink
 }
 private val neutralActive: KeyComputed.(KeyContext) -> Unit = { c ->
     // globals.css 8683-8696
     face = c.t.keyFaceDeep
-    shadows = c.t.css.bevelPressed + c.t.css.shadowKeyPressed
+    shadows = emptyList() // --bevel-pressed + --shadow-key-pressed, retired (both transparent)
 }
 private val primaryRest: KeyComputed.(KeyContext) -> Unit = { c ->
     // globals.css 8634-8641
@@ -174,8 +178,6 @@ private val primaryRest: KeyComputed.(KeyContext) -> Unit = { c ->
     face = c.t.accent
     ink = c.t.accentInk
     shadows = listOf(
-        hardShadow(1.dp, c.t.litFaint, inset = true),
-        hardShadow(0.dp, c.t.litFaint, x = 1.dp, inset = true),
         hardShadow((-1).dp, ctxContact(c.t, 0.1f), x = (-1).dp, inset = true),
         hardShadow(3.dp, c.t.accentSide),
         softShadow(5.dp, 7.dp, ctxContact(c.t, 0.32f), spread = (-2).dp),
@@ -186,7 +188,6 @@ private val primaryActive: KeyComputed.(KeyContext) -> Unit = { c ->
     face = c.t.accentDeep
     shadows = listOf(
         softShadow(2.dp, 3.dp, c.t.pressShade, inset = true),
-        hardShadow((-1).dp, c.t.litFaint, inset = true),
         hardShadow(1.dp, c.t.accentSide),
         softShadow(1.dp, 2.dp, ctxContact(c.t, 0.24f)),
     )
@@ -197,7 +198,6 @@ private val brickRest: KeyComputed.(KeyContext) -> Unit = { c ->
     face = c.t.brick
     ink = c.t.accentInk
     shadows = listOf(
-        hardShadow(1.dp, c.t.litFaint, inset = true),
         hardShadow((-1).dp, ctxContact(c.t, 0.1f), x = (-1).dp, inset = true),
         hardShadow(2.dp, c.t.brickSide),
         softShadow(4.dp, 6.dp, ctxContact(c.t, 0.3f), spread = (-2).dp),
@@ -263,14 +263,14 @@ val KeyRules: List<KeyRule> = listOf(
     // ── globals.css base rules (specificity (0,1,0) unless noted) ──
     g(641, emptySet(), spec(1, 1), KeyPseudo.Disabled) { alpha = DisabledOpacity }, // button:disabled
     g(755, Icon, spec(1)) { border = Color.Transparent; radius = it.t.radiusSm; face = Color.Transparent; ink = it.t.muted }, // colour inherits; hosts set --muted
-    g(892, NewSession, spec(1)) { border = it.t.lineStrong; radius = it.t.radiusSm; face = it.t.graphiteRaised; shadows = it.t.css.edgeHighlight + it.t.css.shadowRaised; ink = it.t.white },
+    g(892, NewSession, spec(1)) { border = it.t.lineStrong; radius = it.t.radiusSm; face = it.t.graphiteRaised; shadows = it.t.css.shadowRaised; ink = it.t.white },
     g(1930, End, spec(1)) { border = Color.Transparent; radius = it.t.radiusSm; face = Color.Transparent; ink = it.t.muted },
     g(2297, Primary, spec(1)) { radius = it.t.radiusSm },
     g(2298, Secondary, spec(1)) { radius = it.t.radiusSm },
-    g(2312, Primary, spec(1)) { border = Color.Transparent; face = it.t.violetStrong; shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowRaised; ink = it.t.white },
+    g(2312, Primary, spec(1)) { border = Color.Transparent; face = it.t.violetStrong; shadows = it.t.css.shadowRaised; ink = it.t.white },
     g(2323, Secondary, spec(1)) { border = it.t.lineStrong; face = Color.Transparent; ink = it.t.ink },
     g(4774, Jump, spec(1)) { border = it.t.lineStrong; radius = KeyRadiusCircle; face = it.t.graphiteRaised; ink = it.t.ink; shadows = it.t.css.shadowFloating },
-    g(7107, Send, spec(1)) { border = it.t.violetStrong; radius = it.t.radiusMd; face = it.t.violetDeep; ink = it.t.white; shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowRaised },
+    g(7107, Send, spec(1)) { border = it.t.violetStrong; radius = it.t.radiusMd; face = it.t.violetDeep; ink = it.t.white; shadows = it.t.css.shadowRaised },
     g(7127, Send, spec(2), KeyPseudo.Disabled) { alpha = 0.5f },
     g(7128, Interrupt, spec(1)) { border = it.t.dangerEdge; face = it.t.dangerWash },
     g(7136, Attach, spec(1)) { border = it.t.line; radius = it.t.radiusMd; face = it.t.mineralDeep; ink = it.t.muted },
@@ -300,7 +300,7 @@ val KeyRules: List<KeyRule> = listOf(
     g(8720, Deny, spec(5), KeyPseudo.Active, declare = brickActive),
     g(8721, Danger, spec(5), KeyPseudo.Active, declare = brickActive),
     g(8722, End, spec(4), KeyPseudo.Active, declare = brickActive),
-    g(8734, Jump, spec(2)) { border = it.t.charcoalSide; face = it.t.charcoal; ink = it.t.utilityInk; shadows = listOf(hardShadow(1.dp, it.t.litSoft, inset = true), hardShadow(2.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
+    g(8734, Jump, spec(2)) { border = it.t.charcoalSide; face = it.t.charcoal; ink = it.t.utilityInk; shadows = listOf(hardShadow(2.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
     g(8749, Jump, spec(3), KeyPseudo.Active) { face = oklabMix(it.t.charcoal, it.t.contact, 0.9f); shadows = listOf(softShadow(2.dp, 3.dp, it.t.pressShade, inset = true), hardShadow(1.dp, it.t.charcoalSide)) + it.t.css.shadowFloating },
     g(8757, Primary, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
     g(8758, Secondary, spec(3), KeyPseudo.Disabled, declare = flatDisabled),
@@ -314,7 +314,7 @@ val KeyRules: List<KeyRule> = listOf(
         border = it.t.keySide
         radius = KeyRadiusCircle
         face = it.t.keyFace
-        shadows = listOf(hardShadow(1.dp, it.t.litStrong, inset = true)) + it.t.css.shadowKeySm
+        shadows = emptyList()
         ink = it.t.muted
     },
     g(11402, Attach, spec(4), KeyPseudo.Active, declare = neutralActive),
@@ -324,9 +324,8 @@ val KeyRules: List<KeyRule> = listOf(
         face = it.t.violetWash
         ink = it.t.violet
         shadows = listOf(
-            hardShadow(1.dp, it.t.litStrong, inset = true),
             CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = it.t.violetStrong),
-        ) + it.t.css.shadowKeySm
+        )
     },
 
     // ── studio.css (loads after globals.css; `:root:where(...)` = (0,1,0) + classes) ──

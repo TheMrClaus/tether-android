@@ -59,15 +59,23 @@ data class RockerGeometry(
     val capLeftOn: Dp,
 )
 
+/**
+ * The cap's slide: `transition: transform 110ms var(--ease-out)` (globals.css "Rocker switches",
+ * `:root .settings-toggle > i b`, tether 887c222). The web inlined the literal when it retired the
+ * `--rocker-ms` token (110ms in both Studio skins) and studio.css does not override it, so this is
+ * the same duration, now a literal here too.
+ */
+const val RockerSlideMs: Int = 110
+
 /** Studio's track (studio.css): 40×24, no border, the :root 0.5rem radius survives; an 18px cap at 3px, +16px when on. */
 fun rockerGeometry(): RockerGeometry =
     RockerGeometry(40.dp, 24.dp, 0.dp, 8.dp, 3.dp, 18.dp, 18.dp, 5.44.dp, 3.dp, 19.dp)
 
 /**
  * The bi-stable settings rocker (`.settings-toggle > i`): a recessed frame (`--key-face-deep`,
- * `--well`, 1px `--line-strong`, `--accent-side` when on); the SELECTED half pressed into it with
+ * 1px `--line-strong`, `--accent-side` when on); the SELECTED half pressed into it with
  * its etched legend on the well floor (OFF muted / ON `--accent` with `--accent-ink`); the other
- * half a raised `--key-face` cap that slides across in `--rocker-ms` `--ease-out` (a state jump
+ * half a raised `--key-face` cap that slides across in [RockerSlideMs] `--ease-out` (a state jump
  * under reduced motion). Studio re-dresses it as a 40×24 track (`--line-strong`, violet-strong
  * when on) with a white 18px cap; the globals legend layer still sits under the cap, exactly as
  * the browser paints it.
@@ -91,7 +99,7 @@ fun TetherRocker(
     val focused by interaction.collectIsFocusedAsState()
     val capLeft by animateFloatAsState(
         if (checked) g.capLeftOn.value else g.capLeftOff.value,
-        if (reduced) snap() else tween(t.css.rockerMs, easing = t.css.easeOut.toEasing()),
+        if (reduced) snap() else tween(RockerSlideMs, easing = t.css.easeOut.toEasing()),
         label = "rockerCap",
     )
     val frameShape = RoundedCornerShape(g.radius)
@@ -140,7 +148,7 @@ fun TetherRocker(
                             RoundedCornerShape(0.dp),
                             if (checked) t.accent else Color.Transparent,
                             shadows = if (checked) {
-                                listOf(softShadow(2.dp, 3.dp, t.pressShade, inset = true), hardShadow((-1).dp, t.litFaint, inset = true))
+                                listOf(softShadow(2.dp, 3.dp, t.pressShade, inset = true))
                             } else {
                                 listOf(softShadow(2.dp, 3.dp, t.contact.copy(alpha = 0.2f), inset = true))
                             },

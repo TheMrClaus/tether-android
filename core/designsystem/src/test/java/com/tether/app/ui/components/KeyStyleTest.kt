@@ -37,28 +37,28 @@ class KeyStyleTest {
     private fun inset(y: Dp, color: Color, x: Dp = 0.dp, blur: Dp = 0.dp, spread: Dp = 0.dp) = CssShadow(true, x, y, blur, spread, color)
     private fun drop(y: Dp, color: Color, blur: Dp = 0.dp, spread: Dp = 0.dp) = CssShadow(false, 0.dp, y, blur, spread, color)
 
-    /** g8592: inset 0 1px 0 lit-strong, inset 1px 0 0 lit-soft, var(--shadow-key). */
-    private val neutral = { t: TetherTokens -> listOf(inset(1.dp, t.litStrong), inset(0.dp, t.litSoft, x = 1.dp)) + t.css.shadowKey }
+    // The retired material tokens (--lit-*, --shadow-key*, --bevel-pressed; tether 887c222) were
+    // transparent in both Studio skins, so their layers are gone from the lists below.
 
-    /** g8686: var(--bevel-pressed), var(--shadow-key-pressed). */
-    private val neutralPressed = { t: TetherTokens -> t.css.bevelPressed + t.css.shadowKeyPressed }
+    /** g8592: was lit-strong / lit-soft bevels + var(--shadow-key), all retired: nothing left. */
+    private val neutral = { _: TetherTokens -> emptyList<CssShadow>() }
 
-    /** g8634: lit-faint ×2, inset -1px -1px contact/.1, 0 3px accent-side, 0 5px 7px -2px contact/.32. */
+    /** g8686: was var(--bevel-pressed), var(--shadow-key-pressed), both retired: nothing left. */
+    private val neutralPressed = { _: TetherTokens -> emptyList<CssShadow>() }
+
+    /** g8634: inset -1px -1px contact/.1, 0 3px accent-side, 0 5px 7px -2px contact/.32 (lit-faint ×2 retired). */
     private val primary = { t: TetherTokens ->
-        listOf(
-            inset(1.dp, t.litFaint), inset(0.dp, t.litFaint, x = 1.dp), inset((-1).dp, c(t, 0.1f), x = (-1).dp),
-            drop(3.dp, t.accentSide), drop(5.dp, c(t, 0.32f), blur = 7.dp, spread = (-2).dp),
-        )
+        listOf(inset((-1).dp, c(t, 0.1f), x = (-1).dp), drop(3.dp, t.accentSide), drop(5.dp, c(t, 0.32f), blur = 7.dp, spread = (-2).dp))
     }
 
-    /** g8711: inset 0 2px 3px press-shade, inset 0 -1px 0 lit-faint, 0 1px 0 accent-side, 0 1px 2px contact/.24. */
+    /** g8711: inset 0 2px 3px press-shade, 0 1px 0 accent-side, 0 1px 2px contact/.24 (lit-faint retired). */
     private val primaryPressed = { t: TetherTokens ->
-        listOf(inset(2.dp, t.pressShade, blur = 3.dp), inset((-1).dp, t.litFaint), drop(1.dp, t.accentSide), drop(1.dp, c(t, 0.24f), blur = 2.dp))
+        listOf(inset(2.dp, t.pressShade, blur = 3.dp), drop(1.dp, t.accentSide), drop(1.dp, c(t, 0.24f), blur = 2.dp))
     }
 
-    /** g8656: inset 0 1px 0 lit-faint, inset -1px -1px 0 contact/.1, 0 2px 0 brick-side, 0 4px 6px -2px contact/.3. */
+    /** g8656: inset -1px -1px 0 contact/.1, 0 2px 0 brick-side, 0 4px 6px -2px contact/.3 (lit-faint retired). */
     private val brick = { t: TetherTokens ->
-        listOf(inset(1.dp, t.litFaint), inset((-1).dp, c(t, 0.1f), x = (-1).dp), drop(2.dp, t.brickSide), drop(4.dp, c(t, 0.3f), blur = 6.dp, spread = (-2).dp))
+        listOf(inset((-1).dp, c(t, 0.1f), x = (-1).dp), drop(2.dp, t.brickSide), drop(4.dp, c(t, 0.3f), blur = 6.dp, spread = (-2).dp))
     }
 
     /** g8719: inset 0 2px 3px press-shade, 0 1px 0 brick-side, 0 1px 2px contact/.24. */
@@ -66,7 +66,7 @@ class KeyStyleTest {
 
     /** g8757: 0 1px 0 key-side. */
     private val flat = { t: TetherTokens -> listOf(drop(1.dp, t.keySide)) }
-    private val jump = { t: TetherTokens -> listOf(inset(1.dp, t.litSoft), drop(2.dp, t.charcoalSide)) + t.css.shadowFloating }
+    private val jump = { t: TetherTokens -> listOf(drop(2.dp, t.charcoalSide)) + t.css.shadowFloating }
     private val none = { _: TetherTokens -> emptyList<CssShadow>() }
     private val clear = { _: TetherTokens -> Color.Transparent }
     private val studioRadius = { _: TetherTokens -> 10.dp }

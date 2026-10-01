@@ -79,7 +79,6 @@ import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFiles
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherDialogSurface
 import com.tether.app.ui.components.TetherDialogText
@@ -308,7 +307,6 @@ private fun BrowserHeader(state: FileBrowserState, narrow: Boolean, studioPhone:
             IconKey(TetherIcons.X, "Close file browser", t.ink, onClose, iconSize = 19.dp)
         }
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(1.dp).background(t.line))
-        // `.file-browser-dialog > header::after`: the perforation over the header's bottom edge.
     }
 }
 

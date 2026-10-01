@@ -98,7 +98,7 @@ fun UsageTrack(
                     .padding(border?.width ?: 0.dp)
                     .fillMaxHeight()
                     .fillMaxWidth(width)
-                    .cssSurface(shape, fillColor, shadows = listOf(CssShadow(true, 0.dp, 1.dp, 0.dp, 0.dp, t.litSoft))),
+                    .cssSurface(shape, fillColor),
             )
         }
     }

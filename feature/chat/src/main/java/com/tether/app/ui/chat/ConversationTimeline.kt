@@ -41,6 +41,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -76,7 +77,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.oklabMix
 import com.tether.app.ui.components.rememberTetherHaptics
 import com.tether.app.ui.components.softShadow
@@ -494,11 +494,11 @@ private fun TimelineBubble(
                 // 95% graphite-raised over a blur(18px) backdrop: Compose cannot blur what is behind
                 // a node, so the backdrop is the well's floor the blur would average to.
                 background = t.graphiteRaised.copy(alpha = t.graphiteRaised.alpha * 0.95f).compositeOver(chatWellColor(t)),
-                border = CssBorder(1.dp, oklabMix(t.line, t.seamLip, 0.84f)),
+                // `color-mix(in oklab, var(--line) 84%, transparent)` (the module's .bubble at 887c222).
+                border = CssBorder(1.dp, oklabMix(t.line, Color.Transparent, 0.84f)),
                 shadows = listOf(
                     softShadow(y = 18.dp, blur = 42.dp, spread = (-24).dp, color = t.contact.copy(alpha = 0.55f)),
                     softShadow(y = 5.dp, blur = 16.dp, spread = (-10).dp, color = t.contact.copy(alpha = 0.28f)),
-                    hardShadow(y = 1.dp, color = t.litStrong, inset = true),
                 ),
             )
             .padding(

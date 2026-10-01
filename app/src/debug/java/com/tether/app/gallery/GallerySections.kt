@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.KeyClass
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeySize
-import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.SelectTriggerStyle
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.SpinningIcon
@@ -187,12 +186,11 @@ private fun WellsSection() {
 @Composable
 private fun SeamsSection() {
     val t = LocalTetherTokens.current
-    GalleryRow("horizontal seam · perf divider", wrap = false) {
+    GalleryRow("horizontal seam", wrap = false) {
         Column(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(24.dp).background(t.graphite))
             TetherSeam()
             Box(Modifier.fillMaxWidth().height(24.dp).background(t.mineral))
-            Box(Modifier.fillMaxWidth().background(t.graphite).padding(vertical = 8.dp)) { PerfDivider() }
         }
     }
     GalleryRow("vertical seam", wrap = false) {

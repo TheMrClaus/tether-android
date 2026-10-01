@@ -108,14 +108,11 @@ class TetherTypography internal constructor(val skin: TetherSkin) {
 
     /**
      * A fixed-verb key legend (`.button-primary`/`.button-secondary`: 0.8rem, 680 —
-     * globals.css:2307-2308) with the etched-legend transform and tracking from the tokens
-     * `--key-label-transform` / `--key-label-tracking` (globals.css:9204-9213; Studio: none / 0,
-     * studio.css:77-78). Never for user or provider content (globals.css:9200-9203).
+     * globals.css:2307-2308), no transform, tracking 0. The etched-legend tokens
+     * `--key-label-transform` / `--key-label-tracking` (Studio: none / 0) were retired at tether
+     * 887c222. Never for user or provider content (globals.css:9200-9203).
      */
-    val keyLabel: TetherLabelStyle = TetherLabelStyle(
-        uiRole(0.8f, 680).copy(letterSpacing = t.keyLabelTracking),
-        uppercase = t.keyLabelTransform == "uppercase",
-    )
+    val keyLabel: TetherLabelStyle = TetherLabelStyle(uiRole(0.8f, 680), uppercase = false)
 
     private fun uiRole(rem: Float, weight: Int, tracking: Float = 0f, lineHeight: Float? = null, tabular: Boolean = false) =
         role(ui, rem, weight, tracking, lineHeight, tabular)

@@ -373,7 +373,7 @@ private fun ExpandDock(onExpand: () -> Unit, modifier: Modifier = Modifier) {
                 val k = resolveKey(t, KeyClasses.IconButton, state)
                 ChromeLook(k.face, t.lineStrong, t.muted, k.shadows, t.radiusSm)
             } else {
-                ChromeLook(t.graphiteRaised, t.lineStrong, t.muted, t.css.edgeHighlight + t.css.shadowRaised, t.radiusSm)
+                ChromeLook(t.graphiteRaised, t.lineStrong, t.muted, t.css.shadowRaised, t.radiusSm)
             }
         }
     }

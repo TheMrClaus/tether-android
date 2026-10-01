@@ -28,9 +28,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -399,15 +396,7 @@ fun ProviderGlyph(glyph: String, modifier: Modifier = Modifier) {
             .size(32.dp)
             .background(t.keyFace, CircleShape)
             .border(1.dp, t.lineStrong, CircleShape)
-            .clip(CircleShape)
-            .drawBehind {
-                // Lit top bevel — a 1px light strip on the upper edge.
-                drawRect(
-                    color = t.litStrong,
-                    topLeft = Offset(0f, 0f),
-                    size = Size(size.width, 1.dp.toPx()),
-                )
-            },
+            .clip(CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(

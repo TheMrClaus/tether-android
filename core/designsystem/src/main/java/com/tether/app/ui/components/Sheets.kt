@@ -75,7 +75,7 @@ fun TetherSheetSurface(
     val type = LocalTetherTypography.current
     val r = t.radiusLg
     val shape = if (docked) RoundedCornerShape(topStart = r, topEnd = r) else RoundedCornerShape(r)
-    val shadows: List<CssShadow> = t.css.edgeHighlight + t.css.shadowModal
+    val shadows: List<CssShadow> = t.css.shadowModal
     BoxWithConstraints(modifier) {
         val boxWidth = if (docked) maxWidth else minOf(352.dp, maxWidth - 24.dp)
         Column(
@@ -123,7 +123,6 @@ fun TetherSheetSurface(
                     TetherKey(onClick = onClose, classes = KeyClasses.IconButton, icon = TetherIcons.X, iconSize = 16.dp, contentDescription = "Close")
                 }
             }
-            PerfDivider()
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             Column(
                 Modifier

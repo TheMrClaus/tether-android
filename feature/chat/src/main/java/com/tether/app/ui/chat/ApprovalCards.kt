@@ -873,11 +873,9 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
         !enabled -> t.lineStrong
         else -> t.keySide
     }
-    val shadows = when {
-        active -> t.css.bevelPressed
-        !enabled -> listOf(hardShadow(1.dp, t.keySide))
-        else -> listOf(hardShadow(1.dp, t.litStrong, inset = true), hardShadow(0.dp, t.litSoft, x = 1.dp, inset = true)) + t.css.shadowKey
-    }
+    // The rest / active bevels (--lit-*, --shadow-key, --bevel-pressed) were retired at tether
+    // 887c222; all were transparent in Studio, so only the disabled side-wall remains.
+    val shadows = if (!enabled && !active) listOf(hardShadow(1.dp, t.keySide)) else emptyList()
     Column(
         Modifier
             .fillMaxWidth()

@@ -36,7 +36,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.TetherChip
 import com.tether.app.ui.components.TetherRocker
 import com.tether.app.ui.theme.LocalReducedMotion
@@ -137,7 +136,6 @@ private fun GalleryControls(
             TetherRocker(checked = reduced, onCheckedChange = onReduced, contentDescription = "Reduced motion")
             Text("reduced motion", color = t.muted, style = type.chatBody)
         }
-        PerfDivider()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             sections.forEachIndexed { i, s -> TetherChip(s.title, { onJump(i) }) }
         }

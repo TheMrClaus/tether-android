@@ -78,7 +78,6 @@ import com.tether.app.ui.components.TetherExpandableBlock
 import com.tether.app.ui.components.expandPeek
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -887,9 +886,10 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
 
 /**
  * `.md-copy-btn` under the material layer (`:root .md-copy-btn`, globals.css:8598): a key face
- * (1px `--key-side`, `--key-face`, top/left bevels + `--shadow-key`), `--radius-sm`, 44×44 at
- * 0.85 opacity on touch (`@media (hover: none)`); pressed travels `--press-travel` onto
- * `--key-face-deep` with the pressed bevel. Lucide Copy / Check at 14px.
+ * (1px `--key-side`, `--key-face`), `--radius-sm`, 44×44 at 0.85 opacity on touch
+ * (`@media (hover: none)`); pressed turns `--key-face-deep`. The bevels, `--shadow-key` and
+ * `--press-travel` were retired at tether 887c222 (transparent / 0 in Studio). Lucide Copy /
+ * Check at 14px.
  */
 @Composable
 private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -897,14 +897,6 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = M
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val shape = RoundedCornerShape(t.radiusSm)
-    val shadows = if (pressed) {
-        t.css.bevelPressed + t.css.shadowKeyPressed
-    } else {
-        listOf(
-            hardShadow(1.dp, t.litStrong, inset = true),
-            hardShadow(0.dp, t.litSoft, x = 1.dp, inset = true),
-        ) + t.css.shadowKey
-    }
     val label = if (copied) "Copied" else "Copy code"
     Box(
         modifier
@@ -914,7 +906,6 @@ private fun CopyKey(copied: Boolean, onClick: () -> Unit, modifier: Modifier = M
                 shape,
                 background = if (pressed) t.keyFaceDeep else t.keyFace,
                 border = CssBorder(1.dp, t.keySide),
-                shadows = shadows,
             )
             .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },

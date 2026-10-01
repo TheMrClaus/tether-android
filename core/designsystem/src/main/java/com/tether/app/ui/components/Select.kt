@@ -114,10 +114,7 @@ fun TetherSelectTrigger(
             .then(if (style == SelectTriggerStyle.Field) Modifier.fillMaxWidth() else Modifier)
             .heightIn(min = TetherDimens.touchTargetDp)
             .focusRing(focused, shape, t.violet)
-            .cssSurface(
-                shape, face, CssBorder(1.dp, t.keySide),
-                listOf(hardShadow(1.dp, t.litStrong, inset = true)) + t.css.shadowKeySm,
-            )
+            .cssSurface(shape, face, CssBorder(1.dp, t.keySide))
             .padding(horizontal = t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (style == SelectTriggerStyle.Field) Arrangement.SpaceBetween else Arrangement.spacedBy(t.css.spaceXs),

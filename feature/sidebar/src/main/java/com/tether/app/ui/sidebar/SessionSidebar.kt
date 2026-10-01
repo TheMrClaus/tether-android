@@ -79,7 +79,6 @@ import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.currentLayoutClass
-import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.SidebarSort
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -580,9 +579,8 @@ private fun BankKey(
     val h = (if (phone) 2.75f else 2f).rem
     val shape = RoundedCornerShape(0.4f.rem)
     val shadows = if (on) listOf(
-        hardShadow(1.dp, t.litStrong, inset = true),
         com.tether.app.ui.theme.CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = t.violetStrong),
-    ) + t.css.shadowKeySm else emptyList()
+    ) else emptyList()
     Box(
         Modifier
             .size(w, h)
@@ -693,7 +691,7 @@ private fun SessionFilter(query: String, onChange: (String) -> Unit) {
         Modifier
             .padding(bottom = t.css.spaceXs)
             .fillMaxWidth()
-            .cssSurface(shape, t.mineralDeep, CssBorder(1.dp, t.lineStrong), t.css.well)
+            .cssSurface(shape, t.mineralDeep, CssBorder(1.dp, t.lineStrong))
             .padding(horizontal = t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -1140,7 +1138,6 @@ private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
-    val lip = t.seamLip
     Row(
         Modifier
             .fillMaxWidth()

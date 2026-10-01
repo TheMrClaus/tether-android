@@ -203,7 +203,7 @@ internal fun ComposerWell(
             RoundedCornerShape(16.dp),
             t.dangerWash,
             CssBorder(1.dp, if (inputFocused) t.danger else t.dangerEdge),
-            t.css.well + ring,
+            ring, // `--well` (transparent in Studio) was retired at tether 887c222
         )
     } else run {
         val shadow = if (inputFocused) {

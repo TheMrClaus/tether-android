@@ -216,9 +216,6 @@ class GeneratedTokensTest {
             assertEquals(skin.id, cssColor(json.getValue("--tint-md")), t.tintMd)
             assertEquals(skin.id, cssLengthDp(json.getValue("--radius-key"))!!, t.radiusKey.value, 1e-4f)
         }
-        // Studio keys carry no drop shadow in either lighting (--shadow-key is transparent).
-        assertEquals(0f, tokensFor(TetherSkin.Studio).shadowElevation.value, 0f)
-        assertEquals(0f, tokensFor(TetherSkin.StudioDark).shadowElevation.value, 0f)
         assertNotNull(GeneratedTokens.Studio.fontUi)
     }
 }

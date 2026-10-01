@@ -63,7 +63,6 @@ class TetherTokens internal constructor(
     // Seams
     val line: Color = css.line
     val lineStrong: Color = css.lineStrong
-    val seamLip: Color = css.seamLip
 
     // Text
     val white: Color = css.white
@@ -120,9 +119,6 @@ class TetherTokens internal constructor(
     // Key geometry
     val radiusKey: Dp = css.radiusKey
 
-    /** Uppercase key-legend tracking in em. */
-    val keyTracking: Float = css.keyLabelTracking.value
-
     // Radii
     val radiusSm: Dp = css.radiusSm
     val radiusMd: Dp = css.radiusMd
@@ -145,20 +141,8 @@ class TetherTokens internal constructor(
     val questionInk: Color = css.questionInk
     val dropOverlay: Color = css.dropOverlay
 
-    // Depth / bevels (--lit-* / --press-shade / --wear-*)
-    val litStrong: Color = css.litStrong
-    val litSoft: Color = css.litSoft
-    val litFaint: Color = css.litFaint
+    // Depth (the Machine-era --lit-* / --wear-* bevels were retired at tether 887c222)
     val pressShade: Color = css.pressShade
-    val wearHi: Color = css.wearHi
-    val wearLo: Color = css.wearLo
-
-    /**
-     * Soft drop-shadow elevation for a resting key: the y offset of --shadow-key's second
-     * (soft) layer; the first "0 Npx 0 key-side" layer is the side wall TetherKey draws itself.
-     * 0 when the skin has no key shadow (both Studio skins).
-     */
-    val shadowElevation: Dp = css.shadowKey.filter { !it.inset }.getOrNull(1)?.offsetY ?: 0.dp
 
     private val hash: Int = 31 * skin.hashCode() + css.hashCode()
 

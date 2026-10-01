@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -74,7 +73,6 @@ import com.tether.app.protocol.LogEntry
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.PerfDivider
 import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSeam
@@ -239,15 +237,13 @@ private fun LogHeader(narrow: Boolean, onRefresh: () -> Unit, onClose: () -> Uni
             }
             TetherSeam()
         }
-        // `.log-dialog > header::after`: the perforation over the header's bottom edge.
-        PerfDivider(Modifier.align(Alignment.BottomStart).offset(y = (-1).dp))
     }
 }
 
 @Composable
 private fun LogFooter(narrow: Boolean, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
-    // Footer edge: `border-top` then the lit lip inside it (`inset 0 1px 0 var(--seam-lip)`).
+    // Footer edge: `border-top` (the lit `--seam-lip` inside it was retired, transparent in Studio).
     TetherSeam()
     Row(
         Modifier
