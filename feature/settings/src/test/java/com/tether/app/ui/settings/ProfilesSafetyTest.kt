@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ProvidersInFlight
+import com.tether.app.client.ProvidersWriteStatus
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersRefusal
 import com.tether.app.ui.settings.ProfileFixtures.ORIGIN
@@ -471,5 +472,49 @@ class ProfilesSafetyTest {
             frame(withPath.replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), WORK.replace("Claude Code (work)", "Theirs"), zai().replace("\"enabled\":false", "\"enabled\":true")),
             w.frames()[1],
         )
+    }
+
+    // ---- r4: one in-flight guard, and it recovers from a refused write ------------------------------
+
+    /** The server refuses W1 (an error, no broadcast): after the timeout and the re-request's reply, the next edit IS sent, and the notice says W1 was not saved. */
+    @Test fun aRefusedWriteRecoversAfterTheTimeoutAndSaysItWasNotSaved() {
+        val w = recording()
+        show(writer = w)
+        tap(ProfileTags.switch("zai"))
+        assertEquals(1, w.writes.size)
+        typeAndDone(ProfileTags.field("gemini", ProfileTags.LABEL), "G")
+        assertEquals(1, w.writes.size)
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
+        // The timeout passes: the client asks for the registry again; the section says it is unconfirmed.
+        w.now += ProvidersInFlight.TIMEOUT_MS
+        w.tick()
+        assertEquals(1, w.reRequests)
+        compose.mainClock.advanceTimeBy(ProvidersInFlight.TIMEOUT_MS + 100)
+        compose.waitForIdle()
+        assertTrue(texts().contains(ProfileRows.UNCONFIRMED))
+        // The reply: the registry as it was (the server did not take W1).
+        broadcast(profiles(withPath, WORK, zai()))
+        assertTrue(texts().contains(ProfileRows.LAST_NOT_SAVED))
+        // The next edit is sent.
+        tag(ProfileTags.field("gemini", ProfileTags.LABEL)).performImeAction()
+        waitForWrites(w, 2)
+        assertEquals(frame(withPath.replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), WORK, zai()), w.frames()[1])
+    }
+
+    /** The app's editor has no guard of its own: the client's refusal is the only one (a fresh binding never refuses by itself). */
+    @Test fun theEditorDefersToTheClientsGuard() {
+        var clientSays: ProvidersRefusal? = null
+        val list = ProfileFixtures.list(profiles(withPath, WORK, zai()))
+        val client = object : ProvidersWriter {
+            val sent = mutableListOf<com.tether.app.client.ProvidersWrite>()
+            override fun setProviders(write: com.tether.app.client.ProvidersWrite, origin: String): ProvidersRefusal? = clientSays ?: null.also { sent += write }
+        }
+        val b = ProvidersBinding(list, ORIGIN, client)
+        assertEquals(ProvidersSend.Sent, b.send(com.tether.app.client.ProfileEdit.Label("zai", "A")))
+        // A second write from the same (not yet updated) list: the editor sends it on; only the client decides.
+        assertEquals(ProvidersSend.Sent, b.send(com.tether.app.client.ProfileEdit.Label("zai", "B")))
+        clientSays = ProvidersRefusal.InFlight
+        assertEquals(ProvidersSend.Refused(ProvidersRefusal.InFlight), b.send(com.tether.app.client.ProfileEdit.Label("zai", "C")))
+        assertEquals(2, client.sent.size)
     }
 }

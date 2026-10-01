@@ -66,6 +66,7 @@ import com.tether.app.client.SecretText
 import com.tether.app.client.EnvChange
 import com.tether.app.client.RiskyEnvKeys
 import com.tether.app.client.RunsSnapshot
+import com.tether.app.client.ProvidersWriteStatus
 import com.tether.app.client.jsTrim
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -234,12 +235,22 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             notice = { id, message -> notices = notices + (id to message) },
         )
     }
+    // r4: the client's guard says what became of the last write (one source of truth).
     LaunchedEffect(lastSent) {
-        val sent = lastSent ?: return@LaunchedEffect
+        lastSent ?: return@LaunchedEffect
         delay(com.tether.app.client.ProvidersInFlight.TIMEOUT_MS)
-        val newest = binding.latest()
-        // r3: still waiting means no list holds the write yet (another client's list does not count).
-        if (newest != null && newest.epoch == sent.first && binding.inFlight.waiting(newest)) notices = notices + ("" to ProfileRows.UNCONFIRMED)
+        if (binding.writer.status() is ProvidersWriteStatus.Waiting) notices = notices + ("" to ProfileRows.UNCONFIRMED)
+    }
+    // Each new list may end the wait: saved (the notice goes) or not saved (it says so).
+    LaunchedEffect(list?.epoch, list?.generation) {
+        if (lastSent == null) return@LaunchedEffect
+        when (val st = binding.writer.status()) {
+            is ProvidersWriteStatus.Done -> notices = when (st.outcome) {
+                ProvidersWriteStatus.Outcome.NotSaved -> notices + ("" to ProfileRows.LAST_NOT_SAVED)
+                else -> notices - ""
+            }
+            else -> Unit
+        }
     }
     val caption = buildAnnotatedString {
         val code = SpanStyle(fontFamily = type.mono)

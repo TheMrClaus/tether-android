@@ -682,6 +682,9 @@ interface TetherClient {
      */
     fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? = ProvidersRefusal.NotConnected
 
+    /** ta-q6p r4: what became of the last [setProviders] write, read against the newest list (the client's guard). */
+    fun providersWriteStatus(): ProvidersWriteStatus = ProvidersWriteStatus.Idle
+
     // ------------------------------------------------------------------
     // T5.2 resume: defaults keep other implementations (test doubles) compiling.
     // ------------------------------------------------------------------

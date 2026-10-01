@@ -9,7 +9,7 @@ import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
 import com.tether.app.client.ProvidersWrite
 import com.tether.app.client.ProvidersBuild
-import com.tether.app.client.ProvidersInFlight
+import com.tether.app.client.ProvidersWriteStatus
 import com.tether.app.client.ProvidersRefusal
 import com.tether.app.client.RunsSnapshot
 import com.tether.app.client.RiskyEnvKeys
@@ -23,8 +23,14 @@ import com.tether.app.client.jsTrim
  * for [origin], built from a list that came on that socket, with no other write in flight, and
  * only when it passes [ProvidersPatch.refusal] against its newest list. Null: sent.
  */
-fun interface ProvidersWriter {
+interface ProvidersWriter {
     fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal?
+
+    /**
+     * r4: what became of the last write (the client's own in-flight guard, the one source of
+     * truth: waiting, overdue, saved or not saved).
+     */
+    fun status(): ProvidersWriteStatus = ProvidersWriteStatus.Idle
 
     /** No client (previews, a signed-out frame): nothing is ever sent. */
     object None : ProvidersWriter {
@@ -48,8 +54,9 @@ sealed interface ProvidersSend {
  *
  * Every write is built when it is sent, from [latest]: the client's NEWEST list ([fresh]), not the
  * composed one (which may be a frame behind), so an edit made while another client's broadcast
- * landed applies to that broadcast and never undoes it. r2: [inFlight] refuses a write while the
- * last one sent from here still waits for its broadcast (the client applies the same rule).
+ * landed applies to that broadcast and never undoes it. r4: a write while the last one still waits
+ * for its broadcast is refused by the client alone ([ProvidersWriter.status] says what became of
+ * it), so there is one in-flight guard and it recovers from a refused write.
  */
 data class ProvidersBinding(
     val list: ProvidersList?,
@@ -57,7 +64,6 @@ data class ProvidersBinding(
     val writer: ProvidersWriter = ProvidersWriter.None,
     /** The client's newest list, read when a write is built. Null: [list] is the newest (tests, previews). */
     val fresh: (() -> ProvidersList?)? = null,
-    val inFlight: ProvidersInFlight = ProvidersInFlight(),
 ) {
     /** The newest list of this binding's server, or null without one. */
     fun latest(): ProvidersList? = if (origin == null) null else fresh?.invoke() ?: list
@@ -81,9 +87,8 @@ data class ProvidersBinding(
             ProvidersBuild.NoChange -> return ProvidersSend.NoChange
             is ProvidersBuild.Refused -> return ProvidersSend.Refused(build.reason)
         }
-        (ProvidersPatch.refusal(write, newest) ?: inFlight.refusal(newest))?.let { return ProvidersSend.Refused(it) }
+        ProvidersPatch.refusal(write, newest)?.let { return ProvidersSend.Refused(it) }
         writer.setProviders(write, o)?.let { return ProvidersSend.Refused(it) }
-        inFlight.sent(write, newest)
         return ProvidersSend.Sent
     }
 
@@ -359,6 +364,7 @@ object ProfileRows {
     const val NOT_SAVED_INVALID = "Not saved: the server would refuse this value."
     const val CHANGED_WHILE_CONFIRMING = "Not saved: what this profile runs changed while you were confirming. Review it and try again."
     const val UNCONFIRMED = "The server hasn't confirmed the last change. Check the list before you edit again."
+    const val LAST_NOT_SAVED = "The last change wasn't saved: the server didn't take it. Check the list and try again."
 
     fun notSaved(reason: ProvidersRefusal): String = when (reason) {
         ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT

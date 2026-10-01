@@ -513,6 +513,9 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
 
     private var pending: Pending? = null
 
+    /** r4: how the last write ended, once its guard lifted (null: none yet, or one is waiting). */
+    private var outcome: ProvidersWriteStatus.Outcome? = null
+
     /** Records [write], sent, as built from [base]: the profiles it changes, as they should read once it lands. */
     @Synchronized
     fun sent(write: ProvidersWrite, base: ProvidersList?) {
@@ -526,19 +529,34 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
         }
         for (o in before) idOf(o)?.let { if (it !in sentIds) expected[it] = null }
         pending = Pending(write.epoch, expected, now())
+        outcome = null
     }
 
     /** Whether a write is still waiting against [newest] (lifting the guard when it no longer is). */
     @Synchronized
     fun waiting(newest: ProvidersList?): Boolean {
         val p = pending ?: return false
-        val lifted = newest != null && (
-            newest.epoch != p.epoch ||
-                p.expected.all { (id, exp) -> newest.raws.firstOrNull { (it["id"] as? JsonPrimitive)?.content == id } == exp } ||
-                p.askedAt?.let { newest.generation > it } == true
-            )
-        if (lifted) pending = null
-        return !lifted
+        if (newest == null) return true
+        val held = p.expected.all { (id, exp) -> newest.raws.firstOrNull { (it["id"] as? JsonPrimitive)?.content == id } == exp }
+        outcome = when {
+            newest.epoch != p.epoch -> ProvidersWriteStatus.Outcome.Unknown
+            held -> ProvidersWriteStatus.Outcome.Saved
+            // r4: the reply to the overdue re-request does not hold it: the server did not take it.
+            p.askedAt?.let { newest.generation > it } == true -> ProvidersWriteStatus.Outcome.NotSaved
+            else -> return true
+        }
+        pending = null
+        return false
+    }
+
+    /** r4: the write's state against [newest] (lifting the guard if it can): waiting (and whether overdue), or how it ended. */
+    @Synchronized
+    fun status(newest: ProvidersList?): ProvidersWriteStatus {
+        if (waiting(newest)) {
+            val p = pending!!
+            return ProvidersWriteStatus.Waiting(overdue = p.askedAt != null || now() - p.at >= timeoutMs)
+        }
+        return outcome?.let { ProvidersWriteStatus.Done(it) } ?: ProvidersWriteStatus.Idle
     }
 
     @Synchronized
@@ -559,6 +577,27 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
 
     companion object {
         const val TIMEOUT_MS = 10_000L
+    }
+}
+
+/** r4: what became of the last `set-providers` write the client sent (one source of truth: the client's guard). */
+sealed interface ProvidersWriteStatus {
+    data object Idle : ProvidersWriteStatus
+
+    /** Sent, and no list holds it yet. [overdue]: past the timeout (the client asked for the list again). */
+    data class Waiting(val overdue: Boolean) : ProvidersWriteStatus
+
+    data class Done(val outcome: Outcome) : ProvidersWriteStatus
+
+    enum class Outcome {
+        /** A list holds it. */
+        Saved,
+
+        /** The reply to the re-request does not hold it: the server refused it. */
+        NotSaved,
+
+        /** The socket changed before it was seen. */
+        Unknown,
     }
 }
 

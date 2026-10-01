@@ -198,16 +198,18 @@ fun SettingsDialog(
     // write goes through the client's set-providers check, built from its newest list.
     val profiles by client.providerProfiles.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestProviders() }
-    val providersWriter = remember(client) { ProvidersWriter { write, o -> client.setProviders(write, o) } }
+    val providersWriter = remember(client) {
+        object : ProvidersWriter {
+            override fun setProviders(write: com.tether.app.client.ProvidersWrite, origin: String) = client.setProviders(write, origin)
+            override fun status() = client.providersWriteStatus()
+        }
+    }
     val freshProfiles: () -> ProvidersList? = remember(client) { { client.providerProfiles.value } }
-    // r2: the editor's own in-flight guard lives as long as the client (the client applies the same rule).
-    val providersInFlight = remember(client) { com.tether.app.client.ProvidersInFlight() }
     val providersBinding = ProvidersBinding(
         list = profiles?.takeIf { signedIn },
         origin = origin,
         writer = providersWriter,
         fresh = freshProfiles,
-        inFlight = providersInFlight,
     )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {

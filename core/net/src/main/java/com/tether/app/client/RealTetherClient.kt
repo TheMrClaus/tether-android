@@ -3800,6 +3800,8 @@ class RealTetherClient(
         }
     }
 
+    override fun providersWriteStatus(): ProvidersWriteStatus = synchronized(lock) { providersInFlight.status(sidebarSync.providerProfiles.value) }
+
     /** r3: the sent write is overdue: ask this socket for the registry; the reply lifts the in-flight guard. */
     private fun askForOverdueProviders() {
         synchronized(lock) {

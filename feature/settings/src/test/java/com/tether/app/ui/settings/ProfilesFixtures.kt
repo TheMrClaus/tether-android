@@ -3,6 +3,8 @@ package com.tether.app.ui.settings
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
 import com.tether.app.client.ProvidersRefusal
+import com.tether.app.client.ProvidersInFlight
+import com.tether.app.client.ProvidersWriteStatus
 import com.tether.app.client.ProvidersWrite
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.TetherJson
@@ -57,6 +59,19 @@ class RecordingProvidersWriter(
     private val newest: () -> ProvidersList?,
     private val reply: (ProvidersWrite) -> Unit = {},
 ) : ProvidersWriter {
+    /** The test's clock for the in-flight guard (r4: the same [ProvidersInFlight] the client runs). */
+    var now = 1_000L
+    private val inFlight = ProvidersInFlight(now = { now })
+
+    /** How many times the client would have asked for the registry again (the overdue re-request). */
+    var reRequests = 0
+
+    /** What the client's scheduled timeout does: an overdue write asks for the list again. */
+    fun tick() {
+        if (inFlight.overdue(newest())) reRequests++
+    }
+
+    override fun status(): ProvidersWriteStatus = inFlight.status(newest())
     val writes = mutableListOf<Pair<ProvidersWrite, String>>()
     val refused = mutableListOf<ProvidersRefusal>()
 
@@ -67,12 +82,16 @@ class RecordingProvidersWriter(
     fun frames(): List<JsonObject> = writes.map { ProfileFixtures.json(it.first.message.encode()) }
 
     override fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? {
-        val why = refuseWith ?: ProvidersPatch.refusal(write, newest())
+        val list = newest()
+        // As RealTetherClient.setProviders: the send rule, then the in-flight guard (overdue asks again).
+        tick()
+        val why = refuseWith ?: ProvidersPatch.refusal(write, list) ?: inFlight.refusal(list)
         if (why != null) {
             refused += why
             return why
         }
         writes += write to origin
+        inFlight.sent(write, list)
         reply(write)
         return null
     }

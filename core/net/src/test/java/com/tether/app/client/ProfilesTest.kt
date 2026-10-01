@@ -374,9 +374,11 @@ class ProfilesTest {
         // client's broadcast (a newer list without our write) does NOT lift it.
         val theirs = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},$work]", generation = 2)
         assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(theirs))
+        assertEquals(ProvidersWriteStatus.Waiting(overdue = false), inFlight.status(theirs))
         // The list that holds our write does (the canonical key order may differ).
         val ours = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},${work.replace("\"label\":\"Work\",", "").replace("\"enabled\":false", "\"enabled\":false,\"label\":\"W\"")}]", generation = 3)
         assertNull(inFlight.refusal(ours))
+        assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.Saved), inFlight.status(ours))
     }
 
     @Test fun anOverdueWriteIsAskedForAndTheReplyLiftsIt() {
@@ -389,7 +391,10 @@ class ProfilesTest {
         assertFalse(inFlight.overdue(two))
         // Still refused until the reply (the next list folded) lands, whatever it says.
         assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
+        assertEquals(ProvidersWriteStatus.Waiting(overdue = true), inFlight.status(two))
+        // r4: the reply does not hold the write: the server did not take it.
         assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 2)))
+        assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.NotSaved), inFlight.status(list("[$gemini,$work]", generation = 2)))
         // A new socket lifts it as well.
         inFlight.sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two)
         assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 3, epoch = 1)))
@@ -530,15 +535,21 @@ class ProfilesTest {
         val newest = h.client.providerProfiles.value!!
         assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!, origin()))
         h.expectFrame("set-providers")
-        // The server never broadcasts it: at the timeout the client asks for the registry.
+        ws.send("""{"type":"error","message":"each profile entry needs a valid id"}""")
+        // r4: the server REFUSES it (an error, no broadcast); at the timeout the client asks for the registry.
         h.now.addAndGet(ProvidersInFlight.TIMEOUT_MS)
         h.scheduler.await { it == ProvidersInFlight.TIMEOUT_MS }.fire()
         assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
         assertEquals(ProvidersRefusal.InFlight, h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "X"))!!, origin()))
-        // The reply (the server refused the write: the list is as it was) lifts it.
+        assertEquals(ProvidersWriteStatus.Waiting(overdue = true), h.client.providersWriteStatus())
+        // The reply (the server refused the write: the list is as it was) lifts it, and says it was not saved.
         ws.send("""{"type":"providers","profiles":[$gemini,$work]}""")
         h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
-        assertNull(h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
+        assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.NotSaved), h.client.providersWriteStatus())
+        // The next edit IS sent.
+        val next = ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!
+        assertNull(h.client.setProviders(next, origin()))
+        assertEquals(sent(next), h.expectFrame("set-providers"))
     }
 
     @Test fun aSignOutDropsTheList() {
