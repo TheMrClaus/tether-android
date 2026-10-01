@@ -641,6 +641,19 @@ class FakeTetherClient : TetherClient {
         _projections.update { it + (id to SessionProjection(tetherSessionId = id, provider = provider, cwd = dir)) }
     }
 
+    /** ta-895: the demo has no catalog, so the picker's base-provider rows create as before. */
+    override fun createNewSession(
+        choice: com.tether.app.client.NewSessionChoice,
+        cwd: String?,
+        expectedOrigin: String?,
+    ): com.tether.app.client.NewSessionResult {
+        if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.NewSessionResult.NotLive
+        val frame = com.tether.app.client.NewSessionGuard.resolve(choice, null, providers.value, cwd)
+            ?: return com.tether.app.client.NewSessionResult.NotOffered
+        createSession(frame.provider, frame.cwd, null)
+        return com.tether.app.client.NewSessionResult.Sent
+    }
+
     override fun resumeHistory(historyId: String, cwd: String) {}
     override fun discover(cwd: String) {}
     override fun browse(cwd: String?) {

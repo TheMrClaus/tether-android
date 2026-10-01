@@ -2,7 +2,6 @@ package com.tether.app.ui
 
 import android.content.Context
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -568,33 +567,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
 
-    if (showProviderPicker) {
-        TetherDialog(onDismiss = { showProviderPicker = false }, title = "New session") {
-            providers.forEach { provider ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = provider.available) {
-                            showProviderPicker = false
-                            vm.createSession(provider.id)
-                        }
-                        .heightIn(min = TetherDimens.touchTargetDp)
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ProviderGlyph(provider.glyph)
-                    Text(
-                        provider.label,
-                        color = if (provider.available) t.ink else t.faint,
-                        fontFamily = Manrope,
-                        fontWeight = TetherWeights.label,
-                        fontSize = 13.6.sp,
-                    )
-                }
-            }
-        }
-    }
+    // ta-895: the same New session picker as the drawer's (every catalog row, created on the row picked).
+    if (showProviderPicker) com.tether.app.ui.NewSessionDialog(vm, onDismiss = { showProviderPicker = false })
 
     renaming?.let { target ->
         var name by remember(target.id) { mutableStateOf(target.name) }

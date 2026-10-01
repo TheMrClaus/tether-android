@@ -60,7 +60,6 @@ fun SessionDrawer(
     val sessionOrders by client.sessionOrders.collectAsStateWithLifecycle()
     val remoteSeen by client.remoteSeen.collectAsStateWithLifecycle()
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
-    val providers by client.providers.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
     // T5.3: the debounced workspace content search (use-tether.ts searchResults).
     val contentHits by client.searchResults.collectAsStateWithLifecycle()
@@ -198,12 +197,8 @@ fun SessionDrawer(
     )
 
     // Outside the sidebar's token scope: the web raises these outside `.session-sidebar`.
-    if (providerPicker) {
-        ProviderPickerDialog(providers, onDismiss = { providerPicker = false }) { provider ->
-            providerPicker = false
-            vm.createSession(provider)
-        }
-    }
+    // ta-895: every catalog row (each Claude account, each profile), created on the row picked.
+    if (providerPicker) NewSessionDialog(vm, onDismiss = { providerPicker = false })
     if (folderPicker) {
         FolderPickerDialog(
             directories = directories,

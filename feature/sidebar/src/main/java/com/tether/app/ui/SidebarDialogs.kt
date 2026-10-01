@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.protocol.model.DirectoryListing
-import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.push.PushScope
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StatusDot
@@ -60,51 +59,9 @@ import com.tether.app.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
 // The drawer's interim dialogs, kept from the pre-parity drawer until their web surfaces land:
-// the provider picker (T8.1 new-session composer), the folder picker (T8.2) and the settings
-// sheet (T10.1). The web renders these OUTSIDE `.session-sidebar`, so the host composes them
+// the folder picker (T8.2) and the settings sheet (T10.1); the New session picker is
+// NewSessionPicker.kt (ta-895, until T8.1's draft composer). The web renders these OUTSIDE `.session-sidebar`, so the host composes them
 // outside the sidebar's token scope.
-
-/** Interim provider picker for "New session" (T8.1 replaces it with the draft composer). */
-@Composable
-internal fun ProviderPickerDialog(providers: List<ProviderInfo>, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    val t = LocalTetherTokens.current
-    TetherDialog(onDismiss = { onDismiss() }, title = "New session") {
-        providers.forEach { provider ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = provider.available) {
-                        onDismiss()
-                        onCreate(provider.id)
-                    }
-                    .heightIn(min = TetherDimens.touchTargetDp)
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                ProviderGlyph(provider.glyph)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        provider.label,
-                        color = if (provider.available) t.white else t.faint,
-                        fontFamily = Manrope,
-                        fontWeight = TetherWeights.name,
-                        fontSize = 13.6.sp,
-                    )
-                    if (!provider.available) {
-                        Text(
-                            "Not configured on this server",
-                            color = t.faint,
-                            fontFamily = Manrope,
-                            fontSize = 11.5.sp,
-                        )
-                    }
-                }
-                Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
-            }
-        }
-    }
-}
 
 /** Interim folder picker for "Add workspace" (T8.2 replaces it with folder-picker-dialog). */
 @Composable
