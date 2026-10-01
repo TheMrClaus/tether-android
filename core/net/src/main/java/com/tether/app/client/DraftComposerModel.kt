@@ -80,7 +80,12 @@ enum class DraftSubmitResult {
  *   [DraftForm.replyIsFresh]); a resume's reply (no token) or a stale create's never is. An `error`
  *   unlocks only under the same two rules ([onCreateError]); any other error leaves it locked.
  * - **Link drop**: the socket the create went out on closing, or being replaced ([onLink]), returns
- *   the draft with its text, and says so; its reply can never arrive on another socket.
+ *   the draft with its text, and says so; its reply can never arrive on another socket. r2: unless
+ *   that socket already answered it ([TetherClient.createReply], recorded with the frame): then the
+ *   answer stands, whichever collector runs first, and a reply carried on a later socket never
+ *   completes it ([answers]).
+ * - **No answer** (r2): after [CREATE_REPLY_TIMEOUT_MS] the draft unlocks, keeps its text and says
+ *   the session may already exist; the create is never resent.
  * - **First message**: after the matched `created`, the prompt goes through the client's own send
  *   paths ([TetherClient.sendFirst], durable and bound to the create's server and socket; with attachments [TetherClient.sendAttachments], once the
  *   new session is live on the same socket). If it cannot go out, the prompt is saved as the new
