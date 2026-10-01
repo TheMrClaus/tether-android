@@ -339,6 +339,26 @@ interface TetherClient {
     fun requestProviderCatalog(): Boolean = false
 
     /**
+     * ta-895: [providerCatalog] was delivered by the CURRENT socket (this connection, this server).
+     * False from the moment the socket goes, a new one opens or the server changes, until that
+     * socket's own `providers-snapshot` lands. The New session picker draws profile rows only from
+     * a live catalog.
+     */
+    val providerCatalogLive: StateFlow<Boolean> get() = NO_CATALOG_LIVE
+
+    /**
+     * ta-895: start a new session on the catalog row the New session picker drew ([choice]), in
+     * [cwd]. Call it ONLY from a tap on that row. Under the client's lock, in order: a live,
+     * handshaken socket of a running client; the row drawn for THIS server ([expectedOrigin], the
+     * [consentOrigin] the picker was composed with); the row resolved again against the catalog
+     * THIS socket delivered ([NewSessionGuard.resolve]: the same key, engine and profile, offered
+     * and submittable; with no live catalog, a base provider's default row only); then `create`
+     * (with the row's `profileId`, when it has one) enqueued on that socket. Otherwise nothing is
+     * sent: never another profile, and never the default profile in place of one that went.
+     */
+    fun createNewSession(choice: NewSessionChoice, cwd: String?, expectedOrigin: String?): NewSessionResult = NewSessionResult.NotConnected
+
+    /**
      * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only when drawn for
      * the server the outbox belongs to ([expectedOrigin]; r2), for a listed session that is neither
      * read-only, handed off nor archived, with a mention the current catalog offers it
@@ -722,6 +742,7 @@ private val NO_SERVER_URL: StateFlow<String?> = MutableStateFlow(null)
 private val NO_UNCONFIRMED: StateFlow<Set<String>> = MutableStateFlow(emptySet())
 private val NO_SYNC_STATES: StateFlow<Map<String, SessionSync>> = MutableStateFlow(emptyMap())
 private val NO_PROVIDER_CATALOG: StateFlow<List<ProviderCatalogEntry>> = MutableStateFlow(emptyList())
+private val NO_CATALOG_LIVE: StateFlow<Boolean> = MutableStateFlow(false)
 private val NO_CODEX_CONTROLS: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = MutableStateFlow(emptyMap())
 private val NO_OPENCODE_CONTROLS: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = MutableStateFlow(emptyMap())
 private val SETTINGS_LOADED: StateFlow<Boolean> = MutableStateFlow(true)

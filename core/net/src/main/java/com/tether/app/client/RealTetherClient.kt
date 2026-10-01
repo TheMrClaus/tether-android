@@ -430,6 +430,15 @@ class RealTetherClient(
 
     /** T7.3: the `providers-snapshot` catalog of the current server (the `@` Agents). */
     private val providerCatalogState = MutableStateFlow<List<ProviderCatalogEntry>>(emptyList())
+
+    /**
+     * ta-895: the connection [epoch] and origin whose socket delivered [providerCatalogState] (-1 /
+     * null: none). A profile id goes out on `create` only from the catalog of the CURRENT socket
+     * ([liveCatalogLocked]). Guarded by [lock].
+     */
+    private var catalogEpoch = -1L
+    private var catalogOrigin: String? = null
+    private val providerCatalogLiveState = MutableStateFlow(false)
     private val workspaceRootState = MutableStateFlow<String?>(null)
     private val hiddenAgentSessionCountState = MutableStateFlow<Int?>(null)
 
@@ -477,6 +486,7 @@ class RealTetherClient(
     override val sessions: StateFlow<List<AgentSession>> = sessionsState
     override val providers: StateFlow<List<ProviderInfo>> = providersState
     override val providerCatalog: StateFlow<List<ProviderCatalogEntry>> = providerCatalogState
+    override val providerCatalogLive: StateFlow<Boolean> = providerCatalogLiveState
     override val workspaceRoot: StateFlow<String?> = workspaceRootState
     override val hiddenAgentSessionCount: StateFlow<Int?> = hiddenAgentSessionCountState
     override val projections: StateFlow<Map<String, SessionProjection>> = sessionStore.projections
@@ -986,7 +996,13 @@ class RealTetherClient(
         sessionsState.value = emptyList()
         synchronized(lock) { listedSessionIds.clear() }
         providersState.value = emptyList()
-        providerCatalogState.value = emptyList()
+        // ta-895: the catalog, its stamp and its liveness go together, under the lock.
+        synchronized(lock) {
+            providerCatalogState.value = emptyList()
+            catalogEpoch = -1L
+            catalogOrigin = null
+            providerCatalogLiveState.value = false
+        }
         workspaceRootState.value = null
         hiddenAgentSessionCountState.value = null
         synchronized(lock) { sessionStore.clearViews() }
@@ -1961,6 +1977,8 @@ class RealTetherClient(
         socketOpen = false
         handshakeDone = false
         clearLiveLocked()
+        // ta-895: the catalog the socket delivered is no longer the live one.
+        providerCatalogLiveState.value = false
         // T15.1 (use-tether.ts:1212): the overview stays on screen, marked stale; the wish waits for the next ready.
         overviewSync.onSocketGone()
         consentOriginState.value = null
@@ -2277,6 +2295,8 @@ class RealTetherClient(
                 connecting = false
                 // A new epoch: nothing is attached on this socket yet.
                 epoch++
+                // ta-895: and no catalog of this socket is in yet.
+                providerCatalogLiveState.value = false
                 attachedThisEpoch.clear()
                 // T6.7: interrupts sent on the previous socket are answered there, if at all.
                 interruptsBound.clear()
@@ -2425,7 +2445,13 @@ class RealTetherClient(
             // use-tether.ts:1047: every batch folds into the one log (seq dedupe, bootId restart).
             is ServerMessage.Log -> ifCurrent(webSocket) { eventLogState.update { it.accept(message) } }
             // T7.3: use-tether.ts:1129 — the catalog is replaced wholesale (the `@` Agents read it).
-            is ServerMessage.ProvidersSnapshot -> ifCurrent(webSocket) { providerCatalogState.value = ProviderCatalogEntry.parse(message.entries) }
+            // ta-895: stamped with the socket that delivered it (the New session picker's profile rows).
+            is ServerMessage.ProvidersSnapshot -> ifCurrent(webSocket) {
+                providerCatalogState.value = ProviderCatalogEntry.parse(message.entries)
+                catalogEpoch = epoch
+                catalogOrigin = socketOrigin
+                providerCatalogLiveState.value = socketOrigin != null
+            }
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
             }
@@ -3539,6 +3565,35 @@ class RealTetherClient(
 
     override fun createSession(provider: String, cwd: String?, name: String?) {
         sendFrame(ClientMessage.Create(provider = provider, cwd = cwd, name = name))
+    }
+
+    /**
+     * ta-895: the one path a New session row takes to the wire. Under the lock, in order: a live,
+     * handshaken socket of a running (not halted) client; the row drawn for THIS server
+     * ([expectedOrigin] = the socket's origin); the row resolved again against the catalog THIS
+     * socket delivered, or, with none in, the base providers its `ready` listed
+     * ([NewSessionGuard.resolve]); then `create` enqueued on that socket. Nothing is retried, held
+     * or persisted.
+     */
+    override fun createNewSession(choice: NewSessionChoice, cwd: String?, expectedOrigin: String?): NewSessionResult {
+        val result = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NewSessionResult.NotConnected
+            if (expectedOrigin != origin) return@synchronized NewSessionResult.NotLive
+            val frame = NewSessionGuard.resolve(choice, liveCatalogLocked(), providersState.value, cwd) ?: return@synchronized NewSessionResult.NotOffered
+            if (!ws.send(frame.encode())) return@synchronized NewSessionResult.NotConnected
+            NewSessionResult.Sent
+        }
+        if (result == NewSessionResult.NotConnected) emitError("The secure link is reconnecting. The session was not created.")
+        return result
+    }
+
+    /** ta-895: [providerCatalogState] when the CURRENT socket delivered it, else null. Caller holds [lock]. */
+    private fun liveCatalogLocked(): List<ProviderCatalogEntry>? {
+        val origin = socketOrigin ?: return null
+        if (catalogEpoch != epoch || catalogOrigin != origin) return null
+        return providerCatalogState.value
     }
 
     override fun resumeHistory(historyId: String, cwd: String) {

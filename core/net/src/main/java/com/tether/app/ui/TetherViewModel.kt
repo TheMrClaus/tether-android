@@ -10,6 +10,8 @@ import com.tether.app.client.StagedAttachments
 import com.tether.app.client.CreatedReply
 import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
+import com.tether.app.client.NewSessionChoice
+import com.tether.app.client.NewSessionResult
 import com.tether.app.client.TetherClient
 import com.tether.app.client.isWarning
 import com.tether.app.client.serverOrigin
@@ -418,6 +420,19 @@ class TetherViewModel(
     fun createSession(provider: String) {
         knownIdsBeforeCreate = client.sessions.value.map { it.id }.toSet()
         client.createSession(provider, cwd = _currentWorkspace.value)
+    }
+
+    /**
+     * ta-895: the New session picker's tap on [choice], drawn for [expectedOrigin], in the current
+     * workspace ([TetherClient.createNewSession] re-checks it under the client's lock). Sent: the
+     * next new session row is auto-selected, as [createSession] does. Anything else: nothing was
+     * created, and nothing is auto-selected later.
+     */
+    fun createNewSession(choice: NewSessionChoice, expectedOrigin: String?): NewSessionResult {
+        val before = client.sessions.value.map { it.id }.toSet()
+        val result = client.createNewSession(choice, _currentWorkspace.value, expectedOrigin)
+        if (result == NewSessionResult.Sent) knownIdsBeforeCreate = before
+        return result
     }
 
     /**
