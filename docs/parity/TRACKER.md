@@ -24,26 +24,28 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-10-01 ~19:30 CEST):** `main` @ `d4cd7aed` (code head; full gate green twice: 4507 tests, 0 failed, 4 skipped). Nothing in flight.
+**Resume point (2026-10-01 ~22:30 CEST):** `main` @ `f179b0bb` (code head; full gate green twice: 4584 tests, 0 failed, 4 skipped). Nothing in flight.
 **Releases (all signed with cert SHA-256 `4f8c22de...b74d`; the coordinator publishes, every release bumps the MINOR):** v0.10.0 (code 28, ta-895),
-v0.11.0 (code 29: ta-ceo, ta-3uk, ta-ccu, ta-lx3), **v0.12.0 Latest (code 30, `b06f1fd3`).** Next release: 0.13.0 (code 31), would carry ta-t7l. Flow: android-release.yml draft -> download, apksigner cert + aapt2 version check -> rename asset
+v0.11.0 (code 29: ta-ceo, ta-3uk, ta-ccu, ta-lx3), **v0.12.0 Latest (code 30, `b06f1fd3`).** Next release: 0.13.0 (code 31), would carry ta-t7l + ta-dh1. Flow: android-release.yml draft -> download, apksigner cert + aapt2 version check -> rename asset
 `tether-X.apk` -> Highlights above Changes -> `gh release edit vX --draft=false --latest`.
 **Merged + VERIFIED 2026-10-01:** ta-895, ta-ceo, ta-3uk (hello 137), ta-ccu, ta-lx3 (PARITY_BASE whole at 887c222); T10.1 slice 1 ta-k3f (Settings shell, General,
-Appearance); slice 2 ta-9q2 + ta-ebc (read-only Claude accounts); **slice 3 ta-t7l (`d4cd7aed`): Advanced + Metadata tabs editable as on the web,
-password/proxyToken masked with reveal (sent only on Done, never on blur/close/recreate; dialog SecureOn; re-mask on stop; frames dropped on sign-out),
-Claude CLI switch behind a confirmation showing the new value, env-forced keys locked; Save's write now survives the dialog leaving. +6 matrix rows.**
+Appearance); slice 2 ta-9q2 + ta-ebc (read-only Claude accounts); slice 3 ta-t7l (`d4cd7aed`: Advanced + Metadata editable, secrets masked and sent only on
+Done, Claude CLI switch confirmed); **slice 4 ta-dh1 (`f179b0bb`): Engines cards, Scan again, headless modes, Host config; engine home/command and the Claude
+launch command change only through a confirmation showing Now and Change to, hidden characters and odd spaces spelled out, the confirm key armed after
+450 ms, one send per confirmation; engine keys pass one choke point (ConfirmedEngineWrite). +1 matrix row.**
 **Owner decisions in force (Decision log):** server-wide settings editable from the phone with no extra guard; secrets (password, proxyToken, profile env)
 masked with tap to reveal, never logged or persisted; anything that sets what the server runs (engine command/home, Claude launch command, profile
 commands, **the Claude CLI selection**) editable only after a confirmation showing the new value. T15.7 Open: design unchanged, **device test still pending (owner)**.
-**Next (owner order: T10.1 slices, then T8.1, then `bd ready`):** ta-dh1 (slice 4: Engines cards, detect-engines, confirm-on-command), then ta-q6p
-(slice 5: Profiles editor, set-providers); T10.1 and M.cmp.settings-dialog close after these plus T10.3 (Nodes) / T10.4 (Devices). Then T8.1 full
-new-session composer (the web's create also sends permissionMode/sandboxPolicy). Follow-ups: ta-7n0, ta-ufx, ta-89k, ta-0d9; from ta-t7l: ta-78a
-(clipboard guard fail-closed + real text menu, security-review), ta-pqx (roots lost update), ta-vqe, ta-bl5 (autofill device check), ta-cc5, ta-8fa
-(Codex/opencode controls in Advanced), ta-74g (web side-by-side shots), ta-g67, ta-bg5, ta-tw2 (server pointer, tether#234). **Lessons:** seed every
+**Next (owner order: T10.1 slices, then T8.1, then `bd ready`):** ta-q6p (slice 5: Profiles editor, set-providers; profile commands need the
+confirmation, reuse ta-dh1's ConfirmedEngineWrite pattern and ArmedConfirmKey; env values masked like slice 3 secrets); T10.1 and M.cmp.settings-dialog
+close after it plus T10.3 (Nodes) / T10.4 (Devices). Then T8.1 full new-session composer (the web's create also sends permissionMode/sandboxPolicy).
+Follow-ups: ta-7n0, ta-ufx, ta-89k, ta-0d9; from ta-t7l: ta-78a (clipboard guard fail-closed, security-review), ta-pqx, ta-vqe, ta-bl5 (autofill device
+check), ta-cc5, ta-8fa, ta-74g, ta-g67, ta-bg5, ta-tw2 (server pointer: tether#234, #235); from ta-dh1: ta-880 (Browse folders), ta-q9l (stale-frame
+fallback + re-arm, security-review). **Lessons:** seed every
 golden synchronously with the clock driven by hand and run the full gate twice for UI slices; behaviour tests must assert each tap reached the model
-and wait on the store, never read it once (ta-t7l r3).
-**Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225, #234.
-**Owner queue:** T15.7 Open device test; tether#234 (settings reads/writes from paired devices are not owner-gated); review/redact the private tether issues and PRs (now incl. #234) before the visibility flip (owner handles it).
+and wait on the store, never read it once (ta-t7l r3); a verifier probe that only prints, or that taps a key a fix now arms or delays, proves nothing: make it assert and add a positive control (ta-dh1 r2).
+**Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225, #234, #235.
+**Owner queue:** T15.7 Open device test; tether#234 (settings reads/writes from paired devices are not owner-gated; executable-selecting settings unvalidated) and #235 (engine scans unthrottled); review/redact the private tether issues and PRs (now incl. #234, #235) before the visibility flip (owner handles it).
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -355,6 +357,8 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 | **Settings writes from the phone (owner).** (1) Server-wide settings (host, port, password, storage, session defaults, advanced) are editable from the app with no extra guard, like the web. (2) Secrets the server sends in plaintext (password, proxyToken, profile env values) are shown masked with tap to reveal, and are never logged or persisted. (3) Anything that sets what the server runs (engine command/home, Claude launch command, profile commands) is editable only after a confirmation that shows the new value. Applies to T10.1 slices ta-t7l, ta-dh1 and ta-q6p. | Owner answer 2026-10-01 | owner |
 | 2026-10-01 | ta-t7l divergences from the web, accepted: (1) a secret (password, proxyToken) must be revealed before it can be edited, and is sent only on Done (never on blur, close or recreation): editing a masked field would put plaintext in the semantics tree while it looks masked, and a half-typed password could lock the console at the next restart; (2) number fields refuse any edit that is not all digits instead of reading it as the web does ("6e4"); a mangled value is never sent; (3) the Codex/opencode session controls stay in the composer (T7.2) and are not mirrored in Settings > Advanced yet (ta-8fa); (4) the GitHub connection card is excluded and covered by the `/api/github/*` row (T8.4) | ta-t7l verify + security review | claude-main |
 | 2026-10-01 | The Claude CLI picker (set-advanced-settings) counts as "sets what the server runs" under the owner's 2026-10-01 rule (3): a pick opens a confirmation showing the current and the new CLI before anything is sent | ta-t7l security review F1 | claude-main |
+| 2026-10-01 | ta-dh1 divergences from the web, accepted: (1) an engine home, command or the Claude launch command saves through Done -> a confirmation (Now / Change to, hidden characters and non-ASCII spaces as visible tokens, trim disclosed), not on blur, with a "Not saved yet" hint; owner rule (3); (2) "Use detected" is hidden when the home is env-forced (the server would refuse the write); (3) Scan again shows "Scanning..." until the next server-settings reply or 60 s (the web has no busy state); (4) Browse folders for engine homes is deferred (ta-880); (5) confirmation keys (engine Change, Claude CLI Switch) ignore taps for 450 ms after the dialog shows | ta-dh1 verify + security review | claude-main |
+| 2026-10-01 | Matrix rows of a T10.1 slice go deferred -> done -> verified with that slice, although each row's blocks-edge points at the still-open T10.1 parent (the v1.3.0 close guard then needs --force). The slice's own verifier and merge gate stand in for the parent; T10.1 itself closes only after every slice | ta-dh1 maker question; matches ta-t7l | claude-main |
 
 ## Session log (append-only)
 
@@ -409,3 +413,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 16:30 | claude-main / Opus 5.5 | ta-9q2, ta-ebc, release | ta-9q2 (+ta-ebc) Claude accounts: verify CONFIRMED, security PASS-WITH-FOLLOWUPS; r2 hardening (double tap, look-alike ids, fixed error copy, depth flatten), r3 same-frame double tap (verifier probe re-run by the coordinator: 1 call). Gate twice on `b06f1fd3` (4404). Merged ff-only, VERIFIED with M.lib claude-account-plan (--force past the verified blocker). Follow-ups ta-89k, ta-0d9. v0.12.0 (code 30) dispatched. Handover point. | ta-t7l |
 | 2026-10-01 16:45 | claude-main / Opus 5.5 | release | v0.12.0 (code 30, `b06f1fd3`) built; cert 4f8c22de...b74d and versionName/Code checked; asset tether-0.12.0.apk, Highlights first; PUBLISHED as Latest. Clean handover point. | ta-t7l |
 | 2026-10-01 19:30 | claude-main / Opus 5.5 (new coordinator session) | ta-t7l | T10.1 slice 3 merged ff-only `d4cd7aed`, VERIFIED (+6 matrix rows). verify CONFIRMED r1; security FAIL r1 (CLI switch unconfirmed; recreation committed a half-typed secret) -> r2 fixes -> PASS-WITH-FOLLOWUPS; verifier probes re-run by the coordinator; r3 fixed a load flake and a lost-write on Save. Full gate twice green (4507/0/4). Private tether#234 filed (server settings authorization). 10 follow-up beads. | ta-dh1 |
+| 2026-10-01 22:30 | claude-main / Opus 5.5 | ta-dh1 | T10.1 slice 4 merged ff-only `f179b0bb`, VERIFIED (+1 matrix row). verify CONFIRMED r1; security PASS-WITH-FOLLOWUPS r1, folded into r2 (arming window, one choke point for engine keys, odd spaces spelled out, one-frame race, CLI double tap, a slice-1 load flake) and re-reviewed PASS-WITH-FOLLOWUPS. Coordinator made the race probe assert, with a positive control; 16/16 probes pass. Full gate twice green (4584/0/4). Private tether#235 filed and #234 extended. Follow-ups ta-880, ta-q9l. | ta-q6p |
