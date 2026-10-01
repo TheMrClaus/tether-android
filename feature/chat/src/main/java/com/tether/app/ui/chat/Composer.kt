@@ -64,6 +64,9 @@ import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.protocol.SessionModelOption
+import com.tether.app.protocol.fold.liveBackgroundTaskCount
+import com.tether.app.protocol.fold.openToolCount
+import com.tether.app.protocol.helpers.QueueWait
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.TurnProjection
@@ -112,6 +115,10 @@ import kotlin.math.max
 
 /** T13.2 r2: the composer's Interrupt key. */
 internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
+
+/** ta-ceo (#229): the Stop confirmation's keys. */
+internal const val STOP_ANYWAY_KEY_TAG = "composer-stop-anyway"
+internal const val KEEP_RUNNING_KEY_TAG = "composer-keep-running"
 
 /**
  * T6.7: what the operator is told when an Interrupt tap sent nothing (null: it was sent, or the
@@ -276,6 +283,19 @@ fun Composer(
     // command run (then Interrupt reads "Stop" and Background replaces Queue).
     val foregroundTurn = remember(tree) { CommandGuard.foregroundCommandTurn(tree) }
     val commandRunning = foregroundTurn != null && foregroundTurn == interruptTurnId
+
+    // ta-ceo (issue #229, chat-view.tsx:1973-1979): what a Stop would destroy right now, read off the
+    // projection (the server's own `_liveWork` reads, minus its warm-child level signal), and its
+    // price. With live work Interrupt needs a second, informed tap that names the price; the
+    // confirmation belongs to the turn it was asked for (a new turn or another session drops it), and
+    // lapses when there is no price left to confirm or the copy cannot interrupt at all.
+    val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
+    val stopCost = QueueWait.stopCostCopy(liveWork)
+    var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
+    LaunchedEffect(stopCost.isEmpty(), interruptLock != null, commandRunning) {
+        if (stopCost.isEmpty() || interruptLock != null || commandRunning) confirmStop = false
+    }
+    val confirmingStop = confirmStop && stopCost.isNotEmpty() && interruptLock == null && !commandRunning
     val commandMode = runActions.commandMode && draft.startsWith("!")
     // T13.2's rule: a copy that is not live runs nothing (the words say why).
     val commandLock = liveness.interruptLock
@@ -888,6 +908,9 @@ fun Composer(
                         interruptTurnId = interruptTurnId,
                         onInterruptNow = ::interruptTurn,
                         interruptLock = interruptLock,
+                        liveWork = liveWork,
+                        serverNow = serverNow,
+                        stale = liveness.stale != null,
                     )
                 }
 
@@ -953,7 +976,9 @@ fun Composer(
                         } else {
                             null
                         },
-                        settingsKey = if (liveControls != null && !wideRow) {
+                        // ta-ceo: on a phone the Stop confirmation takes the settings key's room (its
+                        // words must be read; the web phone hides them, globals.css:7894).
+                        settingsKey = if (liveControls != null && !wideRow && !(metrics.phone && confirmingStop)) {
                             { mod ->
                                 val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || liveControls.autoContinue != null || handlers.openProviderControls != null
                                 SessionSettingsTrigger(
@@ -984,6 +1009,9 @@ fun Composer(
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
+                            stopCost = stopCost,
+                            confirmingStop = confirmingStop,
+                            onConfirmStop = { confirmStop = it },
                             commandMode = commandMode,
                             commandRunning = commandRunning,
                             canRun = draft.trim().length > 1,
@@ -1141,7 +1169,7 @@ private fun ComposerToolbar(
  * and a disabled Queue key is hidden (globals.css:11944); wider they carry their legends.
  */
 @Composable
-private fun ComposerActions(
+private fun RowScope.ComposerActions(
     metrics: ComposerMetrics,
     busy: Boolean,
     canQueue: Boolean,
@@ -1153,6 +1181,11 @@ private fun ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
+    /** ta-ceo (#229): what Stop would destroy ([QueueWait.stopCostCopy]); "" = nothing but the turn. */
+    stopCost: String = "",
+    /** ta-ceo: the first Interrupt tap asked for the second, informed one (Keep running · Stop anyway). */
+    confirmingStop: Boolean = false,
+    onConfirmStop: (Boolean) -> Unit = {},
     /** T7.3: the draft is a `!` command (idle: Send to agent + Background). */
     commandMode: Boolean = false,
     /** T7.3: the running turn is a foreground command (Background + Stop instead of Queue + Interrupt). */
@@ -1240,10 +1273,58 @@ private fun ComposerActions(
         // the first 500 ms after it appeared for that turn (a new turn re-arms it), again after it
         // moved, and never through an overlay. Drawn as before while it arms; it just does nothing.
         val drawnFor = interruptTurnId
+        if (confirmingStop && drawnFor != null) {
+            // ta-ceo (chat-view.tsx:4543-4558): Stop is turn-wide — with live work the second tap
+            // names the price. The pair is always labelled (a phone's icon-only key would hide the
+            // price); "Stop anyway" is a new control, so it arms afresh and a double tap never
+            // passes straight through.
+            TetherKey(
+                onClick = { onConfirmStop(false) },
+                classes = KeyClasses.ChatSend,
+                label = "Keep running",
+                fontSize = fontSize,
+                minHeight = height,
+                modifier = Modifier.heightIn(min = height).widthIn(min = 44.dp).testTag(KEEP_RUNNING_KEY_TAG),
+                contentPadding = 16.dp,
+                contentDescription = "Keep the turn running",
+            )
+            val confirmArming = rememberArmedControl(Triple("interrupt-confirm", sessionId, drawnFor), interruptLock == null)
+            val confirmArmed = confirmArming.armed && interruptLock == null
+            TetherKey(
+                onClick = {
+                    if (confirmArmed) {
+                        onConfirmStop(false)
+                        onInterrupt(drawnFor)
+                    }
+                },
+                classes = KeyClasses.ChatInterrupt,
+                label = "$stopCost — Stop anyway",
+                icon = TetherIcons.CircleStop,
+                iconSize = 18.dp,
+                fontSize = fontSize,
+                enabled = interruptLock == null,
+                minHeight = height,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .heightIn(min = height)
+                    .then(confirmArming.modifier)
+                    .semantics { if (!confirmArmed) disabled() }
+                    .testTag(STOP_ANYWAY_KEY_TAG),
+                contentPadding = 16.dp,
+                contentDescription = "$stopCost — stop anyway",
+                maxLines = 3,
+            )
+            return
+        }
         val arming = rememberArmedControl(Triple("interrupt", sessionId, drawnFor), interruptLock == null && drawnFor != null)
         val armed = arming.armed && interruptLock == null && drawnFor != null
         TetherKey(
-            onClick = { if (armed && drawnFor != null) onInterrupt(drawnFor) },
+            onClick = {
+                if (armed && drawnFor != null) {
+                    // issue #229: with live work the first tap asks; without, it interrupts at once.
+                    if (stopCost.isNotEmpty()) onConfirmStop(true) else onInterrupt(drawnFor)
+                }
+            },
             classes = KeyClasses.ChatInterrupt,
             label = if (labelled) "Interrupt" else null,
             icon = TetherIcons.CircleStop,

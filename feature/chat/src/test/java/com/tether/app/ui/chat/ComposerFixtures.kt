@@ -9,7 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.reduce.ev
+import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
@@ -58,6 +60,36 @@ object ComposerFixtures {
             },
         )
     }
+
+    /** ta-ceo: when the deferred message of [deferred] was queued: 7 minutes before [BUSY_NOW]. */
+    const val QUEUED_AT = T_START + 2 * 60_000L
+
+    /**
+     * ta-ceo (issue #229): turn t1 owns live work — [tools] running Bash calls and [background] live
+     * background tasks — and the operator's message waits behind it as `next-call`, journal-stamped
+     * at [queuedAt] (null: an unstamped, pre-v136 row). The web's #229 example is "7 background tasks
+     * live"; the default is one running tool and seven tasks.
+     */
+    fun deferred(tools: Int = 1, background: Int = 7, queuedAt: Long? = QUEUED_AT, turnId: String = "t1"): ChatFixtures.Folded = ChatFixtures.fold(
+        ev("turn_started", turnId, ts = T_START) { put("idempotencyKey", "k-$turnId") },
+        ev("user_message_accepted", turnId, ts = T_START) { put("text", "Run the test suite and tell me what fails.") },
+        ev("token_progress", turnId, ts = T_START) { put("tokens", 960) },
+        *liveWork(turnId, tools, background),
+        ev("queued_message_added", null, ts = queuedAt) {
+            put("queueId", "parity-queue-2")
+            put("text", "Also bump the changelog.")
+            put("flushMode", "next-call")
+        },
+    )
+
+    private fun liveWork(turnId: String, tools: Int, background: Int): Array<AgentEvent> = buildList {
+        repeat(tools) { i ->
+            add(ev("tool_start", turnId, ts = T_START) { put("toolId", "tool-$turnId-$i"); put("name", "Bash"); put("input", kotlinx.serialization.json.buildJsonObject { put("command", "npm test") }) })
+        }
+        repeat(background) { i ->
+            add(evNullTurn("task_started", ts = T_START) { put("taskId", "task-$turnId-$i"); put("taskType", "local_agent") })
+        }
+    }.toTypedArray()
 
     /**
      * T15.6 (v133, tests/queued-message.test.mjs): the queue folded from a legacy (origin-less)

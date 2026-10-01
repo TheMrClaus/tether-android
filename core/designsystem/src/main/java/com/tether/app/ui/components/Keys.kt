@@ -97,6 +97,8 @@ fun TetherKey(
     contentPadding: Dp? = null,
     /** Content after the legend, e.g. New session's `<kbd>N</kbd>` cap (`margin-left: auto`). */
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    /** The legend's line limit: 1 (a key's legend never wraps) unless a caller must show a long legend whole. */
+    maxLines: Int = 1,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -172,7 +174,7 @@ fun TetherKey(
                 text = shown,
                 color = look.ink,
                 style = textStyle,
-                maxLines = 1,
+                maxLines = maxLines,
                 modifier = Modifier.clearAndSetSemantics { },
             )
         }

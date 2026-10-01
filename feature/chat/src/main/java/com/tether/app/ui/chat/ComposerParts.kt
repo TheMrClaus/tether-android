@@ -22,6 +22,8 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,7 +45,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -51,6 +55,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tether.app.protocol.helpers.QueueWait
 import com.tether.app.protocol.model.QueuedMessage
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.TetherLayoutClass
@@ -62,6 +67,8 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.Manrope
+import kotlin.math.max
+import kotlinx.coroutines.delay
 
 /**
  * T7.1: the session composer's writing surface, ported from tether components/chat-view.tsx
@@ -217,6 +224,12 @@ internal fun ComposerWell(
 /** T13.2 r2: a queued row's "Interrupt now". */
 internal const val QUEUE_INTERRUPT_TAG = "queue-interrupt-now"
 
+/** ta-ceo (#229): a queued row's second, informed "Stop anyway" and its "Keep waiting". */
+internal const val QUEUE_STOP_ANYWAY_TAG = "queue-stop-anyway"
+internal const val QUEUE_KEEP_WAITING_TAG = "queue-keep-waiting"
+
+/** chat-view.tsx:1468: an end-of-turn row's wait line. */
+internal const val QUEUED_AFTER_TURN_COPY = "Queued — sends after the current turn"
 
 /**
  * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place. Labelled
@@ -233,6 +246,12 @@ internal fun QueuedMessages(
     onInterruptNow: (turnId: String) -> Unit,
     /** T13.2 r2: why "Interrupt now" cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
+    /** ta-ceo (#229): what a Stop would destroy right now (chat-view.tsx:1974), off the projection. */
+    liveWork: QueueWait.LiveWork = QueueWait.LiveWork.None,
+    /** ta-ceo: the event-anchored server "now" a deferred row's wait is measured to. */
+    serverNow: () -> Long = { 0L },
+    /** ta-ceo: the copy is not live — a deferred row's wait stops counting (it claims nothing about now). */
+    stale: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     Column(
@@ -250,6 +269,10 @@ internal fun QueuedMessages(
                     interruptLock = interruptLock,
                     interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
                     interruptTurnId = interruptTurnId,
+                    queuedAt = message.queuedAt,
+                    liveWork = liveWork,
+                    serverNow = serverNow,
+                    stale = stale,
                 )
             }
         }
@@ -280,8 +303,13 @@ internal fun queueCommit(edited: String, serverText: String): QueueCommit {
  * web's handler means to, but its blur commits the pre-restore buffer from the same render's
  * closure (chat-view.tsx:1464-1467 then 1459) — see the T7.1 README.
  *
- * `flushMode: "next-call"` (issue #183) rows say they send at the next tool boundary and offer
- * "Interrupt now". Status is in words (the icon's description), never colour alone.
+ * `flushMode: "next-call"` (issue #183) rows offer "Interrupt now". ta-ceo (issue #229,
+ * chat-view.tsx:1410-1548): every row says under it, in words, when it sends; a deferred row says
+ * what it waits for and for how long, measured from the journal-stamped [queuedAt] to the
+ * event-anchored [serverNow] (never a device clock read), ticking each second. After
+ * [QueueWait.DEFERRAL_CHOICE_AFTER_MS] with work still live it asks for a decision (keep waiting,
+ * or "Interrupt now" naming what that stops), and with live work "Interrupt now" asks for a second,
+ * informed tap ("Stop anyway") first. Status is in words, never colour alone.
  */
 @Composable
 internal fun QueuedMessageRow(
@@ -295,6 +323,11 @@ internal fun QueuedMessageRow(
     interruptIdentity: Any = Unit,
     /** T6.7: the turn "Interrupt now" is drawn for; null = none runs, so it cannot send. */
     interruptTurnId: String? = null,
+    /** v136: when a deferred row was queued (journal ts, epoch ms); null = unstamped. */
+    queuedAt: Double? = null,
+    liveWork: QueueWait.LiveWork = QueueWait.LiveWork.None,
+    serverNow: () -> Long = { 0L },
+    stale: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -302,6 +335,21 @@ internal fun QueuedMessageRow(
     var editing by remember { mutableStateOf(false) }
     var reverting by remember { mutableStateOf(false) }
     LaunchedEffect(text) { if (!editing) value = text }
+
+    // chat-view.tsx:1435-1445: "Keep waiting" acknowledges the choice; the destructive act is
+    // confirmed with a second tap whenever it would stop live work. The confirmation belongs to the
+    // turn it was asked for: a new turn (or a move to another session) drops it.
+    var choiceAcknowledged by remember { mutableStateOf(false) }
+    var confirmingInterrupt by remember(interruptIdentity) { mutableStateOf(false) }
+    val currentServerNow by rememberUpdatedState(serverNow)
+    var now by remember { mutableLongStateOf(serverNow()) }
+    LaunchedEffect(atToolBoundary, stale) {
+        // A saved copy's clock is frozen where it stood (T13.2), as the run row's.
+        while (atToolBoundary && !stale) {
+            now = currentServerNow()
+            delay(1000)
+        }
+    }
 
     fun commit() {
         editing = false
@@ -317,20 +365,33 @@ internal fun QueuedMessageRow(
         }
     }
 
-    val status = if (atToolBoundary) "Queued — sends at the next tool boundary." else "Queued — sends after the current turn."
+    val cost = QueueWait.stopCostCopy(liveWork)
+    val wait = QueueWait.deferredWaitCopy(liveWork, queuedAt?.let { max(0.0, now - it) })
+    // The confirmation lasts while there is a price to confirm and the copy can interrupt at all.
+    LaunchedEffect(cost.isEmpty(), interruptLock != null) {
+        if (cost.isEmpty() || interruptLock != null) confirmingInterrupt = false
+    }
+    val confirming = confirmingInterrupt && cost.isNotEmpty() && interruptLock == null
+    val choice = atToolBoundary && wait.needsChoice && !choiceAcknowledged
+    val waitLabel = if (atToolBoundary) wait.label else QUEUED_AFTER_TURN_COPY
     val shape = RoundedCornerShape(t.radiusMd)
     val rowHeight = 30.4.dp // 1.9rem
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .tetherWell(t, shape)
             .queueEdge(t.violetStrong)
             .padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         Box(Modifier.heightIn(min = rowHeight), contentAlignment = Alignment.Center) {
-            Icon(TetherIcons.Loader, contentDescription = status, tint = t.violet, modifier = Modifier.size(13.dp))
+            // The web's icon carries the label as a tooltip only; the words are the line below.
+            Icon(TetherIcons.Loader, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
         }
         BasicTextField(
             value = value,
@@ -349,8 +410,14 @@ internal fun QueuedMessageRow(
             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             decorationBox = { inner -> Box(Modifier.padding(vertical = t.css.spaceXs)) { inner() } },
         )
-        if (atToolBoundary) {
-            QueueInterruptNow(onInterruptNow, interruptLock, interruptIdentity, interruptTurnId)
+        if (atToolBoundary && !confirming) {
+            // issue #229: with live work the first tap asks for a second, informed one.
+            QueueInterruptNow(
+                onClick = { turnId -> if (cost.isNotEmpty()) confirmingInterrupt = true else onInterruptNow(turnId) },
+                lock = interruptLock,
+                identity = interruptIdentity,
+                turnId = interruptTurnId,
+            )
         }
         Box(
             Modifier
@@ -362,6 +429,98 @@ internal fun QueuedMessageRow(
         ) {
             Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
         }
+    }
+        QueueWaitLine(
+            label = waitLabel,
+            choice = choice,
+            confirming = confirming,
+            cost = cost,
+            onStopAnyway = { turnId ->
+                confirmingInterrupt = false
+                onInterruptNow(turnId)
+            },
+            onKeepWaiting = { if (confirming) confirmingInterrupt = false else choiceAcknowledged = true },
+            lock = interruptLock,
+            identity = interruptIdentity,
+            turnId = interruptTurnId,
+        )
+    }
+}
+
+/**
+ * `.chat-queue-wait` (globals.css:7125-7137): the full-width line under a queued row — what it is
+ * waiting for (never a silent spinner), then either the Stop confirmation ("<cost> — it cannot be
+ * undone." · Stop anyway · Keep waiting) or, once the wait outlasted the threshold, the choice
+ * ("Delivers at the next safe boundary…" · Keep waiting). 0.74rem / 1.4, `--muted`; the choice state
+ * reads in `--ink`. The prompt is announced politely; the ticking wait is not (it changes each second).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun QueueWaitLine(
+    label: String,
+    choice: Boolean,
+    confirming: Boolean,
+    cost: String,
+    onStopAnyway: (turnId: String) -> Unit,
+    onKeepWaiting: () -> Unit,
+    lock: String?,
+    identity: Any,
+    turnId: String?,
+) {
+    val t = LocalTetherTokens.current
+    val color = if (choice && !confirming) t.ink else t.muted
+    val style = LocalTetherTypography.current.body.copy(color = color, fontSize = 11.84.sp, lineHeight = 16.576.sp)
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+    ) {
+        Text(label, style = style, modifier = Modifier.align(Alignment.CenterVertically))
+        if (confirming || choice) {
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier.align(Alignment.CenterVertically).semantics { liveRegion = LiveRegionMode.Polite },
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+                verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+            ) {
+                if (confirming) {
+                    Text("$cost — it cannot be undone.", style = style)
+                    QueueInterruptNow(
+                        onClick = onStopAnyway,
+                        lock = lock,
+                        identity = "stop-anyway" to identity,
+                        turnId = turnId,
+                        label = "Stop anyway",
+                        description = "Stop anyway",
+                        confirm = true,
+                        tag = QUEUE_STOP_ANYWAY_TAG,
+                    )
+                } else {
+                    Text(
+                        "Delivers at the next safe boundary or when the turn ends. Interrupting stops ${QueueWait.interruptStopsCopy(cost)}.",
+                        style = style,
+                    )
+                }
+                QueueKeepWaiting(onKeepWaiting)
+            }
+        }
+    }
+}
+
+/** `.chat-queue-interrupt` "Keep waiting": non-destructive, so a plain tap (no arming). */
+@Composable
+private fun QueueKeepWaiting(onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    Box(
+        Modifier
+            .heightIn(min = 44.dp)
+            .cssSurface(RoundedCornerShape(t.radiusSm), Color.Transparent, CssBorder(1.dp, t.lineStrong))
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = "Keep waiting" }
+            .testTag(QUEUE_KEEP_WAITING_TAG)
+            .padding(horizontal = t.css.spaceSm),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Keep waiting", color = t.muted, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
     }
 }
 
@@ -390,15 +549,26 @@ private fun Modifier.queueEdge(color: Color): Modifier = drawWithContent {
 
 /**
  * `.chat-queue-interrupt` (issue #183): the deliberate "stop the turn and send this now" action
- * on a row waiting for a tool boundary. 1.9rem tall, 2.75rem under a coarse pointer.
+ * on a row waiting for a tool boundary. 1.9rem tall, 2.75rem under a coarse pointer. ta-ceo:
+ * [confirm] draws `.chat-queue-interrupt--confirm` (`--ink` words and edge), the second tap.
  */
 @Composable
-private fun QueueInterruptNow(onClick: (turnId: String) -> Unit, lock: String?, identity: Any, turnId: String?) {
+private fun QueueInterruptNow(
+    onClick: (turnId: String) -> Unit,
+    lock: String?,
+    identity: Any,
+    turnId: String?,
+    label: String = "Interrupt now",
+    description: String = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this",
+    confirm: Boolean = false,
+    tag: String = QUEUE_INTERRUPT_TAG,
+) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
-    val what = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
+    val ink = if (confirm) t.ink else t.muted
     // T6.7: bound to the turn it is drawn for and armed like the composer's Interrupt key (500 ms,
-    // re-armed by a new turn or a move, no overlay touches); drawn as before while it arms.
+    // re-armed by a new turn or a move, no overlay touches); drawn as before while it arms. The
+    // confirmation is a new control, so it arms afresh: a double tap never passes straight through.
     val arming = rememberArmedControl(identity, lock == null && turnId != null)
     val armed = arming.armed && lock == null && turnId != null
     Row(
@@ -407,17 +577,17 @@ private fun QueueInterruptNow(onClick: (turnId: String) -> Unit, lock: String?, 
             .then(arming.modifier)
             // T13.2 r2: a copy that is not live cannot interrupt: shown, dimmed, and inert.
             .alpha(if (lock == null) 1f else 0.55f)
-            .cssSurface(shape, Color.Transparent, CssBorder(1.dp, t.lineStrong))
+            .cssSurface(shape, Color.Transparent, CssBorder(1.dp, if (confirm) t.ink else t.lineStrong))
             .clickable(enabled = armed, onClick = { if (armed && turnId != null) onClick(turnId) })
             .semantics(mergeDescendants = true) {
-                contentDescription = if (lock == null) what else "$what, unavailable: $lock"
+                contentDescription = if (lock == null) description else "$description, unavailable: $lock"
             }
-            .testTag(QUEUE_INTERRUPT_TAG)
+            .testTag(tag)
             .padding(horizontal = t.css.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.8.dp),
     ) {
-        Icon(TetherIcons.CircleStop, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
-        Text("Interrupt now", color = t.muted, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+        Icon(TetherIcons.CircleStop, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
+        Text(label, color = ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
     }
 }

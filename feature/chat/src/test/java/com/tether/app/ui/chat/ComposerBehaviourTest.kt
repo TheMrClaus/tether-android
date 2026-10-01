@@ -254,9 +254,10 @@ class ComposerBehaviourTest {
     @Test
     fun theRemoveKeyAndInterruptNow() {
         show(ComposerFixtures.queued)
-        // Only the next-call row offers "Interrupt now"; each row says when it sends, in words.
-        rule.onAllNodesWithContentDescription("Queued — sends after the current turn.").assertCountEquals(1)
-        rule.onAllNodesWithContentDescription("Queued — sends at the next tool boundary.").assertCountEquals(1)
+        // Only the next-call row offers "Interrupt now"; each row says when it sends, in words
+        // (ta-ceo, #229: the visible line under the row; this composer is shown no live work).
+        rule.onAllNodesWithText("Queued — sends after the current turn").assertCountEquals(1)
+        rule.onAllNodesWithText("Queued — sends at the next tool call or when the turn ends", substring = true).assertCountEquals(1)
         val interruptNow = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
         rule.onAllNodesWithContentDescription(interruptNow).assertCountEquals(1)
         rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
