@@ -26,7 +26,7 @@
 
 **Resume point (2026-10-01 ~22:30 CEST):** `main` @ `f179b0bb` (code head; full gate green twice: 4584 tests, 0 failed, 4 skipped). Nothing in flight.
 **Releases (all signed with cert SHA-256 `4f8c22de...b74d`; the coordinator publishes, every release bumps the MINOR):** v0.10.0 (code 28, ta-895),
-v0.11.0 (code 29: ta-ceo, ta-3uk, ta-ccu, ta-lx3), **v0.12.0 Latest (code 30, `b06f1fd3`).** Next release: 0.13.0 (code 31), would carry ta-t7l + ta-dh1. Flow: android-release.yml draft -> download, apksigner cert + aapt2 version check -> rename asset
+v0.11.0 (code 29: ta-ceo, ta-3uk, ta-ccu, ta-lx3), **v0.12.0 Latest (code 30, `b06f1fd3`).** Next release: 0.13.0 (code 31), **owner 2026-10-01: release after slice 5 (ta-q6p) merges**, carrying ta-t7l + ta-dh1 + ta-q6p. Flow: android-release.yml draft -> download, apksigner cert + aapt2 version check -> rename asset
 `tether-X.apk` -> Highlights above Changes -> `gh release edit vX --draft=false --latest`.
 **Merged + VERIFIED 2026-10-01:** ta-895, ta-ceo, ta-3uk (hello 137), ta-ccu, ta-lx3 (PARITY_BASE whole at 887c222); T10.1 slice 1 ta-k3f (Settings shell, General,
 Appearance); slice 2 ta-9q2 + ta-ebc (read-only Claude accounts); slice 3 ta-t7l (`d4cd7aed`: Advanced + Metadata editable, secrets masked and sent only on
