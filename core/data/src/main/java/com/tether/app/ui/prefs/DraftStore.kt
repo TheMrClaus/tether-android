@@ -2,6 +2,7 @@ package com.tether.app.ui.prefs
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -39,6 +40,15 @@ import kotlinx.coroutines.flow.first
  *
  * Unscoped keys written by pre-T7.1 development builds (`tether:draft:<id>`, never in a
  * release) are not attributed to any origin: they are never read, and the next write drops them.
+ *
+ * ta-8cv: the draft composer's per-provider preferences ([DraftPreferences.DRAFT_PREFS_KEY], the
+ * last-used model / effort / mode per catalog row, and hand-added model ids) are per server ORIGIN
+ * too, stored under [prefsKey] = `<origin>|tether:draftPreferences.v1`: catalog keys are a
+ * server's own (a profile id on server A can name another account on server B), so one server's
+ * picks never seed another's draft. The UNSCOPED record an earlier build kept ([isLegacyPrefsKey])
+ * cannot be attributed to a server either: it is DROPPED, never read and never migrated into any
+ * origin, and the next write of a draft or of preferences removes it. (No release ever wrote it:
+ * nothing called the unscoped write before ta-8cv.)
  */
 interface DraftStore {
     /** The stored draft of [sessionId] on [origin], or "" when there is none. */
@@ -49,10 +59,11 @@ interface DraftStore {
 
     suspend fun clear(origin: String, sessionId: String) = write(origin, sessionId, "")
 
-    /** lib/draft-preferences.mjs readDraftPreferences: a non-object or junk value reads as {}. */
-    suspend fun readDraftPreferences(): JsObj
+    /** lib/draft-preferences.mjs readDraftPreferences, for [origin]: a non-object or junk value reads as {}. */
+    suspend fun readDraftPreferences(origin: String): JsObj
 
-    suspend fun writeDraftPreferences(preferences: JsObj)
+    /** lib/draft-preferences.mjs writeDraftPreferences, for [origin]. */
+    suspend fun writeDraftPreferences(origin: String, preferences: JsObj)
 
     companion object {
         /** DataStore's file for the drafts (under `files/datastore/`), excluded from backup. */
@@ -67,8 +78,17 @@ interface DraftStore {
             return "$origin|${webKey(sessionId)}"
         }
 
+        /** ta-8cv: the draft preferences' key inside [origin]'s namespace. [origin] must be canonical. */
+        fun prefsKey(origin: String): String {
+            require(serverOrigin(origin) == origin) { "not a canonical server origin" }
+            return "$origin|${DraftPreferences.DRAFT_PREFS_KEY}"
+        }
+
         /** A pre-T7.1 unscoped draft key. */
         fun isLegacyKey(name: String): Boolean = name.startsWith("tether:draft:")
+
+        /** ta-8cv: the unscoped draft-preferences record (dropped, never read). */
+        fun isLegacyPrefsKey(name: String): Boolean = name == DraftPreferences.DRAFT_PREFS_KEY
     }
 }
 
@@ -83,13 +103,13 @@ class DataStoreDraftStore internal constructor(private val store: DataStore<Pref
     override suspend fun write(origin: String, sessionId: String, text: String) {
         val key = stringPreferencesKey(DraftStore.key(origin, sessionId))
         store.edit { prefs ->
-            prefs.asMap().keys.filter { DraftStore.isLegacyKey(it.name) }.forEach { prefs.remove(it) }
+            dropLegacy(prefs)
             if (text.isEmpty()) prefs.remove(key) else prefs[key] = text
         }
     }
 
-    override suspend fun readDraftPreferences(): JsObj {
-        val raw = store.data.first().asMap()[prefsKey] as? String ?: return JsObj.EMPTY
+    override suspend fun readDraftPreferences(origin: String): JsObj {
+        val raw = store.data.first().asMap()[stringPreferencesKey(DraftStore.prefsKey(origin))] as? String ?: return JsObj.EMPTY
         return try {
             JsCodec.parse(raw) as? JsObj ?: JsObj.EMPTY
         } catch (_: RuntimeException) {
@@ -97,13 +117,20 @@ class DataStoreDraftStore internal constructor(private val store: DataStore<Pref
         }
     }
 
-    override suspend fun writeDraftPreferences(preferences: JsObj) {
-        store.edit { it[prefsKey] = JsCodec.stringify(preferences) }
+    override suspend fun writeDraftPreferences(origin: String, preferences: JsObj) {
+        val key = stringPreferencesKey(DraftStore.prefsKey(origin))
+        store.edit { prefs ->
+            dropLegacy(prefs)
+            prefs[key] = JsCodec.stringify(preferences)
+        }
+    }
+
+    /** Unscoped records (pre-T7.1 drafts, pre-ta-8cv preferences) belong to no server: dropped. */
+    private fun dropLegacy(prefs: MutablePreferences) {
+        prefs.asMap().keys.filter { DraftStore.isLegacyKey(it.name) || DraftStore.isLegacyPrefsKey(it.name) }.forEach { prefs.remove(it) }
     }
 
     companion object {
-        private val prefsKey = stringPreferencesKey(DraftPreferences.DRAFT_PREFS_KEY)
-
         /** A store on an explicit file (tests; the app uses the Context constructor). */
         fun create(file: File, scope: CoroutineScope): DataStoreDraftStore =
             DataStoreDraftStore(PreferenceDataStoreFactory.create(scope = scope) { file })
@@ -113,7 +140,7 @@ class DataStoreDraftStore internal constructor(private val store: DataStore<Pref
 /** Process-local drafts (previews, and the view-model default). */
 class InMemoryDraftStore : DraftStore {
     private val drafts = HashMap<String, String>()
-    private var draftPreferences: JsObj = JsObj.EMPTY
+    private val draftPreferences = HashMap<String, JsObj>()
 
     override suspend fun read(origin: String, sessionId: String): String =
         synchronized(drafts) { drafts[DraftStore.key(origin, sessionId)] ?: "" }
@@ -123,9 +150,13 @@ class InMemoryDraftStore : DraftStore {
         synchronized(drafts) { if (text.isEmpty()) drafts.remove(key) else drafts[key] = text }
     }
 
-    override suspend fun readDraftPreferences(): JsObj = draftPreferences
+    override suspend fun readDraftPreferences(origin: String): JsObj {
+        val key = DraftStore.prefsKey(origin)
+        return synchronized(drafts) { draftPreferences[key] ?: JsObj.EMPTY }
+    }
 
-    override suspend fun writeDraftPreferences(preferences: JsObj) {
-        draftPreferences = preferences
+    override suspend fun writeDraftPreferences(origin: String, preferences: JsObj) {
+        val key = DraftStore.prefsKey(origin)
+        synchronized(drafts) { draftPreferences[key] = preferences }
     }
 }

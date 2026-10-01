@@ -44,10 +44,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.DRAFT_NOT_LIVE_COPY
+import com.tether.app.client.DRAFT_NOT_OFFERED_COPY
+import com.tether.app.client.DraftSubmitResult
 import com.tether.app.client.LabelText
 import com.tether.app.client.NewSessionGuard
-import com.tether.app.client.NewSessionResult
 import com.tether.app.client.NewSessionRow
+import com.tether.app.client.READINESS_MODELS_LOADING
 import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.components.TetherDialog
@@ -68,17 +71,20 @@ import com.tether.app.ui.theme.TetherTypography
 // own row, in the server's order (lib/provider-catalog.mjs: profiles first, then the default rows).
 // A tap creates the session on that row (no model is pinned: the engine's default, as the web's
 // create does until the operator picks one). The model browser itself is ta-2uq.
+// ta-8cv: the tap goes through the T8.1 draft composer engine, so the create carries the web's
+// permission mode (Claude Auto by default) and the explicit Claude sandbox; the composer sheet is
+// slice 2.
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
 /** use-draft-composer.ts readiness, for a row still loading (nothing is sent). */
-internal const val NEW_SESSION_LOADING_COPY = "Models are still loading."
+internal const val NEW_SESSION_LOADING_COPY = READINESS_MODELS_LOADING
 
 /** The live catalog no longer offers the row as drawn (nothing was created). */
-internal const val NEW_SESSION_NOT_OFFERED_COPY = "This server no longer offers that choice. Nothing was created; pick again from the updated list."
+internal const val NEW_SESSION_NOT_OFFERED_COPY = DRAFT_NOT_OFFERED_COPY
 
 /** The picker was drawn for another server than the one now connected (nothing was sent). */
-internal const val NEW_SESSION_NOT_LIVE_COPY = "The server changed. Nothing was created; pick again."
+internal const val NEW_SESSION_NOT_LIVE_COPY = DRAFT_NOT_LIVE_COPY
 
 /** No live link (the client also raises its reconnecting toast). */
 internal const val NEW_SESSION_NOT_CONNECTED_COPY = "The secure link is reconnecting. The session was not created."
@@ -86,44 +92,70 @@ internal const val NEW_SESSION_NOT_CONNECTED_COPY = "The secure link is reconnec
 /** Shown while this connection's catalog is not in yet (the base providers stand in). */
 internal const val NEW_SESSION_CATALOG_PENDING_COPY = "Loading accounts and profiles…"
 
+/** ta-8cv: the create went out; the dialog waits for the server's answer to it. */
+internal const val NEW_SESSION_CREATING_COPY = "Starting the session…"
+
 internal const val NEW_SESSION_ROW_TAG = "new-session-row-"
 internal const val NEW_SESSION_NOTICE_TAG = "new-session-notice"
 internal const val NEW_SESSION_PENDING_TAG = "new-session-pending"
+internal const val NEW_SESSION_CREATING_TAG = "new-session-creating"
 
 /**
  * ta-895: "New session", wired to the client. Opening it asks for a fresh catalog (and again when
  * the link comes back while it is open), and it draws the profile rows only from the catalog the
  * current socket delivered ([com.tether.app.client.TetherClient.providerCatalogLive]); until then the
- * base providers stand in as their default rows. A tap goes through
- * [TetherViewModel.createNewSession], which the client re-checks under its lock; the dialog closes
- * only when the create went out, and otherwise says why and stays open.
+ * base providers stand in as their default rows.
+ *
+ * ta-8cv: a tap goes through the draft composer ([TetherViewModel.createNewSession]: the web's frame
+ * with the explicit mode and sandbox and a fresh requestId; the client re-checks it under its lock).
+ * While that create is in flight the rows are locked and the dialog says so; it closes when the
+ * server's `created` for THAT create lands (the view model selects that session). A refusal before
+ * the wire, the server's own `error` for it (in the server's words), or a dropped link: the dialog
+ * says why, unlocks and stays open. Nothing is retried.
  */
 @Composable
 fun NewSessionDialog(vm: TetherViewModel, onDismiss: () -> Unit) {
     val client = vm.client
+    val composer = vm.draftComposer
     val connection by client.connection.collectAsStateWithLifecycle()
     val catalog by client.providerCatalog.collectAsStateWithLifecycle()
     val live by client.providerCatalogLive.collectAsStateWithLifecycle()
     val providers by client.providers.collectAsStateWithLifecycle()
     val origin by client.consentOrigin.collectAsStateWithLifecycle()
+    // A new opening shows its own words, never an earlier opening's (cleared before the first read).
+    val openedAt = remember {
+        composer.clearError()
+        composer.state.value.completed
+    }
+    val draft by composer.state.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
+    LaunchedEffect(draft.completed) { if (draft.completed > openedAt) onDismiss() }
     var notice by remember { mutableStateOf<String?>(null) }
     val rows = NewSessionGuard.rows(if (live) catalog else null, providers)
     TetherDialog(onDismiss = onDismiss, title = "New session") {
-        NewSessionPickerBody(rows = rows, providers = providers, catalogPending = !live, notice = notice) { row ->
+        NewSessionPickerBody(
+            rows = rows,
+            providers = providers,
+            catalogPending = !live,
+            notice = if (draft.creating) null else notice ?: draft.error.takeIf { it.isNotEmpty() },
+            creating = draft.creating,
+        ) { row ->
+            if (composer.state.value.creating) return@NewSessionPickerBody
+            notice = null
             if (row.status == "loading") {
                 notice = NEW_SESSION_LOADING_COPY
                 return@NewSessionPickerBody
             }
             when (vm.createNewSession(row.choice, origin)) {
-                NewSessionResult.Sent -> onDismiss()
-                NewSessionResult.NotOffered -> {
+                // Sent: wait for its own reply. Busy / NotReady: the draft composer says why (or one is in flight).
+                DraftSubmitResult.Sent, DraftSubmitResult.Busy, DraftSubmitResult.NotReady -> Unit
+                DraftSubmitResult.NotOffered -> {
                     notice = NEW_SESSION_NOT_OFFERED_COPY
                     client.requestProviderCatalog()
                 }
-                NewSessionResult.NotLive -> notice = NEW_SESSION_NOT_LIVE_COPY
-                NewSessionResult.NotConnected -> notice = NEW_SESSION_NOT_CONNECTED_COPY
+                DraftSubmitResult.NotLive -> notice = NEW_SESSION_NOT_LIVE_COPY
+                DraftSubmitResult.NotConnected -> notice = NEW_SESSION_NOT_CONNECTED_COPY
             }
         }
     }
@@ -146,10 +178,28 @@ fun ColumnScope.NewSessionPickerBody(
     providers: List<ProviderInfo>,
     catalogPending: Boolean,
     notice: String?,
+    creating: Boolean = false,
     onPick: (NewSessionRow) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
+    if (creating) {
+        // ta-8cv: the pending line's look; every row is locked until the create's own reply.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = t.css.spaceSm)
+                .semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                    testTag = NEW_SESSION_CREATING_TAG
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        ) {
+            Icon(TetherIcons.Loader, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))
+            Text(NEW_SESSION_CREATING_COPY, style = type.body.copy(fontSize = rem(0.78f)), color = t.muted)
+        }
+    }
     if (catalogPending) {
         Row(
             Modifier.fillMaxWidth().padding(bottom = t.css.spaceSm).semantics { testTag = NEW_SESSION_PENDING_TAG },
@@ -171,7 +221,7 @@ fun ColumnScope.NewSessionPickerBody(
     }
     val tags = newSessionRowTags(rows)
     rows.forEachIndexed { index, row ->
-        NewSessionRowView(row, tags[index], glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, onPick = onPick)
+        NewSessionRowView(row, tags[index], glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, locked = creating, onPick = onPick)
     }
     if (notice != null) {
         Row(
@@ -283,14 +333,14 @@ private fun profileIdText(id: String): AnnotatedString {
 }
 
 @Composable
-private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, last: Boolean, onPick: (NewSessionRow) -> Unit) {
+private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, last: Boolean, locked: Boolean, onPick: (NewSessionRow) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val name = newSessionRowLabel(row)
     val state = newSessionRowState(row)
     val error = newSessionRowError(row)
     val profileId = row.choice.profileId?.takeIf { it.isNotEmpty() }
-    val enabled = newSessionRowEnabled(row)
+    val enabled = newSessionRowEnabled(row) && !locked
     val description = listOfNotNull(
         name,
         tag?.let { "tag ${it.removePrefix("#")}" },

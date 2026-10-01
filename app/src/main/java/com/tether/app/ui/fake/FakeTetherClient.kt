@@ -628,29 +628,36 @@ class FakeTetherClient : TetherClient {
         touchSession(sessionId, status = "ready")
     }
 
-    private fun createDemoSession(provider: String, cwd: String?, name: String?) {
+    private fun createDemoSession(provider: String, cwd: String?, name: String?): AgentSession {
         val id = "s-${System.currentTimeMillis()}"
         val ts = System.currentTimeMillis()
         val dir = cwd ?: "/home/operator/git"
-        _sessions.update { list ->
-            list + AgentSession(
-                id = id, provider = provider, name = name ?: "new session", cwd = dir,
-                status = "ready", startedAt = ts, updatedAt = ts,
-            )
-        }
+        val session = AgentSession(
+            id = id, provider = provider, name = name ?: "new session", cwd = dir,
+            status = "ready", startedAt = ts, updatedAt = ts,
+        )
+        _sessions.update { list -> list + session }
         _projections.update { it + (id to SessionProjection(tetherSessionId = id, provider = provider, cwd = dir)) }
+        return session
     }
+
+    // ta-8cv: the demo answers its own create with a `created` echoing the requestId, as the server does.
+    private val _created = MutableStateFlow<com.tether.app.client.CreatedReply?>(null)
+    override val createdSessions: StateFlow<com.tether.app.client.CreatedReply?> = _created.asStateFlow()
 
     /** ta-895: the demo has no catalog, so the picker's base-provider rows create as before. */
     override fun createNewSession(
-        choice: com.tether.app.client.NewSessionChoice,
-        cwd: String?,
+        request: com.tether.app.client.NewSessionRequest,
         expectedOrigin: String?,
     ): com.tether.app.client.NewSessionResult {
         if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.NewSessionResult.NotLive
-        val frame = com.tether.app.client.NewSessionGuard.resolve(choice, null, providers.value, cwd)
+        val frame = com.tether.app.client.NewSessionGuard.resolve(request, null, providers.value)
             ?: return com.tether.app.client.NewSessionResult.NotOffered
-        createDemoSession(frame.provider, frame.cwd, null)
+        val session = createDemoSession(frame.provider, frame.cwd, null)
+        // Answered after the call returns, as a server reply would be.
+        scope.launch {
+            _created.update { com.tether.app.client.CreatedReply(session, (it?.seq ?: 0L) + 1, frame.requestId) }
+        }
         return com.tether.app.client.NewSessionResult.Sent
     }
 

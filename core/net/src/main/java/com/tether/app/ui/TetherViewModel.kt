@@ -8,10 +8,11 @@ import com.tether.app.client.AttachmentSendResult
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.StagedAttachments
 import com.tether.app.client.CreatedReply
+import com.tether.app.client.DraftComposerModel
+import com.tether.app.client.DraftSubmitResult
 import com.tether.app.client.EventLog
 import com.tether.app.client.LogoutResult
 import com.tether.app.client.NewSessionChoice
-import com.tether.app.client.NewSessionResult
 import com.tether.app.client.TetherClient
 import com.tether.app.client.isWarning
 import com.tether.app.client.serverOrigin
@@ -67,6 +68,20 @@ class TetherViewModel(
      */
     private val _currentWorkspace = MutableStateFlow<String?>(null)
     val currentWorkspace: StateFlow<String?> = _currentWorkspace.asStateFlow()
+
+    /**
+     * ta-8cv (T8.1): the new-session draft composer (use-draft-composer.ts), held here like the
+     * web's dashboard holds the hook, so the draft survives a session switch and a rotation. It is
+     * the only path a new session takes ([createNewSession]); its own matched `created` is the one
+     * a new session is selected from.
+     */
+    val draftComposer = DraftComposerModel(
+        client = client,
+        draftStore = draftStore,
+        scope = viewModelScope,
+        currentWorkspace = { _currentWorkspace.value },
+        saveSessionDraft = { origin, sessionId, text -> saveSessionDraft(origin, sessionId, text) },
+    )
 
     /**
      * The selected sub-agent run tab per session (null/absent = the whole
@@ -127,6 +142,16 @@ class TetherViewModel(
         return _drafts.mapNotNull { it[sessionId] }.first()
     }
 
+    /**
+     * ta-8cv: the orphaned first message (use-draft-composer.ts:429-437): stored as [sessionId]'s
+     * draft on [origin] (awaited: a failure throws, and the draft composer keeps the text), then
+     * shown in that session's composer unless something was typed there meanwhile.
+     */
+    private suspend fun saveSessionDraft(origin: String, sessionId: String, text: String) {
+        draftStore.write(origin, sessionId, text)
+        if (draftOrigin == origin) _drafts.update { if (it[sessionId].isNullOrEmpty()) it + (sessionId to text) else it }
+    }
+
     /** The composer's text changed; "" (sent or cleared) removes the stored draft, like the web. */
     fun setDraft(sessionId: String, text: String) {
         if (_drafts.value[sessionId] == text) return
@@ -172,6 +197,8 @@ class TetherViewModel(
         // still being read when the server changes).
         val staged = stagedAttachments.current.value
         if ((staged != null && staged.origin != origin) || origin != draftOrigin) stagedAttachments.clear()
+        // ta-8cv: the draft composer's preferences are that server's own.
+        draftComposer.onOrigin(origin)
         if (origin == draftOrigin) return
         draftOrigin = origin
         draftLoads.clear()
@@ -255,9 +282,6 @@ class TetherViewModel(
     private val anchors = HashMap<String, Anchor>()
     private var globalAnchor: Anchor? = null
 
-    /** Set once a create was requested, so the next new session row is auto-selected. */
-    private var knownIdsBeforeCreate: Set<String>? = null
-
     init {
         viewModelScope.launch {
             client.sessions.collect { list -> onSessions(list) }
@@ -305,6 +329,18 @@ class TetherViewModel(
             val seenSeq = client.createdSessions.value?.seq ?: 0L
             client.createdSessions.collect { reply -> onCreated(reply, seenSeq) }
         }
+        // ta-8cv: the draft composer's other inputs (use-draft-composer.ts effects): the catalog and
+        // workspace it resolves against, the `error` frames, and the link its create went out on.
+        viewModelScope.launch {
+            combine(client.providerCatalog, client.providerCatalogLive, client.providers, client.workspaceRoot, _currentWorkspace) { _, _, _, _, _ -> }
+                .collect { draftComposer.refresh() }
+        }
+        viewModelScope.launch {
+            client.createErrors.collect { reply -> if (reply != null) draftComposer.onCreateError(reply) }
+        }
+        viewModelScope.launch {
+            combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }
+        }
     }
 
     private fun onSessions(list: List<AgentSession>) {
@@ -318,15 +354,6 @@ class TetherViewModel(
         val latest = list.maxOfOrNull { it.updatedAt }
         if (latest != null && (globalAnchor == null || latest > globalAnchor!!.serverTs)) {
             globalAnchor = Anchor(latest, mono)
-        }
-
-        // Auto-select the session created from the provider picker.
-        knownIdsBeforeCreate?.let { before ->
-            val created = list.firstOrNull { it.id !in before }
-            if (created != null) {
-                knownIdsBeforeCreate = null
-                selectSession(created.id)
-            }
         }
 
         // T7.4: attachments staged for a session that locked (read-only, handed off, archived) go;
@@ -418,17 +445,14 @@ class TetherViewModel(
     }
 
     /**
-     * ta-895: the New session picker's tap on [choice], drawn for [expectedOrigin], in the current
-     * workspace ([TetherClient.createNewSession] re-checks it under the client's lock). Sent: the
-     * next new session row is auto-selected. Anything else: nothing was
-     * created, and nothing is auto-selected later.
+     * ta-895 / ta-8cv: the New session picker's tap on [choice], drawn for [expectedOrigin], in the
+     * current workspace, through the draft composer ([DraftComposerModel.submitChoice]: the web's
+     * frame with the explicit mode and sandbox and a fresh requestId; the client re-checks it under
+     * its lock). Sent: the session whose `created` echoes that requestId is selected when it lands,
+     * and no other. Anything else: nothing was created, and nothing is selected later.
      */
-    fun createNewSession(choice: NewSessionChoice, expectedOrigin: String?): NewSessionResult {
-        val before = client.sessions.value.map { it.id }.toSet()
-        val result = client.createNewSession(choice, _currentWorkspace.value, expectedOrigin)
-        if (result == NewSessionResult.Sent) knownIdsBeforeCreate = before
-        return result
-    }
+    fun createNewSession(choice: NewSessionChoice, expectedOrigin: String?): DraftSubmitResult =
+        draftComposer.submitChoice(choice, expectedOrigin)
 
     /**
      * Busy turns queue; idle sessions send. Text only (T7.4): a message with attachments goes
@@ -543,13 +567,25 @@ class TetherViewModel(
         return true
     }
 
-    /** dashboard.tsx:708-722: the unicast reply is a deliberate target; it outranks the rest. */
+    /**
+     * dashboard.tsx:708-722: the unicast reply is a deliberate target; it outranks the rest.
+     *
+     * ta-8cv: a reply that carries a `requestId` answers a create, and is followed only when the
+     * draft composer matches it to ITS in-flight create (requestId, newer seq); a stale or foreign
+     * one is never selected. A reply without one answers a resume: it opens the resumed session as
+     * before, but never while a create is in flight, so it cannot take that create's place.
+     */
     private fun onCreated(reply: CreatedReply?, seenAtStart: Long) {
         if (reply == null || reply.seq <= maxOf(seenAtStart, followedCreatedSeq)) return
         followedCreatedSeq = reply.seq
+        if (reply.requestId != null) {
+            val sessionId = draftComposer.onCreated(reply) ?: return
+            _openingHistoryId.value = null
+            if (_selectedSessionId.value != sessionId) selectSession(sessionId)
+            return
+        }
         _openingHistoryId.value = null
-        // The provider picker's create-then-select may already have landed on it.
-        if (knownIdsBeforeCreate != null && client.sessions.value.any { it.id == reply.session.id }) knownIdsBeforeCreate = null
+        if (draftComposer.state.value.creating) return
         if (_selectedSessionId.value == reply.session.id) return
         selectSession(reply.session.id)
     }

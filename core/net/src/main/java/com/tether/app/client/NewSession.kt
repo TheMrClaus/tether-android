@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.tree.JsObj
 
 /**
  * ta-895: what one row of the New session picker names, exactly as it was drawn: the catalog row's
@@ -17,7 +18,10 @@ enum class NewSessionResult {
     /** The `create` went out on the live socket. */
     Sent,
 
-    /** No live, handshaken socket (or the client is halted): nothing was sent. */
+    /**
+     * No live, handshaken socket (or the client is halted; ta-8cv: or the socket the draft was
+     * composed on has been replaced): nothing was sent.
+     */
     NotConnected,
 
     /** Drawn for another server than the socket's, or for none: nothing was sent. */
@@ -128,27 +132,63 @@ object NewSessionGuard {
     }
 
     /**
-     * The `create` for [choice], or null when the server does not offer it now (fail closed: never
-     * a create on another profile, and never the default profile in place of a missing one).
+     * The catalog row [choice] starts on, or null when the server does not offer it now (fail
+     * closed: never a create on another profile, and never the default profile in place of a
+     * missing one).
      *
      * With a [liveCatalog] (the current socket's; r2: an empty one offers nothing): exactly one row
      * has the drawn key, and its engine and profile are the drawn ones, it is [wellFormed] and
-     * [submittable]; the frame carries that row's engine and profile. Without one (null: none is in
-     * yet): only a default row (no profile, key = an engine id) of an available, non-acp base
-     * provider; the frame carries no profile.
+     * [submittable]; that row. Without one (null: none is in yet): only a default row (no profile,
+     * key = an engine id) of an available, non-acp base provider, as [baseEntry] (no profile).
      */
-    fun resolve(choice: NewSessionChoice, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>, cwd: String?): ClientMessage.Create? {
+    fun resolveEntry(choice: NewSessionChoice, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): ProviderCatalogEntry? {
         val catalog = liveCatalog
         if (catalog == null) {
             if (choice.profileId != null || choice.key != choice.provider || choice.provider == ACP) return null
             val provider = providers.firstOrNull { it.id == choice.provider } ?: return null
             if (!provider.available) return null
-            return ClientMessage.Create(provider = provider.id, cwd = cwd)
+            return baseEntry(provider)
         }
         val matches = catalog.filter { it.key == choice.key }
         val entry = matches.singleOrNull() ?: return null
         if (entry.provider != choice.provider || entry.profileId != choice.profileId) return null
         if (!wellFormed(entry) || !submittable(entry.status)) return null
-        return ClientMessage.Create(provider = entry.provider, cwd = cwd, profileId = entry.profileId)
+        return entry
     }
+
+    /**
+     * ta-8cv: the `create` for [request], or null when the server does not offer its row now
+     * ([resolveEntry]). The frame is the web's, key for key ([CreateFrame.build]), on the row as the
+     * live catalog has it (its engine and profile), never as the request claims them.
+     */
+    fun resolve(request: NewSessionRequest, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): ClientMessage.Create? {
+        val entry = resolveEntry(request.choice, liveCatalog, providers) ?: return null
+        return CreateFrame.build(request.form, entry, request.modified, request.requestId)
+    }
+
+    /** A base provider's implicit default row, standing in while no live catalog is in. */
+    fun baseEntry(provider: ProviderInfo): ProviderCatalogEntry =
+        ProviderCatalogEntry(provider.id, provider.id, if (provider.available) "ready" else "unavailable", emptyList(), label = provider.label)
+
+    /**
+     * ta-8cv: the rows the draft composer resolves its form against, as [rows] draws them: the live
+     * catalog, or (none in yet) the base providers' default rows, acp left out.
+     */
+    fun draftEntries(liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): List<ProviderCatalogEntry> =
+        liveCatalog ?: providers.filter { it.id.isNotEmpty() && it.id != ACP }.map(::baseEntry)
 }
+
+/**
+ * ta-8cv: one new-session submit, as the draft composer composed it: the row drawn ([choice]), the
+ * draft form and its `userModified` guard (lib/draft-form.ts shapes), the correlation token minted
+ * for THIS attempt ([requestId], v76: the server echoes it on `created` / `error`), and the
+ * [TetherClient.linkEpoch] the draft was composed on (the client refuses the create if that socket
+ * has gone). Never persisted, never retried.
+ */
+data class NewSessionRequest(
+    val choice: NewSessionChoice,
+    val form: JsObj,
+    val modified: JsObj,
+    val requestId: String,
+    val linkEpoch: Long,
+)

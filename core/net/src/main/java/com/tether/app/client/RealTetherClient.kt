@@ -571,6 +571,13 @@ class RealTetherClient(
     private var createdSeq = 0L
     override val createdSessions: StateFlow<CreatedReply?> = createdState
 
+    // ta-8cv: the web's `createError` (use-tether.ts:300), and the live socket's epoch, published.
+    private val createErrorsState = MutableStateFlow<CreateErrorReply?>(null)
+    private var createErrorSeq = 0L
+    override val createErrors: StateFlow<CreateErrorReply?> = createErrorsState
+    private val linkEpochState = MutableStateFlow(0L)
+    override val linkEpoch: StateFlow<Long> = linkEpochState
+
     private val storedSettingsLoadedState = MutableStateFlow(false)
     override val storedSettingsLoaded: StateFlow<Boolean> = storedSettingsLoadedState
 
@@ -1018,6 +1025,7 @@ class RealTetherClient(
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
+        createErrorsState.value = null
         searchSync.clear()
         // T15.1: another server's overview must never show, and its subscription does not carry over.
         synchronized(lock) { overviewSync.clear() }
@@ -2296,6 +2304,8 @@ class RealTetherClient(
                 connecting = false
                 // A new epoch: nothing is attached on this socket yet.
                 epoch++
+                // ta-8cv: a create in flight on the previous socket is over; one composed there is refused.
+                linkEpochState.value = epoch
                 // ta-895: and no catalog of this socket is in yet.
                 providerCatalogLiveState.value = false
                 attachedThisEpoch.clear()
@@ -2443,6 +2453,12 @@ class RealTetherClient(
                 // T6.7: cleaned and attributed to the server; one that echoes a node request's
                 // requestId also ends that request.
                 emitServerErrorIfCurrent(webSocket, message.message)
+                // ta-8cv: use-tether.ts:1201 setCreateError — every error, with its echo; the draft
+                // composer acts only on the one that names its in-flight create.
+                ifCurrent(webSocket) {
+                    createErrorSeq += 1
+                    createErrorsState.value = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId)
+                }
                 message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
@@ -3587,20 +3603,22 @@ class RealTetherClient(
         } == true
 
     /**
-     * ta-895: the one path a New session row takes to the wire. Under the lock, in order: a live,
-     * handshaken socket of a running (not halted) client; the row drawn for THIS server
-     * ([expectedOrigin] = the socket's origin); the row resolved again against the catalog THIS
-     * socket delivered, or, with none in, the base providers its `ready` listed
-     * ([NewSessionGuard.resolve]); then `create` enqueued on that socket. Nothing is retried, held
-     * or persisted.
+     * ta-895 / ta-8cv: the one path a new session takes to the wire. Under the lock, in order: a
+     * live, handshaken socket of a running (not halted) client, the one the draft was composed on
+     * ([NewSessionRequest.linkEpoch]); the row drawn for THIS server ([expectedOrigin] = the
+     * socket's origin); the row resolved again against the catalog THIS socket delivered, or, with
+     * none in, the base providers its `ready` listed, and the web's frame built on it
+     * ([NewSessionGuard.resolve], [CreateFrame.build]); then `create` enqueued on that socket.
+     * Nothing is retried, held or persisted (never the outbox).
      */
-    override fun createNewSession(choice: NewSessionChoice, cwd: String?, expectedOrigin: String?): NewSessionResult {
+    override fun createNewSession(request: NewSessionRequest, expectedOrigin: String?): NewSessionResult {
         val result = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NewSessionResult.NotConnected
+            if (request.linkEpoch != epoch) return@synchronized NewSessionResult.NotConnected
             if (expectedOrigin != origin) return@synchronized NewSessionResult.NotLive
-            val frame = NewSessionGuard.resolve(choice, liveCatalogLocked(), providersState.value, cwd) ?: return@synchronized NewSessionResult.NotOffered
+            val frame = NewSessionGuard.resolve(request, liveCatalogLocked(), providersState.value) ?: return@synchronized NewSessionResult.NotOffered
             if (!ws.send(frame.encode())) return@synchronized NewSessionResult.NotConnected
             NewSessionResult.Sent
         }

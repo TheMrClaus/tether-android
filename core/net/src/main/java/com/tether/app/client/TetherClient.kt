@@ -349,16 +349,38 @@ interface TetherClient {
     val providerCatalogLive: StateFlow<Boolean> get() = NO_CATALOG_LIVE
 
     /**
-     * ta-895: start a new session on the catalog row the New session picker drew ([choice]), in
-     * [cwd]. Call it ONLY from a tap on that row. Under the client's lock, in order: a live,
-     * handshaken socket of a running client; the row drawn for THIS server ([expectedOrigin], the
-     * [consentOrigin] the picker was composed with); the row resolved again against the catalog
-     * THIS socket delivered ([NewSessionGuard.resolve]: the same key, engine and profile, offered
-     * and submittable; with no live catalog, a base provider's default row only); then `create`
-     * (with the row's `profileId`, when it has one) enqueued on that socket. Otherwise nothing is
-     * sent: never another profile, and never the default profile in place of one that went.
+     * ta-895 / ta-8cv: start a new session as the draft composer submitted it ([request]: the row
+     * drawn, the draft form, a fresh `requestId`). Call it ONLY from an explicit submit (a tap on a
+     * row, the composer's Send), never in answer to anything received, and never again for the
+     * same attempt: a create is never retried, held, queued or persisted (SYNC_DESIGN §5.2).
+     *
+     * Under the client's lock, in order: a live, handshaken socket of a running client, and the
+     * one the draft was composed on ([NewSessionRequest.linkEpoch] = [linkEpoch]); the row drawn
+     * for THIS server ([expectedOrigin], the [consentOrigin] the picker was composed with); the row
+     * resolved again against the catalog THIS socket delivered ([NewSessionGuard.resolveEntry]: the
+     * same key, engine and profile, offered and submittable; with no live catalog, a base
+     * provider's default row only); then the web's `create` frame for it ([CreateFrame.build]:
+     * permission mode, sandbox, approvals, worktree, profile, picked model/effort, requestId)
+     * enqueued on that socket. Otherwise nothing is sent: never another profile, and never the
+     * default profile in place of one that went.
      */
-    fun createNewSession(choice: NewSessionChoice, cwd: String?, expectedOrigin: String?): NewSessionResult = NewSessionResult.NotConnected
+    fun createNewSession(request: NewSessionRequest, expectedOrigin: String?): NewSessionResult = NewSessionResult.NotConnected
+
+    /**
+     * ta-8cv: every `error` frame of the live socket, as the web's `createError` holds it
+     * (use-tether.ts: `{message, seq, requestId?}`, seq monotonic): the draft composer acts only on
+     * the one whose `requestId` echoes its in-flight create. The message is cleaned by the error
+     * text rule ([LabelText.error]). The toast ([serverErrors]) still shows every error, as the web's
+     * `setError` does.
+     */
+    val createErrors: StateFlow<CreateErrorReply?> get() = NO_CREATE_ERRORS
+
+    /**
+     * ta-8cv: which socket is live, as a number that moves each time a new one opens (never back).
+     * A create composed on one socket is refused on the next ([NewSessionRequest.linkEpoch]), and a
+     * create in flight on a socket that went is over (its reply can never arrive on another one).
+     */
+    val linkEpoch: StateFlow<Long> get() = NO_LINK_EPOCH
 
     /**
      * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only when drawn for
@@ -765,7 +787,12 @@ private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableSt
 /** One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`). */
 data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null)
 
+/** ta-8cv: one `error` frame of the live socket ([TetherClient.createErrors]); [message] already cleaned. */
+data class CreateErrorReply(val message: String, val seq: Long, val requestId: String? = null)
+
 private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)
+private val NO_CREATE_ERRORS: StateFlow<CreateErrorReply?> = MutableStateFlow(null)
+private val NO_LINK_EPOCH: StateFlow<Long> = MutableStateFlow(0L)
 
 private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
 private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = MutableStateFlow(emptyMap())
