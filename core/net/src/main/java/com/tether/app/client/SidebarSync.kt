@@ -28,6 +28,9 @@ internal class SidebarSync {
     val serverSettings = MutableStateFlow<ServerMessage.ServerSettings?>(null)
     val advancedSettings = MutableStateFlow<ServerMessage.AdvancedSettings?>(null)
 
+    /** ta-dh1: every `server-settings` frame counted, an unchanged one too ("Scan again" waits for the next). */
+    val serverSettingsReplies = MutableStateFlow(0L)
+
     /** Folds one frame; returns false for a frame this class does not own. */
     fun onFrame(message: ServerMessage): Boolean {
         when (message) {
@@ -37,7 +40,10 @@ internal class SidebarSync {
                 val known = current[message.historyId]
                 if (known != null && known >= message.seenAt) current else current + (message.historyId to message.seenAt)
             }
-            is ServerMessage.ServerSettings -> serverSettings.value = message
+            is ServerMessage.ServerSettings -> {
+                serverSettings.value = message
+                serverSettingsReplies.update { it + 1 }
+            }
             is ServerMessage.AdvancedSettings -> advancedSettings.value = message
             else -> return false
         }

@@ -3756,6 +3756,10 @@ class RealTetherClient(
 
     override fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = sendFrameFor(origin, message)
 
+    override fun detectEngines(origin: String): Boolean = sendFrameFor(origin, ClientMessage.DetectEngines)
+
+    override val serverSettingsReplies: StateFlow<Long> = sidebarSync.serverSettingsReplies
+
     // T5.3 search (SearchSync.kt).
     override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)
 

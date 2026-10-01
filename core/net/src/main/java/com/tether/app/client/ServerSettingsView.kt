@@ -27,15 +27,20 @@ class SecretText(private val value: String) {
     override fun hashCode(): Int = value.hashCode()
 }
 
-/** How a [ServerSetting] is read and written (settings-dialog.tsx's Server*Row helpers). */
-enum class SettingKind { Text, Secret, Number, Toggle, Choice, Paths }
+/**
+ * How a [ServerSetting] is read and written (settings-dialog.tsx's Server*Row helpers). ta-dh1:
+ * [Runs] is a value that sets what the server RUNS (an engine's home, command or launch command):
+ * read like [Text], but written ONLY by [ServerSettingsPatch.engineValue], after a confirmation
+ * that shows the new value (owner decision 2026-10-01); [ServerSettingsPatch.text] refuses it.
+ */
+enum class SettingKind { Text, Secret, Number, Toggle, Choice, Paths, Runs }
 
 /**
- * The ServerSettings keys (lib/protocol.ts 887c222 :1194) the Advanced and Metadata tabs show, by
- * their wire key. The Engines keys (homes, commands, launch command, headless modes, share host
- * config) are ta-dh1's.
+ * The ServerSettings keys (lib/protocol.ts 887c222 :1194) the Settings tabs show, by their wire
+ * key. [maxBytes]: the server's size limit for a string key (protocol-validate.mjs 887c222
+ * :1846-1866, UTF-8 bytes); a longer value is never sent, since the server would refuse it.
  */
-enum class ServerSetting(val key: String, val kind: SettingKind) {
+enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: Int = 0) {
     Host("host", SettingKind.Text),
     Port("port", SettingKind.Number),
     Password("password", SettingKind.Secret),
@@ -63,6 +68,23 @@ enum class ServerSetting(val key: String, val kind: SettingKind) {
     MetadataGenerationMode("metadataGenerationMode", SettingKind.Choice),
     MetadataGenerationProvider("metadataGenerationProvider", SettingKind.Text),
     MetadataGenerationProviders("metadataGenerationProviders", SettingKind.Text),
+
+    // ta-dh1: the Engines tab (settings-dialog.tsx 887c222 :2107-2249).
+    HeadlessModes("headlessModes", SettingKind.Text, maxBytes = 256),
+    ClaudeHome("claudeHome", SettingKind.Runs, maxBytes = 4096),
+    CodexHome("codexHome", SettingKind.Runs, maxBytes = 4096),
+    OpencodeHome("opencodeHome", SettingKind.Runs, maxBytes = 4096),
+    ReasonixHome("reasonixHome", SettingKind.Runs, maxBytes = 4096),
+    PiHome("piHome", SettingKind.Runs, maxBytes = 4096),
+    DshHome("dshHome", SettingKind.Runs, maxBytes = 4096),
+    ClaudeCommand("claudeCommand", SettingKind.Runs, maxBytes = 256),
+    CodexCommand("codexCommand", SettingKind.Runs, maxBytes = 256),
+    OpencodeCommand("opencodeCommand", SettingKind.Runs, maxBytes = 256),
+    ReasonixCommand("reasonixCommand", SettingKind.Runs, maxBytes = 256),
+    PiCommand("piCommand", SettingKind.Runs, maxBytes = 256),
+    DshCommand("dshCommand", SettingKind.Runs, maxBytes = 256),
+    ClaudeLaunchCommand("claudeLaunchCommand", SettingKind.Runs, maxBytes = 256),
+    ShareHostConfig("shareHostConfig", SettingKind.Toggle),
 }
 
 /**
@@ -80,8 +102,33 @@ class ServerSettingsView private constructor(
     val envForced: Set<String>,
     /** `restartRequired`: the server booted with values that differ from what is now persisted. */
     val restartRequired: Boolean,
+    /** `detected`: Record<string, EngineDetection>, raw; read only for the [EngineCard] ids. */
+    private val detected: JsonObject = JsonObject(emptyMap()),
 ) {
     fun forced(setting: ServerSetting): Boolean = setting.key in envForced
+
+    /**
+     * ta-dh1: `detected[engine.id]` (settings-dialog.tsx:2127), decoded tolerantly; null when the
+     * server sent none for it (the card then says "scanning…"). Only the six [EngineCard] ids are
+     * ever read, so a frame with any number of entries costs six lookups; each is decoded once.
+     */
+    fun detection(engine: EngineCard): EngineDetection? = detections[engine]
+
+    private val detections: Map<EngineCard, EngineDetection?> by lazy {
+        EngineCard.entries.associateWith { EngineDetection.of(detected[it.id]) }
+    }
+
+    /**
+     * ta-dh1: settings-dialog.tsx:47 `headlessModesList`: the comma list, each entry trimmed, the
+     * empty ones dropped (decoded once).
+     */
+    val headlessModes: List<String> by lazy { headlessModesList(text(ServerSetting.HeadlessModes)) }
+
+    /**
+     * ta-dh1 (issue #86, settings-dialog.tsx:2136): the engine has no home and needs one (Claude's
+     * is optional: an empty home is the operator's real HOME), so its switch is blocked.
+     */
+    fun needsHome(engine: EngineCard): Boolean = text(engine.home).isEmpty() && !engine.homeOptional
 
     /**
      * ServerTextRow: `String(settings[field] ?? "")`. r2: a [SettingKind.Secret] reads "" here, so the
@@ -120,7 +167,10 @@ class ServerSettingsView private constructor(
 
     companion object {
         fun of(frame: ServerMessage.ServerSettings): ServerSettingsView =
-            ServerSettingsView(frame.settings, frame.envForced.filterValues { it }.keys, frame.restartRequired)
+            ServerSettingsView(frame.settings, frame.envForced.filterValues { it }.keys, frame.restartRequired, frame.detected)
+
+        /** settings-dialog.tsx:47: `String(raw ?? "").split(",").map(trim).filter(Boolean)`. */
+        fun headlessModesList(raw: String): List<String> = raw.split(',').map(::jsTrim).filter { it.isNotEmpty() }
 
         /** `String(x ?? "")` for the shapes a setting can hold: a primitive's text, else "". */
         private fun stringOf(value: JsonElement?): String = when (value) {
@@ -141,10 +191,11 @@ object ServerSettingsPatch {
 
     /**
      * ServerTextRow's commit (:129-132): `{ [field]: current || null }` when the field differs from
-     * what it showed ([shown]: the server value as the field was filled with it).
+     * what it showed ([shown]: the server value as the field was filled with it). ta-dh1: never a
+     * [SettingKind.Runs] key (those go through [engineValue], after their confirmation).
      */
     fun text(view: ServerSettingsView, setting: ServerSetting, edited: String, shown: String): JsonObject? {
-        if (view.forced(setting) || edited == shown) return null
+        if (setting.kind == SettingKind.Runs || view.forced(setting) || edited == shown) return null
         return patch(setting, if (edited.isEmpty()) JsonNull else JsonPrimitive(edited))
     }
 
@@ -169,7 +220,7 @@ object ServerSettingsPatch {
 
     /** ServerSelectRow (:274): `{ [field]: next === "" ? null : next }`, when it is another option. */
     fun choice(view: ServerSettingsView, setting: ServerSetting, next: String): JsonObject? {
-        if (view.forced(setting) || next == view.choice(setting)) return null
+        if (setting.kind == SettingKind.Runs || view.forced(setting) || next == view.choice(setting)) return null
         return patch(setting, if (next.isEmpty()) JsonNull else JsonPrimitive(next))
     }
 
@@ -199,4 +250,41 @@ object ServerSettingsPatch {
         if (advanced.envForced || next == advanced.claudeCliVersion.orEmpty()) return null
         return ClientMessage.SetAdvancedSettings(next.ifEmpty { null })
     }
+
+    /**
+     * ta-dh1: an engine card's switch (settings-dialog.tsx:2114-2117 `toggleEngine`): the list with
+     * [engine] added or removed, written as `{ headlessModes: next.join(",") }`. Null when the
+     * environment forces the list, when the switch is blocked (the engine [needs a home][ServerSettingsView.needsHome]
+     * and the environment does not force one: :2154, issue #86), or when the list would pass the
+     * server's size limit.
+     */
+    fun headlessMode(view: ServerSettingsView, engine: EngineCard): JsonObject? {
+        if (view.forced(ServerSetting.HeadlessModes)) return null
+        if (view.needsHome(engine) && !view.forced(engine.home)) return null
+        val modes = view.headlessModes
+        val next = if (engine.id in modes) modes.filter { it != engine.id } else modes + engine.id
+        val joined = next.joinToString(",")
+        if (!fits(ServerSetting.HeadlessModes, joined)) return null
+        return patch(ServerSetting.HeadlessModes, JsonPrimitive(joined))
+    }
+
+    /**
+     * ta-dh1: an engine's home, command or launch command ([SettingKind.Runs]), the value the user
+     * CONFIRMED, built when they confirm from the latest frame ([view]). As the web's blur
+     * (settings-dialog.tsx:2175, 2207, 2226): a home or the launch command sends `value || null`, a
+     * command sends `value` (an empty command runs the engine's own name, server.mjs
+     * `providerCommands`). Null when the key is env-forced, the value is the server's already, or it
+     * passes the server's size limit. [value] is sent exactly as given: the caller trims it (the
+     * web's `.trim()`, [jsTrim]) BEFORE the confirmation, which shows the trimmed value.
+     */
+    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String): JsonObject? {
+        if (setting.kind != SettingKind.Runs || view.forced(setting)) return null
+        if (value == view.text(setting) || !fits(setting, value)) return null
+        val nullable = setting !in EngineCard.commandSettings
+        return patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value))
+    }
+
+    /** Within [setting]'s server limit (UTF-8 bytes; protocol-validate.mjs `isBoundedString`). */
+    fun fits(setting: ServerSetting, value: String): Boolean =
+        setting.maxBytes <= 0 || value.toByteArray(Charsets.UTF_8).size <= setting.maxBytes
 }

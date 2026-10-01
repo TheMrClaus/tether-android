@@ -638,6 +638,19 @@ interface TetherClient {
     /** ta-t7l: v16 `set-advanced-settings` (the Claude CLI picker), bound to [origin] like [setServerSettings]. */
     fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = false
 
+    /**
+     * ta-dh1: v73 `detect-engines` (the Engines tab's "Scan again", use-tether.ts:1848): the server
+     * re-runs its host-CLI scan and answers with `server-settings`. Bound to [origin] like
+     * [setServerSettings]. Returns whether it was sent.
+     */
+    fun detectEngines(origin: String): Boolean = false
+
+    /**
+     * ta-dh1: how many `server-settings` frames have arrived (a reply equal to the last one counts
+     * too, though [serverSettings] does not change then): "Scan again" is busy until the next.
+     */
+    val serverSettingsReplies: StateFlow<Long> get() = NO_SERVER_SETTINGS_REPLIES
+
     // ------------------------------------------------------------------
     // T5.2 resume: defaults keep other implementations (test doubles) compiling.
     // ------------------------------------------------------------------
@@ -726,6 +739,7 @@ private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableSta
 private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
 private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
 private val NO_ADVANCED_SETTINGS: StateFlow<ServerMessage.AdvancedSettings?> = MutableStateFlow(null)
+private val NO_SERVER_SETTINGS_REPLIES: StateFlow<Long> = MutableStateFlow(0L)
 private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(null)
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
