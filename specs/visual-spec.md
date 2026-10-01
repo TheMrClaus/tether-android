@@ -1,5 +1,7 @@
 # Tether Mobile UI — Compose Port Spec (pixel-faithful)
 
+> **Historical (T15.5):** the theme families and skins below were retired; the app is Studio-only (light / dark / follow system).
+
 > **⚠ v40 historical (marked 2026-09-26, parity task T0.1).** Written against Tether PROTOCOL_VERSION 40
 > (repo then named `aidash`, now `tether`). Structure is still useful; **numbers, line refs and message
 > lists are stale** — the parity program (`docs/parity/PLAN.md`, PARITY_BASE tether `7d65611`, v128)

@@ -93,7 +93,7 @@ fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: Stri
     )
 }
 
-/** Every transcript state × all 6 skins at the web's phone viewport (412×915 @2.625). */
+/** Every transcript state × both Studio skins at the web's phone viewport (412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ChatPhoneScreenshotTest(private val shot: ChatShot, private val skin: TetherSkin) {
@@ -128,7 +128,7 @@ class ChatTabletScreenshotTest(private val shot: ChatShot, private val skin: Tet
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the transcript (Machine + Studio). */
+/** PLAN §4: 1.3× font scale does not break the transcript (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ChatFontScaleScreenshotTest(private val shot: ChatShot, private val skin: TetherSkin) {

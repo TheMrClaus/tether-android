@@ -64,7 +64,7 @@ class ExternalLinkConfirmScreenshotTest(private val skin: TetherSkin) {
     }
 }
 
-/** PLAN §4: 1.3x font scale (instrument + Studio); the RTL UI and the mail variant. */
+/** PLAN §4: 1.3x font scale (Studio light + dark); the RTL UI and the mail variant. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ExternalLinkConfirmFontScaleScreenshotTest(private val skin: TetherSkin) {

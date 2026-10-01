@@ -19,7 +19,7 @@ OUT=docs/parity/screens/subagent-runs
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/subagent-runs-$skin-phone.png" "Sub-agent runs · tab strip, closed roster, the Session tab · $skin (phone)" \
     "$WEB/subagent-runs-top/$skin-phone.png@0,310,1080,1300" "$G/subrun-session/$skin-phone.png@0,0,1080,1300"
 

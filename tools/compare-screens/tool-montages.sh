@@ -19,7 +19,7 @@ OUT=docs/parity/screens/tool-cards
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/tools-$skin-phone.png" "Tool cards · finished run collapsed (errors), MCP card with its picture · $skin (phone)" \
     "$WEB/tool-cards/$skin-phone.png@0,320,1080,1640" "$G/tool-tools/$skin-phone.png@0,140,1080,1640"
 

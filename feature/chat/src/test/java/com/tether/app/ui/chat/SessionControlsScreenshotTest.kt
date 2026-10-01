@@ -19,7 +19,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T7.2 visual states (DoD: every state in all 6 skins at phone size, the expanded layout where it
+ * T7.2 visual states (DoD: every state in both Studio skins at phone size, the expanded layout where it
  * differs, 1.3× font). Phone: `sheet` = the session sheet's hub (Model / Effort / Mode / Fast for a
  * Claude session whose model has effort levels and fast mode), `mode` = its Mode list (Auto in
  * `--warning`, the check on Manual), `confirm` = the Android-only confirmation before Auto,
@@ -97,7 +97,7 @@ class SessionControlsPhoneScreenshotTest(private val shot: ControlsShot, private
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio) for the sheet and the confirmation. */
+/** PLAN §4: 1.3× font scale (Studio light + dark) for the sheet and the confirmation. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SessionControlsFontScaleScreenshotTest(private val shot: ControlsShot, private val skin: TetherSkin) {

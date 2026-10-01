@@ -44,8 +44,7 @@ enum class UsageTrackPlacement {
  * renders an empty track that announces nothing (never "0%"); a real one announces as a progress
  * bar named "<label> usage".
  *
- * Material, per skin: the track floor is `--key-face-deep` (instrument) or `--line` with 6px
- * corners (Studio, studio.css:850-851); the fill is `--violet`, `--amber` when high
+ * Material: the track floor is `--line` with 6px corners (studio.css:850-851); the fill is `--violet`, `--amber` when high
  * (`:root .usage-track.is-high i`, globals.css:9140 beats the base `--warning`), `--danger` when
  * critical, with an `inset 0 1px 0 var(--lit-soft)` highlight. The fill's width/colour
  * transition (`var(--duration) var(--ease-out)`, globals.css 4490-4497) becomes a jump under

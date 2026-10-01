@@ -19,7 +19,7 @@ OUT=docs/parity/screens/files
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/list-$skin-phone.png" "Workspace files · parity-app, nothing selected · $skin (phone)" \
     "$WEB/file-browser/$skin-phone.png@0,0,1080,2400" "$G/files-list/$skin-phone.png@0,0,1080,2400"
   java "$TOOL" montage "$OUT/list-$skin-tablet.png" "Workspace files · parity-app, nothing selected · $skin (tablet, desktop layout)" \

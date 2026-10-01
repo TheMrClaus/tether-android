@@ -133,7 +133,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
 private fun CompositionLocalProviderForMedia(content: @androidx.compose.runtime.Composable () -> Unit) =
     androidx.compose.runtime.CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader(), content = content)
 
-/** Every attention-card state × all 6 skins at the web's phone viewport (412×915 @2.625). */
+/** Every attention-card state × both Studio skins at the web's phone viewport (412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ApprovalCardsPhoneScreenshotTest(private val shot: ApprovalShot, private val skin: TetherSkin) {
@@ -165,7 +165,7 @@ class ApprovalCardsTabletScreenshotTest(private val shot: ApprovalShot, private 
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the cards (Machine + Studio). */
+/** PLAN §4: 1.3× font scale does not break the cards (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ApprovalCardsFontScaleScreenshotTest(private val shot: ApprovalShot, private val skin: TetherSkin) {

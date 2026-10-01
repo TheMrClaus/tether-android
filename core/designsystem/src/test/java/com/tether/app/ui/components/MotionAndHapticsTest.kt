@@ -53,10 +53,10 @@ class MotionAndHapticsTest {
 
     @Test fun perfDotsParseOrNone() {
         assertEquals(null, perfDotColor("none"))
-        val machine = tokensFor(TetherSkin.StudioDark).css.perfDots
-        val precision = tokensFor(TetherSkin.Studio).css.perfDots
-        assertTrue(machine, perfDotColor(machine) != null || machine == "none")
-        assertTrue(precision, perfDotColor(precision) != null || precision == "none")
+        val dark = tokensFor(TetherSkin.StudioDark).css.perfDots
+        val light = tokensFor(TetherSkin.Studio).css.perfDots
+        assertTrue(dark, perfDotColor(dark) != null || dark == "none")
+        assertTrue(light, perfDotColor(light) != null || light == "none")
         assertEquals(null, perfDotColor(tokensFor(TetherSkin.Studio).css.perfDots))
     }
 

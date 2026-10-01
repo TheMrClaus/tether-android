@@ -20,7 +20,7 @@ OUT=docs/parity/screens/approvals
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/approval-pending-$skin-phone.png" "Approval · a Write waiting for the operator (Approve / Deny) · $skin (phone)" \
     "$WEB/approval-pending/$skin-phone.png@0,310,1080,1700" "$G/approval-write/$skin-phone.png@0,0,1080,1700"
 

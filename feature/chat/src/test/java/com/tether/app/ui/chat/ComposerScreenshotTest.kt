@@ -16,7 +16,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T7.1 composer states (DoD: 6 skins at phone size, the expanded layout where it differs, 1.3×):
+ * T7.1 composer states (DoD: both Studio skins at phone size, the expanded layout where it differs, 1.3×):
  * `idle` = the web's idle-session deck (empty well, the disabled Send key); `busy` = the web's
  * streaming deck (the run row above the well, the busy placeholder, Interrupt alone because an
  * empty Queue key is hidden on a phone); `draft` = a three-line draft, focused (the well's violet
@@ -103,7 +103,7 @@ class ComposerTabletScreenshotTest(private val shot: ComposerShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ComposerFontScaleScreenshotTest(private val shot: ComposerShot, private val skin: TetherSkin) {

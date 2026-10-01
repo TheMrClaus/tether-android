@@ -310,7 +310,6 @@ private fun LogBody(
                 LogRow(
                     entry = rows[index],
                     names = names,
-                    first = index == 0,
                     last = index == rows.lastIndex,
                     narrow = narrow,
                     locale = locale,
@@ -491,9 +490,7 @@ private fun LogControls(state: LogDialogState, logged: List<LoggedSession>, modi
 }
 
 /**
- * `.log-filter-group`: two keys in one recessed strip. Instrument: a `--key-face-deep` well in a
- * `--line-strong` edge, raised `--key-face` keys, the active one sunk (`--bevel-pressed`, white).
- * Studio: a `--mineral` tray with 38px keys, the active one a `--graphite` pill in violet. The keys
+ * `.log-filter-group`: two keys in one strip. Studio: a `--mineral` tray with 38px keys, the active one a `--graphite` pill in violet. The keys
  * draw at the web's size; Compose widens their hit area to the 48dp minimum touch target.
  */
 @Composable
@@ -537,11 +534,7 @@ private fun FilterKey(label: String, active: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            color = when {
-                active -> t.violetStrong
-                active -> t.white
-                else -> t.muted
-            },
+            color = if (active) t.violetStrong else t.muted,
             style = cssText(type.ui, 0.75f, 600),
         )
     }
@@ -552,7 +545,6 @@ private fun FilterKey(label: String, active: Boolean, onClick: () -> Unit) {
 private fun LogRow(
     entry: LogEntry,
     names: Map<String, String>,
-    first: Boolean,
     last: Boolean,
     narrow: Boolean,
     locale: Locale,

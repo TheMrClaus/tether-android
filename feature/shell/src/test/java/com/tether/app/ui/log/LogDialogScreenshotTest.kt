@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 
 /**
  * The log dialog's seeded states at the web's device classes (phone 412×915 @2.625, tablet
- * 1280×800 @1), all 6 skins, plus 1.3× font. `full` = a mixed log with stats loaded; `empty` =
+ * 1280×800 @1), both Studio skins, plus 1.3× font. `full` = a mixed log with stats loaded; `empty` =
  * stats loaded, no entries; `warnings` = the Warnings filter on; `corpus` = the fake-engine
  * capture's own records (parity-corpus/wire/ambient.jsonl), stats loaded; `web` = the web
  * reference's own state (phone and tablet), for the montages.
@@ -95,7 +95,7 @@ class LogDialogTabletScreenshotTest(private val shot: LogShot, private val skin:
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (instrument uppercase + Studio). */
+/** PLAN §4: 1.3× font scale does not break the dialog (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class LogDialogFontScaleScreenshotTest(private val skin: TetherSkin) {

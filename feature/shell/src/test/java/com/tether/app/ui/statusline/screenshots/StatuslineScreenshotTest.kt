@@ -20,7 +20,7 @@ import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Every board × all 6 skins at phone size (412×915dp @420dpi, the web's 412×915 @2.625). */
+/** Every board × both Studio skins at phone size (412×915dp @420dpi, the web's 412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class StatuslinePhoneScreenshotTest(private val board: String, private val skin: TetherSkin) {
@@ -60,7 +60,7 @@ class StatuslineTabletScreenshotTest(private val skin: TetherSkin) {
 
 /**
  * 1.3× font scale (PLAN §4): the strips re-fit (rem thresholds scale with the text), the dial and
- * gauge grow without clipping. Instrument (Machine) and Studio; a taller window so boards fit.
+ * gauge grow without clipping. Studio light and dark; a taller window so boards fit.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h1600dp-420dpi", fontScale = 1.3f)

@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * The reduced-motion pair must be able to fail: two frames after 0% → 80%, the reduced-motion
  * golden shows the fill already at 80% and the with-motion golden shows it mid-transition. The
- * fill is the only saturated colour on the board (Machine `--violet`; captions, page and track
+ * fill is the only saturated colour on the board (Studio dark `--violet`; captions, page and track
  * floor are neutral greys), so its pixel count measures how far the fill has travelled.
  */
 class UsageTrackMotionGoldensTest {

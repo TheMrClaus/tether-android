@@ -19,7 +19,7 @@ OUT=docs/parity/screens/shell
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   # Topbar (0-147px) + workspace header (147-310px): idle-session.
   java "$TOOL" montage "$OUT/idle-$skin-phone.png" "Phone shell · idle session · $skin (topbar + workspace header)" \
     "$WEB/idle-session/$skin-phone.png@0,0,1080,330" "$G/shell-idle/$skin-phone.png@0,0,1080,330"
@@ -32,7 +32,7 @@ for skin in tactile night precision machine studio studio-dark; do
   java "$TOOL" montage "$OUT/drawer-$skin-phone.png" "Phone shell · drawer open · $skin (container edge + scrim)" \
     "$WEB/session-drawer/$skin-phone.png@760,0,320,330" "$G/shell-drawer/$skin-phone.png@760,0,320,330"
 
-  # No session: the well's top-left corner, then the stage's content block (instrument → title →
+  # No session: the well's top-left corner, then the stage's content block (orbit → title →
   # key → providers). Studio's empty stage is StudioWelcome (T8.1) — see README.
   java "$TOOL" montage "$OUT/empty-$skin-phone.png" "Phone shell · empty state · $skin" \
     "$WEB/empty-state/$skin-phone.png@0,110,360,200" "$G/shell-empty/$skin-phone.png@0,110,360,200" \

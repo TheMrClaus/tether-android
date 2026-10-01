@@ -62,7 +62,7 @@ fun ComposeContentTestRule.snapExpanded(shot: ExpandedShot, skin: TetherSkin, na
 private fun allSkins(shots: List<ExpandedShot>): List<Array<Any>> =
     shots.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
 
-/** The web's tablet viewport (1280×800 @1x): every state below 100rem × all 6 skins. */
+/** The web's tablet viewport (1280×800 @1x): every state below 100rem × both Studio skins. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
 class ExpandedTabletScreenshotTest(private val shot: ExpandedShot, private val skin: TetherSkin) {
@@ -112,7 +112,7 @@ class ExpandedDesktopScreenshotTest(private val shot: ExpandedShot, private val 
     }
 }
 
-/** PLAN §4: 1.3× font scale at the tablet viewport (instrument upper-case legends + Studio). */
+/** PLAN §4: 1.3× font scale at the tablet viewport (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi", fontScale = 1.3f)
 class ExpandedFontScaleScreenshotTest(private val shot: ExpandedShot, private val skin: TetherSkin) {

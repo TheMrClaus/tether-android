@@ -141,8 +141,7 @@ internal fun ComposerInput(
         metrics.phone -> 52.8.dp to Pad(14.dp, 14.dp, 14.dp, 8.dp)
         else -> 67.2.dp to Pad(16.dp, 16.dp, 16.dp, 8.dp)
     }
-    // Chromium's default ::placeholder colour (#757575, measured in every instrument web shot);
-    // Studio sets `--faint` (studio.css:481-482).
+    // Studio sets the placeholder to `--faint` (studio.css:481-482).
     val placeholderColor = t.faint
     BasicTextField(
         value = value,

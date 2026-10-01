@@ -64,7 +64,7 @@ enum class KeyShape { Rounded, Circle }
  * ([selected]) key carries the violet selected tone.
  *
  * Legends: [label] is a fixed verb by default and takes the skin's etched-legend transform
- * (uppercase + tracking in the instrument skins, none in Studio); pass `fixedVerb = false` for
+ * (none in Studio: `--key-label-transform`/`--key-label-tracking`); pass `fixedVerb = false` for
  * user/provider content, which must render as authored (globals.css 9197-9213). The accessible
  * name is always the ORIGINAL words (`contentDescription ?: label`), never the uppercased
  * string — like the web, where text-transform leaves the DOM text alone.
@@ -80,7 +80,7 @@ fun TetherKey(
     label: String? = null,
     icon: ImageVector? = null,
     iconSize: Dp = 15.dp,
-    /** Unspecified: the skin's key-legend role (0.8rem instrument, 0.8125rem Studio). */
+    /** Unspecified: Studio's key-legend size (0.8125rem). */
     fontSize: TextUnit = TextUnit.Unspecified,
     enabled: Boolean = true,
     minHeight: Dp = TetherDimens.touchTargetDp,

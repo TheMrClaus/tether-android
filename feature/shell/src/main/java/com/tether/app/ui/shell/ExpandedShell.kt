@@ -211,9 +211,7 @@ fun ExpandedShell(
 }
 
 /**
- * `.session-sidebar` from 48rem: a static grid column (globals.css 4033-4040). Instrument:
- * `padding: space-md space-md space-sm`, a `1px --line-strong` right edge with the `--seam-lip`
- * shade inside it (10860-10866); Studio: the fixed ink-blue finish (`#141d2e`), no edge,
+ * `.session-sidebar` from 48rem: a static grid column (globals.css 4033-4040). Studio: the fixed ink-blue finish (`#141d2e`), no edge,
  * `padding: 1.35rem 0.875rem 0.75rem` (studio.css 295-301, 429). The web's `aria-label="Agent
  * sessions"` names the pane.
  */
@@ -244,8 +242,8 @@ private fun SidebarColumn(width: Dp, content: @Composable () -> Unit) {
 }
 
 /**
- * `<main className="workspace">`: the header, then the stage (or the empty stage). Instrument:
- * the bay floor with a lit bottom lip (globals.css 11151-11154); Studio `--graphite` (studio.css 350).
+ * `<main className="workspace">`: the header, then the stage (or the empty stage), on Studio's
+ * `--graphite` (studio.css 350).
  * The stage is the bay around the chat screen — `padding: space-md`, and on the left
  * `calc(space-lg + 7px)`, from 64rem `calc(2.75rem + space-sm)` for the timeline rail (11219-11225,
  * 11889-11914); Studio `padding: 0` (studio.css 367). The screen itself is the chat's (T6).

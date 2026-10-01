@@ -230,7 +230,7 @@ class ErrorToastTabletScreenshotTest(private val shot: ToastShot, private val sk
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ErrorToastFontScaleScreenshotTest(private val shot: ToastShot, private val skin: TetherSkin) {

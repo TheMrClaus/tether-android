@@ -29,7 +29,7 @@ declare -A TITLE=(
   [panel]="the transcript's command panel (running, failed)"
 )
 for state in command foreground slash mention delegate panel; do
-  for skin in tactile night precision machine studio studio-dark; do
+  for skin in studio studio-dark; do
     g="$G/commands-$state/$skin-phone.png"
     w="$WEB/$state/$skin-phone.png"
     gh=$(height "$g")

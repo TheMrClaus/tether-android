@@ -66,7 +66,7 @@ private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapResume(
     )
 }
 
-/** Both states × all 6 skins at the web's phone viewport (412×915 @2.625), in the drawer. */
+/** Both states × both Studio skins at the web's phone viewport (412×915 @2.625), in the drawer. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ResumePickerPhoneScreenshotTest(private val shot: ResumeShot, private val skin: TetherSkin) {
@@ -96,7 +96,7 @@ class ResumePickerTabletScreenshotTest(private val shot: ResumeShot, private val
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument uppercase + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ResumePickerFontScaleScreenshotTest(private val shot: ResumeShot, private val skin: TetherSkin) {

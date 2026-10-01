@@ -12,7 +12,7 @@
 #   toolbar; the band is the well (bottom 288px of both images), as composer-montages.sh.
 # - tablet: the web desktop row (Model / Mode pills, the hint) above the toolbar footer; the band
 #   is the bottom 100px of the golden against the web deck band ending at the well's foot
-#   (instrument skins x 318, y 686; Studio x 301, y 700 — Studio's deck is taller and centred).
+#   (Studio x 301, y 700: the deck is centred).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 WEB="${1:-${PARITY_WEB_SCREENS:-$HOME/git/tether-android/parity-corpus/screens/web}}"
@@ -25,14 +25,14 @@ height() { python3 -c "import struct,sys; f=open(sys.argv[1],'rb'); f.read(16); 
 
 PHONE_BAND=288
 TABLET_BAND=100
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   g="$G/composer-idle/$skin-phone.png"
   gh=$(height "$g")
   java "$TOOL" montage "$OUT/key-$skin-phone.png" "Session controls · idle-session (the settings key in the well) · $skin (phone)" \
     "$WEB/idle-session/$skin-phone.png@0,$((2402 - PHONE_BAND)),1081,$PHONE_BAND" "$g@0,$((gh - PHONE_BAND)),1081,$PHONE_BAND"
   g="$G/composer-idle/$skin-tablet.png"
   gh=$(height "$g")
-  case "$skin" in studio*) crop="301,700" ;; *) crop="318,686" ;; esac
+  crop="301,700"
   java "$TOOL" montage "$OUT/row-$skin-tablet.png" "Session controls · idle-session (Model / Mode row) · $skin (tablet, desktop layout)" \
     "$WEB/idle-session/$skin-tablet.png@$crop,950,$TABLET_BAND" "$g@0,$((gh - TABLET_BAND)),950,$TABLET_BAND"
 done

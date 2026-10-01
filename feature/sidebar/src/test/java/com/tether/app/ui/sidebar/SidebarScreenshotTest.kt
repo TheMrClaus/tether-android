@@ -78,7 +78,7 @@ fun ComposeContentTestRule.snapSidebar(shot: SidebarShot, skin: TetherSkin, name
     )
 }
 
-/** Every state × all 6 skins at the web's phone viewport (412×915 @2.625), in the drawer. */
+/** Every state × both Studio skins at the web's phone viewport (412×915 @2.625), in the drawer. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class SidebarPhoneScreenshotTest(private val shot: SidebarShot, private val skin: TetherSkin) {
@@ -108,7 +108,7 @@ class SidebarTabletScreenshotTest(private val shot: SidebarShot, private val ski
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the rows (instrument uppercase + Studio). */
+/** PLAN §4: 1.3× font scale does not break the rows (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SidebarFontScaleScreenshotTest(private val shot: SidebarShot, private val skin: TetherSkin) {

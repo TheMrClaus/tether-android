@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -218,7 +219,8 @@ fun InterimSettingsDialog(prefs: UiPrefs, onDismiss: () -> Unit) {
             modifier = Modifier.padding(bottom = 6.dp),
         )
         // Settings → Appearance (hooks/use-preferences.ts THEME_MODES): Studio's lighting only.
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // One radio group, so TalkBack announces "n of 3".
+        Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             ThemeMode.entries.forEach { mode ->
                 ThemeOption(
                     label = mode.label,

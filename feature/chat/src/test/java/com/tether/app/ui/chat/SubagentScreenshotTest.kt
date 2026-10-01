@@ -137,7 +137,7 @@ fun ComposeContentTestRule.snapSubagents(shot: SubagentShot, skin: TetherSkin, n
     )
 }
 
-/** Every T6.4 state × all 6 skins at the web's phone viewport (412×915 @2.625). */
+/** Every T6.4 state × both Studio skins at the web's phone viewport (412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class SubagentPhoneScreenshotTest(private val shot: SubagentShot, private val skin: TetherSkin) {
@@ -167,7 +167,7 @@ class SubagentTabletScreenshotTest(private val shot: SubagentShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the surfaces (Machine + Studio). */
+/** PLAN §4: 1.3× font scale does not break the surfaces (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SubagentFontScaleScreenshotTest(private val shot: SubagentShot, private val skin: TetherSkin) {

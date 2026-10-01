@@ -42,9 +42,7 @@ const val StageFrameTag = "slot-chat-frame"
 
 /**
  * Slot stand-ins for the expanded goldens. The chat slot draws the web's chat SCREEN — the frame
- * the chat (T6) will own: instrument `1px --line-strong`, `--radius-lg`, `--mineral-deep`, `--well`
- * + `--bezel` + the contact shade (globals.css 11230-11236); Studio flat `--graphite` (studio.css
- * 368-369) — so the stage's bay padding reads as it does on the web. The gauge and dial are T4.3's
+ * the chat (T6) will own: Studio's flat `--graphite` (studio.css 368-369) — so the stage's bay padding reads as it does on the web. The gauge and dial are T4.3's
  * real components on a frozen clock; the rail and inspector are empty tagged areas.
  */
 fun expandedSlots(): PhoneShellSlots = PhoneShellSlots(

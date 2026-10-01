@@ -20,7 +20,7 @@ OUT=docs/parity/screens/timeline
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/rest-$skin-phone.png" "Timeline · five prompts at rest (scale line, ticks, violet needle) · $skin (phone)" \
     "$WEB/conversation-timeline/$skin-phone.png@0,310,1080,1780" "$G/timeline-rest/$skin-phone.png@0,0,1080,1780"
 

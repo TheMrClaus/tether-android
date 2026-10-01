@@ -148,7 +148,7 @@ fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: St
     )
 }
 
-/** Every state x all 6 skins at the web's phone viewport (412x915 @2.625). */
+/** Every state x both Studio skins at the web's phone viewport (412x915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class FilesPhoneScreenshotTest(private val shot: FilesShot, private val skin: TetherSkin) {
@@ -180,7 +180,7 @@ class FilesTabletScreenshotTest(private val shot: FilesShot, private val skin: T
     }
 }
 
-/** PLAN §4: 1.3x font scale does not break the browser (Machine + Studio). */
+/** PLAN §4: 1.3x font scale does not break the browser (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class FilesFontScaleScreenshotTest(private val shot: FilesShot, private val skin: TetherSkin) {

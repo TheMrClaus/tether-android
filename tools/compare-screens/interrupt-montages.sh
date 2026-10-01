@@ -23,7 +23,7 @@ height() { python3 -c "import struct,sys; f=open(sys.argv[1],'rb'); f.read(16); 
 
 PHONE_BAND=288
 TABLET_BAND=60
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   g="$G/composer-busy/$skin-phone.png"
   gh=$(height "$g")
   java "$TOOL" montage "$OUT/interrupt-$skin-phone.png" "Interrupt · streaming (the busy well: Interrupt, icon-only) · $skin (phone)" \

@@ -16,7 +16,7 @@ OUT=docs/parity/screens/sidebar
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   # The drawer: min(20rem, 88vw) = 320dp = 840px (Studio min(21rem, 92vw) = 336dp = 882px).
   w=840
   case "$skin" in studio*) w=882 ;; esac

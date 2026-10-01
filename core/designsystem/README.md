@@ -6,7 +6,7 @@ from. Each primitive mirrors a web rule set in `~/git/tether` at `PARITY_BASE` (
 
 | Primitive | File | Web source |
 |---|---|---|
-| Keys (`TetherKey`, `resolveKey`: the key's web CLASS SET run through `KeyRules`, the globals.css + studio.css rules that paint keys, by specificity then source order; wear, slit) | `ui/components/Keys.kt`, `KeyStyle.kt`, `Wear.kt` | globals.css material layer (key system), studio.css |
+| Keys (`TetherKey`, `resolveKey`: the key's web CLASS SET run through `KeyRules`, the globals.css + studio.css rules that paint keys, by specificity then source order) | `ui/components/Keys.kt`, `KeyStyle.kt` | globals.css material layer (key system), studio.css |
 | CSS box model (`cssSurface`, `focusRing`) | `Material.kt` | every `box-shadow` list, `:focus-visible` |
 | Wells (`TetherWell`, `TetherInputWell`) | `Wells.kt` | recessed wells |
 | Seams, perforated divider | `Seams.kt` | parting lines, `--perf-dots` |

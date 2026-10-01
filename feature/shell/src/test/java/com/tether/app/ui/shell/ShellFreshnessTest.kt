@@ -66,7 +66,7 @@ private fun ComposeContentTestRule.snapSync(expanded: Boolean, skin: TetherSkin)
     )
 }
 
-/** The banner, the header's freshness chip and its qualified status pill, phone, 1.3× font, 6 skins. */
+/** The banner, the header's freshness chip and its qualified status pill, phone, 1.3× font, both Studio skins. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ShellSyncPhoneScreenshotTest(private val skin: TetherSkin) {
@@ -81,7 +81,7 @@ class ShellSyncPhoneScreenshotTest(private val skin: TetherSkin) {
     }
 }
 
-/** The same in the expanded shell (tablet, 1.3× font, 6 skins). */
+/** The same in the expanded shell (tablet, 1.3× font, both Studio skins). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi", fontScale = 1.3f)
 class ShellSyncExpandedScreenshotTest(private val skin: TetherSkin) {

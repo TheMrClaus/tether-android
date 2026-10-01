@@ -19,7 +19,7 @@ OUT=docs/parity/screens/notices
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/outcome-unknown-$skin-phone.png" "Notices · a turn recovered as outcome_unknown · $skin (phone)" \
     "$WEB/notices/$skin-phone.png@0,310,1080,560" "$G/notice-outcome-unknown/$skin-phone.png@0,0,1080,560"
 

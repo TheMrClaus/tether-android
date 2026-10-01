@@ -74,8 +74,8 @@ COMPONENTS = {
     "log-dialog": ("Server log dialog (log messages)", "MISSING", "T4.5"),
     "scheduled-actions-view": ("Scheduled actions list/create/control (v87)", "MISSING", "T9.3"),
     "provider-logo": ("Provider logos", "MISSING", "T3.5"),
-    "login/instrument-login": ("Default sign-in (instrument families): password + pairing + passkey", "PARTIAL", "T1.4"),
-    "login/studio-login": ("Sign-in for the Studio family", "MISSING", "T1.4"),
+    "login/instrument-login": ("Retired Instrument sign-in (web PARITY_BASE); since T15.5 Studio's sign-in is the default", "PARTIAL", "T1.4"),
+    "login/studio-login": ("Default sign-in (Studio): password + pairing + passkey", "MISSING", "T1.4"),
     "login/retro-login": ("Retro sign-in (per-browser opt-in variant)", "MISSING", "T1.4"),
     "landing/landing-page": ("Public marketing landing (/web) — not part of the console", "N/A", "—"),
     "landing/demo-console": ("Landing-page demo console — not part of the console", "N/A", "—"),
@@ -83,11 +83,11 @@ COMPONENTS = {
 
 PAGES = {
     "/": ("Dashboard (console)", "PARTIAL", "T4.1"),
-    "/login": ("Sign-in; variant by theme family (instrument/studio) or retro opt-in", "PARTIAL", "T1.4"),
+    "/login": ("Sign-in: Studio default or the Retro opt-in (Studio-only since T15.5)", "PARTIAL", "T1.4"),
     "/setup": ("First-run wizard (separate setup-server mode, unauthenticated)", "MISSING", "T10.6"),
     "/usage": ("Usage page", "MISSING", "T9.2"),
     "/web": ("Marketing landing page — not the console", "N/A", "—"),
-    "app/layout.tsx boot script": ("Pre-paint theme resolution family×mode→skin (6 skins)", "PARTIAL", "T3.1"),
+    "app/layout.tsx boot script": ("Pre-paint theme resolution mode→Studio skin (studio / studio-dark)", "PARTIAL", "T3.1"),
 }
 
 ROUTES = {

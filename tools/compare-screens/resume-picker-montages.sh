@@ -13,7 +13,7 @@ OUT=docs/parity/screens/resume-picker
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   w=840
   case "$skin" in studio*) w=882 ;; esac
   for shot in list opening; do

@@ -187,7 +187,7 @@ private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapInspector
         }
     }
 
-/** T6.6 inspector states × all 6 skins (phone: the telemetry sheet; the tablet column is the same body). */
+/** T6.6 inspector states × both Studio skins (phone: the telemetry sheet; the tablet column is the same body). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class InspectorNoticesScreenshotTest(private val shot: InspectorShot, private val skin: TetherSkin) {

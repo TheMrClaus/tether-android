@@ -21,8 +21,8 @@ import org.robolectric.annotation.Config
 
 /**
  * T9.1: the phone telemetry sheet with the inspector body — populated (every section, its
- * disclosures opened) and sparse (a session that has not answered yet) — in both Studio skins and
- * Machine. The sheet is drawn tall enough to hold the whole body (the device scrolls it).
+ * disclosures opened) and sparse (a session that has not answered yet) — in both Studio skins.
+ * The sheet is drawn tall enough to hold the whole body (the device scrolls it).
  */
 enum class InspectorSheetShot(val id: String, val height: Int) { Populated("populated", 3_300), Sparse("sparse", 700) }
 

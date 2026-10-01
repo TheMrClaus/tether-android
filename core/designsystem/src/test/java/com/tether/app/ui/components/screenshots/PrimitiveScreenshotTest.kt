@@ -66,8 +66,8 @@ class ReducedMotionScreenshotTest(private val skin: TetherSkin) {
 }
 
 /**
- * 1.3× font scale (PLAN §4): legends, chips and the expand toggle grow without clipping. Two
- * skins (instrument uppercase legends; Studio's sentence-case ones), phone width. The window is
+ * 1.3× font scale (PLAN §4): legends, chips and the expand toggle grow without clipping. Both
+ * Studio skins (sentence-case legends), phone width. The window is
  * taller than a phone (1600dp) only so the grown keys board is captured whole.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)

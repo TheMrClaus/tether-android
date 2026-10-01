@@ -47,7 +47,7 @@ fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapShell(shot: Shell
     )
 }
 
-/** Every shell state × all 6 skins at the web's phone viewport (412×915 @2.625). */
+/** Every shell state × both Studio skins at the web's phone viewport (412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ShellPhoneScreenshotTest(private val shot: ShellShot, private val skin: TetherSkin) {
@@ -62,7 +62,7 @@ class ShellPhoneScreenshotTest(private val shot: ShellShot, private val skin: Te
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the chrome (instrument uppercase + Studio legends). */
+/** PLAN §4: 1.3× font scale does not break the chrome (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class ShellFontScaleScreenshotTest(private val shot: ShellShot, private val skin: TetherSkin) {

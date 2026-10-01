@@ -178,8 +178,7 @@ fun statusToneOf(status: String): StatusTone = when (status) {
 /**
  * Status as an etched pill: dot + printed word, never the dot alone (globals.css 11161-11175;
  * Studio: studio.css:354). Active carries the spinner, Waiting the pinging violet dot (violet
- * = waiting for the operator). The accessible name is [label] as written — the instrument skins
- * print it uppercase, TalkBack still reads the words.
+ * = waiting for the operator). The accessible name is [label] as written.
  */
 @Composable
 fun TetherStatusPill(label: String, tone: StatusTone, modifier: Modifier = Modifier) {

@@ -78,7 +78,7 @@ class TimelineTabletScreenshotTest(private val shot: TimelineShot, private val s
     }
 }
 
-/** PLAN §4: 1.3x font scale keeps the bubble readable and on screen (Machine + Studio). */
+/** PLAN §4: 1.3x font scale keeps the bubble readable and on screen (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class TimelineFontScaleScreenshotTest(private val shot: TimelineShot, private val skin: TetherSkin) {

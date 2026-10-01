@@ -125,9 +125,7 @@ data class WorkspaceHeaderActions(
  * into the bay (11142-11145; the phone override 11720 drops it). Studio: 1rem × 1.75rem padding,
  * 5rem tall, 1.12rem / 740 title (studio.css 351-352).
  *
- * Material: instrument — `--graphite`, `1px --line-strong`, a lit top lip and the `--seam-lip`
- * shade (globals.css 11136-11146 with the phone override 11720), `padding: space-sm space-lg`
- * (11858); Studio — flat `--graphite`, `1px --line`, `padding: space-sm space-md` (studio.css 351, 450).
+ * Material: flat `--graphite`, `1px --line`, `padding: space-sm space-md` (studio.css 351, 450).
  */
 @Composable
 fun WorkspaceHeader(
@@ -223,8 +221,7 @@ fun WorkspaceHeader(
                 modifier = Modifier.testTag(ShellTags.LinksKey),
             )
             if (expanded) PinKey(session.pinned, actions.onTogglePinned)
-            // `.end-session`: the brick key, glyph only below 48rem. 2.35rem tall in the instrument
-            // skins (`:root .end-session`, globals.css 11196); Studio's rail forces 2.75rem
+            // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
             // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
             // prints "End session" at 0.66rem (4117-4121, 11196). T13.2 r2: also disabled unless the
             // link is up and this session's copy is live (a saved copy never ends a session).

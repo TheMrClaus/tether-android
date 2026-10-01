@@ -25,7 +25,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T7.3 states (DoD: 6 skins at phone size, the expanded layout where it differs, 1.3×):
+ * T7.3 states (DoD: both Studio skins at phone size, the expanded layout where it differs, 1.3×):
  * `command` = the `!` command mode (flag, the red-edged well in the mono face, Send to agent +
  * Background); `foreground` = a foreground command running (Background + Stop in place of Queue +
  * Interrupt); `slash` = the palette fed by the CLI inventory (the blocked /exit last, "terminal
@@ -148,7 +148,7 @@ class CommandTabletScreenshotTest(private val shot: CommandShot, private val ski
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class CommandFontScaleScreenshotTest(private val shot: CommandShot, private val skin: TetherSkin) {

@@ -15,7 +15,7 @@ OUT=docs/parity/screens/search
 TOOL=tools/compare-screens/CompareScreens.java
 mkdir -p "$OUT"
 
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/find-markdown-$skin-phone.png" "In-chat find · \"the\" over the long-markdown reply · $skin (phone) · web ref: long-markdown-top (no find bar)" \
     "$WEB/long-markdown-top/$skin-phone.png@0,310,1080,1780" "$C/find-markdown/$skin-phone.png@0,0,1080,1780"
   java "$TOOL" montage "$OUT/find-markdown-$skin-tablet.png" "In-chat find · \"the\" · $skin (tablet) · web ref: long-markdown-top (no find bar)" \

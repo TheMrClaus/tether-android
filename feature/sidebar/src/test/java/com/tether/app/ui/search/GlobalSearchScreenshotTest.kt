@@ -103,7 +103,7 @@ fun ComposeContentTestRule.snapGlobalSearch(shot: GlobalSearchShot, skin: Tether
     )
 }
 
-/** Every state × all 6 skins at the web's phone viewport (412×915 @2.625). */
+/** Every state × both Studio skins at the web's phone viewport (412×915 @2.625). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class GlobalSearchPhoneScreenshotTest(private val shot: GlobalSearchShot, private val skin: TetherSkin) {
@@ -133,7 +133,7 @@ class GlobalSearchTabletScreenshotTest(private val shot: GlobalSearchShot, priva
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class GlobalSearchFontScaleScreenshotTest(private val skin: TetherSkin) {

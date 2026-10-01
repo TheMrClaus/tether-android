@@ -23,7 +23,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T6.7 visual states (6 skins at phone size, the desktop layout, 1.3× font):
+ * T6.7 visual states (both Studio skins at phone size, the desktop layout, 1.3× font):
  * `chat-errors` = a turn that failed (its outcome row, the engine's words cleaned) and the
  * session's `lastError` row after the turns; `interrupt-busy` = the busy deck's Queue + Interrupt at
  * the desktop width (the web's `streaming` frame; the phone deck is `composer-busy`);
@@ -141,7 +141,7 @@ class InterruptErrorTabletScreenshotTest(private val skin: TetherSkin) {
     }
 }
 
-/** PLAN §4: 1.3× font scale (instrument + Studio). */
+/** PLAN §4: 1.3× font scale (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class InterruptErrorFontScaleScreenshotTest(private val skin: TetherSkin) {
@@ -158,7 +158,7 @@ class InterruptErrorFontScaleScreenshotTest(private val skin: TetherSkin) {
     }
 }
 
-/** PLAN §4: the End session confirmation at 1.3× (instrument + Studio). */
+/** PLAN §4: the End session confirmation at 1.3× (Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class EndSessionConfirmFontScaleScreenshotTest(private val skin: TetherSkin) {

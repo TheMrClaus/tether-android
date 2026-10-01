@@ -25,7 +25,7 @@ height() { python3 -c "import struct,sys; f=open(sys.argv[1],'rb'); f.read(16); 
 
 PHONE_BAND=288
 TABLET_BAND=60
-for skin in tactile night precision machine studio studio-dark; do
+for skin in studio studio-dark; do
   for shot in idle:idle-session busy:streaming; do
     a="${shot%%:*}"; w="${shot##*:}"
     g="$G/composer-$a/$skin-phone.png"
@@ -35,9 +35,9 @@ for skin in tactile night precision machine studio studio-dark; do
   done
   g="$G/composer-idle/$skin-tablet.png"
   gh=$(height "$g")
-  # Studio's deck is taller (1rem / 1.25rem padding) and its well centred at <= 53rem: its footer
-  # band sits at x 301, y 740 (found with `CompareScreens align`); the instrument skins' at 318, 726.
-  case "$skin" in studio*) crop="301,740" ;; *) crop="318,726" ;; esac
+  # Studio's deck (1rem / 1.25rem padding) centres its well at <= 53rem: the footer band sits at
+  # x 301, y 740 (found with `CompareScreens align`).
+  crop="301,740"
   java "$TOOL" montage "$OUT/idle-$skin-tablet.png" "Composer · idle-session (toolbar footer) · $skin (tablet, desktop layout)" \
     "$WEB/idle-session/$skin-tablet.png@$crop,950,$TABLET_BAND" "$g@0,$((gh - TABLET_BAND)),950,$TABLET_BAND"
 done

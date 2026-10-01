@@ -28,7 +28,7 @@ const val BOARD_VERIFIED: Long = BOARD_NOW - 12 * 60_000L
 
 /**
  * T13.2: every freshness mark on one board (native-only: no web reference). Captured at 1.3×
- * font, the scale the marks must survive, in all six skins at phone and tablet sizes.
+ * font, the scale the marks must survive, in all both Studio skins at phone and tablet sizes.
  */
 @Composable
 fun FreshnessBoard() {

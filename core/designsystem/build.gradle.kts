@@ -81,7 +81,7 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    // ThemeChoice (the persisted theme preference) is part of TetherTheme's API.
+    // ThemeMode (the persisted appearance preference) is part of TetherTheme's API.
     api(project(":core:data"))
     api(libs.lucide.icons)
 
