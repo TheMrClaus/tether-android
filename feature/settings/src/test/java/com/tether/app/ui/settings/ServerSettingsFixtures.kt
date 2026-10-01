@@ -1,9 +1,13 @@
 package com.tether.app.ui.settings
 
 import com.tether.app.client.ServerSettingsView
+import com.tether.app.protocol.ClaudeCliVersion
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.TetherJson
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -45,12 +49,12 @@ object ServerFixtures {
         return JsonObject(base.mapValues { (_, v) -> toJson(v) })
     }
 
-    private fun toJson(v: Any?): kotlinx.serialization.json.JsonElement = when (v) {
-        null -> kotlinx.serialization.json.JsonNull
+    private fun toJson(v: Any?): JsonElement = when (v) {
+        null -> JsonNull
         is String -> JsonPrimitive(v)
         is Number -> JsonPrimitive(v)
         is Boolean -> JsonPrimitive(v)
-        is List<*> -> kotlinx.serialization.json.JsonArray(v.map(::toJson))
+        is List<*> -> JsonArray(v.map(::toJson))
         else -> error("unsupported $v")
     }
 
@@ -68,7 +72,7 @@ object ServerFixtures {
 
     val ADVANCED = ServerMessage.AdvancedSettings(
         claudeCliVersion = null,
-        discovered = listOf(com.tether.app.protocol.ClaudeCliVersion("2.1.225"), com.tether.app.protocol.ClaudeCliVersion("2.1.220")),
+        discovered = listOf(ClaudeCliVersion("2.1.225"), ClaudeCliVersion("2.1.220")),
         envForced = false,
         envPath = null,
         effectiveSource = "host install (auto)",

@@ -88,7 +88,8 @@ class SettingsBehaviourTest {
      */
     @Test fun theLaterPanelsSayWhatIsComing() {
         show()
-        mapOf(SettingsTab.Nodes to 1, SettingsTab.Engines to 3, SettingsTab.Metadata to 1, SettingsTab.Advanced to 1).forEach { (t, slots) ->
+        // ta-t7l: Metadata and Advanced are drawn now (here, before any server reply, they wait for it).
+        mapOf(SettingsTab.Nodes to 1, SettingsTab.Engines to 3, SettingsTab.Metadata to 0, SettingsTab.Advanced to 0).forEach { (t, slots) ->
             tab(t).performScrollTo().performClick()
             compose.waitForIdle()
             compose.onNodeWithTag(SettingsDialogTags.panel(t)).assertExists()

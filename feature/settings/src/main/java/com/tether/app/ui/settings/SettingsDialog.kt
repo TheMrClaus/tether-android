@@ -79,7 +79,9 @@ import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import com.tether.app.protocol.ClientMessage
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.launch
 
 /** Test tags of the dialog's parts. */
@@ -485,6 +487,6 @@ const val RESTART_REQUIRED = "Some changes need a server restart to take effect.
 
 /** The app's [ServerSettingsWriter]: the client's origin-bound settings writes. */
 private class ClientSettingsWriter(private val client: TetherClient) : ServerSettingsWriter {
-    override fun patch(patch: kotlinx.serialization.json.JsonObject, origin: String) = client.setServerSettings(patch, origin)
-    override fun cliVersion(message: com.tether.app.protocol.ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
+    override fun patch(patch: JsonObject, origin: String) = client.setServerSettings(patch, origin)
+    override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
 }
