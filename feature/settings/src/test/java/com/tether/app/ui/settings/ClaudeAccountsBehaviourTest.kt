@@ -232,6 +232,37 @@ class ClaudeAccountsBehaviourTest {
         compose.waitUntil(5_000) { fake.calls.count { it == "status:claude-work" } == 2 }
     }
 
+    /**
+     * r3, the verifier's probe (ScratchVerifyTa9q2UiTest.repeatedCheckTaps): after a check has
+     * settled, with a source that answers AT ONCE (its gate open), two OnClick invocations
+     * back-to-back on the UI thread. The first read can finish inside the first tap, so the status
+     * guard alone lets the second through; the per-id guard holds it until the next frame.
+     */
+    @Test fun twoTapsInOneFrameAskOnceEvenWhenTheAnswerIsInstant() {
+        val gate = CompletableDeferred<Unit>()
+        val fake = FakeAccounts(statusGate = { gate.await() })
+        show(fake.binding())
+        waitFor("Claude Code (work)")
+        val check = tag(ClaudeAccountsTags.check("claude-work"))
+        check.performScrollTo().performClick()
+        compose.waitForIdle()
+        gate.complete(Unit)
+        waitFor("Logged in — work@example.com")
+        val before = fake.calls.count { it == "status:claude-work" }
+        assertEquals(1, before)
+        compose.runOnUiThread {
+            val node = check.fetchSemanticsNode()
+            node.config.getOrNull(SemanticsActions.OnClick)?.action?.invoke()
+            node.config.getOrNull(SemanticsActions.OnClick)?.action?.invoke()
+        }
+        compose.waitForIdle()
+        assertEquals("same-frame extra calls", 1, fake.calls.count { it == "status:claude-work" } - before)
+        // The guard is per frame, not a lock-out: a later tap asks again.
+        waitFor("Logged in — work@example.com")
+        check.performClick()
+        compose.waitUntil(5_000) { fake.calls.count { it == "status:claude-work" } == before + 2 }
+    }
+
     /** r2: two accounts whose titles could pass for each other each show their profile id, by the one-line rule. */
     @Test fun lookAlikeAccountsShowTheirIds() {
         val json = """{"accounts":[

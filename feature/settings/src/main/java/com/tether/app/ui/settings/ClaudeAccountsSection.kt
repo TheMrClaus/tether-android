@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -109,6 +110,11 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     val scope = rememberCoroutineScope()
     val checks = remember(source, current) { SupervisorJob() }
     DisposableEffect(checks) { onDispose { checks.cancel() } }
+    // r3: the ids being asked, checked and set synchronously at click time (main thread only). An id
+    // stays here until the frame AFTER its answer lands, so a second same-frame tap is refused
+    // however fast the first read returns (a fake, or a source that answers without suspending,
+    // can finish inside the first tap and leave the status Known before the second).
+    val asked = remember(source, current) { HashSet<String>() }
 
     LaunchedEffect(source, current, reload) {
         if (current == null || (seed != null && reload == 0)) return@LaunchedEffect
@@ -130,13 +136,21 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
         narrow = narrow,
         onRetry = { reload++ },
         onCheck = onCheck@{ id ->
-            if (current == null) return@onCheck
-            // r2: asked only when the state moved to Checking: a second tap in the same frame (or
-            // any tap while one is in flight, or for an id that may not be asked) sends nothing.
+            if (current == null || id in asked) return@onCheck
+            // r2: asked only when the state moved to Checking (not for an id that may not be asked,
+            // nor while one is in flight); r3: and never twice for one id in one frame ([asked]).
             val next = ClaudeAccountsModel.checking(state, id)
             if (next === state) return@onCheck
+            asked += id
             state = next
-            scope.launch(checks) { state = ClaudeAccountsModel.foldStatus(state, id, source.status(id), current) }
+            scope.launch(checks) {
+                try {
+                    state = ClaudeAccountsModel.foldStatus(state, id, source.status(id), current)
+                    withFrameNanos { }
+                } finally {
+                    asked -= id
+                }
+            }
         },
     )
 }
