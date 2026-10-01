@@ -19,3 +19,7 @@ captures/
 # Web reference PNGs (S0.4) are 55 MB: synced locally by tools/parity/sync-corpus.sh, pinned by the
 # committed parity-corpus/screens/web/{manifest.json,SHA256SUMS}.
 /parity-corpus/screens/web/**/*.png
+
+# Python bytecode (tools/parity scripts)
+__pycache__/
+*.pyc
