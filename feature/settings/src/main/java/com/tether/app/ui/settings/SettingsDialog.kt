@@ -63,6 +63,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.TetherClient
+import com.tether.app.client.serverOrigin
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StudioDialog
@@ -159,6 +160,10 @@ fun SettingsDialog(
     val connection by client.connection.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestServerSettings() }
     val state = rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState() }
+    // ta-9q2: Claude accounts are read for the server signed in to, and only for it.
+    val server by client.serverUrl.collectAsStateWithLifecycle()
+    val configured by client.configured.collectAsStateWithLifecycle()
+    val claudeAccounts = ClaudeAccountsBinding(client.claudeAccounts, if (configured) serverOrigin(server) else null)
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = LocalView.current
@@ -171,6 +176,7 @@ fun SettingsDialog(
             currentWorkspace = currentWorkspace,
             onClose = onDismiss,
             layout = layout,
+            claudeAccounts = claudeAccounts,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -202,6 +208,7 @@ fun SettingsFrame(
      * app): the frame reads them itself and General waits for that read.
      */
     initialPreferences: TetherPreferences? = null,
+    claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -264,6 +271,7 @@ fun SettingsFrame(
                         state = state,
                         currentWorkspace = currentWorkspace,
                         narrow = narrow,
+                        claudeAccounts = claudeAccounts,
                     )
                 }
             }

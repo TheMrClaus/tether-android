@@ -82,14 +82,17 @@ class SettingsBehaviourTest {
         compose.onNodeWithText("Sign-in security").assertExists()
     }
 
-    /** Engines, Metadata, Advanced and Nodes say what is coming, they are never empty. */
+    /**
+     * Engines, Metadata, Advanced and Nodes say what is coming, they are never empty. Engines (ta-9q2)
+     * holds Claude accounts between three slots: the engines, Custom providers and Host config.
+     */
     @Test fun theLaterPanelsSayWhatIsComing() {
         show()
-        listOf(SettingsTab.Nodes, SettingsTab.Engines, SettingsTab.Metadata, SettingsTab.Advanced).forEach { t ->
+        mapOf(SettingsTab.Nodes to 1, SettingsTab.Engines to 3, SettingsTab.Metadata to 1, SettingsTab.Advanced to 1).forEach { (t, slots) ->
             tab(t).performScrollTo().performClick()
             compose.waitForIdle()
             compose.onNodeWithTag(SettingsDialogTags.panel(t)).assertExists()
-            assertEquals("$t", 1, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
+            assertEquals("$t", slots, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
         }
     }
 

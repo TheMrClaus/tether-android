@@ -45,6 +45,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // ta-9q2: the Claude accounts section over the real reader against a fake server (GET only).
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(composeBom)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)

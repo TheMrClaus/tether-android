@@ -57,6 +57,7 @@ fun SettingsUnderTest(
     currentWorkspace: String = CURRENT,
     onClose: () -> Unit = {},
     initialPreferences: com.tether.app.ui.prefs.TetherPreferences? = null,
+    claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -68,6 +69,7 @@ fun SettingsUnderTest(
                 onClose = onClose,
                 layout = layout,
                 initialPreferences = initialPreferences,
+                claudeAccounts = claudeAccounts,
             )
         }
     }

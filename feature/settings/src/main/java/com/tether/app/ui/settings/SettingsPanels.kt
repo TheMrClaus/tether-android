@@ -43,13 +43,14 @@ internal fun SettingsPanel(
     state: SettingsDialogState,
     currentWorkspace: String,
     narrow: Boolean,
+    claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
         SettingsTab.Appearance -> AppearancePanel(prefs, live, narrow)
         SettingsTab.Devices -> DevicesPanel(prefs, narrow)
         SettingsTab.Nodes -> NodesPanel(narrow)
-        SettingsTab.Engines -> EnginesPanel(narrow)
+        SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts)
         SettingsTab.Metadata -> MetadataPanel(narrow)
         SettingsTab.Advanced -> AdvancedPanel(narrow)
     }
@@ -197,11 +198,27 @@ private fun NodesPanel(narrow: Boolean) {
     }
 }
 
-/** Engines (settings-dialog.tsx:2118 onward): the slot for ta-9q2, ta-dh1 and ta-q6p. */
+/**
+ * Engines (settings-dialog.tsx:2107-2249), in the web's order: the engines (Scan again, then one
+ * card per engine; the slot for ta-dh1), Claude accounts (ta-9q2, read only), Custom providers
+ * (`ProfilesEditor`; the slot for ta-q6p) and Host config (`shareHostConfig`; the slot for ta-dh1).
+ */
 @Composable
-private fun EnginesPanel(narrow: Boolean) {
-    SettingsSection("Engines", AnnotatedString("The agent engines this server runs, and the accounts and profiles they use."), narrow, last = true) {
-        ComingSoonNote("Claude accounts, engine detection with Scan again, each engine's home and commands, and provider profiles are coming to the app in a later update.")
+private fun EnginesPanel(narrow: Boolean, claudeAccounts: ClaudeAccountsBinding) {
+    Column {
+        // ta-dh1 slot: the Engines section and the engine cards.
+        SettingsSection("Engines", AnnotatedString("Enable or disable headless engines. Toggling takes effect immediately — no restart."), narrow) {
+            ComingSoonNote("Engine detection with Scan again, and each engine's switch, home, command and launch command, are coming to the app in a later update.")
+        }
+        ClaudeAccountsHost(claudeAccounts, narrow)
+        // ta-q6p slot: ProfilesEditor.
+        SettingsSection("Custom providers", AnnotatedString("Declarative profiles extending the built-in engines — different credentials, binaries, or model lists per profile."), narrow) {
+            ComingSoonNote("The provider profiles editor is coming to the app in a later update.")
+        }
+        // ta-dh1 slot: Host config (shareHostConfig).
+        SettingsSection("Host config", null, narrow, last = true) {
+            ComingSoonNote("Share host config, which links an isolated engine home to your host CLI's skills, MCP servers, commands and agents, is coming to the app in a later update.")
+        }
     }
 }
 
