@@ -31,6 +31,9 @@ object InspectorBoards {
     const val MIN = 60_000L
     const val DAY = 24 * 60 * MIN
 
+    /** T15.7: the paired server's canonical origin (`serverOrigin`), what a service's Open link resolves against. */
+    const val ORIGIN = "https://console.example.test:443"
+
     fun obj(json: String): JsonObject = Json.parseToJsonElement(json).jsonObject
 
     private fun e(type: String, turnId: String?, seq: Long, json: String = "{}"): AgentEvent =
@@ -139,7 +142,7 @@ object InspectorBoards {
             """{"sessionId":"s1","worktreePath":"/w","branch":"tether/inspector","setupStatus":"ok","setupLog":[],"configWarnings":[],
                "scripts":[
                  {"name":"dev","type":"service","command":"npm run dev","status":"running","port":5173,"exitCode":null,"startedAt":1,"endedAt":null,"error":null,
-                  "proxyHost":"dev--inspector.example.test","proxyUrl":"https://dev--inspector.example.test/","proxyPath":null,"proxyAuthUrl":"https://console.example.test/h/1"},
+                  "proxyHost":"dev--inspector.example.test","proxyUrl":"https://dev--inspector.example.test/","proxyPath":null,"proxyAuthUrl":"/api/worktree/open?session=s1&script=dev","proxyUnavailable":null},
                  {"name":"test","type":"script","command":"npm test","status":"failed","port":null,"exitCode":1,"startedAt":1,"endedAt":2,"error":"1 test failed",
                   "proxyHost":null,"proxyUrl":null,"proxyPath":null}]}""",
         ),
@@ -154,7 +157,8 @@ object InspectorBoards {
         state: SessionView? = null,
         replies: InspectorReplies = InspectorReplies(),
         selectedRunId: String? = null,
-    ): InspectorModel = inspectorModel(session, providers, state, collectSubagentRuns(state?.obj), selectedRunId, replies, env)
+        serverOrigin: String? = ORIGIN,
+    ): InspectorModel = inspectorModel(session, providers, state, collectSubagentRuns(state?.obj), selectedRunId, replies, env, serverOrigin)
 
     val sparseModel: InspectorModel get() = model(sparse)
     val fullModel: InspectorModel get() = model(full, fullState, fullReplies)
