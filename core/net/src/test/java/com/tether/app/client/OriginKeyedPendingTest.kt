@@ -1195,6 +1195,9 @@ class OriginKeyedPendingTest {
                "startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"},"requestId":"r-1"}""",
         )
         await(c.sessions) { list -> list.any { it.id == "s-new" } }
+        // Drawn for another server than the one this socket and outbox belong to: refused even on
+        // the create's own socket (the origin binding alone).
+        assertFalse(c.sendFirst("s-new", "private prompt for A only", b.origin(), epochA))
         // Positive control, still on A: recorded, and on A's wire.
         assertTrue(c.sendFirst("s-new", "first words for A", originA, epochA))
         assertTrue(framesUntilBarrier(a).any { it.type() == "send" && it.s("text") == "first words for A" })
