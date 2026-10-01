@@ -2419,8 +2419,12 @@ class RealTetherClient(
                 sidebarSync.onFrame(message)
             }
             // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt); ta-t7l: v16 advanced settings.
-            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings ->
+            // ta-q6p: v84 the custom-providers registry (SidebarSync.kt, dropped with the settings frames).
+            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings,
+            is ServerMessage.Providers ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
+            // ta-q6p: v74 `acp-agents` is retired server-side (887c222 never sends it): decoded, routed nowhere.
+            is ServerMessage.AcpAgents -> Unit
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
             is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
@@ -3763,6 +3767,21 @@ class RealTetherClient(
     override fun detectEngines(origin: String): Boolean = sendFrameFor(origin, ClientMessage.DetectEngines)
 
     override val serverSettingsReplies: StateFlow<Long> = sidebarSync.serverSettingsReplies
+
+    override val providerProfiles: StateFlow<ProvidersList?> = sidebarSync.providerProfiles
+
+    override fun requestProviders(): Boolean = sendFrame(ClientMessage.ProvidersRequest)
+
+    // ta-q6p: the choke point for set-providers. The check reads the newest list under the same
+    // lock the frames are folded under, so no broadcast can land between the check and the send.
+    override fun setProviders(write: ProvidersWrite, origin: String): Boolean {
+        val text = write.message.encode()
+        synchronized(lock) {
+            if (ProvidersPatch.refusal(write, sidebarSync.providerProfiles.value) != null) return false
+            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return false
+            return ws.send(text)
+        }
+    }
 
     // T5.3 search (SearchSync.kt).
     override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)

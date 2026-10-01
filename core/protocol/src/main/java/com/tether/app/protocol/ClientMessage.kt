@@ -617,14 +617,22 @@ sealed interface ClientMessage {
         override fun toJsonObject() = frame("providers") {}
     }
 
-    /** [agents]: AcpAgentEntry[], raw. */
+    /**
+     * [agents]: AcpAgentEntry[], raw. Retired server-side (887c222: no handler; the app never sends
+     * it). An entry carries `env` in plaintext: [toString] prints the count only.
+     */
     data class SetAcpAgents(val agents: List<JsonObject>) : ClientMessage {
         override fun toJsonObject() = frame("set-acp-agents") { put("agents", JsonArray(agents)) }
+        override fun toString(): String = "SetAcpAgents(agents=${agents.size})"
     }
 
-    /** [profiles]: ProfileEntry[], raw. */
+    /**
+     * [profiles]: ProfileEntry[], raw: the WHOLE registry (the server replaces it). ta-q6p: each
+     * profile's `env` values are secrets, so [toString] prints the count only.
+     */
     data class SetProviders(val profiles: List<JsonObject>) : ClientMessage {
         override fun toJsonObject() = frame("set-providers") { put("profiles", JsonArray(profiles)) }
+        override fun toString(): String = "SetProviders(profiles=${profiles.size})"
     }
 
     data object ProvidersSnapshotRequest : ClientMessage {

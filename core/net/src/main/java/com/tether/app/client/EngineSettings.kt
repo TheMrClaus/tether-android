@@ -113,6 +113,7 @@ fun jsTrim(text: String): String {
     return text.substring(start, end)
 }
 
-private fun jsSpace(c: Char): Boolean =
+/** ta-q6p: JavaScript's `\s` and trim set (shared with the profile command split). */
+internal fun jsSpace(c: Char): Boolean =
     c == '\t' || c == '\u000B' || c == '\u000C' || c == ' ' || c == '\u00A0' || c == '\uFEFF' ||
         c == '\n' || c == '\r' || c == '\u2028' || c == '\u2029' || Character.getType(c) == Character.SPACE_SEPARATOR.toInt()

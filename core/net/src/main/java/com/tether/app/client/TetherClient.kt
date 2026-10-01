@@ -658,6 +658,26 @@ interface TetherClient {
      */
     val serverSettingsReplies: StateFlow<Long> get() = NO_SERVER_SETTINGS_REPLIES
 
+    /**
+     * ta-q6p: v84 the custom-providers registry, the last `providers` frame (the reply to
+     * [requestProviders] and the broadcast after every `set-providers`, from any client), null
+     * until one arrives on this server. Dropped on a server switch, a sign-out and an auth-required
+     * state: each profile's env values are plaintext secrets.
+     */
+    val providerProfiles: StateFlow<ProvidersList?> get() = NO_PROVIDER_PROFILES
+
+    /** ta-q6p: v84 `providers` request (Settings opening asks for it). */
+    fun requestProviders(): Boolean = false
+
+    /**
+     * ta-q6p: v84 `set-providers`, the WHOLE registry ([ProvidersWrite], made only by
+     * [ProvidersPatch]), sent only when the live socket was opened for [origin] AND the write
+     * passes [ProvidersPatch.refusal] against the newest list at the moment of the send: it was
+     * built from that very list (no broadcast landed since), and it changes no profile's command or
+     * home unless it is that change's confirmation. The only way the app sends `set-providers`.
+     */
+    fun setProviders(write: ProvidersWrite, origin: String): Boolean = false
+
     // ------------------------------------------------------------------
     // T5.2 resume: defaults keep other implementations (test doubles) compiling.
     // ------------------------------------------------------------------
@@ -746,6 +766,7 @@ private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableSta
 private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
 private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
 private val NO_ADVANCED_SETTINGS: StateFlow<ServerMessage.AdvancedSettings?> = MutableStateFlow(null)
+private val NO_PROVIDER_PROFILES: StateFlow<ProvidersList?> = MutableStateFlow(null)
 private val NO_SERVER_SETTINGS_REPLIES: StateFlow<Long> = MutableStateFlow(0L)
 private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(null)
 

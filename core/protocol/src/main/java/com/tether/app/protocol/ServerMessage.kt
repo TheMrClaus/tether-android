@@ -257,11 +257,27 @@ sealed interface ServerMessage {
                 "discovered=$discovered, detected=${detected.keys.sorted()})"
     }
 
-    /** Retired server-side (the request is answered with `error`), still in the TS union. [agents]: AcpAgentEntry[], raw. */
-    data class AcpAgents(val agents: List<JsonObject>) : ServerMessage
+    /**
+     * Retired server-side (server.mjs 887c222 never sends it; the request is answered with
+     * `error`), still in the TS union. [agents]: AcpAgentEntry[], raw. ta-q6p: decoded tolerantly
+     * (a missing or non-array `agents` is empty, a non-object entry dropped) and routed nowhere.
+     * An entry carries its `env` in plaintext, so [toString] prints the entry count only.
+     */
+    data class AcpAgents(val agents: List<JsonObject>) : ServerMessage {
+        override fun toString(): String = "AcpAgents(agents=${agents.size})"
+    }
 
-    /** [profiles]: ProfileEntry[], raw. */
-    data class Providers(val profiles: List<JsonObject>) : ServerMessage
+    /**
+     * v84 `providers` (the reply to `providers`, and the broadcast after every `set-providers`):
+     * [profiles] is ProfileEntry[], raw, every key as it came. ta-q6p: decoded tolerantly, so the
+     * frame never lands in [Unknown.raw] with its secrets: a missing or non-array `profiles` reads
+     * as an empty list and a non-object entry is dropped, and either makes [intact] false (the list
+     * is not the server's whole registry, so nothing may be written back from it). Each profile's
+     * `env` VALUES are secrets the server sends in plaintext: [toString] prints the count only.
+     */
+    data class Providers(val profiles: List<JsonObject>, val intact: Boolean = true) : ServerMessage {
+        override fun toString(): String = "Providers(profiles=${profiles.size}, intact=$intact)"
+    }
 
     /** [entries]: ProviderCatalogEntry[], raw. */
     data class ProvidersSnapshot(val entries: List<JsonObject>) : ServerMessage
@@ -828,8 +844,13 @@ private object ServerDecoders {
                 detected = r.o.obj("detected") ?: JsonObject(emptyMap()),
             )
         },
-        "acp-agents" to { r -> ServerMessage.AcpAgents(r.objList("agents")) },
-        "providers" to { r -> ServerMessage.Providers(r.objList("profiles")) },
+        // ta-q6p: both carry plaintext env values, so neither ever becomes an Unknown holding its raw frame.
+        "acp-agents" to { r -> ServerMessage.AcpAgents(r.o.objList("agents").orEmpty()) },
+        "providers" to { r ->
+            val raw = r.o.arr("profiles")
+            val profiles = raw?.mapNotNull { it as? JsonObject }.orEmpty()
+            ServerMessage.Providers(profiles, intact = raw != null && profiles.size == raw.size)
+        },
         "providers-snapshot" to { r -> ServerMessage.ProvidersSnapshot(r.objList("entries")) },
         "metadata-draft-result" to { r -> ServerMessage.MetadataDraftResult(r.str("requestId"), r.draft("result")) },
         "metadata-draft-error" to { r -> ServerMessage.MetadataDraftError(r.str("requestId"), r.str("error")) },

@@ -20,6 +20,9 @@ import kotlinx.serialization.json.buildJsonObject
  *  - `server-settings` → the last frame (1120);
  *  - `advanced-settings` → the last frame (1140; ta-t7l, the Claude CLI picker). Both settings
  *    frames are per server, so [clear] drops them with the sidebar on a server switch.
+ *  - `providers` → the custom-providers registry (1155; ta-q6p), numbered by arrival (a write
+ *    built from an older list is refused). It carries each profile's env values in plaintext, so
+ *    it is dropped with the settings frames ([clearSettings], [clear]).
  */
 internal class SidebarSync {
     val historiesByCwd = MutableStateFlow<Map<String, List<HistorySession>>>(emptyMap())
@@ -30,6 +33,13 @@ internal class SidebarSync {
 
     /** ta-dh1: every `server-settings` frame counted, an unchanged one too ("Scan again" waits for the next). */
     val serverSettingsReplies = MutableStateFlow(0L)
+
+    /** ta-q6p: the last `providers` frame, as the editor reads it (null until one arrives on this server). */
+    val providerProfiles = MutableStateFlow<ProvidersList?>(null)
+
+    // ta-q6p: every `providers` frame gets the next number, across clears too, so a list from
+    // before a clear can never pass for the one after it.
+    private var providersGeneration = 0L
 
     /** Folds one frame; returns false for a frame this class does not own. */
     fun onFrame(message: ServerMessage): Boolean {
@@ -45,6 +55,7 @@ internal class SidebarSync {
                 serverSettingsReplies.update { it + 1 }
             }
             is ServerMessage.AdvancedSettings -> advancedSettings.value = message
+            is ServerMessage.Providers -> providerProfiles.value = ProvidersList.of(message, ++providersGeneration)
             else -> return false
         }
         return true
@@ -55,10 +66,11 @@ internal class SidebarSync {
         sessionOrders.update { it + (cwd to order) }
     }
 
-    /** ta-t7l r2: the two settings frames only (sign-out, auth required): they hold plaintext secrets. */
+    /** ta-t7l r2: the settings frames only (sign-out, auth required): they hold plaintext secrets. ta-q6p: the providers list too. */
     fun clearSettings() {
         serverSettings.value = null
         advancedSettings.value = null
+        providerProfiles.value = null
     }
 
     /** Another server's sidebar must never show: dropped with the other per-server views. */
@@ -68,6 +80,7 @@ internal class SidebarSync {
         remoteSeen.value = emptyMap()
         serverSettings.value = null
         advancedSettings.value = null
+        providerProfiles.value = null
     }
 
     companion object {
