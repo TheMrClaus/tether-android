@@ -65,22 +65,62 @@ class NewSessionTransmissionTest {
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.content
 
+    /** ta-8cv: the web's keys for a cold draft (use-draft-composer.ts:313-347); Claude's sandbox explicit. */
+    private val coldKeys = setOf("type", "provider", "cwd", "requestId", "permissionMode", "sandboxPolicy", "useWorktree")
+
     @Test
     fun aProfileRowCreatesOnThatProfile() {
         val (client, _) = withCatalog()
         assertEquals(NewSessionResult.Sent, client.createNewSession(workChoice, "/w", client.consentOrigin.value))
         val sent = creates().single()
-        assertEquals(setOf("type", "provider", "cwd", "profileId"), sent.keys)
+        assertEquals(coldKeys + "profileId", sent.keys)
         assertEquals("claude", sent.str("provider"))
         assertEquals("work", sent.str("profileId"))
         assertEquals("/w", sent.str("cwd"))
+        assertEquals("req-work", sent.str("requestId"))
+        assertEquals("bypassPermissions", sent.str("permissionMode"))
+        assertEquals("workspace-write", sent.str("sandboxPolicy"))
     }
 
     @Test
     fun aDefaultRowCreatesWithNoProfile() {
         val (client, _) = withCatalog()
         assertEquals(NewSessionResult.Sent, client.createNewSession(claudeChoice, "/w", client.consentOrigin.value))
-        assertEquals(setOf("type", "provider", "cwd"), creates().single().keys)
+        assertEquals(coldKeys, creates().single().keys)
+    }
+
+    /** ta-8cv: a draft composed on one socket is never created on the next one. */
+    @Test
+    fun aDraftComposedOnAnEarlierSocketIsRefusedOnTheNext() {
+        val (client, ws) = withCatalog()
+        val composedOn = client.linkEpoch.value
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        h.scheduler.await(::isReconnectDelay).fire()
+        h.handshake(h.nextSocket(), ready())
+        assertTrue(client.linkEpoch.value > composedOn)
+        val stale = NewSessionRequest(claudeChoice, coldDraftForm("/w"), com.tether.app.protocol.helpers.DraftForm.INITIAL_USER_MODIFIED, "r-old", composedOn)
+        assertEquals(NewSessionResult.NotConnected, client.createNewSession(stale, client.consentOrigin.value))
+        assertTrue(creates().isEmpty())
+        // Composed on the live one: sent (positive control).
+        assertEquals(NewSessionResult.Sent, client.createNewSession(stale.copy(linkEpoch = client.linkEpoch.value), client.consentOrigin.value))
+        assertEquals(1, creates().size)
+    }
+
+    /** ta-8cv: every `error` frame is published with its echo, in order, cleaned. */
+    @Test
+    fun errorFramesArePublishedWithTheirRequestId() {
+        val (client, ws) = withCatalog()
+        assertEquals(NewSessionResult.Sent, client.createNewSession(claudeChoice, "/w", client.consentOrigin.value, requestId = "r-1"))
+        ws.send("""{"type":"error","message":"unrelated"}""")
+        val first = h.await(client.createErrors) { it != null }!!
+        assertEquals(null, first.requestId)
+        ws.send("""{"type":"error","message":"Skipping tool approvals needs‮ a browser sign-in, not a paired device.","requestId":"r-1"}""")
+        val second = h.await(client.createErrors) { it?.requestId == "r-1" }!!
+        assertTrue(second.seq > first.seq)
+        assertFalse(second.message.contains('‮'))
+        assertTrue(second.message.startsWith("Skipping tool approvals needs"))
     }
 
     @Test
@@ -121,7 +161,7 @@ class NewSessionTransmissionTest {
         assertEquals(NewSessionResult.Sent, client.createNewSession(claudeChoice, "/w", client.consentOrigin.value))
         val meanwhile = creates()
         assertEquals(1, meanwhile.size)
-        assertEquals(setOf("type", "provider", "cwd"), meanwhile[0].keys)
+        assertEquals(coldKeys, meanwhile[0].keys)
         // This socket's own catalog lands: the profile row creates again.
         ws2.send(catalogFrame(work, claude))
         h.await(client.providerCatalogLive) { it }

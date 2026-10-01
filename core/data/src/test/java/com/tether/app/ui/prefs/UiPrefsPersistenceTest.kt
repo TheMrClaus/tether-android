@@ -271,19 +271,54 @@ class UiPrefsPersistenceTest {
         }
     }
 
-    /** lib/draft-preferences.mjs: `tether:draftPreferences.v1`, junk or non-object reads as {}. */
+    /** lib/draft-preferences.mjs: `tether:draftPreferences.v1` (ta-8cv: per origin), junk or non-object reads as {}. */
     @Test
     fun draftPreferencesRoundTripAndFailSoft() = runBlocking {
         val prefs = JsObj.of("claude" to JsObj.of("model" to JsStr("opus")))
         withDrafts { drafts ->
-            assertEquals(JsObj.EMPTY, drafts.readDraftPreferences())
-            drafts.writeDraftPreferences(prefs)
+            assertEquals(JsObj.EMPTY, drafts.readDraftPreferences(A))
+            drafts.writeDraftPreferences(A, prefs)
         }
-        withDrafts { drafts -> assertEquals(prefs, drafts.readDraftPreferences()) }
+        withDrafts { drafts -> assertEquals(prefs, drafts.readDraftPreferences(A)) }
         for (junk in listOf("{not json", "[1,2]", "\"str\"")) {
-            withStore(draftsFile) { ds -> ds.edit { it[stringPreferencesKey("tether:draftPreferences.v1")] = junk } }
-            withDrafts { drafts -> assertEquals(junk, JsObj.EMPTY, drafts.readDraftPreferences()) }
+            withStore(draftsFile) { ds -> ds.edit { it[stringPreferencesKey("$A|tether:draftPreferences.v1")] = junk } }
+            withDrafts { drafts -> assertEquals(junk, JsObj.EMPTY, drafts.readDraftPreferences(A)) }
         }
+    }
+
+    /**
+     * ta-8cv: the draft preferences are per server origin (catalog keys are a server's own), and the
+     * unscoped record an earlier build kept belongs to no server: never read, dropped on the next write.
+     */
+    @Test
+    fun draftPreferencesArePerOriginAndTheUnscopedRecordIsDropped() = runBlocking {
+        assertEquals("https://a.example:443|tether:draftPreferences.v1", DraftStore.prefsKey(A))
+        assertThrows(IllegalArgumentException::class.java) { DraftStore.prefsKey("https://A.example/") }
+        val legacy = JsObj.of("providerPreferences" to JsObj.of("work" to JsObj.of("mode" to JsStr("bypassPermissions"))))
+        withStore(draftsFile) { ds -> ds.edit { it[stringPreferencesKey("tether:draftPreferences.v1")] = legacy.toString() } }
+        val onA = JsObj.of("providerPreferences" to JsObj.of("work" to JsObj.of("mode" to JsStr("default"))))
+        withDrafts { drafts ->
+            assertEquals("the unscoped record is never read as A's", JsObj.EMPTY, drafts.readDraftPreferences(A))
+            assertEquals("nor as B's", JsObj.EMPTY, drafts.readDraftPreferences(B))
+            drafts.writeDraftPreferences(A, onA)
+            assertEquals(onA, drafts.readDraftPreferences(A))
+            assertEquals("A's picks never show on B", JsObj.EMPTY, drafts.readDraftPreferences(B))
+        }
+        withStore(draftsFile) { ds ->
+            val keys = ds.data.first().asMap().keys.map { it.name }.toSet()
+            assertEquals(setOf("$A|tether:draftPreferences.v1"), keys)
+        }
+        // A draft write drops it as well.
+        withStore(draftsFile) { ds -> ds.edit { it[stringPreferencesKey("tether:draftPreferences.v1")] = legacy.toString() } }
+        withDrafts { drafts -> drafts.write(B, "s1", "x") }
+        withStore(draftsFile) { ds ->
+            assertFalse(ds.data.first().asMap().keys.any { it.name == "tether:draftPreferences.v1" })
+        }
+        // The in-memory store keeps origins apart too.
+        val memory = InMemoryDraftStore()
+        memory.writeDraftPreferences(A, onA)
+        assertEquals(onA, memory.readDraftPreferences(A))
+        assertEquals(JsObj.EMPTY, memory.readDraftPreferences(B))
     }
 
     /**

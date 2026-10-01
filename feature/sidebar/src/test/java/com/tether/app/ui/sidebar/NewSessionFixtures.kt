@@ -1,11 +1,15 @@
 package com.tether.app.ui.sidebar
 
+import com.tether.app.client.CreateErrorReply
+import com.tether.app.client.CreatedReply
 import com.tether.app.client.NewSessionChoice
 import com.tether.app.client.NewSessionGuard
+import com.tether.app.client.NewSessionRequest
 import com.tether.app.client.NewSessionResult
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.SessionModelOption
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,8 +65,9 @@ object NewSessionFixtures {
 /**
  * A [TetherClient] for the picker: the catalog and its liveness are set by the test, every catalog
  * request is counted, and [createNewSession] resolves the tap as the real client does (the drawn
- * origin, then [NewSessionGuard.resolve] against the live catalog) and records the `create`, unless
- * [nextResult] forces an outcome.
+ * origin, then [NewSessionGuard.resolve] against the live catalog: ta-8cv, the web's whole frame)
+ * and records the `create`, unless [nextResult] forces an outcome. ta-8cv: the server's answers are
+ * the test's to give ([answer], [refuse]), each echoing a requestId as the server does.
  */
 class PickerClient(
     val inner: RecordingClient = RecordingClient(),
@@ -71,24 +76,40 @@ class PickerClient(
     override val providerCatalog = MutableStateFlow(NewSessionFixtures.catalog)
     override val providerCatalogLive = MutableStateFlow(true)
     override val consentOrigin = MutableStateFlow<String?>(NewSessionFixtures.ORIGIN)
+    override val createdSessions = MutableStateFlow<CreatedReply?>(null)
+    override val createErrors = MutableStateFlow<CreateErrorReply?>(null)
+    override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
 
     var catalogRequests = 0
     val creates = mutableListOf<ClientMessage.Create>()
     val choices = mutableListOf<NewSessionChoice>()
     var nextResult: NewSessionResult? = null
+    private var seq = 0L
 
     override fun requestProviderCatalog(): Boolean {
         catalogRequests += 1
         return true
     }
 
-    override fun createNewSession(choice: NewSessionChoice, cwd: String?, expectedOrigin: String?): NewSessionResult {
-        choices += choice
+    override fun createNewSession(request: NewSessionRequest, expectedOrigin: String?): NewSessionResult {
+        choices += request.choice
         nextResult?.let { return it }
         if (expectedOrigin != consentOrigin.value) return NewSessionResult.NotLive
         val live = if (providerCatalogLive.value) providerCatalog.value else null
-        val frame = NewSessionGuard.resolve(choice, live, providers.value, cwd) ?: return NewSessionResult.NotOffered
+        val frame = NewSessionGuard.resolve(request, live, providers.value) ?: return NewSessionResult.NotOffered
         creates += frame
         return NewSessionResult.Sent
+    }
+
+    /** The server's `created` for the last create (or for [requestId]), naming session [id]. */
+    fun answer(id: String = "new-${creates.size}", requestId: String? = creates.last().requestId) {
+        val session = AgentSession(id = id, provider = creates.last().provider, name = id, cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1)
+        sessions.value = listOf(session) + sessions.value
+        createdSessions.value = CreatedReply(session, ++seq, requestId)
+    }
+
+    /** The server's `error` (for the last create unless [requestId] says otherwise). */
+    fun refuse(message: String, requestId: String? = creates.last().requestId) {
+        createErrors.value = CreateErrorReply(message, ++seq, requestId)
     }
 }

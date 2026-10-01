@@ -49,14 +49,16 @@ class LiveServerTest {
                     while (client.connection.value != ConnectionState.Connected) delay(50)
                 }
 
-                // ta-895: the one create path (the base provider's default row, no profile).
+                // ta-895 / ta-8cv: the one create path (the base provider's default row, no profile),
+                // with the web's frame (Claude Auto, sandbox workspace-write) and a requestId the
+                // server must echo on the `created` that names the new session.
+                val requestId = "live-${System.nanoTime()}"
                 assertEquals(
                     NewSessionResult.Sent,
-                    client.createNewSession(NewSessionChoice("claude", "claude", null), null, client.consentOrigin.value),
+                    client.createNewSession(NewSessionChoice("claude", "claude", null), client.workspaceRoot.value.orEmpty(), client.consentOrigin.value, requestId),
                 )
                 val sessionId = withTimeout(15_000) {
-                    while (client.sessions.value.isEmpty()) delay(50)
-                    client.sessions.value.first().id
+                    client.createdSessions.first { it?.requestId == requestId }!!.session.id
                 }
 
                 client.attach(sessionId)

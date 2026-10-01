@@ -39,8 +39,16 @@ class TetherViewModelResumeTest {
         override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
         override val createdSessions = MutableStateFlow<CreatedReply?>(null)
 
-        override fun createNewSession(choice: com.tether.app.client.NewSessionChoice, cwd: String?, expectedOrigin: String?) =
-            com.tether.app.client.NewSessionResult.Sent
+        override val connection = MutableStateFlow<com.tether.app.client.ConnectionState>(com.tether.app.client.ConnectionState.Connected)
+        override val consentOrigin = MutableStateFlow<String?>("https://a.example:443")
+        override val providers = MutableStateFlow(listOf(com.tether.app.protocol.model.ProviderInfo("claude", "Claude", "C", true)))
+        override val workspaceRoot = MutableStateFlow<String?>("/w")
+        val requests = mutableListOf<com.tether.app.client.NewSessionRequest>()
+
+        override fun createNewSession(request: com.tether.app.client.NewSessionRequest, expectedOrigin: String?): com.tether.app.client.NewSessionResult {
+            requests += request
+            return com.tether.app.client.NewSessionResult.Sent
+        }
 
         override fun resume(history: HistorySession): Boolean {
             if (!sends) return false
@@ -48,9 +56,9 @@ class TetherViewModelResumeTest {
             return true
         }
 
-        fun created(session: AgentSession) {
+        fun created(session: AgentSession, requestId: String? = null) {
             sessions.value = listOf(session) + sessions.value.filter { it.id != session.id }
-            createdSessions.value = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1)
+            createdSessions.value = CreatedReply(session, (createdSessions.value?.seq ?: 0L) + 1, requestId)
         }
     }
 
@@ -138,13 +146,55 @@ class TetherViewModelResumeTest {
         assertNull(vm.selectedSessionId.value)
     }
 
-    @Test fun theProviderPickersCreateIsSelectedOnceWhetherTheListOrTheReplyComesFirst() = runTest(dispatcher) {
+    @Test fun theProviderPickersCreateIsSelectedOnceFromItsOwnReply() = runTest(dispatcher) {
         val client = ResumeClient()
         val vm = vm(client)
-        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), null)
-        client.created(session("new"))
+        assertEquals(
+            com.tether.app.client.DraftSubmitResult.Sent,
+            vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443"),
+        )
+        // ta-8cv: another device's new session landing in the list is NOT this create's.
+        client.sessions.value = listOf(session("someone-elses"))
+        advanceUntilIdle()
+        assertNull(vm.selectedSessionId.value)
+        client.created(session("new"), requestId = client.requests.single().requestId)
         advanceUntilIdle()
         assertEquals("new", vm.selectedSessionId.value)
         assertEquals(listOf("new"), client.attached)
+    }
+
+    /** ta-8cv: while a create is in flight, a resume's reply (no requestId) never takes its place. */
+    @Test fun aResumesReplyDoesNotHijackAPendingCreate() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.resumeHistory(history("hist-1"))
+        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
+        client.created(session("resumed", historyId = "hist-1"))
+        advanceUntilIdle()
+        assertNull("the resume's reply is not selected over the pending create", vm.selectedSessionId.value)
+        assertNull("its row is no longer opening", vm.openingHistoryId.value)
+        assertTrue(vm.draftComposer.state.value.creating)
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        advanceUntilIdle()
+        assertEquals("new", vm.selectedSessionId.value)
+        assertEquals(listOf("new"), client.attached)
+    }
+
+    /** ta-8cv (negative control): a create's reply with another requestId is never selected. */
+    @Test fun aCreatedWithAnotherRequestIdIsNeverSelected() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), "https://a.example:443")
+        client.created(session("stale"), requestId = "not-this-one")
+        advanceUntilIdle()
+        assertNull(vm.selectedSessionId.value)
+        assertTrue(vm.draftComposer.state.value.creating)
+        // No create in flight: a stray create reply is still never followed.
+        client.created(session("new"), requestId = client.requests.single().requestId)
+        advanceUntilIdle()
+        assertEquals("new", vm.selectedSessionId.value)
+        client.created(session("late"), requestId = "another")
+        advanceUntilIdle()
+        assertEquals("new", vm.selectedSessionId.value)
     }
 }

@@ -15,10 +15,13 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.tether.app.client.ConnectionState
+import com.tether.app.client.DRAFT_LINK_DROPPED_COPY
 import com.tether.app.client.NewSessionChoice
 import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionResult
 import com.tether.app.client.ProviderCatalogEntry
+import com.tether.app.ui.NEW_SESSION_CREATING_TAG
 import com.tether.app.ui.NEW_SESSION_LOADING_COPY
 import com.tether.app.ui.NEW_SESSION_NOTICE_TAG
 import com.tether.app.ui.NEW_SESSION_NOT_OFFERED_COPY
@@ -34,6 +37,7 @@ import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -90,7 +94,7 @@ class NewSessionPickerBehaviourTest {
     fun everyAccountIsItsOwnRowAndATapCreatesOnThatAccount() {
         val client = PickerClient()
         val dismissed = mutableListOf<Unit>()
-        open(client, dismissed)
+        val vm = open(client, dismissed)
         for (key in listOf("work", "personal", "gemini-acp", "claude", "codex", "opencode", "pi")) {
             rule.onNodeWithTag(NEW_SESSION_ROW_TAG + key, useUnmergedTree = true).assertExists()
         }
@@ -101,7 +105,18 @@ class NewSessionPickerBehaviourTest {
         assertEquals(listOf(NewSessionChoice("personal", "claude", "personal")), client.choices)
         assertEquals("personal", client.creates.single().profileId)
         assertEquals("claude", client.creates.single().provider)
+        // ta-8cv: the web's frame: Claude Auto, the explicit sandbox, a requestId of its own.
+        assertEquals("bypassPermissions", client.creates.single().permissionMode)
+        assertEquals("workspace-write", client.creates.single().sandboxPolicy)
+        assertTrue(client.creates.single().requestId!!.isNotEmpty())
+        // ta-8cv: it waits for THAT create's own reply, rows locked.
+        assertTrue(dismissed.isEmpty())
+        rule.onNodeWithTag(NEW_SESSION_CREATING_TAG, useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "work", useUnmergedTree = true).assertIsNotEnabled()
+        client.answer("new-personal")
+        rule.waitForIdle()
         assertEquals(1, dismissed.size)
+        assertEquals("new-personal", vm.selectedSessionId.value)
     }
 
     @Test
@@ -111,10 +126,87 @@ class NewSessionPickerBehaviourTest {
         rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
         rule.waitForIdle()
         assertNull(client.creates.single().profileId)
+        client.answer()
+        rule.waitForIdle()
         assertTrue(description(NEW_SESSION_ROW_TAG + "codex").endsWith("Error, codex app-server exited (code 1)"))
         rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "codex", useUnmergedTree = true).performClick()
         rule.waitForIdle()
         assertEquals(listOf("claude", "codex"), client.creates.map { it.provider })
+        // ta-8cv: Codex starts on its Default permissions preset.
+        assertEquals("workspace-write", client.creates.last().sandboxPolicy)
+        assertNull(client.creates.last().approvalPolicy)
+        assertNotEquals(client.creates[0].requestId, client.creates[1].requestId)
+    }
+
+    /** ta-8cv: the server refuses THIS create (a paired phone before ta-drm): its words, unlocked, open. */
+    @Test
+    fun theServersRefusalOfThisCreateIsShownAndThePickerUnlocks() {
+        val client = PickerClient()
+        val dismissed = mutableListOf<Unit>()
+        val vm = open(client, dismissed)
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        // An unrelated error first: still waiting.
+        client.refuse("Something else failed.", requestId = null)
+        rule.waitForIdle()
+        rule.onNodeWithTag(NEW_SESSION_CREATING_TAG, useUnmergedTree = true).assertExists()
+        // A created for another create: not this one, nothing closes, nothing is selected.
+        client.answer("someone-elses", requestId = "another-request")
+        rule.waitForIdle()
+        assertTrue(dismissed.isEmpty())
+        assertNull(vm.selectedSessionId.value)
+        client.refuse("Skipping tool approvals needs a browser sign-in, not a paired device.")
+        rule.waitForIdle()
+        rule.onNodeWithTag(NEW_SESSION_CREATING_TAG, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Skipping tool approvals needs a browser sign-in, not a paired device.").assertExists()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).assertIsEnabled()
+        assertTrue(dismissed.isEmpty())
+        // Never downgraded and resent on its own.
+        assertEquals(1, client.creates.size)
+        assertEquals("bypassPermissions", client.creates.single().permissionMode)
+    }
+
+    /** ta-8cv: the link drops before `created`: the picker says so and unlocks. */
+    @Test
+    fun aDroppedLinkWhileCreatingSaysSoAndUnlocks() {
+        val client = PickerClient()
+        val dismissed = mutableListOf<Unit>()
+        open(client, dismissed)
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        client.inner.connection.value = ConnectionState.Disconnected
+        rule.waitForIdle()
+        rule.onNodeWithText(DRAFT_LINK_DROPPED_COPY).assertExists()
+        rule.onNodeWithTag(NEW_SESSION_CREATING_TAG, useUnmergedTree = true).assertDoesNotExist()
+        assertTrue(dismissed.isEmpty())
+        // A late reply (it cannot come on another socket, but even so) closes nothing.
+        client.answer()
+        rule.waitForIdle()
+        assertTrue(dismissed.isEmpty())
+    }
+
+    /** ta-8cv: a new opening never shows an earlier opening's refusal. */
+    @Test
+    fun aReopenedPickerStartsWithoutTheEarlierError() {
+        val client = PickerClient()
+        val vm = TetherViewModel(client)
+        var shown by mutableStateOf(true)
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Studio)) {
+                if (shown) NewSessionDialog(vm, onDismiss = { shown = false })
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        client.refuse("Refused once.")
+        rule.waitForIdle()
+        rule.onNodeWithText("Refused once.").assertExists()
+        shown = false
+        rule.waitForIdle()
+        shown = true
+        rule.waitForIdle()
+        rule.onNodeWithText("Refused once.").assertDoesNotExist()
     }
 
     @Test

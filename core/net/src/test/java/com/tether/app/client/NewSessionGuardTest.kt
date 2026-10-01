@@ -1,7 +1,9 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.protocol.tree.JsStr
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -51,6 +53,27 @@ class NewSessionGuardTest {
 
     private fun choice(e: ProviderCatalogEntry) = NewSessionChoice(e.key, e.provider, e.profileId)
 
+    /** ta-8cv: the guard now builds the web's whole frame; a cold draft (no picks) in [cwd]. */
+    private fun resolve(c: NewSessionChoice, live: List<ProviderCatalogEntry>?, p: List<ProviderInfo>, cwd: String): ClientMessage.Create? =
+        NewSessionGuard.resolve(
+            NewSessionRequest(c, DraftForm.INITIAL_DRAFT_FORM.put("cwd", JsStr(cwd)), DraftForm.INITIAL_USER_MODIFIED, "req-1", 0),
+            live,
+            p,
+        )
+
+    private fun cold(provider: String, profileId: String? = null) = ClientMessage.Create(
+        provider = provider,
+        cwd = "/w",
+        requestId = "req-1",
+        permissionMode = "bypassPermissions",
+        sandboxPolicy = when (provider) {
+            "claude", "codex" -> "workspace-write"
+            else -> null
+        },
+        useWorktree = false,
+        profileId = profileId,
+    )
+
     // --- rows -----------------------------------------------------------------------------------
 
     @Test
@@ -97,24 +120,18 @@ class NewSessionGuardTest {
     @Test
     fun anEmptyLiveCatalogOffersNoRowAndNoDefault() {
         assertTrue(NewSessionGuard.rows(emptyList(), providers).isEmpty())
-        assertNull(NewSessionGuard.resolve(NewSessionChoice("claude", "claude", null), emptyList(), providers, "/w"))
-        assertNull(NewSessionGuard.resolve(choice(catalog[0]), emptyList(), providers, "/w"))
+        assertNull(resolve(NewSessionChoice("claude", "claude", null), emptyList(), providers, "/w"))
+        assertNull(resolve(choice(catalog[0]), emptyList(), providers, "/w"))
     }
 
     // --- resolve: the create a tap may produce --------------------------------------------------
 
     @Test
     fun aProfileRowCreatesOnThatProfileAndADefaultRowOnNone() {
-        assertEquals(
-            ClientMessage.Create(provider = "claude", cwd = "/w", profileId = "work"),
-            NewSessionGuard.resolve(choice(catalog[0]), catalog, providers, "/w"),
-        )
-        assertEquals(
-            ClientMessage.Create(provider = "acp", cwd = "/w", profileId = "gemini-acp"),
-            NewSessionGuard.resolve(choice(catalog[2]), catalog, providers, "/w"),
-        )
-        val default = NewSessionGuard.resolve(choice(catalog[3]), catalog, providers, "/w")
-        assertEquals(ClientMessage.Create(provider = "claude", cwd = "/w"), default)
+        assertEquals(cold("claude", profileId = "work"), resolve(choice(catalog[0]), catalog, providers, "/w"))
+        assertEquals(cold("acp", profileId = "gemini-acp"), resolve(choice(catalog[2]), catalog, providers, "/w"))
+        val default = resolve(choice(catalog[3]), catalog, providers, "/w")
+        assertEquals(cold("claude"), default)
         assertNull(default!!.profileId)
     }
 
@@ -122,7 +139,7 @@ class NewSessionGuardTest {
     fun aRowGoneFromTheRefreshedCatalogIsRefusedNotCreatedOnTheDefault() {
         val drawn = choice(catalog[0])
         val refreshed = catalog.filter { it.key != "work" }
-        assertNull(NewSessionGuard.resolve(drawn, refreshed, providers, "/w"))
+        assertNull(resolve(drawn, refreshed, providers, "/w"))
     }
 
     @Test
@@ -133,44 +150,63 @@ class NewSessionGuardTest {
             entry("work", "codex", profileId = "work", extends = "codex"),
             entry("work", "claude"), // the profile went and its key is now an (odd) default row
         )
-        for (row in swapped) assertNull("$row", NewSessionGuard.resolve(drawn, listOf(row) + catalog.drop(1), providers, "/w"))
+        for (row in swapped) assertNull("$row", resolve(drawn, listOf(row) + catalog.drop(1), providers, "/w"))
         // A default row the operator drew never picks up a profile that took its key.
-        assertNull(NewSessionGuard.resolve(choice(catalog[3]), listOf(profile("claude")), providers, "/w"))
+        assertNull(resolve(choice(catalog[3]), listOf(profile("claude")), providers, "/w"))
     }
 
     @Test
     fun aRowThatTurnedUnavailableOrLoadingIsRefusedAnErrorOneStillCreates() {
         val drawn = choice(catalog[0])
-        assertNull(NewSessionGuard.resolve(drawn, listOf(profile("work", status = "unavailable")), providers, "/w"))
-        assertNull(NewSessionGuard.resolve(drawn, listOf(profile("work", status = "loading")), providers, "/w"))
-        assertEquals("work", NewSessionGuard.resolve(drawn, listOf(profile("work", status = "error")), providers, "/w")?.profileId)
+        assertNull(resolve(drawn, listOf(profile("work", status = "unavailable")), providers, "/w"))
+        assertNull(resolve(drawn, listOf(profile("work", status = "loading")), providers, "/w"))
+        assertEquals("work", resolve(drawn, listOf(profile("work", status = "error")), providers, "/w")?.profileId)
     }
 
     @Test
     fun anAmbiguousKeyIsRefused() {
         val drawn = choice(catalog[0])
-        assertNull(NewSessionGuard.resolve(drawn, listOf(profile("work"), profile("work").copy(label = "Spoof")), providers, "/w"))
+        assertNull(resolve(drawn, listOf(profile("work"), profile("work").copy(label = "Spoof")), providers, "/w"))
     }
 
     @Test
     fun withoutALiveCatalogNoProfileIsEverSentOnlyAnAvailableDefault() {
         // A row drawn from an earlier connection's (or another server's) catalog.
-        assertNull(NewSessionGuard.resolve(choice(catalog[0]), null, providers, "/w"))
-        assertNull(NewSessionGuard.resolve(choice(catalog[0]), emptyList(), providers, "/w"))
-        assertNull(NewSessionGuard.resolve(NewSessionChoice("gemini-acp", "acp", "gemini-acp"), null, providers, "/w"))
-        assertNull("acp has no default row", NewSessionGuard.resolve(NewSessionChoice("acp", "acp", null), null, providers, "/w"))
-        assertNull("unavailable", NewSessionGuard.resolve(NewSessionChoice("pi", "pi", null), null, providers, "/w"))
-        assertNull("not listed", NewSessionGuard.resolve(NewSessionChoice("opencode", "opencode", null), null, providers, "/w"))
-        assertNull("key != engine", NewSessionGuard.resolve(NewSessionChoice("work", "claude", null), null, providers, "/w"))
-        assertEquals(ClientMessage.Create(provider = "codex", cwd = "/w"), NewSessionGuard.resolve(NewSessionChoice("codex", "codex", null), null, providers, "/w"))
+        assertNull(resolve(choice(catalog[0]), null, providers, "/w"))
+        assertNull(resolve(choice(catalog[0]), emptyList(), providers, "/w"))
+        assertNull(resolve(NewSessionChoice("gemini-acp", "acp", "gemini-acp"), null, providers, "/w"))
+        assertNull("acp has no default row", resolve(NewSessionChoice("acp", "acp", null), null, providers, "/w"))
+        assertNull("unavailable", resolve(NewSessionChoice("pi", "pi", null), null, providers, "/w"))
+        assertNull("not listed", resolve(NewSessionChoice("opencode", "opencode", null), null, providers, "/w"))
+        assertNull("key != engine", resolve(NewSessionChoice("work", "claude", null), null, providers, "/w"))
+        assertEquals(cold("codex"), resolve(NewSessionChoice("codex", "codex", null), null, providers, "/w"))
     }
 
     @Test
     fun theCreateFrameIsTheWebsShapeWithTheProfileOnlyWhenThereIsOne() {
-        val withProfile = NewSessionGuard.resolve(choice(catalog[0]), catalog, providers, "/w")!!.toJsonObject()
-        assertEquals(setOf("type", "provider", "cwd", "profileId"), withProfile.keys)
-        val without = NewSessionGuard.resolve(choice(catalog[3]), catalog, providers, "/w")!!.toJsonObject()
-        assertEquals(setOf("type", "provider", "cwd"), without.keys)
+        // ta-8cv: every key the web sends for a cold Claude draft (use-draft-composer.ts:313-347).
+        val base = setOf("type", "provider", "cwd", "requestId", "permissionMode", "sandboxPolicy", "useWorktree")
+        val withProfile = resolve(choice(catalog[0]), catalog, providers, "/w")!!.toJsonObject()
+        assertEquals(base + "profileId", withProfile.keys)
+        val without = resolve(choice(catalog[3]), catalog, providers, "/w")!!.toJsonObject()
+        assertEquals(base, without.keys)
+    }
+
+    @Test
+    fun theFrameIsBuiltOnTheLiveRowNeverOnWhatTheRequestClaims() {
+        // The request's form names Codex's Full access; the live row is Claude: Claude's rules apply.
+        val request = NewSessionRequest(
+            choice(catalog[0]),
+            DraftForm.INITIAL_DRAFT_FORM.with("cwd" to JsStr("/w"), "mode" to JsStr("full-access")),
+            DraftForm.INITIAL_USER_MODIFIED,
+            "req-1",
+            0,
+        )
+        val frame = NewSessionGuard.resolve(request, catalog, providers)!!
+        assertEquals("claude", frame.provider)
+        assertEquals("work", frame.profileId)
+        assertEquals("workspace-write", frame.sandboxPolicy)
+        assertNull(frame.approvalPolicy)
     }
 
     // --- the catalog fields the picker reads ----------------------------------------------------
