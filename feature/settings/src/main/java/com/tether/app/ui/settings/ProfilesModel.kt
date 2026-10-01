@@ -12,6 +12,7 @@ import com.tether.app.client.ProvidersBuild
 import com.tether.app.client.ProvidersInFlight
 import com.tether.app.client.ProvidersRefusal
 import com.tether.app.client.RunsSnapshot
+import com.tether.app.client.RiskyEnvKeys
 import com.tether.app.client.EnvChange
 import com.tether.app.client.SecretText
 import com.tether.app.client.jsTrim
@@ -82,7 +83,7 @@ data class ProvidersBinding(
         }
         (ProvidersPatch.refusal(write, newest) ?: inFlight.refusal(newest))?.let { return ProvidersSend.Refused(it) }
         writer.setProviders(write, o)?.let { return ProvidersSend.Refused(it) }
-        inFlight.sent(write)
+        inFlight.sent(write, newest)
         return ProvidersSend.Sent
     }
 
@@ -137,6 +138,8 @@ data class ExtendsReview(
     val home: String?,
     override val snapshot: RunsSnapshot,
     override val epoch: Long = 0L,
+    /** r3: the profile's [RiskyEnvKeys] names (never values): the new engine reads them its own way. */
+    val riskyKeys: List<String> = emptyList(),
 ) : ProfileReview {
     override val edit: ProfileRunsEdit get() = ProfileRunsEdit.Extends(profileId, to)
     override fun toString(): String = "ExtendsReview($profileId, $from -> $to)"
@@ -150,6 +153,8 @@ data class EnvReview(
     val nowValue: SecretText?,
     override val snapshot: RunsSnapshot,
     override val epoch: Long = 0L,
+    /** r3: run once the confirmed change was sent (the Add row clears its draft). */
+    val afterSend: () -> Unit = {},
 ) : ProfileReview {
     override val edit: ProfileRunsEdit get() = ProfileRunsEdit.Env(profileId, change)
     override fun toString(): String = "EnvReview($profileId, ${change::class.simpleName}:${change.keys})"
@@ -296,7 +301,7 @@ object ProfileRows {
     /** Picking another engine: what to confirm (null for the same one). */
     fun reviewExtends(p: Profile, to: String, epoch: Long = 0L): ExtendsReview? {
         if (to == p.extends || to !in ProfileLimits.EXTENDS) return null
-        return ExtendsReview(p.id, name(p), p.extends, to, p.command ?: emptyList(), p.homeDir, RunsSnapshot.of(p), epoch)
+        return ExtendsReview(p.id, name(p), p.extends, to, p.command ?: emptyList(), p.homeDir, RunsSnapshot.of(p), epoch, p.envKeys.filter(RiskyEnvKeys::risky))
     }
 
     fun extendsTitle(r: ExtendsReview) = "Change the ${r.name} engine?"
@@ -309,12 +314,14 @@ object ProfileRows {
     const val ENGINE_NOW = "Engine — now"
     const val ENGINE_COMMAND = "Command it will run"
     const val ENGINE_HOME = "Home it will use"
+    const val ENGINE_ENV = "Variables it will read"
+    const val ENGINE_ENV_NONE = "None that change what runs"
     const val ENGINE_ACTION = "Change engine"
 
     // ---- r2: the risky env keys (owner decision A) -----------------------------------------------
 
     /** An env change on [p]: a review when it touches a risky key, else null (it saves as before). */
-    fun reviewEnv(p: Profile, change: EnvChange, epoch: Long = 0L): EnvReview? {
+    fun reviewEnv(p: Profile, change: EnvChange, epoch: Long = 0L, afterSend: () -> Unit = {}): EnvReview? {
         if (!change.risky) return null
         val nowKey = when (change) {
             is EnvChange.Change -> change.key
@@ -322,7 +329,7 @@ object ProfileRows {
             is EnvChange.Rename -> change.from
             is EnvChange.Add -> null
         }
-        return EnvReview(p.id, name(p), change, nowKey?.let(p::envValue), RunsSnapshot.of(p), epoch)
+        return EnvReview(p.id, name(p), change, nowKey?.let(p::envValue), RunsSnapshot.of(p), epoch, afterSend)
     }
 
     /** The action, in plain text (key names are drawn by the exact rule beside it). */
@@ -347,6 +354,7 @@ object ProfileRows {
     const val NOT_SAVED_CHANGED = "Not saved: the list changed. Try again."
     const val NOT_SAVED_IN_FLIGHT = "Not saved: the last change is still being saved. Try again in a moment."
     const val NOT_SAVED_COLLISION = "Not saved: this profile already has a variable with that name."
+    const val NOT_SAVED_BAD_NAME = "Not saved: use letters, digits and _ only (not starting with a digit)."
     const val NOT_SAVED_OFFLINE = "Not saved: not connected to the server. Try again."
     const val NOT_SAVED_INVALID = "Not saved: the server would refuse this value."
     const val CHANGED_WHILE_CONFIRMING = "Not saved: what this profile runs changed while you were confirming. Review it and try again."
@@ -355,6 +363,7 @@ object ProfileRows {
     fun notSaved(reason: ProvidersRefusal): String = when (reason) {
         ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT
         ProvidersRefusal.Collision -> NOT_SAVED_COLLISION
+        ProvidersRefusal.BadName -> NOT_SAVED_BAD_NAME
         ProvidersRefusal.NotConnected -> NOT_SAVED_OFFLINE
         ProvidersRefusal.Invalid -> NOT_SAVED_INVALID
         ProvidersRefusal.Changed -> CHANGED_WHILE_CONFIRMING

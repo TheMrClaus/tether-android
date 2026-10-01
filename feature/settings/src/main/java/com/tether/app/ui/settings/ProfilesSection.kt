@@ -139,6 +139,7 @@ object ProfileTags {
     const val ConfirmNowReveal = "profile-confirm-now-reveal"
     const val ConfirmCommand = "profile-confirm-command"
     const val ConfirmHome = "profile-confirm-home"
+    const val ConfirmEnvKeys = "profile-confirm-env-keys"
     const val Notice = "profiles-notice"
     fun notice(id: String) = "profile-notice:$id"
     fun envNewNote(id: String) = "profile-env-new-note:$id"
@@ -237,7 +238,8 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
         val sent = lastSent ?: return@LaunchedEffect
         delay(com.tether.app.client.ProvidersInFlight.TIMEOUT_MS)
         val newest = binding.latest()
-        if (newest != null && newest.epoch == sent.first && newest.generation == sent.second) notices = notices + ("" to ProfileRows.UNCONFIRMED)
+        // r3: still waiting means no list holds the write yet (another client's list does not count).
+        if (newest != null && newest.epoch == sent.first && binding.inFlight.waiting(newest)) notices = notices + ("" to ProfileRows.UNCONFIRMED)
     }
     val caption = buildAnnotatedString {
         val code = SpanStyle(fontFamily = type.mono)
@@ -593,7 +595,7 @@ private fun PendingReview(pending: ProfileReview?, binding: ProvidersBinding, ac
         SideEffect {
             if (!fired[0]) {
                 fired[0] = true
-                actions.confirmed(r)
+                if (actions.confirmed(r) == ProvidersSend.Sent && r is EnvReview) r.afterSend()
             }
             onDone()
         }
@@ -662,6 +664,8 @@ internal fun ExtendsConfirmDialog(r: ExtendsReview, onConfirm: () -> Unit, onCan
             ConfirmValueField(ProfileRows.ENGINE_NOW, listOf(r.from), "", ProfileTags.ConfirmNow)
             ConfirmValueField(ProfileRows.ENGINE_COMMAND, r.command, "Empty — no command (the engine's own)", ProfileTags.ConfirmCommand)
             ConfirmValueField(ProfileRows.ENGINE_HOME, listOfNotNull(r.home?.ifEmpty { null }), "Empty — the engine's dedicated home", ProfileTags.ConfirmHome)
+            // r3: names only, never values: the new engine reads them its own way.
+            ConfirmValueField(ProfileRows.ENGINE_ENV, r.riskyKeys, ProfileRows.ENGINE_ENV_NONE, ProfileTags.ConfirmEnvKeys)
         }
     }
 }
@@ -794,14 +798,16 @@ private fun EnvEditor(p: Profile, actions: ProfileActions, editable: Boolean, na
  * One env change from the editor: a [RiskyEnvKeys] key opens its confirmation (r2, owner decision
  * A); any other saves at once. A name already set on the profile is refused (r2, security F9).
  */
-private fun envCommit(p: Profile, change: EnvChange, actions: ProfileActions, edit: ProfileEdit, quiet: Boolean): CommitOutcome {
+private fun envCommit(p: Profile, change: EnvChange, actions: ProfileActions, edit: ProfileEdit, quiet: Boolean, afterSend: () -> Unit = {}): CommitOutcome {
+    // r3: a name added or renamed to is a plain variable name (a `=` in a key would set another variable).
+    ProvidersPatch.newName(change)?.let { if (it.isNotEmpty() && !RiskyEnvKeys.validName(it)) return CommitOutcome.Refused(ProfileRows.NOT_SAVED_BAD_NAME) }
     val collides = when (change) {
         is EnvChange.Rename -> change.to != change.from && change.to in p.envKeys
         is EnvChange.Add -> change.key in p.envKeys
         else -> false
     }
     if (collides) return CommitOutcome.Refused(ProfileRows.NOT_SAVED_COLLISION)
-    ProfileRows.reviewEnv(p, change, actions.epoch)?.let {
+    ProfileRows.reviewEnv(p, change, actions.epoch, afterSend)?.let {
         actions.review(it)
         return CommitOutcome.Reviewing
     }
@@ -917,7 +923,13 @@ private fun EnvAddRow(p: Profile, actions: ProfileActions, narrow: Boolean) {
     val add: () -> Unit = {
         val key = jsTrim(name)
         if (key.isNotEmpty()) {
-            when (val outcome = envCommit(latestProfile, EnvChange.Add(key, SecretText(value)), latest, ProfileEdit.EnvAdd(p.id, name, SecretText(value)), quiet = true)) {
+            // r3: a confirmed (risky) add clears the draft once its confirmation sends.
+            val clear = {
+                name = ""
+                value = ""
+                note = null
+            }
+            when (val outcome = envCommit(latestProfile, EnvChange.Add(key, SecretText(value)), latest, ProfileEdit.EnvAdd(p.id, name, SecretText(value)), quiet = true, afterSend = clear)) {
                 // The web clears the draft after its Add; here only once it was sent (a refused write keeps it).
                 CommitOutcome.Sent -> {
                     name = ""

@@ -55,7 +55,8 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapProfileConfirm(skin
  * `settings-profile-env-confirm`: a risky env key's value change (PATH on the Gemini CLI
  * profile), both values masked as the dialog opens (FAKE values behind the masks).
  * `settings-profile-extends-confirm`: the Gemini CLI profile moving from acp to claude, with
- * the command and home the new engine will run (the command shown although Claude hides it).
+ * the command and home the new engine will run (the command shown although Claude hides it) and, r3, the
+ * names of its risky env keys (PATH; never the value).
  */
 enum class ProfileConfirmShot(val id: String) { Command("settings-profile-confirm"), Env("settings-profile-env-confirm"), Extends("settings-profile-extends-confirm") }
 
@@ -73,7 +74,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapOther(shot: Profile
                         onConfirm = {}, onCancel = {},
                     )
                     else -> ExtendsConfirmDialog(
-                        ExtendsReview("gemini", "Gemini CLI", "acp", "claude", gemini.command.orEmpty(), gemini.homeDir, snapshot),
+                        ExtendsReview("gemini", "Gemini CLI", "acp", "claude", gemini.command.orEmpty(), gemini.homeDir, snapshot, riskyKeys = gemini.envKeys.filter(com.tether.app.client.RiskyEnvKeys::risky)),
                         onConfirm = {}, onCancel = {},
                     )
                 }

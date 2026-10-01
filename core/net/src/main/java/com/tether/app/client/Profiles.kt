@@ -148,25 +148,50 @@ class ProvidersList private constructor(
 }
 
 /**
- * r2 (owner decision 2026-10-01, A): the profile env keys that decide WHAT the server runs or
- * WHERE the engine reads its config, so adding, changing, renaming or removing one is confirmed
- * like a command. The loader and interpreter hooks (PATH, the LD_ / DYLD_ preload and library
- * paths, NODE_OPTIONS, BASH_ENV, PYTHONSTARTUP, PERL5OPT, RUBYOPT, GIT_SSH_COMMAND, …) and the
- * config homes (HOME, XDG_*, CLAUDE_CONFIG_DIR, CODEX_HOME, which hold hooks and MCP servers).
+ * r2 (owner decision 2026-10-01, A, "exec/home-class keys and similar"): the profile env keys that
+ * decide WHAT the server runs or WHERE an engine or tool reads its config, so adding, changing,
+ * renaming or removing one is confirmed like a command:
+ * - loader and interpreter hooks: PATH, every LD_ / DYLD_ variable, GCONV_PATH, NODE_OPTIONS,
+ *   NODE_PATH, BASH_ENV, ENV, the PYTHON / PERL / RUBY start-up and library paths, the JVM option
+ *   variables, SHELL and ZDOTDIR;
+ * - commands other tools run for the agent: GIT_SSH_COMMAND, GIT_EXEC_PATH, GIT_ASKPASS,
+ *   SSH_ASKPASS, GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF, git's environment config (GIT_CONFIG_*),
+ *   EDITOR, VISUAL, GIT_EDITOR, PAGER, GIT_PAGER;
+ * - config homes, which hold hooks and MCP servers: HOME, the XDG_* directories, CLAUDE_CONFIG_DIR,
+ *   CODEX_HOME, the other engines' homes, GIT_CONFIG_GLOBAL, GH_CONFIG_DIR.
+ * Proxy and base-URL keys are NOT here (a separate owner question).
+ *
  * Linux names are case-sensitive, but a key is compared upper-cased here, so `path` or `Path`
- * cannot slip past as an ordinary key.
+ * cannot slip past as an ordinary key. r3 (verify + security F1): a key that is not a plain
+ * variable name ([NAME]) counts as risky too: the child's environment is built as `key=value`, so
+ * `LD_PRELOAD=/tmp/x.so:` set as a KEY sets LD_PRELOAD. Such a key is never added or renamed to
+ * from the app ([validName]); one the server already holds is changed only through the confirmation.
  */
 object RiskyEnvKeys {
     val NAMES: Set<String> = setOf(
-        "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
-        "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV",
+        // loader and interpreter hooks
+        "PATH", "GCONV_PATH", "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV",
         "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
-        "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "SHELL",
-        "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+        "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "SHELL", "ZDOTDIR",
+        // commands other tools run
+        "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF",
+        "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "EDITOR", "VISUAL", "GIT_EDITOR", "PAGER", "GIT_PAGER",
+        // config homes
+        "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_DIRS", "XDG_DATA_DIRS",
+        "CLAUDE_CONFIG_DIR", "CODEX_HOME", "REASONIX_HOME", "DSH_HOME", "PI_CODING_AGENT_DIR",
+        "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "GIT_CONFIG_GLOBAL", "GH_CONFIG_DIR",
     )
-    val PREFIXES: List<String> = listOf("DYLD_")
+
+    /** LD_ subsumes LD_PRELOAD, LD_LIBRARY_PATH, LD_AUDIT and the rest of the loader's variables. */
+    val PREFIXES: List<String> = listOf("LD_", "DYLD_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+    /** A plain environment variable name (POSIX portable): the only shape the app adds or renames to. */
+    val NAME: Regex = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
+    fun validName(key: String): Boolean = NAME.matches(key)
 
     fun risky(key: String): Boolean {
+        if (!validName(key)) return true
         val k = key.uppercase(java.util.Locale.ROOT)
         return k in NAMES || PREFIXES.any { k.startsWith(it) }
     }
@@ -417,6 +442,9 @@ enum class ProvidersRefusal {
     /** An env rename or add onto a key the profile already has. */
     Collision,
 
+    /** r3: an env key added or renamed to that is not a plain variable name ([RiskyEnvKeys.validName]). */
+    BadName,
+
     /** The value passes the server's limits or rules. */
     Invalid,
 
@@ -469,25 +497,64 @@ class ProvidersWrite internal constructor(
 }
 
 /**
- * r2 (verifier F1): a write waits for its broadcast. While it does, the newest list does not
- * show it yet, so another write built now would undo it (the server replaces the whole list).
- * One sent write is tracked by the list it was built from; a write is refused while the newest
- * list is still that one, for at most [timeoutMs] (a broadcast that never comes stops blocking).
+ * r2 (verifier F1), r3: a write waits for its broadcast. Until a list that CONTAINS it arrives
+ * (every profile the write changed, added or removed reads as it was sent), the newest list does
+ * not show it, so another write built now would undo it (the server replaces the whole list). A
+ * list from another client landing first does not lift the guard (r3). After [timeoutMs] the
+ * write is overdue ([overdue]): the client asks for the list again, and the first list folded
+ * after that request (the server answers in order, so it reflects the write, whether it was taken
+ * or refused) lifts it. A new socket lifts it too (the list is then this socket's to fetch).
  */
 class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_000_000 }, val timeoutMs: Long = TIMEOUT_MS) {
-    private var sent: Pair<Long, Long>? = null
-    private var at = 0L
+    private class Pending(val epoch: Long, val expected: Map<String, JsonObject?>, val at: Long) {
+        /** The generation of the newest list when the overdue write's list was asked for again. */
+        var askedAt: Long? = null
+    }
 
+    private var pending: Pending? = null
+
+    /** Records [write], sent, as built from [base]: the profiles it changes, as they should read once it lands. */
     @Synchronized
-    fun refusal(newest: ProvidersList?): ProvidersRefusal? {
-        val s = sent ?: return null
-        return if (newest != null && newest.epoch == s.first && newest.generation == s.second && now() - at < timeoutMs) ProvidersRefusal.InFlight else null
+    fun sent(write: ProvidersWrite, base: ProvidersList?) {
+        val before = base?.raws.orEmpty()
+        fun idOf(o: JsonObject) = (o["id"] as? JsonPrimitive)?.content
+        val expected = LinkedHashMap<String, JsonObject?>()
+        val sentIds = write.profiles.mapNotNull(::idOf).toSet()
+        for (p in write.profiles) {
+            val id = idOf(p) ?: continue
+            if (before.firstOrNull { idOf(it) == id } != p) expected[id] = p
+        }
+        for (o in before) idOf(o)?.let { if (it !in sentIds) expected[it] = null }
+        pending = Pending(write.epoch, expected, now())
+    }
+
+    /** Whether a write is still waiting against [newest] (lifting the guard when it no longer is). */
+    @Synchronized
+    fun waiting(newest: ProvidersList?): Boolean {
+        val p = pending ?: return false
+        val lifted = newest != null && (
+            newest.epoch != p.epoch ||
+                p.expected.all { (id, exp) -> newest.raws.firstOrNull { (it["id"] as? JsonPrimitive)?.content == id } == exp } ||
+                p.askedAt?.let { newest.generation > it } == true
+            )
+        if (lifted) pending = null
+        return !lifted
     }
 
     @Synchronized
-    fun sent(write: ProvidersWrite) {
-        sent = write.epoch to write.generation
-        at = now()
+    fun refusal(newest: ProvidersList?): ProvidersRefusal? = if (newest != null && waiting(newest)) ProvidersRefusal.InFlight else null
+
+    /**
+     * True once, when the waiting write passes [timeoutMs]: the caller asks the server for the list
+     * (the client does), and the next list folded after [newest] lifts the guard.
+     */
+    @Synchronized
+    fun overdue(newest: ProvidersList?): Boolean {
+        if (!waiting(newest)) return false
+        val p = pending ?: return false
+        if (p.askedAt != null || now() - p.at < timeoutMs || newest == null) return false
+        p.askedAt = newest.generation
+        return true
     }
 
     companion object {
@@ -553,6 +620,8 @@ object ProvidersPatch {
                 val target = base.firstOrNull { idOf(it) == profileId(edit) } ?: return gone()
                 val profile = list.profile(profileId(edit)) ?: return gone()
                 envChangeOf(edit)?.let { change ->
+                    // r3: a name the app would add or rename to must be a plain variable name.
+                    newName(change)?.let { if (it.isNotEmpty() && !RiskyEnvKeys.validName(it)) return ProvidersBuild.Refused(ProvidersRefusal.BadName) }
                     if (change.risky) return ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
                 }
                 val updated = when (val r = applyTo(profile, target, edit)) {
@@ -566,6 +635,13 @@ object ProvidersPatch {
         }
         if (next == base) return ProvidersBuild.NoChange
         return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, confirmed = null, renames = renames, epoch = list.epoch))
+    }
+
+    /** The name an env change adds or renames to (null for a value change or a remove). */
+    fun newName(change: EnvChange): String? = when (change) {
+        is EnvChange.Add -> change.key
+        is EnvChange.Rename -> change.to
+        else -> null
     }
 
     /** The env change a plain env edit makes (null for any other edit). */
@@ -645,6 +721,9 @@ object ProvidersPatch {
                 else -> RunsSnapshot.NEW_PROFILE
             }
             if (RunsSnapshot.of(p) != expected) return ProvidersRefusal.Unconfirmed
+            // r3: no write puts a key that is not a plain variable name into a profile's env.
+            val had = (before?.get("env") as? JsonObject)?.keys.orEmpty()
+            if ((p["env"] as? JsonObject)?.keys.orEmpty().any { it !in had && !RiskyEnvKeys.validName(it) }) return ProvidersRefusal.BadName
         }
         return null
     }
@@ -726,6 +805,7 @@ object ProvidersPatch {
                 val value = env?.get(change.from) ?: return Applied.No(ProvidersRefusal.Gone)
                 if (change.to.isEmpty() || change.to == change.from) return Applied.Nothing
                 if (change.to.length > ProfileLimits.COMMAND_ENTRY) return Applied.No(ProvidersRefusal.Invalid)
+                if (!RiskyEnvKeys.validName(change.to)) return Applied.No(ProvidersRefusal.BadName)
                 if (change.to in env) return Applied.No(ProvidersRefusal.Collision)
                 val next = LinkedHashMap(env)
                 next.remove(change.from)
@@ -749,6 +829,7 @@ object ProvidersPatch {
             is EnvChange.Add -> {
                 if (change.key.isEmpty()) return Applied.Nothing
                 if (change.key.length > ProfileLimits.COMMAND_ENTRY || change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
+                if (!RiskyEnvKeys.validName(change.key)) return Applied.No(ProvidersRefusal.BadName)
                 if (env != null && change.key in env) return Applied.No(ProvidersRefusal.Collision)
                 if ((env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env ?: emptyMap())

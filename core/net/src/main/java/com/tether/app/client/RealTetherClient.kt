@@ -3789,11 +3789,22 @@ class RealTetherClient(
             val newest = sidebarSync.providerProfiles.value
             ProvidersPatch.refusal(write, newest)?.let { return it }
             if (newest == null || newest.epoch != epoch) return ProvidersRefusal.Stale
-            providersInFlight.refusal(newest)?.let { return it }
             val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return ProvidersRefusal.NotConnected
+            if (providersInFlight.overdue(newest)) ws.send(ClientMessage.ProvidersRequest.encode())
+            providersInFlight.refusal(newest)?.let { return it }
             if (!ws.send(text)) return ProvidersRefusal.NotConnected
-            providersInFlight.sent(write)
+            providersInFlight.sent(write, newest)
+            // r3: if no list containing it comes in time, ask for the list (the reply lifts the guard).
+            scheduler.schedule(providersInFlight.timeoutMs) { askForOverdueProviders() }
             return null
+        }
+    }
+
+    /** r3: the sent write is overdue: ask this socket for the registry; the reply lifts the in-flight guard. */
+    private fun askForOverdueProviders() {
+        synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone) socket else null) ?: return
+            if (providersInFlight.overdue(sidebarSync.providerProfiles.value)) ws.send(ClientMessage.ProvidersRequest.encode())
         }
     }
 

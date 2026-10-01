@@ -28,7 +28,7 @@ class ProfilesTest {
 
     private fun frame(text: String) = ServerMessage.parse(text) as ServerMessage.Providers
 
-    private fun list(profiles: String, generation: Long = 1) = ProvidersList.of(frame("""{"type":"providers","profiles":$profiles}"""), generation)
+    private fun list(profiles: String, generation: Long = 1, epoch: Long = 0) = ProvidersList.of(frame("""{"type":"providers","profiles":$profiles}"""), generation, epoch)
 
     private val gemini = """{"id":"gemini","extends":"acp","label":"Gemini","command":["gemini","--acp"],"homeDir":"/srv/homes/gemini",""" +
         """"env":{"GEMINI_API_KEY":"$sentinel","MODE":"x"},"dropEnv":["GEMINI"],"enabled":true,"order":2,"verifiedThrough":"0.43.0"}"""
@@ -363,20 +363,68 @@ class ProfilesTest {
         assertNotNull(ProvidersPatch.confirmed(other, ProfileRunsEdit.Home("gemini", "/x"), shown).writeOrNull)
     }
 
-    @Test fun aWriteInFlightBlocksTheNextUntilItsBroadcastOrTheTimeout() {
+    @Test fun aWriteInFlightBlocksTheNextUntilAListContainsIt() {
         var now = 1_000L
         val inFlight = ProvidersInFlight(now = { now })
         val first = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
         assertNull(inFlight.refusal(two))
-        inFlight.sent(first)
+        inFlight.sent(first, two)
         assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
-        // Its broadcast (the next generation) ends it.
+        // r3 (verifier probe FINDING_anotherClientsBroadcastLiftsTheGuardBeforeOursLands): another
+        // client's broadcast (a newer list without our write) does NOT lift it.
+        val theirs = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},$work]", generation = 2)
+        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(theirs))
+        // The list that holds our write does (the canonical key order may differ).
+        val ours = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},${work.replace("\"label\":\"Work\",", "").replace("\"enabled\":false", "\"enabled\":false,\"label\":\"W\"")}]", generation = 3)
+        assertNull(inFlight.refusal(ours))
+    }
+
+    @Test fun anOverdueWriteIsAskedForAndTheReplyLiftsIt() {
+        var now = 1_000L
+        val inFlight = ProvidersInFlight(now = { now })
+        inFlight.sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two)
+        assertFalse("not yet", inFlight.overdue(two))
+        now += ProvidersInFlight.TIMEOUT_MS
+        assertTrue("overdue: ask the server once", inFlight.overdue(two))
+        assertFalse(inFlight.overdue(two))
+        // Still refused until the reply (the next list folded) lands, whatever it says.
+        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
         assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 2)))
-        // A broadcast that never comes stops blocking after the timeout.
-        now += ProvidersInFlight.TIMEOUT_MS - 1
-        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
-        now += 1
-        assertNull(inFlight.refusal(two))
+        // A new socket lifts it as well.
+        inFlight.sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two)
+        assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 3, epoch = 1)))
+    }
+
+    /** r3 (verify + security F1): a key that is not a plain variable name is never added; one the server holds is risky. */
+    @Test fun anEnvKeyThatIsNotAPlainNameIsNeverAddedAndIsRiskyIfPresent() {
+        val bad = ProvidersBuild.Refused(ProvidersRefusal.BadName)
+        // The verifier's probe: LD_PRELOAD set through the KEY (the child env is built as key=value).
+        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "LD_PRELOAD=/tmp/x.so:", SecretText("v"))))
+        for (k in listOf("A-B", "1ABC", "A B", "PATH\u0000", "A.B", "")) assertFalse(k, RiskyEnvKeys.validName(k))
+        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "MY KEY", SecretText("v"))))
+        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvKey("gemini", "MODE", "MODE=x")))
+        assertEquals(bad, ProvidersPatch.confirmed(two, ProfileRunsEdit.Env("gemini", EnvChange.Add("LD_PRELOAD=/x", SecretText("v"))), RunsSnapshot.of(two.profile("gemini")!!)))
+        assertTrue(RiskyEnvKeys.risky("LD_PRELOAD=/tmp/x.so:"))
+        assertTrue(RiskyEnvKeys.risky("A-B"))
+        // A forged write adding one is refused by the send rule.
+        val forged = ProvidersWrite(listOf(json(gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"LD_PRELOAD=/tmp/x.so:\":\"v\"")), json(work)), two.generation, null)
+        assertEquals(ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forged, two))
+        // One the server already holds: changing, renaming or removing it needs the confirmation.
+        val held = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"A-B\":\"v\"")},$work]")
+        val needs = ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
+        assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvValue("gemini", "A-B", SecretText("w"))))
+        assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvRemove("gemini", "A-B")))
+        assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvKey("gemini", "A-B", "AB")))
+        assertNotNull(ProvidersPatch.confirmed(held, ProfileRunsEdit.Env("gemini", EnvChange.Remove("A-B")), RunsSnapshot.of(held.profile("gemini")!!)).writeOrNull)
+        // The new names of the owner's "and similar".
+        for (k in listOf("REASONIX_HOME", "DSH_HOME", "PI_CODING_AGENT_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "XDG_STATE_HOME", "XDG_CONFIG_DIRS",
+            "XDG_DATA_DIRS", "GIT_CONFIG_GLOBAL", "GH_CONFIG_DIR", "ZDOTDIR", "GCONV_PATH", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
+            "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "EDITOR", "VISUAL",
+            "GIT_EDITOR", "PAGER", "GIT_PAGER", "LD_BIND_NOW", "DYLD_FALLBACK_LIBRARY_PATH", "GIT_CONFIG_KEY_0", "git_config_value_3")) {
+            assertTrue(k, RiskyEnvKeys.risky(k))
+        }
+        // Not proxy or base-URL keys (a separate owner question).
+        for (k in listOf("HTTPS_PROXY", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL")) assertFalse(k, RiskyEnvKeys.risky(k))
     }
 
     // ---- over a socket ---------------------------------------------------------------------------
@@ -474,6 +522,23 @@ class ProfilesTest {
         val next = ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "W"))!!
         assertNull(h.client.setProviders(next, origin()))
         assertTrue(h.expectFrame("set-providers").toString().contains("/opt/gemini"))
+    }
+
+    /** r3: an overdue write makes the client ask for the list; the reply lifts the guard. */
+    @Test fun anOverdueWriteIsAskedForAgain() {
+        val ws = holdingProviders()
+        val newest = h.client.providerProfiles.value!!
+        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!, origin()))
+        h.expectFrame("set-providers")
+        // The server never broadcasts it: at the timeout the client asks for the registry.
+        h.now.addAndGet(ProvidersInFlight.TIMEOUT_MS)
+        h.scheduler.await { it == ProvidersInFlight.TIMEOUT_MS }.fire()
+        assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
+        assertEquals(ProvidersRefusal.InFlight, h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "X"))!!, origin()))
+        // The reply (the server refused the write: the list is as it was) lifts it.
+        ws.send("""{"type":"providers","profiles":[$gemini,$work]}""")
+        h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
+        assertNull(h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
     }
 
     @Test fun aSignOutDropsTheList() {

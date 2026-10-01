@@ -388,4 +388,88 @@ class ProfilesSafetyTest {
         tag(CommitFieldTags.note(host)).assertExists()
         assertTrue(texts().contains(CommitOutcome.NOT_CONNECTED))
     }
+
+    // ---- r3 ------------------------------------------------------------------------------------------
+
+    /** The verifier's probe: a key holding `=` (it would set LD_PRELOAD in the child) is refused at the Add row, with no confirmation and nothing sent. */
+    @Test fun anEqualsSignInANewKeyIsRefusedAndSaid() {
+        val w = recording()
+        show(writer = w)
+        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("LD_PRELOAD=/tmp/x.so:")
+        tap(ProfileTags.envNewReveal("claude-work"))
+        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("v")
+        tap(ProfileTags.envAdd("claude-work"))
+        assertFalse(exists(ProfileTags.ConfirmSheet))
+        tag(ProfileTags.envNewNote("claude-work")).assertExists()
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_BAD_NAME))
+        // Nor through a rename (Done or a focus loss).
+        val key = ProfileTags.envKey("zai", "ANTHROPIC_BASE_URL")
+        tag(key).performScrollTo().performClick()
+        tag(key).performTextReplacement("MODE=x")
+        tag(ProfileTags.field("zai", ProfileTags.LABEL)).performScrollTo().performClick()
+        compose.waitForIdle()
+        typeAndDone(key, "MODE=x")
+        assertFalse(exists(ProfileTags.ConfirmSheet))
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_BAD_NAME))
+        assertEquals(emptyList<Any>(), w.writes)
+    }
+
+    /** A key the server already holds that is not a plain name is changed only through the confirmation. */
+    @Test fun anExistingKeyThatIsNotAPlainNameIsConfirmed() {
+        val w = answering()
+        show(ProfileFixtures.list(profiles(gemini(extraEnv = ""","A-B":"v""""), WORK, zai())), w)
+        tap(ProfileTags.envRemove("gemini", "A-B"))
+        assertEquals(emptyList<Any>(), w.writes)
+        assertEquals("Remove A-B", SafeText.original(textOf(ProfileTags.ConfirmAction)))
+        confirm()
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(), WORK, zai()), w.frames().single())
+    }
+
+    /** Item 4: the engine confirmation names the risky variables (never their values) the new engine will read. */
+    @Test fun theEngineConfirmationNamesTheRiskyVariables() {
+        show(writer = recording())
+        compose.onNodeWithContentDescription("gemini extends").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("claude").performClick()
+        compose.waitForIdle()
+        assertEquals("PATH", SafeText.original(textOf(ProfileTags.ConfirmEnvKeys)))
+        assertFalse(textOf(ProfileTags.ConfirmEnvKeys).contains("/usr/bin"))
+    }
+
+    /** Item 5: a confirmed risky add clears the Add row's name and value. */
+    @Test fun aConfirmedRiskyAddClearsTheAddRow() {
+        val w = answering()
+        show(writer = w)
+        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("HOME")
+        tap(ProfileTags.envNewReveal("claude-work"))
+        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("/srv/h")
+        tap(ProfileTags.envAdd("claude-work"))
+        confirm()
+        waitForWrites(w, 1)
+        compose.waitForIdle()
+        assertEquals("", editable(ProfileTags.envNewName("claude-work")))
+        assertEquals("", editable(ProfileTags.envNewInput("claude-work")))
+    }
+
+    /** Item 3 (the verifier's probe): another client's list landing before ours keeps the guard up. */
+    @Test fun anotherClientsListDoesNotLiftTheGuard() {
+        val w = recording()
+        show(writer = w)
+        tap(ProfileTags.switch("zai"))
+        assertEquals(1, w.writes.size)
+        // Theirs: built before ours, it lacks our switch.
+        broadcast(profiles(withPath, WORK.replace("Claude Code (work)", "Theirs"), zai()))
+        typeAndDone(ProfileTags.field("gemini", ProfileTags.LABEL), "G")
+        assertEquals(1, w.writes.size)
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
+        // Ours lands: Done sends, on top of both.
+        broadcast(profiles(withPath, WORK.replace("Claude Code (work)", "Theirs"), zai().replace("\"enabled\":false", "\"enabled\":true")))
+        tag(ProfileTags.field("gemini", ProfileTags.LABEL)).performImeAction()
+        waitForWrites(w, 2)
+        assertEquals(
+            frame(withPath.replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), WORK.replace("Claude Code (work)", "Theirs"), zai().replace("\"enabled\":false", "\"enabled\":true")),
+            w.frames()[1],
+        )
+    }
 }
