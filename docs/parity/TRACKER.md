@@ -24,14 +24,13 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-10-01 10:25 CEST):** `main` @ `fea4f063` (gate green 4277). **v0.10.0 PUBLISHED as Latest** (code 28, `e537965b`: ta-895, New session lists every Claude account/profile, cert checked). **ta-ceo merged + VERIFIED** after the release (deferred queued message wait/choice, Stop confirms its cost; ships in the next release). Nothing in flight.
+**Resume point (2026-10-01 12:30 CEST):** `main` @ `efd840dd` (gate green 4276). Merged + VERIFIED today: ta-895 (New session lists every Claude account; shipped in v0.10.0), ta-ceo (deferred-message wait/choice, Stop confirms its cost), ta-3uk (hello advertises 137 = TARGET), ta-ccu (tokens at 887c222), ta-lx3 (tether#232 seed fix merged; web screenshots at 887c222). **v0.11.0 (code 29, `efd840dd`) being built.**
 **Merged + verified overnight:** T15.4 top bar, ta-ylh (v133-v135 decode; hello stays 132), T7.4 attachments + thumbnails, T15.6 operator-only queue,
 T15.3 Overview host & usage, ta-vmg/ta-x9c flakes, T15.5 Studio-only, T15.7 service Open links, ta-dl4 inspector leftovers, T15.8 re-baseline
 (PARITY_BASE 887c222 / v137 for protocol corpora + matrix), ta-exi (store-read failures fail closed). **Owner (2026-10-01 answers):** server deployed at
 protocol **137** (floor 129; #224 and #230 deployed); the hello hold is lifted -> ta-3uk advertises 137; the app's routes are exempt at the
 gateway (verified unauthenticated). **Still open:** a service Open device test (T15.7: `/api/worktree/open` stays behind the gateway by
-design, so it works only when the phone's browser holds its own console sign-in). **In flight:** ta-3uk (hello 137), ta-ccu (tokens
-re-baseline), ta-lx3 (tether screens exporter PR). **Next (`bd ready`):** ta-ebc (#231 plan names, with T10.1), then the P3 follow-ups.
+design, so it works only when the phone's browser holds its own console sign-in). **Next (`bd ready`):** ta-ebc (#231 plan names, with T10.1), then the P3 follow-ups.
 **Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
 **#224 merged (`81aa352`), deployed 2026-10-01 with main `887c222` (protocol 137)** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
 protocol 134, native floor 129).
@@ -402,3 +401,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 09:50 | claude-main / Opus 5.5 | release, ta-ceo | v0.10.0 (code 28, `e537965b`) built by android-release.yml, cert SHA-256 4f8c22de...b74d and versionName/Code checked, asset renamed tether-0.10.0.apk, Highlights first, PUBLISHED as Latest. ta-ceo dispatched (executor). | ta-ceo verify |
 | 2026-10-01 10:25 | claude-main / Opus 5.5 | ta-ceo | ta-ceo (executor) -> verify CONFIRMED (helpers byte-identical to the web's queue-wait.mjs over 543 inputs; turn/session/lock/double-tap probes on Stop anyway; the maker's test flush is test-only). Rebased, gate 4277 on `fea4f063`, merged ff-only, VERIFIED with its matrix row. Follow-up ta-7n0 (P4, phone Stop anyway padding). | ta-ebc, ta-ccu, ta-lx3 |
 | 2026-10-01 10:45 | claude-main / Opus 5.5 | owner answers, ta-3uk, ta-ccu, ta-lx3 | Owner (relayed, live-checked): server at protocol 137, #224/#230 deployed, app routes gateway-exempt; hello hold lifted -> ta-3uk filed and dispatched (advertise 137 = TARGET). T15.7 device test still pending. ta-ccu and ta-lx3 makers running. | ta-3uk verify -> 0.11.0 (ta-ceo + ta-3uk) |
+| 2026-10-01 12:30 | claude-main / Opus 5.5 | ta-ccu, ta-lx3, ta-3uk | All three verify CONFIRMED (ta-ccu: export reproduced byte-identical, 0 goldens moved; ta-3uk: 676-case match with evaluateHello; ta-lx3: coordinator check, tether#232 merged `4b05be74`). Stacked (VENDORED/PARITY_BASE conflict resolved: UI base whole at 887c222), gate 4276 on `efd840dd`, merged ff-only, all VERIFIED. Worktrees removed (incl. our tether worktrees). v0.11.0 (code 29) dispatched. | publish 0.11.0; then ta-ebc with T10.1, T8.1, bd ready |
