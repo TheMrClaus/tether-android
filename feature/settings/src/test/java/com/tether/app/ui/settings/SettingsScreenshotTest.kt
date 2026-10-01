@@ -1,6 +1,9 @@
 package com.tether.app.ui.settings
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -46,7 +49,14 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             restartRequired = shot.restart,
         )
     }
-    waitUntil(5_000) { state.draft != null }
+    // Deterministic capture: only once the stored preferences have loaded AND the composed
+    // dialog shows it (General and Save are disabled until then, T10.1 r2 F2): wait for the
+    // Save key's semantics to report enabled, then let its face animation settle.
+    waitUntil(10_000) {
+        state.draft != null &&
+            onAllNodesWithTag(SettingsDialogTags.Save).fetchSemanticsNodes().singleOrNull()
+                ?.config?.getOrNull(SemanticsProperties.Disabled) == null
+    }
     mainClock.advanceTimeBy(600)
     waitForIdle()
     onRoot().captureRoboImage(
