@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Studio light mineral token (GeneratedTokens.Studio.mineral); the pre-composition window. -->
+    <color name="tether_window_background">#F4F6FA</color>
+</resources>

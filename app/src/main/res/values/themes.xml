@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window shell only; Compose (TetherTheme) owns everything inside.
-         windowBackground matches the machine family's mineral to avoid a
-         white flash before composition; bars go edge-to-edge from MainActivity. -->
+    <!-- Window shell only; Compose (TetherTheme) owns everything inside. The window background
+         (also the Android 12+ splash background) is Studio's mineral token, light here and dark in
+         values-night, so the frame painted before composition is already the Studio skin the
+         device's lighting asks for (T15.5; OVERVIEW_STUDIO_PLAN §3 pre-paint fallback). Bars go
+         edge-to-edge from MainActivity, whose auto bar style follows the same night setting. -->
     <style name="Theme.Tether" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#0b0f10</item>
+        <item name="android:windowBackground">@color/tether_window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/tether_window_background</item>
     </style>
 </resources>
