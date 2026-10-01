@@ -10,7 +10,7 @@
 |---|---|
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4 in progress (T4.1-T4.3 merged); Phases 5/6/12 landing |
-| PARITY_BASE (tether SHA) | `887c222` (PROTOCOL_VERSION 137, floor 129) for the protocol corpora (reducer+helpers, wire) and the Parity Matrix (T15.8). Tokens = tether `887c222` export (ta-ccu). **Screens stay older:** web screenshots = `3f69e4f` (v128), until ta-lx3. See `parity-corpus/VENDORED.md` |
+| PARITY_BASE (tether SHA) | `887c222` (PROTOCOL_VERSION 137, floor 129) for the protocol corpora (reducer+helpers, wire), the Parity Matrix (T15.8), tokens (the `887c222` export, ta-ccu) and the web screenshots (`887c222`, captured at `97af028`, seed fix tether#232; ta-lx3). The UI base is whole again. See `parity-corpus/VENDORED.md` |
 | App version on `main` | **0.6.0 (code 16), released 2026-09-27** ([v0.6.0](https://github.com/TheMrClaus/tether-android/releases/tag/v0.6.0)); minSdk 34 / targetSdk 37; still speaks protocol 40 |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches → PR) |

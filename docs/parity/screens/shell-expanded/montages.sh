@@ -20,8 +20,8 @@ G=feature/shell/src/test/screenshots
 OUT=docs/parity/screens/shell-expanded
 TOOL=tools/compare-screens/CompareScreens.java
 
-for skin in tactile night precision machine studio studio-dark; do
-  case "$skin" in studio|studio-dark) band=146 ;; *) band=112 ;; esac
+for skin in studio studio-dark; do
+  band=146 # Studio's topbar + header band
   # Topbar (brand on the rail's vertical, link readout, labelled tool keys, Lock) + the header
   # band (title, dial, labelled gauge, links key, Pin, End session): idle-session.
   java "$TOOL" montage "$OUT/idle-$skin-tablet.png" "Expanded shell · idle session · $skin (topbar + workspace header)" \

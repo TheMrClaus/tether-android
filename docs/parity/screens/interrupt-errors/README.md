@@ -1,6 +1,7 @@
 # Interrupt, End session, error surfaces, selection & copy (T6.7)
 
-Web reference: the S0.4 corpus frames (tether `3f69e4f`); the behaviour and copy were read from the
+Web reference: the S0.4 corpus frames (tether `3f69e4f`; the vendored corpus is now at `887c222`,
+ta-lx3, and these montages were not rebuilt); the behaviour and copy were read from the
 web code at tether `de1b0aa`. Montages are rebuilt by `tools/compare-screens/interrupt-montages.sh`. Goldens
 live in `feature/chat/src/test/screenshots/{composer-busy,interrupt-busy,interrupt-refused,chat-errors,end-session-confirm}*`
 and `feature/shell/src/test/screenshots/error-toast-*`.

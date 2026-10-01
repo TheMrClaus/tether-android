@@ -11,7 +11,7 @@
 # A source tree need not be a branch checkout: a `git archive` extract with a `.git` whose HEAD is
 # the archived sha works (its row then reads `(detached)`).
 #
-# Web reference screenshots (S0.4, 55 MB) are copied into parity-corpus/screens/web/ but the PNGs
+# Web reference screenshots (S0.4; 120 PNGs, 17 MB at 887c222) are copied into parity-corpus/screens/web/ but the PNGs
 # are gitignored; manifest.json + SHA256SUMS are committed and pin them. Check a local copy with
 #   (cd parity-corpus/screens/web && sha256sum -c --quiet SHA256SUMS)
 set -euo pipefail

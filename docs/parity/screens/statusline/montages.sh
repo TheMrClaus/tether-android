@@ -16,8 +16,8 @@ G=feature/shell/src/test/screenshots
 OUT=docs/parity/screens/statusline
 TOOL=tools/compare-screens/CompareScreens.java
 
-for skin in tactile night precision machine studio studio-dark; do
-  case "$skin" in studio|studio-dark) gx=661 ;; *) gx=650 ;; esac
+for skin in studio studio-dark; do
+  gx=661
   # Context gauge with no reading (the seeded scenarios carry no metrics): rest in the streaming
   # header, open (telemetry sheet up) in session-details.
   java "$TOOL" montage "$OUT/context-gauge-$skin-phone.png" "Context gauge, no reading · $skin · phone (streaming rest · session-details open)" \
@@ -26,12 +26,8 @@ for skin in tactile night precision machine studio studio-dark; do
 done
 
 # Tablet header rail (streaming, 1280×800): the dial "00:09:00" plate and the labelled gauge.
-for skin in tactile night precision machine studio studio-dark; do
-  case "$skin" in
-    precision|machine) rx=824; ry=62 ;;
-    studio|studio-dark) rx=826; ry=86 ;; # Studio's header is taller (studio.css:351 min-height 5rem)
-    *) rx=825; ry=62 ;;
-  esac
+for skin in studio studio-dark; do
+  rx=826; ry=86 # Studio's header is taller (studio.css:351 min-height 5rem)
   java "$TOOL" montage "$OUT/header-rail-$skin-tablet.png" "Header rail: session dial + labelled gauge · $skin · tablet (streaming)" \
     "$WEB/streaming/$skin-tablet.png@$rx,$ry,200,33" "$G/header-rail/$skin-tablet.png@23,49,200,33"
 done
