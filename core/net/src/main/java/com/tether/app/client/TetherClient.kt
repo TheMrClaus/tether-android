@@ -666,17 +666,21 @@ interface TetherClient {
      */
     val providerProfiles: StateFlow<ProvidersList?> get() = NO_PROVIDER_PROFILES
 
-    /** ta-q6p: v84 `providers` request (Settings opening asks for it). */
+    /**
+     * ta-q6p: v84 `providers` request (Settings opening asks for it). r2 (security F1): once asked,
+     * the client asks again after every handshake (a reconnect, however fast), until a sign-out.
+     */
     fun requestProviders(): Boolean = false
 
     /**
      * ta-q6p: v84 `set-providers`, the WHOLE registry ([ProvidersWrite], made only by
-     * [ProvidersPatch]), sent only when the live socket was opened for [origin] AND the write
-     * passes [ProvidersPatch.refusal] against the newest list at the moment of the send: it was
-     * built from that very list (no broadcast landed since), and it changes no profile's command or
-     * home unless it is that change's confirmation. The only way the app sends `set-providers`.
+     * [ProvidersPatch]), sent only when the live socket was opened for [origin] AND, at the moment
+     * of the send, the write passes [ProvidersPatch.refusal] against the newest list, that list came
+     * on THIS socket (r2: never one from before a reconnect), and no earlier write is still waiting
+     * for its broadcast ([ProvidersInFlight]). The only way the app sends `set-providers`.
+     * Returns null when it was sent, else why not.
      */
-    fun setProviders(write: ProvidersWrite, origin: String): Boolean = false
+    fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? = ProvidersRefusal.NotConnected
 
     // ------------------------------------------------------------------
     // T5.2 resume: defaults keep other implementations (test doubles) compiling.

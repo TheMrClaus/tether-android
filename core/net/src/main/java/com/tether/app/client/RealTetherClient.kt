@@ -2420,9 +2420,10 @@ class RealTetherClient(
             }
             // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt); ta-t7l: v16 advanced settings.
             // ta-q6p: v84 the custom-providers registry (SidebarSync.kt, dropped with the settings frames).
-            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings,
-            is ServerMessage.Providers ->
+            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
+            // r2 (security F1): stamped with this socket's epoch: a list from before a reconnect is never written back.
+            is ServerMessage.Providers -> ifCurrent(webSocket) { sidebarSync.onProviders(message, epoch) }
             // ta-q6p: v74 `acp-agents` is retired server-side (887c222 never sends it): decoded, routed nowhere.
             is ServerMessage.AcpAgents -> Unit
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
@@ -2586,6 +2587,9 @@ class RealTetherClient(
         // T15.1 (use-tether.ts:802-807): a new socket starts unsubscribed; a standing Overview wish
         // is replaced from a fresh snapshot before any delta is trusted. On THIS socket only.
         synchronized(lock) { if (socket === webSocket) overviewSync.onReady { sendOverviewLocked(webSocket, it) } }
+        // ta-q6p r2 (security F1): a registry asked for in this sign-in is asked for again on every
+        // new socket, so the list a write is built from is always this socket's. On THIS socket only.
+        if (synchronized(lock) { socket === webSocket && providersWanted }) sendFrameOn(webSocket, ClientMessage.ProvidersRequest)
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
         // session's snapshot.
@@ -3770,18 +3774,34 @@ class RealTetherClient(
 
     override val providerProfiles: StateFlow<ProvidersList?> = sidebarSync.providerProfiles
 
-    override fun requestProviders(): Boolean = sendFrame(ClientMessage.ProvidersRequest)
+    override fun requestProviders(): Boolean {
+        synchronized(lock) { providersWanted = true }
+        return sendFrame(ClientMessage.ProvidersRequest)
+    }
 
     // ta-q6p: the choke point for set-providers. The check reads the newest list under the same
     // lock the frames are folded under, so no broadcast can land between the check and the send.
-    override fun setProviders(write: ProvidersWrite, origin: String): Boolean {
+    // r2: the list must have come on THIS socket (epoch), and no earlier write may still be
+    // waiting for its broadcast (in flight, bounded).
+    override fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? {
         val text = write.message.encode()
         synchronized(lock) {
-            if (ProvidersPatch.refusal(write, sidebarSync.providerProfiles.value) != null) return false
-            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return false
-            return ws.send(text)
+            val newest = sidebarSync.providerProfiles.value
+            ProvidersPatch.refusal(write, newest)?.let { return it }
+            if (newest == null || newest.epoch != epoch) return ProvidersRefusal.Stale
+            providersInFlight.refusal(newest)?.let { return it }
+            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return ProvidersRefusal.NotConnected
+            if (!ws.send(text)) return ProvidersRefusal.NotConnected
+            providersInFlight.sent(write)
+            return null
         }
     }
+
+    // ta-q6p r2: Settings asked for the registry in this sign-in: every handshake asks again. Guarded by [lock].
+    private var providersWanted = false
+
+    // ta-q6p r2 (verifier F1): the sent write waiting for its broadcast (on the client's clock).
+    private val providersInFlight = ProvidersInFlight(now = { clock() })
 
     // T5.3 search (SearchSync.kt).
     override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)
@@ -3965,6 +3985,7 @@ class RealTetherClient(
         // ta-t7l r2: the settings frames carry the server's password and proxy token in plaintext:
         // a sign-out (or a sign-in anew) drops them.
         sidebarSync.clearSettings()
+        synchronized(lock) { providersWanted = false }
         nodesState.value = emptyList()
         nodeResultState.value = null
         eventLogState.update { EventLog(generation = it.generation + 1) }

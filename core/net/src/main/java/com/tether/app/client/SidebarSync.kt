@@ -55,10 +55,15 @@ internal class SidebarSync {
                 serverSettingsReplies.update { it + 1 }
             }
             is ServerMessage.AdvancedSettings -> advancedSettings.value = message
-            is ServerMessage.Providers -> providerProfiles.value = ProvidersList.of(message, ++providersGeneration)
+            is ServerMessage.Providers -> onProviders(message, epoch = 0L)
             else -> return false
         }
         return true
+    }
+
+    /** ta-q6p r2: a `providers` frame, stamped with the socket [epoch] that delivered it (security F1). */
+    fun onProviders(message: ServerMessage.Providers, epoch: Long) {
+        providerProfiles.value = ProvidersList.of(message, ++providersGeneration, epoch)
     }
 
     /** use-tether.ts:1512 — optimistic after a successful send; the server's broadcast follows. */

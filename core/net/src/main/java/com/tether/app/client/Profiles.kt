@@ -120,27 +120,91 @@ class Profile internal constructor(internal val raw: JsonObject) {
 
 /**
  * One `providers` frame, as the editor draws it. [generation] counts the frames the client has
- * had (a write built from an older one is refused). [writable]: the frame was the server's whole
- * registry, within its limits, every entry one its validator accepts and every id distinct.
+ * had (a write built from an older one is refused); [epoch] is the socket that delivered it
+ * (r2, security F1: a list from before a reconnect is never written back, since the server may
+ * have changed while the link was down). [writable]: the frame was the server's whole registry,
+ * within its limits, every entry one its validator accepts and every id distinct.
  */
 class ProvidersList private constructor(
     val profiles: List<Profile>,
     val writable: Boolean,
     val generation: Long,
+    val epoch: Long,
 ) {
     fun profile(id: String): Profile? = profiles.firstOrNull { it.id == id }
 
     internal val raws: List<JsonObject> get() = profiles.map { it.raw }
 
-    override fun toString(): String = "ProvidersList(ids=${profiles.map { it.id }}, writable=$writable, generation=$generation)"
+    override fun toString(): String = "ProvidersList(ids=${profiles.map { it.id }}, writable=$writable, generation=$generation, epoch=$epoch)"
 
     companion object {
-        fun of(frame: ServerMessage.Providers, generation: Long): ProvidersList {
+        fun of(frame: ServerMessage.Providers, generation: Long, epoch: Long = 0L): ProvidersList {
             val profiles = frame.profiles.take(ProfileLimits.PROFILES).map(::Profile)
             val writable = frame.intact && frame.profiles.size <= ProfileLimits.PROFILES &&
                 profiles.all { it.valid } && profiles.map { it.id }.toSet().size == profiles.size
-            return ProvidersList(profiles, writable, generation)
+            return ProvidersList(profiles, writable, generation, epoch)
         }
+    }
+}
+
+/**
+ * r2 (owner decision 2026-10-01, A): the profile env keys that decide WHAT the server runs or
+ * WHERE the engine reads its config, so adding, changing, renaming or removing one is confirmed
+ * like a command. The loader and interpreter hooks (PATH, the LD_ / DYLD_ preload and library
+ * paths, NODE_OPTIONS, BASH_ENV, PYTHONSTARTUP, PERL5OPT, RUBYOPT, GIT_SSH_COMMAND, …) and the
+ * config homes (HOME, XDG_*, CLAUDE_CONFIG_DIR, CODEX_HOME, which hold hooks and MCP servers).
+ * Linux names are case-sensitive, but a key is compared upper-cased here, so `path` or `Path`
+ * cannot slip past as an ordinary key.
+ */
+object RiskyEnvKeys {
+    val NAMES: Set<String> = setOf(
+        "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+        "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV",
+        "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
+        "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "SHELL",
+        "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+    )
+    val PREFIXES: List<String> = listOf("DYLD_")
+
+    fun risky(key: String): Boolean {
+        val k = key.uppercase(java.util.Locale.ROOT)
+        return k in NAMES || PREFIXES.any { k.startsWith(it) }
+    }
+}
+
+/**
+ * r2: what a profile RUNS, as the send rule compares it: its engine (`extends`), command, home
+ * and its [RiskyEnvKeys] entries (exact keys, raw values). Two writes run the same thing iff
+ * their snapshots are equal. Holds env values: [toString] prints the keys only.
+ */
+class RunsSnapshot internal constructor(
+    internal val extends: JsonElement?,
+    internal val command: JsonElement?,
+    internal val homeDir: JsonElement?,
+    internal val riskyEnv: Map<String, JsonElement>,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is RunsSnapshot && other.extends == extends && other.command == command && other.homeDir == homeDir && other.riskyEnv == riskyEnv
+
+    override fun hashCode(): Int = listOf(extends, command, homeDir, riskyEnv).hashCode()
+
+    override fun toString(): String = "RunsSnapshot(extends=$extends, command=${command != null}, home=${homeDir != null}, riskyEnv=${riskyEnv.keys})"
+
+    companion object {
+        private fun present(e: JsonElement?): JsonElement? = if (e == null || e is JsonNull) null else e
+
+        internal fun of(raw: JsonObject?): RunsSnapshot? {
+            raw ?: return null
+            val env = (raw["env"] as? JsonObject).orEmpty().filterKeys(RiskyEnvKeys::risky)
+            return RunsSnapshot(present(raw["extends"]), present(raw["command"]), present(raw["homeDir"]), env)
+        }
+
+        fun of(profile: Profile): RunsSnapshot = of(profile.raw)!!
+
+        /** A profile "Add profile" makes (:625): Claude, nothing it runs set. */
+        internal val NEW_PROFILE = RunsSnapshot(JsonPrimitive("claude"), null, null, emptyMap())
+
+        private fun JsonObject?.orEmpty(): Map<String, JsonElement> = this ?: emptyMap()
     }
 }
 
@@ -221,13 +285,12 @@ internal object ProfileShape {
 /**
  * One edit of the registry that is NOT what the server runs, applied to whatever list is newest
  * when it is sent (each is the web's handler, settings-dialog.tsx 887c222 :621-1000, re-read
- * against that list). An edit whose profile (or model row) is gone from the newest list, or
- * that would change nothing, writes nothing. A profile's command and home are not here: they
- * are [ProfileRunsEdit]s, sent only after their confirmation.
+ * against that list). r2: an env edit that touches a [RiskyEnvKeys] key, and any Extends change,
+ * are not plain: they are [ProfileRunsEdit]s, sent only after their confirmation.
  */
 sealed interface ProfileEdit {
-    /** The switch (:647): `{ enabled: !profile.enabled }`. */
-    data class Enabled(val id: String) : ProfileEdit
+    /** The switch (:647). r2 (security F8): the value the user asked for, not a toggle of whatever is newest. */
+    data class Enabled(val id: String, val enabled: Boolean) : ProfileEdit
 
     /** Label (:660): the trimmed value, when non-empty and new. */
     data class Label(val id: String, val typed: String) : ProfileEdit
@@ -235,10 +298,7 @@ sealed interface ProfileEdit {
     /** ID (:670): the profile renamed in place (the server propagates the rename to its sessions). */
     data class Rename(val id: String, val typed: String) : ProfileEdit
 
-    /** Extends (:681). */
-    data class Extends(val id: String, val value: String) : ProfileEdit
-
-    /** EnvEditor's key blur (:385-393): the trimmed new name, with the key's value. */
+    /** EnvEditor's key blur (:385-393): the trimmed new name, with the key's value. r2: never onto another key. */
     data class EnvKey(val id: String, val key: String, val typed: String) : ProfileEdit
 
     /** EnvEditor's value (:400-404), not trimmed. [value] is a secret. */
@@ -247,7 +307,7 @@ sealed interface ProfileEdit {
     /** EnvEditor's remove (:410). */
     data class EnvRemove(val id: String, val key: String) : ProfileEdit
 
-    /** EnvEditor's Add (:368-374): the trimmed name with [value] (a secret, not trimmed). */
+    /** EnvEditor's Add (:368-374): the trimmed name with [value] (a secret, not trimmed). r2: never over an existing key. */
     data class EnvAdd(val id: String, val typedKey: String, val value: SecretText) : ProfileEdit
 
     /** Drop env prefixes (:766-770): split at commas. */
@@ -293,7 +353,12 @@ sealed interface ModelOp {
     data class Add(val initialId: String, val typedId: String, val typedLabel: String) : ModelOp
 }
 
-/** What sets what the server RUNS for a profile: written only after a confirmation that shows the new value. */
+/**
+ * What sets what the server RUNS for a profile (owner decisions 2026-10-01): its command, its
+ * home, its engine (r2, B) and its [RiskyEnvKeys] entries (r2, A). Written only after a
+ * confirmation that shows the change, and only while the profile still runs exactly what that
+ * confirmation showed as "Now" ([ProvidersPatch.confirmed]).
+ */
 sealed interface ProfileRunsEdit {
     val id: String
 
@@ -302,20 +367,97 @@ sealed interface ProfileRunsEdit {
 
     /** Home (:735): the trimmed value; empty clears it (`value || undefined`). */
     data class Home(override val id: String, val value: String) : ProfileRunsEdit
+
+    /** Extends (:681): the engine the profile runs on. */
+    data class Extends(override val id: String, val value: String) : ProfileRunsEdit
+
+    /** An env change that touches a [RiskyEnvKeys] key (the add, change, rename or remove an [ProfileEdit] would make). */
+    data class Env(override val id: String, val change: EnvChange) : ProfileRunsEdit
+}
+
+/** One env change of the editor, by its action. Values are secrets ([SecretText]). */
+sealed interface EnvChange {
+    data class Add(val key: String, val value: SecretText) : EnvChange
+    data class Change(val key: String, val value: SecretText) : EnvChange
+    data class Rename(val from: String, val to: String) : EnvChange
+    data class Remove(val key: String) : EnvChange
+
+    /** The keys it touches (both names for a rename). */
+    val keys: List<String>
+        get() = when (this) {
+            is Add -> listOf(key)
+            is Change -> listOf(key)
+            is Rename -> listOf(from, to)
+            is Remove -> listOf(key)
+        }
+
+    val risky: Boolean get() = keys.any(RiskyEnvKeys::risky)
+}
+
+/** Why a write was not built or not sent. */
+enum class ProvidersRefusal {
+    /** No list, or one the app cannot write back. */
+    NotWritable,
+
+    /** The edit's profile (or row) is not in the newest list any more. */
+    Gone,
+
+    /** What the profile runs is not what the confirmation showed (it changed meanwhile). */
+    Changed,
+
+    /** Built from an older list (a broadcast landed since) or from before a reconnect. */
+    Stale,
+
+    /** A write is still waiting for its broadcast: one built now would undo it. */
+    InFlight,
+
+    /** The edit changes what a profile runs: it goes through its confirmation. */
+    NeedsConfirmation,
+
+    /** An env rename or add onto a key the profile already has. */
+    Collision,
+
+    /** The value passes the server's limits or rules. */
+    Invalid,
+
+    /** It changes what a profile runs without being that change's confirmation. */
+    Unconfirmed,
+
+    /** No live socket for the list's server. */
+    NotConnected,
+}
+
+/** A builder's answer: a write to send, nothing to send, or why not. */
+sealed interface ProvidersBuild {
+    data class Ready(val write: ProvidersWrite) : ProvidersBuild
+    data object NoChange : ProvidersBuild
+    data class Refused(val reason: ProvidersRefusal) : ProvidersBuild
+
+    val writeOrNull: ProvidersWrite? get() = (this as? Ready)?.write
 }
 
 /**
- * A `set-providers` write: the WHOLE list as it will be sent, the [generation] of the list it was
- * built from, and (only when it came from a confirmation) the one command or home it changes.
- * Made only by [ProvidersPatch] (the constructor is internal to this module), and the client
- * sends nothing else as `set-providers` ([TetherClient.setProviders]). [toString] prints ids only.
+ * r2: the confirmation a [ProvidersWrite] carries: the one profile it changes, what that profile
+ * ran as the confirmation showed it ([expectedNow]) and what it runs after ([after]).
+ */
+class ConfirmedRuns internal constructor(val edit: ProfileRunsEdit, internal val expectedNow: RunsSnapshot, internal val after: RunsSnapshot) {
+    override fun toString(): String = "ConfirmedRuns(${edit::class.simpleName}:${edit.id})"
+}
+
+/**
+ * A `set-providers` write: the WHOLE list as it will be sent, the [generation] and [epoch] of the
+ * list it was built from, and (only when it came from a confirmation) the one change of what a
+ * profile runs it makes. Made only by [ProvidersPatch] (the constructor is internal to this
+ * module), and the client sends nothing else as `set-providers` ([TetherClient.setProviders]).
+ * [toString] prints ids only.
  */
 class ProvidersWrite internal constructor(
     val profiles: List<JsonObject>,
     val generation: Long,
-    internal val confirmed: ProfileRunsEdit?,
+    internal val confirmed: ConfirmedRuns?,
     /** new id -> old id, for a rename (the renamed profile keeps what it runs). */
     internal val renames: Map<String, String> = emptyMap(),
+    val epoch: Long = 0L,
 ) {
     val message: ClientMessage.SetProviders get() = ClientMessage.SetProviders(profiles)
 
@@ -323,18 +465,41 @@ class ProvidersWrite internal constructor(
     val isConfirmed: Boolean get() = confirmed != null
 
     override fun toString(): String =
-        "ProvidersWrite(ids=${profiles.map { (it["id"] as? JsonPrimitive)?.content }}, generation=$generation, confirmed=${confirmed?.let { "${it::class.simpleName}:${it.id}" }})"
+        "ProvidersWrite(ids=${profiles.map { (it["id"] as? JsonPrimitive)?.content }}, generation=$generation, epoch=$epoch, confirmed=$confirmed)"
 }
 
 /**
- * The builders of [ProvidersWrite] and the one rule every send path applies ([refusal]).
- * Each builder takes the newest list ([ProvidersList]) and returns null when nothing should be
- * sent: the list is not writable, the edit's profile is gone, or the edit changes nothing.
+ * r2 (verifier F1): a write waits for its broadcast. While it does, the newest list does not
+ * show it yet, so another write built now would undo it (the server replaces the whole list).
+ * One sent write is tracked by the list it was built from; a write is refused while the newest
+ * list is still that one, for at most [timeoutMs] (a broadcast that never comes stops blocking).
+ */
+class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_000_000 }, val timeoutMs: Long = TIMEOUT_MS) {
+    private var sent: Pair<Long, Long>? = null
+    private var at = 0L
+
+    @Synchronized
+    fun refusal(newest: ProvidersList?): ProvidersRefusal? {
+        val s = sent ?: return null
+        return if (newest != null && newest.epoch == s.first && newest.generation == s.second && now() - at < timeoutMs) ProvidersRefusal.InFlight else null
+    }
+
+    @Synchronized
+    fun sent(write: ProvidersWrite) {
+        sent = write.epoch to write.generation
+        at = now()
+    }
+
+    companion object {
+        const val TIMEOUT_MS = 10_000L
+    }
+}
+
+/**
+ * The builders of [ProvidersWrite] and the one rule every send path applies ([refusal]). Each
+ * builder takes the newest list and answers a write, nothing to send, or why not.
  */
 object ProvidersPatch {
-    /** The two keys that set what a profile RUNS (owner decision 2026-10-01; a home holds the engine's config). */
-    val RUNS_KEYS = listOf("command", "homeDir")
-
     /** settings-dialog.tsx :707 `raw.split(/\s+/)` after `.trim()`: JavaScript's whitespace, as [jsTrim]. */
     fun commandParts(typed: String): List<String> {
         val trimmed = jsTrim(typed)
@@ -358,9 +523,12 @@ object ProvidersPatch {
     /** Whether [parts] fit the server's command limits (:181-186): at most 32 parts of at most 256 units. */
     fun commandFits(parts: List<String>): Boolean = parts.size <= ProfileLimits.COMMAND && parts.all { it.length <= ProfileLimits.COMMAND_ENTRY }
 
-    /** A plain edit applied to [list]; null when nothing is to be sent. */
-    fun write(list: ProvidersList?, edit: ProfileEdit): ProvidersWrite? {
-        if (list == null || !list.writable) return null
+    /** A plain edit applied to [list]; null when nothing is to be sent (see [build] for why). */
+    fun write(list: ProvidersList?, edit: ProfileEdit): ProvidersWrite? = build(list, edit).writeOrNull
+
+    /** A plain edit applied to [list]: the write, nothing to send, or why not. */
+    fun build(list: ProvidersList?, edit: ProfileEdit): ProvidersBuild {
+        if (list == null || !list.writable) return ProvidersBuild.Refused(ProvidersRefusal.NotWritable)
         val base = list.raws
         var renames = emptyMap<String, String>()
         val next: List<JsonObject> = when (edit) {
@@ -373,90 +541,132 @@ object ProvidersPatch {
                 }
                 base + JsonObject(linkedMapOf("id" to JsonPrimitive(id), "extends" to JsonPrimitive("claude"), "label" to JsonPrimitive(id), "enabled" to JsonPrimitive(true)))
             }
-            is ProfileEdit.Remove -> if (base.none { idOf(it) == edit.id }) return null else base.filter { idOf(it) != edit.id }
+            is ProfileEdit.Remove -> if (base.none { idOf(it) == edit.id }) return gone() else base.filter { idOf(it) != edit.id }
             is ProfileEdit.Rename -> {
                 val value = jsTrim(edit.typed)
-                if (value.isEmpty() || value == edit.id || base.none { idOf(it) == edit.id }) return null
+                if (value.isEmpty() || value == edit.id) return ProvidersBuild.NoChange
+                if (base.none { idOf(it) == edit.id }) return gone()
                 renames = mapOf(value to edit.id)
                 base.map { if (idOf(it) == edit.id) with(it, "id", JsonPrimitive(value)) else it }
             }
             else -> {
-                val target = base.firstOrNull { idOf(it) == profileId(edit) } ?: return null
-                val profile = list.profile(profileId(edit)) ?: return null
-                val updated = applyTo(profile, target, edit) ?: return null
-                if (updated == target) return null
+                val target = base.firstOrNull { idOf(it) == profileId(edit) } ?: return gone()
+                val profile = list.profile(profileId(edit)) ?: return gone()
+                envChangeOf(edit)?.let { change ->
+                    if (change.risky) return ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
+                }
+                val updated = when (val r = applyTo(profile, target, edit)) {
+                    is Applied.To -> r.raw
+                    Applied.Nothing -> return ProvidersBuild.NoChange
+                    is Applied.No -> return ProvidersBuild.Refused(r.reason)
+                }
+                if (updated == target) return ProvidersBuild.NoChange
                 base.map { if (it === target) updated else it }
             }
         }
-        if (next == base) return null
-        return ProvidersWrite(next, list.generation, confirmed = null, renames = renames)
+        if (next == base) return ProvidersBuild.NoChange
+        return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, confirmed = null, renames = renames, epoch = list.epoch))
+    }
+
+    /** The env change a plain env edit makes (null for any other edit). */
+    fun envChangeOf(edit: ProfileEdit): EnvChange? = when (edit) {
+        is ProfileEdit.EnvKey -> EnvChange.Rename(edit.key, jsTrim(edit.typed))
+        is ProfileEdit.EnvValue -> EnvChange.Change(edit.key, edit.value)
+        is ProfileEdit.EnvRemove -> EnvChange.Remove(edit.key)
+        is ProfileEdit.EnvAdd -> EnvChange.Add(jsTrim(edit.typedKey), edit.value)
+        else -> null
     }
 
     /**
-     * A command or home the user CONFIRMED, applied to the newest [list] (built when they confirm).
-     * Null when the list is not writable, the profile is gone, the value is the server's already,
-     * or it passes the server's limits. The ONLY producer of a write that changes what runs.
+     * A change of what a profile runs the user CONFIRMED, applied to the newest [list] when they
+     * confirm. [expectedNow] is what the confirmation showed the profile running (r2, verifier F2):
+     * if the newest list differs, nothing is built ([ProvidersRefusal.Changed]), and [refusal]
+     * checks it again at the send. The ONLY producer of a write that changes what runs.
      */
-    fun confirmed(list: ProvidersList?, edit: ProfileRunsEdit): ProvidersWrite? {
-        if (list == null || !list.writable) return null
+    fun confirmed(list: ProvidersList?, edit: ProfileRunsEdit, expectedNow: RunsSnapshot): ProvidersBuild {
+        if (list == null || !list.writable) return ProvidersBuild.Refused(ProvidersRefusal.NotWritable)
         val base = list.raws
-        val target = base.firstOrNull { idOf(it) == edit.id } ?: return null
-        val updated = when (edit) {
+        val target = base.firstOrNull { idOf(it) == edit.id } ?: return gone()
+        val profile = list.profile(edit.id) ?: return gone()
+        if (RunsSnapshot.of(profile) != expectedNow) return ProvidersBuild.Refused(ProvidersRefusal.Changed)
+        val updated: JsonObject = when (edit) {
             is ProfileRunsEdit.Command -> {
-                if (!commandFits(edit.parts)) return null
+                if (!commandFits(edit.parts)) return invalid()
                 // :709 compares the joined text: the same words with other spacing are no change.
-                val now = (list.profile(edit.id)?.command ?: emptyList()).joinToString(" ")
-                if (edit.parts.joinToString(" ") == now) return null
+                if (edit.parts.joinToString(" ") == (profile.command ?: emptyList()).joinToString(" ")) return ProvidersBuild.NoChange
                 if (edit.parts.isEmpty()) without(target, "command") else with(target, "command", JsonArray(edit.parts.map(::JsonPrimitive)))
             }
             is ProfileRunsEdit.Home -> {
-                if (edit.value.length > ProfileLimits.HOME) return null
-                if (edit.value == (list.profile(edit.id)?.homeDir ?: "")) return null
+                if (edit.value.length > ProfileLimits.HOME) return invalid()
+                if (edit.value == (profile.homeDir ?: "")) return ProvidersBuild.NoChange
                 if (edit.value.isEmpty()) without(target, "homeDir") else with(target, "homeDir", JsonPrimitive(edit.value))
             }
+            is ProfileRunsEdit.Extends -> {
+                if (edit.value !in ProfileLimits.EXTENDS) return invalid()
+                if (edit.value == profile.extends) return ProvidersBuild.NoChange
+                with(target, "extends", JsonPrimitive(edit.value))
+            }
+            is ProfileRunsEdit.Env -> when (val r = applyEnv(target, edit.change)) {
+                is Applied.To -> r.raw
+                Applied.Nothing -> return ProvidersBuild.NoChange
+                is Applied.No -> return ProvidersBuild.Refused(r.reason)
+            }
         }
-        if (updated == target) return null
-        return ProvidersWrite(base.map { if (it === target) updated else it }, list.generation, confirmed = edit)
+        if (updated == target) return ProvidersBuild.NoChange
+        val confirmation = ConfirmedRuns(edit, expectedNow, RunsSnapshot.of(updated)!!)
+        return ProvidersBuild.Ready(ProvidersWrite(base.map { if (it === target) updated else it }, list.generation, confirmed = confirmation, epoch = list.epoch))
     }
 
     /**
      * Why [write] must NOT be sent against [newest] (the client's newest list), or null when it may.
      * Every send path applies it, the client's under the same lock as its frames:
      * - no newest list, or one that cannot be written back;
-     * - [write] was built from an older list than [newest] (a broadcast landed since: sending it
-     *   would undo that concurrent edit);
-     * - any profile's command or home differs from the newest list's (a renamed profile is
-     *   compared with its old self), unless it is exactly the value its confirmation names.
+     * - [write] was built from another list than [newest] (a broadcast landed since, or the socket
+     *   changed: sending it would undo what the server holds now);
+     * - for a confirmation: the profile no longer runs what it showed as "Now";
+     * - any profile runs something else than in [newest] (its engine, command, home or a
+     *   [RiskyEnvKeys] entry; a renamed profile compared with its old self, a new one with what
+     *   "Add profile" makes), unless it is exactly the change its confirmation names.
      */
-    fun refusal(write: ProvidersWrite, newest: ProvidersList?): String? {
-        if (newest == null || !newest.writable) return "no writable list"
-        if (write.generation != newest.generation) return "built from an older list"
+    fun refusal(write: ProvidersWrite, newest: ProvidersList?): ProvidersRefusal? {
+        if (newest == null || !newest.writable) return ProvidersRefusal.NotWritable
+        if (write.generation != newest.generation || write.epoch != newest.epoch) return ProvidersRefusal.Stale
         val confirmed = write.confirmed
+        if (confirmed != null) {
+            val now = newest.raws.firstOrNull { idOf(it) == confirmed.edit.id } ?: return ProvidersRefusal.Changed
+            if (RunsSnapshot.of(now) != confirmed.expectedNow) return ProvidersRefusal.Changed
+        }
         for (p in write.profiles) {
             val id = idOf(p)
             val before = newest.raws.firstOrNull { idOf(it) == (write.renames[id] ?: id) }
-            for (key in RUNS_KEYS) {
-                val sent = present(p[key])
-                val expected = when {
-                    confirmed is ProfileRunsEdit.Command && key == "command" && confirmed.id == id ->
-                        confirmed.parts.takeIf { it.isNotEmpty() }?.let { parts -> JsonArray(parts.map(::JsonPrimitive)) }
-                    confirmed is ProfileRunsEdit.Home && key == "homeDir" && confirmed.id == id ->
-                        confirmed.value.takeIf { it.isNotEmpty() }?.let(::JsonPrimitive)
-                    else -> present(before?.get(key))
-                }
-                if (sent != expected) return "an unconfirmed change to what profile $id runs"
+            val expected = when {
+                confirmed != null && confirmed.edit.id == id && write.renames.isEmpty() -> confirmed.after
+                before != null -> RunsSnapshot.of(before)
+                else -> RunsSnapshot.NEW_PROFILE
             }
+            if (RunsSnapshot.of(p) != expected) return ProvidersRefusal.Unconfirmed
         }
         return null
     }
 
     // ---- the web's handlers --------------------------------------------------------------------
 
+    private fun gone() = ProvidersBuild.Refused(ProvidersRefusal.Gone)
+
+    private fun invalid() = ProvidersBuild.Refused(ProvidersRefusal.Invalid)
+
+    private sealed interface Applied {
+        data class To(val raw: JsonObject) : Applied
+        data object Nothing : Applied
+        data class No(val reason: ProvidersRefusal) : Applied
+    }
+
+    private fun applied(raw: JsonObject?): Applied = if (raw == null) Applied.Nothing else Applied.To(raw)
+
     private fun profileId(edit: ProfileEdit): String = when (edit) {
         is ProfileEdit.Enabled -> edit.id
         is ProfileEdit.Label -> edit.id
         is ProfileEdit.Rename -> edit.id
-        is ProfileEdit.Extends -> edit.id
         is ProfileEdit.EnvKey -> edit.id
         is ProfileEdit.EnvValue -> edit.id
         is ProfileEdit.EnvRemove -> edit.id
@@ -470,79 +680,82 @@ object ProvidersPatch {
         ProfileEdit.Add -> ""
     }
 
-    private fun applyTo(profile: Profile, raw: JsonObject, edit: ProfileEdit): JsonObject? = when (edit) {
-        is ProfileEdit.Enabled -> with(raw, "enabled", JsonPrimitive(!profile.enabled))
-        is ProfileEdit.Label -> jsTrim(edit.typed).takeIf { it.isNotEmpty() && it != profile.label }?.let { with(raw, "label", JsonPrimitive(it)) }
-        is ProfileEdit.Extends -> edit.value.takeIf { it in ProfileLimits.EXTENDS && it != profile.extends }?.let { with(raw, "extends", JsonPrimitive(it)) }
-        is ProfileEdit.EnvKey -> {
-            val env = raw["env"] as? JsonObject
-            val nextKey = jsTrim(edit.typed)
-            val value = env?.get(edit.key)
-            if (env == null || value == null || nextKey.isEmpty() || nextKey == edit.key) {
-                null
-            } else {
-                val next = LinkedHashMap(env)
-                next.remove(edit.key)
-                next[nextKey] = value
-                withEnv(raw, next)
-            }
-        }
-        is ProfileEdit.EnvValue -> {
-            val env = raw["env"] as? JsonObject
-            val now = env?.get(edit.key)
-            if (env == null || now == null || (now as? JsonPrimitive)?.content == edit.value.reveal()) {
-                null
-            } else {
-                val next = LinkedHashMap(env)
-                next[edit.key] = JsonPrimitive(edit.value.reveal())
-                withEnv(raw, next)
-            }
-        }
-        is ProfileEdit.EnvRemove -> {
-            val env = raw["env"] as? JsonObject
-            if (env == null || edit.key !in env) {
-                null
-            } else {
-                val next = LinkedHashMap(env)
-                next.remove(edit.key)
-                withEnv(raw, next)
-            }
-        }
-        is ProfileEdit.EnvAdd -> {
-            val key = jsTrim(edit.typedKey)
-            if (key.isEmpty()) {
-                null
-            } else {
-                val next = LinkedHashMap((raw["env"] as? JsonObject).orEmpty())
-                next[key] = JsonPrimitive(edit.value.reveal())
-                withEnv(raw, next)
-            }
-        }
-        is ProfileEdit.DropEnv -> splitList(raw, "dropEnv", edit.typed, profile.dropEnv)
-        is ProfileEdit.DisallowedTools -> splitList(raw, "disallowedTools", edit.typed, profile.disallowedTools)
+    private fun applyTo(profile: Profile, raw: JsonObject, edit: ProfileEdit): Applied = when (edit) {
+        is ProfileEdit.Enabled -> applied(if (edit.enabled == profile.enabled) null else with(raw, "enabled", JsonPrimitive(edit.enabled)))
+        is ProfileEdit.Label -> applied(jsTrim(edit.typed).takeIf { it.isNotEmpty() && it != profile.label }?.let { with(raw, "label", JsonPrimitive(it)) })
+        is ProfileEdit.EnvKey, is ProfileEdit.EnvValue, is ProfileEdit.EnvRemove, is ProfileEdit.EnvAdd -> applyEnv(raw, envChangeOf(edit)!!)
+        is ProfileEdit.DropEnv -> applied(splitList(raw, "dropEnv", edit.typed, profile.dropEnv))
+        is ProfileEdit.DisallowedTools -> applied(splitList(raw, "disallowedTools", edit.typed, profile.disallowedTools))
         is ProfileEdit.Order -> {
             val trimmed = jsTrim(edit.typed)
-            when {
-                trimmed.isEmpty() -> if (profile.order != null) without(raw, "order") else null
-                trimmed.all { it in '0'..'9' } && trimmed.length <= 7 -> {
-                    val n = trimmed.toLong()
-                    if (n > ProfileLimits.ORDER || n == profile.order) null else with(raw, "order", JsonPrimitive(n))
-                }
-                // Not a whole number: nothing (the browser's number input never yields one).
-                else -> null
-            }
+            applied(
+                when {
+                    trimmed.isEmpty() -> if (profile.order != null) without(raw, "order") else null
+                    trimmed.all { it in '0'..'9' } && trimmed.length <= 7 -> {
+                        val n = trimmed.toLong()
+                        if (n > ProfileLimits.ORDER || n == profile.order) null else with(raw, "order", JsonPrimitive(n))
+                    }
+                    // Not a whole number: nothing (the browser's number input never yields one).
+                    else -> null
+                },
+            )
         }
         is ProfileEdit.VerifiedThrough -> {
             val value = jsTrim(edit.typed)
-            when {
-                value == (profile.verifiedThrough ?: "") -> null
-                value.isEmpty() -> without(raw, "verifiedThrough")
-                value.length > ProfileLimits.VERSION -> null
-                else -> with(raw, "verifiedThrough", JsonPrimitive(value))
+            applied(
+                when {
+                    value == (profile.verifiedThrough ?: "") -> null
+                    value.isEmpty() -> without(raw, "verifiedThrough")
+                    value.length > ProfileLimits.VERSION -> null
+                    else -> with(raw, "verifiedThrough", JsonPrimitive(value))
+                },
+            )
+        }
+        is ProfileEdit.Model -> applied(modelEdit(raw, edit.list, edit.op))
+        is ProfileEdit.Add, is ProfileEdit.Remove, is ProfileEdit.Rename -> Applied.Nothing
+    }
+
+    /**
+     * The env editor's handlers (:368-410). r2 (security F9): a rename or an add onto a key the
+     * profile already has is refused ([ProvidersRefusal.Collision]), never a silent overwrite.
+     */
+    private fun applyEnv(raw: JsonObject, change: EnvChange): Applied {
+        val env = raw["env"] as? JsonObject
+        return when (change) {
+            is EnvChange.Rename -> {
+                val value = env?.get(change.from) ?: return Applied.No(ProvidersRefusal.Gone)
+                if (change.to.isEmpty() || change.to == change.from) return Applied.Nothing
+                if (change.to.length > ProfileLimits.COMMAND_ENTRY) return Applied.No(ProvidersRefusal.Invalid)
+                if (change.to in env) return Applied.No(ProvidersRefusal.Collision)
+                val next = LinkedHashMap(env)
+                next.remove(change.from)
+                next[change.to] = value
+                Applied.To(withEnv(raw, next))
+            }
+            is EnvChange.Change -> {
+                val now = env?.get(change.key) ?: return Applied.No(ProvidersRefusal.Gone)
+                if ((now as? JsonPrimitive)?.content == change.value.reveal()) return Applied.Nothing
+                if (change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
+                val next = LinkedHashMap(env)
+                next[change.key] = JsonPrimitive(change.value.reveal())
+                Applied.To(withEnv(raw, next))
+            }
+            is EnvChange.Remove -> {
+                if (env == null || change.key !in env) return Applied.No(ProvidersRefusal.Gone)
+                val next = LinkedHashMap(env)
+                next.remove(change.key)
+                Applied.To(withEnv(raw, next))
+            }
+            is EnvChange.Add -> {
+                if (change.key.isEmpty()) return Applied.Nothing
+                if (change.key.length > ProfileLimits.COMMAND_ENTRY || change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
+                if (env != null && change.key in env) return Applied.No(ProvidersRefusal.Collision)
+                if ((env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
+                val next = LinkedHashMap(env ?: emptyMap())
+                next[change.key] = JsonPrimitive(change.value.reveal())
+                Applied.To(withEnv(raw, next))
             }
         }
-        is ProfileEdit.Model -> modelEdit(raw, edit.list, edit.op)
-        is ProfileEdit.Add, is ProfileEdit.Remove, is ProfileEdit.Rename -> null
     }
 
     /** :766-770: the trimmed text split at each comma (and the spaces around it), empty parts dropped; written when the comma join differs. */

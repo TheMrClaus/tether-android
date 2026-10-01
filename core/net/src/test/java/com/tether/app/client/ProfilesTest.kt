@@ -37,6 +37,10 @@ class ProfilesTest {
 
     private fun sent(write: ProvidersWrite?): JsonObject = json(write!!.message.encode())
 
+    /** A confirmed change built against the profile's own current "Now" (what a confirmation showed). */
+    private fun confirmedWrite(list: ProvidersList, edit: ProfileRunsEdit): ProvidersWrite? =
+        ProvidersPatch.confirmed(list, edit, RunsSnapshot.of(list.profile(edit.id)!!)).writeOrNull
+
     private fun profiles(vararg p: String) = json("""{"type":"set-providers","profiles":[${p.joinToString(",")}]}""")
 
     // ---- the read ----------------------------------------------------------------------------------
@@ -131,7 +135,7 @@ class ProfilesTest {
         val withOne = list("""[{"id":"profile","extends":"claude","label":"profile","enabled":true}]""")
         assertEquals("""profile-2""", (sent(ProvidersPatch.write(withOne, ProfileEdit.Add))["profiles"] as JsonArray)[1].jsonObject["id"]!!.let { (it as JsonPrimitive).content })
         assertEquals(profiles(work), sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))))
-        assertEquals(profiles(gemini, work.replace("\"enabled\":false", "\"enabled\":true")), sent(ProvidersPatch.write(two, ProfileEdit.Enabled("work"))))
+        assertEquals(profiles(gemini, work.replace("\"enabled\":false", "\"enabled\":true")), sent(ProvidersPatch.write(two, ProfileEdit.Enabled("work", true))))
         assertEquals(profiles(), sent(ProvidersPatch.write(list("[$work]"), ProfileEdit.Remove("work"))))
     }
 
@@ -141,8 +145,9 @@ class ProfilesTest {
         assertNull("unchanged", ProvidersPatch.write(two, ProfileEdit.Label("work", "Work ")))
         assertEquals(profiles(gemini, work.replace("\"id\":\"work\"", "\"id\":\"day\"")), sent(ProvidersPatch.write(two, ProfileEdit.Rename("work", " day"))))
         assertNull(ProvidersPatch.write(two, ProfileEdit.Rename("work", "work")))
-        assertEquals(profiles(gemini, work.replace("\"extends\":\"claude\"", "\"extends\":\"pi\"")), sent(ProvidersPatch.write(two, ProfileEdit.Extends("work", "pi"))))
-        assertNull("outside the closed set", ProvidersPatch.write(two, ProfileEdit.Extends("work", "gemini")))
+        // r2 (owner decision B): Extends is what the profile runs on, so it is a confirmed change.
+        assertEquals(profiles(gemini, work.replace("\"extends\":\"claude\"", "\"extends\":\"pi\"")), sent(confirmedWrite(two, ProfileRunsEdit.Extends("work", "pi"))))
+        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.Invalid), ProvidersPatch.confirmed(two, ProfileRunsEdit.Extends("work", "gemini"), RunsSnapshot.of(two.profile("work")!!)))
     }
 
     @Test fun theEnvEditorsEditsKeepEveryOtherValueAsItCame() {
@@ -227,34 +232,50 @@ class ProfilesTest {
 
     @Test fun aConfirmedCommandOrHomeChangesOnlyThatKey() {
         assertEquals(profiles(gemini.replace("[\"gemini\",\"--acp\"]", "[\"/opt/gemini\",\"--acp\",\"-v\"]"), work),
-            sent(ProvidersPatch.confirmed(two, ProfileRunsEdit.Command("gemini", listOf("/opt/gemini", "--acp", "-v")))))
-        assertEquals(profiles(gemini.replace(",\"command\":[\"gemini\",\"--acp\"]", ""), work), sent(ProvidersPatch.confirmed(two, ProfileRunsEdit.Command("gemini", emptyList()))))
-        assertEquals(profiles(gemini, work.replace("/srv/homes/work", "/srv/homes/w2")), sent(ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("work", "/srv/homes/w2"))))
-        assertEquals(profiles(gemini, work.replace(",\"homeDir\":\"/srv/homes/work\"", "")), sent(ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("work", ""))))
-        assertNull("the same words", ProvidersPatch.confirmed(two, ProfileRunsEdit.Command("gemini", listOf("gemini", "--acp"))))
-        assertNull("the same home", ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("work", "/srv/homes/work")))
-        assertNull("a gone profile", ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("gone", "/x")))
-        assertTrue(ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("work", "/x"))!!.isConfirmed)
+            sent(confirmedWrite(two, ProfileRunsEdit.Command("gemini", listOf("/opt/gemini", "--acp", "-v")))))
+        assertEquals(profiles(gemini.replace(",\"command\":[\"gemini\",\"--acp\"]", ""), work), sent(confirmedWrite(two, ProfileRunsEdit.Command("gemini", emptyList()))))
+        assertEquals(profiles(gemini, work.replace("/srv/homes/work", "/srv/homes/w2")), sent(confirmedWrite(two, ProfileRunsEdit.Home("work", "/srv/homes/w2"))))
+        assertEquals(profiles(gemini, work.replace(",\"homeDir\":\"/srv/homes/work\"", "")), sent(confirmedWrite(two, ProfileRunsEdit.Home("work", ""))))
+        assertNull("the same words", confirmedWrite(two, ProfileRunsEdit.Command("gemini", listOf("gemini", "--acp"))))
+        assertNull("the same home", confirmedWrite(two, ProfileRunsEdit.Home("work", "/srv/homes/work")))
+        assertEquals("a gone profile", ProvidersBuild.Refused(ProvidersRefusal.Gone), ProvidersPatch.confirmed(two, ProfileRunsEdit.Home("gone", "/x"), RunsSnapshot.of(two.profile("work")!!)))
+        assertTrue(confirmedWrite(two, ProfileRunsEdit.Home("work", "/x"))!!.isConfirmed)
     }
 
     @Test fun theSendRuleRefusesAnUnconfirmedChangeToWhatRuns() {
-        // Hand-built writes (as a careless caller could build one): each changes a command or home.
-        fun forged(vararg p: String, renames: Map<String, String> = emptyMap(), confirmed: ProfileRunsEdit? = null) =
-            ProvidersWrite(p.map(::json), two.generation, confirmed, renames)
+        // Hand-built writes (as a careless caller could build one): each changes what a profile runs.
+        fun forged(vararg p: String, renames: Map<String, String> = emptyMap(), confirmed: ProfileRunsEdit? = null): ProvidersWrite {
+            val c = confirmed?.let { edit ->
+                val built = confirmedWrite(two, edit)!!
+                built.confirmed
+            }
+            return ProvidersWrite(p.map(::json), two.generation, c, renames)
+        }
         val evilCommand = gemini.replace("[\"gemini\",\"--acp\"]", "[\"/tmp/evil\"]")
         assertNotNull(ProvidersPatch.refusal(forged(evilCommand, work), two))
         assertNotNull(ProvidersPatch.refusal(forged(gemini.replace(",\"command\":[\"gemini\",\"--acp\"]", ""), work), two))
         assertNotNull(ProvidersPatch.refusal(forged(gemini, work.replace("/srv/homes/work", "/tmp/evil-home")), two))
         assertNotNull("a new profile that runs something", ProvidersPatch.refusal(forged(gemini, work, """{"id":"n","extends":"pi","label":"N","command":["/tmp/x"],"enabled":true}"""), two))
+        assertNotNull("a new profile on another engine", ProvidersPatch.refusal(forged(gemini, work, """{"id":"n","extends":"codex","label":"N","enabled":true}"""), two))
         assertNotNull("a rename that also swaps the command", ProvidersPatch.refusal(forged(evilCommand.replace("\"id\":\"gemini\"", "\"id\":\"g2\""), work, renames = mapOf("g2" to "gemini")), two))
         assertNotNull("a confirmation of ANOTHER profile", ProvidersPatch.refusal(forged(evilCommand, work.replace("/srv/homes/work", "/x"), confirmed = ProfileRunsEdit.Home("work", "/x")), two))
         assertNotNull("a confirmation of another value", ProvidersPatch.refusal(forged(evilCommand, work, confirmed = ProfileRunsEdit.Command("gemini", listOf("/opt/ok"))), two))
+        // r2: the engine and the risky env keys too.
+        assertEquals(ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forged(gemini.replace("\"extends\":\"acp\"", "\"extends\":\"codex\""), work), two))
+        assertEquals(ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forged(gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"LD_PRELOAD\":\"/tmp/e.so\""), work), two))
+        assertEquals(ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forged(gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"path\":\"/tmp\""), work), two))
+        val withPath = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/usr/bin\"")},$work]")
+        fun forgedOn(l: ProvidersList, vararg p: String) = ProvidersWrite(p.map(::json), l.generation, null)
+        assertEquals("a risky value changed", ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forgedOn(withPath, gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/tmp\""), work), withPath))
+        assertEquals("a risky key removed", ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forgedOn(withPath, gemini, work), withPath))
+        assertEquals("a risky key renamed", ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forgedOn(withPath, gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"MYPATH\":\"/usr/bin\""), work), withPath))
+        assertNull("an ordinary env change is plain", ProvidersPatch.refusal(forgedOn(withPath, gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"y\",\"PATH\":\"/usr/bin\""), work), withPath))
         // What the builders make passes: a plain edit, a rename (the profile keeps what it runs), a confirmed change.
         assertNull(ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!, two))
         assertNull(ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Rename("gemini", "g2"))!!, two))
         assertNull(ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, two))
         assertNull(ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two))
-        assertNull(ProvidersPatch.refusal(ProvidersPatch.confirmed(two, ProfileRunsEdit.Command("gemini", listOf("/opt/ok")))!!, two))
+        assertNull(ProvidersPatch.refusal(confirmedWrite(two, ProfileRunsEdit.Command("gemini", listOf("/opt/ok")))!!, two))
     }
 
     // ---- concurrent edits ------------------------------------------------------------------------
@@ -263,7 +284,7 @@ class ProfilesTest {
         val mine = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
         // Another client toggles gemini meanwhile: the broadcast is the newest list.
         val broadcast = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},$work]", generation = 2)
-        assertEquals("built from an older list", ProvidersPatch.refusal(mine, broadcast))
+        assertEquals(ProvidersRefusal.Stale, ProvidersPatch.refusal(mine, broadcast))
         // Rebuilt from the broadcast, the same edit keeps the other client's change.
         val again = ProvidersPatch.write(broadcast, ProfileEdit.Label("work", "W"))!!
         assertNull(ProvidersPatch.refusal(again, broadcast))
@@ -277,9 +298,85 @@ class ProfilesTest {
     @Test fun anUnwritableListIsNeverWrittenTo() {
         val odd = ProvidersList.of(frame("""{"type":"providers","profiles":[$work,1]}"""), 1)
         assertNull(ProvidersPatch.write(odd, ProfileEdit.Label("work", "W")))
-        assertNull(ProvidersPatch.confirmed(odd, ProfileRunsEdit.Home("work", "/x")))
-        assertEquals("no writable list", ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, odd))
-        assertEquals("no writable list", ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, null))
+        assertNull(ProvidersPatch.confirmed(odd, ProfileRunsEdit.Home("work", "/x"), RunsSnapshot.of(odd.profile("work")!!)).writeOrNull)
+        assertEquals(ProvidersRefusal.NotWritable, ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, odd))
+        assertEquals(ProvidersRefusal.NotWritable, ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, null))
+    }
+
+    // ---- r2: what else a profile runs, and the races ------------------------------------------
+
+    @Test fun theRiskyEnvKeysAreOneListAndMatchInAnyCase() {
+        for (k in listOf("PATH", "path", "Path", "LD_PRELOAD", "ld_library_path", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "dyld_x", "NODE_OPTIONS", "NODE_PATH",
+            "BASH_ENV", "ENV", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB", "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
+            "SHELL", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME", "home", "XDG_CONFIG_HOME", "XDG_DATA_HOME")) {
+            assertTrue(k, RiskyEnvKeys.risky(k))
+        }
+        for (k in listOf("PATHX", "MY_PATH", "GEMINI_API_KEY", "ANTHROPIC_BASE_URL", "XDG_CACHE_HOME", "MODE", "ENVIRONMENT")) assertFalse(k, RiskyEnvKeys.risky(k))
+    }
+
+    @Test fun aPlainEnvEditNeverTouchesARiskyKey() {
+        val withPath = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/usr/bin\"")},$work]")
+        val needs = ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvAdd("work", "LD_PRELOAD", SecretText("/tmp/e.so"))))
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvAdd("work", " path ", SecretText("/tmp"))))
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvValue("gemini", "PATH", SecretText("/tmp"))))
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvRemove("gemini", "PATH")))
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvKey("gemini", "PATH", "MYPATH")))
+        assertEquals(needs, ProvidersPatch.build(withPath, ProfileEdit.EnvKey("gemini", "MODE", "NODE_OPTIONS")))
+        // Confirmed, each is the exact list the web would send.
+        fun env(change: EnvChange) = sent(confirmedWrite(withPath, ProfileRunsEdit.Env("gemini", change)))
+        val g = gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/usr/bin\"")
+        assertEquals(profiles(g.replace("\"PATH\":\"/usr/bin\"", "\"PATH\":\"/opt/bin\""), work), env(EnvChange.Change("PATH", SecretText("/opt/bin"))))
+        assertEquals(profiles(g.replace(",\"PATH\":\"/usr/bin\"", ""), work), env(EnvChange.Remove("PATH")))
+        assertEquals(profiles(g.replace("\"PATH\":\"/usr/bin\"", "\"MYPATH\":\"/usr/bin\""), work), env(EnvChange.Rename("PATH", "MYPATH")))
+        assertEquals(profiles(g.replace("\"PATH\":\"/usr/bin\"", "\"PATH\":\"/usr/bin\",\"HOME\":\"/srv/h\""), work), env(EnvChange.Add("HOME", SecretText("/srv/h"))))
+    }
+
+    /** r2 (security F9): a rename or an add onto a key the profile already has is refused, never an overwrite. */
+    @Test fun anEnvKeyCollisionIsRefused() {
+        val collision = ProvidersBuild.Refused(ProvidersRefusal.Collision)
+        assertEquals(collision, ProvidersPatch.build(two, ProfileEdit.EnvKey("gemini", "MODE", "GEMINI_API_KEY")))
+        assertEquals(collision, ProvidersPatch.build(two, ProfileEdit.EnvAdd("gemini", " MODE ", SecretText("y"))))
+        val withPath = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/usr/bin\"")},$work]")
+        assertEquals(collision, ProvidersPatch.confirmed(withPath, ProfileRunsEdit.Env("gemini", EnvChange.Rename("PATH", "MODE")), RunsSnapshot.of(withPath.profile("gemini")!!)))
+        assertEquals(collision, ProvidersPatch.confirmed(withPath, ProfileRunsEdit.Env("gemini", EnvChange.Add("PATH", SecretText("/x"))), RunsSnapshot.of(withPath.profile("gemini")!!)))
+    }
+
+    /** r2 (security F8): the switch sends the value the user saw flipped to, so a concurrent flip is never undone by toggling it back. */
+    @Test fun theSwitchSendsTheIntendedValue() {
+        assertEquals(ProvidersBuild.NoChange, ProvidersPatch.build(two, ProfileEdit.Enabled("gemini", true)))
+        assertEquals(profiles(gemini.replace("\"enabled\":true", "\"enabled\":false"), work), sent(ProvidersPatch.write(two, ProfileEdit.Enabled("gemini", false))))
+    }
+
+    /** r2 (verifier F2): the confirmation's "Now" travels with the change: if the newest list differs, nothing is built or sent. */
+    @Test fun aChangeBetweenTheCheckAndTheBuildSendsNothing() {
+        val shown = RunsSnapshot.of(two.profile("gemini")!!)
+        val moved = list("[${gemini.replace("[\"gemini\",\"--acp\"]", "[\"/usr/bin/other\"]")},$work]", generation = 2)
+        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.Changed), ProvidersPatch.confirmed(moved, ProfileRunsEdit.Command("gemini", listOf("/opt/mine")), shown))
+        // The engine and the risky keys are part of "Now" too.
+        val engine = list("[${gemini.replace("\"extends\":\"acp\"", "\"extends\":\"codex\"")},$work]", generation = 2)
+        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.Changed), ProvidersPatch.confirmed(engine, ProfileRunsEdit.Home("gemini", "/x"), shown))
+        val risky = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"PATH\":\"/tmp\"")},$work]", generation = 2)
+        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.Changed), ProvidersPatch.confirmed(risky, ProfileRunsEdit.Home("gemini", "/x"), shown))
+        // An ordinary env change is not part of it.
+        val other = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"y\"")},$work]", generation = 2)
+        assertNotNull(ProvidersPatch.confirmed(other, ProfileRunsEdit.Home("gemini", "/x"), shown).writeOrNull)
+    }
+
+    @Test fun aWriteInFlightBlocksTheNextUntilItsBroadcastOrTheTimeout() {
+        var now = 1_000L
+        val inFlight = ProvidersInFlight(now = { now })
+        val first = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
+        assertNull(inFlight.refusal(two))
+        inFlight.sent(first)
+        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
+        // Its broadcast (the next generation) ends it.
+        assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 2)))
+        // A broadcast that never comes stops blocking after the timeout.
+        now += ProvidersInFlight.TIMEOUT_MS - 1
+        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
+        now += 1
+        assertNull(inFlight.refusal(two))
     }
 
     // ---- over a socket ---------------------------------------------------------------------------
@@ -315,26 +412,68 @@ class ProfilesTest {
         val ws = holdingProviders()
         val newest = h.client.providerProfiles.value!!
         val write = ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!
-        assertFalse("bound to its server", h.client.setProviders(write, "https://elsewhere.example"))
+        assertEquals("bound to its server", ProvidersRefusal.NotConnected, h.client.setProviders(write, "https://elsewhere.example"))
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
-        assertTrue(h.client.setProviders(write, origin()))
+        assertNull(h.client.setProviders(write, origin()))
         assertEquals(sent(write), h.expectFrame("set-providers"))
         // A broadcast lands: the write built before it is refused, nothing goes out.
         ws.send("""{"type":"providers","profiles":[$gemini,${work.replace("\"enabled\":false", "\"enabled\":true")}]}""")
         h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
-        assertFalse(h.client.setProviders(write, origin()))
+        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(write, origin()))
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
     }
 
     @Test fun theClientRefusesAnUnconfirmedChangeToWhatAProfileRuns() {
         holdingProviders()
         val newest = h.client.providerProfiles.value!!
-        val forged = ProvidersWrite(listOf(json(gemini.replace("[\"gemini\",\"--acp\"]", "[\"/tmp/evil\"]")), json(work)), newest.generation, confirmed = null)
-        assertFalse(h.client.setProviders(forged, origin()))
+        val forged = ProvidersWrite(listOf(json(gemini.replace("[\"gemini\",\"--acp\"]", "[\"/tmp/evil\"]")), json(work)), newest.generation, confirmed = null, epoch = newest.epoch)
+        assertEquals(ProvidersRefusal.Unconfirmed, h.client.setProviders(forged, origin()))
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
-        val confirmed = ProvidersPatch.confirmed(newest, ProfileRunsEdit.Command("gemini", listOf("/opt/gemini")))!!
-        assertTrue(h.client.setProviders(confirmed, origin()))
-        assertEquals(sent(confirmed), h.expectFrame("set-providers"))
+        val ok = confirmedWrite(newest, ProfileRunsEdit.Command("gemini", listOf("/opt/gemini")))!!
+        assertNull(h.client.setProviders(ok, origin()))
+        assertEquals(sent(ok), h.expectFrame("set-providers"))
+    }
+
+    /** r2 (security F1): a list from before a reconnect is never written back, and the client asks for the list again on the new socket. */
+    @Test fun aListFromBeforeAReconnectIsNeverWrittenBackAndIsAskedForAgain() {
+        val ws = holdingProviders()
+        assertTrue(h.client.requestProviders())
+        h.expectFrame("providers")
+        val old = h.client.providerProfiles.value!!
+        val stale = ProvidersPatch.write(old, ProfileEdit.Label("work", "W"))!!
+        ws.close(1001, null)
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        h.enqueueConnect()
+        h.scheduler.await(::isReconnectDelay).fire()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2)
+        // Asked for again on the new socket, before any edit could be built from it.
+        assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
+        // Before the reply: the list held is the old socket's, and nothing built from it is sent.
+        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(stale, origin()))
+        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
+        assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
+        // The new socket's list is written to.
+        ws2.send("""{"type":"providers","profiles":[$gemini,$work]}""")
+        h.await(h.client.providerProfiles) { it != null && it.epoch != old.epoch }
+        assertNull(h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
+    }
+
+    /** r2 (verifier F1): a second write before the first's broadcast would undo it: refused until the broadcast. */
+    @Test fun aSecondWriteBeforeTheBroadcastIsRefused() {
+        val ws = holdingProviders()
+        val newest = h.client.providerProfiles.value!!
+        val command = confirmedWrite(newest, ProfileRunsEdit.Command("gemini", listOf("/opt/gemini")))!!
+        assertNull(h.client.setProviders(command, origin()))
+        h.expectFrame("set-providers")
+        // Built from the same (not yet updated) list, it would put the old command back.
+        assertEquals(ProvidersRefusal.InFlight, h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!, origin()))
+        assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
+        ws.send("""{"type":"providers","profiles":[${gemini.replace("[\"gemini\",\"--acp\"]", "[\"/opt/gemini\"]")},$work]}""")
+        h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
+        val next = ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "W"))!!
+        assertNull(h.client.setProviders(next, origin()))
+        assertTrue(h.expectFrame("set-providers").toString().contains("/opt/gemini"))
     }
 
     @Test fun aSignOutDropsTheList() {
@@ -381,6 +520,6 @@ class ProfilesTest {
     @Test fun nothingIsSentWithoutAHandshakenSocket() {
         h.newClient(configured = false)
         assertFalse(h.client.requestProviders())
-        assertFalse(h.client.setProviders(ProvidersPatch.write(two, ProfileEdit.Add)!!, "http://localhost"))
+        assertEquals(ProvidersRefusal.NotWritable, h.client.setProviders(ProvidersPatch.write(two, ProfileEdit.Add)!!, "http://localhost"))
     }
 }
