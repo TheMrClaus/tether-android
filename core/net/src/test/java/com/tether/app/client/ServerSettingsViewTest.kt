@@ -201,6 +201,54 @@ class ServerSettingsViewTest {
         h.await(h.client.serverSettings) { it?.restartRequired == true }
     }
 
+    private val settingsFrame =
+        """{"type":"server-settings","settings":{"password":"SENTINEL-pw-41f0"},"envForced":{},"restartRequired":false,"discovered":[],"detected":{}}"""
+    private val advancedFrame =
+        """{"type":"advanced-settings","claudeCliVersion":null,"discovered":[],"envForced":false,"envPath":null,"effectiveSource":"bundled","effectiveVersion":"bundled"}"""
+
+    /** Connected, with both settings frames held. */
+    private fun holdingSettings(): okhttp3.WebSocket {
+        h.newClient()
+        h.enqueueConnect()
+        h.client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws)
+        ws.send(settingsFrame)
+        ws.send(advancedFrame)
+        h.await(h.client.serverSettings) { it != null }
+        h.await(h.client.advancedSettings) { it != null }
+        return ws
+    }
+
+    /** r2: a sign-out drops both frames (the plaintext password goes with them). */
+    @Test fun aSignOutDropsTheSettingsFrames() {
+        holdingSettings()
+        h.server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}"))
+        kotlinx.coroutines.runBlocking { h.client.logout() }
+        assertNull(h.client.serverSettings.value)
+        assertNull(h.client.advancedSettings.value)
+    }
+
+    /** r2: a server-side revocation (close 4001 -> auth required) drops them too. */
+    @Test fun authRequiredDropsTheSettingsFrames() {
+        val ws = holdingSettings()
+        ws.close(4001, "device revoked")
+        h.await(h.client.connection) { it == ConnectionState.AuthRequired }
+        assertNull(h.client.serverSettings.value)
+        assertNull(h.client.advancedSettings.value)
+    }
+
+    /** r2: `text()` never hands out a secret; only `secret()` does. */
+    @Test fun textNeverReadsASecret() {
+        val v = view("""{"password":"$sentinel","proxyToken":"$tokenSentinel"}""")
+        assertEquals("", v.text(ServerSetting.Password))
+        assertEquals("", v.text(ServerSetting.ProxyToken))
+        assertEquals("", v.choice(ServerSetting.Password))
+        assertEquals(sentinel, v.secret(ServerSetting.Password).reveal())
+        // The secret rows' patch still sends the edited secret (built from the revealed value).
+        assertEquals(json("""{"password":"x"}"""), ServerSettingsPatch.text(v, ServerSetting.Password, "x", v.secret(ServerSetting.Password).reveal()))
+    }
+
     @Test fun nothingIsSentWithoutAHandshakenSocket() {
         h.newClient(configured = false)
         assertFalse(h.client.requestAdvancedSettings())

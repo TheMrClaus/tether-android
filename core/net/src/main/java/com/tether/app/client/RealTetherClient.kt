@@ -1506,7 +1506,7 @@ class RealTetherClient(
                 // said anything). The next start() reads again.
                 val connect = synchronized(lock) {
                     val signedIn = baseUrlValue != null && credentialValue != null
-                    if (!signedIn) connectionState.value = ConnectionState.AuthRequired
+                    if (!signedIn) enterAuthRequired()
                     signedIn
                 }
                 if (connect) connectNow()
@@ -1540,7 +1540,7 @@ class RealTetherClient(
             // "nothing to redeliver", never a failed start).
             bindPendingToCurrentServer()
             if (baseUrlValue == null || credentialValue == null) {
-                connectionState.value = ConnectionState.AuthRequired
+                enterAuthRequired()
             } else {
                 connectNow()
             }
@@ -1708,7 +1708,7 @@ class RealTetherClient(
             if (credentialValue == null) {
                 // A user logout is not a server verdict: no "session expired" copy.
                 signedOutReasonState.value = null
-                connectionState.value = ConnectionState.AuthRequired
+                enterAuthRequired()
             }
         }
 
@@ -2015,7 +2015,7 @@ class RealTetherClient(
             if (b == null || c == null) {
                 // Before start() read the settings (e.g. an early lifecycle
                 // signal) "no credential" is not known yet: stay quiet.
-                if (settingsLoaded) connectionState.value = ConnectionState.AuthRequired
+                if (settingsLoaded) enterAuthRequired()
                 return
             }
             connecting = true
@@ -2091,7 +2091,7 @@ class RealTetherClient(
                     }
                     if (current) {
                         // State first: an observer that sees the reason must see the settled state.
-                        connectionState.value = ConnectionState.AuthRequired
+                        enterAuthRequired()
                         signedOutReasonState.value = SignedOutReason.GatewayRefused
                     }
                 }
@@ -2128,7 +2128,7 @@ class RealTetherClient(
         // device must not keep transcripts it can no longer prove it may read (§8.3).
         wipeMirror()
         // State first: an observer that sees the reason must see the settled state.
-        connectionState.value = ConnectionState.AuthRequired
+        enterAuthRequired()
         signedOutReasonState.value = reason
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
@@ -3935,11 +3935,24 @@ class RealTetherClient(
      * (The web reloads the page on every sign-in, which starts both over.)
      */
     private fun clearSignInViews() {
+        // ta-t7l r2: the settings frames carry the server's password and proxy token in plaintext:
+        // a sign-out (or a sign-in anew) drops them.
+        sidebarSync.clearSettings()
         nodesState.value = emptyList()
         nodeResultState.value = null
         eventLogState.update { EventLog(generation = it.generation + 1) }
         // T15.1: signed out (Lock) or signed in anew: no overview data or subscription survives it.
         synchronized(lock) { overviewSync.clear() }
+    }
+
+    /**
+     * ta-t7l r2: the one way into [ConnectionState.AuthRequired]. The settings frames (the server's
+     * password and proxy token in plaintext) are dropped first: a client that may not read this
+     * server any more holds nothing of its settings.
+     */
+    private fun enterAuthRequired() {
+        sidebarSync.clearSettings()
+        connectionState.value = ConnectionState.AuthRequired
     }
 
     /**

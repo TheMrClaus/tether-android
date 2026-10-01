@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ServerSetting
 import com.tether.app.ui.settings.ServerFixtures.FAKE_PASSWORD
@@ -204,6 +206,38 @@ class ServerSettingsBehaviourTest {
         )
     }
 
+    /** r2 (verifier): an edit that is not all digits is refused whole, never rewritten and sent. */
+    @Test fun aNumberFieldRefusesAnythingButDigits() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        val port = tag(ServerSettingsTags.input(ServerSetting.Port))
+        for (bad in listOf("6e4", "-5", "41.5", "4 173", "١٢")) {
+            port.performTextReplacement(bad)
+            port.performImeAction()
+            compose.waitForIdle()
+            assertTrue(bad, allSemantics().contains("EditableText=4173"))
+        }
+        shown = false
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /** r2: without a server (signed out) no settings are drawn, even with a frame in hand. */
+    @Test fun signedOutNoSettingsAreDrawn() {
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings()), origin = null))
+        tag(ServerSettingsTags.Loading).assertExists()
+        tag(ServerSettingsTags.row(ServerSetting.Host)).assertDoesNotExist()
+        tag(ServerSettingsTags.row(ServerSetting.Password)).assertDoesNotExist()
+        state.tab = SettingsTab.Metadata
+        compose.waitForIdle()
+        tag(ServerSettingsTags.row(ServerSetting.MetadataGenerationEnabled)).assertDoesNotExist()
+    }
+
+    /** r2: the dialog's window is FLAG_SECURE. */
+    @Test fun theDialogWindowIsSecure() {
+        assertEquals(androidx.compose.ui.window.SecureFlagPolicy.SecureOn, SettingsDialogProperties.securePolicy)
+    }
+
     @Test fun anUneditedFieldSendsNothingWhenItLosesFocusOrLeaves() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
@@ -222,14 +256,63 @@ class ServerSettingsBehaviourTest {
         assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"workspaceRoot":null}}""")), writer.frames())
     }
 
-    @Test fun theCliPickerSendsSetAdvancedSettings() {
+    /** r2: a pick only asks; the confirmation shows the current and the new CLI; Switch sends the exact frame. */
+    @Test fun theCliPickerSendsSetAdvancedSettingsOnlyAfterTheConfirmation() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("2.1.220")
+        assertEquals(emptyList<Any>(), writer.cli)
+        tag(ServerSettingsTags.CliConfirmSheet).assertExists()
+        assertTrue(allSemantics().contains("Auto — newest installed (2.1.225)"))
+        tag(ServerSettingsTags.CliConfirmNew).assertExists()
+        assertTrue(texts().contains(ClaudeCliCopy.CONFIRM_TITLE))
+        assertTrue(texts().contains("2.1.220"))
+        tag(ServerSettingsTags.CliConfirm).performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"2.1.220"}"""), writer.cli.map { it.first.encode() })
+        assertEquals(ORIGIN, writer.cli.single().second)
+        tag(ServerSettingsTags.CliConfirmSheet).assertDoesNotExist()
+    }
+
+    @Test fun cancellingTheCliSwitchSendsNothing() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
         openSelect(ClaudeCliCopy.PICKER_TITLE)
         pick("Bundled (SDK)")
+        tag(ServerSettingsTags.CliCancel).performClick()
         compose.waitForIdle()
-        assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"bundled"}"""), writer.cli.map { it.first.encode() })
-        assertEquals(ORIGIN, writer.cli.single().second)
+        tag(ServerSettingsTags.CliConfirmSheet).assertDoesNotExist()
+        assertEquals(emptyList<Any>(), writer.cli)
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    @Test fun switchingBackToAutoShowsWhatAutoResolvesToAndSendsNull() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(advanced = ServerFixtures.ADVANCED.copy(claudeCliVersion = "2.1.220", effectiveSource = "picker", effectiveVersion = "2.1.220"), writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("Auto — newest installed")
+        assertEquals(emptyList<Any>(), writer.cli)
+        // Now: the pinned version; Switch to: Auto, by the picker's own label.
+        assertTrue(texts().contains("2.1.220"))
+        assertTrue(texts().contains("Auto — newest installed"))
+        tag(ServerSettingsTags.CliConfirm).performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":null}"""), writer.cli.map { it.first.encode() })
+    }
+
+    @Test fun anEnvOverrideThatLandsBeforeTheSwitchSendsNothing() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("Bundled (SDK)")
+        binding = binding.copy(advanced = ServerFixtures.ADVANCED_FORCED)
+        compose.waitForIdle()
+        if (compose.onAllNodesWithTag(ServerSettingsTags.CliConfirm, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
+            tag(ServerSettingsTags.CliConfirm).performClick()
+            compose.waitForIdle()
+        }
+        assertEquals(emptyList<Any>(), writer.cli)
     }
 
     // ---- env locks ---------------------------------------------------------------------------------
@@ -341,6 +424,86 @@ class ServerSettingsBehaviourTest {
         assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"proxyToken":"new-token"}}""")), writer.frames())
     }
 
+    /** r2: a secret is sent only by Done: not when the field loses focus, nor when Settings closes. */
+    @Test fun aSecretIsSentOnlyByDone() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings()), writer = writer))
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        tag(ServerSettingsTags.input(ServerSetting.Password)).performClick()
+        tag(ServerSettingsTags.input(ServerSetting.Password)).performTextReplacement("ab")
+        // Focus moves to another field: the half-typed secret is not sent.
+        tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot)).performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
+        // Settings closes with it still typed: nothing either.
+        shown = false
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /** r2: the app going to the background masks a revealed secret (the Recents snapshot never holds it). */
+    @Test fun stoppingTheAppMasksTheSecretAgain() {
+        val owner = TestOwner()
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        binding = ServerFixtures.binding(view = ServerFixtures.view(secretSettings()))
+        compose.setContent {
+            CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner) {
+                SettingsUnderTest(store.prefs, state, serverSettings = binding)
+            }
+        }
+        compose.waitUntil(5_000) { state.draft != null }
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        compose.waitForIdle()
+        tag(ServerSettingsTags.input(ServerSetting.Password)).assertExists()
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
+        compose.waitForIdle()
+        tag(ServerSettingsTags.masked(ServerSetting.Password)).assertExists()
+        assertFalse(allSemantics().contains(SENTINEL))
+    }
+
+    /** r2: a revealed secret cannot be copied or cut to the clipboard. */
+    @Test fun aRevealedSecretCannotBeCopied() {
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
+        field.performClick()
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        compose.waitForIdle()
+        val actions = field.fetchSemanticsNode().config
+        assertTrue("the field offers copy", actions.contains(SemanticsActions.CopyText))
+        field.performSemanticsAction(SemanticsActions.CopyText)
+        compose.waitForIdle()
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        compose.waitForIdle()
+        if (field.fetchSemanticsNode().config.contains(SemanticsActions.CutText)) field.performSemanticsAction(SemanticsActions.CutText)
+        compose.waitForIdle()
+        val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSystemService(android.content.ClipboardManager::class.java)
+        val clip = clipboard.primaryClip
+        assertFalse("the clipboard holds the secret", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+    }
+
+    /** r2: the revealed field's text menu offers neither Copy nor Cut (paste and select-all stay). */
+    @Test fun theRevealedFieldsMenuOffersNoCopyOrCut() {
+        val seen = mutableListOf<List<Boolean>>()
+        val platform = object : androidx.compose.ui.platform.TextToolbar {
+            override val status = androidx.compose.ui.platform.TextToolbarStatus.Hidden
+            override fun hide() = Unit
+            override fun showMenu(
+                rect: androidx.compose.ui.geometry.Rect,
+                onCopyRequested: (() -> Unit)?,
+                onPasteRequested: (() -> Unit)?,
+                onCutRequested: (() -> Unit)?,
+                onSelectAllRequested: (() -> Unit)?,
+            ) {
+                seen += listOf(onCopyRequested != null, onPasteRequested != null, onCutRequested != null, onSelectAllRequested != null)
+            }
+        }
+        val guarded = NoCopyToolbar(platform)
+        guarded.showMenu(androidx.compose.ui.geometry.Rect.Zero, {}, {}, {}, {})
+        assertEquals(listOf(listOf(false, true, false, true)), seen)
+    }
+
     @Test fun closingSettingsMasksTheSecretAgain() {
         show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
         tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
@@ -427,6 +590,48 @@ class ServerSettingsBehaviourTest {
     /** Fake values only in the revealed golden: the fixture's value is obviously fake. */
     @Test fun theGoldenSecretIsObviouslyFake() {
         assertTrue(FAKE_PASSWORD.startsWith("FAKE-"))
+    }
+}
+
+/** A lifecycle owner the test moves by hand. */
+class TestOwner : androidx.lifecycle.LifecycleOwner {
+    val registry = androidx.lifecycle.LifecycleRegistry(this)
+    override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+}
+
+/**
+ * r2: a real activity recreation (a configuration change: rotation, theme, locale) never commits a
+ * half-typed edit: neither a revealed secret nor a number. A real close still commits a non-secret
+ * row (ServerSettingsBehaviourTest.anEditLeftInAFieldIsSentWhenTheDialogClosesLikeTheWebsBlur).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ServerSettingsRecreationTest {
+    private val tmp = TemporaryFolder()
+    private val store = PrefsStore(tmp)
+    private val compose = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
+
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
+
+    @Test fun recreatingTheActivitySendsNoHalfTypedEdit() {
+        val writer = RecordingWriter()
+        val state = SettingsDialogState(SettingsTab.Advanced)
+        val binding = ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(password = SENTINEL)), writer = writer)
+        compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = binding) }
+        compose.waitUntil(5_000) { state.draft != null }
+        fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
+        // A revealed secret, half typed (its focus loss below sends nothing: a secret waits for Done).
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        tag(ServerSettingsTags.input(ServerSetting.Password)).performClick()
+        tag(ServerSettingsTags.input(ServerSetting.Password)).performTextReplacement("ab")
+        // A number, half typed and still focused when the configuration changes.
+        tag(ServerSettingsTags.input(ServerSetting.Port)).performScrollTo().performClick()
+        tag(ServerSettingsTags.input(ServerSetting.Port)).performTextReplacement("41")
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
     }
 }
 

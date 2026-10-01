@@ -15,8 +15,9 @@ import kotlinx.serialization.json.longOrNull
  * ta-t7l: a value the server sends in PLAINTEXT that is a secret (`password`, `proxyToken`). It
  * prints as `SecretText(***)` whatever it holds, so no log line, assertion message or data-class
  * `toString` can carry it; [reveal] is the one way to read it, called only by the revealed row.
- * It is never put in saved state or the preference store (the settings UI keeps it in memory, for
- * the open dialog only).
+ * It is never put in saved state or the preference store. In memory it lives in the client's last
+ * `server-settings` frame, which the client drops on a server switch, a sign-out and an
+ * auth-required state (r2), and in the settings UI only while a row is revealed.
  */
 class SecretText(private val value: String) {
     fun reveal(): String = value
@@ -82,8 +83,11 @@ class ServerSettingsView private constructor(
 ) {
     fun forced(setting: ServerSetting): Boolean = setting.key in envForced
 
-    /** ServerTextRow: `String(settings[field] ?? "")`. */
-    fun text(setting: ServerSetting): String = stringOf(raw[setting.key])
+    /**
+     * ServerTextRow: `String(settings[field] ?? "")`. r2: a [SettingKind.Secret] reads "" here, so the
+     * plaintext can only be had through [secret] (and its [SecretText.reveal]), never by mistake.
+     */
+    fun text(setting: ServerSetting): String = if (setting.kind == SettingKind.Secret) "" else stringOf(raw[setting.key])
 
     /** The secret rows' value, the same coercion as [text], kept in a [SecretText]. */
     fun secret(setting: ServerSetting): SecretText = SecretText(stringOf(raw[setting.key]))
@@ -104,8 +108,8 @@ class ServerSettingsView private constructor(
         else -> true
     }
 
-    /** ServerSelectRow: null / absent is the empty option (`""`), anything else its string. */
-    fun choice(setting: ServerSetting): String = stringOf(raw[setting.key])
+    /** ServerSelectRow: null / absent is the empty option (`""`), anything else its string (a secret reads ""). */
+    fun choice(setting: ServerSetting): String = if (setting.kind == SettingKind.Secret) "" else stringOf(raw[setting.key])
 
     /** ServerRootsRow: `Array.isArray(raw) ? raw : []` (a non-string entry is dropped). */
     fun paths(setting: ServerSetting): List<String> =

@@ -49,6 +49,12 @@ internal class SidebarSync {
         sessionOrders.update { it + (cwd to order) }
     }
 
+    /** ta-t7l r2: the two settings frames only (sign-out, auth required): they hold plaintext secrets. */
+    fun clearSettings() {
+        serverSettings.value = null
+        advancedSettings.value = null
+    }
+
     /** Another server's sidebar must never show: dropped with the other per-server views. */
     fun clear() {
         historiesByCwd.value = emptyMap()

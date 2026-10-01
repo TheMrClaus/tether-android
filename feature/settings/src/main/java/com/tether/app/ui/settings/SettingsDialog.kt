@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.ServerSettingsView
@@ -173,14 +174,16 @@ fun SettingsDialog(
     val advanced by client.advancedSettings.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestAdvancedSettings() }
     val writer = remember(client) { ClientSettingsWriter(client) }
+    val origin = if (configured) serverOrigin(server) else null
     val serverBinding = ServerSettingsBinding(
-        settings = serverSettings?.let(ServerSettingsView::of),
+        // r2: signed out (no origin), no settings: the client also drops the frames then.
+        settings = serverSettings?.takeIf { origin != null }?.let(ServerSettingsView::of),
         advanced = advanced,
-        origin = if (configured) serverOrigin(server) else null,
+        origin = origin,
         writer = writer,
     )
     val layout = currentLayoutClass()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
         val progress = rememberDialogIn()
@@ -481,6 +484,17 @@ private fun rememberDialogIn(): Animatable<Float, *> {
     }
     return progress
 }
+
+/**
+ * The dialog's window. r2: FLAG_SECURE (SecureOn) for the whole dialog, since its Advanced tab can
+ * reveal the server's password and proxy token: no screenshot, screen recording or Recents
+ * snapshot holds them.
+ */
+internal val SettingsDialogProperties = DialogProperties(
+    usePlatformDefaultWidth = false,
+    decorFitsSystemWindows = false,
+    securePolicy = SecureFlagPolicy.SecureOn,
+)
 
 /** settings-dialog.tsx:2000, the banner's words. */
 const val RESTART_REQUIRED = "Some changes need a server restart to take effect."

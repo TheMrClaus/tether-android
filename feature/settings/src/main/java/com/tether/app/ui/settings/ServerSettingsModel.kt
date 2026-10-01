@@ -31,7 +31,9 @@ interface ServerSettingsWriter {
  * ([origin]). [settings] is the last `server-settings` frame (null until the server replies, the
  * web's `serverSettings`), [advanced] the last `advanced-settings` frame (the Claude CLI picker).
  * Both arrive from the client's flows; a screenshot builds them by hand, so nothing is fetched in a
- * shot. Nothing here is persisted: a secret it holds lives only while the dialog is open.
+ * shot. Nothing here is persisted. A secret it holds lives in the client's last frame, which the
+ * client drops on a server switch, a sign-out and an auth-required state (r2); the tabs draw no
+ * settings at all without an [origin].
  */
 data class ServerSettingsBinding(
     val settings: ServerSettingsView?,
@@ -163,6 +165,13 @@ object ClaudeCliCopy {
     const val PICKER_TITLE = "Claude CLI version"
     const val PICKER_TIP = "Auto = the newest installed host version from ~/.local/share/claude/versions/ (Tether behaves like an extension of your own CLI); Bundled = the SDK-shipped CLI. A mismatched CLI can break turns or silently disable approval prompts."
     const val AUTO_SOURCE = "host install (auto)"
+
+    // r2: the switch's confirmation (owner decision 2026-10-01: what the server runs is confirmed, showing the new value).
+    const val CONFIRM_TITLE = "Switch the Claude CLI?"
+    const val CONFIRM_BODY = "Sessions started after the switch run the CLI below. A CLI that doesn't match the built-in SDK can make turns fail, or silently disable the approval prompts."
+    const val CONFIRM_NOW = "Now"
+    const val CONFIRM_NEW = "Switch to"
+    const val CONFIRM_ACTION = "Switch CLI"
 
     /** The picker row's caption (:2431). */
     fun caption(advanced: ServerMessage.AdvancedSettings?): String = when {

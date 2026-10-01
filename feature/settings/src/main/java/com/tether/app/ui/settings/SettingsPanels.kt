@@ -234,7 +234,8 @@ private fun EnginesPanel(narrow: Boolean, claudeAccounts: ClaudeAccountsBinding)
  */
 @Composable
 private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
-    val view = binding.settings
+    // r2: no server, nothing drawn (a frame kept past a sign-out must never show).
+    val view = binding.settings?.takeIf { binding.origin != null }
     Column {
         if (view == null) {
             SettingsSection(MetadataRows.GENERATION, AnnotatedString(MetadataRows.GENERATION_CAPTION), narrow, last = true) { ServerSettingsLoading() }
@@ -270,8 +271,10 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  * (the two secrets, masked), Storage, GitHub connection, Session lifecycle, Session defaults, then
  * Claude CLI. Every row writes at once (`set-server-settings` with only its key); a value an
  * environment variable forces is locked. The restart banner above follows the server's
- * `restartRequired` in its reply. None of these rows sets what the server RUNS (the engine homes,
- * commands and launch command are on Engines, ta-dh1, behind a confirmation).
+ * `restartRequired` in its reply. One row here sets what the server RUNS: the Claude CLI picker
+ * (which binary a new Claude session spawns), so a pick is confirmed first, the new CLI shown
+ * (ClaudeCliConfirmDialog; r2). The engine homes, commands and launch command are on Engines (ta-dh1),
+ * behind the same kind of confirmation.
  *
  * Not here: the GitHub connection card (the `/api/github/connection` routes, MATRIX row `/api/github/...`, T8.4)
  * holds its place with a note; the active Codex / opencode session's provider controls
@@ -280,7 +283,8 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  */
 @Composable
 private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding) {
-    val view = binding.settings
+    // r2: no server, nothing drawn (a frame kept past a sign-out must never show).
+    val view = binding.settings?.takeIf { binding.origin != null }
     Column {
         if (view == null) {
             SettingsSection("Server settings", null, narrow) { ServerSettingsLoading() }

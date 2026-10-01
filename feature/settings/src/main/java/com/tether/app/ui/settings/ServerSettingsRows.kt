@@ -1,5 +1,9 @@
 package com.tether.app.ui.settings
 
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +20,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,8 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.AndroidClipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -41,12 +54,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tether.app.client.LabelText
 import com.tether.app.client.ServerSetting
 import com.tether.app.client.ServerSettingsPatch
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.TetherDialog
+import com.tether.app.ui.components.TetherDialogText
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
@@ -71,6 +89,11 @@ object ServerSettingsTags {
     const val CliWarning = "claude-cli-warning"
     const val CliPicker = "claude-cli-picker"
     const val CliForced = "claude-cli-forced"
+    const val CliConfirmSheet = "claude-cli-confirm"
+    const val CliConfirmNow = "claude-cli-confirm-now"
+    const val CliConfirmNew = "claude-cli-confirm-new"
+    const val CliConfirm = "claude-cli-confirm-switch"
+    const val CliCancel = "claude-cli-confirm-cancel"
 }
 
 /** A row's caption: "Set by environment" when forced (settings-dialog.tsx:145), else its description. */
@@ -80,9 +103,15 @@ private fun caption(forced: Boolean, description: String) = AnnotatedString(if (
  * `.settings-server-input` (studio.css 594-609, 975-979): a 44dp field on the case's graphite with a
  * 1px `--line-strong` edge at 8dp, mono 13 (16 on a phone), the focus edge `--violet-strong`;
  * disabled at 0.55. The value is committed the web's way (ServerTextRow, settings-dialog.tsx:129):
- * on Done (Enter), when the field loses focus, and when it leaves the screen with an edit in it
- * (the web's blur on close). [shown] is what the field was filled with; a server reply with a new
- * value refills it (the web's `key={rawValue}` remount).
+ * on Done (Enter), when the field loses focus ([commitOnBlur]), and when it leaves the screen with
+ * an edit in it ([commitOnLeave]: the web's blur on close). [shown] is what the field was filled
+ * with; a server reply with a new value refills it (the web's `key={rawValue}` remount).
+ *
+ * r2: a configuration change (rotation, theme, locale: the activity is recreated) is NOT a close
+ * or a blur: while the activity [isChangingConfigurations][android.app.Activity.isChangingConfigurations]
+ * neither the focus loss nor the disposal it causes commits anything, so a half-typed value is
+ * never sent. [accept]: an edit that fails it leaves the field as it was (nothing is rewritten).
+ * [noCopy]: copy and cut put nothing on the clipboard and are not offered (a revealed secret).
  */
 @Composable
 private fun CommitField(
@@ -95,11 +124,16 @@ private fun CommitField(
     onCommit: (String) -> Unit,
     modifier: Modifier = Modifier,
     keyboardType: KeyboardType = KeyboardType.Text,
-    filter: (String) -> String = { it },
+    accept: (String) -> Boolean = { true },
+    commitOnBlur: Boolean = true,
+    commitOnLeave: Boolean = true,
+    noCopy: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val focusManager = LocalFocusManager.current
+    val activity = LocalContext.current.findActivity()
+    val recreating = { activity?.isChangingConfigurations == true }
     var text by remember(shown) { mutableStateOf(shown) }
     // The last value handed to [onCommit] for this server value: Done then the focus loss it
     // causes is one write, not two.
@@ -112,11 +146,13 @@ private fun CommitField(
         }
     }
     val latestCommit by rememberUpdatedState(commit)
-    DisposableEffect(Unit) { onDispose { latestCommit() } }
+    val leaves by rememberUpdatedState(commitOnLeave)
+    DisposableEffect(Unit) { onDispose { if (leaves && !recreating()) latestCommit() } }
     val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
+    NoCopyScope(noCopy) {
     BasicTextField(
         value = text,
-        onValueChange = { text = filter(it) },
+        onValueChange = { if (accept(it)) text = it },
         enabled = enabled,
         singleLine = true,
         textStyle = style.copy(color = t.ink),
@@ -135,7 +171,7 @@ private fun CommitField(
             .testTag(tag)
             .semantics { contentDescription = label }
             .onFocusChanged { f ->
-                if (focused && !f.isFocused) commit()
+                if (focused && !f.isFocused && commitOnBlur && !recreating()) commit()
                 focused = f.isFocused
             },
         decorationBox = { inner ->
@@ -152,6 +188,59 @@ private fun CommitField(
             }
         },
     )
+    }
+}
+
+/** The activity hosting [this] context (a dialog's themed wrapper included), or null. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/**
+ * r2: with [on], the field's copy and cut never reach the clipboard (its writes are dropped; paste
+ * still reads it) and the text toolbar offers neither. (A cut asked for another way, an
+ * accessibility action or a hardware key, then only deletes the selection.)
+ */
+// AndroidClipboard is marked @VisibleForTesting, but the text field requires it (a plain Clipboard
+// throws in its paste check), so the guard implements it.
+@SuppressLint("VisibleForTests")
+@Composable
+private fun NoCopyScope(on: Boolean, content: @Composable () -> Unit) {
+    if (!on) return content()
+    val clipboard = LocalClipboard.current
+    val toolbar = LocalTextToolbar.current
+    // The text field reads the platform manager for paste (AndroidClipboard); only writes are dropped.
+    val guarded = remember(clipboard) { (clipboard as? AndroidClipboard)?.let(::NoCopyClipboard) ?: clipboard }
+    val menu = remember(toolbar) { NoCopyToolbar(toolbar) }
+    CompositionLocalProvider(LocalClipboard provides guarded, LocalTextToolbar provides menu, content = content)
+}
+
+@SuppressLint("VisibleForTests")
+private class NoCopyClipboard(private val delegate: AndroidClipboard) : AndroidClipboard {
+    override val clipboardManager: android.content.ClipboardManager get() = delegate.clipboardManager
+    override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
+}
+
+internal class NoCopyToolbar(private val delegate: TextToolbar) : TextToolbar by delegate {
+    override fun showMenu(
+        rect: Rect,
+        onCopyRequested: (() -> Unit)?,
+        onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?,
+        onSelectAllRequested: (() -> Unit)?,
+    ) = delegate.showMenu(rect, null, onPasteRequested, null, onSelectAllRequested)
+
+    override fun showMenu(
+        rect: Rect,
+        onCopyRequested: (() -> Unit)?,
+        onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?,
+        onSelectAllRequested: (() -> Unit)?,
+        onAutofillRequested: (() -> Unit)?,
+    ) = delegate.showMenu(rect, null, onPasteRequested, null, onSelectAllRequested, onAutofillRequested)
 }
 
 /** The control's width: the row's on a phone, the web's 288dp cap beside the text. */
@@ -192,7 +281,10 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
  *   the secret on the phone, reveal it first (the web lets a masked field be typed into);
  * - the reveal flag is plain `remember`: never saved state, so a rotation, closing Settings or
  *   leaving the tab masks it again; the panel is keyed on the server's origin, so another server
- *   starts masked;
+ *   starts masked; r2: the app going to the background (ON_STOP) masks it too, so the Recents
+ *   snapshot never holds it (the dialog's window is also FLAG_SECURE);
+ * - r2: a secret is sent ONLY by Done on the keyboard: never on a focus loss, a close, a tab change
+ *   or a recreation, so a half-typed password is never applied. Copy and cut are off.
  * - forced by env: masked, no Reveal (the web hides its eye then).
  */
 @Composable
@@ -203,6 +295,12 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
     val forced = view.forced(s)
     val secret = view.secret(s)
     var revealed by remember { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) revealed = false }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val open = revealed && !forced
     SettingsRow(
         narrow = narrow,
@@ -221,6 +319,9 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
                         narrow = narrow,
                         placeholder = row.placeholder,
                         keyboardType = KeyboardType.Password,
+                        commitOnBlur = false,
+                        commitOnLeave = false,
+                        noCopy = true,
                         onCommit = { binding.send(ServerSettingsPatch.text(view, s, it, shown)) },
                         modifier = Modifier.weight(1f),
                     )
@@ -258,7 +359,7 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
     )
 }
 
-/** ServerNumberRow (settings-dialog.tsx:164-211): digits only (the number keypad), committed like the text row. */
+/** ServerNumberRow (settings-dialog.tsx:164-211): digits only (the number keypad, and any other edit refused), committed like the text row. */
 @Composable
 internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
     val s = row.setting
@@ -280,7 +381,9 @@ internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: 
                     narrow = narrow,
                     placeholder = row.placeholder,
                     keyboardType = KeyboardType.Number,
-                    filter = { typed -> typed.filter(Char::isDigit).take(MAX_DIGITS) },
+                    // r2: an edit that is not all digits (a paste of "6e4" or "-5") is refused as a
+                    // whole, never rewritten into another number that would then be sent.
+                    accept = { typed -> typed.length <= MAX_DIGITS && typed.all { it in '0'..'9' } },
                     onCommit = { binding.send(ServerSettingsPatch.number(view, s, it)) },
                     modifier = Modifier.widthIn(max = 144.dp).fillMaxWidth(),
                 )
@@ -454,12 +557,18 @@ private fun AddPathField(value: String, onChange: (String) -> Unit, label: Strin
  * The Claude CLI section (settings-dialog.tsx:2426-2449): `.settings-warning` (Studio: the attention
  * wash, studio.css 612), then the env-forced row, or the version picker (disabled until the server's
  * `advanced-settings` reply). Its writes are `set-advanced-settings`.
+ *
+ * r2: the picker chooses which Claude binary the server RUNS, so (owner decision, 2026-10-01) a
+ * pick only opens [ClaudeCliConfirmDialog], which shows the current and the new CLI; Switch sends
+ * the write, built at that moment from the latest frame (an env override that landed meanwhile
+ * still sends nothing). Cancel, Back or a tap outside sends nothing.
  */
 @Composable
 internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val advanced = binding.advanced
+    var pending by remember { mutableStateOf<ServerChoice?>(null) }
     SettingsSection(ClaudeCliCopy.TITLE, null, narrow, modifier = Modifier.testTag(ServerSettingsTags.section("cli")), last = true) {
         val warning = buildAnnotatedString {
             val strong = SpanStyle(fontWeight = FontWeight(630), color = t.ink)
@@ -506,7 +615,12 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
                         TetherSelect(
                             options = ClaudeCliCopy.options(advanced).map { TetherSelectOption(it.value, it.label) },
                             selectedValue = advanced?.claudeCliVersion.orEmpty(),
-                            onSelect = { choice -> advanced?.let { binding.sendCli(ServerSettingsPatch.cliVersion(it, choice.value)) } },
+                            onSelect = { choice ->
+                                val a = advanced
+                                if (a != null && ServerSettingsPatch.cliVersion(a, choice.value) != null) {
+                                    pending = ClaudeCliCopy.options(a).firstOrNull { it.value == choice.value }
+                                }
+                            },
                             enabled = advanced != null,
                             placeholder = LabelText.visibleValue(advanced?.claudeCliVersion),
                             contentDescription = ClaudeCliCopy.PICKER_TITLE,
@@ -516,6 +630,68 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
                 },
             )
         }
+    }
+    PendingCliPick(pending, binding) { pending = null }
+}
+
+/** The section's pending pick, confirmed or dropped. */
+@Composable
+private fun PendingCliPick(pending: ServerChoice?, binding: ServerSettingsBinding, onDone: () -> Unit) {
+    val choice = pending ?: return
+    // The frame went away (signed out, another server): the pick goes with it.
+    val advanced = binding.advanced ?: return SideEffect { onDone() }
+    val current = ClaudeCliCopy.options(advanced).firstOrNull { it.value == advanced.claudeCliVersion.orEmpty() }?.label
+        ?: LabelText.visibleValue(advanced.claudeCliVersion)
+    ClaudeCliConfirmDialog(
+        current = current,
+        next = choice.label,
+        onConfirm = {
+            // [binding] is this composition's, so the write is built from the latest frame.
+            binding.sendCli(ServerSettingsPatch.cliVersion(advanced, choice.value))
+            onDone()
+        },
+        onCancel = onDone,
+    )
+}
+
+/**
+ * r2: the Claude CLI switch's confirmation: what runs now and what will run (the picker's own
+ * labels, so Auto names what it resolves to), the web's warning in short, Cancel and Switch.
+ */
+@Composable
+internal fun ClaudeCliConfirmDialog(current: String, next: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    TetherDialog(
+        onDismiss = onCancel,
+        title = ClaudeCliCopy.CONFIRM_TITLE,
+        footer = {
+            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ServerSettingsTags.CliCancel))
+            TetherKey(onClick = onConfirm, classes = KeyClasses.ButtonPrimary, label = ClaudeCliCopy.CONFIRM_ACTION, modifier = Modifier.testTag(ServerSettingsTags.CliConfirm))
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().testTag(ServerSettingsTags.CliConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TetherDialogText(ClaudeCliCopy.CONFIRM_BODY)
+            CliField(ClaudeCliCopy.CONFIRM_NOW, current, ServerSettingsTags.CliConfirmNow)
+            CliField(ClaudeCliCopy.CONFIRM_NEW, next, ServerSettingsTags.CliConfirmNew)
+        }
+    }
+}
+
+@Composable
+private fun CliField(label: String, value: String, tag: String) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
+        Text(
+            value,
+            color = t.ink,
+            style = settingsText(type.mono, 13f, 400, lineHeight = 1.5f),
+            modifier = Modifier
+                .testTag(tag)
+                .fillMaxWidth()
+                .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        )
     }
 }
 
