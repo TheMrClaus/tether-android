@@ -50,9 +50,9 @@ fi
 {
   echo "# Vendored parity corpora"
   echo
-  echo "Generated in tether worktrees and copied by \`tools/parity/sync-corpus.sh\` — do not hand-edit."
-  echo "PARITY_BASE (UI: tokens, screens) = tether \`7d65611\` (v128). The protocol corpora (reducer+helpers,"
-  echo "wire) may be newer: each row's manifest \`tetherSha\` is the tree it was generated from."
+  echo "Generated in tether worktrees and copied by \`tools/parity/sync-corpus.sh\` — do not hand-edit the"
+  echo "table. The corpora may sit at different tether bases: each row's manifest \`tetherSha\` is the tree it"
+  echo "was generated from (TRACKER.md's PARITY_BASE line says which base each layer is at)."
   echo
   echo "| Corpus | Source branch @ sha | Manifest tetherSha |"
   echo "|---|---|---|"
@@ -67,5 +67,8 @@ fi
     msha=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('tetherSha'))" "$DEST/$mf")
     echo "| $name | \`$br\` @ \`$sha\` | \`$msha\` |"
   done
+  # Hand-written notes below the table survive a re-sync.
+  notes=$(awk 'seen && !/^\|/ {tail=1} /^\|/ {seen=1} tail' <<<"$OLD_VENDORED")
+  if [ -n "$notes" ]; then printf '%s\n' "$notes"; fi
 } > "$DEST/VENDORED.md"
 du -sh "$DEST"; cat "$DEST/VENDORED.md"

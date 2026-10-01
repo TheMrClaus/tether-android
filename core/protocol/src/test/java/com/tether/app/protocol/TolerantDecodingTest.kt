@@ -157,8 +157,8 @@ class TolerantDecodingTest {
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         assertEquals(setOf("type", "protocolVersion"), ClientMessage.Hello().toJsonObject().keys)
         // ta-koy: the app speaks v132; the native floor it documents stays 129.
-        // ta-ylh: the wire types model v135, but the ADVERTISED hello stays 132 — see the pin below.
-        assertEquals(135, TARGET_PROTOCOL_VERSION)
+        // ta-ylh: the wire types model v135 (T15.8: v137), but the ADVERTISED hello stays 132 — see the pin below.
+        assertEquals(137, TARGET_PROTOCOL_VERSION)
         assertEquals(129, NATIVE_PROTOCOL_FLOOR)
     }
 

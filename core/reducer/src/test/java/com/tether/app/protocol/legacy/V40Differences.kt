@@ -25,6 +25,12 @@ object V40Differences {
         Allowed(
             "*",
             "*",
+            Regex("""\$\.queuedMessages\[\d+]\.queuedAt"""),
+            "T15.8: the typed QueuedMessage carries v136's queuedAt (issue #229, events.mjs:2968 queued_message_added; null unless a stamped deferred row); v40 had no such field",
+        ),
+        Allowed(
+            "*",
+            "*",
             Regex("""\$\.turnsById\["[^"]*"]\.blocksById\["[^"]*"]\.attachments\[\d+]\.(delivery|mediaRef)"""),
             "T7.4: the typed AttachmentMeta carries v112's delivery and mediaRef (lib/protocol.ts AttachmentMeta, null when the journal has none); v40 had no such fields",
         ),

@@ -24,9 +24,9 @@ import kotlinx.coroutines.CompletableDeferred
  *
  * ta-ylh: keyed on TARGET, not the advertised PROTOCOL_VERSION (held at 132 for the owner gate):
  * the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
- * port must not be reused, although the corpus (still 79c3d37, re-sync is T15.8) did not move.
+ * port must not be reused, although the corpus did not move. T15.8: the corpus moved to 887c222.
  */
-const val REDUCER_CORPUS_SHA = "79c3d377d2f1e650286092b3387392c15512a843"
+const val REDUCER_CORPUS_SHA = "887c22214126fa662192e2a3adf6f2dd44e69cd6"
 val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$TARGET_PROTOCOL_VERSION"
 
 /**

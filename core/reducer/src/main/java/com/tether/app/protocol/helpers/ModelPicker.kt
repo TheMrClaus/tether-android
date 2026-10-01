@@ -300,7 +300,7 @@ object ModelPicker {
         CatalogModel("claude-opus-4-5", "Opus 4.5", "Opus 4.5 · legacy", reviewAfter = "2026-11-24"),
         CatalogModel("claude-sonnet-5", "Sonnet 5", "Sonnet 5 · near-Opus coding at Sonnet cost · 1M context", aliases = listOf("sonnet"), reviewAfter = "2027-06-30"),
         CatalogModel("claude-sonnet-4-6", "Sonnet 4.6", "Previous-generation Sonnet · 1M context", reviewAfter = "2027-02-17"),
-        CatalogModel("claude-sonnet-4-5", "Sonnet 4.5", "Sonnet 4.5 · legacy", reviewAfter = "2026-09-29"),
+        CatalogModel("claude-sonnet-4-5", "Sonnet 4.5", "Sonnet 4.5 · legacy", reviewAfter = "2026-11-30"),
         CatalogModel("claude-haiku-4-5", "Haiku 4.5", "Fastest · quick answers · 200K context", aliases = listOf("haiku"), reviewAfter = "2026-10-15"),
         // --- Retired: filtered out by date, listed so the absence is explained. ---
         CatalogModel("claude-opus-4-1", "Opus 4.1", "Retired", retiresOn = "2026-08-05"),

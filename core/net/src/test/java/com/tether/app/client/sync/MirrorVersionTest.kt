@@ -13,7 +13,7 @@ class MirrorVersionTest {
         val sha = Regex("\"tetherSha\"\\s*:\\s*\"([0-9a-f]+)\"").find(manifest)!!.groupValues[1]
         assertEquals("re-synced corpus: bump REDUCER_CORPUS_SHA (it invalidates local checkpoints)", sha, REDUCER_CORPUS_SHA)
         assertEquals("$sha/v$TARGET_PROTOCOL_VERSION", REDUCER_VERSION)
-        // ta-ylh: the v135 port (queue origin/noticeKind folded) over the 79c3d37 corpus.
-        assertEquals("79c3d377d2f1e650286092b3387392c15512a843/v135", REDUCER_VERSION)
+        // T15.8: the corpus re-synced at 887c222 (v137: deferred-row queuedAt, #222 grants folded).
+        assertEquals("887c22214126fa662192e2a3adf6f2dd44e69cd6/v137", REDUCER_VERSION)
     }
 }

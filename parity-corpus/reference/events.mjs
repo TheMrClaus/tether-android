@@ -415,6 +415,53 @@ export function currentTurn(state) {
   return state.activeTurnId ? state.turnsById[state.activeTurnId] : null;
 }
 
+// issue #183: the tool calls of the session's in-flight turn that are genuinely
+// RUNNING — started, not ended, and not parked on an approval or question (a
+// gated call has not run yet, so interrupting it destroys nothing: before #183 a
+// message typed at an approval card cancelled the turn, and it still does).
+// Read off the folded projection — engine-agnostic, unlike the persistent-only
+// openToolIds set. `excludeToolId` drops the call whose own tool_start is being
+// evaluated (a just-requested call has done nothing yet).
+export function runningToolIds(state, excludeToolId = null) {
+  const turn = currentTurn(state);
+  const running = new Set();
+  if (!turn) return running;
+  const parked = new Set();
+  for (const request of Object.values(turn.pendingApprovals ?? {})) if (request?.toolId) parked.add(request.toolId);
+  for (const request of Object.values(turn.pendingQuestions ?? {})) if (request?.toolId) parked.add(request.toolId);
+  for (const blockId of turn.blocks) {
+    if (blockId === excludeToolId || parked.has(blockId)) continue;
+    const block = turn.blocksById[blockId];
+    if (block?.kind === "tool" && block.done !== true) running.add(blockId);
+  }
+  return running;
+}
+
+export function openToolCount(state, excludeToolId = null) {
+  return runningToolIds(state, excludeToolId).size;
+}
+
+// issue #183: background tasks that are provably still running, off the folded
+// projection. EVIDENCE only — never the eviction heuristic (pendingBackgroundToolIds
+// deliberately over-marks and is cleared only by a continuation, so a foreground
+// Agent would pin every later message into "deferred" for the warm session's life).
+//   * `levelTaskIds` (the CLI's authoritative background_tasks_changed level, when
+//     this process has seen one) wins outright;
+//   * otherwise a task whose task_started has no terminal task_completed.
+// A task launched by a call already counted as a running tool is not counted twice.
+export function liveBackgroundTaskCount(state, { levelTaskIds = null, excludeToolIds = new Set() } = {}) {
+  const tasks = Array.isArray(state?.backgroundTasks) ? state.backgroundTasks : [];
+  const excluded = (task) => Boolean(task?.toolUseId) && excludeToolIds.has(task.toolUseId);
+  if (levelTaskIds) {
+    let count = 0;
+    for (const taskId of levelTaskIds) {
+      if (!excluded(tasks.find((task) => task.taskId === taskId))) count += 1;
+    }
+    return count;
+  }
+  return tasks.filter((task) => task.status === "running" && !excluded(task)).length;
+}
+
 // Issue #17: the sidebar's "Last Active" sort must reflect real conversation
 // activity — a user message or an agent turn — never a bare state-transition
 // stamp. A caller used to key that sort off a `Date.now()` read taken on
@@ -636,6 +683,29 @@ function normalizeStringList(values, { limit, maxChars }) {
     result.push(boundedDisplayText(value, maxChars));
   }
   return result;
+}
+
+/**
+ * Issue #222: does a requested-permissions profile exceed the projection bounds
+ * (a path over `pathChars` code points, or a list over `paths` entries)? The
+ * projection TRUNCATES such a value, and web + native clients grant exactly the
+ * bounded copy — so a path cut at a `/` would be granted as an ANCESTOR
+ * directory, a broader grant than the provider asked for. A request that cannot
+ * be shown whole is therefore never grantable (see the approval_request case).
+ */
+function requestedPermissionsExceedBounds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fileSystem = value.fileSystem;
+  if (!fileSystem || typeof fileSystem !== "object" || Array.isArray(fileSystem)) return false;
+  for (const access of ["read", "write"]) {
+    const list = fileSystem[access];
+    if (!Array.isArray(list)) continue;
+    if (list.length > PROVIDER_PROJECTION_LIMITS.paths) return true;
+    for (const entry of list) {
+      if (typeof entry === "string" && Array.from(entry).length > PROVIDER_PROJECTION_LIMITS.pathChars) return true;
+    }
+  }
+  return false;
 }
 
 function normalizeGrantedPermissions(value) {
@@ -2504,8 +2574,19 @@ function reduceEvent(state, event) {
 
     case "approval_request": {
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
-      const choices = normalizeApprovalChoices(event.choices);
-      const metadata = normalizeApprovalMetadata(event.metadata);
+      let choices = normalizeApprovalChoices(event.choices);
+      let metadata = normalizeApprovalMetadata(event.metadata);
+      // Issue #222: a requested permission set the projection cannot carry whole
+      // is NOT grantable — never truncate it into a (possibly broader) grant.
+      // Drop the truncated copy and every choice that would grant it; only the
+      // refusals remain, and a grant payload has nothing to confirm against.
+      if (requestedPermissionsExceedBounds(event.metadata?.requestedPermissions)) {
+        if (metadata) {
+          metadata = { ...metadata };
+          delete metadata.requestedPermissions;
+        }
+        if (choices) choices = choices.filter((choice) => choice.permissionGrant === undefined);
+      }
       // v131: `createdAt` is the journal-stamped `ts` of this request event —
       // never a clock read — so the pending request's age is identical on the
       // server, on every client folding the same events, and on replay. Added as
@@ -2894,7 +2975,15 @@ function reduceEvent(state, event) {
         ...state,
         queuedMessages: [
           ...state.queuedMessages,
-          { queueId: event.queueId, text: event.text, ...(event.flushMode ? { flushMode: event.flushMode } : {}) },
+          { queueId: event.queueId, text: event.text, ...(event.flushMode ? { flushMode: event.flushMode } : {}),
+            ...(event.origin ? { origin: event.origin } : {}),
+            ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
+            // v136 (issue #229): for a deferred ("next-call") message, the
+            // journal-stamped `ts` of the add — never a clock read — so "waited
+            // 14m" is identical on every device and after a reload. A KEY only for
+            // that mode and only when stamped (every other queued row, and a direct
+            // unit-test fold, keeps the pre-v136 shape).
+            ...(event.flushMode && nonNegativeFiniteNumber(event.ts) !== undefined ? { queuedAt: nonNegativeFiniteNumber(event.ts) } : {}) },
         ],
       };
     }

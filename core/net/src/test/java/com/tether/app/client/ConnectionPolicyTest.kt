@@ -81,9 +81,10 @@ class ConnectionPolicyTest {
      * deploys — which is why raising PROTOCOL_VERSION waits for the owner's deploy.
      */
     @Test
-    fun helloCompatWindowAt132CoversServers133To135() {
+    fun helloCompatWindowAt132CoversServers133To137() {
         assertEquals(132, PROTOCOL_VERSION)
-        for (server in 133..135) assertNull("server $server", Compatibility.evaluate(server, 129))
+        // T15.8: tether main moved to 137 (floor still 129); a 132 hello is still served.
+        for (server in 133..137) assertNull("server $server", Compatibility.evaluate(server, 129))
         for (server in 133..134) {
             assertEquals("server $server", IncompatibleReason.ServerTooOld, Compatibility.evaluate(server, 129, clientVersion = 135)!!.reason)
         }

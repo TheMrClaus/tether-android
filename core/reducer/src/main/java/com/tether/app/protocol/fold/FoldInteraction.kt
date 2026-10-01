@@ -189,16 +189,20 @@ private fun foldQuestionAnswered(state: JsObj, event: JsObj): JsObj {
 private fun hasQueueId(state: JsObj, queueId: JsValue?): Boolean =
     state["queuedMessages"].arr!!.any { strictEquals(it.obj?.get("queueId"), queueId) }
 
-// events.mjs:2887 (v135). v133 (issue #211): `origin` / `noticeKind` are copied verbatim when
+// events.mjs:2968 (887c222). v133 (issue #211): `origin` / `noticeKind` are copied verbatim when
 // truthy, exactly like `flushMode` — the fold does not validate them (readers normalize).
+// v136 (issue #229): a deferred (`flushMode`) row gets `queuedAt`, the journal-stamped `ts` of the
+// add (never a clock read) — a KEY only for that mode and only when stamped.
 private fun foldQueuedAdded(state: JsObj, event: JsObj): JsObj {
     if (hasQueueId(state, event["queueId"])) return state
+    val deferred = truthy(event["flushMode"])
     val message = JsObj.of(
         "queueId" to event["queueId"],
         "text" to event["text"],
-        "flushMode" to (if (truthy(event["flushMode"])) event["flushMode"] else null),
+        "flushMode" to (if (deferred) event["flushMode"] else null),
         "origin" to (if (truthy(event["origin"])) event["origin"] else null),
         "noticeKind" to (if (truthy(event["noticeKind"])) event["noticeKind"] else null),
+        "queuedAt" to (if (deferred) nonNegativeFiniteNumber(event["ts"]) else null),
     )
     return state.put("queuedMessages", state["queuedMessages"].arr!!.add(message))
 }
@@ -256,11 +260,18 @@ private fun foldRateLimit(state: JsObj, event: JsObj): JsObj {
     return state.with("rateLimit" to next, "rateLimitResume" to rateLimitResume)
 }
 
-// events.mjs:2495
+// events.mjs:2575 (887c222)
 private fun foldApprovalRequest(state: JsObj, event: JsObj): JsObj {
     if (!isOpenCurrentTurn(state, event["turnId"])) return state
-    val choices = normalizeApprovalChoices(event["choices"])
-    val metadata = normalizeApprovalMetadata(event["metadata"])
+    var choices = normalizeApprovalChoices(event["choices"])
+    var metadata = normalizeApprovalMetadata(event["metadata"])
+    // Issue #222: a requested permission set the projection cannot carry whole is NOT grantable —
+    // never truncate it into a (possibly broader, ancestor-directory) grant. Drop the truncated copy
+    // and every choice that would grant it; only the refusals remain.
+    if (requestedPermissionsExceedBounds(event["metadata"].obj?.get("requestedPermissions"))) {
+        metadata = metadata?.remove("requestedPermissions")
+        choices = choices?.filterKeep { it.obj?.get("permissionGrant") == null }
+    }
     // v131: the journal-stamped `ts` of this request (never a clock read); a KEY only when the
     // event is stamped, so an unstamped fold keeps the pre-v131 shape.
     val createdAt = nonNegativeFiniteNumber(event["ts"])
@@ -312,6 +323,21 @@ private fun foldApprovalClosed(state: JsObj, event: JsObj): JsObj {
         turn.put("pendingApprovals", turn["pendingApprovals"].obj!!.remove(jsToString(event["requestId"])))
     }
     return withDerivedStatus(next)
+}
+
+// events.mjs:696 (887c222), issue #222: does a requested-permissions profile exceed the projection
+// bounds (a path over `pathChars` code points, or a list over `paths` entries)?
+internal fun requestedPermissionsExceedBounds(value: JsValue?): Boolean {
+    val fileSystem = (value as? JsObj)?.get("fileSystem") as? JsObj ?: return false
+    val limits = Limits.PROVIDER_PROJECTION_LIMITS
+    for (access in listOf("read", "write")) {
+        val list = fileSystem[access] as? JsArr ?: continue
+        if (list.size > limits.paths) return true
+        for (entry in list) {
+            if (entry is JsStr && entry.value.codePointCount(0, entry.value.length) > limits.pathChars) return true
+        }
+    }
+    return false
 }
 
 // events.mjs:635

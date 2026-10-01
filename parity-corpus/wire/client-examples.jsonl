@@ -1,4 +1,4 @@
-{"type":"hello","frame":{"type":"hello","protocolVersion":132},"verdict":{"ok":true}}
+{"type":"hello","frame":{"type":"hello","protocolVersion":137},"verdict":{"ok":true}}
 {"type":"node-add","frame":{"type":"node-add","credential":"parity-credential-bundle","label":"Peer","baseUrl":"https://peer.example.test","requestId":"node-add-1"},"verdict":{"ok":true}}
 {"type":"node-remove","frame":{"type":"node-remove","nodeId":"node-0001","requestId":"node-remove-1"},"verdict":{"ok":true}}
 {"type":"node-probe","frame":{"type":"node-probe","nodeId":"node-0001","requestId":"node-probe-1"},"verdict":{"ok":true}}

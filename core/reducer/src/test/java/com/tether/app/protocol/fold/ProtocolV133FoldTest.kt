@@ -16,7 +16,7 @@ import org.junit.Test
 
 /**
  * ta-ylh: v133 (issue #211) queued-message provenance in the fold. The vendored reducer corpus is
- * still 79c3d37 (v132) and never carries `origin` / `noticeKind` (re-sync is T15.8), so these are
+ * 79c3d37 (v132) carried no `origin` / `noticeKind` (T15.8 re-synced it at 887c222), so these are
  * hand-written: the expected queue below is what the real engines/events.mjs at protocol 135
  * produced folding the same events (tests/queued-message.test.mjs plus truthiness edges).
  */

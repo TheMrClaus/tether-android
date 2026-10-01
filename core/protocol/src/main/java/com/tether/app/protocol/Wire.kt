@@ -12,18 +12,20 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * The protocol the wire TYPES in this module model: tether lib/protocol.ts
- * PROTOCOL_VERSION v135 (ta-ylh; ta-koy moved it 129 -> 132). Every
+ * PROTOCOL_VERSION v137 (T15.8; ta-ylh 135, ta-koy 129 -> 132). Every
  * ClientMessage/ServerMessage of that union has a Kotlin type; see
- * WireConformanceTest. v130-v135 are all additive and not native-breaking:
+ * WireConformanceTest. v130-v137 are all additive and not native-breaking:
  * AgentSession.lastSeq and SessionProjection.removedQueueIds (v130), the opt-in
  * Overview feed frames and pending-request `createdAt` (v131),
  * OverviewActivity.workspace (v132), queued-message `origin` / `noticeKind`
  * (v133), WorktreeScript `proxyUnavailable` and the nullable proxy links (v134),
- * AgentSession.createdVia and ready.hiddenAgentSessionCount (v135).
+ * AgentSession.createdVia and ready.hiddenAgentSessionCount (v135),
+ * QueuedMessage.queuedAt (v136). v137 only adds `plan` to the HTTP
+ * `/api/claude-accounts` rows, which this app does not read yet.
  *
  * NOT what the app advertises: see [PROTOCOL_VERSION].
  */
-const val TARGET_PROTOCOL_VERSION: Int = 135
+const val TARGET_PROTOCOL_VERSION: Int = 137
 
 /**
  * The protocol version the RUNTIME speaks: the `hello` this app sends. The
@@ -35,7 +37,8 @@ const val TARGET_PROTOCOL_VERSION: Int = 135
  * refuses a native hello NEWER than its own PROTOCOL_VERSION (server_too_old),
  * and the deployed server was last known at 133, so advertising 135 would lock
  * the app out until the owner deploys. Nothing on the server is gated on the
- * client's advertised version (the v133-v135 fields reach every client), so the
+ * client's advertised version (the v133-v137 fields reach every client; T15.8
+ * re-checked at 887c222), so the
  * app decodes them tolerantly while it still says 132. Raising this is an OWNER
  * GATE: only once the deployed server is at >= the new value.
  */
@@ -43,7 +46,7 @@ const val PROTOCOL_VERSION: Int = 132
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be
- * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v135). The
+ * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v137). The
  * server advertises its own value in `ready.nativeProtocolFloor` and `/healthz`;
  * this constant is documentation only — the runtime always trusts the server's.
  */

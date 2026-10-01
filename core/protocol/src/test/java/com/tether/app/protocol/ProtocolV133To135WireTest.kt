@@ -15,7 +15,7 @@ import org.junit.Test
  * null / the documented fallback and never drops a session row, a queue item or the ready frame.
  * Frames are shaped after the web's own tests (tests/queued-message.test.mjs,
  * tests/worktree-services*.test.mjs, tests/integration/session-list-creator.test.mjs) and
- * server.mjs's ready. The vendored wire corpus is still 79c3d37 (v132): re-sync is T15.8.
+ * server.mjs's ready. Written when the wire corpus was 79c3d37 (v132); T15.8 re-synced it at 887c222.
  */
 class ProtocolV133To135WireTest {
 

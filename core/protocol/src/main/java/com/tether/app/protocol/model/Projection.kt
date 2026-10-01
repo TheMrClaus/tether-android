@@ -291,6 +291,11 @@ data class QueuedMessage(
     val origin: JsonElement? = null,
     /** v133: a system notice's kind — "spawn" | "command" | "continuation". Read [noticeKindValue]. */
     val noticeKind: JsonElement? = null,
+    /**
+     * v136 (issue #229): the journal-stamped time (epoch ms) a DEFERRED ([flushMode] "next-call")
+     * message was queued, so it can say how long it has waited. Absent on every other row.
+     */
+    val queuedAt: Double? = null,
 ) {
     val atToolBoundary: Boolean get() = flushMode == "next-call"
 

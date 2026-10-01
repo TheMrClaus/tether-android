@@ -146,6 +146,9 @@ value class QueuedMessageView(val obj: JsObj) {
 
     /** v133: a system notice's kind ("spawn" | "command" | "continuation"; unknown kept as-is). */
     val noticeKind: String? get() = obj.string("noticeKind")
+
+    /** v136 (issue #229): when a deferred ("next-call") message was queued (epoch ms); null otherwise. */
+    val queuedAt: Double? get() = obj.number("queuedAt")
 }
 
 private fun JsObj.string(key: String): String? = (this[key] as? JsStr)?.value

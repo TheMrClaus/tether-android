@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * PLAN §5.2: the vendored wire corpus (tether S0.3's capture, re-run at 79c3d37 / v132 by
- * ta-koy) against the v132 Kotlin wire types.
+ * ta-koy and at 887c222 / v137 by T15.8) against the Kotlin wire types.
  *  (a) every s2c frame of every scenario decodes to a KNOWN ServerMessage subtype;
  *  (b) every client example decodes and re-encodes to canonically-equal JSON;
  *  (c) the Kotlin discriminator sets equal the TS unions' sets.
