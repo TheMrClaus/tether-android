@@ -310,7 +310,12 @@ class NewSessionTransmissionTest {
             ws.send(createdFrame("resumed", null))
             ws.send("""{"type":"error","message":"no","requestId":"r-2"}""")
             ws.send("""{"type":"error","message":"other"}""")
-            h.await(client.createErrors) { it?.message == "other" }
+            // r3: wait on what is asserted, the collected streams themselves (the latest-value flow is
+            // set first, so it can show the last reply before a collector has appended it).
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+            while ((got.size < 2 || errors.size < 2) && System.nanoTime() < deadline) Thread.sleep(5)
+            assertEquals("both replies were carried: $got", 2, got.size)
+            assertEquals("both errors were carried: $errors", 2, errors.size)
             assertEquals("the latest-value flow keeps only the last", "resumed", client.createdSessions.value?.session?.id)
             assertEquals(listOf("new", "resumed"), got.map { it.session.id })
             assertEquals(listOf("r-2", null), errors.map { it.requestId })
