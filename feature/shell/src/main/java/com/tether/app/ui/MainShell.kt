@@ -71,6 +71,7 @@ import com.tether.app.ui.files.WorkspaceFileBrowser
 import com.tether.app.ui.files.rememberFileBrowserState
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.inspector.InspectorHost
+import com.tether.app.ui.inspector.InspectorReads
 import com.tether.app.ui.log.LogDialog
 import com.tether.app.ui.log.LogDialogState
 import com.tether.app.ui.prefs.UiPrefs
@@ -235,16 +236,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var copiedTetherId by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
     LaunchedEffect(copiedTetherId) { if (copiedTetherId) { delay(CopiedFeedbackMs); copiedTetherId = false } }
-    // T9.1 (dashboard.tsx:793-828): the inspector's reads, once per opened session — the diff summary
-    // for any session (the server answers null for a non-repo cwd and pushes fresh summaries after),
-    // an isolated checkout's scripts, and a checkout-pr session's change request.
-    LaunchedEffect(session?.id, connected) {
-        val s = session ?: return@LaunchedEffect
-        if (!connected) return@LaunchedEffect
-        vm.client.requestWorktreeDiff(s.id)
-        if (s.worktree != null) vm.client.requestWorktreeScripts(s.id)
-        if (s.worktree?.mode == "checkout-pr") vm.client.requestChangeRequest(s.id)
-    }
+    // T9.1 (dashboard.tsx:793-828): the inspector's reads for the opened session (ta-dl4: each on
+    // the web's own dependency list).
+    InspectorReads(vm.client, session, connected)
     // T4.4: a session opened by a link reads like a sidebar pick: the drawer and the previous
     // session's popover close, so the session is on screen. T15.4: it shows Sessions (dashboard.tsx
     // `pushView("sessions", id)`): from another view Back returns there; from Sessions nothing is

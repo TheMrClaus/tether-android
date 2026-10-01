@@ -2,9 +2,11 @@ package com.tether.app.ui.inspector
 
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tether.app.client.TetherClient
 import com.tether.app.client.serverOrigin
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionView
@@ -43,4 +45,28 @@ fun ColumnScope.InspectorHost(vm: TetherViewModel, session: AgentSession, view: 
         fileDiffs = fileDiffs[session.id],
         onRequestFileDiff = { path -> vm.client.requestGitFileDiff(session.id, path) },
     )
+}
+
+/**
+ * T9.1 (dashboard.tsx:793-828): the inspector's reads for the opened [session], each re-sent on the
+ * web's own dependency list (ta-dl4) — the diff summary on the session id (the server answers null
+ * for a non-repo cwd and pushes fresh summaries after), an isolated checkout's scripts on the id and
+ * its worktree (by value, so an unrelated session update re-sends nothing), and a checkout-pr
+ * session's change request on the id and the worktree's mode. Every read also waits for (and is
+ * re-sent on) a [connected] link, and the client sends only on an open, handshaken socket.
+ */
+@Composable
+fun InspectorReads(client: TetherClient, session: AgentSession?, connected: Boolean) {
+    val id = session?.id
+    val worktree = session?.worktree
+    val mode = worktree?.mode
+    LaunchedEffect(id, connected) {
+        if (id != null && connected) client.requestWorktreeDiff(id)
+    }
+    LaunchedEffect(id, worktree, connected) {
+        if (id != null && connected && worktree != null) client.requestWorktreeScripts(id)
+    }
+    LaunchedEffect(id, mode, connected) {
+        if (id != null && connected && mode == "checkout-pr") client.requestChangeRequest(id)
+    }
 }
