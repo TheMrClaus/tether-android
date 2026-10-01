@@ -472,7 +472,8 @@ internal fun changeRequestLine(cr: JsonObject): String {
     return listOfNotNull(
         state?.let { CR_STATE[it] ?: LabelText.label(it) },
         if (cr.flag("isDraft") && state == "OPEN") "Draft" else null,
-        cr.string("reviewDecision")?.let { CR_REVIEW[it] ?: LabelText.label(it) },
+        // An unknown decision is dropped, as the web's `CR_REVIEW[x]` is undefined and filtered out.
+        cr.string("reviewDecision")?.let { CR_REVIEW[it] },
         if (cr.string("mergeable") == "CONFLICTING") "Conflicts" else null,
     ).filter { it.isNotEmpty() }.joinToString(" · ")
 }

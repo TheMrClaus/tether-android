@@ -229,6 +229,11 @@ class InspectorModelTest {
             PullRequestLine("Pull request #3", "Open · Draft · Changes requested · Conflicts"),
             pr(ChangeRequestReading(obj("""{"number":3,"state":"OPEN","isDraft":true,"reviewDecision":"CHANGES_REQUESTED","mergeable":"CONFLICTING"}"""), false)),
         )
+        // ta-dl4: an unknown decision is dropped, as on the web (CR_REVIEW[x] is undefined, filtered out).
+        assertEquals(
+            PullRequestLine("Pull request #4", "Open"),
+            pr(ChangeRequestReading(obj("""{"number":4,"state":"OPEN","isDraft":false,"reviewDecision":"FOO_BAR","mergeable":"MERGEABLE"}"""), false)),
+        )
     }
 
     @Test
