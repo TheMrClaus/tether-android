@@ -2,6 +2,9 @@ package com.tether.app.ui.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -80,3 +83,7 @@ fun SettingsUnderTest(
 }
 
 const val CURRENT = "/srv/work/tether"
+
+/** ta-b72: the one node tagged [tag] is drawn and enabled now (for a waitUntil, never a single read). */
+fun SemanticsNodeInteractionsProvider.isDrawnEnabled(tag: String): Boolean =
+    onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.config?.contains(SemanticsProperties.Disabled) == false

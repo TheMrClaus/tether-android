@@ -8,7 +8,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
@@ -46,6 +46,9 @@ private class GatedStore(private val real: DataStore<Preferences>) : DataStore<P
  * T10.1 r2 (verifier F2): until the stored preferences have been read once, General can be neither
  * edited nor saved, so Save can never write the defaults over fields the operator did not touch.
  * Once the read lands, the draft starts from the stored values.
+ *
+ * ta-b72: this file's classes use the v2 rule, so the store's IO-thread reads and writes resume on
+ * the test thread (see [SettingsBehaviourTest]).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -85,8 +88,10 @@ class SettingsLoadingTest {
         // The read lands: the draft is the stored values, and General is live.
         gated.open.value = true
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitForIdle()
         assertEquals(GeneralDraft("/srv/kept", showEndedSessions = false, confirmBeforeEnd = false, showThinking = true), state.draft)
+        // ta-b72 (load flake): the screen is WAITED on until it draws that draft, then read.
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) && compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)) }
+        compose.waitForIdle()
         save.assertIsEnabled()
         thinking.assertIsEnabled().assertIsOn()
         thinking.performClick()
@@ -127,12 +132,18 @@ class SettingsSaveTest {
 
     private fun stored() = runBlocking { store.store.data.first().asMap().mapKeys { it.key.name } }
 
+    /** ta-b72: the draft (read on the store's IO thread) is drawn: the switch and Save are live. */
+    private fun waitReady() = compose.waitUntil(5_000) {
+        compose.isDrawnEnabled(SettingsDialogTags.Save) && compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking))
+    }
+
     @Test fun saveClosesOnlyAfterTheWriteLands() {
         val slow = SlowWriteStore(store.store)
         val state = SettingsDialogState()
         var closes = 0
         compose.setContent { SettingsUnderTest(UiPrefs.on(slow), state, onClose = { closes++ }) }
         compose.waitUntil(5_000) { state.draft != null }
+        waitReady()
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
@@ -152,6 +163,7 @@ class SettingsSaveTest {
         var shown by mutableStateOf(true)
         compose.setContent { if (shown) SettingsUnderTest(UiPrefs.on(slow), state) }
         compose.waitUntil(5_000) { state.draft != null }
+        waitReady()
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()

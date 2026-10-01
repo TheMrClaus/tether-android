@@ -3,13 +3,14 @@ package com.tether.app.ui.settings
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -34,6 +35,12 @@ import org.robolectric.annotation.Config
  * T10.1 (components/settings-dialog.tsx): the tabs, General's Save draft (Save writes it, Cancel
  * and Close drop it), Appearance applied on click (T15.5's mode setting and the sign-in screen),
  * the restart banner, and the panels the later slices fill in.
+ *
+ * ta-b72: the v2 rule. Under the v1 rule's unconfined composition dispatcher, the draft's seed
+ * (read on the store's IO thread) was written on that thread, and the recomposer could miss it for
+ * good: the draft was set but General stayed drawn not-ready (probe: at least 12 of 280 openings;
+ * none of 360 under v2), so a tap on Use current was dropped. v2 dispatches that write to the
+ * test thread.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -53,8 +60,15 @@ class SettingsBehaviourTest {
         }
         // The draft is seeded from the store's first read.
         compose.waitUntil(5_000) { state.draft != null }
+        // ta-b72: and it is drawn: wait until the screen is ready too (Save is enabled only then, as
+        // are Use current and the switches), so no tap lands on a still-disabled control.
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         compose.waitForIdle()
     }
+
+    /** ta-b72: wait until [t] is drawn selected (Appearance draws the stored value, read back from the store after the write). */
+    private fun waitSelected(t: String) =
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(t).fetchSemanticsNodes().singleOrNull()?.config?.getOrNull(SemanticsProperties.Selected) == true }
 
     private fun tab(tab: SettingsTab) = compose.onNodeWithTag(SettingsDialogTags.tab(tab))
     private fun toggle(toggle: GeneralToggle) = compose.onNodeWithTag(SettingsPanelTags.toggle(toggle))
@@ -150,7 +164,9 @@ class SettingsBehaviourTest {
         show()
         compose.onNodeWithText("Workspace root").assertExists()
         compose.onNodeWithTag(SettingsPanelTags.UseCurrent).performClick()
-        compose.waitForIdle()
+        // ta-b72 (load flake): the tap reached the draft, and the caption is WAITED on, not read once.
+        compose.waitUntil(5_000) { state.draft?.defaultWorkspace == CURRENT }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(CURRENT, substring = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(CURRENT, substring = true).assertExists()
         compose.onNodeWithText("Workspace root").assertDoesNotExist()
         assertEquals("", store.stored()[PreferenceKeys.DEFAULT_WORKSPACE])
@@ -186,6 +202,7 @@ class SettingsBehaviourTest {
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
         compose.waitUntil(5_000) { store.stored()[PreferenceKeys.THEME_MODE] == "dark" }
+        waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).assertIsSelected()
         compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performClick()
         compose.waitUntil(5_000) { store.stored()[PreferenceKeys.LOGIN_VARIANT] == "retro" }
@@ -211,12 +228,14 @@ class SettingsBehaviourTest {
         for (retired in listOf("Tactile Console", "Precision Machine", "THEME")) {
             assertEquals(retired, 0, compose.onAllNodesWithText(retired).fetchSemanticsNodes().size)
         }
+        waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).assertIsSelected()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Light)).performClick()
         compose.waitUntil(5_000) { store.stored()[PreferenceKeys.THEME_MODE] == "light" }
         val raw = store.stored()
         assertEquals(null, raw[PreferenceKeys.THEME_FAMILY])
         assertEquals(null, raw[PreferenceKeys.LEGACY_THEME])
+        waitSelected(SettingsPanelTags.themeMode(ThemeMode.Light))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Light)).assertIsSelected()
     }
 

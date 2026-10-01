@@ -9,7 +9,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -45,6 +45,12 @@ import org.robolectric.shadows.ShadowLog
  * ta-9q2 / ta-ebc: the Engines tab's Claude accounts section (settings-dialog.tsx 887c222
  * :1380-1867), read only: what it reads and when, what it shows, the owner-grade controls drawn
  * disabled and never sent, the answers bound to the shown server, and `plan.raw` nowhere.
+ *
+ * ta-b72: the v2 rule (a StandardTestDispatcher for the composition). Under the v1 rule the
+ * section's effects ran on an unconfined dispatcher, so an answer the real reader finished on an
+ * OkHttp/IO thread resumed THERE and wrote Compose state off the main thread, racing the test
+ * thread's layout ("performMeasureAndLayout called during measure layout"). Now each answer is
+ * dispatched back to the test thread, as AndroidUiDispatcher resumes it on main in the app.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
