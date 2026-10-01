@@ -1124,4 +1124,51 @@ class OriginKeyedPendingTest {
         assertEquals("m-build", m["model"]!!.jsonPrimitive.content)
         assertTrue(b.allFrames.none { it.contains("private") })
     }
+
+    // ------------------------------------------------------------------
+    // 5. ta-895: a New session profile never crosses a server switch
+    // ------------------------------------------------------------------
+
+    private val readyWithClaude =
+        """{"type":"ready","protocolVersion":132,"nativeProtocolFloor":129,"sessions":[],""" +
+            """"providers":[{"id":"claude","label":"Claude","glyph":"C","available":true}],"workspaceRoot":null}"""
+
+    private val accountsCatalog =
+        """{"type":"providers-snapshot","entries":[""" +
+            """{"key":"work","provider":"claude","status":"ready","profileId":"work","extends":"claude","label":"Claude (work)","models":[]},""" +
+            """{"key":"claude","provider":"claude","status":"ready","label":"Claude","models":[]}]}"""
+
+    @Test
+    fun aProfileRowDrawnForAIsNeverCreatedOnBNotEvenAsTheDefault() {
+        val c = processOnA()
+        c.start()
+        val ws = a.nextSocket()
+        ws.send(readyWithClaude)
+        assertEquals("hello", a.frame().type())
+        await(c.connection) { it == ConnectionState.Connected }
+        ws.send(accountsCatalog)
+        await(c.providerCatalogLive) { it }
+        val drawnOnA = NewSessionChoice("work", "claude", "work")
+        val originA = c.consentOrigin.value
+        assertEquals(a.origin(), originA)
+
+        loginTo(b)
+        assertTrue("A's catalog shows on B", client.providerCatalog.value.isEmpty())
+        assertEquals(false, client.providerCatalogLive.value)
+        val bws = b.nextSocket()
+        bws.send(readyWithClaude)
+        assertEquals("hello", b.frame().type())
+        await(client.connection) { it == ConnectionState.Connected }
+
+        // Drawn for A: refused outright on B's socket.
+        assertEquals(NewSessionResult.NotLive, client.createNewSession(drawnOnA, "/w", originA))
+        // Re-drawn for B before B's catalog is in: B's base providers stand in, never A's profile.
+        assertEquals(NewSessionResult.NotOffered, client.createNewSession(drawnOnA, "/w", b.origin()))
+        // B's own catalog, without that account: still refused, and never the default instead.
+        bws.send("""{"type":"providers-snapshot","entries":[{"key":"claude","provider":"claude","status":"ready","label":"Claude","models":[]}]}""")
+        await(client.providerCatalogLive) { it }
+        assertEquals(NewSessionResult.NotOffered, client.createNewSession(drawnOnA, "/w", b.origin()))
+        assertTrue(framesUntilBarrier(b).none { it.type() == "create" })
+        assertTrue("A saw a create", a.allFrames.none { it.contains("\"create\"") })
+    }
 }
