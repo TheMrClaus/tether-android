@@ -117,7 +117,7 @@ private fun caption(forced: Boolean, description: String) = AnnotatedString(if (
  * [noCopy]: copy and cut put nothing on the clipboard and are not offered (a revealed secret).
  */
 @Composable
-private fun CommitField(
+internal fun CommitField(
     shown: String,
     label: String,
     tag: String,
@@ -209,7 +209,7 @@ internal fun serverFieldStyle(narrow: Boolean) = settingsText(LocalTetherTypogra
 internal fun Modifier.serverFieldWidth(narrow: Boolean): Modifier = serverInputWidth(narrow)
 
 /** The activity hosting [this] context (a dialog's themed wrapper included), or null. */
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
@@ -224,7 +224,7 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 // throws in its paste check), so the guard implements it.
 @SuppressLint("VisibleForTests")
 @Composable
-private fun NoCopyScope(on: Boolean, content: @Composable () -> Unit) {
+internal fun NoCopyScope(on: Boolean, content: @Composable () -> Unit) {
     if (!on) return content()
     val clipboard = LocalClipboard.current
     val toolbar = LocalTextToolbar.current
@@ -306,18 +306,10 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
  */
 @Composable
 internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
     val s = row.setting
     val forced = view.forced(s)
     val secret = view.secret(s)
-    var revealed by remember { mutableStateOf(false) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) revealed = false }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
+    var revealed by rememberMaskedReveal()
     val open = revealed && !forced
     SettingsRow(
         narrow = narrow,
@@ -343,23 +335,15 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
                         modifier = Modifier.weight(1f),
                     )
                 } else {
-                    val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
-                    Box(
-                        Modifier
-                            .testTag(ServerSettingsTags.masked(s))
-                            .clearAndSetSemantics { contentDescription = ServerRowCopy.maskedDescription(row.label, secret.isEmpty) }
-                            .weight(1f)
-                            .alpha(if (forced) 0.55f else 1f)
-                            .heightIn(min = 44.dp)
-                            .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        when {
-                            !secret.isEmpty -> Text(ServerRowCopy.MASK, style = style, color = t.ink, maxLines = 1)
-                            row.placeholder.isNotEmpty() -> Text(row.placeholder, style = style, color = t.faint, maxLines = 1)
-                        }
-                    }
+                    MaskedWell(
+                        tag = ServerSettingsTags.masked(s),
+                        description = ServerRowCopy.maskedDescription(row.label, secret.isEmpty),
+                        hasValue = !secret.isEmpty,
+                        placeholder = row.placeholder,
+                        narrow = narrow,
+                        dimmed = forced,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 if (!forced) {
                     TetherKey(
@@ -374,6 +358,58 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
             }
         },
     )
+}
+
+/**
+ * ta-q6p (slice 3's reveal, shared): whether a secret is revealed. Plain `remember` (never saved
+ * state, so a rotation, a close or leaving the tab masks it again), and the app going to the
+ * background (ON_STOP) masks it too, so the Recents snapshot never holds it.
+ */
+@Composable
+internal fun rememberMaskedReveal(): androidx.compose.runtime.MutableState<Boolean> {
+    val revealed = remember { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) revealed.value = false }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    return revealed
+}
+
+/**
+ * ta-q6p (slice 3's masked well, shared): a secret while masked. The value is NOT in the
+ * composition: the well draws a fixed mask (never the length) when [hasValue], else the
+ * [placeholder], and is one node named [description], so the semantics tree holds no part of it.
+ */
+@Composable
+internal fun MaskedWell(
+    tag: String,
+    description: String,
+    hasValue: Boolean,
+    placeholder: String,
+    narrow: Boolean,
+    modifier: Modifier = Modifier,
+    dimmed: Boolean = false,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
+    Box(
+        modifier
+            .testTag(tag)
+            .clearAndSetSemantics { contentDescription = description }
+            .alpha(if (dimmed) 0.55f else 1f)
+            .heightIn(min = 44.dp)
+            .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        when {
+            hasValue -> Text(ServerRowCopy.MASK, style = style, color = t.ink, maxLines = 1)
+            placeholder.isNotEmpty() -> Text(placeholder, style = style, color = t.faint, maxLines = 1)
+        }
+    }
 }
 
 /** ServerNumberRow (settings-dialog.tsx:164-211): digits only (the number keypad, and any other edit refused), committed like the text row. */

@@ -59,6 +59,7 @@ fun SettingsUnderTest(
     initialPreferences: com.tether.app.ui.prefs.TetherPreferences? = null,
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
+    providers: ProvidersBinding = ProvidersBinding.None,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -72,6 +73,7 @@ fun SettingsUnderTest(
                 initialPreferences = initialPreferences,
                 claudeAccounts = claudeAccounts,
                 serverSettings = serverSettings,
+                providers = providers,
             )
         }
     }

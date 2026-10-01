@@ -47,13 +47,14 @@ internal fun SettingsPanel(
     narrow: Boolean,
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
+    providers: ProvidersBinding = ProvidersBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
         SettingsTab.Appearance -> AppearancePanel(prefs, live, narrow)
         SettingsTab.Devices -> DevicesPanel(prefs, narrow)
         SettingsTab.Nodes -> NodesPanel(narrow)
-        SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts, serverSettings)
+        SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts, serverSettings, providers)
         // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
         // masked, every half-typed field dropped; a dropped edit is bound to its own server).
         SettingsTab.Metadata -> key(serverSettings.origin) { MetadataPanel(narrow, serverSettings) }
@@ -206,20 +207,18 @@ private fun NodesPanel(narrow: Boolean) {
 /**
  * Engines (settings-dialog.tsx:2107-2249), in the web's order: the engines (Scan again, then one
  * card per engine; ta-dh1, EnginesSection.kt), Claude accounts (ta-9q2, read only), Custom
- * providers (`ProfilesEditor`; the slot for ta-q6p) and Host config (`shareHostConfig`; ta-dh1).
- * The engine parts are keyed on the server, so another server's cards start from nothing (no
- * half-typed field, no pending confirmation; an edit is bound to its own server).
+ * providers (`ProfilesEditor`, :2237; ta-q6p, ProfilesSection.kt) and Host config
+ * (`shareHostConfig`; ta-dh1). The engine parts and the profiles are keyed on the server, so
+ * another server's cards start from nothing (no half-typed field, no revealed env value, no
+ * pending confirmation; an edit is bound to its own server).
  */
 @Composable
-private fun EnginesPanel(narrow: Boolean, claudeAccounts: ClaudeAccountsBinding, serverSettings: ServerSettingsBinding) {
+private fun EnginesPanel(narrow: Boolean, claudeAccounts: ClaudeAccountsBinding, serverSettings: ServerSettingsBinding, providers: ProvidersBinding) {
     val loaded = serverSettings.settings != null && serverSettings.origin != null
     Column {
         key(serverSettings.origin) { EngineCards(serverSettings, narrow) }
         ClaudeAccountsHost(claudeAccounts, narrow)
-        // ta-q6p slot: ProfilesEditor.
-        SettingsSection("Custom providers", AnnotatedString("Declarative profiles extending the built-in engines — different credentials, binaries, or model lists per profile."), narrow, last = !loaded) {
-            ComingSoonNote("The provider profiles editor is coming to the app in a later update.")
-        }
+        key(providers.origin) { ProfilesSection(providers, narrow, last = !loaded) }
         // Like the web, Host config is drawn once the server's settings are in.
         key(serverSettings.origin) { HostConfigSection(serverSettings, narrow) }
     }

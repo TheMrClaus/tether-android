@@ -401,26 +401,39 @@ internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () ->
 }
 
 @Composable
-private fun EngineValueField(label: String, value: String, empty: String, tag: String) {
+private fun EngineValueField(label: String, value: String, empty: String, tag: String) =
+    ConfirmValueField(label, if (value.isEmpty()) emptyList() else listOf(value), empty, tag)
+
+/**
+ * A confirmation's value well (ta-dh1; ta-q6p shares it): [label] over the value, each of [parts]
+ * on its own line (a profile command's binary and arguments; an engine value is one part), every
+ * part drawn by the exact rule, so what is confirmed is what is sent. No parts: [empty], muted.
+ */
+@Composable
+internal fun ConfirmValueField(label: String, parts: List<String>, empty: String, tag: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
-        val shown = if (value.isEmpty()) {
+        val shown = if (parts.isEmpty()) {
             AnnotatedString(empty)
         } else {
-            remember(value, t) {
-                AnnotatedString.Builder(value.length).apply {
+            remember(parts, t) {
+                AnnotatedString.Builder(parts.sumOf { it.length + 1 }).apply {
                     withStyle(ParagraphStyle(textDirection = codeDirection)) {
-                        // r2: the exact rule: a no-break or other odd space is a token too.
-                        append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(value)), tokenStyle(t)))
+                        parts.forEachIndexed { i, part ->
+                            // A break between parts is the only raw line break (a part never holds one: it is a token there).
+                            if (i > 0) append('\n')
+                            // r2: the exact rule: a no-break or other odd space is a token too.
+                            append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(part)), tokenStyle(t)))
+                        }
                     }
                 }.toAnnotatedString()
             }
         }
         Text(
             shown,
-            color = if (value.isEmpty()) t.muted else t.ink,
+            color = if (parts.isEmpty()) t.muted else t.ink,
             style = settingsText(type.mono, 13f, 400, lineHeight = 1.5f),
             modifier = Modifier
                 .testTag(tag)

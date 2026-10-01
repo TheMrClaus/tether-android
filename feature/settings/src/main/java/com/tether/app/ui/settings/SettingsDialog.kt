@@ -64,6 +64,7 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.ConfirmedEngineWrite
+import com.tether.app.client.ProvidersList
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.client.TetherClient
 import com.tether.app.client.serverOrigin
@@ -193,6 +194,18 @@ fun SettingsDialog(
         // r2: a confirmed write is built from the client's newest frame, never a composed one behind it.
         fresh = freshSettings,
     )
+    // ta-q6p: the custom-providers registry, asked for on open (the web asks on connect); every
+    // write goes through the client's set-providers check, built from its newest list.
+    val profiles by client.providerProfiles.collectAsStateWithLifecycle()
+    LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestProviders() }
+    val providersWriter = remember(client) { ProvidersWriter { write, o -> client.setProviders(write, o) } }
+    val freshProfiles: () -> ProvidersList? = remember(client) { { client.providerProfiles.value } }
+    val providersBinding = ProvidersBinding(
+        list = profiles?.takeIf { signedIn },
+        origin = origin,
+        writer = providersWriter,
+        fresh = freshProfiles,
+    )
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
@@ -207,6 +220,7 @@ fun SettingsDialog(
             layout = layout,
             claudeAccounts = claudeAccounts,
             serverSettings = serverBinding,
+            providers = providersBinding,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -241,6 +255,8 @@ fun SettingsFrame(
     claudeAccounts: ClaudeAccountsBinding = ClaudeAccountsBinding.None,
     /** ta-t7l: the Advanced and Metadata tabs' server settings; its `restartRequired` also raises the banner. */
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
+    /** ta-q6p: the Engines tab's Custom providers editor. */
+    providers: ProvidersBinding = ProvidersBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -307,6 +323,7 @@ fun SettingsFrame(
                         narrow = narrow,
                         claudeAccounts = claudeAccounts,
                         serverSettings = serverSettings,
+                        providers = providers,
                     )
                 }
             }
