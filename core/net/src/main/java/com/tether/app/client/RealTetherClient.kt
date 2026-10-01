@@ -39,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -101,6 +102,10 @@ private const val INTERRUPTS_REMEMBERED = 8
 
 /** T7.4: how many unconfirmed messages with attachments a socket remembers (each is megabytes: few). */
 private const val ATTACHMENTS_IN_FLIGHT_REMEMBERED = 16
+
+/** ta-8cv r2: create replies buffered for a slow collector, and create answers remembered by requestId. */
+private const val CREATE_REPLIES_BUFFERED = 64
+private const val CREATE_REPLIES_REMEMBERED = 32
 
 /** T7.4: a message with attachments offered to the durable path (never used for them). */
 internal const val ATTACHMENTS_NOT_SENT_COPY = "Not connected — the message and its attachments were not sent."
@@ -578,6 +583,30 @@ class RealTetherClient(
     private val linkEpochState = MutableStateFlow(0L)
     override val linkEpoch: StateFlow<Long> = linkEpochState
 
+    // ta-8cv r2 (security F2): the same replies, never conflated away, and the recent create answers
+    // by requestId (written under [lock] with the frame, before its socket can be reported gone).
+    private val createdRepliesFlow = MutableSharedFlow<CreatedReply>(
+        extraBufferCapacity = CREATE_REPLIES_BUFFERED,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    override val createdReplies: Flow<CreatedReply> = createdRepliesFlow
+    private val createErrorRepliesFlow = MutableSharedFlow<CreateErrorReply>(
+        extraBufferCapacity = CREATE_REPLIES_BUFFERED,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    override val createErrorReplies: Flow<CreateErrorReply> = createErrorRepliesFlow
+    /** Guarded by [lock]; bounded (oldest dropped), emptied with the other per-server views. */
+    private val createRepliesByRequest = LinkedHashMap<String, CreateReplyRecord>()
+
+    override fun createReply(requestId: String): CreateReplyRecord? = synchronized(lock) { createRepliesByRequest[requestId] }
+
+    /** Caller holds [lock]. */
+    private fun recordCreateReplyLocked(requestId: String, record: CreateReplyRecord) {
+        createRepliesByRequest.remove(requestId)
+        createRepliesByRequest[requestId] = record
+        while (createRepliesByRequest.size > CREATE_REPLIES_REMEMBERED) createRepliesByRequest.remove(createRepliesByRequest.keys.first())
+    }
+
     private val storedSettingsLoadedState = MutableStateFlow(false)
     override val storedSettingsLoaded: StateFlow<Boolean> = storedSettingsLoadedState
 
@@ -1026,6 +1055,7 @@ class RealTetherClient(
         sidebarSync.clear()
         createdState.value = null
         createErrorsState.value = null
+        synchronized(lock) { createRepliesByRequest.clear() }
         searchSync.clear()
         // T15.1: another server's overview must never show, and its subscription does not carry over.
         synchronized(lock) { overviewSync.clear() }
@@ -2407,7 +2437,10 @@ class RealTetherClient(
             is ServerMessage.Created -> ifCurrent(webSocket) {
                 upsertSessionLocked(message.session)
                 createdSeq += 1
-                createdState.value = CreatedReply(message.session, createdSeq, message.requestId)
+                val reply = CreatedReply(message.session, createdSeq, message.requestId, epoch)
+                createdState.value = reply
+                createdRepliesFlow.tryEmit(reply)
+                message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Created(reply)) }
             }
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {
@@ -2457,7 +2490,10 @@ class RealTetherClient(
                 // composer acts only on the one that names its in-flight create.
                 ifCurrent(webSocket) {
                     createErrorSeq += 1
-                    createErrorsState.value = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId)
+                    val reply = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId, epoch)
+                    createErrorsState.value = reply
+                    createErrorRepliesFlow.tryEmit(reply)
+                    message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Failed(reply)) }
                 }
                 message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
             }
@@ -2927,6 +2963,26 @@ class RealTetherClient(
      * and neither read-only, handed off nor archived; the mention one the catalog that server pushed
      * offers it. Otherwise nothing is recorded.
      */
+    /**
+     * ta-8cv r2 (security F1): the draft composer's first message, recorded in the SAME step that
+     * checks, under the lock, that the outbox, the live socket and [expectedOrigin] are one server and
+     * the socket is still the create's ([expectedEpoch]); a sign-in switch (login / pair, on IO)
+     * therefore cannot slip between the check and the record and file it in another server's outbox.
+     */
+    override fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean {
+        var evicted: List<PendingRecord> = emptyList()
+        val recorded = synchronized(lock) {
+            if (pendingOrigin != expectedOrigin || socketOrigin != expectedOrigin || socket == null) return@synchronized false
+            if (epoch != expectedEpoch || haltedLocked()) return@synchronized false
+            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized false
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized false
+            evicted = recordLocked(PendingInput.KIND_SEND, sessionId, text, null, null)
+            true
+        }
+        if (recorded) afterRecord(evicted)
+        return recorded
+    }
+
     override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): MentionResult {
         // T7.4: a delegation that carries attachments is [sendAttachments]'s (never the outbox's).
         if (attachments.isNotEmpty()) {

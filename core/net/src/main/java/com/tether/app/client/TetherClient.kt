@@ -13,8 +13,10 @@ import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.overview.OverviewClientState
 import com.tether.app.protocol.overview.OverviewSubscription
 import com.tether.app.protocol.tree.JsObj
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 
@@ -374,6 +376,35 @@ interface TetherClient {
      * `setError` does.
      */
     val createErrors: StateFlow<CreateErrorReply?> get() = NO_CREATE_ERRORS
+
+    /**
+     * ta-8cv r2 (security F2): every `created` of the live socket, in order and never conflated away
+     * (two replies in one burst both arrive), for the view model and the draft composer.
+     * [createdSessions] keeps only the latest. The default reads [createdSessions] (a client without
+     * its own stream), which can conflate.
+     */
+    val createdReplies: Flow<CreatedReply> get() = createdSessions.filterNotNull()
+
+    /** ta-8cv r2 (security F2): every `error` frame of the live socket, in order ([createErrors] keeps the latest). */
+    val createErrorReplies: Flow<CreateErrorReply> get() = createErrors.filterNotNull()
+
+    /**
+     * ta-8cv r2 (security F2): the reply the server already sent to the create with [requestId] (a
+     * `created` or an `error` echoing it), if it is one of the recent ones, else null. Recorded when
+     * the frame is handled, before the socket it came on can be reported gone, so a create whose
+     * reply landed just before a drop is never taken for one that was not answered.
+     */
+    fun createReply(requestId: String): CreateReplyRecord? = null
+
+    /**
+     * ta-8cv r2 (security F1): the draft composer's first message for the session its create just
+     * made. Durable like [send], but recorded only when, in the same step under the client's lock,
+     * the outbox's server, the live socket's server and [expectedOrigin] are the same, and the live
+     * socket is still the one the create went out on ([expectedEpoch] = [linkEpoch]); the session is
+     * listed and neither read-only, handed off nor archived. Otherwise nothing is recorded (false):
+     * the caller keeps the prompt as that session's draft and never resends it.
+     */
+    fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean = false
 
     /**
      * ta-8cv: which socket is live, as a number that moves each time a new one opens (never back).
@@ -785,10 +816,20 @@ private val NO_SEARCH_RESULTS: StateFlow<SearchResults> = MutableStateFlow(Searc
 private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableStateFlow(GlobalSearchResults())
 
 /** One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`). */
-data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null)
+/**
+ * ta-8cv r2: [linkEpoch] is the [TetherClient.linkEpoch] of the socket the reply came on (null: a
+ * client that does not say).
+ */
+data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null, val linkEpoch: Long? = null)
 
 /** ta-8cv: one `error` frame of the live socket ([TetherClient.createErrors]); [message] already cleaned. */
-data class CreateErrorReply(val message: String, val seq: Long, val requestId: String? = null)
+data class CreateErrorReply(val message: String, val seq: Long, val requestId: String? = null, val linkEpoch: Long? = null)
+
+/** ta-8cv r2: the recorded answer to one create ([TetherClient.createReply]). */
+sealed interface CreateReplyRecord {
+    data class Created(val reply: CreatedReply) : CreateReplyRecord
+    data class Failed(val reply: CreateErrorReply) : CreateReplyRecord
+}
 
 private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)
 private val NO_CREATE_ERRORS: StateFlow<CreateErrorReply?> = MutableStateFlow(null)

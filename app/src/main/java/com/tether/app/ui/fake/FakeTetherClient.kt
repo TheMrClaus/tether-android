@@ -645,6 +645,13 @@ class FakeTetherClient : TetherClient {
     private val _created = MutableStateFlow<com.tether.app.client.CreatedReply?>(null)
     override val createdSessions: StateFlow<com.tether.app.client.CreatedReply?> = _created.asStateFlow()
 
+    /** ta-8cv r2: the demo's one server and socket; the first message is an ordinary demo send. */
+    override fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean {
+        if (expectedOrigin != DEMO_ORIGIN || expectedEpoch != linkEpoch.value) return false
+        send(sessionId, text)
+        return true
+    }
+
     /** ta-895: the demo has no catalog, so the picker's base-provider rows create as before. */
     override fun createNewSession(
         request: com.tether.app.client.NewSessionRequest,

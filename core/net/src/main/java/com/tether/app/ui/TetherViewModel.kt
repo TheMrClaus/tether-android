@@ -82,6 +82,7 @@ class TetherViewModel(
         scope = viewModelScope,
         currentWorkspace = { _currentWorkspace.value },
         saveSessionDraft = { origin, sessionId, text -> saveSessionDraft(origin, sessionId, text) },
+        onSessionCreated = { sessionId -> onOwnCreate(sessionId) },
     )
 
     /**
@@ -328,7 +329,8 @@ class TetherViewModel(
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
             val seenSeq = client.createdSessions.value?.seq ?: 0L
-            client.createdSessions.collect { reply -> onCreated(reply, seenSeq) }
+            // ta-8cv r2 (security F2): every reply in order, never conflated away.
+            client.createdReplies.collect { reply -> onCreated(reply, seenSeq) }
         }
         // ta-8cv: the draft composer's other inputs (use-draft-composer.ts effects): the catalog and
         // workspace it resolves against, the `error` frames, and the link its create went out on.
@@ -337,7 +339,7 @@ class TetherViewModel(
                 .collect { draftComposer.refresh() }
         }
         viewModelScope.launch {
-            client.createErrors.collect { reply -> if (reply != null) draftComposer.onCreateError(reply) }
+            client.createErrorReplies.collect { reply -> draftComposer.onCreateError(reply) }
         }
         viewModelScope.launch {
             combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }
@@ -572,23 +574,30 @@ class TetherViewModel(
      * dashboard.tsx:708-722: the unicast reply is a deliberate target; it outranks the rest.
      *
      * ta-8cv: a reply that carries a `requestId` answers a create, and is followed only when the
-     * draft composer matches it to ITS in-flight create (requestId, newer seq); a stale or foreign
-     * one is never selected. A reply without one answers a resume: it opens the resumed session as
-     * before, but never while a create is in flight, so it cannot take that create's place.
+     * draft composer matches it to ITS in-flight create (requestId, newer seq, the create's socket;
+     * [onOwnCreate]); a stale or foreign one is never selected. A reply without one answers a
+     * resume and opens the resumed session as it lands, as the web's dashboard does for every
+     * `created` (r2, verifier P3: also while a create is in flight). It cannot take that create's
+     * place: the create completes only on its own reply, which then opens ITS session, so whichever
+     * reply lands last is on screen, exactly as on the web.
      */
     private fun onCreated(reply: CreatedReply?, seenAtStart: Long) {
         if (reply == null || reply.seq <= maxOf(seenAtStart, followedCreatedSeq)) return
         followedCreatedSeq = reply.seq
         if (reply.requestId != null) {
-            val sessionId = draftComposer.onCreated(reply) ?: return
-            _openingHistoryId.value = null
-            if (_selectedSessionId.value != sessionId) selectSession(sessionId)
+            draftComposer.onCreated(reply)
             return
         }
+        openCreated(reply.session.id)
+    }
+
+    /** ta-8cv: the draft composer's own create made [sessionId] (from its reply, or from the record after a drop). */
+    private fun onOwnCreate(sessionId: String) = openCreated(sessionId)
+
+    private fun openCreated(sessionId: String) {
         _openingHistoryId.value = null
-        if (draftComposer.state.value.creating) return
-        if (_selectedSessionId.value == reply.session.id) return
-        selectSession(reply.session.id)
+        if (_selectedSessionId.value == sessionId) return
+        selectSession(sessionId)
     }
 
     // ------------------------------------------------------------------

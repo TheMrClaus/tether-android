@@ -137,6 +137,14 @@ sealed interface ClientMessage {
             if (approvalsReviewer != null) put("approvalsReviewer", approvalsReviewer.value)
             opt("requestId", requestId)
         }
+
+        /**
+         * ta-8cv r2 (security F3): redacted, like [NodeAdd]: the profile (which account a session
+         * runs on) and the folder, branch and name never reach a log. The wire form is [toJsonObject].
+         */
+        override fun toString(): String =
+            "Create(provider=$provider, permissionMode=$permissionMode, sandboxPolicy=$sandboxPolicy, " +
+                "profile=${if (profileId == null) "none" else "***"}, useWorktree=$useWorktree, requestId=$requestId)"
     }
 
     data class Resume(val historyId: String, val cwd: String, val profileId: String? = null) : ClientMessage {

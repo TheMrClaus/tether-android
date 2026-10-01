@@ -11,7 +11,10 @@ import com.tether.app.protocol.tree.JsObj
  * tap; the client resolves it again, under its lock, against the catalog the CURRENT socket
  * delivered ([NewSessionGuard.resolve]). It is never persisted.
  */
-data class NewSessionChoice(val key: String, val provider: String, val profileId: String?)
+data class NewSessionChoice(val key: String, val provider: String, val profileId: String?) {
+    /** ta-8cv r2 (security F3): redacted; a profile row's key IS its profile id. */
+    override fun toString(): String = "NewSessionChoice(provider=$provider, profile=${if (profileId == null) "none" else "***"})"
+}
 
 /** ta-895: what became of a New session tap. */
 enum class NewSessionResult {
@@ -191,4 +194,7 @@ data class NewSessionRequest(
     val modified: JsObj,
     val requestId: String,
     val linkEpoch: Long,
-)
+) {
+    /** ta-8cv r2 (security F3): redacted (no profile id, folder or picks); the wire form is the client's. */
+    override fun toString(): String = "NewSessionRequest(choice=$choice, requestId=$requestId, linkEpoch=$linkEpoch)"
+}
