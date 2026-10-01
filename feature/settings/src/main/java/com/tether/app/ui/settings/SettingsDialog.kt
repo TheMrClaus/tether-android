@@ -196,9 +196,15 @@ fun SettingsFrame(
     modifier: Modifier = Modifier,
     surfaceModifier: Modifier = Modifier,
     layout: TetherLayoutClass = currentLayoutClass(),
+    /**
+     * The stored preferences when the caller has already read them (the screenshot harness, with
+     * a [state] seeded from the same read): the first frame is then the loaded dialog. Null (the
+     * app): the frame reads them itself and General waits for that read.
+     */
+    initialPreferences: TetherPreferences? = null,
 ) {
     val t = LocalTetherTokens.current
-    val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = null)
+    val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
     // settings-dialog.tsx:1935: the draft starts as the stored preferences (read once, so a value
     // that lands later never overwrites an edit).
     LaunchedEffect(prefs) { if (state.draft == null) state.draft = GeneralDraft.of(prefs.preferences.first()) }

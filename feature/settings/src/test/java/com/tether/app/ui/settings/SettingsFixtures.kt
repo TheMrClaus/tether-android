@@ -56,6 +56,7 @@ fun SettingsUnderTest(
     restartRequired: Boolean = false,
     currentWorkspace: String = CURRENT,
     onClose: () -> Unit = {},
+    initialPreferences: com.tether.app.ui.prefs.TetherPreferences? = null,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -66,6 +67,7 @@ fun SettingsUnderTest(
                 currentWorkspace = currentWorkspace,
                 onClose = onClose,
                 layout = layout,
+                initialPreferences = initialPreferences,
             )
         }
     }

@@ -1,9 +1,6 @@
 package com.tether.app.ui.settings
 
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -12,6 +9,8 @@ import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.prefs.PreferenceKeys
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.mode
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -39,7 +38,13 @@ enum class SettingsShot(val id: String, val tab: SettingsTab, val restart: Boole
 fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, skin: TetherSkin, size: String, name: String = shot.id) {
     // The stored mode is the skin shown (the web reference's seeded state), so Appearance agrees.
     store.seed(PreferenceKeys.THEME_MODE to skin.mode.id)
-    val state = SettingsDialogState(shot.tab)
+    // Timing-free by construction (T10.1 r4): the stored preferences are read HERE, and the frame
+    // gets them as its live value and its seeded draft, so its first frame is already the loaded
+    // dialog (the not-loaded state never renders). Nothing in it animates from a start value then:
+    // keys, switches and choice rows compose at their resting look. The clock is driven by hand.
+    val stored = runBlocking { store.prefs.preferences.first() }
+    val state = SettingsDialogState(shot.tab, GeneralDraft.of(stored))
+    mainClock.autoAdvance = false
     setContent {
         SettingsUnderTest(
             store.prefs,
@@ -47,15 +52,8 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             mode = skin.mode,
             layout = if (size == "tablet") TetherLayoutClass.Expanded else TetherLayoutClass.Phone,
             restartRequired = shot.restart,
+            initialPreferences = stored,
         )
-    }
-    // Deterministic capture: only once the stored preferences have loaded AND the composed
-    // dialog shows it (General and Save are disabled until then, T10.1 r2 F2): wait for the
-    // Save key's semantics to report enabled, then let its face animation settle.
-    waitUntil(10_000) {
-        state.draft != null &&
-            onAllNodesWithTag(SettingsDialogTags.Save).fetchSemanticsNodes().singleOrNull()
-                ?.config?.getOrNull(SemanticsProperties.Disabled) == null
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
