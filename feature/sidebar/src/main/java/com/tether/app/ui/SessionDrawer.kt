@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,7 +86,8 @@ fun SessionDrawer(
     var harness by remember { mutableStateOf<String?>(null) }
     var providerPicker by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
-    var settingsOpen by remember { mutableStateOf(false) }
+    // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
 
     // Relative times tick while the list is composed (the web re-renders on every broadcast).
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }

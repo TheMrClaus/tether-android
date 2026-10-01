@@ -109,11 +109,18 @@ class SettingsDialogState(tab: SettingsTab = SettingsTab.General, draft: General
     var tab by mutableStateOf(tab)
     var draft by mutableStateOf(draft)
 
-    /** The draft, or (before the first read lands) the live value it will be seeded from. */
+    /** False until the stored preferences have been read once: General cannot be edited or saved. */
+    val ready: Boolean get() = draft != null
+
+    /** The draft, or (before the first read lands) the live value it will be seeded from, shown only. */
     fun draftOr(live: TetherPreferences): GeneralDraft = draft ?: GeneralDraft.of(live)
 
-    fun edit(live: TetherPreferences, change: (GeneralDraft) -> GeneralDraft) {
-        draft = change(draftOr(live))
+    /**
+     * An edit of the draft. Before the first read it does nothing: a draft started from the
+     * defaults would make Save write defaults over the stored fields the operator never touched.
+     */
+    fun edit(change: (GeneralDraft) -> GeneralDraft) {
+        draft = draft?.let(change)
     }
 
     companion object {
@@ -199,7 +206,8 @@ fun SettingsFrame(
     var saving by remember { mutableStateOf(false) }
     val save: () -> Unit = save@{
         if (saving) return@save
-        val draft = state.draftOr(live ?: TetherPreferences.Default)
+        // Never before the first read (see [SettingsDialogState.edit]).
+        val draft = state.draft ?: return@save
         saving = true
         // Written before the dialog closes, so leaving composition never cancels the write. Storage
         // that refuses the write closes the dialog all the same (the web's localStorage save is
@@ -253,7 +261,7 @@ fun SettingsFrame(
                     )
                 }
             }
-            SettingsFooter(narrow, saving, onCancel = onClose, onSave = save)
+            SettingsFooter(narrow, saving || !state.ready, onCancel = onClose, onSave = save)
         }
     }
 }
@@ -398,7 +406,7 @@ private fun RestartBanner(narrow: Boolean) {
 
 /** `.settings-dialog > footer` (settings-dialog.tsx:2456; studio.css 538-545, 965-967). */
 @Composable
-private fun SettingsFooter(narrow: Boolean, saving: Boolean, onCancel: () -> Unit, onSave: () -> Unit) {
+private fun SettingsFooter(narrow: Boolean, saveBlocked: Boolean, onCancel: () -> Unit, onSave: () -> Unit) {
     val t = LocalTetherTokens.current
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
@@ -421,7 +429,7 @@ private fun SettingsFooter(narrow: Boolean, saving: Boolean, onCancel: () -> Uni
                 label = "Save settings",
                 icon = TetherIcons.Check,
                 iconSize = 17.dp,
-                enabled = !saving,
+                enabled = !saveBlocked,
                 modifier = Modifier.testTag(SettingsDialogTags.Save),
             )
         }

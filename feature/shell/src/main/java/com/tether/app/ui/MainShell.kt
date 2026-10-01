@@ -187,7 +187,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // T15.2: the selected session is on screen only in Sessions (dashboard.tsx:725 `activeSession`);
     // elsewhere the shell gets none: no header, stage, chat or inspector, and nothing marks it seen.
     val sessionsView = view == DashboardView.Sessions
-    var settingsOpen by remember { mutableStateOf(false) }
+    // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSession = sessions.firstOrNull { it.id == selectedId }

@@ -79,7 +79,8 @@ private fun GeneralPanel(live: TetherPreferences, state: SettingsDialogState, cu
                 },
                 control = { m ->
                     TetherKey(
-                        onClick = { state.edit(live) { it.usingCurrent(currentWorkspace) } },
+                        onClick = { state.edit { it.usingCurrent(currentWorkspace) } },
+                        enabled = state.ready,
                         classes = KeyClasses.ButtonSecondary,
                         label = "Use current",
                         modifier = m.testTag(SettingsPanelTags.UseCurrent),
@@ -94,7 +95,8 @@ private fun GeneralPanel(live: TetherPreferences, state: SettingsDialogState, cu
                     caption = toggle.caption,
                     tip = toggle.tip,
                     checked = draft.isOn(toggle),
-                    onToggle = { state.edit(live) { it.toggled(toggle) } },
+                    onToggle = { state.edit { it.toggled(toggle) } },
+                    enabled = state.ready,
                     narrow = narrow,
                     modifier = Modifier.testTag(SettingsPanelTags.toggle(toggle)),
                 )

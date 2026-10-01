@@ -241,12 +241,14 @@ internal fun SettingsToggleRow(
     onToggle: () -> Unit,
     narrow: Boolean,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     SettingsRow(
         narrow = narrow,
         inline = true,
         modifier = modifier.toggleable(
             value = checked,
+            enabled = enabled,
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
             role = Role.Switch,
