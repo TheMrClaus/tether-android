@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,8 +32,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -43,7 +39,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tether.app.client.LabelText
 import com.tether.app.client.NodeCredential
 import com.tether.app.client.NodeRegistryRules
@@ -551,27 +546,23 @@ private fun NodeRow(node: NodeSummary, binding: NodesBinding, actions: NodesActi
     val look = NodeStatusLook.of(node.status)
     val small = settingsText(type.ui, 12f, 400, lineHeight = 1.6f)
     val details = buildAnnotatedString {
-        appendInlineContent(STATUS_GLYPH, "")
-        append(" ")
         append(look.label)
         append(" · ")
         appendSafe(NodeText.url(node), SafeText.Rule.Line, tokenStyle(t))
         NodeText.version(node)?.let { append(" · v$it") }
         if (node.lastSeenAt > 0) append(" · " + NodesCopy.lastSeen(relativeTime(node.lastSeenAt, binding.now())))
     }
-    val glyph = mapOf(
-        STATUS_GLYPH to InlineTextContent(Placeholder(14.sp, 14.sp, PlaceholderVerticalAlign.TextCenter)) {
-            // `.settings-node-status` has no colour of its own: the glyph takes the line's ink.
-            Icon(look.icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-        },
-    )
     SettingsRow(
         narrow = narrow,
         modifier = Modifier.testTag(NodeTags.row(node.nodeId)),
         text = { m ->
             Column(m, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(label, color = t.ink, style = settingsText(type.ui, 14f, 650, lineHeight = 1.5f))
-                Text(details, inlineContent = glyph, color = t.muted, style = small, modifier = Modifier.testTag(NodeTags.status(node.nodeId)))
+                // The status glyph leads the line (`.settings-node-status`: no colour of its own, so the line's ink).
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
+                    Icon(look.icon, contentDescription = null, tint = t.muted, modifier = Modifier.padding(top = 3.dp).size(14.dp))
+                    Text(details, color = t.muted, style = small, modifier = Modifier.weight(1f, fill = false).testTag(NodeTags.status(node.nodeId)))
+                }
                 NodeText.skew(node, binding.consoleProtocol)?.let { peer ->
                     Row(
                         Modifier
@@ -622,5 +613,3 @@ private fun NodeRow(node: NodeSummary, binding: NodesBinding, actions: NodesActi
         },
     )
 }
-
-private const val STATUS_GLYPH = "node-status-glyph"
