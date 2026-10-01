@@ -289,7 +289,8 @@ private fun EngineValueRow(
     val latestView by rememberUpdatedState(view)
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
-    val edited = !forced && text != shown
+    // r2: the hint only when Done would open a review (not after spaces typed around the value).
+    val edited = !forced && EngineRows.review(view, engine, setting, text, shown) != null
     SettingsRow(
         narrow = narrow,
         rule = !first,
@@ -327,37 +328,47 @@ private fun EngineValueRow(
     )
 }
 
-/** The pending edit, confirmed or dropped. */
+/**
+ * The pending edit, confirmed or dropped. r2: a tap on Change only ASKS; the write is built in the
+ * frame after it ([SideEffect]), from that frame's binding and the client's newest frame
+ * ([ServerSettingsBinding.latestSettings]), so an env lock that landed in the same frame as the
+ * tap closes the confirmation and sends nothing. One confirmation is one write, a double tap
+ * included.
+ */
 @Composable
 private fun PendingEngineEdit(pending: EngineEdit?, binding: ServerSettingsBinding, onDone: () -> Unit) {
     val edit = pending ?: return
     // The frame went away (signed out), or the environment now forces the key: the edit goes too.
     val view = binding.settings?.takeIf { binding.origin != null }
     if (view == null || view.forced(edit.setting)) return SideEffect { onDone() }
-    val latest by rememberUpdatedState(binding)
-    // One confirmation is one write, a double tap in one frame included.
+    var asked by remember(edit) { mutableStateOf(false) }
     val fired = remember(edit) { booleanArrayOf(false) }
+    if (asked) {
+        SideEffect {
+            if (!fired[0]) {
+                fired[0] = true
+                // Built NOW, from the newest frame: an env lock or the same value sends nothing.
+                val latest = binding.latestSettings()
+                if (latest != null) binding.sendConfirmed(ServerSettingsPatch.engineValue(latest, edit.setting, edit.value))
+            }
+            onDone()
+        }
+        return
+    }
     EngineConfirmDialog(
         edit = edit,
         now = view.text(edit.setting),
-        onConfirm = {
-            if (!fired[0]) {
-                fired[0] = true
-                // Built NOW, from the latest frame: an env lock or the same value sends nothing.
-                val b = latest
-                val v = b.settings?.takeIf { b.origin != null }
-                if (v != null) b.send(ServerSettingsPatch.engineValue(v, edit.setting, edit.value))
-            }
-            onDone()
-        },
+        onConfirm = { asked = true },
         onCancel = onDone,
     )
 }
 
 /**
- * The confirmation for what the server runs: the current value and the one that will be sent,
- * each drawn by the code rule (every bidi control and invisible character a visible ⟨U+…⟩ token,
- * an LTR paragraph, wrapped anywhere but inside a token), so what is confirmed is what is sent.
+ * The confirmation for what the server runs: the value that will be sent, then the current one,
+ * each drawn by the exact rule ([SafeText.exact]: every bidi control, invisible character and
+ * non-ASCII space a visible ⟨U+…⟩ token, an LTR paragraph, wrapped anywhere but inside a token), so
+ * what is confirmed is what is sent. r2: Change ignores taps for [CONFIRM_ARM_MS] after the dialog
+ * appears ([ArmedConfirmKey]), so a double tap on Done cannot confirm unread.
  */
 @Composable
 internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
@@ -368,12 +379,13 @@ internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () ->
         title = EngineRows.confirmTitle(edit),
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(EngineTags.Cancel))
-            TetherKey(onClick = onConfirm, classes = KeyClasses.ButtonPrimary, label = EngineRows.confirmAction(edit), modifier = Modifier.testTag(EngineTags.Confirm))
+            ArmedConfirmKey(EngineRows.confirmAction(edit), EngineTags.Confirm, onConfirm)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(EngineTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TetherDialogText(EngineRows.confirmBody(edit))
-            EngineValueField(EngineRows.CONFIRM_NOW, now, EngineRows.emptyValue(edit.engine, edit.setting), EngineTags.ConfirmNow)
+            // r2: the new value first, so a long current one can never push it out of view; the trim
+            // note right under it (it is about the new value).
             EngineValueField(EngineRows.CONFIRM_NEW, edit.value, EngineRows.emptyValue(edit.engine, edit.setting), EngineTags.ConfirmNew)
             if (edit.trimmed) {
                 Text(
@@ -383,6 +395,7 @@ internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () ->
                     modifier = Modifier.testTag(EngineTags.ConfirmTrimmed),
                 )
             }
+            EngineValueField(EngineRows.CONFIRM_NOW, now, EngineRows.emptyValue(edit.engine, edit.setting), EngineTags.ConfirmNow)
         }
     }
 }
@@ -399,7 +412,8 @@ private fun EngineValueField(label: String, value: String, empty: String, tag: S
             remember(value, t) {
                 AnnotatedString.Builder(value.length).apply {
                     withStyle(ParagraphStyle(textDirection = codeDirection)) {
-                        append(styledDisplay(SafeText.breakAnywhere(SafeText.line(value)), tokenStyle(t)))
+                        // r2: the exact rule: a no-break or other odd space is a token too.
+                        append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(value)), tokenStyle(t)))
                     }
                 }.toAnnotatedString()
             }

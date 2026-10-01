@@ -635,6 +635,13 @@ interface TetherClient {
      */
     fun setServerSettings(patch: JsonObject, origin: String): Boolean = false
 
+    /**
+     * ta-dh1 r2: a confirmed engine home / command / launch command ([ConfirmedEngineWrite], made only
+     * by [ServerSettingsPatch.engineValue]), bound to [origin] like [setServerSettings]. The ONE
+     * way such a key reaches the server: [setServerSettings] refuses a plain patch naming one.
+     */
+    fun setConfirmedEngineValue(write: ConfirmedEngineWrite, origin: String): Boolean = false
+
     /** ta-t7l: v16 `set-advanced-settings` (the Claude CLI picker), bound to [origin] like [setServerSettings]. */
     fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = false
 

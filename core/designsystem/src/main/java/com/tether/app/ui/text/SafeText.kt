@@ -105,7 +105,7 @@ object SafeText {
     /** The three RGI subdivision flags (England, Scotland, Wales): tag text after U+1F3F4. */
     val RGI_FLAG_TAGS: Set<String> = setOf("gbeng", "gbsct", "gbwls")
 
-    enum class Rule { Prose, Code, Line }
+    enum class Rule { Prose, Code, Line, Exact }
 
     fun prose(text: String): String = encode(text, Rule.Prose)
 
@@ -113,6 +113,17 @@ object SafeText {
 
     /** ta-28i r2: a one-line name, path or id ([Rule.Line]: [code], with TAB / LF / CR as tokens). */
     fun line(text: String): String = encode(text, Rule.Line)
+
+    /**
+     * ta-dh1 r2: a value the reader CONFIRMS before it is sent (an engine's command or home): [line],
+     * and also every Unicode space separator other than U+0020 (NBSP, U+1680, U+2000-U+200A,
+     * U+202F, U+205F, U+3000) as a token, so `/opt/x\u00A0y` never passes for `/opt/x y`. Used only
+     * where exactness wins over typography; no other rule changes.
+     */
+    fun exact(text: String): String = encode(text, Rule.Exact)
+
+    /** [Rule.Exact]'s addition to [Rule.Line]: a space separator that is not U+0020. */
+    internal fun oddSpace(cp: Int): Boolean = cp != 0x20 && Character.getType(cp) == Character.SPACE_SEPARATOR.toInt()
 
     /** Command output: [code] after the SGR colour sequences are dropped (see the class doc). */
     fun terminal(text: String): String = code(dropSgr(text))
@@ -235,7 +246,7 @@ object SafeText {
             Rule.Prose -> c < ' ' && c != '\t' && c != '\n' || c in '\u007F'..'\u009F' || c == '\u200E' || c == '\u200F' ||
                 c == '\u061C' || c in '\u2028'..'\u202E' || c == MARK || c in '\u2066'..'\u2069' || c == '\uDB40'
             Rule.Code -> c < ' ' && c != '\t' && c != '\n' || c >= '\u007F'
-            Rule.Line -> c < ' ' || c >= '\u007F'
+            Rule.Line, Rule.Exact -> c < ' ' || c >= '\u007F'
         }
 
         fun crlf(i: Int): Boolean = text[i] == '\r' && i + 1 < n && text[i + 1] == '\n'
@@ -291,6 +302,7 @@ object SafeText {
                     Rule.Prose -> proseAlways(cp) && !crlf(i)
                     Rule.Code -> codeEscapes(cp) && !crlf(i)
                     Rule.Line -> cp == 0x09 || cp == 0x0A || codeEscapes(cp) // no CRLF exception on one line
+                    Rule.Exact -> cp == 0x09 || cp == 0x0A || codeEscapes(cp) || oddSpace(cp)
                 }
                 if (!esc) {
                     i += len

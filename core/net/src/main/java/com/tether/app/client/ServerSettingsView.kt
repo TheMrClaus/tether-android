@@ -189,13 +189,22 @@ class ServerSettingsView private constructor(
 object ServerSettingsPatch {
     private fun patch(setting: ServerSetting, value: JsonElement) = JsonObject(mapOf(setting.key to value))
 
+    /** r2: the keys that set what the server runs ([SettingKind.Runs]): written only as a [ConfirmedEngineWrite]. */
+    val runsKeys: Set<String> by lazy { ServerSetting.entries.filter { it.kind == SettingKind.Runs }.map { it.key }.toSet() }
+
+    /** r2: [patch] names a key that sets what the server runs (so it may go out only as a [ConfirmedEngineWrite]). */
+    fun touchesWhatRuns(patch: JsonObject): Boolean = patch.keys.any { it in runsKeys }
+
+    /** r2: a builder that writes without a confirmation never takes a [SettingKind.Runs] key (the send path refuses one too). */
+    private fun unconfirmed(setting: ServerSetting) = setting.kind != SettingKind.Runs
+
     /**
      * ServerTextRow's commit (:129-132): `{ [field]: current || null }` when the field differs from
      * what it showed ([shown]: the server value as the field was filled with it). ta-dh1: never a
      * [SettingKind.Runs] key (those go through [engineValue], after their confirmation).
      */
     fun text(view: ServerSettingsView, setting: ServerSetting, edited: String, shown: String): JsonObject? {
-        if (setting.kind == SettingKind.Runs || view.forced(setting) || edited == shown) return null
+        if (!unconfirmed(setting) || view.forced(setting) || edited == shown) return null
         return patch(setting, if (edited.isEmpty()) JsonNull else JsonPrimitive(edited))
     }
 
@@ -205,7 +214,7 @@ object ServerSettingsPatch {
      * number input never yields one; the server would refuse it).
      */
     fun number(view: ServerSettingsView, setting: ServerSetting, text: String): JsonObject? {
-        if (view.forced(setting)) return null
+        if (!unconfirmed(setting) || view.forced(setting)) return null
         val trimmed = text.trim()
         val parsed = if (trimmed.isEmpty()) null else (trimmed.toLongOrNull() ?: return null)
         if (parsed == view.number(setting)) return null
@@ -214,19 +223,19 @@ object ServerSettingsPatch {
 
     /** ServerToggleRow (:230): `{ [field]: !value }`. */
     fun toggle(view: ServerSettingsView, setting: ServerSetting): JsonObject? {
-        if (view.forced(setting)) return null
+        if (!unconfirmed(setting) || view.forced(setting)) return null
         return patch(setting, JsonPrimitive(!view.toggle(setting)))
     }
 
     /** ServerSelectRow (:274): `{ [field]: next === "" ? null : next }`, when it is another option. */
     fun choice(view: ServerSettingsView, setting: ServerSetting, next: String): JsonObject? {
-        if (setting.kind == SettingKind.Runs || view.forced(setting) || next == view.choice(setting)) return null
+        if (!unconfirmed(setting) || view.forced(setting) || next == view.choice(setting)) return null
         return patch(setting, if (next.isEmpty()) JsonNull else JsonPrimitive(next))
     }
 
     /** ServerRootsRow's Add (:298-304): the trimmed path appended, the WHOLE list sent; empty or a duplicate sends nothing. */
     fun addPath(view: ServerSettingsView, setting: ServerSetting, typed: String): JsonObject? {
-        if (view.forced(setting)) return null
+        if (!unconfirmed(setting) || view.forced(setting)) return null
         val value = typed.trim()
         val roots = view.paths(setting)
         if (value.isEmpty() || value in roots) return null
@@ -235,7 +244,7 @@ object ServerSettingsPatch {
 
     /** ServerRootsRow's remove (:305): the list without [path]. */
     fun removePath(view: ServerSettingsView, setting: ServerSetting, path: String): JsonObject? {
-        if (view.forced(setting)) return null
+        if (!unconfirmed(setting) || view.forced(setting)) return null
         val roots = view.paths(setting)
         if (path !in roots) return null
         return patch(setting, JsonArray(roots.filter { it != path }.map(::JsonPrimitive)))
@@ -276,15 +285,31 @@ object ServerSettingsPatch {
      * `providerCommands`). Null when the key is env-forced, the value is the server's already, or it
      * passes the server's size limit. [value] is sent exactly as given: the caller trims it (the
      * web's `.trim()`, [jsTrim]) BEFORE the confirmation, which shows the trimmed value.
+     *
+     * r2: the ONLY producer of a [ConfirmedEngineWrite], the only form in which the client sends a
+     * [SettingKind.Runs] key ([TetherClient.setServerSettings] refuses one in a plain patch).
      */
-    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String): JsonObject? {
+    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String): ConfirmedEngineWrite? {
         if (setting.kind != SettingKind.Runs || view.forced(setting)) return null
         if (value == view.text(setting) || !fits(setting, value)) return null
         val nullable = setting !in EngineCard.commandSettings
-        return patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value))
+        return ConfirmedEngineWrite(patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value)))
     }
 
     /** Within [setting]'s server limit (UTF-8 bytes; protocol-validate.mjs `isBoundedString`). */
     fun fits(setting: ServerSetting, value: String): Boolean =
         setting.maxBytes <= 0 || value.toByteArray(Charsets.UTF_8).size <= setting.maxBytes
+}
+
+/**
+ * ta-dh1 r2: a `set-server-settings` patch naming a key that sets what the server RUNS (an engine's
+ * home, command or launch command), as confirmed by the user. Only [ServerSettingsPatch.engineValue]
+ * makes one (the constructor is internal to this module), and the client sends such a key only in
+ * this form: [TetherClient.setServerSettings] refuses a plain patch that names one. [toString]
+ * names the key, never the value.
+ */
+class ConfirmedEngineWrite internal constructor(val patch: JsonObject) {
+    override fun toString(): String = "ConfirmedEngineWrite(${patch.keys.sorted()})"
+    override fun equals(other: Any?): Boolean = other is ConfirmedEngineWrite && other.patch == patch
+    override fun hashCode(): Int = patch.hashCode()
 }

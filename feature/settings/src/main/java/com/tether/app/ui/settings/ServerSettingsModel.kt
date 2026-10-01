@@ -1,5 +1,6 @@
 package com.tether.app.ui.settings
 
+import com.tether.app.client.ConfirmedEngineWrite
 import com.tether.app.client.EngineCard
 import com.tether.app.client.EngineDetection
 import com.tether.app.client.LabelText
@@ -26,11 +27,15 @@ interface ServerSettingsWriter {
     /** ta-dh1: `detect-engines` ("Scan again"), bound to [origin] like the writes. */
     fun detectEngines(origin: String): Boolean
 
+    /** ta-dh1 r2: a confirmed engine home / command / launch command, the only form such a key is sent in. */
+    fun confirmed(write: ConfirmedEngineWrite, origin: String): Boolean
+
     /** No client (previews, a signed-out frame): nothing is ever sent. */
     object None : ServerSettingsWriter {
         override fun patch(patch: JsonObject, origin: String) = false
         override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = false
         override fun detectEngines(origin: String) = false
+        override fun confirmed(write: ConfirmedEngineWrite, origin: String) = false
     }
 }
 
@@ -50,9 +55,24 @@ data class ServerSettingsBinding(
     val writer: ServerSettingsWriter = ServerSettingsWriter.None,
     /** ta-dh1: how many `server-settings` replies have arrived ("Scan again" is busy until the next). */
     val replies: Long = 0L,
+    /**
+     * ta-dh1 r2: the client's NEWEST frame, read when a confirmed write is built (the composed
+     * [settings] may be a frame behind it). Null: [settings] is the newest (tests, previews).
+     */
+    val fresh: (() -> ServerSettingsView?)? = null,
 ) {
-    /** A write to the server this binding was drawn from; false (nothing sent) without one. */
-    fun send(patch: JsonObject?): Boolean = patch != null && origin != null && writer.patch(patch, origin)
+    /** r2: the newest frame of this binding's server, or null without one. */
+    fun latestSettings(): ServerSettingsView? = if (origin == null) null else fresh?.invoke() ?: settings
+
+    /**
+     * A write to the server this binding was drawn from; false (nothing sent) without one. r2: never
+     * a patch naming a key that sets what the server runs (that goes only through [sendConfirmed]).
+     */
+    fun send(patch: JsonObject?): Boolean =
+        patch != null && origin != null && !ServerSettingsPatch.touchesWhatRuns(patch) && writer.patch(patch, origin)
+
+    /** ta-dh1 r2: a confirmed engine value ([ServerSettingsPatch.engineValue]), to the server this binding was drawn from. */
+    fun sendConfirmed(write: ConfirmedEngineWrite?): Boolean = write != null && origin != null && writer.confirmed(write, origin)
 
     fun sendCli(message: ClientMessage.SetAdvancedSettings?): Boolean = message != null && origin != null && writer.cliVersion(message, origin)
 
@@ -383,7 +403,7 @@ object EngineRows {
 
     const val CONFIRM_NOW = "Now"
     const val CONFIRM_NEW = "Change to"
-    const val TRIMMED = "Spaces at the start and end were removed."
+    const val TRIMMED = "Spaces or line breaks at the start and end were removed."
 
     fun confirmAction(edit: EngineEdit) = "Change ${what(edit.engine, edit.setting)}"
 

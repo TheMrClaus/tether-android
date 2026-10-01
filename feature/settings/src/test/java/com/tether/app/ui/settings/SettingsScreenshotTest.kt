@@ -120,6 +120,7 @@ private object NeverWrites : ServerSettingsWriter {
     override fun patch(patch: JsonObject, origin: String): Boolean = error("a seeded shot must not write")
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = error("a seeded shot must not write")
     override fun detectEngines(origin: String): Boolean = error("a seeded shot must not scan")
+    override fun confirmed(write: com.tether.app.client.ConfirmedEngineWrite, origin: String): Boolean = error("a seeded shot must not write")
 }
 
 /**

@@ -1,5 +1,7 @@
 package com.tether.app.ui.settings
 
+import com.tether.app.client.ConfirmedEngineWrite
+import com.tether.app.client.ServerSettingsPatch
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.protocol.ClaudeCliVersion
 import com.tether.app.protocol.ClientMessage
@@ -129,7 +131,12 @@ class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSett
     /** The frames as sent: `{"type":"set-server-settings","settings":…}`. */
     fun frames(): List<JsonObject> = patches.map { ClientMessage.SetServerSettings(it.first).toJsonObject() }
 
+    /** ta-dh1 r2: the confirmed engine writes (also in [patches], as the frame they send). */
+    val confirmedWrites = mutableListOf<ConfirmedEngineWrite>()
+
     override fun patch(patch: JsonObject, origin: String): Boolean {
+        // r2: a plain patch never names what the server runs (the binding refuses one before here).
+        check(!ServerSettingsPatch.touchesWhatRuns(patch)) { "an unconfirmed write of ${patch.keys}" }
         patches += patch to origin
         reply(patch)
         return true
@@ -142,6 +149,13 @@ class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSett
 
     override fun detectEngines(origin: String): Boolean {
         scans += origin
+        return true
+    }
+
+    override fun confirmed(write: ConfirmedEngineWrite, origin: String): Boolean {
+        confirmedWrites += write
+        patches += write.patch to origin
+        reply(write.patch)
         return true
     }
 }

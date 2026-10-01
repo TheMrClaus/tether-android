@@ -3751,8 +3751,12 @@ class RealTetherClient(
 
     override fun requestAdvancedSettings(): Boolean = sendFrame(ClientMessage.AdvancedSettingsRequest)
 
+    // ta-dh1 r2: the choke point: a plain patch never carries a key that sets what the server runs.
     override fun setServerSettings(patch: JsonObject, origin: String): Boolean =
-        patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
+        patch.isNotEmpty() && !ServerSettingsPatch.touchesWhatRuns(patch) && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
+
+    override fun setConfirmedEngineValue(write: ConfirmedEngineWrite, origin: String): Boolean =
+        write.patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(write.patch))
 
     override fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = sendFrameFor(origin, message)
 

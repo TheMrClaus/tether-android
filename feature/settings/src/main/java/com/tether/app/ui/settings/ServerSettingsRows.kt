@@ -23,6 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +75,7 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import kotlinx.coroutines.delay
 
 /** Tags of the server-settings rows (one per wire key). */
 object ServerSettingsTags {
@@ -648,24 +651,60 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
     PendingCliPick(pending, binding) { pending = null }
 }
 
-/** The section's pending pick, confirmed or dropped. */
+/**
+ * The section's pending pick, confirmed or dropped. ta-dh1 r2: as the engine confirmation, a tap
+ * on Switch only asks; the write is built in the next frame from that frame's binding (an env
+ * override that landed with the tap sends nothing), once per confirmation.
+ */
 @Composable
 private fun PendingCliPick(pending: ServerChoice?, binding: ServerSettingsBinding, onDone: () -> Unit) {
     val choice = pending ?: return
     // The frame went away (signed out, another server): the pick goes with it.
     val advanced = binding.advanced ?: return SideEffect { onDone() }
+    var asked by remember(choice) { mutableStateOf(false) }
+    val fired = remember(choice) { booleanArrayOf(false) }
+    if (asked) {
+        SideEffect {
+            if (!fired[0]) {
+                fired[0] = true
+                binding.sendCli(ServerSettingsPatch.cliVersion(advanced, choice.value))
+            }
+            onDone()
+        }
+        return
+    }
     val current = ClaudeCliCopy.options(advanced).firstOrNull { it.value == advanced.claudeCliVersion.orEmpty() }?.label
         ?: LabelText.visibleValue(advanced.claudeCliVersion)
     ClaudeCliConfirmDialog(
         current = current,
         next = choice.label,
-        onConfirm = {
-            // [binding] is this composition's, so the write is built from the latest frame.
-            binding.sendCli(ServerSettingsPatch.cliVersion(advanced, choice.value))
-            onDone()
-        },
+        onConfirm = { asked = true },
         onCancel = onDone,
     )
+}
+
+/**
+ * ta-dh1 r2 (security F2): how long a confirmation's confirm key ignores taps after it appears
+ * (longer than its fade-in), so a double tap on what opened it cannot confirm a change unread. The
+ * wait runs on the composition's clock (a test's or golden's hand-driven one); [LocalConfirmArmMs]
+ * sets it.
+ */
+const val CONFIRM_ARM_MS: Long = 450L
+
+val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
+
+/** The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed. */
+@Composable
+internal fun ArmedConfirmKey(label: String, tag: String, onConfirm: () -> Unit) {
+    val ms = LocalConfirmArmMs.current
+    var armed by remember { mutableStateOf(ms <= 0L) }
+    LaunchedEffect(ms) {
+        if (ms > 0L) {
+            delay(ms)
+            armed = true
+        }
+    }
+    TetherKey(onClick = { if (armed) onConfirm() }, classes = KeyClasses.ButtonPrimary, label = label, modifier = Modifier.testTag(tag))
 }
 
 /**
@@ -679,7 +718,7 @@ internal fun ClaudeCliConfirmDialog(current: String, next: String, onConfirm: ()
         title = ClaudeCliCopy.CONFIRM_TITLE,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ServerSettingsTags.CliCancel))
-            TetherKey(onClick = onConfirm, classes = KeyClasses.ButtonPrimary, label = ClaudeCliCopy.CONFIRM_ACTION, modifier = Modifier.testTag(ServerSettingsTags.CliConfirm))
+            ArmedConfirmKey(ClaudeCliCopy.CONFIRM_ACTION, ServerSettingsTags.CliConfirm, onConfirm)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(ServerSettingsTags.CliConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {

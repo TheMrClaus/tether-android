@@ -119,6 +119,25 @@ class EnginesBehaviourTest {
         compose.waitForIdle()
     }
 
+    /**
+     * r2: hand a state write made outside an input event (a semantics action, a runOnUiThread
+     * block) to the recomposer now. In this Robolectric harness such a write is otherwise not
+     * applied until something else triggers a frame (a real tap always is).
+     */
+    private fun flushWrites() = androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+
+    /** r2: let the confirmation's key arm (it ignores taps for [CONFIRM_ARM_MS] after it appears). */
+    private fun arm() {
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
+        compose.waitForIdle()
+    }
+
+    /** Tap Change once it is armed. */
+    private fun confirm() {
+        arm()
+        tag(EngineTags.Confirm).performClick()
+    }
+
     private fun waitForWrites(writer: RecordingWriter, n: Int) = compose.waitUntil(5_000) { writer.patches.size >= n }
 
     private fun frames(vararg settings: String) = settings.map { json("""{"type":"set-server-settings","settings":$it}""") }
@@ -315,7 +334,7 @@ class EnginesBehaviourTest {
         assertEquals("codex", SafeText.original(textOf(EngineTags.ConfirmNow)))
         assertEquals("/opt/codex/bin/codex", SafeText.original(textOf(EngineTags.ConfirmNew)))
         assertFalse(exists(EngineTags.ConfirmTrimmed))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 1)
         compose.waitForIdle()
         assertEquals(frames("""{"codexCommand":"/opt/codex/bin/codex"}"""), writer.frames())
@@ -332,13 +351,13 @@ class EnginesBehaviourTest {
         typeAndDone(ServerSetting.ClaudeLaunchCommand, "jean-claude run -- claude")
         assertTrue(texts().contains("Change the Claude Code launch command?"))
         assertEquals("Empty — no wrapper", textOf(EngineTags.ConfirmNow))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 1)
         // An emptied home is null, as the web's `value || null`.
         typeAndDone(ServerSetting.CodexHome, "")
         assertEquals("/srv/homes/codex", SafeText.original(textOf(EngineTags.ConfirmNow)))
         assertEquals("Empty — not set", textOf(EngineTags.ConfirmNew))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 2)
         assertEquals(frames("""{"claudeLaunchCommand":"jean-claude run -- claude"}""", """{"codexHome":null}"""), writer.frames())
     }
@@ -350,7 +369,7 @@ class EnginesBehaviourTest {
         assertEquals("/opt/pi/bin/pi", SafeText.original(textOf(EngineTags.ConfirmNew)))
         tag(EngineTags.ConfirmTrimmed).assertExists()
         assertTrue(texts().contains(EngineRows.TRIMMED))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 1)
         assertEquals(frames("""{"piCommand":"/opt/pi/bin/pi"}"""), writer.frames())
     }
@@ -395,10 +414,12 @@ class EnginesBehaviourTest {
         val writer = RecordingWriter()
         showWith(writer)
         typeAndDone(ServerSetting.CodexCommand, "/tmp/other")
+        arm()
         val action = tag(EngineTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         compose.runOnUiThread {
             action()
             action()
+            flushWrites()
         }
         waitForWrites(writer, 1)
         compose.waitForIdle()
@@ -413,7 +434,7 @@ class EnginesBehaviourTest {
         binding = binding.copy(settings = ServerFixtures.view(settings, envForced = mapOf("claudeCommand" to true)))
         compose.waitForIdle()
         if (exists(EngineTags.Confirm)) {
-            tag(EngineTags.Confirm).performClick()
+            confirm()
             compose.waitForIdle()
         }
         assertFalse(exists(EngineTags.ConfirmSheet))
@@ -428,7 +449,7 @@ class EnginesBehaviourTest {
         binding = binding.copy(settings = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "/opt/codex"))), replies = 1)
         compose.waitForIdle()
         assertEquals("/opt/codex", SafeText.original(textOf(EngineTags.ConfirmNow)))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         compose.waitForIdle()
         assertEquals(emptyList<Any>(), writer.patches)
     }
@@ -493,7 +514,7 @@ class EnginesBehaviourTest {
         assertEquals(emptyList<Any>(), writer.patches)
         assertTrue(texts().contains("Change the OpenCode home?"))
         assertEquals("/home/op/.config/opencode", SafeText.original(textOf(EngineTags.ConfirmNew)))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 1)
         assertEquals(frames("""{"opencodeHome":"/home/op/.config/opencode"}"""), writer.frames())
         // A home is set now: no detected-home row, and the switch can be turned on.
@@ -525,11 +546,113 @@ class EnginesBehaviourTest {
         // What is confirmed is what is sent.
         assertEquals(serverSpoof, SafeText.original(now))
         assertEquals(typed, SafeText.original(next))
-        tag(EngineTags.Confirm).performClick()
+        confirm()
         waitForWrites(writer, 1)
         assertEquals(json("""{"codexHome":"$typed"}"""), writer.patches.single().first)
     }
 
+
+    // ---- r2 ----------------------------------------------------------------------------------------
+
+    /** r2 (F2): a tap on Change the moment the confirmation appears (a double tap on Done) sends nothing. */
+    @Test fun aTapBeforeTheConfirmationArmsSendsNothing() {
+        val writer = answering()
+        showWith(writer)
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        compose.mainClock.autoAdvance = false
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS - 150)
+        tag(EngineTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { flushWrites() }
+        compose.mainClock.advanceTimeBy(32)
+        assertEquals(emptyList<Any>(), writer.patches)
+        tag(EngineTags.ConfirmSheet).assertExists()
+        // Armed now: the same tap sends.
+        compose.mainClock.advanceTimeBy(200)
+        tag(EngineTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { flushWrites() }
+        compose.mainClock.autoAdvance = true
+        waitForWrites(writer, 1)
+        assertEquals(frames("""{"codexCommand":"/opt/codex"}"""), writer.frames())
+    }
+
+    /** r2 (verifier 1): an env lock set in the same frame as the tap on Change sends nothing. */
+    @Test fun anEnvLockInTheSameFrameAsTheTapSendsNothing() {
+        val writer = RecordingWriter()
+        showWith(writer)
+        typeAndDone(ServerSetting.CodexCommand, "/tmp/x")
+        arm()
+        val action = tag(EngineTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            binding = binding.copy(settings = ServerFixtures.view(settings, envForced = mapOf("codexCommand" to true)))
+            action()
+            flushWrites()
+        }
+        compose.waitForIdle()
+        assertFalse(exists(EngineTags.ConfirmSheet))
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /** r2: the write is built from the client's NEWEST frame, even when the composed one is behind it. */
+    @Test fun theWriteReadsTheClientsNewestFrame() {
+        val writer = RecordingWriter()
+        val newest = ServerFixtures.view(settings, envForced = mapOf("codexCommand" to true))
+        show(ServerFixtures.binding(view = ServerFixtures.view(settings), writer = writer).copy(fresh = { newest }))
+        typeAndDone(ServerSetting.CodexCommand, "/tmp/x")
+        confirm()
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /** r2 (F1): a no-break space is a visible token in the confirmation, and the value is sent exactly. */
+    @Test fun aNoBreakSpaceIsShownAsATokenAndSentExactly() {
+        val writer = answering()
+        showWith(writer)
+        val typed = "/opt/x\u00A0y/claude"
+        typeAndDone(ServerSetting.ClaudeCommand, typed)
+        val next = textOf(EngineTags.ConfirmNew)
+        assertTrue(next, next.contains("⟨U+00A0⟩"))
+        assertFalse(next.contains('\u00A0'))
+        assertEquals(typed, SafeText.original(next))
+        confirm()
+        waitForWrites(writer, 1)
+        assertEquals(json("""{"claudeCommand":"/opt/x\u00A0y/claude"}"""), writer.patches.single().first)
+        assertTrue(texts().none { it == "Spaces at the start and end were removed." })
+    }
+
+    /** r2: the new value is drawn above the current one. */
+    @Test fun theNewValueComesFirst() {
+        showWith(RecordingWriter())
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        val newTop = tag(EngineTags.ConfirmNew).fetchSemanticsNode().positionInRoot.y
+        val nowTop = tag(EngineTags.ConfirmNow).fetchSemanticsNode().positionInRoot.y
+        assertTrue("Change to above Now", newTop < nowTop)
+    }
+
+    /** r2 (verifier 3): spaces typed around an empty value raise no "Not saved" hint (Done would do nothing). */
+    @Test fun whitespaceOnlyTypingRaisesNoHint() {
+        showWith(RecordingWriter())
+        tag(ServerSettingsTags.input(ServerSetting.ClaudeLaunchCommand)).performScrollTo().performTextReplacement("   ")
+        compose.waitForIdle()
+        assertEquals("   ", editable(ServerSetting.ClaudeLaunchCommand))
+        assertFalse(exists(EngineTags.unsaved(ServerSetting.ClaudeLaunchCommand)))
+        tag(ServerSettingsTags.input(ServerSetting.ClaudeLaunchCommand)).performTextReplacement(" w ")
+        compose.waitForIdle()
+        tag(EngineTags.unsaved(ServerSetting.ClaudeLaunchCommand)).assertExists()
+    }
+
+    /** r2 (F3): the send path refuses an unconfirmed patch naming what the server runs, whichever builder made it. */
+    @Test fun theBindingRefusesAnUnconfirmedEngineWrite() {
+        val writer = RecordingWriter()
+        val b = ServerFixtures.binding(writer = writer)
+        for (key in com.tether.app.client.ServerSettingsPatch.runsKeys) {
+            assertFalse(key, b.send(json("""{"$key":"/tmp/evil"}""")))
+            assertFalse(key, b.send(json("""{"host":"h","$key":null}""")))
+        }
+        assertTrue(b.send(json("""{"headlessModes":"claude"}""")))
+        assertTrue(b.sendConfirmed(com.tether.app.client.ServerSettingsPatch.engineValue(ServerFixtures.view(), ServerSetting.CodexCommand, "/opt/c")))
+        assertEquals(listOf(json("""{"headlessModes":"claude"}"""), json("""{"codexCommand":"/opt/c"}""")), writer.patches.map { it.first })
+        assertEquals(1, writer.confirmedWrites.size)
+    }
 }
 
 /**

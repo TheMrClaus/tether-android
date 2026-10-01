@@ -163,10 +163,16 @@ class SettingsBehaviourTest {
     @Test fun theStoredFolderIsDrawnSafely() {
         store.seed(PreferenceKeys.DEFAULT_WORKSPACE to "/srv/re\u202Epo")
         show()
-        val texts = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+        // ta-dh1 r2 (load flake): the seed reached the model, and the panel is WAITED on, not read
+        // once: the draft is written from a coroutine, and waitForIdle can return before the
+        // recomposer has been told of that write, so one read could still see "Workspace root".
+        assertEquals("/srv/re\u202Epo", state.draft?.defaultWorkspace)
+        fun texts() = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
             .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text].map { t -> t.text } }
-        assertTrue("the folder is shown: $texts", texts.any { it.startsWith("/srv/re") })
-        assertTrue("the bidi override must not reach the screen raw: $texts", texts.none { '\u202E' in it })
+        compose.waitUntil(5_000) { texts().any { it.startsWith("/srv/re") } }
+        val shown = texts()
+        assertTrue("the folder is shown: $shown", shown.any { it.startsWith("/srv/re") })
+        assertTrue("the bidi override must not reach the screen raw: $shown", shown.none { '\u202E' in it })
     }
 
     /**

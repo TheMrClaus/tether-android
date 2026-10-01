@@ -78,6 +78,13 @@ class ServerSettingsBehaviourTest {
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
+    /** ta-dh1 r2: tap Switch once armed (it ignores taps for [CONFIRM_ARM_MS] after it appears). */
+    private fun confirmCli() {
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
+        compose.waitForIdle()
+        tag(ServerSettingsTags.CliConfirm).performClick()
+    }
+
     /** A select's trigger is named by its row (tether-select's `ariaLabel`); tapping it opens the menu. */
     private fun openSelect(label: String) {
         compose.onNodeWithContentDescription(label).performScrollTo().performClick()
@@ -268,7 +275,7 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.CliConfirmNew).assertExists()
         assertTrue(texts().contains(ClaudeCliCopy.CONFIRM_TITLE))
         assertTrue(texts().contains("2.1.220"))
-        tag(ServerSettingsTags.CliConfirm).performClick()
+        confirmCli()
         compose.waitForIdle()
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"2.1.220"}"""), writer.cli.map { it.first.encode() })
         assertEquals(ORIGIN, writer.cli.single().second)
@@ -296,7 +303,7 @@ class ServerSettingsBehaviourTest {
         // Now: the pinned version; Switch to: Auto, by the picker's own label.
         assertTrue(texts().contains("2.1.220"))
         assertTrue(texts().contains("Auto — newest installed"))
-        tag(ServerSettingsTags.CliConfirm).performClick()
+        confirmCli()
         compose.waitForIdle()
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":null}"""), writer.cli.map { it.first.encode() })
     }
@@ -309,9 +316,62 @@ class ServerSettingsBehaviourTest {
         binding = binding.copy(advanced = ServerFixtures.ADVANCED_FORCED)
         compose.waitForIdle()
         if (compose.onAllNodesWithTag(ServerSettingsTags.CliConfirm, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
-            tag(ServerSettingsTags.CliConfirm).performClick()
+            confirmCli()
             compose.waitForIdle()
         }
+        assertEquals(emptyList<Any>(), writer.cli)
+    }
+
+    /** ta-dh1 r2 (F2): a tap on Switch the moment the confirmation appears sends nothing; once armed it sends. */
+    @Test fun aTapBeforeTheCliSwitchArmsSendsNothing() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("Bundled (SDK)")
+        tag(ServerSettingsTags.CliConfirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() }
+        compose.waitForIdle()
+        assertEquals(emptyList<Any>(), writer.cli)
+        tag(ServerSettingsTags.CliConfirmSheet).assertExists()
+        confirmCli()
+        compose.waitUntil(5_000) { writer.cli.size == 1 }
+        assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"bundled"}"""), writer.cli.map { it.first.encode() })
+    }
+
+    /** ta-dh1 r2: a double tap on Switch in one frame is one write. */
+    @Test fun aDoubleTapOnTheCliSwitchSendsOnce() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("2.1.220")
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
+        compose.waitForIdle()
+        val action = tag(ServerSettingsTags.CliConfirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            action()
+            action()
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.waitUntil(5_000) { writer.cli.isNotEmpty() }
+        compose.waitForIdle()
+        assertEquals(1, writer.cli.size)
+    }
+
+    /** ta-dh1 r2: an env override set in the same frame as the tap on Switch sends nothing. */
+    @Test fun anEnvOverrideInTheSameFrameAsTheSwitchSendsNothing() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        openSelect(ClaudeCliCopy.PICKER_TITLE)
+        pick("Bundled (SDK)")
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
+        compose.waitForIdle()
+        val action = tag(ServerSettingsTags.CliConfirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            binding = binding.copy(advanced = ServerFixtures.ADVANCED_FORCED)
+            action()
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.waitForIdle()
         assertEquals(emptyList<Any>(), writer.cli)
     }
 
@@ -579,11 +639,11 @@ class ServerSettingsBehaviourTest {
     }
 
     @Test fun serverTextIsDrawnSafely() {
-        val bidi = "/srv/‮evil"
+        val bidi = "/srv/\u202Eevil"
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("allowedRoots" to listOf(bidi))))))
         tag(ServerSettingsTags.entry(ServerSetting.AllowedRoots, bidi)).performScrollTo()
         // The path rule writes the override out as a token; the remove key names it by the value rule.
-        assertFalse(texts().any { it.contains("‮") })
+        assertFalse(texts().any { it.contains("\u202E") })
         assertTrue(texts().contains("Remove /srv/\\u{202E}evil"))
     }
 
