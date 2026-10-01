@@ -24,27 +24,26 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-10-01 12:30 CEST):** `main` @ `efd840dd` (gate green 4276). Merged + VERIFIED today: ta-895 (New session lists every Claude account; shipped in v0.10.0), ta-ceo (deferred-message wait/choice, Stop confirms its cost), ta-3uk (hello advertises 137 = TARGET), ta-ccu (tokens at 887c222), ta-lx3 (tether#232 seed fix merged; web screenshots at 887c222). **v0.11.0 PUBLISHED as Latest** (code 29, `efd840dd`, cert checked, asset `tether-0.11.0.apk`). Nothing in flight.
-**Merged + verified overnight:** T15.4 top bar, ta-ylh (v133-v135 decode; hello stays 132), T7.4 attachments + thumbnails, T15.6 operator-only queue,
-T15.3 Overview host & usage, ta-vmg/ta-x9c flakes, T15.5 Studio-only, T15.7 service Open links, ta-dl4 inspector leftovers, T15.8 re-baseline
-(PARITY_BASE 887c222 / v137 for protocol corpora + matrix), ta-exi (store-read failures fail closed). **Owner (2026-10-01 answers):** server deployed at
-protocol **137** (floor 129; #224 and #230 deployed); the hello hold is lifted -> ta-3uk advertises 137; the app's routes are exempt at the
-gateway (verified unauthenticated). **Still open:** a service Open device test (T15.7: `/api/worktree/open` stays behind the gateway by
-design, so it works only when the phone's browser holds its own console sign-in). **Next (`bd ready`):** ta-ebc (#231 plan names, with T10.1), then the P3 follow-ups.
-**Tether (merged by the coordinator; deploys are the owner's):** #208, #209, #212, #216 deployed (server protocol 133 then);
-**#224 merged (`81aa352`), deployed 2026-10-01 with main `887c222` (protocol 137)** - see tether#220 for deploy notes (service hostnames change; new settings in docs/worktrees.md;
-protocol 134, native floor 129).
-**Releases (same cert as 0.6.0 `4f8c22de...b74d`):** v0.7.8 (code 25) published by the owner 2026-09-30; **v0.8.0 (code 26, `6c5e474`,
-+ta-28i +ta-fz3 +T6.8 +ta-8lg +T9.1 +T15.1/T15.2) PUBLISHED by the coordinator 2026-09-30** (cert checked). **v0.9.0 (code 27, `fe5e86dd`, everything merged overnight) PUBLISHED by the coordinator 2026-10-01** (cert checked). Drafts 0.7.4-0.7.7 superseded. **Owner rule 2026-09-30: the coordinator PUBLISHES releases itself (no drafts left for the owner), and every new
-release bumps the MINOR version** (0.8.0, 0.9.0, ...; versionCode +1 each). Flow: `android-release.yml` draft -> download the APK,
-check the signing cert against 0.7.8's and the versionName/versionCode -> publish; never publish a mismatched cert.
+**Resume point (2026-10-01 16:30 CEST):** `main` @ `b06f1fd3` (code head; full gate green twice: 4404 tests, 0 failed, 4 skipped). Nothing in flight; no worktrees.
+**Releases (all signed with cert SHA-256 `4f8c22de...b74d`; the coordinator publishes, every release bumps the MINOR):** v0.10.0 (code 28, ta-895),
+v0.11.0 (code 29: ta-ceo, ta-3uk, ta-ccu, ta-lx3) published; **v0.12.0 (code 30, `b06f1fd3`: ta-k3f Settings shell, ta-9q2 + ta-ebc Claude accounts with plan names)**,
+see the session log for whether it is published. Flow: android-release.yml draft -> download, apksigner cert + aapt2 version check -> rename asset
+`tether-X.apk` -> Highlights above Changes -> `gh release edit vX --draft=false --latest`.
+**Merged + VERIFIED 2026-10-01:** ta-895 New session lists every Claude account/profile; ta-ceo deferred-message wait/choice + Stop cost; ta-3uk hello
+advertises 137 (= TARGET; owner's server deployed at 137, floor 129); ta-ccu tokens at 887c222; ta-lx3 tether#232 seed fix + web screenshots at 887c222
+(PARITY_BASE whole at 887c222); T10.1 slice 1 ta-k3f (feature/settings: 7-tab Settings dialog, General, Appearance, confirm-before-end honoured);
+T10.1 slice 2 ta-9q2 + ta-ebc (read-only Claude accounts list in Engines with plan names; owner-only actions disabled).
+**Owner decisions in force (Decision log):** server-wide settings editable from the phone with no extra guard; secrets (password, proxyToken, profile env)
+masked with tap to reveal, never logged or persisted; anything that sets what the server runs (engine command/home, Claude launch command, profile
+commands) editable only after a confirmation showing the new value. T15.7 Open: design unchanged, **device test still pending (owner)**.
+**Next (owner order: T10.1 slices, then T8.1, then `bd ready`):** ta-t7l (slice 3: Advanced + Metadata, set-server-settings / advanced-settings,
+security-review), then ta-dh1 (slice 4: Engines cards, detect-engines, confirm-on-command), then ta-q6p (slice 5: Profiles editor, set-providers);
+T10.1 and M.cmp.settings-dialog close after these plus T10.3 (Nodes) / T10.4 (Devices). Then T8.1 full new-session composer (note on T8.1: the web's
+create also sends permissionMode/sandboxPolicy). Follow-ups filed today: ta-7n0, ta-ufx (P4 cosmetics), ta-89k (Claude account alias row),
+ta-0d9 (shared fixed-path GET helper, security-review). **Lesson:** settings goldens flaked under the full gate's load until every capture was seeded
+synchronously (initialPreferences, ClaudeAccountsBinding.initial) with the clock driven by hand; run the full gate twice for UI slices.
 **Security follow-ups live in private tether issues** (public beads carry pointers only): #221, #222, #223, #225.
-**Owner queue:** service Open device test (T15.7); review/redact the private tether issues and PRs before the visibility flip (owner handles it).
-**Next frontier (`bd ready`), owner-ordered 2026-09-30:** after ta-28i/ta-fz3 merge, in parallel: **T6.8** (P1, tool screenshots
-not showing on device), **Overview** (T15.1 feed -> T15.2 screen / T15.3 host+usage -> T15.4 top bar), **T9.1** full telemetry
-(the web's whole inspector), **T7.4** attachments + image thumbnails; then T15.5 Studio-only, ta-ylh (v135 wire) -> T15.6/T15.7, T15.8
-re-baseline. Server main is protocol **135** (not deployed past 133). Note: `bd ready` on v1.3.0 still lists T15.6/T15.7 despite
-their ta-ylh blocks-edge; check `bd show` before dispatch.
+**Owner queue:** T15.7 Open device test; review/redact the private tether issues and PRs before the visibility flip (owner handles it).
 Tether S* work happens only in `~/git/tether-wt/` worktrees; **never** switch branches in `~/git/tether` (production runs
 from it). Refresh this board's rows with `python3 tools/parity/refresh-tracker.py` (reads `bd list --all --json`).
 
@@ -405,3 +404,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-01 12:30 | claude-main / Opus 5.5 | ta-ccu, ta-lx3, ta-3uk | All three verify CONFIRMED (ta-ccu: export reproduced byte-identical, 0 goldens moved; ta-3uk: 676-case match with evaluateHello; ta-lx3: coordinator check, tether#232 merged `4b05be74`). Stacked (VENDORED/PARITY_BASE conflict resolved: UI base whole at 887c222), gate 4276 on `efd840dd`, merged ff-only, all VERIFIED. Worktrees removed (incl. our tether worktrees). v0.11.0 (code 29) dispatched. | publish 0.11.0; then ta-ebc with T10.1, T8.1, bd ready |
 | 2026-10-01 12:45 | claude-main / Opus 5.5 | release | v0.11.0 (code 29, `efd840dd`: ta-ceo, ta-3uk, ta-ccu, ta-lx3) built by android-release.yml; cert SHA-256 4f8c22de...b74d and versionName/Code checked; asset renamed, Highlights first; PUBLISHED as Latest. | ta-ebc with T10.1; T8.1; bd ready |
 | 2026-10-01 14:00 | claude-main / Opus 5.5 | T10.1, ta-k3f, ta-9q2 | T10.1 split into 5 slices (ta-k3f, ta-9q2, ta-t7l, ta-dh1, ta-q6p); owner decided the settings write rules (Decision log). ta-k3f Settings shell + General + Appearance: verify REFUTED r1 (rotation closed Settings), fixed r2; r3/r4 fixed screenshot flakes the gate exposed under load; merged ff-only `d8b00b21`, VERIFIED (gate run twice: 4321 tests). Follow-up ta-ufx. ta-9q2 (Claude accounts + plan names, with ta-ebc) maker running. | ta-9q2 verify + security review |
+| 2026-10-01 16:30 | claude-main / Opus 5.5 | ta-9q2, ta-ebc, release | ta-9q2 (+ta-ebc) Claude accounts: verify CONFIRMED, security PASS-WITH-FOLLOWUPS; r2 hardening (double tap, look-alike ids, fixed error copy, depth flatten), r3 same-frame double tap (verifier probe re-run by the coordinator: 1 call). Gate twice on `b06f1fd3` (4404). Merged ff-only, VERIFIED with M.lib claude-account-plan (--force past the verified blocker). Follow-ups ta-89k, ta-0d9. v0.12.0 (code 30) dispatched. Handover point. | publish 0.12.0 if not yet; ta-t7l |
