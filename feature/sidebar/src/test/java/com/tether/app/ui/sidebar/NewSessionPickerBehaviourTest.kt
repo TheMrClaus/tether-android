@@ -209,6 +209,28 @@ class NewSessionPickerBehaviourTest {
         rule.onNodeWithText("Refused once.").assertDoesNotExist()
     }
 
+    /**
+     * ta-8cv: the create's folder is the workspace, else the server's root (the web's form.cwd); with
+     * neither, the web's readiness reason is shown and nothing is sent.
+     */
+    @Test
+    fun withNoFolderAtAllTheWebsReadinessReasonShowsAndNothingIsSent() {
+        val client = PickerClient().apply { inner.workspaceRoot.value = null }
+        val dismissed = mutableListOf<Unit>()
+        open(client, dismissed)
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(com.tether.app.client.READINESS_NEED_CWD).assertExists()
+        assertTrue(client.creates.isEmpty())
+        assertTrue(dismissed.isEmpty())
+        // The server's root arrives: the same tap creates there.
+        client.inner.workspaceRoot.value = "/srv/root"
+        rule.waitForIdle()
+        rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "claude", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertEquals("/srv/root", client.creates.single().cwd)
+    }
+
     @Test
     fun aRowTheServerNoLongerOffersSaysSoStaysOpenAndAsksAgain() {
         val client = PickerClient().apply { nextResult = NewSessionResult.NotOffered }

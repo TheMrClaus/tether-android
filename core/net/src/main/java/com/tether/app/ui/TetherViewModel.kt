@@ -37,9 +37,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Thin view-model over [TetherClient]: selection, create-then-select, the
- * event-anchored clock, per-session composer drafts, the error toast, and the
- * Health & Event Log badge (unseen warnings).
+ * Thin view-model over [TetherClient]: selection, the new-session draft composer
+ * ([draftComposer]; ta-8cv: a new session is selected only from its own create's
+ * `created`, matched by requestId), the event-anchored clock, per-session composer
+ * drafts, the error toast, and the Health & Event Log badge (unseen warnings).
  */
 class TetherViewModel(
     val client: TetherClient,
