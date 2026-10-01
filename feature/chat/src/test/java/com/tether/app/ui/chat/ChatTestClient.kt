@@ -172,7 +172,6 @@ class ChatTestClient : TetherClient {
         if (result == com.tether.app.client.ConsentResult.Sent) decided.value = decided.value + com.tether.app.client.consentKey(sessionId, requestId, fingerprint)
         return result
     }
-    override fun createSession(provider: String, cwd: String?, name: String?) = Unit
     override fun resumeHistory(historyId: String, cwd: String) = Unit
     override fun discover(cwd: String) = Unit
     override fun browse(cwd: String?) = Unit

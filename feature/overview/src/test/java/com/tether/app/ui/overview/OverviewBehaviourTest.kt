@@ -163,7 +163,6 @@ private class RecordingClient : TetherClient {
         calls += "question"
         return ConsentResult.Sent
     }
-    override fun createSession(provider: String, cwd: String?, name: String?) { calls += "create" }
     override fun resumeHistory(historyId: String, cwd: String) { calls += "resume" }
     override fun discover(cwd: String) { calls += "discover" }
     override fun browse(cwd: String?) { calls += "browse" }

@@ -74,7 +74,6 @@ class NavTestClient(
     override val liveSessions: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
     override val consentOrigin: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
-    override fun createSession(provider: String, cwd: String?, name: String?) { stateChanges += "createSession" }
     override fun resumeHistory(historyId: String, cwd: String) { stateChanges += "resumeHistory" }
     override fun sessionControl(sessionId: String, control: com.tether.app.client.SessionControl, expectedOrigin: String?): com.tether.app.client.ControlResult {
         stateChanges += "sessionControl"

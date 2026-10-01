@@ -39,6 +39,9 @@ class TetherViewModelResumeTest {
         override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
         override val createdSessions = MutableStateFlow<CreatedReply?>(null)
 
+        override fun createNewSession(choice: com.tether.app.client.NewSessionChoice, cwd: String?, expectedOrigin: String?) =
+            com.tether.app.client.NewSessionResult.Sent
+
         override fun resume(history: HistorySession): Boolean {
             if (!sends) return false
             resumed += history.historyId
@@ -138,7 +141,7 @@ class TetherViewModelResumeTest {
     @Test fun theProviderPickersCreateIsSelectedOnceWhetherTheListOrTheReplyComesFirst() = runTest(dispatcher) {
         val client = ResumeClient()
         val vm = vm(client)
-        vm.createSession("claude")
+        vm.createNewSession(com.tether.app.client.NewSessionChoice("claude", "claude", null), null)
         client.created(session("new"))
         advanceUntilIdle()
         assertEquals("new", vm.selectedSessionId.value)

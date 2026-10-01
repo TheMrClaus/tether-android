@@ -378,7 +378,6 @@ interface TetherClient {
      */
     fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): NoticeResult = NoticeResult.NotConnected
 
-    fun createSession(provider: String, cwd: String? = null, name: String? = null)
     fun resumeHistory(historyId: String, cwd: String)
     fun discover(cwd: String)
     fun browse(cwd: String? = null)

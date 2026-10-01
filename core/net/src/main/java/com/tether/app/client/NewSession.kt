@@ -95,13 +95,15 @@ object NewSessionGuard {
     fun submittable(status: String): Boolean = status == "ready" || status == "error"
 
     /**
-     * The rows to draw. [liveCatalog] is the catalog the current socket delivered (null or empty:
-     * none is in yet), listed in the server's order. Without one, the base [providers] stand in as
-     * their default rows (no profile; acp, which has none, left out), so a new session can still be
-     * started on a default engine while the catalog loads.
+     * The rows to draw. [liveCatalog] is the catalog the current socket delivered (null: none is in
+     * yet), listed in the server's order. Without one, the base [providers] stand in as their
+     * default rows (no profile; acp, which has none, left out), so a new session can still be
+     * started on a default engine while the catalog loads. r2 (F3): a live catalog that is EMPTY
+     * (the server offered nothing, or nothing it sent decoded) is what the server offers: no rows,
+     * as the web draws "No models available", and no default stands in for it.
      */
     fun rows(liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): List<NewSessionRow> {
-        val catalog = liveCatalog?.takeIf { it.isNotEmpty() }
+        val catalog = liveCatalog
         if (catalog == null) {
             return providers.filter { it.id.isNotEmpty() && it.id != ACP }.map { provider ->
                 NewSessionRow(
@@ -129,13 +131,14 @@ object NewSessionGuard {
      * The `create` for [choice], or null when the server does not offer it now (fail closed: never
      * a create on another profile, and never the default profile in place of a missing one).
      *
-     * With a [liveCatalog] (the current socket's, non-empty): exactly one row has the drawn key, and
-     * its engine and profile are the drawn ones, it is [wellFormed] and [submittable]; the frame
-     * carries that row's engine and profile. Without one: only a default row (no profile, key = an
-     * engine id) of an available, non-acp base provider; the frame carries no profile.
+     * With a [liveCatalog] (the current socket's; r2: an empty one offers nothing): exactly one row
+     * has the drawn key, and its engine and profile are the drawn ones, it is [wellFormed] and
+     * [submittable]; the frame carries that row's engine and profile. Without one (null: none is in
+     * yet): only a default row (no profile, key = an engine id) of an available, non-acp base
+     * provider; the frame carries no profile.
      */
     fun resolve(choice: NewSessionChoice, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>, cwd: String?): ClientMessage.Create? {
-        val catalog = liveCatalog?.takeIf { it.isNotEmpty() }
+        val catalog = liveCatalog
         if (catalog == null) {
             if (choice.profileId != null || choice.key != choice.provider || choice.provider == ACP) return null
             val provider = providers.firstOrNull { it.id == choice.provider } ?: return null

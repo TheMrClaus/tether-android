@@ -35,7 +35,10 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,11 +48,16 @@ import com.tether.app.client.LabelText
 import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionResult
 import com.tether.app.client.NewSessionRow
+import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.text.codeLabel
+import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.text.appendStyled
+import com.tether.app.ui.text.codeDirection
+import com.tether.app.ui.text.tokenStyle
+import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
@@ -125,11 +133,12 @@ fun NewSessionDialog(vm: TetherViewModel, onDismiss: () -> Unit) {
  * The picker's body (stateless): a pending line while the catalog is not in, then one row per
  * [rows] entry as model-browser.tsx ProviderRow draws it — the engine's mark (for a profile row the
  * engine it `extends`: the web's badge), the label (`entry.label ?? entry.provider`), the trailing
- * state in words ("N models", "Loading…", "Unavailable", "Error") and a chevron; an unavailable row
- * is disabled. The app adds one line the web does not draw: a profile row's id, so two accounts
- * labelled alike (or a profile labelled like the default row) never look the same; an error row also
- * shows its reason. Every server string is drawn by the text rules (labels [LabelText], ids
- * [codeLabel]).
+ * state in words ("N models", "Loading…", "Unavailable", "Error"; r2: "Not offered" for a row the
+ * client refuses) and a chevron; a row that cannot create is disabled ([newSessionRowEnabled]). The
+ * app adds what the web does not draw: a profile row's id, whole (it wraps), so two accounts
+ * labelled alike (or a profile labelled like the default row) never look the same, and a short tag
+ * after a label another row shares ([newSessionRowTags]); an error row also shows its reason. Every
+ * server string is drawn by the text rules (labels [LabelText], ids [SafeText.Rule.Line]).
  */
 @Composable
 fun ColumnScope.NewSessionPickerBody(
@@ -160,8 +169,9 @@ fun ColumnScope.NewSessionPickerBody(
             modifier = Modifier.fillMaxWidth().padding(vertical = t.css.spaceMd),
         )
     }
+    val tags = newSessionRowTags(rows)
     rows.forEachIndexed { index, row ->
-        NewSessionRowView(row, glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, onPick = onPick)
+        NewSessionRowView(row, tags[index], glyphFor(providers, row.choice.provider), last = index == rows.lastIndex, onPick = onPick)
     }
     if (notice != null) {
         Row(
@@ -196,31 +206,94 @@ internal fun newSessionRowLabel(row: NewSessionRow): String {
     return LabelText.visibleValue(row.choice.profileId ?: row.choice.provider)
 }
 
+/**
+ * r2 (F2): the row takes a tap. A row that can create does; so does a loading one (the tap says
+ * "Models are still loading.", as the web's readiness does, and sends nothing). Every other row
+ * (unavailable, or one the client would refuse: a duplicated key, a malformed row, an unknown
+ * status) is drawn disabled, so it never looks like it would start a session.
+ */
+internal fun newSessionRowEnabled(row: NewSessionRow): Boolean = row.creatable || row.status == "loading"
+
 /** model-browser.tsx ProviderRow's trailing state, in words (never colour alone). */
-internal fun newSessionRowState(row: NewSessionRow): String = when (row.status) {
-    "ready" -> row.entry?.let { e -> "${e.models.size} ${if (e.models.size == 1) "model" else "models"}" } ?: ""
-    "loading" -> "Loading…"
-    "unavailable" -> "Unavailable"
+internal fun newSessionRowState(row: NewSessionRow): String = when {
+    row.status == "loading" -> "Loading…"
+    row.status == "unavailable" -> "Unavailable"
+    // r2 (F2): a row the client refuses whatever its status says (duplicated, malformed, unknown).
+    !row.creatable -> "Not offered"
+    row.status == "ready" -> row.entry?.let { e -> "${e.models.size} ${if (e.models.size == 1) "model" else "models"}" } ?: ""
     else -> "Error"
 }
 
 /** An error row's reason (model-browser.tsx ProviderView: `entry.error ?? "Failed to load models."`). */
 internal fun newSessionRowError(row: NewSessionRow): String? {
-    if (row.status == "ready" || row.status == "loading" || row.status == "unavailable") return null
+    if (row.status != "error") return null
     return LabelText.error(row.entry?.error).ifEmpty { "Failed to load models." }
 }
 
+/**
+ * r2 (F1): rows whose drawn label is the same ("Claude Code (work)" twice: the server names an
+ * account after its nickname and only its id gets the "-2") each carry a short stable tag of their
+ * key, `#` + 6 hex of its SHA-256 (the [LabelText.visibleValue] tag), drawn after the label and
+ * never cut. Null for a row whose label is its own.
+ */
+internal fun newSessionRowTags(rows: List<NewSessionRow>): List<String?> {
+    val labels = rows.map(::newSessionRowLabel)
+    val counts = labels.groupingBy { it }.eachCount()
+    return rows.mapIndexed { i, row -> if ((counts[labels[i]] ?: 0) > 1) "#" + shortHash(row.choice.key) else null }
+}
+
+private fun shortHash(value: String): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }.take(6)
+
+/** r2 (F1): an id longer than this is cut in the MIDDLE, so its end (a "-2" suffix) always shows. */
+internal const val PROFILE_ID_SHOWN = 96
+
+/**
+ * The raw parts of [id] to draw: the whole id, or (longer than [PROFILE_ID_SHOWN]) its head and its
+ * tail, each cut at a character-cluster boundary ([TextCut]), drawn with "…" between them.
+ */
+internal fun profileIdParts(id: String): List<String> {
+    if (id.length <= PROFILE_ID_SHOWN) return listOf(id)
+    val half = (PROFILE_ID_SHOWN - 1) / 2
+    val headEnd = TextCut.boundaryAtOrBefore(id, half)
+    val tailStart = TextCut.boundaryAtOrBefore(id, id.length - half, floor = headEnd)
+    return listOf(id.substring(0, headEnd), id.substring(tailStart))
+}
+
+/**
+ * r2 (F1): a profile id as drawn: the one-line rule ([SafeText.Rule.Line]: hidden code points and
+ * line breaks as tokens) in an LTR paragraph, a break opportunity between any two characters, and
+ * never cut at its end: it wraps, and only an id longer than [PROFILE_ID_SHOWN] is cut, in the middle.
+ */
 @Composable
-private fun NewSessionRowView(row: NewSessionRow, glyph: String?, last: Boolean, onPick: (NewSessionRow) -> Unit) {
+private fun profileIdText(id: String): AnnotatedString {
+    val t = LocalTetherTokens.current
+    return remember(id, t) {
+        val style = tokenStyle(t)
+        AnnotatedString.Builder(id.length * 2).apply {
+            withStyle(ParagraphStyle(textDirection = codeDirection)) {
+                profileIdParts(id).forEachIndexed { i, part ->
+                    if (i > 0) append("…")
+                    appendStyled(SafeText.breakAnywhere(SafeText.encode(part, SafeText.Rule.Line)), style)
+                }
+            }
+        }.toAnnotatedString()
+    }
+}
+
+@Composable
+private fun NewSessionRowView(row: NewSessionRow, tag: String?, glyph: String?, last: Boolean, onPick: (NewSessionRow) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val name = newSessionRowLabel(row)
     val state = newSessionRowState(row)
     val error = newSessionRowError(row)
     val profileId = row.choice.profileId?.takeIf { it.isNotEmpty() }
-    val enabled = row.status != "unavailable"
+    val enabled = newSessionRowEnabled(row)
     val description = listOfNotNull(
         name,
+        tag?.let { "tag ${it.removePrefix("#")}" },
         profileId?.let { "profile ${LabelText.visibleValue(it)}" },
         state.takeIf { it.isNotEmpty() },
         error,
@@ -244,10 +317,15 @@ private fun NewSessionRowView(row: NewSessionRow, glyph: String?, last: Boolean,
         ) {
             CatalogGlyph(row.choice.provider, glyph)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.6.dp)) {
-                Text(name, style = type.body.copy(fontSize = rem(0.82f)), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                    Text(name, style = type.body.copy(fontSize = rem(0.82f)), color = t.white, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    // r2 (F1): the tag that tells two same-labelled rows apart is never cut.
+                    if (tag != null) Text(tag, style = type.body.copy(fontSize = rem(0.7f), fontFamily = JetBrainsMono), color = t.faint, maxLines = 1, softWrap = false)
+                }
                 if (profileId != null) {
-                    // ta-28i: an id is drawn by the one-line rule (hidden code points as tokens, LTR).
-                    Text(codeLabel(profileId), style = type.body.copy(fontSize = rem(0.7f)), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // ta-28i: an id is drawn by the one-line rule (hidden code points as tokens, LTR);
+                    // r2 (F1): it wraps rather than losing its end.
+                    Text(profileIdText(profileId), style = type.body.copy(fontSize = rem(0.7f)), color = t.faint)
                 }
                 if (error != null) {
                     Text(error, style = type.body.copy(fontSize = rem(0.7f)), color = t.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)

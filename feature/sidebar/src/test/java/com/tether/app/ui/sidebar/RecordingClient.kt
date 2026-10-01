@@ -80,7 +80,6 @@ class RecordingClient(
     /** T13.2 r3: keeps the interface's empty syncStates, so it reports no freshness. */
     override val reportsFreshness: Boolean = false
     override val decidedRequests: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
-    override fun createSession(provider: String, cwd: String?, name: String?) = record(ClientMessage.Create(provider = provider, cwd = cwd, name = name))
     override fun resumeHistory(historyId: String, cwd: String) = record(ClientMessage.Resume(historyId, cwd))
     override fun discover(cwd: String) = record(ClientMessage.Discover(cwd))
     override fun browse(cwd: String?) = record(ClientMessage.Browse(cwd))

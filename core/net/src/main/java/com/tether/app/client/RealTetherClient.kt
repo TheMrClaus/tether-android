@@ -3563,10 +3563,6 @@ class RealTetherClient(
                 (command["status"] as? JsStr)?.value == "running"
         } == true
 
-    override fun createSession(provider: String, cwd: String?, name: String?) {
-        sendFrame(ClientMessage.Create(provider = provider, cwd = cwd, name = name))
-    }
-
     /**
      * ta-895: the one path a New session row takes to the wire. Under the lock, in order: a live,
      * handshaken socket of a running (not halted) client; the row drawn for THIS server

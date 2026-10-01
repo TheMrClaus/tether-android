@@ -49,7 +49,11 @@ class LiveServerTest {
                     while (client.connection.value != ConnectionState.Connected) delay(50)
                 }
 
-                client.createSession(provider = "claude", name = "live-verify")
+                // ta-895: the one create path (the base provider's default row, no profile).
+                assertEquals(
+                    NewSessionResult.Sent,
+                    client.createNewSession(NewSessionChoice("claude", "claude", null), null, client.consentOrigin.value),
+                )
                 val sessionId = withTimeout(15_000) {
                     while (client.sessions.value.isEmpty()) delay(50)
                     client.sessions.value.first().id

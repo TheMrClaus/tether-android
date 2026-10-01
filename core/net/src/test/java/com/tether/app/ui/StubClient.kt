@@ -57,7 +57,6 @@ internal open class StubClient : TetherClient {
     override val consentOrigin: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override val liveSessions: StateFlow<Set<String>> = MutableStateFlow(emptySet())
     override val decidedRequests: StateFlow<Set<String>> = MutableStateFlow(emptySet())
-    override fun createSession(provider: String, cwd: String?, name: String?) = Unit
     override fun resumeHistory(historyId: String, cwd: String) = Unit
     override fun discover(cwd: String) = Unit
     override fun browse(cwd: String?) = Unit

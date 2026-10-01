@@ -331,7 +331,6 @@ private class MetricsClient : TetherClient {
     override fun queueRemove(sessionId: String, queueId: String) = error("unused")
     override fun approval(sessionId: String, requestId: String, expectedFingerprint: String, choiceId: String?, decision: String?, grantedPermissions: GrantedPermissions?): ConsentResult = error("unused")
     override fun answerQuestion(sessionId: String, requestId: String, expectedFingerprint: String, picks: List<ConsentGuard.QuestionPick>, skipped: Set<Int>): ConsentResult = error("unused")
-    override fun createSession(provider: String, cwd: String?, name: String?) = error("unused")
     override fun resumeHistory(historyId: String, cwd: String) = error("unused")
     override fun discover(cwd: String) = error("unused")
     override fun browse(cwd: String?) = error("unused")

@@ -628,7 +628,7 @@ class FakeTetherClient : TetherClient {
         touchSession(sessionId, status = "ready")
     }
 
-    override fun createSession(provider: String, cwd: String?, name: String?) {
+    private fun createDemoSession(provider: String, cwd: String?, name: String?) {
         val id = "s-${System.currentTimeMillis()}"
         val ts = System.currentTimeMillis()
         val dir = cwd ?: "/home/operator/git"
@@ -650,7 +650,7 @@ class FakeTetherClient : TetherClient {
         if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.NewSessionResult.NotLive
         val frame = com.tether.app.client.NewSessionGuard.resolve(choice, null, providers.value, cwd)
             ?: return com.tether.app.client.NewSessionResult.NotOffered
-        createSession(frame.provider, frame.cwd, null)
+        createDemoSession(frame.provider, frame.cwd, null)
         return com.tether.app.client.NewSessionResult.Sent
     }
 
