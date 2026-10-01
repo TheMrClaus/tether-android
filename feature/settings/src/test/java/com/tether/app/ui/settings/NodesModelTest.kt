@@ -191,6 +191,11 @@ class NodesModelTest {
         assertFalse(actions.noticeFor(ORIGIN)!!.ok)
     }
 
+    @Test fun theGoldenCredentialIsObviouslyFake() {
+        assertTrue(NodeFixtures.FAKE_CREDENTIAL.startsWith("FAKE-"))
+        assertTrue(NodeFixtures.FAKE_CREDENTIAL.contains("not-a-real-credential"))
+    }
+
     @Test fun noValueTheActionsHoldPrintsTheCredential() {
         val scope = TestScope(StandardTestDispatcher())
         val writer = RecordingNodesWriter()

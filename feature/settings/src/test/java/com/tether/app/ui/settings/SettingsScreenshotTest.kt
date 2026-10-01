@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ClaudeAccount
 import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
@@ -48,6 +49,7 @@ enum class SettingsShot(
     val accounts: AccountsShot? = null,
     val server: ServerShot? = null,
     val profiles: ProfilesShot? = null,
+    val nodes: NodesShot? = null,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
@@ -72,6 +74,39 @@ enum class SettingsShot(
     Profiles("settings-profiles", SettingsTab.Engines, profiles = ProfilesShot.Loaded),
     ProfilesEnv("settings-profiles-env", SettingsTab.Engines, profiles = ProfilesShot.Masked),
     ProfilesRevealed("settings-profiles-revealed", SettingsTab.Engines, profiles = ProfilesShot.Revealed),
+    Nodes("settings-nodes", SettingsTab.Nodes, nodes = NodesShot.List),
+    NodesEmpty("settings-nodes-empty", SettingsTab.Nodes, nodes = NodesShot.Empty),
+    NodesAdding("settings-nodes-adding", SettingsTab.Nodes, nodes = NodesShot.Adding),
+    NodesRevealed("settings-nodes-revealed", SettingsTab.Nodes, nodes = NodesShot.Revealed),
+    NodesResult("settings-nodes-result", SettingsTab.Nodes, nodes = NodesShot.Result),
+    NodesError("settings-nodes-error", SettingsTab.Nodes, nodes = NodesShot.Error),
+}
+
+/**
+ * T10.3: the Nodes seeds, timing-free like the others: the list and the last answer are built HERE
+ * and handed in (the answer as the actions' initial notice), so the first frame is the drawn tab;
+ * the writer behind them fails the shot on any request. `settings-nodes` the list (every status,
+ * the skew warning), `-empty` no nodes, `-adding` the form filled with the credential masked,
+ * `-revealed` the same shown (an obviously FAKE bundle), `-result` a probe's answer, `-error` the
+ * refusal a phone sign-in gets before tether #236 is deployed. The form is filled by synchronous
+ * semantics actions on the hand-driven clock, then the focus cleared (no cursor in the shot).
+ */
+enum class NodesShot(
+    val scrollTo: String?,
+    val list: List<com.tether.app.protocol.NodeSummary> = NodeFixtures.LIST,
+    val fill: Boolean = false,
+    val reveal: Boolean = false,
+    val notice: NodeNotice? = null,
+) {
+    List(NodeTags.row("node_ws")),
+    Empty(NodeTags.Add, list = emptyList()),
+    Adding(null, fill = true),
+    Revealed(null, fill = true, reveal = true),
+    Result(NodeTags.Add, notice = NodeNotice(NodeFixtures.ORIGIN, NodeAction.Probe, "node_ws", ok = true, text = "Reachable.", heldByServer = false, serial = 1)),
+    Error(NodeTags.Add, notice = NodeNotice(NodeFixtures.ORIGIN, NodeAction.Add, null, ok = false, text = NodeFixtures.REFUSAL, heldByServer = false, serial = 1)),
+    ;
+
+    fun binding(actions: NodesActions) = NodesBinding(list, NodeFixtures.ORIGIN, actions, NodeFixtures.CONSOLE, now = { NodeFixtures.NOW })
 }
 
 /**
@@ -201,7 +236,10 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     val stored = runBlocking { store.prefs.preferences.first() }
     val state = SettingsDialogState(shot.tab, GeneralDraft.of(stored))
     mainClock.autoAdvance = false
+    var focus: androidx.compose.ui.focus.FocusManager? = null
     setContent {
+        focus = androidx.compose.ui.platform.LocalFocusManager.current
+        val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
         SettingsUnderTest(
             store.prefs,
             state,
@@ -212,10 +250,23 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             claudeAccounts = shot.accounts?.binding() ?: ClaudeAccountsBinding.None,
             serverSettings = shot.server?.binding() ?: ServerSettingsBinding.None,
             providers = shot.profiles?.binding() ?: ProvidersBinding.None,
+            nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
         )
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
+    if (shot.nodes?.fill == true) {
+        onNodeWithTag(NodeTags.Label, useUnmergedTree = true).performTextReplacement("Workstation")
+        onNodeWithTag(NodeTags.BaseUrl, useUnmergedTree = true).performTextReplacement("http://10.0.0.2:4173")
+        onNodeWithTag(NodeTags.CredentialReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+        onNodeWithTag(NodeTags.Credential, useUnmergedTree = true).performTextReplacement(NodeFixtures.FAKE_CREDENTIAL)
+        if (!shot.nodes.reveal) onNodeWithTag(NodeTags.CredentialReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        runOnIdle { focus?.clearFocus(force = true) }
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
     if (shot.server?.reveal == true) {
         onNodeWithTag(ServerSettingsTags.reveal(ServerSetting.Password), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         mainClock.advanceTimeBy(600)
@@ -226,7 +277,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
-    (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo)?.let { scrollTo ->
+    (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo)?.let { scrollTo ->
         // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
         // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
         // shows), and the scroll runs out on the hand-driven clock.
@@ -277,7 +328,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards and the custom providers; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards, the custom providers and the Nodes list and form; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -286,6 +337,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
