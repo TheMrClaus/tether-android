@@ -1,6 +1,6 @@
 {
- "parityBase": "7d65611",
- "protocolVersion": 128,
+ "parityBase": "887c222",
+ "protocolVersion": 137,
  "rows": [
   {
    "kind": "component",
@@ -158,13 +158,6 @@
   },
   {
    "kind": "component",
-   "artifact": "components/login/instrument-login.tsx",
-   "behavior": "Default sign-in (instrument families): password + pairing + passkey",
-   "android": "PARTIAL",
-   "task": "T1.4"
-  },
-  {
-   "kind": "component",
    "artifact": "components/login/retro-login.tsx",
    "behavior": "Retro sign-in (per-browser opt-in variant)",
    "android": "MISSING",
@@ -173,7 +166,7 @@
   {
    "kind": "component",
    "artifact": "components/login/studio-login.tsx",
-   "behavior": "Sign-in for the Studio family",
+   "behavior": "Default sign-in (Studio): password + pairing + passkey",
    "android": "MISSING",
    "task": "T1.4"
   },
@@ -232,6 +225,34 @@
    "behavior": "OpenCode serve controls",
    "android": "MISSING",
    "task": "T7.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/overview/overview.tsx",
+   "behavior": "Overview: every session at a glance, counts, filters, attention first (opt-in feed)",
+   "android": "DONE",
+   "task": "T15.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/overview/overview-card.tsx",
+   "behavior": "Overview session card: status text + shape, current-state age, excerpt",
+   "android": "DONE",
+   "task": "T15.2"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/overview/overview-host.tsx",
+   "behavior": "Overview host resources (polled /api/overview/host while visible, stale label)",
+   "android": "DONE",
+   "task": "T15.3"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/overview/overview-panels.tsx",
+   "behavior": "Overview panels: needs your attention (pending requests), recent activity",
+   "android": "DONE",
+   "task": "T15.2"
   },
   {
    "kind": "component",
@@ -347,6 +368,13 @@
   },
   {
    "kind": "component",
+   "artifact": "components/theme-sync.tsx",
+   "behavior": "Applies the Studio skin for the stored mode (light/dark/system) and follows the OS",
+   "android": "DONE",
+   "task": "T15.5"
+  },
+  {
+   "kind": "component",
    "artifact": "components/todo-bar.tsx",
    "behavior": "Todo/plan progress bar above composer",
    "android": "MISSING",
@@ -411,7 +439,7 @@
   {
    "kind": "page",
    "artifact": "/login",
-   "behavior": "Sign-in; variant by theme family (instrument/studio) or retro opt-in",
+   "behavior": "Sign-in: Studio default or the Retro opt-in (Studio-only since T15.5)",
    "android": "PARTIAL",
    "task": "T1.4"
   },
@@ -439,7 +467,7 @@
   {
    "kind": "page",
    "artifact": "app/layout.tsx boot script",
-   "behavior": "Pre-paint theme resolution family×mode→skin (6 skins)",
+   "behavior": "Pre-paint theme resolution mode→Studio skin (studio / studio-dark)",
    "android": "PARTIAL",
    "task": "T3.1"
   },
@@ -613,6 +641,27 @@
   },
   {
    "kind": "route",
+   "artifact": "/api/overview/host",
+   "behavior": "Overview host resources (CPU, memory, disk) sampled while viewed (T15.8)",
+   "android": "DONE",
+   "task": "T15.3"
+  },
+  {
+   "kind": "route",
+   "artifact": "/api/overview/usage",
+   "behavior": "Overview daily token usage summary (T15.8)",
+   "android": "DONE",
+   "task": "T15.3"
+  },
+  {
+   "kind": "route",
+   "artifact": "/.well-known/assetlinks.json",
+   "behavior": "Digital Asset Links for the Android app: verified App Links + this host's passkeys (S10.1, T15.8)",
+   "android": "MISSING",
+   "task": "T10.5"
+  },
+  {
+   "kind": "route",
    "artifact": "/api/control/v1",
    "behavior": "Control API — machine-facing plane, not for the app",
    "android": "N/A",
@@ -766,6 +815,62 @@
    "task": "T3.1"
   },
   {
+   "kind": "hook/helper",
+   "artifact": "lib/overview-client.mjs (+overview-model.mjs limits)",
+   "behavior": "Overview feed fold (snapshot/delta) and its bounds (v131/v132)",
+   "android": "DONE",
+   "task": "T15.1"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "components/overview/overview-format.ts",
+   "behavior": "Overview display helpers (ages, counts; no clock reads)",
+   "android": "DONE",
+   "task": "T15.2"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/dashboard-view.mjs",
+   "behavior": "Top-level views and URLs: Overview / Sessions / Scheduled, last view remembered",
+   "android": "DONE",
+   "task": "T15.4"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/theme-mode.mjs",
+   "behavior": "Studio appearance: stored mode -> skin, the one shared resolver",
+   "android": "DONE",
+   "task": "T15.5"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/queued-message.mjs",
+   "behavior": "Queued-message provenance: origin user/system, notice kinds, the operator's own drafts (v133)",
+   "android": "DONE",
+   "task": "T15.6"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/session-list-visibility.mjs",
+   "behavior": "Creator rule: agent-made sessions kept off the list server-side; the app shows the hidden count (v135)",
+   "android": "DONE",
+   "task": "T15.6"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/queue-wait.mjs (+events.mjs runningToolIds, liveBackgroundTaskCount)",
+   "behavior": "Deferred message: what it waits for, for how long, the choice after 60s; Stop's cost confirmation (v136, #229)",
+   "android": "MISSING",
+   "task": "ta-ceo"
+  },
+  {
+   "kind": "hook/helper",
+   "artifact": "lib/claude-account-plan.mjs",
+   "behavior": "Claude account plan by its popular name on /api/claude-accounts rows; label + organization only (v137, #231)",
+   "android": "MISSING",
+   "task": "ta-ebc"
+  },
+  {
    "kind": "client-msg",
    "artifact": "hello",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
@@ -799,6 +904,20 @@
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "MISSING",
    "task": "T1.2"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "overview-subscribe",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "DONE",
+   "task": "T15.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "overview-unsubscribe",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "DONE",
+   "task": "T15.1"
   },
   {
    "kind": "client-msg",
@@ -1247,6 +1366,20 @@
    "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
    "android": "MISSING",
    "task": "T1.2"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "overview-snapshot",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "DONE",
+   "task": "T15.1"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "overview-delta",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "DONE",
+   "task": "T15.1"
   },
   {
    "kind": "server-msg",
@@ -2038,6 +2171,12 @@
    "behavior": "AgentEvent: reducer fold (T2.1) + surface",
    "android": "PARTIAL",
    "task": "T7.1"
+  }
+ ],
+ "retired": [
+  {
+   "artifact": "components/login/instrument-login.tsx",
+   "reason": "removed from the web at the T15.8 re-baseline (tether 887c222): Studio-only appearance; Studio's sign-in is the only one (T15.5)"
   }
  ]
 }

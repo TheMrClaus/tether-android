@@ -6,11 +6,17 @@ ClientMessage, ServerMessage and AgentEvent type at PARITY_BASE.
 
 Writes docs/parity/matrix.json (data) and docs/parity/MATRIX.md (human digest).
 Protocol rows are EXTRACTED from lib/protocol.ts; everything else is classified by hand
-below. Android status is judged against the app at T0.1 (v0.5.1, protocol 40):
+below (client-facing artifacts only: server-only lib/ modules are not rows). Android status is
+judged against the app at T0.1 (v0.5.1, protocol 40):
   MISSING  — no equivalent in the app
   PARTIAL  — an equivalent exists but predates v128 / differs from the web
   DONE     — at parity (none yet: nothing has been checked against the corpora)
   N/A      — deliberately out of scope for the native app (reason in behavior)
+
+Re-baseline (PLAN §9, T15.8): a row already in matrix.json keeps its recorded status (the
+baseline it entered at; progress lives in the row's bead). A NEW row takes its status from
+NEW_ROW_STATUS (DONE when merged work already delivered it), else from the app's wire types.
+An artifact the web removed moves to RETIRED (its bead is dropped with the reason).
 """
 import argparse
 import json
@@ -74,11 +80,21 @@ COMPONENTS = {
     "log-dialog": ("Server log dialog (log messages)", "MISSING", "T4.5"),
     "scheduled-actions-view": ("Scheduled actions list/create/control (v87)", "MISSING", "T9.3"),
     "provider-logo": ("Provider logos", "MISSING", "T3.5"),
-    "login/instrument-login": ("Retired Instrument sign-in (web PARITY_BASE); since T15.5 Studio's sign-in is the default", "PARTIAL", "T1.4"),
     "login/studio-login": ("Default sign-in (Studio): password + pairing + passkey", "MISSING", "T1.4"),
     "login/retro-login": ("Retro sign-in (per-browser opt-in variant)", "MISSING", "T1.4"),
     "landing/landing-page": ("Public marketing landing (/web) — not part of the console", "N/A", "—"),
     "landing/demo-console": ("Landing-page demo console — not part of the console", "N/A", "—"),
+    # T15.8 re-baseline (tether 887c222): the Overview (v131/v132) and Studio-only theme sync.
+    "overview/overview": ("Overview: every session at a glance, counts, filters, attention first (opt-in feed)", "MISSING", "T15.2"),
+    "overview/overview-card": ("Overview session card: status text + shape, current-state age, excerpt", "MISSING", "T15.2"),
+    "overview/overview-host": ("Overview host resources (polled /api/overview/host while visible, stale label)", "MISSING", "T15.3"),
+    "overview/overview-panels": ("Overview panels: needs your attention (pending requests), recent activity", "MISSING", "T15.2"),
+    "theme-sync": ("Applies the Studio skin for the stored mode (light/dark/system) and follows the OS", "MISSING", "T15.5"),
+}
+
+# Artifacts the web removed since the row was added: artifact -> reason (bead dropped with it).
+RETIRED = {
+    "components/login/instrument-login.tsx": "removed from the web at the T15.8 re-baseline (tether 887c222): Studio-only appearance; Studio's sign-in is the only one (T15.5)",
 }
 
 PAGES = {
@@ -115,6 +131,9 @@ ROUTES = {
     "/api/worktree/open": ("Open a worktree service URL (Custom Tab on Android)", "MISSING", "T8.3"),
     "/api/tool-media/": ("Tool media blobs (v94)", "MISSING", "T6.2"),
     "/api/setup/*": ("First-run wizard API (setup-server mode)", "MISSING", "T10.6"),
+    "/api/overview/host": ("Overview host resources (CPU, memory, disk) sampled while viewed (T15.8)", "MISSING", "T15.3"),
+    "/api/overview/usage": ("Overview daily token usage summary (T15.8)", "MISSING", "T15.3"),
+    "/.well-known/assetlinks.json": ("Digital Asset Links for the Android app: verified App Links + this host's passkeys (S10.1, T15.8)", "MISSING", "T10.5"),
     "/api/control/v1": ("Control API — machine-facing plane, not for the app", "N/A", "—"),
 }
 
@@ -140,6 +159,37 @@ HOOKS_HELPERS = {
     "lib/claude-reset-grants-view.mjs, deepseek-peak.mjs": ("Usage view helpers", "MISSING", "T9.2"),
     "lib/attachment-draft.ts, draft-form.ts": ("Attachment/draft form model", "PARTIAL", "T7.4"),
     "app/globals.css + app/studio.css tokens": ("6 skin token maps + material layer", "PARTIAL", "T3.1"),
+    # T15.8 re-baseline (tether 887c222)
+    "lib/overview-client.mjs (+overview-model.mjs limits)": ("Overview feed fold (snapshot/delta) and its bounds (v131/v132)", "MISSING", "T15.1"),
+    "components/overview/overview-format.ts": ("Overview display helpers (ages, counts; no clock reads)", "MISSING", "T15.2"),
+    "lib/dashboard-view.mjs": ("Top-level views and URLs: Overview / Sessions / Scheduled, last view remembered", "MISSING", "T15.4"),
+    "lib/theme-mode.mjs": ("Studio appearance: stored mode -> skin, the one shared resolver", "MISSING", "T15.5"),
+    "lib/queued-message.mjs": ("Queued-message provenance: origin user/system, notice kinds, the operator's own drafts (v133)", "MISSING", "T15.6"),
+    "lib/session-list-visibility.mjs": ("Creator rule: agent-made sessions kept off the list server-side; the app shows the hidden count (v135)", "MISSING", "T15.6"),
+    "lib/queue-wait.mjs (+events.mjs runningToolIds, liveBackgroundTaskCount)": ("Deferred message: what it waits for, for how long, the choice after 60s; Stop's cost confirmation (v136, #229)", "MISSING", "ta-ceo"),
+    "lib/claude-account-plan.mjs": ("Claude account plan by its popular name on /api/claude-accounts rows; label + organization only (v137, #231)", "MISSING", "ta-ebc"),
+}
+
+# Status of a row NEW at a re-baseline, when merged work already delivered it (evidence in the
+# row's bead). Keyed by (kind, artifact).
+NEW_ROW_STATUS = {
+    ("component", "components/overview/overview.tsx"): "DONE",
+    ("component", "components/overview/overview-card.tsx"): "DONE",
+    ("component", "components/overview/overview-host.tsx"): "DONE",
+    ("component", "components/overview/overview-panels.tsx"): "DONE",
+    ("component", "components/theme-sync.tsx"): "DONE",
+    ("route", "/api/overview/host"): "DONE",
+    ("route", "/api/overview/usage"): "DONE",
+    ("hook/helper", "lib/overview-client.mjs (+overview-model.mjs limits)"): "DONE",
+    ("hook/helper", "components/overview/overview-format.ts"): "DONE",
+    ("hook/helper", "lib/dashboard-view.mjs"): "DONE",
+    ("hook/helper", "lib/theme-mode.mjs"): "DONE",
+    ("hook/helper", "lib/queued-message.mjs"): "DONE",
+    ("hook/helper", "lib/session-list-visibility.mjs"): "DONE",
+    ("client-msg", "overview-subscribe"): "DONE",
+    ("client-msg", "overview-unsubscribe"): "DONE",
+    ("server-msg", "overview-snapshot"): "DONE",
+    ("server-msg", "overview-delta"): "DONE",
 }
 
 # ---- protocol type -> task -----------------------------------------------------------------
@@ -157,6 +207,7 @@ CLIENT_TASK = {
     "schedule-update": "T9.3", "schedule-control": "T9.3", "approval": "T6.3", "question": "T6.3",
     "metadata-draft-request": "T8.5", "handoff-brief": "T8.5", "handoff": "T8.5",
     "providers-snapshot": "T8.1", "refresh-providers": "T8.1",
+    "overview-subscribe": "T15.1", "overview-unsubscribe": "T15.1",
 }
 SERVER_TASK = {
     "ready": "T1.2", "pong": "T1.2", "version_mismatch": "T1.2", "snapshot": "T1.2", "log": "T4.5",
@@ -167,6 +218,7 @@ SERVER_TASK = {
     "approval": "T6.3", "approval_resolved": "T6.3", "interrupt_result": "T6.7", "error": "T6.7",
     "metadata-draft-result": "T8.5", "metadata-draft-error": "T8.5", "handoff-brief": "T8.5",
     "git-diff-file": "T6.2", "change-request": "T8.3",
+    "overview-snapshot": "T15.1", "overview-delta": "T15.1",
 }
 EVENT_TASK_PREFIX = [
     ("native_session_id", "T7.3"), ("cli_", "T7.3"), ("command_output_", "T7.3"),
@@ -246,11 +298,11 @@ def extract_unions(protocol_ts: str):
 
 
 def android_known():
-    p = ROOT / "app/src/main/java/com/tether/app/protocol"
-    client = set(re.findall(r'put\("type", "([^"]+)"\)', (p / "ClientMessage.kt").read_text()))
+    p = ROOT / "core/protocol/src/main/java/com/tether/app/protocol"
+    client = set(re.findall(r'"type"\s*(?:,|to)\s*"([a-z_-]+)"', (p / "ClientMessage.kt").read_text()))
     server = when_labels((p / "ServerMessage.kt").read_text())
     events = set()
-    for f in (p / "reduce").glob("*.kt"):
+    for f in (ROOT / "core/reducer/src/main/java/com/tether/app/protocol/fold").glob("*.kt"):
         events |= when_labels(f.read_text())
     return client, server, events
 
@@ -277,10 +329,13 @@ def main():
     pv = re.search(r"export const PROTOCOL_VERSION = (\d+)", proto)[1]
     client, server, events = extract_unions(proto)
     a_client, a_server, a_events = android_known()
+    matrix = ROOT / "docs/parity/matrix.json"
+    previous = {(r["kind"], r["artifact"]): r["android"] for r in json.loads(matrix.read_text())["rows"]} if matrix.exists() else {}
 
     rows = []
 
     def add(kind, artifact, behavior, status, task):
+        status = previous.get((kind, artifact)) or NEW_ROW_STATUS.get((kind, artifact)) or status
         rows.append({"kind": kind, "artifact": artifact, "behavior": behavior, "android": status, "task": task})
 
     found = sorted(str(p.relative_to(tether / "components"))[:-4] for p in (tether / "components").rglob("*.tsx"))
@@ -306,8 +361,12 @@ def main():
         add("event", t, "AgentEvent: reducer fold (T2.1) + surface",
             "PARTIAL" if t in a_events else "MISSING", event_task(t))
 
-    data = {"parityBase": sha, "protocolVersion": int(pv), "rows": rows}
-    (ROOT / "docs/parity/matrix.json").write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    gone = [r for r in RETIRED if r.startswith("components/") and (tether / r).exists()]
+    if gone:
+        raise SystemExit(f"retired artifacts still in the web tree: {gone}")
+    data = {"parityBase": sha, "protocolVersion": int(pv), "rows": rows,
+            "retired": [{"artifact": k, "reason": v} for k, v in RETIRED.items()]}
+    matrix.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
 
     counts = {}
     for r in rows:
@@ -318,7 +377,8 @@ def main():
         "",
         f"> Generated by `tools/parity/build-matrix.py` from tether `{sha}` (PROTOCOL_VERSION {pv}) — T0.5.",
         "> Data: [`matrix.json`](./matrix.json). Each row is also a bead (`bd list -l matrix`), closed when",
-        "> its task ports it and a verifier confirms. Android status is as of app 0.5.1 (protocol 40).",
+        "> its task ports it and a verifier confirms. Android status is as of app 0.5.1 (protocol 40) for",
+        "> the T0.5 rows (tether 7d65611); rows added at a re-baseline (T15.8) carry their status then.",
         "> `PARTIAL` = an equivalent exists but predates v128 or differs; every protocol row also needs",
         "> T1.1 (types + tolerant decode) and, for events, T2.1 (reducer conformance).",
         "",
@@ -335,6 +395,8 @@ def main():
         for r in rows:
             if r["kind"] == kind:
                 md.append(f"| `{r['artifact']}` | {r['behavior']} | {r['android']} | {r['task']} |")
+    md += ["", "## Retired", "", "| Web artifact | Why |", "|---|---|"]
+    md += [f"| `{k}` | {v} |" for k, v in RETIRED.items()]
     (ROOT / "docs/parity/MATRIX.md").write_text("\n".join(md) + "\n")
     print(json.dumps(counts), len(rows))
 

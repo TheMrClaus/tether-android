@@ -1,12 +1,11 @@
 package com.tether.app.protocol
 
 /**
- * The v132 TS unions' discriminator sets, checked in so CI (no tether checkout)
- * can verify type coverage. The PARITY_BASE (7d65611, v128) part is derived from
- * docs/parity/matrix.json (kind `server-msg` / `client-msg`, 41 + 67 rows), which
- * S0.1 generated from tether lib/protocol.ts; v129 (S1.1) and v130 (S13.1) added
- * fields only; v131 added the opt-in Overview frames ([SINCE_PARITY_BASE_SERVER] /
- * [SINCE_PARITY_BASE_CLIENT]), which the matrix gains when PARITY_BASE moves.
+ * The v137 TS unions' discriminator sets, checked in so CI (no tether checkout)
+ * can verify type coverage. They are derived from docs/parity/matrix.json (kind
+ * `server-msg` / `client-msg`, 43 + 69 rows), which tools/parity/build-matrix.py
+ * generates from tether lib/protocol.ts at PARITY_BASE (T15.8: 887c222, v137; the
+ * v131 Overview frames joined the matrix then). v132-v137 added no message types.
  * WireConformanceTest re-checks these against matrix.json, and against
  * lib/protocol.ts itself when TETHER_PROTOCOL_TS points at one.
  */
@@ -42,7 +41,7 @@ object WireTypeLists {
         "overview-subscribe", "overview-unsubscribe",
     )
 
-    /** Types added after PARITY_BASE (7d65611): not in matrix.json until the matrix is rebuilt at a newer base. */
-    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("overview-delta", "overview-snapshot")
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("overview-subscribe", "overview-unsubscribe")
+    /** Types added after PARITY_BASE (887c222): not in matrix.json until the matrix is rebuilt at a newer base. */
+    val SINCE_PARITY_BASE_SERVER: Set<String> = emptySet()
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = emptySet()
 }
