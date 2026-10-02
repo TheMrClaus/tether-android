@@ -386,7 +386,7 @@ class DraftComposerModel(
         persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("model" to JsStr(modelId))) }
     }
 
-    /** use-draft-composer.ts:227-235 selectEffort: taken as it is, and remembered for the row. True when it was taken. */
+    /** use-draft-composer.ts:223-231 selectEffort: taken as it is, and remembered for the row. True when it was taken. */
     fun selectEffort(effort: String): Boolean {
         dispatch(JsObj.of("type" to JsStr("SET_REASONING_EFFORT_FROM_USER"), "effort" to JsStr(effort)))
         val key = formKey()
@@ -395,7 +395,7 @@ class DraftComposerModel(
     }
 
     /**
-     * use-draft-composer.ts:237-245 selectMode: the mode as it is, remembered for the row; an elevated
+     * use-draft-composer.ts:233-241 selectMode: the mode as it is, remembered for the row; an elevated
      * mode is an ordinary choice (owner 2026-10-02), with no confirmation. True when it was taken.
      *
      * [drawnFor] is the provider the tapped control was drawn for: a tap that lands after the row's

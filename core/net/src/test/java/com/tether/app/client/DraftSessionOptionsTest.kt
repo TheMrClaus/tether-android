@@ -286,7 +286,7 @@ class DraftSessionOptionsTest {
     }
 
     /**
-     * ta-coik.4: use-draft-composer.ts:227-245 selectEffort / selectMode take the value as it is and
+     * ta-coik.4: use-draft-composer.ts:223-241 selectEffort / selectMode take the value as it is and
      * remember it; the create carries it (the server validates). The retired ta-xki rule refused them.
      */
     @Test
