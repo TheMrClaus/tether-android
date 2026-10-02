@@ -83,6 +83,8 @@ data class WorktreeSourceInfo(
     val hasSetup: Boolean = false,
     val hasTeardown: Boolean = false,
     val declaredScripts: List<WorktreeDeclaredScript> = emptyList(),
+    /** False when the reply's `hasSetup` was not a JSON boolean: then nothing is known (the gate fails closed). */
+    val setupKnown: Boolean = true,
 ) {
     /** Redacted: paths and branch names stay out of logs. */
     override fun toString(): String =
@@ -102,7 +104,10 @@ data class WorktreeSourceInfo(
         private fun JsonObject.str(key: String, max: Int): String =
             (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.length <= max } ?: ""
 
-        private fun JsonObject.flag(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
+        /** Only a JSON boolean counts (the string "true" is not one). */
+        private fun JsonObject.bool(key: String): Boolean? = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+
+        private fun JsonObject.flag(key: String): Boolean = bool(key) == true
 
         private fun JsonObject.names(key: String, cap: Int): List<String> =
             ((this[key] as? JsonArray) ?: return emptyList()).asSequence()
@@ -129,6 +134,7 @@ data class WorktreeSourceInfo(
                 .take(MAX_WARNINGS)
                 .toList(),
             hasSetup = info.flag("hasSetup"),
+            setupKnown = info.bool("hasSetup") != null,
             hasTeardown = info.flag("hasTeardown"),
             declaredScripts = ((info["declaredScripts"] as? JsonArray) ?: JsonArray(emptyList())).asSequence()
                 .mapNotNull { it as? JsonObject }
@@ -282,8 +288,8 @@ object WorktreeSetupGate {
                 when {
                     // A typed base other than the default: its committed config is not the inspected one.
                     base != null && base != defaultBase -> SetupConfirmation(WorktreeModes.BRANCH_OFF, SETUP_FIELD_BASE, base, branch, cwd, certain = false)
-                    // Nothing inspected for this folder on this socket: nothing is known.
-                    source == null -> SetupConfirmation(WorktreeModes.BRANCH_OFF, SETUP_FIELD_BASE, base, branch, cwd, certain = false)
+                    // Nothing inspected for this folder on this socket (or an answer that did not say): nothing is known.
+                    source == null || !source.setupKnown -> SetupConfirmation(WorktreeModes.BRANCH_OFF, SETUP_FIELD_BASE, base, branch, cwd, certain = false)
                     source.hasSetup -> SetupConfirmation(WorktreeModes.BRANCH_OFF, SETUP_FIELD_BASE, base ?: defaultBase, branch, cwd, certain = true)
                     else -> null
                 }
