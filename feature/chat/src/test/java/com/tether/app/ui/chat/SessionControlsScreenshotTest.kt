@@ -8,7 +8,6 @@ import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
-import com.tether.app.client.ModeVocabulary
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.theme.TetherSkin
@@ -22,17 +21,14 @@ import org.robolectric.annotation.Config
  * T7.2 visual states (DoD: every state in both Studio skins at phone size, the expanded layout where it
  * differs, 1.3× font). Phone: `sheet` = the session sheet's hub (Model / Effort / Mode / Fast for a
  * Claude session whose model has effort levels and fast mode), `mode` = its Mode list (Auto in
- * `--warning`, the check on Manual), `confirm` = the Android-only confirmation before Auto,
- * `codex-panel` = the Codex provider-controls view. Tablet (the web's desktop row from 64rem):
+ * `--warning`, the check on Manual), `codex-panel` = the Codex provider-controls view. Tablet (the web's desktop row from 64rem):
  * `opencode-row` = Model (with a provider tag) / Effort / Mode / the Auto toggle ON (warning edge,
  * "Auto" spoken) and the danger hint; `codex-row` = the Codex catalogs' Model / Effort / Mode, Auto
  * off, and the Provider controls key; `unknown-row` (round 2) = a Claude session whose stored mode
  * this app does not know ("Unknown mode (dontAsk)", warning edge and hint) and the Fast key (I6).
- * T6.6: `auto-continue-confirm` = the Android-only confirmation before Auto-continue goes on (a
- * primary key with the Clock glyph: a grant, not a danger posture).
  * The idle Claude row is composer-idle's tablet golden.
  */
-enum class ControlsShot(val id: String) { Sheet("sheet"), Mode("mode"), Confirm("confirm"), CodexPanel("codex-panel"), AutoContinueConfirm("auto-continue-confirm") }
+enum class ControlsShot(val id: String) { Sheet("sheet"), Mode("mode"), CodexPanel("codex-panel") }
 
 enum class RowShot(val id: String) { Opencode("opencode-row"), Codex("codex-row"), Unknown("unknown-row") }
 
@@ -70,15 +66,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapSheet(shot: Control
     when (shot) {
         ControlsShot.Sheet -> Unit
         ControlsShot.Mode -> { onNodeWithTag("sheet-row-Mode").performClick(); step(700) }
-        ControlsShot.Confirm -> {
-            onNodeWithTag("sheet-row-Mode").performClick(); step(700)
-            onNodeWithTag("control-option-${ModeVocabulary.AUTO}").performClick(); step(700)
-        }
         ControlsShot.CodexPanel -> { onNodeWithTag("sheet-row-Provider controls").performClick(); step(700) }
-        ControlsShot.AutoContinueConfirm -> {
-            onNodeWithTag("sheet-row-Auto-continue").performClick(); step(700)
-            onNodeWithTag("control-option-true").performClick(); step(700)
-        }
     }
     captureScreenRoboImage("src/test/screenshots/$name/${skin.id}-$size.png", roborazziOptions = exact)
 }
@@ -97,7 +85,7 @@ class SessionControlsPhoneScreenshotTest(private val shot: ControlsShot, private
     }
 }
 
-/** PLAN §4: 1.3× font scale (Studio light + dark) for the sheet and the confirmation. */
+/** PLAN §4: 1.3× font scale (Studio light + dark) for the sheet. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SessionControlsFontScaleScreenshotTest(private val shot: ControlsShot, private val skin: TetherSkin) {
@@ -108,7 +96,7 @@ class SessionControlsFontScaleScreenshotTest(private val shot: ControlsShot, pri
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ControlsShot.Sheet, ControlsShot.Confirm).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(ControlsShot.Sheet).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }

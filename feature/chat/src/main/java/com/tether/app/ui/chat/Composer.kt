@@ -58,8 +58,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
@@ -81,7 +79,6 @@ import com.tether.app.client.OPENCODE_V2
 import com.tether.app.client.SessionControl
 import com.tether.app.client.LabelText
 import com.tether.app.client.typedModelAllowed
-import com.tether.app.client.confirmedCopy
 import com.tether.app.client.looksLikeModelId
 import com.tether.app.protocol.reduce.composerCommandList
 import com.tether.app.protocol.reduce.TETHER_BLOCKED_COMMANDS
@@ -370,16 +367,6 @@ fun Composer(
     // The web swaps the pill row for the sheet key below 64rem of VIEWPORT (globals.css:7347-7352).
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 1024
     var sheetAt by remember(session?.id) { mutableStateOf<SheetView?>(null) }
-    // T6.6 r2: a pending confirmation belongs to the session, server and link it was opened on. A
-    // server switch re-keys it; any lock (the link dropping, catching up after a reconnect, read-only,
-    // handed off) closes it, so it never survives into another link and nothing is sent.
-    var escalation by remember(session?.id, controlActions.origin) { mutableStateOf<Escalation?>(null) }
-    val escalationLocked = controlActions.lock != null
-    LaunchedEffect(escalationLocked) { if (escalationLocked) escalation = null }
-    // T6.6 r4: while the app is stopped the lock above is never observed (its inputs are collected
-    // with the lifecycle), so a reconnect to the same server in the background would leave the
-    // question open and armed on the new link. Stopping closes it; the operator asks again.
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { escalation = null }
     // T7.3 (chat-view.tsx:2249-2273): Codex has no command catalog of its own; the one action Tether
     // can run from the palette is compaction, once the live catalog says it is dispatchable.
     val codexCompactReady = session?.provider == "codex" && session.engineGeneration == com.tether.app.client.CODEX_V2 &&
@@ -431,36 +418,12 @@ fun Composer(
         menuDismissed = true
     }
 
-    /** The dialog's words for a control that needs the operator's confirmation. */
-    fun escalationFor(control: SessionControl): Escalation? {
-        val confirmed = control.confirmedCopy() ?: return null
-        val c = composerControls
-        return when (control) {
-            is SessionControl.Mode -> {
-                val option = c?.mode?.options?.firstOrNull { it.value == control.value }
-                Escalation(option?.label ?: if (control.value == ModeVocabulary.AUTO) "Auto" else LabelText.visibleValue(control.value), escalationBody(option?.description ?: c?.auto?.hint), confirmed)
-            }
-            is SessionControl.OpencodeMode -> {
-                val agent = controlActions.opencode?.snapshot?.modes?.items?.firstOrNull { it.value == control.mode }
-                Escalation(ComposerControlsModel.opencodeAgentLabel(control.mode, agent?.label ?: ""), escalationBody(agent?.hint?.ifEmpty { null }), confirmed)
-            }
-            is SessionControl.CodexAutoApprove -> Escalation("Auto approve", escalationBody(c?.auto?.hint), confirmed)
-            // T6.6: only while the toggle is still drawn "off" (the grant it offers).
-            is SessionControl.AutoContinueOnLimit ->
-                c?.autoContinue?.takeIf { !it.on && control.enabled }?.let { Escalation("Auto-continue", AUTO_CONTINUE_CONFIRM_BODY, confirmed, danger = false) }
-            else -> null
-        }
-    }
-
     /**
-     * T7.2: one operator choice to the client's guard; a refusal is said in words. Round 2 (L4): a
-     * change the client wants confirmed opens the confirmation for exactly that control.
+     * T7.2: one operator choice to the client's guard; a refusal is said in words. Every switch,
+     * the most permissive ones included, is sent on the tap, as on the web.
      */
     fun sendControl(control: SessionControl, notOfferedCopy: String? = null): Boolean {
         val result = controlActions.onControl(control)
-        if (result == ControlResult.NeedsConfirmation) {
-            escalationFor(control)?.let { escalation = it; return false }
-        }
         if (result != ControlResult.Sent) {
             (if (result == ControlResult.NotOffered && notOfferedCopy != null) notOfferedCopy else controlRefusalCopy(result))?.let(::flash)
         }
@@ -484,7 +447,7 @@ fun Composer(
         if (c.codexV2) return codexChooseModel(value)
         if (value == LEGACY_GROUP_VALUE) return
         val model = models.firstOrNull { it.value == value }
-        // Round 3 (F1): the confirmation reads the cleaned name, never raw server text.
+        // Round 3 (F1): the flash reads the cleaned name, never raw server text.
         val displayName = model?.displayName?.let { LabelText.label(it) }?.ifEmpty { null } ?: LabelText.label(value).ifEmpty { LabelText.visibleValue(value) }
         val typedRefusal = if (unlisted) "“${LabelText.visibleValue(value)}” wasn’t accepted as a model id for this session — the model was not changed." else null
         if (sendControl(SessionControl.Model(value, typed = unlisted), typedRefusal)) {
@@ -535,11 +498,7 @@ fun Composer(
         }
         val option = c.mode?.options?.firstOrNull { it.value == value }
         if (option?.disabled == true) return
-        if (option?.danger == true || value == ModeVocabulary.AUTO) {
-            if (c.mode?.value == value) return
-            escalation = escalationFor(SessionControl.Mode(value))
-            return
-        }
+        // chat-view.tsx:2500-2510: Auto and a danger agent are sent like any other mode.
         sendControl(SessionControl.Mode(value))
     }
 
@@ -548,13 +507,12 @@ fun Composer(
         val auto = c.auto ?: return
         if (c.codexV2) {
             val revision = controlActions.codex?.snapshot?.revision ?: return
-            if (auto.on) sendControl(SessionControl.CodexAutoApprove(false, revision))
-            else escalation = escalationFor(SessionControl.CodexAutoApprove(true, revision))
+            // chat-view.tsx:2552-2555 + 2488-2497: set-approval-policy "never" / null, on the tap.
+            sendControl(SessionControl.CodexAutoApprove(!auto.on, revision))
             return
         }
-        // chat-view.tsx:2486-2495: the same set-mode the Mode row sends.
-        if (auto.on) sendControl(SessionControl.Mode("default"))
-        else escalation = escalationFor(SessionControl.Mode(ModeVocabulary.AUTO))
+        // chat-view.tsx:2556-2560: the same set-mode the Mode row sends.
+        sendControl(SessionControl.Mode(if (auto.on) "default" else ModeVocabulary.AUTO))
     }
 
     val providerV2 = session != null && (composerControls?.codexV2 == true || (session.provider == "opencode" && session.engineGeneration == OPENCODE_V2))
@@ -565,17 +523,13 @@ fun Composer(
         toggleAuto = ::toggleAuto,
         setFast = { enabled -> sendControl(SessionControl.FastMode(enabled)) },
         setAutoApprove = { on -> if (on != composerControls?.auto?.on) toggleAuto() },
-        // T6.6 (chat-view.tsx:2480): exactly the flip of the value the toggle was drawn with.
-        // Turning it on is a grant: it only asks (the confirmation sends); turning it off sends.
-        // r3: never while locked (offline, or a copy that is not live: T13.2's rule), whichever key asked.
+        // T6.6 (chat-view.tsx:2544-2548): exactly the flip of the value the toggle was drawn with,
+        // sent on the tap either way. r3: never while locked (offline, or a copy that is not live:
+        // T13.2's rule), whichever key asked.
         setAutoContinue = { enabled ->
             val ac = composerControls?.autoContinue
             if (ac != null && enabled != ac.on && controlActions.lock == null) {
-                if (enabled) {
-                    escalation = escalationFor(SessionControl.AutoContinueOnLimit(true))
-                } else if (sendControl(SessionControl.AutoContinueOnLimit(false))) {
-                    flash(AUTO_CONTINUE_OFF_FLASH)
-                }
+                if (sendControl(SessionControl.AutoContinueOnLimit(enabled))) flash(if (enabled) AUTO_CONTINUE_ON_FLASH else AUTO_CONTINUE_OFF_FLASH)
             }
         },
         openProviderControls = if (providerV2) {
@@ -1049,8 +1003,7 @@ fun Composer(
                         selectedMode = if (session.approvalPolicy == "never") "default" else session.permissionMode ?: "default",
                         locked = locked,
                         onControl = { sendControl(it) },
-                        needsConfirmation = { mode -> ComposerControlsModel.opencodeAgentNeedsConfirmation(mode, controls, controlActions.opencode?.snapshot) },
-                        onDangerMode = { control -> escalation = escalationFor(control) },
+                        markedDanger = { mode -> ComposerControlsModel.opencodeAgentMarkedDanger(mode, controls, controlActions.opencode?.snapshot) },
                     )
                 }
             }
@@ -1065,42 +1018,10 @@ fun Composer(
             onDismiss = { sheetAt = null },
         )
     }
-    escalation?.takeIf { !escalationLocked }?.let { pending ->
-        EscalationDialog(
-            label = pending.label,
-            body = pending.body,
-            danger = pending.danger,
-            sessionName = session?.name,
-            onConfirm = {
-                // Round 3 (I-a): what is confirmed is what is on screen now; if the row moved under
-                // the dialog (a new label or hint), show the new words instead of sending.
-                val fresh = escalationFor(pending.control)
-                if (controlActions.lock != null || fresh == null) {
-                    escalation = null
-                } else if (fresh.label != pending.label || fresh.body != pending.body) {
-                    escalation = fresh
-                } else {
-                    escalation = null
-                    if (sendControl(pending.control) && pending.control is SessionControl.AutoContinueOnLimit) flash(AUTO_CONTINUE_ON_FLASH)
-                }
-            },
-            onCancel = { escalation = null },
-        )
-    }
 }
 
-/** A most-permissive change waiting for the operator's confirmation (never saved: a restore drops it). */
-internal class Escalation(val label: String, val body: String, val control: SessionControl, val danger: Boolean = true)
-
-/** T6.6: the auto-continue grant's confirmation (the web's toggle title, said before it is on). */
-internal const val AUTO_CONTINUE_CONFIRM_BODY =
-    "A rate/usage limit hit in this session will schedule its own continuation for right after the reset, without asking. It stays on for this session until you switch it back."
 internal const val AUTO_CONTINUE_ON_FLASH = "Auto-continue is on — a limit hit schedules its own continuation."
 internal const val AUTO_CONTINUE_OFF_FLASH = "Auto-continue is off."
-
-internal fun escalationBody(hint: String?): String =
-    (hint?.trimEnd('.')?.let { "$it." } ?: "The agent will run without asking, including destructive commands.") +
-        " It stays on for this session until you switch it back."
 
 private data class DeckPadding(val start: Dp, val top: Dp, val end: Dp, val bottom: Dp)
 

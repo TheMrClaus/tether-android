@@ -509,78 +509,32 @@ class AutoContinueBehaviourTest {
     }
 
     @Test
-    fun turningItOnOnlyAsksAndTheArmedConfirmationSendsTheGrant() {
+    fun turningItOnSendsOnTheFirstTap() {
+        // ta-coik.7: the web's toggle (chat-view.tsx:2546-2548) sends set-auto-continue-on-limit at once.
         h.show()
         h.arm()
         openAutoContinueSheet()
         h.arm()
         rule.onNodeWithText("On", useUnmergedTree = true).performClick()
         h.settle()
-        assertTrue("choosing On only asks", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
-        rule.onNodeWithText(AUTO_CONTINUE_CONFIRM_BODY).assertExists()
-        // The confirm key is armed too.
-        h.click("escalation-confirm")
-        assertTrue(h.recorder.sent.isEmpty())
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true, confirmed = true)), h.recorder.sent)
-    }
-
-    @Test
-    fun theConfirmationIsBoundToTheToggleItWasOpenedFor() {
-        h.show()
-        h.arm()
-        openAutoContinueSheet()
-        h.arm()
-        rule.onNodeWithText("On", useUnmergedTree = true).performClick()
-        h.settle()
-        // Another device turned it on under the dialog: confirming sends nothing, and it closes.
-        h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
-        h.arm()
-        h.click("escalation-confirm")
-        assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
-    }
-
-    @Test
-    fun aDroppedLinkClosesThePendingConfirmationAndSendsNothing() {
-        h.show()
-        h.arm()
-        openAutoContinueSheet()
-        h.arm()
-        rule.onNodeWithText("On", useUnmergedTree = true).performClick()
-        h.settle()
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
-        // The link drops, then comes back (catching up, then live): the question asked on the old
-        // link is gone, and nothing was granted.
-        h.lock = ConsentLock.Offline
-        h.settle()
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
-        h.lock = ConsentLock.CatchingUp
-        h.settle()
-        h.lock = null
-        h.arm()
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
+        rule.onNodeWithText(AUTO_CONTINUE_ON_FLASH).assertExists()
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-        assertTrue(h.recorder.sent.isEmpty())
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
     }
 
     @Test
-    fun aServerSwitchClosesThePendingConfirmationAndSendsNothing() {
+    fun aRefusedGrantIsSaid() {
+        h.recorder.resultFor = { ControlResult.NotLive }
         h.show()
         h.arm()
         openAutoContinueSheet()
         h.arm()
         rule.onNodeWithText("On", useUnmergedTree = true).performClick()
         h.settle()
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
-        // Same session id, another server, never locked in between.
-        h.origin = "https://other.test"
-        h.arm()
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
-        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-        assertTrue(h.recorder.sent.isEmpty())
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
+        rule.onNodeWithText("Catching up — the setting was not changed. Try again in a moment.").assertExists()
+        rule.onNodeWithText(AUTO_CONTINUE_ON_FLASH).assertDoesNotExist()
     }
 
     @Test
@@ -630,7 +584,7 @@ class AutoContinueBehaviourTest {
     }
 }
 
-/** T6.6: the Auto-continue key in the wide row (from 64rem): armed, and a grant that asks first. */
+/** T6.6: the Auto-continue key in the wide row (from 64rem): armed, and sent on the tap (ta-coik.7). */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
 class AutoContinueTabletBehaviourTest {
@@ -638,18 +592,15 @@ class AutoContinueTabletBehaviourTest {
     private val h = ControlsHost(rule)
 
     @Test
-    fun theKeyIsArmedAndOnlyAsks() {
+    fun theKeyIsArmedAndSendsOnTheTap() {
         h.show()
         h.click("control-auto-continue")
         assertTrue("the key is armed", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
         h.arm()
         h.click("control-auto-continue")
-        assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertExists()
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true, confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
         h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
         h.arm()
         h.click("control-auto-continue")

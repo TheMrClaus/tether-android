@@ -127,7 +127,6 @@ internal fun controlRefusalCopy(result: ControlResult): String? = when (result) 
     ControlResult.NotLive -> "Catching up — the setting was not changed. Try again in a moment."
     ControlResult.Locked -> "This session can’t be changed from here."
     ControlResult.NotOffered -> "That option is no longer offered — the setting was not changed."
-    ControlResult.NeedsConfirmation -> "Confirm the change to continue."
 }
 
 /** v95 fast-mode reason copy (session-settings-sheet.tsx:39-55), never the raw enum string. */
@@ -186,7 +185,7 @@ internal fun rememberArmedControl(identity: Any, actionable: Boolean): ArmedCont
 
 /**
  * The operator's handlers for the row and the sheet (Composer builds them; each ends in
- * [SessionControlActions.onControl] or opens the confirmation).
+ * [SessionControlActions.onControl]).
  */
 internal class ControlHandlers(
     val chooseModel: (String) -> Unit,
@@ -921,43 +920,6 @@ internal fun SheetHint(text: String, warning: Boolean = false) {
         color = if (warning) t.warning else t.muted,
         modifier = Modifier.padding(horizontal = t.css.spaceSm, vertical = 4.dp),
     )
-}
-
-// ---------------------------------------------------------------------------------------------
-// The confirmation (Android addition: the web switches to Auto without one)
-// ---------------------------------------------------------------------------------------------
-
-/**
- * T7.2 divergence (documented): before a session is switched to its most permissive posture (Claude
- * / pi Auto, reasonix YOLO, opencode Auto, Codex Auto approve, a danger opencode agent) the operator
- * confirms it here. The confirm key is armed (T6.3/T6.4) and refuses touches through an overlay;
- * only its tap sends, with the confirmation flag the client requires.
- */
-@Composable
-internal fun EscalationDialog(label: String, body: String, sessionName: String?, onConfirm: () -> Unit, onCancel: () -> Unit, danger: Boolean = true) {
-    val arming = rememberArmedControl(Triple("escalation", label, body), true)
-    TetherDialog(
-        onDismiss = onCancel,
-        // Round 3 (I-b): the label isolated, so right-to-left text in it cannot reorder the question.
-        title = "Turn on \u2068$label\u2069?",
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel")
-            TetherKey(
-                onClick = { if (arming.armed) onConfirm() },
-                classes = if (danger) KeyClasses.ButtonDanger else KeyClasses.ButtonPrimary,
-                label = "Turn on \u2068$label\u2069",
-                icon = if (danger) TetherIcons.Zap else TetherIcons.Clock,
-                enabled = arming.armed,
-                modifier = arming.modifier.testTag("escalation-confirm"),
-            )
-        },
-    ) {
-        // L5: name the session the change is for, cleaned like every server-supplied label.
-        sessionName?.let { com.tether.app.client.LabelText.label(it) }?.takeIf { it.isNotEmpty() }?.let {
-            TetherDialogText("Session: \u2068$it\u2069", Modifier.padding(bottom = 8.dp))
-        }
-        TetherDialogText(body)
-    }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -168,7 +168,6 @@ internal fun rateLimitRefusalCopy(result: ControlResult): String? = when (result
     ControlResult.NotLive -> "Catching up — nothing was sent. Try again in a moment."
     ControlResult.Locked -> "This session can’t be changed from here."
     ControlResult.NotOffered -> "That limit prompt is no longer active — nothing was sent."
-    ControlResult.NeedsConfirmation -> null
 }
 
 /**

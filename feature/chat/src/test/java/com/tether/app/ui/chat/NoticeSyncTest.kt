@@ -1,6 +1,5 @@
 package com.tether.app.ui.chat
 
-import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -11,7 +10,6 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -22,7 +20,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.ConnectionState
@@ -233,7 +230,7 @@ class NoticeSyncTest {
     }
 
     @Test
-    fun everyCopyThatIsNotLiveLocksTheAutoContinueSheetRowsAndClosesItsConfirmation() {
+    fun everyCopyThatIsNotLiveLocksTheAutoContinueSheetRows() {
         val controlled = SessionControlFixtures.claude
         val client = client(controlled, ComposerFixtures.idle)
         client.sessionControls.value = mapOf(controlled.id to SessionControlFixtures.claudeControls)
@@ -253,32 +250,24 @@ class NoticeSyncTest {
             rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
             assertTrue("$name: a copy that is not live changed auto-continue ${client.controlCalls}", client.controlCalls.isEmpty())
         }
-        // Live again: On only asks; the copy then stops being live under the question, which closes.
+        // Live again: On goes out on the first tap (ta-coik.7: the web asks nothing), once.
         rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
         arm()
         rule.onNodeWithTag("control-option-true").assertIsEnabled().performClick()
         rule.waitForIdle()
-        rule.onNodeWithText(CONFIRM_TITLE).assertExists()
-        rule.runOnIdle { client.sync.value = mapOf(controlled.id to SessionSync(Freshness.Saved, 1L)) }
-        arm()
         rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-        rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
-        arm()
-        rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
-        assertTrue("nothing was granted: ${client.controlCalls}", client.controlCalls.isEmpty())
+        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true)}"), client.controlCalls)
     }
 }
 
-/** The wide row (from 64rem): the Auto-continue pill, and its confirmation. */
+/** The wide row (from 64rem): the Auto-continue pill. */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
 class NoticeSyncTabletTest {
     @get:Rule val rule = createComposeRule()
 
     private fun arm() = rule.armChat()
-
-    private fun openAndArm() = rule.openAndArmChat()
 
     private fun host(on: Boolean): Pair<ChatTestClient, AgentSession> {
         val controlled = SessionControlFixtures.claude.copy(autoContinueOnLimit = on)
@@ -315,29 +304,23 @@ class NoticeSyncTabletTest {
     }
 
     @Test
-    fun theAutoContinueConfirmationClosesWhenTheCopyStopsBeingLive() {
+    fun aLiveCopyGrantsAutoContinueOnTheFirstTapAndNoOtherDoes() {
         val (client, controlled) = host(on = false)
         for ((name, sync) in notLiveCopies(controlled.id)) {
-            rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
-            rule.waitForIdle()
-            rule.onNodeWithText(CONFIRM_TITLE).assertExists()
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
-            rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-            // Live again: the question asked on the stale copy does not come back.
-            rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
-            arm()
-            rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
+            rule.onNodeWithTag("control-auto-continue").assertIsNotEnabled().performClick()
+            rule.waitForIdle()
             assertTrue("$name: nothing was granted: ${client.controlCalls}", client.controlCalls.isEmpty())
         }
-        // Asked and confirmed on a live copy: the grant goes, once.
-        rule.onNodeWithTag("control-auto-continue").performClick()
-        // The dialog animates in (its key moves, so it re-arms once it stands still).
-        openAndArm()
-        rule.onNodeWithTag("escalation-confirm").assertIsEnabled().performClick()
+        // ta-coik.7: on a live copy the grant goes on the tap, once, with no question (the web's toggle).
+        rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
+        arm()
+        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true, confirmed = true)}"), client.controlCalls)
+        rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true)}"), client.controlCalls)
     }
 }
 
@@ -351,56 +334,4 @@ internal fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.tapScree
     val root = roots[roots.fetchSemanticsNodes().size - 1]
     val origin = root.fetchSemanticsNode().positionOnScreen
     root.performTouchInput { click(screen - origin) }
-}
-
-/**
- * T6.6 r4: the confirmation's lock inputs are collected with the lifecycle, so while the app is
- * stopped a drop and a reconnect to the same server go unseen. Stopping the app closes the question.
- */
-@RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w1280dp-h800dp-mdpi")
-class NoticeLifecycleTest {
-    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
-
-    @Test
-    fun theAutoContinueConfirmationDoesNotSurviveABackgroundReconnect() {
-        val controlled = SessionControlFixtures.claude.copy(autoContinueOnLimit = false)
-        val client = ChatTestClient().also {
-            it.reports = true
-            it.show(controlled, ComposerFixtures.idle, live = true)
-            it.sessionControls.value = mapOf(controlled.id to SessionControlFixtures.claudeControls)
-            it.sync.value = liveCopy(controlled.id)
-        }
-        rule.hostChat(client, controlled)
-        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
-        rule.openAndArmChat()
-        rule.onNodeWithText(CONFIRM_TITLE).assertExists()
-        val confirmAt = rule.screenCentreOf("escalation-confirm")
-        rule.onNodeWithTag("escalation-confirm").assertIsEnabled()
-
-        // The screen turns off; the link drops and comes back to the same server while stopped.
-        val scenario = rule.activityRule.scenario
-        scenario.moveToState(Lifecycle.State.CREATED)
-        client.link.value = ConnectionState.Disconnected
-        client.live.value = emptySet()
-        client.sync.value = mapOf(controlled.id to SessionSync(Freshness.Saved, 1L))
-        client.link.value = ConnectionState.Connected
-        client.live.value = setOf(controlled.id)
-        client.sync.value = liveCopy(controlled.id)
-        scenario.moveToState(Lifecycle.State.RESUMED)
-        rule.openAndArmChat()
-
-        rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
-        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-        rule.tapScreenAt(confirmAt)
-        rule.armChat()
-        assertTrue("nothing was granted on the new link: ${client.controlCalls}", client.controlCalls.isEmpty())
-
-        // The operator asks again, on the link that is live now: the grant goes, once.
-        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
-        rule.openAndArmChat()
-        rule.onNodeWithTag("escalation-confirm").assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(true, confirmed = true)}"), client.controlCalls)
-    }
 }

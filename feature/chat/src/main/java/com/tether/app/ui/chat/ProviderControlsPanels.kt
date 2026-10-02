@@ -216,7 +216,7 @@ private fun ReviewForm(snapshot: CodexSnapshot, enabled: Boolean, onControl: (Se
 /**
  * components/opencode-serve-controls.tsx `OpencodeServeControlsPanel`: stage a model (+ `--variant`)
  * or an agent locally, then Apply — nothing is sent until the Apply tap. The drafts re-seed when the
- * session's applied values or the catalog revision move. A danger agent goes through the confirmation.
+ * session's applied values or the catalog revision move. A danger agent applies like any other.
  */
 @Composable
 internal fun OpencodeControlsPanel(
@@ -226,9 +226,8 @@ internal fun OpencodeControlsPanel(
     selectedMode: String,
     locked: Boolean,
     onControl: (SessionControl) -> Unit,
-    /** Round 2 (M2): the one rule the row, the sheet and the client share. */
-    needsConfirmation: (String) -> Boolean,
-    onDangerMode: (SessionControl) -> Unit,
+    /** Round 2 (M2): the agent rows drawn in `--warning`, the same rule as the Mode row. Styling only. */
+    markedDanger: (String) -> Boolean,
 ) {
     val snapshot = state?.snapshot
     val busy = state?.busy == true
@@ -286,7 +285,7 @@ internal fun OpencodeControlsPanel(
                             it.value,
                             com.tether.app.client.ComposerControlsModel.opencodeAgentLabel(it.value, it.label),
                             description = it.hint.ifEmpty { null },
-                            danger = needsConfirmation(it.value),
+                            danger = markedDanger(it.value),
                         )
                     },
                     selectedValue = modeDraft,
@@ -296,8 +295,8 @@ internal fun OpencodeControlsPanel(
                     contentDescription = "opencode agent/mode",
                 )
                 ArmedPanelKey(snapshot.revision, "apply-mode", "Apply agent / mode", enabled = !busy && !locked && modeDraft.isNotEmpty(), tag = "opencode-apply-mode") {
-                    val control = SessionControl.OpencodeMode(modeDraft, snapshot.revision)
-                    if (needsConfirmation(modeDraft)) onDangerMode(control) else onControl(control)
+                    // opencode-serve-controls.tsx:132-139: any agent, a danger one too, applies on the tap.
+                    onControl(SessionControl.OpencodeMode(modeDraft, snapshot.revision))
                 }
             }
         }

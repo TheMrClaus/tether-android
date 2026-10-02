@@ -10,6 +10,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -196,28 +197,26 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
-    fun aClientAskingForConfirmationOpensTheDialogForThatControl() {
+    fun aServerRefusalIsSaidAndNothingElseOpens() {
+        // ta-coik.7: a refused switch is said in words, as before; there is no confirmation to open.
         h.session = SessionControlFixtures.opencode
         h.controls = SessionControlFixtures.opencodeControls
         h.opencode = SessionControlFixtures.opencodeState
-        h.recorder.resultFor = { c -> if (c is SessionControl.OpencodeMode && !c.confirmed) ControlResult.NeedsConfirmation else ControlResult.Sent }
+        h.recorder.resultFor = { c -> if (c is SessionControl.OpencodeMode) ControlResult.NotOffered else ControlResult.Sent }
         h.show()
         h.click("session-settings-trigger")
         h.click("sheet-row-Provider controls")
         h.arm()
         h.click("opencode-apply-mode")
-        rule.onNodeWithText("Confirm the change to continue.").assertDoesNotExist()
-        rule.onNodeWithText("Turn on \u2068Build\u2069?").assertExists()
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(
-            listOf<SessionControl>(SessionControl.OpencodeMode("default", "oc-1"), SessionControl.OpencodeMode("default", "oc-1", confirmed = true)),
-            h.recorder.sent,
-        )
+        assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("default", "oc-1")), h.recorder.sent)
+        rule.onNodeWithText("That option is no longer offered — the setting was not changed.").assertExists()
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
     }
 
     @Test
-    fun aPermissiveAgentCalledPlanIsConfirmedFromThePanel() {
+    fun aPermissiveAgentCalledPlanIsSentFromThePanelOnTheFirstTap() {
+        // ta-coik.7: opencode-serve-controls.tsx:132-139 applies any agent on the tap.
         h.session = SessionControlFixtures.opencode
         h.controls = SessionControlFixtures.sneakyOpencodeControls
         h.opencode = SessionControlFixtures.sneakyOpencodeState
@@ -230,13 +229,9 @@ class SessionControlsPhoneBehaviourTest {
         h.settle()
         h.arm()
         h.click("opencode-apply-mode")
-        assertTrue("confirmation first", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
-        rule.onNodeWithText("Plans only (really: everything). It stays on for this session until you switch it back.").assertExists()
-        rule.onNodeWithText("Session: \u2068Sketch the sync outbox\u2069").assertExists()
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("planx", "oc-1", confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("planx", "oc-1")), h.recorder.sent)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
     }
 
     @Test
@@ -269,57 +264,16 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
-    fun autoNeedsTheArmedConfirmation() {
+    fun autoIsSentOnTheFirstTap() {
+        // ta-coik.7: chat-view.tsx:2500-2510, Auto is a Mode row like any other.
         h.show()
         h.click("session-settings-trigger")
         h.click("sheet-row-Mode")
         h.arm()
         h.click("control-option-${ModeVocabulary.AUTO}")
-        assertTrue("choosing Auto only asks", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertExists()
-        // The confirm key is armed too.
-        h.click("escalation-confirm")
-        assertTrue(h.recorder.sent.isEmpty())
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO, confirmed = true)), h.recorder.sent)
-        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
-    }
-
-    @Test
-    fun cancellingTheConfirmationSendsNothing() {
-        h.show()
-        h.click("session-settings-trigger")
-        h.click("sheet-row-Mode")
-        h.arm()
-        h.click("control-option-${ModeVocabulary.AUTO}")
-        h.arm()
-        rule.onNodeWithText("Cancel").performClick()
-        h.arm()
-        assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
-    }
-
-    @Test
-    fun stoppingTheAppClosesTheAutoConfirmation() {
-        // T6.6 r4: the Auto question shares the composer's one pending confirmation; the app going
-        // to the background closes it, with the link and the lock unchanged.
-        h.show()
-        h.click("session-settings-trigger")
-        h.click("sheet-row-Mode")
-        h.arm()
-        h.click("control-option-${ModeVocabulary.AUTO}")
-        h.arm()
-        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertExists()
-        val confirmAt = rule.screenCentreOf("escalation-confirm")
-        rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
-        rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-        h.arm()
-        rule.onNodeWithText("Turn on \u2068Auto\u2069?").assertDoesNotExist()
+        assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO)), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
-        rule.tapScreenAt(confirmAt)
-        h.arm()
-        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
     }
 
     @Test
@@ -437,27 +391,6 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
-    fun aConfirmationWhoseWordsChangedIsShownAgainNotSent() {
-        // Round 3 (I-a): the agent is renamed while the dialog is open.
-        h.session = SessionControlFixtures.opencode
-        h.controls = SessionControlFixtures.sneakyOpencodeControls
-        h.show()
-        h.click("session-settings-trigger")
-        h.click("sheet-row-Mode")
-        h.arm()
-        h.click("control-option-planx")
-        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
-        h.controls = SessionControlFixtures.sneakyOpencodeControls.copy(modes = listOf(com.tether.app.protocol.ModeOption("planx", "Everything", "Runs every tool")))
-        h.arm()
-        h.click("escalation-confirm")
-        assertTrue("the changed words are shown first", h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Everything (planx)\u2069?").assertExists()
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.Mode("planx", confirmed = true)), h.recorder.sent)
-    }
-
-    @Test
     fun aListedModelNameResolves() {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model sonnet")
@@ -505,7 +438,8 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
-    fun codexAutoApproveNeedsTheConfirmation() {
+    fun codexAutoApproveIsSentOnTheFirstTap() {
+        // ta-coik.7: chat-view.tsx:2552-2555 -> set-approval-policy "never", no confirmation.
         h.session = SessionControlFixtures.codex
         h.controls = null
         h.codex = SessionControlFixtures.codexState
@@ -514,10 +448,9 @@ class SessionControlsPhoneBehaviourTest {
         h.click("sheet-row-Auto approve")
         h.arm()
         h.click("control-option-true")
-        assertTrue(h.recorder.sent.isEmpty())
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.CodexAutoApprove(true, "catalog-3")), h.recorder.sent)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
     }
 }
 
@@ -543,7 +476,8 @@ class SessionControlsTabletBehaviourTest {
     }
 
     @Test
-    fun theOpencodeAutoToggleAsksFirstAndTurnsOffWithoutAsking() {
+    fun theOpencodeAutoToggleTurnsOnAndOffOnTheTap() {
+        // ta-coik.7: chat-view.tsx:2550-2561 toggleAuto, no confirmation either way.
         h.session = SessionControlFixtures.opencode
         h.controls = SessionControlFixtures.opencodeControls
         h.show()
@@ -551,10 +485,9 @@ class SessionControlsTabletBehaviourTest {
         assertTrue("the toggle is armed", h.recorder.sent.isEmpty())
         h.arm()
         h.click("control-auto")
-        assertTrue(h.recorder.sent.isEmpty())
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO, confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO)), h.recorder.sent)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
         h.session = SessionControlFixtures.opencode.copy(approvalPolicy = "never")
         h.arm()
         rule.onNodeWithText("Auto-approves permission requests that are not explicitly denied").assertExists()
@@ -579,7 +512,7 @@ class SessionControlsTabletBehaviourTest {
     }
 
     @Test
-    fun aPermissiveAgentCalledPlanIsConfirmedFromTheRow() {
+    fun aPermissiveAgentCalledPlanIsSentFromTheRowOnTheFirstTap() {
         h.session = SessionControlFixtures.opencode
         h.controls = SessionControlFixtures.sneakyOpencodeControls
         h.show()
@@ -587,11 +520,9 @@ class SessionControlsTabletBehaviourTest {
         h.arm()
         rule.onNodeWithTag("control-option-planx").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Plan (planx), Plans only (really: everything)")))
         h.click("control-option-planx")
-        assertTrue(h.recorder.sent.isEmpty())
-        rule.onNodeWithText("Turn on \u2068Plan (planx)\u2069?").assertExists()
-        h.arm()
-        h.click("escalation-confirm")
-        assertEquals(listOf<SessionControl>(SessionControl.Mode("planx", confirmed = true)), h.recorder.sent)
+        assertEquals(listOf<SessionControl>(SessionControl.Mode("planx")), h.recorder.sent)
+        rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
+        rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
     }
 
     @Test
