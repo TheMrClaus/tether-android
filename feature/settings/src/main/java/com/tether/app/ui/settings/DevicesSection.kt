@@ -693,7 +693,11 @@ private fun Tag(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** The confirmations, in the web's confirm chrome; the confirm key is armed after a beat (ta-dh1 r2) and drawn as danger. */
+/**
+ * The confirmations, in the web's confirm chrome; the confirm key is armed after a beat (ta-dh1 r2)
+ * and drawn as danger. ta-ban: armed for the confirmation it SHOWS (ta-q9l's rule): one replaced
+ * while open (another device or passkey) disarms the key and the beat runs again.
+ */
 @Composable
 internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val (title, body, action) = when (confirm) {
@@ -706,7 +710,7 @@ internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit,
         title = title,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(DevicesTags.ConfirmCancel))
-            ArmedConfirmKey(action, DevicesTags.ConfirmGo, onConfirm, classes = KeyClasses.ButtonDanger)
+            ArmedConfirmKey(action, DevicesTags.ConfirmGo, onConfirm, classes = KeyClasses.ButtonDanger, shown = confirm)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(DevicesTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(10.dp)) {

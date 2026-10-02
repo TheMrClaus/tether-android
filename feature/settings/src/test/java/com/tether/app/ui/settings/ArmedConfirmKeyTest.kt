@@ -166,7 +166,44 @@ class ArmedConfirmKeyTest {
         assertReArms(ProfileTags.Confirm) { review = first.copy(change = EnvChange.Change("PATH", SecretText("FAKE-/tmp/evil"))) }
     }
 
-    // ---- the default (no shown value: Devices' use, unchanged) ------------------------------------
+    // ---- Settings → Devices (ta-ban) ---------------------------------------------------------------
+
+    @Test fun aRevokeConfirmationReArmsWhenTheDeviceIsReplaced() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.No))
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.Revoke(DevicesFixtures.TABLET, SelfMatch.No) }
+        compose.onNodeWithTag(DevicesTags.ConfirmSheet, useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun aRevokeConfirmationReArmsWhenWhetherItIsThisPhoneChanges() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.No))
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.Yes) }
+    }
+
+    @Test fun aPasskeyConfirmationReArmsWhenThePasskeyIsReplaced() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.RemovePasskey(DevicesFixtures.LAPTOP_KEY))
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.RemovePasskey(DevicesFixtures.YUBIKEY) }
+    }
+
+    @Test fun aConfirmationReplacedByAnotherKindReArms() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.RemovePasskey(DevicesFixtures.LAPTOP_KEY))
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.SignOutOthers }
+    }
+
+    /** No spurious re-arm in Devices either: an equal confirmation (a new but equal object) keeps the key armed. */
+    @Test fun anEqualDevicesConfirmationKeepsTheKeyArmed() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.No))
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        frame(CONFIRM_ARM_MS + 50)
+        replace { confirm = DevicesConfirm.Revoke(DevicesFixtures.PHONE.copy(), SelfMatch.No) }
+        tap(DevicesTags.ConfirmGo)
+        assertEquals(1, confirmed)
+    }
+
+    // ---- the default (no shown value) -------------------------------------------------------------
 
     @Test fun aKeyWithoutAShownValueArmsOnceAsBefore() {
         var label by mutableStateOf("Revoke")
