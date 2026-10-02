@@ -564,6 +564,13 @@ interface TetherClient {
     val claudeAccounts: ClaudeAccountsSource get() = ClaudeAccountsSource.Unavailable
 
     /**
+     * T10.4: Settings → Devices (paired devices, passkeys, signed-in sessions), over the fixed routes
+     * of [DeviceSecuritySource], each call bound to the server it names and sent with the credential
+     * in force, never following a redirect (see [HttpDeviceSecurity]).
+     */
+    val deviceSecurity: DeviceSecuritySource get() = DeviceSecuritySource.Unavailable
+
+    /**
      * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
      * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
      * session's cached hunks, so an expanded file refetches. Emptied with the other server views.

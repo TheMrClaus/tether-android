@@ -3327,6 +3327,28 @@ class RealTetherClient(
         }
     })
 
+    /**
+     * T10.4: Settings → Devices, over [authHttp] with the same per-call (server, credential) read as
+     * [files], plus which kind of sign-in that credential is (read in the same lock, so the two
+     * always agree). Each call goes only to the server the screen names.
+     */
+    override val deviceSecurity: DeviceSecuritySource = HttpDeviceSecurity(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        val files = when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+        SecurityAuthority(
+            files,
+            when (credential) {
+                is Credential.DeviceToken -> AppSignIn.DeviceToken
+                is Credential.Cookie -> AppSignIn.SessionCookie
+                null -> null
+            },
+        )
+    })
+
     // ------------------------------------------------------------------
     // Fire-and-forget commands
     // ------------------------------------------------------------------
