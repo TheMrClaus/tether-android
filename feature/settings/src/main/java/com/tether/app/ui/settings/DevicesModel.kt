@@ -571,7 +571,8 @@ class DevicesController(
     /** Copy the code on screen: marked sensitive, cleared again shortly after (see [PairingClipboard]). */
     fun copyCode(): Boolean {
         val code = shown?.code ?: return false
-        return clipboard.copy(code.code)
+        // ta-x5e: with the life it has left, on the same clock the expiry runs on; no clear is retried past it.
+        return clipboard.copy(code.code, code.expiresAt - now())
     }
 
     /**

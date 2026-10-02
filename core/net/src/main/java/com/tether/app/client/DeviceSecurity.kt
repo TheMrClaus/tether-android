@@ -42,8 +42,11 @@ enum class AppSignIn { DeviceToken, SessionCookie }
  * gives nothing of the credential back; it only lets the screen tell the client "this credential is
  * dead" ([DeviceSecuritySource.credentialRejected]), which the client honours only while that very
  * credential is still the one in force (compare-and-clear).
+ *
+ * ta-x5e: only this module mints one (the client, over the credential a call actually went out
+ * with); a feature can carry a handle back but cannot make one up.
  */
-class SignInHandle(internal val credential: Any) {
+class SignInHandle internal constructor(internal val credential: Any) {
     override fun toString(): String = "SignInHandle"
 }
 

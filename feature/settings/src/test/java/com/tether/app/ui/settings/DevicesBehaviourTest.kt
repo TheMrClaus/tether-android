@@ -26,7 +26,6 @@ import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.AppSignIn
 import com.tether.app.client.DeviceRevoked
 import com.tether.app.client.DevicesList
-import com.tether.app.client.SignInHandle
 import com.tether.app.client.withHandle
 import com.tether.app.client.PasskeyPolicySource
 import com.tether.app.client.PasswordPolicy
@@ -42,6 +41,7 @@ import com.tether.app.ui.settings.DevicesFixtures.PHONE
 import com.tether.app.ui.settings.DevicesFixtures.SENTINEL
 import com.tether.app.ui.settings.DevicesFixtures.TABLET
 import com.tether.app.ui.settings.DevicesFixtures.ok
+import com.tether.app.ui.settings.DevicesFixtures.signInHandle
 import java.time.Duration
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -510,7 +510,7 @@ class DevicesBehaviourTest {
         assertTrue(texts().contains(DevicesCopy.SELF_SIGNS_OUT))
         tapInDialog(DevicesTags.ConfirmGo)
         waitCalls(4)
-        val handle = SignInHandle(Any())
+        val handle = signInHandle()
         source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken).withHandle(handle))
         waitText(DevicesCopy.SIGNED_OUT_HERE)
         // r2 (security F2): the client is told at once that this credential is dead.
@@ -564,7 +564,7 @@ class DevicesBehaviourTest {
         waitCalls(5)
         assertEquals("devices", source.calls.last().name)
         assertTrue("not yet: it may have been another device", source.rejected.isEmpty())
-        val handle = SignInHandle(Any())
+        val handle = signInHandle()
         source.answer("devices", SecurityResult.SignedOut(ORIGIN).withHandle(handle))
         waitText(DevicesCopy.SIGNED_OUT_HERE)
         assertEquals(listOf(handle), source.rejected.toList())
@@ -578,9 +578,9 @@ class DevicesBehaviourTest {
         tap(DevicesTags.revoke(TABLET.id))
         tapInDialog(DevicesTags.ConfirmGo)
         waitCalls(4)
-        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken).withHandle(SignInHandle(Any())))
+        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken).withHandle(signInHandle()))
         waitCalls(5)
-        source.answer("devices", SecurityResult.Ok(DevicesList(listOf(PHONE), emptyList()), ORIGIN, AppSignIn.DeviceToken).withHandle(SignInHandle(Any())))
+        source.answer("devices", SecurityResult.Ok(DevicesList(listOf(PHONE), emptyList()), ORIGIN, AppSignIn.DeviceToken).withHandle(signInHandle()))
         waitGone(DevicesTags.device(TABLET.id))
         assertTrue(source.rejected.isEmpty())
         assertTrue(exists(DevicesTags.Pair))

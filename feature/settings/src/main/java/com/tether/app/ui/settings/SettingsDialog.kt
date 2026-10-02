@@ -236,6 +236,8 @@ fun SettingsDialog(
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
+        // ta-x5e: back in the app with Settings open, focus goes to this window: a pending clipboard clear retries then.
+        RetryClipboardClearOnFocus(pairingClipboard)
         val progress = rememberDialogIn()
         SettingsFrame(
             prefs = prefs,

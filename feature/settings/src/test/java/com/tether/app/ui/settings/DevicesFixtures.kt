@@ -56,6 +56,13 @@ object DevicesFixtures {
 
     fun <T> ok(value: T, signIn: AppSignIn? = AppSignIn.SessionCookie, origin: String = ORIGIN) = SecurityResult.Ok(value, origin, signIn)
 
+    /**
+     * ta-x5e: an opaque handle for the panel tests. Its constructor is `internal` to :core:net (a
+     * feature may not mint one), so the tests reach it the way no feature code can: by reflection,
+     * here only. It wraps a bare object, never a credential.
+     */
+    fun signInHandle(): SignInHandle = SignInHandle::class.java.getDeclaredConstructor(Any::class.java).newInstance(Any())
+
     /** A seed: everything loaded for [ORIGIN]. */
     fun seed(signIn: AppSignIn = AppSignIn.SessionCookie, code: FreshPairingCode? = null, devices: List<PairedDevice> = DEVICES, sessions: List<SecuritySession> = SESSIONS) = DevicesSeed(
         devices = devices,
