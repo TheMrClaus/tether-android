@@ -603,7 +603,7 @@ internal fun runForToolId(runs: List<SubagentRun>, toolId: String?): SubagentRun
 }
 
 /** ONE roster derivation for every surface that counts runs. */
-internal fun subagentRosterSummary(runs: List<SubagentRun>): SubagentRosterSummary {
+fun subagentRosterSummary(runs: List<SubagentRun>): SubagentRosterSummary {
     var tokens: Double? = null
     var measured = 0
     var running = 0
@@ -628,11 +628,11 @@ val STATUS_TEXT = mapOf(RUN_RUNNING to "running", RUN_ERROR to "error", RUN_DONE
 internal const val UNCONFIRMED_STATUS_TEXT = "running (unconfirmed)"
 
 /** `statusLabel`: an unconfirmed running run says so in words (never by colour or icon alone). */
-internal fun statusLabel(run: SubagentRun): String =
+fun statusLabel(run: SubagentRun): String =
     if (run.status == RUN_RUNNING && run.unconfirmed) UNCONFIRMED_STATUS_TEXT else STATUS_TEXT.getValue(run.status)
 
 /** `runStatusText`: a spawned run's raw status (finished / stopped …) unless unconfirmed. */
-internal fun runStatusText(run: SubagentRun): String =
+fun runStatusText(run: SubagentRun): String =
     if (run.spawned != null && !run.unconfirmed) run.spawned.status else statusLabel(run)
 
 /** `harnessLabel`: how a tab / roster row names the harness that produced the run. */

@@ -52,6 +52,9 @@ object InspectorFixtures {
         ),
     )
 
+    /** ta-coik.10: the rate limit as the panel's attention strip draws it (a `.ti-alert`). */
+    fun rateLimitAttention(): Attention = attention(InspectorBoards.session(), rateLimited(), env())
+
     val mcp: SessionView by lazy {
         SessionView(
             foldTree(
@@ -167,7 +170,7 @@ class InspectorNoticesBehaviourTest {
 
     @Test
     fun theRateLimitNoticeIsAPoliteStatus() {
-        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { Column { InspectorLimitNotice(InspectorFixtures.rateLimited(), env = InspectorFixtures.env) } } }
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { Column { AttentionStrip(InspectorFixtures.rateLimitAttention()) } } }
         rule.onNodeWithTag("inspector-rate-limit")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
     }
@@ -182,7 +185,7 @@ private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapInspector
             when (shot) {
                 InspectorShot.Mcp -> InspectorMcpHealth("claude", null, InspectorFixtures.mcp, Modifier.fillMaxWidth())
                 InspectorShot.Plugins -> InspectorMcpHealth("opencode", "opencode-serve-v2", InspectorFixtures.healthy, Modifier.fillMaxWidth())
-                InspectorShot.RateLimit -> InspectorLimitNotice(InspectorFixtures.rateLimited(), env = InspectorFixtures.env)
+                InspectorShot.RateLimit -> AttentionStrip(InspectorFixtures.rateLimitAttention())
             }
         }
     }

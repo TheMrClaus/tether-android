@@ -36,6 +36,14 @@ enum class UsageTrackPlacement {
 
     /** A full-width meter (`:root .usage-track`, globals.css 11579-11587): 0.4rem with a 1px edge. */
     Meter,
+
+    /**
+     * ta-coik.10: the telemetry panel's ink meter (`.inspector.ti .ti-gauge-track`, telemetry-panel.css
+     * 153-166, 348): full width, 0.45rem (the coarse-pointer size; Android is always coarse), a
+     * `--slate` floor with no edge and full rounding, and an INK fill that shifts to `--warning` at 75%
+     * and `--danger` at 90%. Violet never fills a panel meter.
+     */
+    Panel,
 }
 
 /**
@@ -60,8 +68,9 @@ fun UsageTrack(
     val t = LocalTetherTokens.current
     val reduced = LocalReducedMotion.current
     val tone = usageTone(percent)
-    val shape: Shape = RoundedCornerShape(6.dp)
-    val floor = t.line
+    val panel = placement == UsageTrackPlacement.Panel
+    val shape: Shape = if (panel) RoundedCornerShape(percent = 50) else RoundedCornerShape(6.dp)
+    val floor = if (panel) t.slate else t.line
     val meter = placement == UsageTrackPlacement.Meter
     val border = if (meter) CssBorder(1.dp, t.lineStrong) else null
     val shadows = emptyList<CssShadow>()
@@ -73,13 +82,14 @@ fun UsageTrack(
         label = "usage-track-width",
     )
     val fillColor by animateColorAsState(
-        targetValue = fillColor(t, tone),
+        targetValue = if (panel) panelFillColor(t, tone) else fillColor(t, tone),
         animationSpec = if (reduced) snap() else tween(duration),
         label = "usage-track-tone",
     )
     val size: Modifier = when (placement) {
         UsageTrackPlacement.Statusline -> Modifier.size(width = StatuslineTrackWidth, height = StatuslineTrackHeight)
         UsageTrackPlacement.Meter -> Modifier.fillMaxWidth().height(MeterTrackHeight)
+        UsageTrackPlacement.Panel -> Modifier.fillMaxWidth().height(PanelTrackHeight)
     }
     Box(
         modifier
@@ -109,6 +119,16 @@ private fun fillColor(t: TetherTokens, tone: UsageTone): Color = when (tone) {
     UsageTone.High -> t.amber
     UsageTone.Critical -> t.danger
 }
+
+/** telemetry-panel.css 164-166: ink, then `--warning` / `--danger` (never violet). */
+private fun panelFillColor(t: TetherTokens, tone: UsageTone): Color = when (tone) {
+    UsageTone.None -> t.ink
+    UsageTone.High -> t.warning
+    UsageTone.Critical -> t.danger
+}
+
+/** `.inspector.ti .ti-gauge-track { height: 0.45rem }` (coarse pointer). */
+val PanelTrackHeight: Dp = 7.2.dp
 
 /** `.statusline .usage-track { width: 1.6rem }` and `:root .statusline .usage-track { height: 0.3rem }`. */
 val StatuslineTrackWidth: Dp = 25.6.dp

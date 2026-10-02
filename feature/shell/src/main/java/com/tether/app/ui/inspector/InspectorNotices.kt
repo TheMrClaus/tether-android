@@ -98,42 +98,6 @@ fun rateLimitNoticeText(state: SessionView?, nowMs: Double): String? {
 }
 
 /**
- * inspector.tsx:520-523: the Wrap-Up notice while Claude's allowance covers the turn in flight,
- * else the generic rate-limit notice (`.telemetry-empty`, `role="status"`), which expires on its
- * own at `resetsAt`.
- */
-@Composable
-fun InspectorLimitNotice(state: SessionView?, modifier: Modifier = Modifier, env: () -> ReadingEnv = ReadingEnv::current) {
-    if (state != null && wrapUpReading(state, env()) != null) {
-        WrapUpNotice(state, modifier.padding(top = LocalTetherTokens.current.css.spaceXl), env = env)
-        return
-    }
-    val resetsAt = ((state?.obj?.get("rateLimit") as? JsObj)?.get("resetsAt") as? JsNum)?.value
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(resetsAt) {
-        if (resetsAt == null || !resetsAt.isFinite()) return@LaunchedEffect
-        delay(max(0.0, resetsAt - env().nowMs).toLong() + 1)
-        tick++
-    }
-    val text = remember(state, tick) { rateLimitNoticeText(state, env().nowMs) } ?: return
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val line = t.line
-    Text(
-        text,
-        style = TextStyle(fontFamily = type.ui, fontSize = rem(0.65f), lineHeight = 1.5.em),
-        color = t.faint,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = t.css.spaceXl)
-            .drawBehind { drawRect(line, Offset.Zero, size.copy(height = 1.dp.toPx())) }
-            .padding(top = t.css.spaceLg)
-            .semantics { liveRegion = LiveRegionMode.Polite }
-            .testTag("inspector-rate-limit"),
-    )
-}
-
-/**
  * One `McpHealthProjection`, bounded for display: [name] is drawn by the one-line rule (codeLabel), [error] by the
  * prose rule (com.tether.app.ui.text). [key] is the server's raw name (the row's state identity).
  */
@@ -187,6 +151,12 @@ fun McpHealthCard(
     modifier: Modifier = Modifier,
     compact: Boolean = true,
     count: (Int) -> String = { n -> "$n server${if (n == 1) "" else "s"}" },
+    /**
+     * ta-coik.10: inside the telemetry panel the compact card reads as a band head
+     * (telemetry-panel.css 331-333): the band gap above its rule, no glyph, the label as the
+     * panel's uppercase muted heading.
+     */
+    banded: Boolean = false,
 ) {
     if (servers.isEmpty()) return
     val t = LocalTetherTokens.current
@@ -200,7 +170,7 @@ fun McpHealthCard(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(top = t.css.spaceLg)
+            .padding(top = if (banded) 18.dp else t.css.spaceLg)
             .then(
                 if (compact) Modifier.drawBehind { drawRect(line, Offset.Zero, size.copy(height = 1.dp.toPx())) }
                 else Modifier.cssSurface(shape, background = t.mineralDeep, border = CssBorder(1.dp, t.line)),
@@ -227,11 +197,15 @@ fun McpHealthCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
-            Icon(TetherIcons.Network, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+            if (!banded) Icon(TetherIcons.Network, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
             Text(
-                label,
-                style = TextStyle(fontFamily = if (compact) type.ui else type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650)),
-                color = t.ink,
+                if (banded) label.uppercase() else label,
+                style = if (banded) {
+                    TextStyle(fontFamily = type.ui, fontSize = rem(0.66f), fontWeight = FontWeight(720), letterSpacing = 0.07.em)
+                } else {
+                    TextStyle(fontFamily = if (compact) type.ui else type.mono, fontSize = rem(0.78f), fontWeight = FontWeight(650))
+                },
+                color = if (banded) t.muted else t.ink,
                 modifier = Modifier.weight(1f),
             )
             Text(

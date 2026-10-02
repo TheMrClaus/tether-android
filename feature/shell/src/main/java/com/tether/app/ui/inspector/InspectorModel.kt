@@ -11,6 +11,7 @@ import com.tether.app.protocol.helpers.ModelPicker
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.model.SessionView
+import com.tether.app.protocol.model.SubagentDefault
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsNull
@@ -24,18 +25,19 @@ import com.tether.app.ui.chat.STATUS_TEXT
 import com.tether.app.ui.chat.SubagentRun
 import com.tether.app.ui.chat.WorktreeDiffSummaryView
 import com.tether.app.ui.chat.providerNotices
+import com.tether.app.ui.chat.runStatusText
+import com.tether.app.ui.chat.subagentRosterSummary
 import com.tether.app.ui.chat.usageGapReason
 import com.tether.app.ui.chat.worktreeDiffSummary
-import com.tether.app.ui.statusline.ContextReading
-import com.tether.app.ui.statusline.ContextSnapshotReading
 import com.tether.app.ui.statusline.ReadingEnv
 import com.tether.app.ui.statusline.TelemetryMetrics
-import com.tether.app.ui.statusline.WindowReading
+import com.tether.app.ui.statusline.WrapUpReading
 import com.tether.app.ui.statusline.contextReading
 import com.tether.app.ui.statusline.contextSnapshotReading
 import com.tether.app.ui.statusline.gitDivergence
 import com.tether.app.ui.statusline.taskReading
 import com.tether.app.ui.statusline.windowReading
+import com.tether.app.ui.statusline.wrapUpReading
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -49,10 +51,11 @@ import java.text.DecimalFormatSymbols
 import java.util.Locale
 
 /*
- * T9.1: the state-mapping layer of the inspector (components/inspector.tsx 289-735 and its parts:
- * repository-panel.tsx, worktree-services-card.tsx, the CodexNotices lead-in). Pure: the session
- * row, the reducer's projection and the client's per-session replies in; one [InspectorModel] out,
- * section by section in the web's order. Nothing here sends anything.
+ * T9.1 / ta-coik.10: the state-mapping layer of the session telemetry panel (tether 90fbb9f
+ * components/inspector.tsx, the f4c4133 redesign, and its parts: repository-panel.tsx,
+ * worktree-services-card.tsx, the CodexNotices lead-in). Pure: the session row, the reducer's
+ * projection and the client's per-session replies in; one [InspectorModel] out, band by band in
+ * the web's order. Nothing here sends anything.
  *
  * Server and agent text never reaches the screen as a bare string: every value is a [Seg] that
  * names its drawing rule ([Rule]): the app's own words, a cleaned LABEL (names), LINE (paths,
@@ -106,76 +109,199 @@ fun Line.plain(): String = joinToString("") { it.text }
 
 // --- The model -------------------------------------------------------------------------------
 
+/*
+ * ta-coik.10: the panel as the deployed web draws it (tether 90fbb9f components/inspector.tsx, the
+ * f4c4133 "Headroom first" redesign + #233), band by band in the operator's order: header, the
+ * attention strip, Context, Limits, Subagents, the selected run, MCP health, Tokens, Repository,
+ * Services, Codex notices, Runtime, the acp capability set.
+ */
 @Immutable
 data class InspectorModel(
     val identity: Identity,
-    /** The roster (every run in the session) and the selected run, resolved by lookup. */
+    /** inspector.tsx:634-684: model · effort · account, the divergence note and the "Now" task. */
+    val header: Header,
+    /** inspector.tsx:586-596, 693-711: only what would stop the work; empty for a healthy session. */
+    val attention: Attention,
+    /** inspector.tsx:717-748. */
+    val context: ContextBand,
+    /** inspector.tsx:751-779; null until the session has metrics (the band is omitted). */
+    val limits: LimitsSection?,
+    /** Every run in the session (the transcript's derivation) and the selected one, resolved by lookup. */
     val runs: List<SubagentRun>,
     val activeRunId: String?,
-    val usage: UsageSection,
-    val repository: RepositorySection?,
-    val limits: LimitsSection,
-    /** Every provider but opencode shows the MCP card (inspector.tsx:534). */
-    val mcpHealth: Boolean,
-    val services: ServicesSection?,
-    /** `codex-app-server-v2` only (inspector.tsx:547-549). */
-    val codexNotices: List<ProviderNoticeView>,
-    /** `opencode-serve-v2` only: the "Plugins" card (inspector.tsx:554-556). */
-    val opencodePlugins: Boolean,
+    /** inspector.tsx:418-489; null without runs. */
+    val subagents: SubagentsBand?,
+    /** inspector.tsx:285-348: the selected run's own readings; null with no run selected. */
+    val runUsage: RunUsage?,
     /** A run is selected: "Session" states that everything below is session-scoped again. */
     val sessionDivider: Boolean,
-    val runtime: List<SpecRow>,
+    /** Every provider but opencode shows the MCP card (inspector.tsx:809). */
+    val mcpHealth: Boolean,
+    /** `opencode-serve-v2` only: the "Plugins" card (inspector.tsx:816). */
+    val opencodePlugins: Boolean,
+    /** inspector.tsx:611-628, 821-849; null when there is nothing to count. */
+    val tokens: TokensBand?,
+    val repository: RepositorySection?,
+    val services: ServicesSection?,
+    /** `codex-app-server-v2` only (inspector.tsx:870-872). */
+    val codexNotices: List<ProviderNoticeView>,
+    /** inspector.tsx:876-1001. */
+    val runtime: RuntimeSection,
     /** The acp engine's advertised capability set; null for every other provider. */
     val acpCapabilities: List<Pair<String, Boolean>>?,
 )
 
-/** `.inspector-heading`: the provider mark, its label and the session status in words. */
+/** `.ti-harness`: the provider mark, its label and the session status in words. */
 @Immutable
 data class Identity(val provider: String, val providerLabel: Seg, val status: String, val statusText: Seg)
 
-sealed interface UsageSection
-
-/** inspector.tsx:410-471: the session's Usage block. */
+/** `.ti-head` below the harness row. */
 @Immutable
-data class SessionUsage(
-    /** "Live", or "Snapshot · 09:05 AM" when the context reading came from the transcript. */
-    val badge: String,
-    /** "Processed" when the provider reported a cache split, else "Tokens". */
-    val totalLabel: String,
-    val totalValue: String,
-    val totalCaption: String,
-    /** The last turn's whole-tree tokens; null when not reported (the cell is omitted). */
-    val lastTurn: String?,
-    val subagentsSpawned: String,
-    val context: ContextReading?,
-    val snapshot: ContextSnapshotReading?,
-    val perModel: List<ModelUsageRow>,
-) : UsageSection {
-    /** "Per-model breakdown", with the count when there is more than one. */
-    val perModelSummary: String
-        get() = "Per-model breakdown" + if (perModel.size > 1) " (${perModel.size})" else ""
+data class Header(
+    /** The CONFIGURED model's reading, or "Not reported yet". */
+    val model: Line,
+    /** "last served <model>" only when the main thread was demonstrably served by another one (#179). */
+    val lastServed: Seg?,
+    /** The effort, first letter capitalised (`capitalized`), or "—". */
+    val effort: Seg,
+    /** v92 (Claude only): the account this session bills, and its organisation. */
+    val account: Seg?,
+    val organization: Seg?,
+    /** `modelReading().note`: the divergence, in `--warning`. */
+    val note: Seg?,
+    /** v39: what the agent says it is doing now ("Now"). */
+    val task: Seg?,
+    val taskProgress: String?,
+)
+
+/** One `.ti-alert` of the rate limit: its words and whether it is the rejected (danger) state. */
+@Immutable
+data class RateLimitAlert(val text: String, val danger: Boolean)
+
+@Immutable
+data class Attention(
+    /** Issue #195: the Wrap-Up Allowance; it REPLACES the rate-limit alert while it runs. */
+    val wrapUp: WrapUpReading?,
+    val rateLimit: RateLimitAlert?,
+    /** "1 failed, 2 need sign-in", or null. */
+    val mcpProblem: String?,
+    val setupFailed: Boolean,
+) {
+    val any: Boolean get() = wrapUp != null || rateLimit != null || mcpProblem != null || setupFailed
 }
 
-/** One `ModelUsageEstimate` (inspector.tsx:154-179). */
+/** One `Gauge` row (label | track | number, caption under); [percent] null draws no bar. */
 @Immutable
-data class ModelUsageRow(val identity: Seg, val contributors: List<Seg>, val provider: Line, val figures: List<String>)
+data class GaugeRow(val label: String, val percent: Int?, val value: String, val caption: String)
 
-/** inspector.tsx:190-255: the Usage block scoped to ONE sub-agent run. */
+@Immutable
+data class ContextBand(
+    /** "Live", "Snapshot · 09:05 AM", "Waiting"; "Session · …" while a run is selected. */
+    val aside: String,
+    /** No metrics yet: the honest empty state. */
+    val awaiting: Boolean,
+    val gauge: GaugeRow?,
+    /** "This engine has not reported a context window." */
+    val noWindow: Boolean,
+)
+
+/** The Limits band: the account's windows, then its resets. The reset actions are T9.2's. */
+@Immutable
+data class LimitsSection(
+    val gauges: List<GaugeRow>,
+    /** Claude: "1 reset left · expires in 26 d" and its note; null when there is nothing to say. */
+    val resetGrants: Pair<String, String>?,
+    /** Codex: the banked reset count ("2 available"); null when none (or never checked). */
+    val bankedResets: String?,
+    /** #233: "No current 5-hour or weekly reading for this account." */
+    val noReading: Boolean,
+)
+
+/** One run's model or effort and where it came from: served (no note), "asked" or "declared". */
+@Immutable
+data class RunSetting(val text: Seg, val source: String) {
+    val note: String get() = SOURCE_NOTE[source].orEmpty()
+
+    companion object {
+        const val SERVED = "served"
+        const val REQUESTED = "requested"
+        const val DECLARED = "declared"
+
+        /** inspector.tsx:400 SOURCE_NOTE. */
+        val SOURCE_NOTE = mapOf(SERVED to "", REQUESTED to "asked", DECLARED to "declared")
+    }
+}
+
+/** One `.ti-run-row`. */
+@Immutable
+data class RunRow(
+    val runId: String,
+    val title: Seg,
+    /** RUN_RUNNING / RUN_ERROR / RUN_DONE: the glyph (spinner, alert, check). */
+    val status: String,
+    /** `runStatusText`, in words. */
+    val statusText: Seg,
+    /** "63.2M tok", or null ("no usage", titled with [gap]). */
+    val tokens: String?,
+    val gap: String?,
+    val model: RunSetting?,
+    val effort: RunSetting?,
+    val active: Boolean,
+    val nested: Boolean,
+) {
+    val error: Boolean get() = status == com.tether.app.ui.chat.RUN_ERROR
+}
+
+@Immutable
+data class SubagentsBand(
+    /** "10 total · 2 running · 1 failed". */
+    val aside: String,
+    val rows: List<RunRow>,
+    /** The selected run sits behind "Show N more": that disclosure starts open. */
+    val moreOpen: Boolean,
+    /** "Tokens captured for 3 of 10 runs." when the totals cover only some runs. */
+    val partialNote: String?,
+) {
+    val head: List<RunRow> get() = rows.take(VISIBLE_RUNS)
+    val rest: List<RunRow> get() = rows.drop(VISIBLE_RUNS)
+
+    companion object {
+        /** inspector.tsx:408. */
+        const val VISIBLE_RUNS = 6
+    }
+}
+
+/** One `.ti-ledger` row; [sub] rows are the parts of the row above. */
+@Immutable
+data class LedgerRow(val label: String, val value: String, val note: String? = null, val sub: Boolean = false)
+
+/** One `ModelUsageEstimate` (inspector.tsx:241-274). */
+@Immutable
+data class ModelUsageRow(val identity: Seg, val contributors: List<Seg>, val provider: Line, val ledger: List<LedgerRow>)
+
+@Immutable
+data class TokensBand(val rows: List<LedgerRow>, val perModel: List<ModelUsageRow>) {
+    /** The disclosure's count: "2 models". */
+    val perModelCount: String get() = "${perModel.size} ${if (perModel.size == 1) "model" else "models"}"
+}
+
+/** inspector.tsx:285-348: the Sub-agent band, scoped to ONE run. */
 @Immutable
 data class RunUsage(
     val runId: String,
     val title: Seg,
     val status: String,
-    val tokens: String,
-    val tokensCaption: String,
-    val steps: String,
-    val stepsCaption: String,
+    val ledger: List<LedgerRow>,
     /** Why the run has no token reading (never a "—" standing for zero); null when measured. */
     val gap: String?,
     val specs: List<SpecRow>,
-) : UsageSection
+)
 
-/** One `.telemetry-specs` row: an uppercase label, a mono value and its notes. */
+/** The Runtime disclosure: its summary's CLI version and its rows. */
+@Immutable
+data class RuntimeSection(val cli: Seg?, val rows: List<SpecRow>)
+
+/** One `.ti-specs` row: a label, a mono value and its notes. */
 @Immutable
 data class SpecRow(
     val label: String,
@@ -187,7 +313,7 @@ data class SpecRow(
     val names: List<Line> = emptyList(),
 )
 
-/** A `.telemetry-note` (faint) or `.model-divergence` (warning) under a value; [status] = role="status". */
+/** A small note under a value; [warning] = `--warning`; [status] = role="status". */
 @Immutable
 data class Note(val line: Line, val warning: Boolean = false, val status: Boolean = false)
 
@@ -208,19 +334,6 @@ data class RepositorySection(
 @Immutable
 data class PullRequestLine(val headline: String, val state: String?)
 
-/** inspector.tsx:488-513 (Account limits). The reset actions are T9.2's: display only here. */
-@Immutable
-data class LimitsSection(
-    val windows: List<Pair<String, WindowReading>>,
-    /** No metrics at all yet: "Telemetry appears after the agent completes its first response." */
-    val awaitingTelemetry: Boolean,
-    /** Claude: "1 reset left · expires in 26 d" and its note; null when there is nothing to say. */
-    val resetGrants: Pair<String, String>?,
-    /** Codex: the banked reset count ("2 available"); null when none (or never checked). */
-    val bankedResets: String?,
-) {
-    val empty: Boolean get() = windows.isEmpty() && !awaitingTelemetry && resetGrants == null && bankedResets == null
-}
 
 /** worktree-services-card.tsx, display only (running and stopping services is T8.3's). */
 @Immutable
@@ -284,9 +397,10 @@ data class InspectorReplies(
     val changeRequest: ChangeRequestReading? = null,
 )
 
+
 // --- The mapping -----------------------------------------------------------------------------
 
-/** inspector.tsx 289-735, from the session, the provider list and the projection. */
+/** inspector.tsx:491-1009, from the session, the provider list and the projection. */
 fun inspectorModel(
     session: AgentSession,
     providers: List<ProviderInfo>,
@@ -300,14 +414,23 @@ fun inspectorModel(
 ): InspectorModel {
     val activeRun = selectedRunId?.let { id -> runs.firstOrNull { it.runId == id } }
     val metrics = TelemetryMetrics.from(session.metrics)
+    // v138: the declared defaults are Claude's only (inspector.tsx:786, 794).
+    val defaults = if (session.provider == "claude") session.metrics?.subagentDefaultMap.orEmpty() else emptyMap()
     return InspectorModel(
         identity = identity(session, providers),
+        header = header(session, state),
+        attention = attention(session, state, env),
+        context = contextBand(session, metrics, env, activeRun != null),
+        limits = if (session.metrics != null) limits(session, env) else null,
         runs = runs,
         activeRunId = activeRun?.runId,
-        usage = if (activeRun != null) runUsage(activeRun) else sessionUsage(session, state, runs, metrics, env),
-        repository = repository(session, replies),
-        limits = limits(session, env),
+        subagents = subagentsBand(runs, activeRun?.runId, defaults),
+        runUsage = activeRun?.let { runUsage(it, it.agentType?.let(defaults::get)) },
+        sessionDivider = activeRun != null,
         mcpHealth = session.provider != "opencode" && state != null,
+        opencodePlugins = session.engineGeneration == "opencode-serve-v2" && state != null,
+        tokens = tokensBand(session, state, runs, metrics, env),
+        repository = repository(session, replies),
         services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
@@ -315,8 +438,6 @@ fun inspectorModel(
         } else {
             emptyList()
         },
-        opencodePlugins = session.engineGeneration == "opencode-serve-v2" && state != null,
-        sessionDivider = activeRun != null,
         runtime = runtime(session, state),
         acpCapabilities = if (session.provider == "acp") acpCapabilities(providers) else null,
     )
@@ -328,9 +449,109 @@ internal fun identity(session: AgentSession, providers: List<ProviderInfo>): Ide
     return Identity(session.provider, named?.let { Seg(it, Rule.Label) } ?: label(session.provider), session.status, status)
 }
 
-// ---- Usage
+// ---- Header
 
-/** inspector.tsx:134-142: the newest turn that carries usage, and its id. */
+/** inspector.tsx:234-236 `capitalized`: the first character upper-cased, the rest as sent. */
+internal fun capitalized(value: String?): String =
+    if (value.isNullOrEmpty()) "" else value.substring(0, 1).uppercase(Locale.ROOT) + value.substring(1)
+
+/** inspector.tsx:552-580, 634-684. */
+internal fun header(session: AgentSession, state: SessionView?): Header {
+    val reading = modelReading(session, state)
+    val readingLabel = strOf(reading["label"]).orEmpty()
+    val metrics = session.metrics
+    val email = if (session.provider == "claude") metrics?.accountEmail?.takeIf { it.isNotEmpty() } else null
+    val task = taskReading(state?.todo)
+    val effort = capitalized(metrics?.effort)
+    return Header(
+        model = if (readingLabel == "—" || readingLabel.isEmpty()) listOf(app("Not reported yet")) else listOf(code(readingLabel)),
+        lastServed = strOf(reading["lastServed"])?.let(::code),
+        effort = if (effort.isEmpty()) app("—") else label(effort),
+        // The account identity is an id: the one-line rule, so a look-alike shows its hidden code points.
+        account = email?.let(::code),
+        organization = if (email != null) metrics?.accountOrganization?.takeIf { it.isNotEmpty() }?.let(::label) else null,
+        note = strOf(reading["note"])?.let(::prose),
+        task = task?.let { prose(it.text) },
+        taskProgress = task?.progress,
+    )
+}
+
+/** inspector.tsx:552-566: the configured model and, when it demonstrably differs, what served it. */
+internal fun modelReading(session: AgentSession, state: SessionView?): JsObj {
+    val latest = latestTurn(state)
+    val served = strOf(latest?.second?.get("model"))?.takeIf { it.isNotEmpty() } ?: session.metrics?.model
+    val fallback = latest?.let { (turnId, _) -> (state?.turn(turnId)?.obj?.get("modelFallbacks") as? JsArr)?.lastOrNull() } ?: JsNull
+    return ModelPicker.modelReading(
+        JsObj.of(
+            "configured" to (session.model?.let(::JsStr) ?: JsNull),
+            "served" to (served?.let(::JsStr) ?: JsNull),
+            "fallback" to fallback,
+        ),
+    )
+}
+
+// ---- Attention
+
+/** inspector.tsx:586-596: the MCP count in words, the card's own predicate (failed / needs-auth). */
+internal fun mcpProblem(state: SessionView?): String? {
+    val health = state?.obj?.get("mcpHealth") as? JsObj ?: return null
+    var failed = 0
+    var needsAuth = 0
+    for ((_, value) in health.entries) {
+        when (strOf((value as? JsObj)?.get("status"))) {
+            "failed" -> failed++
+            "needs-auth" -> needsAuth++
+        }
+    }
+    return listOfNotNull(
+        if (failed > 0) "$failed failed" else null,
+        if (needsAuth > 0) "$needsAuth ${if (needsAuth == 1) "needs" else "need"} sign-in" else null,
+    ).joinToString(", ").ifEmpty { null }
+}
+
+internal fun attention(session: AgentSession, state: SessionView?, env: ReadingEnv): Attention {
+    val wrapUp = if (state != null) wrapUpReading(state, env) else null
+    val rateStatus = ((state?.obj?.get("rateLimit") as? JsObj)?.get("status") as? JsStr)?.value
+    val rateLimit = if (wrapUp == null) {
+        rateLimitNoticeText(state, env.nowMs)?.let { RateLimitAlert(it, danger = rateStatus == "rejected") }
+    } else {
+        null
+    }
+    return Attention(
+        wrapUp = wrapUp,
+        rateLimit = rateLimit,
+        mcpProblem = if (session.provider != "opencode") mcpProblem(state) else null,
+        setupFailed = session.worktree?.setupStatus == "failed",
+    )
+}
+
+// ---- Context
+
+internal fun contextBand(session: AgentSession, metrics: TelemetryMetrics?, env: ReadingEnv, runSelected: Boolean): ContextBand {
+    val context = contextReading(metrics, env)
+    val snapshot = contextSnapshotReading(metrics, env)
+    val aside = when {
+        session.metrics == null -> "Waiting"
+        snapshot != null -> "Snapshot · ${snapshot.asOf}"
+        else -> "Live"
+    }
+    val gauge = when {
+        session.metrics == null -> null
+        context != null -> GaugeRow("Used", context.percent, "${context.percent}%", context.caption)
+        snapshot != null -> GaugeRow("Used", null, Format.compactNumber(snapshot.tokens), "Snapshot · ${snapshot.asOf} · window size not reported")
+        else -> null
+    }
+    return ContextBand(
+        aside = if (runSelected) "Session · $aside" else aside,
+        awaiting = session.metrics == null,
+        gauge = gauge,
+        noWindow = session.metrics != null && gauge == null,
+    )
+}
+
+// ---- Usage helpers
+
+/** inspector.tsx:214-222: the newest turn that carries usage, and its id. */
 internal fun latestTurn(state: SessionView?): Pair<String, JsObj>? {
     if (state == null) return null
     val order = state.turnOrder
@@ -345,50 +566,40 @@ internal fun latestTurn(state: SessionView?): Pair<String, JsObj>? {
 private fun finiteOf(value: JsValue?): Double? = (value as? JsNum)?.value?.takeIf { it.isFinite() }
 private fun strOf(value: JsValue?): String? = (value as? JsStr)?.value
 
-/** inspector.tsx:144-146: `Intl.NumberFormat("en")` (grouped, up to 3 fraction digits), "—" when not finite. */
+/** inspector.tsx:224-226: `Intl.NumberFormat("en")` (grouped, up to 3 fraction digits), "—" when not finite. */
 internal fun usageNumber(value: JsValue?): String {
     val d = finiteOf(value) ?: return "—"
     val format = DecimalFormat("#,##0.###", DecimalFormatSymbols(Locale.US)).apply { roundingMode = RoundingMode.HALF_UP }
     return format.format(d)
 }
 
-internal fun sessionUsage(
-    session: AgentSession,
-    state: SessionView?,
-    runs: List<SubagentRun>,
-    metrics: TelemetryMetrics?,
-    env: ReadingEnv,
-): SessionUsage {
+// ---- Tokens
+
+internal fun tokensBand(session: AgentSession, state: SessionView?, runs: List<SubagentRun>, metrics: TelemetryMetrics?, env: ReadingEnv): TokensBand? {
     val raw = session.metrics
-    val context = contextReading(metrics, env)
-    val snapshot = contextSnapshotReading(metrics, env)
     val cacheRead = raw?.cacheReadInputTokens?.toDouble()
     val cacheMiss = raw?.cacheMissInputTokens?.toDouble()
     val split = cacheRead != null || cacheMiss != null
-    val caption = when {
-        split -> "${Format.compactNumber(cacheRead?.let(::JsNum))} cached · ${Format.compactNumber(cacheMiss?.let(::JsNum))} fresh"
-        context == null && (raw?.contextWindow ?: 0L) != 0L ->
-            "${Format.compactNumber(raw!!.contextWindow!!.toDouble())} context"
-        else -> "Current session"
-    }
     val latest = latestTurn(state)
     val usage = latest?.second
+    val rows = buildList {
+        raw?.totalTokens?.let { total ->
+            add(LedgerRow(if (split) "Processed" else "Tokens", Format.compactNumber(total.toDouble()), note = "Current session"))
+            cacheRead?.let { add(LedgerRow("Cache reads", Format.compactNumber(it), sub = true)) }
+            cacheMiss?.let { add(LedgerRow("Fresh input", Format.compactNumber(it), sub = true)) }
+        }
+        finiteOf(usage?.get("perTurnTokens"))?.let { add(LedgerRow("Last turn", Format.compactNumber(it), note = "Whole-tree tokens")) }
+        // The window SIZE prints in the context meter's caption once that reading exists.
+        if (contextReading(metrics, env) == null) {
+            raw?.contextWindow?.let { add(LedgerRow("Context window", Format.compactNumber(it.toDouble()))) }
+        }
+    }
     val lastTurnRuns = latest?.let { (turnId, _) -> runs.filter { it.turnId == turnId } }.orEmpty()
     val perModel = (usage?.get("modelUsages") as? JsArr)?.mapNotNull { it as? JsObj }.orEmpty()
         .take(LabelText.MAX_ITEMS)
         .map { entry -> modelUsageRow(entry, lastTurnRuns, strOf(usage?.get("model")), strOf(usage?.get("rawModel"))) }
-    val n = runs.size
-    return SessionUsage(
-        badge = snapshot?.let { "Snapshot · ${it.asOf}" } ?: "Live",
-        totalLabel = if (split) "Processed" else "Tokens",
-        totalValue = Format.compactNumber(raw?.totalTokens?.toDouble()?.let(::JsNum)),
-        totalCaption = caption,
-        lastTurn = finiteOf(usage?.get("perTurnTokens"))?.let { Format.compactNumber(it) },
-        subagentsSpawned = "$n ${if (n == 1) "subagent" else "subagents"} spawned",
-        context = context,
-        snapshot = snapshot,
-        perModel = perModel,
-    )
+    if (rows.isEmpty() && perModel.isEmpty()) return null
+    return TokensBand(rows, perModel)
 }
 
 /** subagent-run-model.mjs `modelUsageContributors`: which run(s) an entry's numbers belong to. */
@@ -424,25 +635,91 @@ internal fun modelUsageRow(entry: JsObj, runs: List<SubagentRun>, mainModel: Str
             if (name == "Main session" || name == "Unidentified sub-agent") app(name) else label(name)
         },
         provider = providerLine,
-        figures = listOf(
-            "${usageNumber(entry["inputTokens"])} in · ${usageNumber(entry["outputTokens"])} out",
-            "${usageNumber(entry["cacheReadInputTokens"])} cache read · ${usageNumber(entry["cacheCreationInputTokens"])} cache write",
-            "${usageNumber(entry["webSearchRequests"])} web searches",
-            "${usageNumber(entry["contextWindow"])} context · ${usageNumber(entry["maxOutputTokens"])} max output",
+        ledger = listOf(
+            LedgerRow("Input", usageNumber(entry["inputTokens"])),
+            LedgerRow("Output", usageNumber(entry["outputTokens"])),
+            LedgerRow("Cache read", usageNumber(entry["cacheReadInputTokens"])),
+            LedgerRow("Cache write", usageNumber(entry["cacheCreationInputTokens"])),
+            LedgerRow("Web searches", usageNumber(entry["webSearchRequests"])),
+            LedgerRow("Window", usageNumber(entry["contextWindow"])),
+            LedgerRow("Max output", usageNumber(entry["maxOutputTokens"])),
         ),
     )
 }
 
-internal fun runUsage(run: SubagentRun): RunUsage {
+// ---- Subagents
+
+/**
+ * inspector.tsx:383-398 `runModelReading`: model = served > requested > declared; effort =
+ * requested > declared. A run never reports its own effort, so nothing declared is shown as measured.
+ */
+internal fun runModelReading(run: SubagentRun, declared: SubagentDefault?): Pair<RunSetting?, RunSetting?> {
+    val served = strOf(run.usage?.get("model"))?.takeIf { it.isNotEmpty() }
+    val requestedModel = run.requestedModel?.takeIf { it.isNotEmpty() }
+    val requestedEffort = run.requestedEffort?.takeIf { it.isNotEmpty() }
+    val declaredModel = declared?.model
+    val declaredEffort = declared?.effort
+    val model = when {
+        served != null -> RunSetting(code(served), RunSetting.SERVED)
+        requestedModel != null -> RunSetting(code(requestedModel), RunSetting.REQUESTED)
+        declaredModel != null -> RunSetting(code(declaredModel), RunSetting.DECLARED)
+        else -> null
+    }
+    val effort = when {
+        requestedEffort != null -> RunSetting(label(requestedEffort), RunSetting.REQUESTED)
+        declaredEffort != null -> RunSetting(label(declaredEffort), RunSetting.DECLARED)
+        else -> null
+    }
+    return model to effort
+}
+
+internal fun subagentsBand(runs: List<SubagentRun>, activeRunId: String?, defaults: Map<String, SubagentDefault>): SubagentsBand? {
+    if (runs.isEmpty()) return null
+    val summary = subagentRosterSummary(runs)
+    val aside = listOfNotNull(
+        "${summary.total} total",
+        if (summary.running > 0) "${summary.running} running" else null,
+        if (summary.errored > 0) "${summary.errored} failed" else null,
+    ).joinToString(" · ")
+    val rows = runs.map { run ->
+        val (model, effort) = runModelReading(run, run.agentType?.let(defaults::get))
+        val measured = run.totalTokens != null
+        RunRow(
+            runId = run.runId,
+            title = label(run.title),
+            status = run.status,
+            statusText = label(runStatusText(run)),
+            tokens = if (measured) "${Format.compactNumber(run.totalTokens!!)} tok" else null,
+            gap = if (measured) null else usageGapReason(run),
+            model = model,
+            effort = effort,
+            active = run.runId == activeRunId,
+            nested = run.depth > 1,
+        )
+    }
+    return SubagentsBand(
+        aside = aside,
+        rows = rows,
+        moreOpen = rows.drop(SubagentsBand.VISIBLE_RUNS).any { it.active },
+        partialNote = if (summary.partial && summary.measured > 0) "Tokens captured for ${summary.measured} of ${summary.total} runs." else null,
+    )
+}
+
+/** inspector.tsx:285-348. */
+internal fun runUsage(run: SubagentRun, declared: SubagentDefault? = null): RunUsage {
     val measured = run.totalTokens != null
     val thread = run.source == RunSource.THREAD
     val served = strOf(run.usage?.get("model"))?.takeIf { it.isNotEmpty() }
     val requested = run.requestedModel?.takeIf { it.isNotEmpty() }
+    val agentType = run.agentType?.takeIf { it.isNotEmpty() }
+    val requestedEffort = run.requestedEffort?.takeIf { it.isNotEmpty() }
+    val declaredModel = declared?.model
+    val declaredEffort = declared?.effort
     val specs = buildList {
         run.provider?.takeIf { it.isNotEmpty() }?.let { provider ->
             add(SpecRow("Harness", listOf(label(provider)), if (run.source == RunSource.DELEGATE) listOf(Note(listOf(app("Delegated Tether session")))) else emptyList()))
         }
-        run.agentType?.takeIf { it.isNotEmpty() }?.let { add(SpecRow("Agent type", listOf(label(it)))) }
+        agentType?.let { add(SpecRow("Agent type", listOf(label(it)))) }
         if (served != null) {
             val note = if (requested != null && requested != served) {
                 listOf(Note(listOf(app("Requested "), code(requested), app(", but this is what served it"))))
@@ -452,19 +729,24 @@ internal fun runUsage(run: SubagentRun): RunUsage {
             add(SpecRow("Model", listOf(code(served)), note))
         } else if (requested != null) {
             add(SpecRow("Model", listOf(code(requested)), listOf(Note(listOf(app("Requested; served model not captured"))))))
+        } else if (declaredModel != null) {
+            add(SpecRow("Model", listOf(code(declaredModel)), listOf(Note(listOf(app("Declared by the "), label(agentType), app(" agent type; no served response yet"))))))
         }
-        run.requestedEffort?.takeIf { it.isNotEmpty() }?.let {
-            add(SpecRow("Effort", listOf(label(it)), listOf(Note(listOf(app("Requested on the Agent call"))))))
+        if (requestedEffort != null) {
+            add(SpecRow("Effort", listOf(label(requestedEffort)), listOf(Note(listOf(app("Requested on the Agent call"))))))
+        } else if (declaredEffort != null) {
+            add(SpecRow("Effort", listOf(label(declaredEffort)), listOf(Note(listOf(app("Declared by the "), label(agentType), app(" agent type"))))))
         }
     }
     return RunUsage(
         runId = run.runId,
         title = label(run.title),
         status = STATUS_TEXT[run.status] ?: run.status,
-        tokens = if (measured) Format.compactNumber(run.totalTokens!!) else "—",
-        tokensCaption = if (measured) "This sub-agent only" else "Not captured",
-        steps = if (thread) "—" else run.steps.toString(),
-        stepsCaption = if (thread) "Not streamed" else "Recorded",
+        ledger = listOf(
+            LedgerRow("Tokens", if (measured) Format.compactNumber(run.totalTokens!!) else "—", note = if (measured) "This sub-agent only" else "Not captured"),
+            // Issue #172: a child run in its own native thread streams no steps here.
+            LedgerRow("Steps", if (thread) "—" else run.steps.toString(), note = if (thread) "Not streamed" else "Recorded"),
+        ),
         gap = if (measured) null else "${usageGapReason(run)}.",
         specs = specs,
     )
@@ -513,17 +795,21 @@ internal fun repository(session: AgentSession, replies: InspectorReplies): Repos
     )
 }
 
+
 // ---- Account limits
 
 internal fun jsOf(element: JsonElement?): JsValue = if (element == null) JsNull else JsCodec.fromJson(element)
 
+/** inspector.tsx:599-605, 751-779 (#233: the neutral empty copy). */
 internal fun limits(session: AgentSession, env: ReadingEnv): LimitsSection {
     val metrics = session.metrics
     val t = TelemetryMetrics.from(metrics)
-    val windows = buildList {
-        t?.fiveHour?.let { add("5 hour" to windowReading(it, env)) }
-        t?.weekly?.let { add("Weekly" to windowReading(it, env)) }
-        t?.fable?.let { add("Fable" to windowReading(it, env)) }
+    val gauges = buildList {
+        for ((label, window) in listOf("5 hour" to t?.fiveHour, "Weekly" to t?.weekly, "Fable" to t?.fable)) {
+            if (window == null) continue
+            val reading = windowReading(window, env)
+            add(GaugeRow(label, reading.percent, reading.percent?.let { "$it%" } ?: "—", reading.caption))
+        }
     }
     val grants = if (session.provider == "claude") metrics?.claudeResetGrants?.takeIf { it is JsonObject } else null
     val resetGrants = grants?.let { summary ->
@@ -534,10 +820,10 @@ internal fun limits(session: AgentSession, env: ReadingEnv): LimitsSection {
     val credits = if (session.provider == "codex") metrics?.codexResetCredits as? JsonObject else null
     val available = credits?.number("availableCount")?.takeIf { it > 0 }
     return LimitsSection(
-        windows = windows,
-        awaitingTelemetry = metrics == null,
+        gauges = gauges,
         resetGrants = resetGrants,
         bankedResets = available?.let { "${numberToString(it)} available" },
+        noReading = gauges.isEmpty() && grants == null && available == null,
     )
 }
 
@@ -661,140 +947,96 @@ internal fun inventoryNames(names: List<String>, limit: Int = 8): Line {
     return out
 }
 
-internal fun runtime(session: AgentSession, state: SessionView?): List<SpecRow> = buildList {
-    taskReading(state?.todo)?.let { task ->
-        add(SpecRow("Current task", listOf(prose(task.text)), listOfNotNull(task.progress?.let { Note(listOf(app(it))) })))
-    }
-    if (session.provider == "codex") {
-        val v2 = session.engineGeneration == "codex-app-server-v2"
-        add(
-            SpecRow(
-                "Engine",
-                listOf(app(if (v2) "App server v2" else "Legacy exec v1")),
-                listOf(Note(listOf(app(if (v2) "Persistent, interactive Codex session" else "Preserved without automatic migration")))),
-            ),
-        )
-    }
-    session.worktree?.let { w ->
-        add(
-            SpecRow(
-                "Worktree",
-                listOf(label(w.status)),
-                listOfNotNull(
-                    Note(listOf(code(w.path))),
-                    w.notice?.takeIf { it.isNotEmpty() }?.let { Note(listOf(prose(it)), status = true) },
-                ),
-                capitalize = true,
-            ),
-        )
-        val base = w.baseRef?.takeIf { it.isNotEmpty() }?.let { ref ->
-            when (w.mode) {
-                "checkout-pr" -> listOf(app("Pull request #${w.prNumber?.toString() ?: "null"} from "), code(ref))
-                "checkout-branch" -> listOf(app("Existing branch, checked out in its own directory"))
-                else -> listOf(app("Branched off "), code(ref))
-            }
-        }
-        add(SpecRow("Worktree branch", listOf(code(w.branch)), listOfNotNull(base?.let { Note(it) })))
-        val setup = w.setupStatus
-        if (setup != null && setup != "none" && setup != "ok") {
-            val failed = setup == "failed"
+internal fun runtime(session: AgentSession, state: SessionView?): RuntimeSection {
+    val obj = state?.obj
+    val cli = strOf(obj?.get("cliVersion"))?.takeIf { it.isNotEmpty() }
+    val rows = buildList {
+        if (session.provider == "codex") {
+            val v2 = session.engineGeneration == "codex-app-server-v2"
             add(
                 SpecRow(
-                    "Worktree setup",
-                    listOf(app(if (failed) "Failed" else "Running")),
-                    listOf(
-                        Note(
-                            listOf(
-                                app(
-                                    if (failed) {
-                                        "This project's setup commands did not finish. The checkout is still usable — see the Services panel for the log."
-                                    } else {
-                                        "Running this project's setup commands. The first turn starts when they finish."
-                                    },
-                                ),
-                            ),
-                            status = true,
-                        ),
+                    "Engine",
+                    listOf(app(if (v2) "App server v2" else "Legacy exec v1")),
+                    listOf(Note(listOf(app(if (v2) "Persistent, interactive Codex session" else "Preserved without automatic migration")))),
+                ),
+            )
+        }
+        session.worktree?.let { w ->
+            add(
+                SpecRow(
+                    "Worktree",
+                    listOf(label(w.status)),
+                    listOfNotNull(
+                        Note(listOf(code(w.path))),
+                        w.notice?.takeIf { it.isNotEmpty() }?.let { Note(listOf(prose(it)), status = true) },
+                    ),
+                    capitalize = true,
+                ),
+            )
+            val base = w.baseRef?.takeIf { it.isNotEmpty() }?.let { ref ->
+                when (w.mode) {
+                    "checkout-pr" -> listOf(app("Pull request #${w.prNumber?.toString() ?: "null"} from "), code(ref))
+                    "checkout-branch" -> listOf(app("Existing branch, checked out in its own directory"))
+                    else -> listOf(app("Branched off "), code(ref))
+                }
+            }
+            add(SpecRow("Branch", listOf(code(w.branch)), listOfNotNull(base?.let { Note(it) })))
+            val setup = w.setupStatus
+            if (setup != null && setup != "none" && setup != "ok") {
+                val failed = setup == "failed"
+                val text = if (failed) {
+                    "This project's setup commands did not finish. The checkout is still usable — see the Services panel for the log."
+                } else {
+                    "Running this project's setup commands. The first turn starts when they finish."
+                }
+                add(SpecRow("Setup", listOf(app(if (failed) "Failed" else "Running")), listOf(Note(listOf(app(text)), status = true))))
+            }
+            w.configWarningList.take(LabelText.MAX_ITEMS).forEach { warning ->
+                add(SpecRow("Config", emptyList(), listOf(Note(listOf(prose(warning)), status = true))))
+            }
+        }
+        if (session.provider == "acp") {
+            add(
+                SpecRow(
+                    "ACP agent",
+                    listOf(session.acpAgentId?.takeIf { it.isNotEmpty() }?.let(::code) ?: app("—")),
+                    listOf(Note(listOf(app("generic ACP v1 engine")))),
+                ),
+            )
+        }
+        cli?.let { version ->
+            val caps = (obj?.get("cliCapabilities") as? JsArr)?.mapNotNull { strOf(it) }.orEmpty()
+            val note = if (caps.isNotEmpty()) {
+                val line = ArrayList<Seg>()
+                line.add(app("${caps.size} protocol ${if (caps.size == 1) "capability" else "capabilities"}: "))
+                caps.take(LabelText.MAX_ITEMS).forEachIndexed { i, cap ->
+                    if (i > 0) line.add(app(", "))
+                    line.add(code(cap))
+                }
+                listOf(Note(line))
+            } else {
+                emptyList()
+            }
+            add(SpecRow("CLI", listOf(code(version)), note))
+        }
+        state?.cliInventory?.let { inventory ->
+            val commands = (inventory["commands"] as? JsArr)?.mapNotNull { (it as? JsObj)?.let { c -> strOf(c["name"]) } }.orEmpty()
+            val tools = (inventory["tools"] as? JsArr)?.mapNotNull { strOf(it) }.orEmpty()
+            val commandCount = (inventory["commands"] as? JsArr)?.size ?: 0
+            val toolCount = (inventory["tools"] as? JsArr)?.size ?: 0
+            add(
+                SpecRow(
+                    "Inventory",
+                    listOf(app("$commandCount commands · $toolCount tools")),
+                    names = listOf(
+                        listOf(app("Commands: ")) + inventoryNames(commands.map { "/$it" }) + app(" · Tether support is decided separately"),
+                        listOf(app("Tools: ")) + inventoryNames(tools),
                     ),
                 ),
             )
         }
-        w.configWarningList.take(LabelText.MAX_ITEMS).forEach { warning ->
-            add(SpecRow("Worktree config", emptyList(), listOf(Note(listOf(prose(warning)), status = true))))
-        }
     }
-    add(modelRow(session, state))
-    add(SpecRow("Effort", listOf(session.metrics?.effort?.takeIf { it.isNotEmpty() }?.let(::label) ?: app("—")), capitalize = true))
-    val email = session.metrics?.accountEmail?.takeIf { it.isNotEmpty() }
-    if (session.provider == "claude" && email != null) {
-        // The account identity is an id: the one-line rule, so a look-alike shows its hidden code points.
-        add(SpecRow("Account", listOf(code(email)), listOfNotNull(session.metrics?.accountOrganization?.takeIf { it.isNotEmpty() }?.let { Note(listOf(code(it))) })))
-    }
-    if (session.provider == "acp") {
-        add(
-            SpecRow(
-                "ACP agent",
-                listOf(session.acpAgentId?.takeIf { it.isNotEmpty() }?.let(::code) ?: app("—")),
-                listOf(Note(listOf(app("generic ACP v1 engine")))),
-            ),
-        )
-    }
-    val obj = state?.obj
-    strOf(obj?.get("cliVersion"))?.takeIf { it.isNotEmpty() }?.let { version ->
-        val caps = (obj?.get("cliCapabilities") as? JsArr)?.mapNotNull { strOf(it) }.orEmpty()
-        val note = if (caps.isNotEmpty()) {
-            val line = ArrayList<Seg>()
-            line.add(app("${caps.size} protocol ${if (caps.size == 1) "capability" else "capabilities"}: "))
-            caps.take(LabelText.MAX_ITEMS).forEachIndexed { i, cap ->
-                if (i > 0) line.add(app(", "))
-                line.add(code(cap))
-            }
-            listOf(Note(line))
-        } else {
-            emptyList()
-        }
-        add(SpecRow("CLI", listOf(code(version)), note))
-    }
-    state?.cliInventory?.let { inventory ->
-        val commands = (inventory["commands"] as? JsArr)?.mapNotNull { (it as? JsObj)?.let { c -> strOf(c["name"]) } }.orEmpty()
-        val tools = (inventory["tools"] as? JsArr)?.mapNotNull { strOf(it) }.orEmpty()
-        val commandCount = (inventory["commands"] as? JsArr)?.size ?: 0
-        val toolCount = (inventory["tools"] as? JsArr)?.size ?: 0
-        add(
-            SpecRow(
-                "Inventory",
-                listOf(app("$commandCount commands · $toolCount tools")),
-                names = listOf(
-                    listOf(app("Commands: ")) + inventoryNames(commands.map { "/$it" }) + app(" · Tether support is decided separately"),
-                    listOf(app("Tools: ")) + inventoryNames(tools),
-                ),
-            ),
-        )
-    }
-}
-
-/** inspector.tsx:355-364, 652-663: the configured model and, when it demonstrably differs, what served it. */
-internal fun modelRow(session: AgentSession, state: SessionView?): SpecRow {
-    val latest = latestTurn(state)
-    val served = strOf(latest?.second?.get("model"))?.takeIf { it.isNotEmpty() } ?: session.metrics?.model
-    val fallback = latest?.let { (turnId, _) -> (state?.turn(turnId)?.obj?.get("modelFallbacks") as? JsArr)?.lastOrNull() } ?: JsNull
-    val reading = ModelPicker.modelReading(
-        JsObj.of(
-            "configured" to (session.model?.let(::JsStr) ?: JsNull),
-            "served" to (served?.let(::JsStr) ?: JsNull),
-            "fallback" to fallback,
-        ),
-    )
-    val readingLabel = strOf(reading["label"]).orEmpty()
-    val value = buildList {
-        add(if (readingLabel == "—") app("—") else code(readingLabel))
-        strOf(reading["lastServed"])?.let {
-            add(app(" · last served "))
-            add(code(it))
-        }
-    }
-    val note = strOf(reading["note"])?.let { listOf(Note(listOf(prose(it)), warning = true, status = true)) }.orEmpty()
-    return SpecRow("Model", value, note)
+    return RuntimeSection(cli?.let(::code), rows)
 }
 
 /** inspector.tsx:262-287: the acp provider's advertised capability set, or null without one. */

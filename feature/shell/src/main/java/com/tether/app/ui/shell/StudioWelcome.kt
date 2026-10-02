@@ -292,7 +292,7 @@ private fun WorkflowBody(text: String, modifier: Modifier = Modifier) {
  * `.studio-welcome-providers .is-available`): the background and the ink.
  */
 @Composable
-private fun brandTile(provider: String): Pair<Color, Color>? {
+internal fun brandTile(provider: String): Pair<Color, Color>? {
     if (ProviderLogos.mark(provider) == null) return null
     val c = LocalTetherTokens.current.css
     return when (provider) {
