@@ -37,6 +37,12 @@ import com.tether.app.protocol.tree.JsStr
  * runs sandboxed whatever the server's default (with no server default, an omitted policy ran
  * unsandboxed).
  *
+ * ta-xki (slice 4): the frame never carries a value outside the known sets, whatever the form holds
+ * (a stale or tampered preference, a form built by hand). A mode the provider does not offer is its
+ * default ([DraftModes.normalize]; the web would send it raw), and an effort the selected model does
+ * not offer is dropped ([DraftSessionOptionsModel.offeredEfforts] on the row as the live catalog has
+ * it; the web would send it). For every offered mode and effort the frame is the web's, key for key.
+ *
  * Pure: no I/O, no clock, no randomness (the caller mints [requestId]).
  */
 object CreateFrame {
@@ -52,7 +58,8 @@ object CreateFrame {
         val isClaude = provider == "claude"
         val isCodex = provider == "codex"
         val isOpencode = provider == "opencode"
-        val mode = form.s("mode")
+        // ta-xki: only a mode this provider offers (else its default) ever reaches the frame.
+        val mode = DraftModes.normalize(provider, form.s("mode"))
         // codexModePreset degrades any non-codex mode value to its "default" preset, harmlessly.
         val codexPreset = CodexModePresets.codexModePreset(JsStr(mode))
         val autoMode = !isCodex && mode == DEFAULT_PERMISSION_MODE
@@ -64,7 +71,8 @@ object CreateFrame {
         }
         val approvalsReviewer = if (isCodex && (codexPreset["approvalsReviewer"] as? JsStr)?.value == "auto_review") "auto_review" else null
         val model = form.s("model")
-        val effort = form.s("reasoningEffort")
+        // ta-xki: an effort rides only when the selected model (on this row) offers it.
+        val effort = form.s("reasoningEffort").takeIf { e -> DraftSessionOptionsModel.offeredEfforts(entry, model).any { it.value == e } }.orEmpty()
         return ClientMessage.Create(
             provider = provider,
             cwd = form.s("cwd"),

@@ -223,8 +223,22 @@ class DraftComposerModel(
     private fun dispatch(action: JsObj) {
         _state.update { s ->
             val store = DraftForm.reduceDraftForm(JsObj.of("form" to s.form, "userModified" to s.modified), action) as JsObj
-            s.copy(form = store["form"] as JsObj, modified = store["userModified"] as JsObj)
+            s.copy(form = knownMode(store["form"] as JsObj), modified = store["userModified"] as JsObj)
         }
+    }
+
+    /**
+     * ta-xki (prefs rule): the form's mode is always one the picked row's provider offers. A stored
+     * preference the reducer took as it is (lib/draft-form.ts resolveMode trusts it) but that names a
+     * mode the provider does not offer, or is not a string at all, becomes the provider's default
+     * ([DraftModes.normalize]), so what the composer shows is what the create carries.
+     */
+    private fun knownMode(form: JsObj): JsObj {
+        val key = (form["key"] as? JsStr)?.value.orEmpty()
+        if (key.isEmpty()) return form
+        val provider = entries.firstOrNull { it.key == key }?.provider ?: return form
+        val fixed = DraftModes.normalize(provider, (form["mode"] as? JsStr)?.value.orEmpty())
+        return if (form["mode"] == JsStr(fixed)) form else form.put("mode", JsStr(fixed))
     }
 
     private fun entriesJs(): JsArr =
@@ -325,18 +339,45 @@ class DraftComposerModel(
         persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("model" to JsStr(modelId))) }
     }
 
-    /** use-draft-composer.ts selectEffort. */
-    fun selectEffort(effort: String) {
+    /**
+     * use-draft-composer.ts selectEffort. ta-xki: only a variant the Effort select lists for the
+     * selected model is taken (and remembered for the row); anything else changes nothing. True when
+     * it was taken.
+     */
+    fun selectEffort(effort: String): Boolean {
+        val offered = DraftSessionOptionsModel.of(_state.value).effort?.options.orEmpty()
+        if (offered.none { it.value == effort }) return false
         dispatch(JsObj.of("type" to JsStr("SET_REASONING_EFFORT_FROM_USER"), "effort" to JsStr(effort)))
         val key = formKey()
         if (key.isNotEmpty()) persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("reasoningEffort" to JsStr(effort))) }
+        return true
     }
 
-    /** use-draft-composer.ts selectMode: an elevated mode is an ordinary choice (owner 2026-10-02). */
-    fun selectMode(mode: String) {
+    /**
+     * use-draft-composer.ts selectMode: an elevated mode is an ordinary choice (owner 2026-10-02), with
+     * no confirmation. ta-xki: only a mode the picked row's provider offers ([DraftModes.selectable]:
+     * its Mode rows, and opencode's Auto) is taken and remembered for the row; anything else, or no
+     * row picked, changes nothing. True when it was taken.
+     */
+    fun selectMode(mode: String): Boolean {
+        val provider = entryForKey(formKey())?.provider ?: return false
+        if (!DraftModes.selectable(provider, mode)) return false
         dispatch(JsObj.of("type" to JsStr("SET_MODE_FROM_USER"), "mode" to JsStr(mode)))
         val key = formKey()
         if (key.isNotEmpty()) persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("mode" to JsStr(mode))) }
+        return true
+    }
+
+    /**
+     * draft-composer.tsx toggleAuto (opencode's Auto chip): Auto on is `bypassPermissions` (Build +
+     * `approvalPolicy: never` on the create), off is Build ("default"). Nothing for a provider without
+     * the chip. True when it was taken.
+     */
+    fun toggleAuto(): Boolean {
+        val provider = entryForKey(formKey())?.provider ?: return false
+        if (!DraftModes.hasAutoChip(provider)) return false
+        val on = formStr("mode") == ModeVocabulary.AUTO
+        return selectMode(if (on) "default" else ModeVocabulary.AUTO)
     }
 
     /** use-draft-composer.ts selectAutoMode. */
