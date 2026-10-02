@@ -151,8 +151,13 @@ import kotlinx.coroutines.launch
  * SessionSettingsSheet trigger row that carries Model, Effort and Mode instead ([DraftLiveRow],
  * [DraftSettingsTriggerRow], [DraftSettingsFrame]; the model chip opens the sheet on the browser).
  *
- * Left for later slices (nothing is drawn for them, so nothing looks like a control that is not
- * there): the worktree select and its detail row (slice 5) and the GitHub issues / PRs dialog (T8.4).
+ * ta-23f (slice 5): the worktree select beside the folder chip and its detail row under the project
+ * row ([WorktreeSelect], [WorktreeDetails]); while isolation is on the sheet asks the server what the
+ * folder's repo offers (the engine's matched `worktree-inspect`), and a Send that may run the
+ * project's setup opens the setup confirmation ([WorktreeSetupConfirmDialog]) instead of sending.
+ *
+ * Left for a later slice (nothing is drawn for it, so nothing looks like a control that is not
+ * there): the GitHub issues / PRs dialog (T8.4).
  */
 
 /** Test tags of the sheet (behaviour tests and goldens). */
@@ -251,6 +256,10 @@ class DraftSheetActions(
     val onToggleAuto: (drawnFor: String) -> Unit = {},
     /** ta-xki: the phone's sliders chip (the settings sheet's hub). */
     val onOpenSettings: () -> Unit = {},
+    /** ta-23f: the worktree select ("local" or a mode). */
+    val onSelectIsolation: (String) -> Unit = {},
+    /** ta-23f: one worktree detail field typed or filled from a suggestion. */
+    val onWorktreeField: (com.tether.app.client.WorktreeField, String) -> Unit = { _, _ -> },
 )
 
 private fun DraftComposerState.cwd(): String = (form["cwd"] as? JsStr)?.value.orEmpty()
@@ -291,6 +300,11 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
+    // ta-23f: draft-composer.tsx's effect on [useWorktree, cwd]: ask what the folder's repo offers while
+    // isolation is on (here also on a new socket, whose answer replaces the dropped one). Once per
+    // folder per socket; the engine takes only the answer to its own question.
+    val isolated = draft.form["useWorktree"] == com.tether.app.protocol.tree.JsBool.TRUE
+    LaunchedEffect(isolated, draft.cwd(), linkEpoch, connected) { if (isolated && connected) composer.inspectWorktree() }
     // ta-2uq: the browser belongs to one server: a switch closes it (the draft is dropped with it).
     val browser = remember(origin) { ModelBrowserState() }
     // ta-xki: so does the phone's settings sheet (which embeds its own browser).
@@ -346,6 +360,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         onSelectEffort = { composer.selectEffort(it) },
         onSelectMode = { mode, drawnFor -> composer.selectMode(mode, drawnFor) },
         onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
+        onSelectIsolation = { composer.selectIsolation(it) },
+        onWorktreeField = { field, value -> composer.setWorktreeField(field, value) },
         onPickFolder = composer::setCwd,
         onBrowse = {
             client.browse(draft.cwd().ifEmpty { root.orEmpty() }.ifEmpty { null })
@@ -420,6 +436,12 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             title = "Choose a working folder",
         )
     }
+    // ta-23f: the setup confirmation, one per opening (a new one re-arms its confirm key).
+    draft.setupConfirm?.let { confirmation ->
+        androidx.compose.runtime.key(draft.setupConfirmId) {
+            SetupConfirmHost(confirmation, draft.setupConfirmId, onConfirm = { id -> composer.confirmSetup(id, origin) }, onCancel = composer::cancelSetup)
+        }
+    }
     if (attachOpen) {
         AttachSheet(
             onDismiss = { attachOpen = false },
@@ -428,6 +450,26 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             onPickFiles = pickers.pickFiles,
         )
     }
+}
+
+/**
+ * ta-23f: the open setup confirmation. Its confirm goes to the engine once (a double tap included):
+ * the engine closes the confirmation first and builds the create from its newest state, sending
+ * only if what was shown still holds.
+ */
+@Composable
+private fun SetupConfirmHost(confirmation: com.tether.app.client.SetupConfirmation, id: Long, onConfirm: (Long) -> Unit, onCancel: (Long) -> Unit) {
+    val fired = remember(id) { booleanArrayOf(false) }
+    WorktreeSetupConfirmDialog(
+        confirmation = confirmation,
+        onConfirm = {
+            if (!fired[0]) {
+                fired[0] = true
+                onConfirm(id)
+            }
+        },
+        onCancel = { onCancel(id) },
+    )
 }
 
 /**
@@ -590,8 +632,8 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
 private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
-    // `.chat-project-row`: which folder (slice 5 adds the worktree select, T8.4 the GitHub dialog,
-    // beside the chip). A hairline under it sets the group off.
+    // `.chat-project-row`: which folder and, beside it, the worktree select (ta-23f; T8.4 adds the
+    // GitHub dialog). A hairline under it sets the group off.
     Column(
         Modifier
             .fillMaxWidth()
@@ -599,10 +641,19 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
             .drawBehind { drawRect(t.line, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .padding(bottom = if (narrow) t.css.spaceMd else t.css.spaceLg),
     ) {
-        WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse)
-        // Slot (T8.1 slice 5): WorktreeSelect and WorktreeDetails. Slot (T8.4): GitHubWorkDialog.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        ) {
+            WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse)
+            WorktreeSelect(draft.form, actions.onSelectIsolation)
+            // Slot (T8.4): GitHubWorkDialog.
+        }
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
+
+    // ta-23f: WorktreeDetails, its own row between the project row and the live row (absent when local).
+    WorktreeDetails(draft.form, draft.worktreeSource, actions.onWorktreeField)
 
     // ta-2uq / ta-xki: `.chat-mode-row-live` ("Session options"): the ModelSelector chip, Effort and
     // Mode (and opencode's Auto); below 64rem the SessionSettingsSheet trigger row carries all three.

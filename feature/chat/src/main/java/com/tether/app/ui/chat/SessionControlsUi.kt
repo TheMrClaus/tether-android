@@ -441,6 +441,9 @@ fun ControlSelect(
     maxWidth: Dp = Dp.Unspecified,
     testTag: String,
     emptyLabel: String? = null,
+    // ta-23f: TetherSelect `triggerIcon` (the worktree select's Split glyph) and the chip's `is-active`.
+    icon: ImageVector? = null,
+    active: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     var opensUp by remember { mutableStateOf(true) }
@@ -459,6 +462,8 @@ fun ControlSelect(
             danger = danger,
             maxWidth = maxPill,
             testTag = testTag,
+            icon = icon,
+            active = active,
         )
         if (open) {
             val provider = remember(gap) {

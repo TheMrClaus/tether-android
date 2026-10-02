@@ -877,9 +877,12 @@ const val CONFIRM_ARM_MS: Long = 450L
 
 val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
 
-/** The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed. */
+/**
+ * The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed.
+ * ta-23f: public, so the new-session composer's setup confirmation (feature/shell) arms the same way.
+ */
 @Composable
-internal fun ArmedConfirmKey(
+fun ArmedConfirmKey(
     label: String,
     tag: String,
     onConfirm: () -> Unit,
