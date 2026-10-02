@@ -773,7 +773,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                 TetherSelect(
                     options = modes.map { TetherSelectOption(it.name, ClaudeAccountsPresentation.modeLabel(it)) },
                     selectedValue = config.mode.name,
-                    onSelect = { o -> modes.firstOrNull { it.name == o.value }?.let { c.saveSync(config.copy(mode = it)) } },
+                    onSelect = { o -> modes.firstOrNull { it.name == o.value }?.let { c.saveSync { now -> now.copy(mode = it) } } },
                     enabled = editable,
                     placeholder = ClaudeAccountsPresentation.modeLabel(config.mode),
                     // The chosen value is said with the row's name (the trigger's own label is not read out).
@@ -802,17 +802,18 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                                 description = "Sync $label",
                                 tag = ClaudeAccountsTags.syncCategory(key),
                                 onChange = { v ->
-                                    val k = config.categories
-                                    c.saveSync(
-                                        config.copy(
+                                    // r3 (security F2): built on the config as it is at the tap, not as drawn.
+                                    c.saveSync { now ->
+                                        val k = now.categories
+                                        now.copy(
                                             categories = when (key) {
                                                 "plugins" -> k.copy(plugins = v)
                                                 "skills" -> k.copy(skills = v)
                                                 "mcp" -> k.copy(mcp = v)
                                                 else -> k.copy(hooks = v)
                                             },
-                                        ),
-                                    )
+                                        )
+                                    }
                                 },
                             )
                         }
@@ -837,7 +838,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                         options = listOf(TetherSelectOption("", if (primaryMissing) "Choose a primary account…" else "None", disabled = true)) +
                             capable.map { TetherSelectOption(it.id, label(it)) },
                         selectedValue = config.primaryAccountId?.takeIf { p -> capable.any { it.id == p } } ?: "",
-                        onSelect = { o -> if (o.value.isNotEmpty()) c.saveSync(config.copy(primaryAccountId = o.value)) },
+                        onSelect = { o -> if (o.value.isNotEmpty()) c.saveSync { now -> now.copy(primaryAccountId = o.value) } },
                         enabled = editable,
                         placeholder = sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),
                         contentDescription = "Primary account for sync: " + sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),

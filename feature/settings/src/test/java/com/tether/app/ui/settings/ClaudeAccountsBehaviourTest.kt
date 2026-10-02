@@ -345,8 +345,31 @@ class ClaudeAccountsBehaviourTest {
         show(FakeAccounts(hangList = true).binding())
         tag(ClaudeAccountsTags.Loading).assertExists()
         assertTrue(everything().contains(ClaudeAccountsPresentation.LOADING))
-        tag(ClaudeAccountsTags.Add).assertIsNotEnabled()
+        // r3: the web's "Add Claude account" sits outside the list's conditional (settings-dialog.tsx:1838-1862).
+        tag(ClaudeAccountsTags.Add).assertIsEnabled()
     }
+
+    /**
+     * r3 (web parity): Add works while the list is still loading and after the list failed, as the
+     * web's (settings-dialog.tsx:1838-1862); signed out it is not offered (the control).
+     */
+    @Test fun addIsOfferedWhileTheListLoads() = addWithoutAList(FakeAccounts(hangList = true), ClaudeAccountsPresentation.LOADING)
+
+    @Test fun addIsOfferedAfterTheListFailed() =
+        addWithoutAList(FakeAccounts(lists = listOf(ClaudeAccountsResult.Unavailable(500, ORIGIN))), ClaudeAccountsPresentation.LIST_ERROR)
+
+    private fun addWithoutAList(reads: FakeAccounts, shown: String) {
+        val actions = FakeAccountActions(auto = { if (it == "add") com.tether.app.client.SecurityResult.Ok(Unit, ORIGIN, null) else null })
+        show(reads.binding().copy(actions = actions))
+        waitFor(shown)
+        tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
+        compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
+        tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
+        compose.waitUntil(5_000) { actions.calls.any { it.name == "add" } }
+        assertEquals("add($ORIGIN, home)", actions.calls.single().toString())
+    }
+
+    // The control (signed out, no Add) is ClaudeAccountsChangesBehaviourTest.signedOutOffersNoChange.
 
     @Test fun aFailureShowsTheStatusRowAndRetryReadsAgain() {
         val fake = FakeAccounts(lists = listOf(ClaudeAccountsResult.Unavailable(500, ORIGIN), ClaudeAccountsResult.Ok(AccountsFixtures.LIST, ORIGIN)))

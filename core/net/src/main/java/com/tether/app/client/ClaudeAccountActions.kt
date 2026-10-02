@@ -32,7 +32,8 @@ import okhttp3.OkHttpClient
 // account id goes in a path only in the providers registry's shape ([ClaudeAccountsJson.isAccountId]).
 // The pasted authorization code ([ClaudeLoginCode]) prints nothing and is read only to build its one
 // body; the server writes it to the CLI's stdin and never echoes it. Nothing here logs or stores.
-// The login link the server relays is opened only when it is a plain https URL ([ClaudeLoginLink]).
+// The login link the server relays is opened when it is a web address, http or https, as the web's
+// `<a href>` opens it ([ClaudeLoginLink]); only a non-web scheme is not handed to the phone.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -53,10 +54,14 @@ class ClaudeLoginCode(private val value: String) {
 enum class ClaudeLoginStatus { Idle, PendingUrl, AwaitingCode, Success, Error, Unknown }
 
 /**
- * The browser link `claude auth login` printed (lib/claude-accounts.mjs `parseLoginUrl`), kept only
- * when it is a plain absolute https URL: no user info, no whitespace or control character, a host,
- * at most [MAX_LENGTH]. [url] is the parsed URL's own spelling (what is opened is what was checked);
- * [host] is drawn beside the Open key so the operator sees where it goes.
+ * The browser link `claude auth login` printed (lib/claude-accounts.mjs `parseLoginUrl` relays
+ * `https://\S+`). r3 (owner rule): kept whenever the web's `<a href target="_blank">` would open it,
+ * that is any http or https URL with a host, user info, escaped characters and length included. Only a
+ * non-web scheme (intent:, javascript:, content:, file:, an app's own) is refused: handed to
+ * ACTION_VIEW on a phone it would reach an app rather than a browser, which a browser's link never
+ * does. [url] is the parsed URL's canonical spelling (what is opened is what was read); [host] is
+ * its canonical host (ASCII, punycode), drawn beside the Open key so the operator sees where it
+ * really goes whatever user info or hidden characters the link carries.
  */
 class ClaudeLoginLink private constructor(val url: String, val host: String) {
     override fun toString(): String = "ClaudeLoginLink($host)"
@@ -75,9 +80,6 @@ class ClaudeLoginLink private constructor(val url: String, val host: String) {
     val anthropic: Boolean get() = host in ANTHROPIC_HOSTS
 
     companion object {
-        /** An Anthropic authorize URL with its PKCE challenge and state is ~600 characters. */
-        const val MAX_LENGTH = 4096
-
         /** The most of a host drawn, and how much of its start is kept when it is cut. */
         const val HOST_SHOWN = 64
         const val HOST_HEAD = 16
@@ -90,15 +92,14 @@ class ClaudeLoginLink private constructor(val url: String, val host: String) {
          */
         val ANTHROPIC_HOSTS: Set<String> = setOf("claude.ai", "claude.com", "console.anthropic.com", "platform.claude.com")
 
+        /** A web address (http or https, with a host), as a browser reads it; any other scheme is null. */
         fun parse(raw: String?): ClaudeLoginLink? {
-            if (raw == null || raw.isEmpty() || raw.length > MAX_LENGTH) return null
-            if (raw.any { it.isWhitespace() || it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }) return null
-            if (!raw.startsWith("https://", ignoreCase = true)) return null
+            if (raw.isNullOrBlank()) return null
+            // OkHttp's parser reads only http and https (every other scheme is null) the way a browser's
+            // URL parser does: surrounding whitespace dropped, the rest percent-encoded.
             val parsed = raw.toHttpUrlOrNull() ?: return null
-            if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() || parsed.host.isEmpty()) return null
-            val spelled = parsed.toString()
-            if (spelled.length > MAX_LENGTH) return null
-            return ClaudeLoginLink(spelled, parsed.host)
+            if ((parsed.scheme != "https" && parsed.scheme != "http") || parsed.host.isEmpty()) return null
+            return ClaudeLoginLink(parsed.toString(), parsed.host)
         }
     }
 }

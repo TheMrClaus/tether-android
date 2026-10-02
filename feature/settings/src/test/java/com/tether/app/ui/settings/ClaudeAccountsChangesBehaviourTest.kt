@@ -61,7 +61,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
     private val state = SettingsDialogState(SettingsTab.Engines)
-    private val fast = LoginPollPace(first = 20, next = 20, afterFailure = 20, limitMs = 60_000)
+    private val fast = LoginPollPace(first = 20, next = 20, afterFailure = 20)
     private val link = ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE-STATE")!!
 
     private fun binding(reads: FakeAccounts, actions: FakeAccountActions, opener: LoginLinkOpener = LoginLinkOpener.None, origin: String = ORIGIN) =
@@ -379,7 +379,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals("no poll after an error", 1, actions.calls.count { it.name == "pollLogin" })
     }
 
-    @Test fun aLinkThatIsNotPlainHttpsIsNotOffered() {
+    @Test fun aLinkThatIsNotAWebAddressIsNotOffered() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions, RecordingOpener()))
         tap(ClaudeAccountsTags.login("claude-work"))
@@ -517,6 +517,31 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitFor("4 updated, 0 already current.")
     }
 
+    /**
+     * r3 (security F2): two category taps in one frame (no redraw between them) both land: the second
+     * is built on the config as the first left it, not on the one drawn, so it never undoes the first.
+     */
+    @Test fun twoCategoryTapsInOneFrameBothLand() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        waitFor("Sync across accounts")
+        compose.waitForIdle()
+        val hooks = tag(ClaudeAccountsTags.syncCategory("hooks")).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val skills = tag(ClaudeAccountsTags.syncCategory("skills")).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            hooks()
+            skills()
+        }
+        compose.waitUntil(5_000) { actions.calls.count { it.name == "saveSync" } == 2 }
+        val c = AccountsFixtures.SYNC.config
+        val saves = actions.calls.filter { it.name == "saveSync" }.map { it.arg }
+        assertEquals("the first", c.copy(categories = c.categories.copy(hooks = true)).toString(), saves[0])
+        assertEquals("the second keeps the first", c.copy(categories = c.categories.copy(hooks = true, skills = false)).toString(), saves[1])
+        compose.waitForIdle()
+        assertEquals(ToggleableState.On, tag(ClaudeAccountsTags.syncCategory("hooks")).fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+        assertEquals(ToggleableState.Off, tag(ClaudeAccountsTags.syncCategory("skills")).fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
+    }
+
     @Test fun aRefusedSyncSaveGoesBackAndSaysWhy() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
@@ -629,27 +654,33 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals(ToggleableState.On, hooks())
     }
 
-    // ---- r2: the poll's deadline and its end (verifier P4, security P4-1, P4-3) -----------------------
+    // ---- r3: the poll as the web's: no limit, no cancel but Cancel (owner rule) ----------------------------
 
-    /** A poll that never answers is still ended by the deadline (request time counts), and the server is told. */
-    @Test fun aHungPollIsEndedByTheDeadlineAndTheServerIsTold() {
+    /**
+     * settings-dialog.tsx `pollLogin` (:1561-1581): a refusal (a 4xx with no status) is read as
+     * "pending-url" and polled again; the panel stays, the code field stays, nothing is cancelled.
+     * The control: the next answer, awaiting the code, is taken as usual.
+     */
+    @Test fun aRefusedPollIsPolledAgainAsOnTheWeb() {
         val actions = FakeAccountActions()
-        val reads = FakeAccounts()
-        show(ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions, pace = LoginPollPace(first = 20, next = 20, afterFailure = 20, limitMs = 2_000)))
+        show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.login("claude-work"))
         waitForCall(actions, "startLogin")
-        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.PendingUrl, null, false, null), ORIGIN, null))
-        // The first poll is sent and never answered.
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, link, false, null), ORIGIN, null))
         waitForCall(actions, "pollLogin")
-        compose.mainClock.advanceTimeBy(2_500)
-        waitFor(ClaudeAccountsCopy.LOGIN_TOO_LONG)
-        compose.waitUntil(5_000) { actions.calls.any { it.name == "cancelLogin" } }
-        assertEquals("cancelLogin($ORIGIN, claude-work)", actions.calls.single { it.name == "cancelLogin" }.toString())
-        assertEquals("one poll, hung, then the end", 1, actions.calls.count { it.name == "pollLogin" })
-        tag(ClaudeAccountsTags.code("claude-work")).assertDoesNotExist()
+        actions.answer("pollLogin", SecurityResult.Refused(429, "Too many requests.", ORIGIN))
+        compose.waitUntil(5_000) { actions.calls.count { it.name == "pollLogin" } == 2 }
+        waitFor(ClaudeAccountsCopy.LOGIN_WAITING)
+        tag(ClaudeAccountsTags.code("claude-work")).assertExists()
+        tag(ClaudeAccountsTags.loginOpen("claude-work")).assertExists()
+        assertFalse(actions.calls.any { it.name == "cancelLogin" })
+        actions.answer("pollLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, link, false, null), ORIGIN, null))
+        waitFor(ClaudeAccountsCopy.LOGIN_PASTE)
+        assertFalse(actions.calls.any { it.name == "cancelLogin" })
     }
 
-    @Test fun aLoginThatEndsInAnErrorTellsTheServer() {
+    /** The server's error ends the panel (the web's `status === "error"`), and nothing is cancelled: the web sends nothing then. */
+    @Test fun aLoginThatEndsInAnErrorSendsNothing() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.login("claude-work"))
@@ -657,8 +688,13 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.PendingUrl, null, false, null), ORIGIN, null))
         waitForCall(actions, "pollLogin")
         actions.answer("pollLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.Error, null, false, "Claude login did not complete (exit code 1)."), ORIGIN, null))
+        waitFor("Claude login did not complete (exit code 1).")
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        assertFalse(actions.calls.any { it.name == "cancelLogin" })
+        // The control: Cancel is the one thing that tells the server.
+        tap(ClaudeAccountsTags.loginCancel("claude-work"))
         compose.waitUntil(5_000) { actions.calls.any { it.name == "cancelLogin" } }
-        assertEquals(ORIGIN, actions.calls.single { it.name == "cancelLogin" }.origin)
     }
 
     @Test fun aLoginTheServerNoLongerRunsIsNotCancelledAgain() {

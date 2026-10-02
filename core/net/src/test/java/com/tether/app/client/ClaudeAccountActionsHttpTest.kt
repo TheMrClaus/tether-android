@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -336,24 +337,66 @@ class ClaudeAccountActionsHttpTest {
         assertFalse("$code".contains("SECRET"))
     }
 
-    @Test fun onlyAPlainHttpsLinkIsKept() {
-        assertEquals("claude.ai", ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?x=1")!!.host)
+    /**
+     * r3 (owner rule): every link the web's `<a href>` opens is kept, as the server relays it
+     * (`https://\S+`) and http too; the verifier's relayable links (user info, a zero-width character,
+     * 5000 characters, an upper-case scheme) are among them.
+     */
+    @Test fun everyWebLinkIsKeptAsTheWebOpensIt() {
+        for (web in listOf(
+            "https://claude.ai/oauth/authorize?x=1",
+            "http://claude.ai/oauth/authorize?x=1",
+            "https://user@claude.ai/oauth/authorize?x=1",
+            "https://user:pass@claude.ai/oauth",
+            "https://claude.ai/oauth/authorize?x=1\u200b",
+            "https://claude.ai/\u202Eoauth",
+            "https://claude.ai/oauth/authorize?x=" + "a".repeat(5000),
+            "HTTPS://claude.ai/oauth/authorize?x=1",
+            "https://claude.ai/o auth",
+            " https://claude.ai/oauth ",
+        )) {
+            assertNotNull(web.take(60), ClaudeLoginLink.parse(web))
+        }
+        assertEquals("http", ClaudeLoginLink.parse("http://claude.ai/x")!!.url.substringBefore(':'))
+        assertFalse(ClaudeLoginLink.parse("https://claude.ai/oauth?state=S")!!.toString().contains("state"))
+    }
+
+    /** The one native rule: a scheme a browser's link never hands to an app is not handed to the phone. */
+    @Test fun onlyANonWebSchemeOrNoHostIsRefused() {
+        // The control: a web link is kept.
+        assertNotNull(ClaudeLoginLink.parse("https://claude.ai/oauth/authorize"))
         for (bad in listOf(
-            "http://claude.ai/oauth/authorize",
             "javascript:alert(1)",
             "intent://claude.ai#Intent;scheme=https;end",
             "file:///sdcard/x",
-            "https://user:pass@claude.ai/oauth",
-            "https://claude.ai/oauth\nauthorize",
-            "https://claude.ai/o auth",
-            "https://claude.ai/\u202Eoauth",
+            "content://com.example.provider/x",
+            "market://details?id=x",
+            "claude://oauth/callback",
+            "data:text/html,hi",
+            "ftp://claude.ai/x",
             "https://",
-            "https://claude.ai/" + "a".repeat(ClaudeLoginLink.MAX_LENGTH),
             "",
+            "   ",
+            null,
         )) {
-            assertNull(bad, ClaudeLoginLink.parse(bad))
+            assertNull(bad.toString(), ClaudeLoginLink.parse(bad))
         }
-        assertFalse(ClaudeLoginLink.parse("https://claude.ai/oauth?state=S")!!.toString().contains("state"))
+    }
+
+    /**
+     * What is drawn is the host that is opened: user info or a hidden character in the link never
+     * changes the host shown, so the tail and the not-Anthropic note say where it really goes.
+     */
+    @Test fun theShownHostIsTheRealHostWhateverTheLinkCarries() {
+        val tricky = ClaudeLoginLink.parse("https://claude.ai@evil.example/oauth")!!
+        assertEquals("evil.example", tricky.host)
+        assertEquals("evil.example", java.net.URI(tricky.url).host)
+        assertFalse(tricky.anthropic)
+        val bidi = ClaudeLoginLink.parse("https://evil.example/\u202Eia.edualc")!!
+        assertEquals("evil.example", bidi.shownHost)
+        assertFalse(bidi.url.contains('\u202E'))
+        // The control: Anthropic's own host with user info is still Anthropic's.
+        assertTrue(ClaudeLoginLink.parse("https://user@claude.ai/oauth")!!.anthropic)
     }
 
     /** r2 (security P3-1): a long host is cut in the middle, so its end (whose domain it is) always shows. */
@@ -383,10 +426,16 @@ class ClaudeAccountActionsHttpTest {
     }
 
     @Test fun aLinkTheClientWillNotOpenIsFlaggedNotKept() = runBlocking<Unit> {
-        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code","url":"http://evil.test/phish"}"""))
+        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code","url":"intent://evil.test#Intent;end"}"""))
         val state = (actions.pollLogin(origin, "claude-work") as SecurityResult.Ok).value
         assertNull(state.link)
         assertTrue(state.linkRefused)
+        take()
+        // The control: an http link, as the web opens it, is kept.
+        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code","url":"http://evil.test/phish"}"""))
+        val kept = (actions.pollLogin(origin, "claude-work") as SecurityResult.Ok).value
+        assertEquals("evil.test", kept.link!!.host)
+        assertFalse(kept.linkRefused)
         take()
     }
 

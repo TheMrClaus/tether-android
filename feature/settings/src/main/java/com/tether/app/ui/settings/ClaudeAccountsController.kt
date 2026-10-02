@@ -29,7 +29,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /** ta-7rh: the section's words for the changes (the web's, where it has them). */
 object ClaudeAccountsCopy {
@@ -74,14 +73,13 @@ object ClaudeAccountsCopy {
     const val START_FAILED = "Could not start the login."
     const val CODE_FAILED = "That code was not accepted."
 
-    /** Native: the login link opens in the phone's browser, never in the app. */
+    /** The login link opens in the phone's browser (the web opens it in a new tab). */
     fun openCaption(host: String) = "Complete sign-in in your browser ($host), then come back here and paste the code."
-    const val LINK_REFUSED = "The server sent a sign-in link that is not a plain https address, so the app will not open it. Finish this login from the web console."
+    const val LINK_REFUSED = "The server sent a sign-in link that is not a web address (http or https), so the phone will not open it. Finish this login from the web console."
     const val LINK_UNOPENED = "No browser on this phone could open the link."
     /** r2 (security P3-1). */
     const val NOT_ANTHROPIC = "This is not an Anthropic sign-in address. Open it only if you expected this server to send you there."
     const val LOGIN_GONE = "This login is no longer running on the server. Start it again."
-    const val LOGIN_TOO_LONG = "The login took too long and was stopped here. Start it again."
 
     /**
      * The owner-grade refusal of a server without tether #236 (it says "needs an owner sign-in"): said
@@ -129,7 +127,7 @@ fun interface LoginLinkOpener {
         val None = LoginLinkOpener { false }
 
         /**
-         * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the checked https URL ([ClaudeLoginLink]): the
+         * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the web address read ([ClaudeLoginLink]): the
          * phone's browser, no app credential with it (the T15.7 / CompatibilityBanner pattern).
          * Uri.parse, not core-ktx's toUri: this module does not depend on androidx.core (ExternalLinks' rule).
          */
@@ -165,12 +163,8 @@ data class AccountsWriteSeed(
     val armedRemove: String? = null,
 )
 
-/**
- * The login poll's pace (settings-dialog.tsx `startLogin` / `pollLogin`), and how long it is kept up
- * here. r2: [limitMs] is a deadline on the whole poll loop (request time included), on the controller
- * scope's monotonic clock, never a sum of the waits.
- */
-data class LoginPollPace(val first: Long = 500L, val next: Long = 1_500L, val afterFailure: Long = 2_000L, val limitMs: Long = 15 * 60_000L)
+/** The login poll's pace (settings-dialog.tsx `startLogin` / `pollLogin`); as on the web, it has no limit. */
+data class LoginPollPace(val first: Long = 500L, val next: Long = 1_500L, val afterFailure: Long = 2_000L)
 
 /**
  * ta-7rh: the Claude accounts section's state and calls for ONE server ([origin]): the reads
@@ -188,7 +182,8 @@ data class LoginPollPace(val first: Long = 500L, val next: Long = 1_500L, val af
  * - A server without #236 answers a change 403 "needs an owner sign-in": [ownerNeeded] says so, as the
  *   web shows a change's error; nothing is disabled, and the next change clears it.
  * - A login runs a poll loop per account, stopped by its generation (cancel or a fresh start), a
- *   success, an error, the section closing, or [LoginPollPace.limitMs]. The pasted code lives in
+ *   success, the server's error, idle, or the section closing; never on a clock (the web's has no
+ *   limit). Only Cancel tells the server to drop it. The pasted code lives in
  *   [codes] only until it is handed over, cancelled or the section closes.
  */
 @Stable
@@ -247,8 +242,12 @@ class ClaudeAccountsController(
     // refused however fast the first read returns.
     private val asked = HashSet<String>()
 
-    /** Whether changes may be made at all (signed in, the list read): the web draws them once it has the list. */
-    val canChange: Boolean get() = origin != null && state.listFault == null && state.accounts != null
+    /**
+     * Whether changes may be made at all: signed in. The web's "Add Claude account" is there while the
+     * list loads and after it failed (settings-dialog.tsx:1838-1862); every other change sits on a
+     * card or the sync rows, which are drawn only once the list (or the sync state) is in.
+     */
+    val canChange: Boolean get() = origin != null
 
     /** Whether [action] on [id] is in flight (its key then says so and is drawn disabled, as the web's). */
     fun busy(action: AccountsAction, id: String? = null): Boolean = key(action, id) in inFlight
@@ -438,17 +437,24 @@ class ClaudeAccountsController(
 
     // ---- Log in ------------------------------------------------------------------------------------
 
-    /** settings-dialog.tsx `startLogin`: a fresh generation, the start, then the poll (500 ms, then 1.5 s). */
+    /**
+     * settings-dialog.tsx `startLogin`: a fresh generation, the start, then the poll (500 ms, then
+     * 1.5 s). As on the web, Log in after a Cancel starts again even while the cancelled start is
+     * still in flight: each start is its own busy key (its generation), and the stale answer is
+     * dropped without a word to the server. r3 (security F1): a tap that sends nothing changes
+     * nothing (the checks come first, and a refused write puts the panel and generation back).
+     */
     fun startLogin(account: ClaudeAccount): Boolean {
         val id = account.id
-        if (!account.checkable || logins.containsKey(id)) return false
-        if (!canChange) return false
+        if (origin == null || !canChange || !account.checkable || logins.containsKey(id)) return false
+        val before = generations[id]
+        val gen = (before ?: 0) + 1
         // In the tap's own frame: the panel shows "Starting…" and a second tap starts nothing.
-        val gen = (generations[id] ?: 0) + 1
         generations[id] = gen
+        val linesBefore = lines
         lines = lines - id
         logins = logins + (id to LoginPanel(ClaudeLoginStatus.PendingUrl, starting = true))
-        return write(AccountsAction.Login, id) { o ->
+        val sent = write(AccountsAction.Login, id, keyOf = "$id#$gen") { o ->
             val r = actions.startLogin(o, id)
             if (!mine(r) || generations[id] != gen) return@write
             when (r) {
@@ -463,20 +469,22 @@ class ClaudeAccountsController(
                 else -> logins = logins + (id to LoginPanel(ClaudeLoginStatus.Error, error = failure(r, ClaudeAccountsCopy.START_FAILED)))
             }
         }
+        if (!sent) {
+            if (before == null) generations -= id else generations[id] = before
+            lines = linesBefore
+            logins = logins - id
+        }
+        return sent
     }
 
     /**
-     * r2 (verifier P4, security P4-1): the limit is a deadline on the whole loop
-     * ([LoginPollPace.limitMs] of the scope's clock, request time included: a hung poll is cancelled
-     * there), not a sum of the waits. Security P4-3: a login that ends here on its limit, an error
-     * or a failure also tells the server to drop it (the same best-effort cancel as the Cancel key),
-     * so its CLI child does not run on and the next Log in is not refused as already in progress.
+     * settings-dialog.tsx `pollLogin` (:1561-1581): polled for as long as the login runs, with no
+     * limit (the web has none, nor does the server). It stops on success, on the server's error
+     * status, on idle (nothing runs any more), on Cancel or a fresh start (the generation), or when
+     * the section closes. It never tells the server to drop the login: only Cancel does, as on the web.
      */
     private fun poll(o: String, id: String, gen: Int) {
-        scope.launch {
-            val ended = withTimeoutOrNull(pace.limitMs) { pollUntilEnd(o, id, gen) }
-            if (ended == null && generations[id] == gen) endLogin(id, ClaudeAccountsCopy.LOGIN_TOO_LONG, tellServer = o)
-        }
+        scope.launch { pollUntilEnd(o, id, gen) }
     }
 
     /** The poll loop; returns when the login ended (or is no longer this generation's). */
@@ -494,8 +502,8 @@ class ClaudeAccountsController(
                         check(id)
                         return
                     }
-                    ClaudeLoginStatus.Error -> return endLogin(id, r.value.error?.let(LabelText::error)?.takeIf { it.isNotEmpty() } ?: ClaudeAccountsCopy.LOGIN_FAILED, tellServer = o)
-                    // Nothing runs on the server any more: nothing to tell it.
+                    ClaudeLoginStatus.Error -> return endLogin(id, r.value.error?.let(LabelText::error)?.takeIf { it.isNotEmpty() } ?: ClaudeAccountsCopy.LOGIN_FAILED)
+                    // Nothing runs on the server any more.
                     ClaudeLoginStatus.Idle -> return endLogin(id, ClaudeAccountsCopy.LOGIN_GONE)
                     else -> {
                         val now = logins[id] ?: return
@@ -503,28 +511,27 @@ class ClaudeAccountsController(
                         wait = pace.next
                     }
                 }
+                // A failed fetch: the web's `catch` polls again after 2 s.
                 is SecurityResult.Unavailable, SecurityResult.LocalNetworkBlocked -> wait = pace.afterFailure
-                is SecurityResult.OwnerSignInNeeded -> {
-                    dropLogin(id)
-                    ownerNeeded = true
-                    return
+                // A JSON refusal (a 4xx: 401, 403, 404, 409, 429 …) has no status: the web reads it as
+                // `data.status ?? "pending-url"`, keeps the link, and polls again after 1.5 s (:1576-1577).
+                is SecurityResult.Refused, is SecurityResult.SignedOut, is SecurityResult.OwnerSignInNeeded -> {
+                    val now = logins[id] ?: return
+                    logins = logins + (id to now.copy(status = ClaudeLoginStatus.PendingUrl, starting = false))
+                    wait = pace.next
                 }
-                else -> return endLogin(id, failure(r, ClaudeAccountsCopy.LOGIN_FAILED), tellServer = o)
+                // Not JSON (a sign-in page or redirect): the web's `res.json()` fails into
+                // `{ status: "error" }`, which ends the panel (:1565, :1572-1575); nothing is cancelled.
+                else -> return endLogin(id, failure(r, ClaudeAccountsCopy.LOGIN_FAILED))
             }
         }
     }
 
-    /**
-     * The panel shows why it ended; the code goes (the web hides the field then). [tellServer]: the
-     * server [origin] to send the best-effort cancel to (null: nothing is sent).
-     */
-    private fun endLogin(id: String, why: String, tellServer: String? = null) {
+    /** The panel shows why it ended; the code goes (the web hides the field then). Nothing is sent. */
+    private fun endLogin(id: String, why: String) {
         codes = codes - id
         val now = logins[id] ?: LoginPanel(ClaudeLoginStatus.Error)
         logins = logins + (id to now.copy(status = ClaudeLoginStatus.Error, error = why, starting = false))
-        if (tellServer != null && tellServer == origin && ClaudeAccountsJson.isAccountId(id)) {
-            tellCancel(tellServer, id)
-        }
     }
 
     private fun dropLogin(id: String) {
@@ -591,15 +598,22 @@ class ClaudeAccountsController(
     // ---- Sync ------------------------------------------------------------------------------------------
 
     /**
-     * ClaudeAccountSyncSection's `save`: shown at once, then the server's answer. Native: a failed save
-     * puts back what was there (the web keeps its optimistic value beside the error).
+     * ClaudeAccountSyncSection's `save`: shown at once, then the server's answer; a failed save puts
+     * back what the server had.
+     *
+     * r3 (security F2): [change] is applied to the config as it is NOW (not as it was drawn), and the
+     * optimistic value lands in the tap's own frame, before anything is launched: two toggles in one
+     * frame each build on the other, so the second never undoes the first on the server.
      */
-    fun saveSync(next: ClaudeSyncConfig): Boolean {
-        val before = state.sync ?: return false
-        if (before.config.mode == ClaudeSyncMode.Unknown || next.mode == ClaudeSyncMode.Unknown || next == before.config) return false
-        return write(AccountsAction.SyncSave, null, exclusive = false) { o ->
+    fun saveSync(change: (ClaudeSyncConfig) -> ClaudeSyncConfig): Boolean {
+        val current = state.sync ?: return false
+        val next = change(current.config)
+        if (current.config.mode == ClaudeSyncMode.Unknown || next.mode == ClaudeSyncMode.Unknown || next == current.config) return false
+        if (origin == null || !canChange) return false
+        state = state.copy(sync = current.copy(config = next))
+        val before = current
+        val sent = write(AccountsAction.SyncSave, null, exclusive = false) { o ->
             syncLine = null
-            state = state.copy(sync = (state.sync ?: before).copy(config = next))
             val r = actions.saveSync(o, next)
             if (!mine(r) || state.origin != o) return@write
             if (r is SecurityResult.Ok) {
@@ -611,6 +625,8 @@ class ClaudeAccountsController(
                 settle(r, ClaudeAccountsCopy.SYNC_SAVE_FAILED) { syncLine = it }
             }
         }
+        if (!sent && state.sync?.config == next) state = state.copy(sync = state.sync?.copy(config = before.config))
+        return sent
     }
 
     /** "Sync now" (`disabled={running || config.mode === "none"}`). */
@@ -661,14 +677,14 @@ class ClaudeAccountsController(
     }
 
     /**
-     * One change: refused only when signed out, before the list, or when this very key is in flight
+     * One change: refused only when signed out, or when this very key ([keyOf]) is in flight
      * ([exclusive]; a sync save may follow another, as on the web). A change clears the owner note (the
      * web clears a change's error when it starts); a refusal puts it back.
      */
-    private fun write(action: AccountsAction, id: String?, exclusive: Boolean = true, call: suspend (String) -> Unit): Boolean {
+    private fun write(action: AccountsAction, id: String?, exclusive: Boolean = true, keyOf: String? = id, call: suspend (String) -> Unit): Boolean {
         val o = origin ?: return false
         if (!canChange) return false
-        val k = key(action, id)
+        val k = key(action, keyOf)
         if (exclusive && k in inFlight) return false
         ownerNeeded = false
         if (exclusive) inFlight = inFlight + k else syncSaves++
