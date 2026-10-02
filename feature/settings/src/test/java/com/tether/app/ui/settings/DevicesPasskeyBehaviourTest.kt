@@ -230,7 +230,9 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
         label("Pixel")
         tap(DevicesTags.AddPasskey)
         waitFor { source.pending("registerOptions") }
-        source.answer("registerOptions", SecurityResult.Ok(PasskeyShapes.challenge("other-console.example.test"), OTHER_ORIGIN, AppSignIn.DeviceToken))
+        // A well-formed challenge for THIS server's rpId, but answered about another server: dropped
+        // by the origin check alone (the rpId guard would let it through).
+        source.answer("registerOptions", SecurityResult.Ok(PasskeyShapes.challenge(ownRpId), OTHER_ORIGIN, AppSignIn.DeviceToken))
         compose.waitForIdle()
         waitFor { enabled(DevicesTags.AddPasskey) }
         assertTrue(passkeys.requests.isEmpty())

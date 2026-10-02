@@ -2,6 +2,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    // T10.5: JVM screenshot tests of the passkey sign-in states (recordRoborazziDebug / verifyRoborazziDebug).
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -16,6 +18,12 @@ android {
         }
     }
 }
+
+// Goldens live in the source tree (checked in); verifyRoborazziDebug fails on any difference.
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
+}
+tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
 dependencies {
     implementation(project(":core:net"))
@@ -39,4 +47,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
 }

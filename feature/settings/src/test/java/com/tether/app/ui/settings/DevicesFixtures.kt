@@ -161,6 +161,13 @@ object NeverCalledSecurity : DeviceSecuritySource {
     override suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String) = no()
 }
 
+/** T10.5: the goldens' passkey prompt: available (as on a device), and any ceremony fails the shot. */
+object NeverPromptsPasskeys : PasskeyAuthenticator {
+    override val available: Boolean get() = true
+    override suspend fun register(requestJson: String): PasskeyCeremony = throw AssertionError("a seeded shot must not prompt")
+    override suspend fun authenticate(requestJson: String): PasskeyCeremony = throw AssertionError("a seeded shot must not prompt")
+}
+
 /**
  * T10.5: a fake Credential Manager whose every ceremony waits for the test's answer (as the real
  * prompt waits for the operator). [requests] holds the options JSON each ceremony was handed.

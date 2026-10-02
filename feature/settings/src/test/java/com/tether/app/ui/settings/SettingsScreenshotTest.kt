@@ -65,6 +65,9 @@ enum class SettingsShot(
     DevicesOwner("settings-devices-owner", SettingsTab.Devices, devices = DevicesShot.Owner),
     DevicesChecking("settings-devices-checking", SettingsTab.Devices, devices = DevicesShot.Checking),
     DevicesError("settings-devices-error", SettingsTab.Devices, devices = DevicesShot.Error),
+    DevicesPasskeyAdding("settings-devices-passkey-adding", SettingsTab.Devices, devices = DevicesShot.PasskeyAdding),
+    DevicesPasskeyDuplicate("settings-devices-passkey-duplicate", SettingsTab.Devices, devices = DevicesShot.PasskeyDuplicate),
+    DevicesPasskeyAdded("settings-devices-passkey-added", SettingsTab.Devices, devices = DevicesShot.PasskeyAdded),
     Engines("settings-engines", SettingsTab.Engines, accounts = AccountsShot.Loaded),
     EnginesSync("settings-engines-sync", SettingsTab.Engines, accounts = AccountsShot.Sync),
     EnginesLoading("settings-engines-loading", SettingsTab.Engines, accounts = AccountsShot.Loading),
@@ -130,7 +133,10 @@ enum class NodesShot(
  * `-code` a fresh code masked, `-code-revealed` the same shown (an obviously FAKE code; the one tap
  * of the shot, a synchronous state change on the hand clock), `-code-expired` the expired card,
  * `-owner` the owner-grade refusal before tether #236 is deployed, `-checking` the opening reads in
- * flight, `-error` a refusal in each area.
+ * flight, `-error` a refusal in each area. T10.5 (the panel's passkey prompt available, as on a
+ * device): `-passkey-adding` the ceremony in flight ("Adding…", every key held), `-passkey-duplicate`
+ * the web's words for an authenticator that already has one, `-passkey-added` the notice and the new
+ * row after the re-read.
  */
 enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
     Top(null),
@@ -144,6 +150,9 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
     Owner(null),
     Checking(null),
     Error(DevicesTags.Paired),
+    PasskeyAdding(DevicesTags.Passkeys),
+    PasskeyDuplicate(DevicesTags.Passkeys),
+    PasskeyAdded(DevicesTags.Passkeys),
     ;
 
     fun seed(): DevicesSeed = when (this) {
@@ -157,6 +166,12 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
         Error -> DevicesFixtures.seed().copy(
             devicesLine = DevicesLine("No such device.", error = true),
             securityLine = DevicesLine("Sign in with a passkey first, then turn password sign-in off — this proves the passkey works before it becomes the only way in.", error = true),
+        )
+        PasskeyAdding -> DevicesFixtures.seed().copy(securityBusy = DevicesAction.AddPasskey)
+        PasskeyDuplicate -> DevicesFixtures.seed().copy(securityLine = DevicesLine(DevicesCopy.PASSKEY_DUPLICATE, error = true))
+        PasskeyAdded -> DevicesFixtures.seed().copy(
+            passkeys = DevicesFixtures.PASSKEYS.copy(passkeys = listOf(PasskeyShapes.NEW_KEY) + DevicesFixtures.PASSKEYS.passkeys),
+            securityLine = DevicesLine(DevicesCopy.PASSKEY_ADDED, error = false),
         )
     }
 }
@@ -292,7 +307,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     setContent {
         focus = androidx.compose.ui.platform.LocalFocusManager.current
         val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
-        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), now = { DevicesFixtures.NOW }) }
+        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), now = { DevicesFixtures.NOW }, authenticator = NeverPromptsPasskeys) }
         SettingsUnderTest(
             store.prefs,
             state,

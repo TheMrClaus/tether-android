@@ -265,6 +265,8 @@ data class DevicesSeed(
     val securityLine: DevicesLine? = null,
     /** A code already on screen (the goldens' FAKE one). */
     val code: FreshPairingCode? = null,
+    /** T10.5: a Sign-in security write in flight (the goldens' "Adding…"). */
+    val securityBusy: DevicesAction? = null,
 )
 
 /**
@@ -320,7 +322,7 @@ class DevicesController(
         private set
     var devicesBusy: DevicesAction? by mutableStateOf(null)
         private set
-    var securityBusy: DevicesAction? by mutableStateOf(null)
+    var securityBusy: DevicesAction? by mutableStateOf(seed?.securityBusy)
         private set
     var shown: ShownCode? by mutableStateOf(seed?.code?.let { ShownCode(it, it.expiresAt, 0L) })
         private set
