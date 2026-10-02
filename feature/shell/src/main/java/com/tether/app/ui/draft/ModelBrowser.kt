@@ -333,7 +333,14 @@ fun modelSelectorLabel(entries: List<ProviderCatalogEntry>, selectedKey: String,
 
 /** model-browser.tsx ModelSelector's chip: the picked row's glyph, the model's label (or "Select model"), the caret. */
 @Composable
-fun ModelSelectorChip(inputs: ModelBrowserInputs, open: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ModelSelectorChip(
+    inputs: ModelBrowserInputs,
+    open: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** ta-xki: false on a phone, where the chip is the settings sheet's model trigger (no caret, as the web's). */
+    chevron: Boolean = true,
+) {
     val selected = inputs.entries.firstOrNull { it.key == inputs.selectedKey }
     val label = modelSelectorLabel(inputs.entries, inputs.selectedKey, inputs.selectedModel).ifEmpty { "Select model" }
     ControlPill(
@@ -344,6 +351,7 @@ fun ModelSelectorChip(inputs: ModelBrowserInputs, open: Boolean, onClick: () -> 
         modifier = modifier,
         glyphProvider = selected?.provider,
         active = open,
+        chevron = chevron,
         maxWidth = 260.dp,
         stateDescription = if (open) "Expanded" else "Collapsed",
         testTag = ModelBrowserTags.Chip,
@@ -394,14 +402,23 @@ fun ModelBrowserFrame(
 
 /** model-browser.tsx ModelBrowser: the panel (role dialog, "Model browser"). */
 @Composable
-fun ModelBrowserPanel(inputs: ModelBrowserInputs, state: ModelBrowserState, actions: ModelBrowserActions, modifier: Modifier = Modifier) {
+fun ModelBrowserPanel(
+    inputs: ModelBrowserInputs,
+    state: ModelBrowserState,
+    actions: ModelBrowserActions,
+    modifier: Modifier = Modifier,
+    /**
+     * ta-xki: false inside the phone's settings sheet (`.settings-sheet .model-browser`: no border,
+     * radius, shadow or face of its own; the sheet is the floating surface).
+     */
+    framed: Boolean = true,
+) {
     val t = LocalTetherTokens.current
     // Studio: `:root .model-browser { border-radius: var(--radius-lg) }`.
     val shape = RoundedCornerShape(t.radiusLg)
     Column(
         modifier
-            .cssSurface(shape, t.graphite, CssBorder(1.dp, t.lineStrong), t.css.shadowMenu)
-            .clip(shape)
+            .then(if (framed) Modifier.cssSurface(shape, t.graphite, CssBorder(1.dp, t.lineStrong), t.css.shadowMenu).clip(shape) else Modifier)
             .semantics { paneTitle = "Model browser" }
             .testTag(ModelBrowserTags.Browser)
             // The panel swallows taps (only the backdrop closes it); a gesture sink, not a clickable.
@@ -511,6 +528,23 @@ private fun ColumnScope.AllView(inputs: ModelBrowserInputs, state: ModelBrowserS
             "noSearchMatches" -> EmptyState(TetherIcons.Search, "No matches")
             else -> ModelRowList(browserRows(all["rows"] as? JsArr ?: JsArr.EMPTY), inputs, actions, showProviderLabel = true)
         }
+    }
+}
+
+/**
+ * ta-xki: session-settings-sheet.tsx's hub search (`view === "root" && search.trim()`): the "all"
+ * view's results for [query] alone, every provider's matching models (or "No matches"). Nothing while
+ * the query is blank (the hub's rows show instead).
+ */
+@Composable
+internal fun ModelSearchResults(inputs: ModelBrowserInputs, query: String, actions: ModelBrowserActions) {
+    val q = normalizeQuery(query)
+    if (q.isEmpty()) return
+    val all = ModelBrowserView.resolveModelBrowserAllView(entriesJs(inputs.entries), JsStr(q), inputs.collator)
+    when ((all["kind"] as? JsStr)?.value) {
+        "browse" -> Unit
+        "noSearchMatches" -> EmptyState(TetherIcons.Search, "No matches")
+        else -> ModelRowList(browserRows(all["rows"] as? JsArr ?: JsArr.EMPTY), inputs, actions, showProviderLabel = true)
     }
 }
 

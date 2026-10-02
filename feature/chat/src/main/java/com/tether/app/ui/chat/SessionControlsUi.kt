@@ -423,9 +423,13 @@ fun ControlPill(
     }
 }
 
-/** A [ControlPill] that opens its rows in a drop-up menu (TetherSelect `dropUp`). */
+/**
+ * A [ControlPill] that opens its rows in a drop-up menu (TetherSelect `dropUp`). ta-xki: public for the
+ * new-session composer's live row (feature/shell); [emptyLabel] is what the pill says while its value
+ * matches no row (the draft's untouched effort: "Default"), instead of the first row's label.
+ */
 @Composable
-internal fun ControlSelect(
+fun ControlSelect(
     control: SelectControl,
     name: String,
     enabled: Boolean,
@@ -436,12 +440,13 @@ internal fun ControlSelect(
     armedRows: Boolean = false,
     maxWidth: Dp = Dp.Unspecified,
     testTag: String,
+    emptyLabel: String? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     var opensUp by remember { mutableStateOf(true) }
     val t = LocalTetherTokens.current
     val gap = with(LocalDensity.current) { t.css.spaceXs.roundToPx() }
-    val label = control.current?.label ?: control.label.ifEmpty { control.options.firstOrNull()?.label ?: "" }
+    val label = control.current?.label ?: emptyLabel ?: control.label.ifEmpty { control.options.firstOrNull()?.label ?: "" }
     val maxPill = if (maxWidth != Dp.Unspecified) maxWidth else (LocalConfiguration.current.screenWidthDp * 0.3f).dp
     Box {
         ControlPill(
@@ -527,7 +532,7 @@ internal fun ControlOptionList(control: SelectControl, armedRows: Boolean, onSel
  * the selected row (colour never carries the state alone: the check and the selected state do).
  */
 @Composable
-internal fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean, divider: Boolean, onClick: () -> Unit) {
+fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean, divider: Boolean, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
@@ -847,7 +852,7 @@ private fun t() = LocalTetherTokens.current
  * `is-danger` swaps the edge to `--warning`; the value says "Auto"/"On" in words.
  */
 @Composable
-private fun HubRow(icon: ImageVector, label: String, value: String, danger: Boolean = false, onClick: () -> Unit) {
+fun HubRow(icon: ImageVector, label: String, value: String, danger: Boolean = false, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(

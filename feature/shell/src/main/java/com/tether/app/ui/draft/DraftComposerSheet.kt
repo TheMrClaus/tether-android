@@ -91,6 +91,8 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.DraftComposerState
+import com.tether.app.client.DraftSessionOptions
+import com.tether.app.client.DraftSessionOptionsModel
 import com.tether.app.client.DraftSubmitResult
 import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionRow
@@ -145,10 +147,12 @@ import kotlinx.coroutines.launch
  * rows: it opens the model browser ([ModelBrowserFrame]), whose "all" view lists those rows, and a
  * pick sets the draft's row (provider / profile) and model together, as on the web.
  *
+ * ta-xki (slice 4): the live row's Effort and Mode beside the chip (from 64rem), and below 64rem the
+ * SessionSettingsSheet trigger row that carries Model, Effort and Mode instead ([DraftLiveRow],
+ * [DraftSettingsTriggerRow], [DraftSettingsFrame]; the model chip opens the sheet on the browser).
+ *
  * Left for later slices (nothing is drawn for them, so nothing looks like a control that is not
- * there): the worktree select and its detail row (slice 5), the GitHub issues / PRs dialog (T8.4),
- * the live row's Effort and Mode (slice 4), and the narrow screen's SessionSettingsSheet trigger
- * that carries Model, Effort and Mode (slice 4; until then the chip shows on a phone too).
+ * there): the worktree select and its detail row (slice 5) and the GitHub issues / PRs dialog (T8.4).
  */
 
 /** Test tags of the sheet (behaviour tests and goldens). */
@@ -221,6 +225,8 @@ class DraftSheetInputs(
     val notice: String? = null,
     /** ta-2uq: the model browser is up (the chip is drawn active). */
     val browserOpen: Boolean = false,
+    /** ta-xki: the draft's Effort and Mode ([com.tether.app.client.DraftSessionOptionsModel]). */
+    val options: DraftSessionOptions = DraftSessionOptions.None,
 )
 
 /** What the sheet's controls do. */
@@ -234,6 +240,14 @@ class DraftSheetActions(
     val onAttach: () -> Unit = {},
     val onRemoveAttachment: (Long) -> Unit = {},
     val onSubmit: () -> Unit = {},
+    /** ta-xki: an Effort pick (a variant value). */
+    val onSelectEffort: (String) -> Unit = {},
+    /** ta-xki: a Mode pick (an elevated one too: an ordinary choice, no confirmation). */
+    val onSelectMode: (String) -> Unit = {},
+    /** ta-xki: opencode's Auto chip. */
+    val onToggleAuto: () -> Unit = {},
+    /** ta-xki: the phone's sliders chip (the settings sheet's hub). */
+    val onOpenSettings: () -> Unit = {},
 )
 
 private fun DraftComposerState.cwd(): String = (form["cwd"] as? JsStr)?.value.orEmpty()
@@ -276,6 +290,9 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
     // ta-2uq: the browser belongs to one server: a switch closes it (the draft is dropped with it).
     val browser = remember(origin) { ModelBrowserState() }
+    // ta-xki: so does the phone's settings sheet (which embeds its own browser).
+    val settings = remember(origin) { DraftSettingsState() }
+    val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP
     val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
 
     val scope = rememberCoroutineScope()
@@ -308,12 +325,24 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         workspaceRoot = root.orEmpty(),
         readiness = composer.readiness(),
         notice = notice,
-        browserOpen = browser.open,
+        browserOpen = if (wideRow) browser.open else settings.open,
+        options = DraftSessionOptionsModel.of(draft),
     )
     val actions = DraftSheetActions(
         onClose = vm::closeDraft,
         onText = composer::setText,
-        onModelChip = { if (browser.open) browser.close() else browser.openOn(draft.entries, draft.key()) },
+        onModelChip = {
+            when {
+                // Below 64rem the model chip opens the settings sheet straight on the browser (the web's).
+                !wideRow -> settings.openAt(DraftSettingsView.Model, draft.entries, draft.key())
+                browser.open -> browser.close()
+                else -> browser.openOn(draft.entries, draft.key())
+            }
+        },
+        onOpenSettings = { settings.openAt(DraftSettingsView.Root, draft.entries, draft.key()) },
+        onSelectEffort = { composer.selectEffort(it) },
+        onSelectMode = { composer.selectMode(it) },
+        onToggleAuto = { composer.toggleAuto() },
         onPickFolder = composer::setCwd,
         onBrowse = {
             client.browse(draft.cwd().ifEmpty { root.orEmpty() }.ifEmpty { null })
@@ -329,14 +358,17 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     Dialog(onDismissRequest = vm::closeDraft, properties = DraftDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
-        DraftComposerFrame(inputs, actions, focusOnOpen = true)
+        DraftComposerFrame(inputs, actions, focusOnOpen = true, wideRow = wideRow)
     }
-    if (browser.open) {
-        // model-browser.tsx handleSelect / draft-composer.tsx handleModelSelect: a pick on another
-        // row is one atomic provider + model pick; on the same row, a model pick. Then it closes.
+    // model-browser.tsx handleSelect / draft-composer.tsx handleModelSelect: a pick on another row is
+    // one atomic provider + model pick; on the same row, a model pick.
+    val pickModel: (String, String) -> Unit = { entryKey, modelId ->
+        if (entryKey != draft.key()) composer.selectProviderAndModel(entryKey, modelId) else composer.selectModel(modelId)
+    }
+    if (browser.open && wideRow) {
         val browserActions = ModelBrowserActions(
             onSelect = { entryKey, modelId ->
-                if (entryKey != draft.key()) composer.selectProviderAndModel(entryKey, modelId) else composer.selectModel(modelId)
+                pickModel(entryKey, modelId)
                 browser.close()
             },
             // dashboard.tsx onRetryProvider: refreshProviders([key]), on the socket this was drawn on.
@@ -349,6 +381,27 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             val view = LocalView.current
             SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
             ModelBrowserFrame(browserInputs, browser, browserActions, currentLayoutClass())
+        }
+    }
+    if (settings.open && !wideRow) {
+        // session-settings-sheet.tsx (catalog kind): its model view is the same browser; its picks
+        // step the sheet itself (close from the view it opened on, else back to the hub).
+        val settingsActions = DraftSettingsActions(
+            browser = ModelBrowserActions(
+                onSelect = pickModel,
+                onRetry = { key -> client.refreshProviders(key, linkEpoch) },
+                onAddModel = composer::addCustomModel,
+                onRemoveModel = composer::removeCustomModel,
+            ),
+            onSelectEffort = { composer.selectEffort(it) },
+            onSelectMode = { composer.selectMode(it) },
+            onToggleAuto = { composer.toggleAuto() },
+            onClose = settings::close,
+        )
+        Dialog(onDismissRequest = settings::close, properties = DraftDialogProperties) {
+            val view = LocalView.current
+            SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
+            DraftSettingsFrame(inputs, settings, settingsActions, currentLayoutClass())
         }
     }
     if (browsing) {
@@ -417,6 +470,8 @@ fun DraftComposerFrame(
     layout: TetherLayoutClass = currentLayoutClass(),
     /** r2 (F3): put the caret in the message box when the sheet opens (dashboard.tsx 381-384); off in goldens. */
     focusOnOpen: Boolean = false,
+    /** ta-xki: the live row (from 64rem) or, below, the settings sheet's trigger row. */
+    wideRow: Boolean = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP,
 ) {
     val t = LocalTetherTokens.current
     val narrow = layout == TetherLayoutClass.Phone
@@ -469,7 +524,7 @@ fun DraftComposerFrame(
                     .verticalScroll(rememberScrollState())
                     .padding(start = side, end = side, top = if (narrow) t.css.spaceMd else t.css.spaceLg),
             ) {
-                DraftComposerOptions(inputs, actions, narrow)
+                DraftComposerOptions(inputs, actions, narrow, wideRow)
             }
             // `.draft-dialog .chat-composer` (Studio) bottom: phone max(space-md, safe-area-bottom),
             // space-sm over the keyboard (the sheet already sits on it); desktop space-xl.
@@ -529,7 +584,7 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
 /** draft-composer.tsx's composer, in its order. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean) {
+private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
     // `.chat-project-row`: which folder (slice 5 adds the worktree select, T8.4 the GitHub dialog,
@@ -546,15 +601,9 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
 
-    // ta-2uq: `.chat-mode-row-live` ("Session options"): the ModelSelector chip. Slot (slice 4): Effort
-    // and Mode beside it, and on a phone the SessionSettingsSheet trigger that carries all three.
-    Row(
-        Modifier.fillMaxWidth().semantics { contentDescription = "Session options" }.testTag(DraftComposerTags.LiveRow),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-    ) {
-        ModelSelectorChip(inputs.browser, inputs.browserOpen, actions.onModelChip)
-    }
+    // ta-2uq / ta-xki: `.chat-mode-row-live` ("Session options"): the ModelSelector chip, Effort and
+    // Mode (and opencode's Auto); below 64rem the SessionSettingsSheet trigger row carries all three.
+    if (wideRow) DraftLiveRow(inputs, actions) else DraftSettingsTriggerRow(inputs, actions)
     Box(Modifier.height(t.css.spaceMd))
 
     // draft-composer.tsx: the hook's error, else the attachment flash.
