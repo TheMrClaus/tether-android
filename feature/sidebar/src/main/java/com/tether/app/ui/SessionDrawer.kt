@@ -23,6 +23,7 @@ import com.tether.app.ui.sidebar.SidebarModel
 import com.tether.app.ui.sidebar.SidebarState
 import com.tether.app.ui.sidebar.sidebarCollator
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -201,19 +202,72 @@ fun SessionDrawer(
 
     // Outside the sidebar's token scope: the web raises these outside `.session-sidebar`.
     if (folderPicker) {
-        FolderPickerDialog(
-            directories = directories,
-            current = current,
-            onDismiss = { folderPicker = false },
-            onBrowse = { client.browse(it) },
-            onChoose = { cwd ->
-                folderPicker = false
-                controller.chooseWorkspace(cwd, pinned, current)
-            },
-        )
+        WorkspaceFolderPicker(client, directories, current, pinned, controller, onDismiss = { folderPicker = false })
     }
     // T10.1: the Settings dialog (feature/settings); "Use current" takes this list's current workspace.
     if (settingsOpen) SettingsDialog(client, prefs, currentWorkspace = current.orEmpty(), onDismiss = { settingsOpen = false })
+}
+
+/** The drawer's folder picker and [WorkspacePickerHost]'s: choosing a folder pins it and makes it current. */
+@Composable
+private fun WorkspaceFolderPicker(
+    client: com.tether.app.client.TetherClient,
+    directories: com.tether.app.protocol.model.DirectoryListing?,
+    current: String?,
+    pinned: List<String>,
+    controller: SidebarController,
+    onDismiss: () -> Unit,
+) {
+    FolderPickerDialog(
+        directories = directories,
+        current = current,
+        onDismiss = onDismiss,
+        onBrowse = { client.browse(it) },
+        onChoose = { cwd ->
+            onDismiss()
+            controller.chooseWorkspace(cwd, pinned, current)
+        },
+    )
+}
+
+/**
+ * ta-3e7: the workspace folder picker for a surface outside the drawer — the Studio welcome's
+ * "Open workspace" (dashboard.tsx 1727: `browseWorkspace(currentWorkspace || workspaceRoot)`, then
+ * the one FolderPickerDialog the sidebar's "Add workspace" also opens). Composed while open; it
+ * lists the current workspace (else the server's root) as it opens, and a chosen folder is pinned
+ * and made current exactly as from the drawer. The host composes it at shell level, so it opens
+ * whether or not the rail is showing.
+ */
+@Composable
+fun WorkspacePickerHost(
+    vm: TetherViewModel,
+    prefs: UiPrefs,
+    workspaceRoot: String?,
+    onDismiss: () -> Unit,
+) {
+    val client = vm.client
+    val scope = rememberCoroutineScope()
+    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
+    val directories by client.directories.collectAsStateWithLifecycle()
+    val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
+    val latestPrefs by rememberUpdatedState(preferences)
+    val controller = remember(vm, prefs) {
+        SidebarController(
+            client = client,
+            readPreferences = { latestPrefs },
+            updatePreferences = { transform -> scope.launch { prefs.updatePreferences(transform) } },
+            selectWorkspace = vm::selectWorkspace,
+        )
+    }
+    val current = controller.currentWorkspace(pickedWorkspace, preferences, workspaceRoot)
+    val pinned = controller.pinnedWorkspaces(serverSettings, preferences)
+    // The stored preferences, not the first frame's defaults, decide which folder is current.
+    LaunchedEffect(Unit) {
+        val stored = prefs.preferences.first()
+        client.browse(controller.currentWorkspace(vm.currentWorkspace.value, stored, workspaceRoot) ?: workspaceRoot)
+    }
+    WorkspaceFolderPicker(client, directories, current, pinned, controller, onDismiss)
 }
 
 /** dashboard.tsx:842 — the sidebar filter's content search waits this long after the last keystroke. */
