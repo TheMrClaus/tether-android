@@ -22,6 +22,8 @@ import okhttp3.Response
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ta-9q2 (T10.1 slice 2) + ta-ebc (#231): the Settings Engines tab's Claude accounts, READ ONLY.
+// ta-7rh: the changes (add, rename, remove, log in/out, sync) are a separate source,
+// ClaudeAccountActions.kt, over FixedRouteHttp; this reader still sends nothing but its three GETs.
 // tether 887c222 server.mjs ~8117-8297 (/api/claude-accounts):
 //   GET /api/claude-accounts             { accounts: ClaudeAccountRow[] }   (each row carries `plan`, #231)
 //   GET /api/claude-accounts/sync        { config, lastResult }
@@ -437,6 +439,41 @@ object ClaudeAccountsJson {
                 primaryAccountId = string(config["primaryAccountId"], MAX_TEXT)?.takeIf { it.isNotEmpty() },
             ),
             lastResult = syncResult(obj["lastResult"]),
+        )
+    }
+
+    /**
+     * ta-7rh: `PUT /sync` and `POST /sync/run` answer `{ config, result }` (the sync GET's two parts
+     * under other names). Null without a `config` object.
+     */
+    fun syncSaved(obj: JsonObject): ClaudeSyncSaved? {
+        val read = sync(JsonObject(mapOfNotNull("config" to obj["config"], "lastResult" to obj["result"]))) ?: return null
+        return ClaudeSyncSaved(read.config, read.lastResult)
+    }
+
+    private fun mapOfNotNull(vararg pairs: Pair<String, JsonElement?>): Map<String, JsonElement> =
+        pairs.mapNotNull { (k, v) -> v?.let { k to it } }.toMap()
+
+    /**
+     * ta-7rh: the login routes' `{ status, url, error }` (lib/claude-accounts.mjs `publicLoginState`).
+     * The link is kept only when [ClaudeLoginLink.parse] accepts it; one it refuses is flagged, never
+     * kept. A status this client does not know is [ClaudeLoginStatus.Unknown] (it keeps polling).
+     */
+    fun loginState(obj: JsonObject): ClaudeLoginState {
+        val rawUrl = (obj["url"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val link = ClaudeLoginLink.parse(rawUrl)
+        return ClaudeLoginState(
+            status = when (string(obj["status"], MAX_CODE)) {
+                "idle" -> ClaudeLoginStatus.Idle
+                "pending-url" -> ClaudeLoginStatus.PendingUrl
+                "awaiting-code" -> ClaudeLoginStatus.AwaitingCode
+                "success" -> ClaudeLoginStatus.Success
+                "error" -> ClaudeLoginStatus.Error
+                else -> ClaudeLoginStatus.Unknown
+            },
+            link = link,
+            linkRefused = rawUrl != null && rawUrl.isNotEmpty() && link == null,
+            error = string(obj["error"], MAX_TEXT)?.takeIf { it.isNotBlank() },
         )
     }
 

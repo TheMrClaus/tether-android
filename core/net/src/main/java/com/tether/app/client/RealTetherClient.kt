@@ -3503,7 +3503,7 @@ class RealTetherClient(
     /**
      * ta-9q2: Settings' Claude accounts (`GET /api/claude-accounts`, `/sync`, `/<id>/status`), over
      * [authHttp] with the same per-call (server, credential) read as [files]. GET only: the
-     * owner-grade writes (403 to a device token) are never sent.
+     * owner-grade writes are [claudeAccountActions] (ta-7rh), never this reader.
      */
     override val claudeAccounts: ClaudeAccountsSource = HttpClaudeAccounts(authHttp, authority = {
         val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
@@ -3519,6 +3519,19 @@ class RealTetherClient(
      * the same per-call (server, credential) read as [files].
      */
     override val serviceOpen: ServiceOpenSource = HttpServiceOpen(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
+    /**
+     * ta-7rh: the Claude account changes, over [authHttp] with the same per-call (server, credential)
+     * read as [claudeAccounts]; each call is made only when that server is the one the screen names.
+     */
+    override val claudeAccountActions: ClaudeAccountActions = HttpClaudeAccountActions(authHttp, authority = {
         val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
         when {
             base == null || credential == null -> FilesAuthority.SignedOut

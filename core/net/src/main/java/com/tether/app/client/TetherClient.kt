@@ -619,10 +619,18 @@ interface TetherClient {
     /**
      * ta-9q2: Settings' Claude accounts, READ ONLY: `GET /api/claude-accounts`, `/sync` and
      * `/<id>/status` on the paired server, with the credential in force and never following a
-     * redirect (see [HttpClaudeAccounts]). The owner-grade writes are not reachable through it. The
+     * redirect (see [HttpClaudeAccounts]). The owner-grade writes are [claudeAccountActions]. The
      * default refuses every call without touching the network.
      */
     val claudeAccounts: ClaudeAccountsSource get() = ClaudeAccountsSource.Unavailable
+
+    /**
+     * ta-7rh: the Claude account changes (add, rename, remove, log in and out, sync), owner-grade on
+     * the server (tether #236 makes the app's sign-ins owner-grade). Each call goes only to the
+     * server it names, on a fixed route, never following a redirect (see [HttpClaudeAccountActions]).
+     * The default refuses every call without touching the network.
+     */
+    val claudeAccountActions: ClaudeAccountActions get() = ClaudeAccountActions.Unavailable
 
     /**
      * T10.4: Settings → Devices (paired devices, passkeys, signed-in sessions), over the fixed routes
