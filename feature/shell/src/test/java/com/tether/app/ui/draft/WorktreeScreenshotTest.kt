@@ -49,7 +49,9 @@ import org.robolectric.annotation.Config
  * - `pr`: Pull request #42 with a name, and a config warning from the repo's tether.json;
  * - `not-repo`: the folder is not a Git repository (the note alone);
  * - `confirm-will`: the setup confirmation for a new branch from the default base with setup;
- * - `confirm-may`: the confirmation for an existing branch whose name hides an RLO and a ZWSP (tokens).
+ * - `confirm-may`: the confirmation for an existing branch whose name hides an RLO and a ZWSP (tokens);
+ * - `confirm-may-default` (r2): a new branch from the default base of a repo whose only remote is
+ *   `upstream`: may run, and the base named neutrally (the create resolves origin's default or HEAD).
  *
  * Every state is seeded synchronously through the real engine on an unconfined scope (the source is
  * placed on the drawn state, never asked for), the clock is driven by hand, and the client throws on
@@ -62,6 +64,7 @@ enum class WorktreeShot(val id: String, val confirm: Boolean = false) {
     NotRepo("draft-worktree-not-repo"),
     ConfirmWill("draft-setup-confirm-will", confirm = true),
     ConfirmMay("draft-setup-confirm-may", confirm = true),
+    ConfirmMayDefault("draft-setup-confirm-may-default", confirm = true),
 }
 
 private val exactCompare = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -118,6 +121,10 @@ private class WorktreeSeed(shot: WorktreeShot) {
         model.selectProviderAndModel("work", "m1")
         model.setText(WORKTREE_PROMPT)
         val source: WorktreeSourceInfo = when (shot) {
+            WorktreeShot.ConfirmMayDefault -> {
+                check(model.selectIsolation("branch-off"))
+                repo(hasSetup = true, scripts = 2).copy(remote = "upstream", defaultBaseRef = "upstream/main", branches = listOf("upstream/main", "main"))
+            }
             WorktreeShot.BranchOff, WorktreeShot.ConfirmWill -> {
                 check(model.selectIsolation("branch-off"))
                 repo(hasSetup = true, scripts = 2)

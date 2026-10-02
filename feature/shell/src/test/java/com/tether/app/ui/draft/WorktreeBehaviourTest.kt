@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -18,8 +19,11 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.tether.app.client.READINESS_NEED_BRANCH
 import com.tether.app.client.READINESS_NEED_PR
 import com.tether.app.client.READINESS_PR_TOO_LARGE
+import com.tether.app.client.SETUP_BODY_MAY_DEFAULT
 import com.tether.app.client.SETUP_BODY_MAY_PR
 import com.tether.app.client.SETUP_CHANGED_COPY
+import com.tether.app.client.SETUP_DEFAULT_BASE
+import com.tether.app.client.SETUP_TITLE_MAY
 import com.tether.app.client.SETUP_TITLE_WILL
 import com.tether.app.client.WorktreeDeclaredScript
 import com.tether.app.client.WorktreeField
@@ -163,6 +167,71 @@ abstract class WorktreeHarness(private val width: Int, private val height: Int) 
         until("the sheet asked") { client.inspects.isNotEmpty() }
         client.answerInspect(info)
         until("the engine took the answer") { composer.state.value.worktreeSource == info }
+    }
+
+    // --- r2: run on the phone and the tablet ---------------------------------------------------------
+
+    /**
+     * r2 (the verifier's reproduction): the repo's only remote is `upstream` and its default has no
+     * setup, but the create resolves origin (none) and cuts from HEAD. Send asks first, and the
+     * dialog names the base neutrally, never the inspected upstream/main.
+     */
+    @Test
+    fun anUpstreamOnlyRepoConfirmsAndNamesNoInspectedBase() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        answer(repo(hasSetup = false).copy(remote = "upstream", remotes = listOf("upstream"), defaultBaseRef = "upstream/main"))
+        until("Send enabled") { sendEnabled() }
+        tap(DraftComposerTags.Send)
+        awaitTag(WorktreeTags.Confirm)
+        assertTrue("nothing sent before the confirmation", client.creates.isEmpty())
+        assertEquals(SETUP_TITLE_MAY, composer.state.value.setupConfirm?.title)
+        assertEquals(SETUP_BODY_MAY_DEFAULT, composer.state.value.setupConfirm?.body)
+        assertEquals(SETUP_DEFAULT_BASE, shown(WorktreeTags.confirmField("Base")))
+        rule.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
+        tap(WorktreeTags.ConfirmKey)
+        until("the create went out") { client.creates.size == 1 }
+        val block = client.creates.single().worktree!!
+        assertEquals("branch-off", block.mode)
+        assertNull("the frame stays the web's", block.baseRef)
+    }
+
+    /** r2 (P4): closing the sheet cancels the confirmation; reopening it shows none and sends nothing. */
+    @Test
+    fun closingTheSheetCancelsTheConfirmation() {
+        openSheet()
+        ready()
+        isolate("checkout-pr")
+        type(WorktreeField.Pr, "42")
+        until("Send enabled") { sendEnabled() }
+        tap(DraftComposerTags.Send)
+        awaitTag(WorktreeTags.Confirm)
+        rule.runOnUiThread { vm.closeDraft() }
+        awaitGone(DraftComposerTags.Sheet)
+        until("the confirmation went with it") { composer.state.value.setupConfirm == null }
+        rule.runOnUiThread { vm.openDraft() }
+        awaitTag(DraftComposerTags.Sheet)
+        rule.mainClock.advanceTimeBy(1_000)
+        rule.waitForIdle()
+        assertFalse("reopened with no confirmation", exists(WorktreeTags.Confirm))
+        assertNull(composer.state.value.setupConfirm)
+        assertTrue(client.creates.isEmpty())
+        assertEquals("Review this", composer.state.value.text)
+        // Send asks again.
+        tap(DraftComposerTags.Send)
+        awaitTag(WorktreeTags.Confirm)
+        assertTrue(client.creates.isEmpty())
+    }
+
+    /** Verifier F3: the New branch placeholder is the web's `tether/<name>` (U+003C / U+003E), drawn as is. */
+    @Test
+    fun theNewBranchPlaceholderIsTheWebsText() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        until("the placeholder") { rule.onAllNodesWithText("tether/<name>", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodesWithText("tether/\u2039name\u203A", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 }
 
