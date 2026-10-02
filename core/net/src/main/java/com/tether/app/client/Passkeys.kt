@@ -186,6 +186,8 @@ class PasskeyLoginRequest internal constructor(
     val server: HttpUrl,
     internal val challengeId: String,
     private val requestJson: String,
+    /** ta-coik.1 r3: the client's sign-in generation when this sign-in began (its start). */
+    internal val generation: Long = 0L,
 ) {
     fun requestJson(): String = requestJson
     override fun toString(): String = "PasskeyLoginRequest(${server.host})"

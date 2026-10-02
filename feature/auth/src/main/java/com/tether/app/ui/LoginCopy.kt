@@ -152,6 +152,8 @@ fun versionCopy(incompatibility: Incompatibility): String = when (incompatibilit
 fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? = when (result) {
     // A dismissed passkey prompt is a notice, not an error ([PASSKEY_DISMISSED_NOTICE]).
     is LoginResult.Success, is LoginResult.LocalNetworkBlocked, is LoginResult.PasskeyDismissed -> null
+    // ta-coik.1 r3: an earlier outcome stands; the screen ignores this one ([LoginScreen]).
+    is LoginResult.Superseded -> null
     is LoginResult.PasskeyFailed -> serverText(result.message, "Passkey sign-in failed.")
     is LoginResult.BadPassword -> serverText(result.message, "Those credentials are not correct.") +
         if (usernameHint) " $USERNAME_MISSING_HINT" else ""
@@ -177,7 +179,7 @@ fun gatewayRefusedCopy(result: LoginResult.GatewayRefused): String =
 
 /** Error line for a pairing attempt; null = success or the local-network flow takes over. */
 fun pairErrorCopy(result: PairResult): String? = when (result) {
-    is PairResult.Success, is PairResult.LocalNetworkBlocked -> null
+    is PairResult.Success, is PairResult.LocalNetworkBlocked, is PairResult.Superseded -> null
     is PairResult.Rejected -> serverText(result.message, "That pairing code is not valid or has expired.")
     is PairResult.RateLimited -> serverText(result.message, "Too many pairing attempts. Try again in a few minutes.")
     is PairResult.NotSupported -> serverText(result.message, "This server does not support device pairing.")

@@ -1165,6 +1165,13 @@ sealed interface LoginResult {
      * 401 "That passkey could not be verified.") or the app's words for what happened on the phone.
      */
     data class PasskeyFailed(val message: String) : LoginResult
+
+    /**
+     * ta-coik.1 r3: the server signed this attempt in, but another sign-in was adopted first, or the
+     * user signed out, after it began. It is not adopted (the earlier outcome stands) and its session
+     * is revoked on the server. Nothing for the login screen to show: it keeps what it shows.
+     */
+    data object Superseded : LoginResult
 }
 
 /** Outcome of [TetherClient.pair]. Sibling of [LoginResult]; see specs/protocol-spec.md §1.3. */
@@ -1185,6 +1192,9 @@ sealed interface PairResult {
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
     data object LocalNetworkBlocked : PairResult
+
+    /** ta-coik.1 r3: as [LoginResult.Superseded]: claimed, not adopted, the device token revoked. */
+    data object Superseded : PairResult
 }
 
 /** T13.2 r2: what [TetherClient.interrupt] did. Only [Sent] put a frame on the wire. */

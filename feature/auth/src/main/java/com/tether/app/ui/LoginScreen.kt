@@ -274,6 +274,8 @@ fun LoginScreen(
 
     /** use-login-flow.ts signInWithPasskey's outcomes, for the prompt and the autofill offer alike. */
     fun passkeyOutcome(result: LoginResult) {
+        // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
+        if (result is LoginResult.Superseded) return
         val blocked = result is LoginResult.LocalNetworkBlocked
         when {
             blocked -> phase = LoginPhase.Ready
@@ -378,16 +380,21 @@ fun LoginScreen(
         val usernameHint = usernameHintFor(requirements, sentUsername)
         scope.launch {
             var blocked = false
+            var superseded = false
             val failure = when (attemptMode) {
                 AuthMode.Password -> client.login(url, password, sentUsername).let {
                     blocked = it is LoginResult.LocalNetworkBlocked
+                    superseded = it is LoginResult.Superseded
                     loginErrorCopy(it, usernameHint)
                 }
                 AuthMode.Pairing -> client.pair(url, code, deviceLabel).let {
                     blocked = it is PairResult.LocalNetworkBlocked
+                    superseded = it is PairResult.Superseded
                     pairErrorCopy(it)
                 }
             }
+            // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
+            if (superseded) return@launch
             when {
                 blocked -> phase = LoginPhase.Ready
                 failure != null -> {
