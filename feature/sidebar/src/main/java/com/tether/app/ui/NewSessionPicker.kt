@@ -64,8 +64,9 @@ import com.tether.app.ui.theme.TetherTypography
 // create does until the operator picks one). The model browser itself is ta-2uq.
 // ta-abm (T8.1 slice 2): the interim dialog that created on a tap is gone. These rows are now the
 // draft composer sheet's provider stage (feature:shell DraftComposerSheet): a tap picks the row
-// (SET_PROVIDER_FROM_USER) and the sheet's Send creates the session with its first message. The
-// model browser (ta-2uq, slice 3) replaces this stage with the web's ModelSelector chip.
+// (SET_PROVIDER_FROM_USER) and the sheet's Send creates the session with its first message.
+// ta-2uq (slice 3): the sheet now shows the web's ModelSelector chip; these rows are the "all" view of
+// its model browser (feature:shell ModelBrowser), where a tap opens that row's models.
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
