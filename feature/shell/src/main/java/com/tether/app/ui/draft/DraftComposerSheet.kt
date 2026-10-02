@@ -97,7 +97,6 @@ import com.tether.app.client.NewSessionRow
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.FolderPickerDialog
-import com.tether.app.ui.NewSessionPickerBody
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.chat.AttachSheet
 import com.tether.app.ui.chat.ControlPill
@@ -142,10 +141,14 @@ import kotlinx.coroutines.launch
  * (the T7.4 sheet) and Send. Send creates the session AND sends the first message, as on the web.
  * While the create is in flight the sheet gives way to [DraftLaunching] on the shell's stage.
  *
+ * ta-2uq (slice 3): the live row's ModelSelector chip ([ModelSelectorChip]) replaces the provider
+ * rows: it opens the model browser ([ModelBrowserFrame]), whose "all" view lists those rows, and a
+ * pick sets the draft's row (provider / profile) and model together, as on the web.
+ *
  * Left for later slices (nothing is drawn for them, so nothing looks like a control that is not
  * there): the worktree select and its detail row (slice 5), the GitHub issues / PRs dialog (T8.4),
- * the live row's Model selector (slice 3, ta-2uq: it also replaces the provider rows), Effort and
- * Mode (slice 4), and the narrow screen's SessionSettingsSheet trigger that carries those three.
+ * the live row's Effort and Mode (slice 4), and the narrow screen's SessionSettingsSheet trigger
+ * that carries Model, Effort and Mode (slice 4; until then the chip shows on a phone too).
  */
 
 /** Test tags of the sheet (behaviour tests and goldens). */
@@ -155,7 +158,7 @@ object DraftComposerTags {
     const val WorkspaceChip = "draft-workspace-chip"
     const val WorkspacePopover = "draft-workspace-popover"
     const val Browse = "draft-workspace-browse"
-    const val Providers = "draft-providers"
+    const val LiveRow = ModelBrowserTags.LiveRow
     const val Error = "draft-error"
     const val Notice = "draft-notice"
     const val Readiness = "draft-readiness"
@@ -208,22 +211,24 @@ fun draftProviderLabel(row: NewSessionRow?, providers: List<ProviderInfo>): Stri
 @Immutable
 class DraftSheetInputs(
     val draft: DraftComposerState,
-    val rows: List<NewSessionRow>,
-    val providers: List<ProviderInfo>,
-    val catalogPending: Boolean,
+    /** ta-2uq: what the Model chip and its browser draw. */
+    val browser: ModelBrowserInputs,
     val quickPicks: List<WorkspaceQuickPick>,
     val workspaceRoot: String,
     /** The engine's first readiness reason ("" = ready), in the web's order. */
     val readiness: String,
     /** An attachment flash (draft-composer.tsx `notice`), shown while there is no error. */
     val notice: String? = null,
+    /** ta-2uq: the model browser is up (the chip is drawn active). */
+    val browserOpen: Boolean = false,
 )
 
 /** What the sheet's controls do. */
 class DraftSheetActions(
     val onClose: () -> Unit = {},
     val onText: (String) -> Unit = {},
-    val onPickProvider: (NewSessionRow) -> Unit = {},
+    /** ta-2uq: the Model chip (opens or closes the model browser). */
+    val onModelChip: () -> Unit = {},
     val onPickFolder: (String) -> Unit = {},
     val onBrowse: () -> Unit = {},
     val onAttach: () -> Unit = {},
@@ -266,8 +271,12 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     val directories by client.directories.collectAsStateWithLifecycle()
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
+    // ta-2uq: the browser belongs to one server: a switch closes it (the draft is dropped with it).
+    val browser = remember(origin) { ModelBrowserState() }
+    val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
 
     val scope = rememberCoroutineScope()
     var notice by remember { mutableStateOf<String?>(null) }
@@ -290,22 +299,21 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     var attachOpen by rememberSaveable { mutableStateOf(false) }
     var browsing by rememberSaveable { mutableStateOf(false) }
 
-    val rows = NewSessionGuard.rows(if (live) catalog else null, providers)
     val current = SidebarController.resolveCurrentWorkspace(picked, preferences, root)
+    val browserInputs = draftBrowserInputs(draft, if (live) catalog else null, providers, collator, System.currentTimeMillis())
     val inputs = DraftSheetInputs(
         draft = draft,
-        rows = rows,
-        providers = providers,
-        catalogPending = !live,
+        browser = browserInputs,
         quickPicks = workspaceQuickPicks(preferences.pinnedProjects, preferences.defaultWorkspace, current, root),
         workspaceRoot = root.orEmpty(),
         readiness = composer.readiness(),
         notice = notice,
+        browserOpen = browser.open,
     )
     val actions = DraftSheetActions(
         onClose = vm::closeDraft,
         onText = composer::setText,
-        onPickProvider = { row -> composer.selectProvider(row.choice.key) },
+        onModelChip = { if (browser.open) browser.close() else browser.openOn(draft.entries, draft.key()) },
         onPickFolder = composer::setCwd,
         onBrowse = {
             client.browse(draft.cwd().ifEmpty { root.orEmpty() }.ifEmpty { null })
@@ -322,6 +330,26 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
         DraftComposerFrame(inputs, actions, focusOnOpen = true)
+    }
+    if (browser.open) {
+        // model-browser.tsx handleSelect / draft-composer.tsx handleModelSelect: a pick on another
+        // row is one atomic provider + model pick; on the same row, a model pick. Then it closes.
+        val browserActions = ModelBrowserActions(
+            onSelect = { entryKey, modelId ->
+                if (entryKey != draft.key()) composer.selectProviderAndModel(entryKey, modelId) else composer.selectModel(modelId)
+                browser.close()
+            },
+            // dashboard.tsx onRetryProvider: refreshProviders([key]), on the socket this was drawn on.
+            onRetry = { key -> client.refreshProviders(key, linkEpoch) },
+            onAddModel = composer::addCustomModel,
+            onRemoveModel = composer::removeCustomModel,
+            onClose = browser::close,
+        )
+        Dialog(onDismissRequest = browser::close, properties = DraftDialogProperties) {
+            val view = LocalView.current
+            SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
+            ModelBrowserFrame(browserInputs, browser, browserActions, currentLayoutClass())
+        }
     }
     if (browsing) {
         FolderPickerDialog(
@@ -344,6 +372,33 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             onPickFiles = pickers.pickFiles,
         )
     }
+}
+
+/**
+ * ta-2uq: what the Model chip and browser draw for [draft]: its merged rows, ta-895's rows for the
+ * same list (the live catalog's, else the base providers'), its pick and custom ids.
+ */
+fun draftBrowserInputs(
+    draft: DraftComposerState,
+    liveCatalog: List<com.tether.app.client.ProviderCatalogEntry>?,
+    providers: List<ProviderInfo>,
+    collator: com.tether.app.protocol.helpers.JsCollator,
+    now: Long,
+): ModelBrowserInputs {
+    val pending = liveCatalog == null
+    val merged = draft.entries
+    val rows = NewSessionGuard.rows(if (pending) null else merged, providers)
+    return ModelBrowserInputs(
+        entries = merged,
+        rows = rows,
+        providers = providers,
+        catalogPending = pending,
+        selectedKey = draft.key(),
+        selectedModel = (draft.form["model"] as? JsStr)?.value.orEmpty(),
+        customModels = draft.customModels,
+        now = now,
+        collator = collator,
+    )
 }
 
 /** The sheet's window: edge to edge (the frame pads the bars it must), no platform dim. */
@@ -491,20 +546,14 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
 
-    // The provider and profile rows (ta-895), the first stage of the web's ModelSelector: a tap picks
-    // the row (SET_PROVIDER_FROM_USER). Slot (T8.1 slice 3, ta-2uq): the ModelSelector chip replaces
-    // this stage. Slot (slice 4): Effort and Mode, and on a phone the SessionSettingsSheet trigger.
-    Column(Modifier.fillMaxWidth().testTag(DraftComposerTags.Providers)) {
-        SectionLabel("Provider")
-        NewSessionPickerBody(
-            rows = inputs.rows,
-            providers = inputs.providers,
-            catalogPending = inputs.catalogPending,
-            notice = null,
-            selectedKey = draft.key().ifEmpty { null },
-            pickLabel = { "Choose $it" },
-            onPick = actions.onPickProvider,
-        )
+    // ta-2uq: `.chat-mode-row-live` ("Session options"): the ModelSelector chip. Slot (slice 4): Effort
+    // and Mode beside it, and on a phone the SessionSettingsSheet trigger that carries all three.
+    Row(
+        Modifier.fillMaxWidth().semantics { contentDescription = "Session options" }.testTag(DraftComposerTags.LiveRow),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        ModelSelectorChip(inputs.browser, inputs.browserOpen, actions.onModelChip)
     }
     Box(Modifier.height(t.css.spaceMd))
 

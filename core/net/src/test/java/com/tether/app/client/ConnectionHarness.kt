@@ -101,6 +101,15 @@ class ConnectionHarness {
     /** Runs on the server's reader thread before a client frame is recorded (a test may block it). */
     @Volatile var onServerMessage: ((String) -> Unit)? = null
 
+    /**
+     * ta-2uq: every `ready` now asks for the catalog (`{"type":"providers-snapshot"}`, a read, as the
+     * web does). Unless a test turns this off, that bare request is recorded in [catalogRequests]
+     * instead of [received], so the suites that prove an exact frame order after the handshake keep
+     * proving it; ProviderRefreshTransmissionTest asserts the request itself (in order, with this off).
+     */
+    @Volatile var separateCatalogRequests = true
+    val catalogRequests = LinkedBlockingQueue<String>()
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
             sockets.put(webSocket)
@@ -109,7 +118,7 @@ class ConnectionHarness {
         override fun onMessage(webSocket: WebSocket, text: String) {
             log.add("${System.identityHashCode(webSocket)}:${text.take(40)}")
             onServerMessage?.invoke(text)
-            received.put(text)
+            if (separateCatalogRequests && text == """{"type":"providers-snapshot"}""") catalogRequests.put(text) else received.put(text)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

@@ -56,8 +56,10 @@ class NewSessionTransmissionTest {
     private fun withCatalog(vararg rows: String = arrayOf(work, personal, claude, codex)): Pair<RealTetherClient, WebSocket> {
         val (client, ws) = connected()
         assertFalse("no catalog of this socket yet", client.providerCatalogLive.value)
+        // ta-2uq: the ready asked for it once; an explicit ask is a second read (the harness keeps them apart).
         assertTrue(client.requestProviderCatalog())
-        assertEquals(listOf("providers-snapshot"), h.framesUntilBarrier().map { it.type() })
+        h.framesUntilBarrier()
+        assertEquals(2, h.catalogRequests.size)
         ws.send(catalogFrame(*rows))
         h.await(client.providerCatalogLive) { it }
         return client to ws
