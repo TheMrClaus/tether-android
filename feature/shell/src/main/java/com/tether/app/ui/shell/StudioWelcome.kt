@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.LineBreak
@@ -136,8 +137,7 @@ private fun WelcomeHeading(expanded: Boolean, vw: Float) {
         },
         color = t.white,
         style = cssText(type.ui, px / 16f, 650, trackingEm = -0.04f, lineHeight = 1.08f).copy(lineBreak = LineBreak.Heading),
-        // 14ch: Manrope's "0" advances ≈ 0.62em.
-        modifier = Modifier.widthIn(max = (14 * 0.62f * px).dp).semantics { heading() },
+        modifier = Modifier.widthIn(max = (14 * CH_EM * px).dp).semantics { heading() },
     )
 }
 
@@ -153,7 +153,7 @@ private fun WelcomeCopy(expanded: Boolean) {
         style = cssText(type.ui, rem, 400, lineHeight = 1.8f).copy(lineBreak = LineBreak.Paragraph),
         modifier = Modifier
             .padding(top = if (expanded) 24.dp else 20.dp, bottom = if (expanded) 32.dp else 24.dp)
-            .widthIn(max = (44 * 0.62f * rem * 16f).dp),
+            .widthIn(max = (44 * CH_EM * rem * 16f).dp),
     )
 }
 
@@ -161,7 +161,8 @@ private fun WelcomeCopy(expanded: Boolean) {
 @Composable
 private fun WelcomeKey(label: String, icon: ImageVector, classes: Set<com.tether.app.ui.components.KeyClass>, enabled: Boolean, onClick: () -> Unit, tag: String) {
     TetherKey(
-        onClick = onClick,
+        // A disabled key's semantics click still reaches `clickable`'s action; offline it does nothing.
+        onClick = { if (enabled) onClick() },
         classes = classes,
         label = label,
         icon = icon,
@@ -203,7 +204,7 @@ private fun Workflow(expanded: Boolean) {
                     WorkflowIcon(item.icon)
                     WorkflowTitle(item.title, Modifier.padding(top = 14.4.dp, bottom = 8.dp))
                     // `max-width: 28ch` at 0.8rem.
-                    WorkflowBody(item.body, Modifier.widthIn(max = (28 * 0.62f * 12.8f).dp))
+                    WorkflowBody(item.body, Modifier.widthIn(max = (28 * CH_EM * 12.8f).dp))
                 }
             }
         }
@@ -294,8 +295,8 @@ private fun ProvidersFooter(providers: List<ProviderAvailability>) {
                     .clearAndSetSemantics {
                         contentDescription = label
                         stateDescription = if (p.available) "Available" else "Not configured"
-                    }
-                    .testTag(StudioWelcomeTags.provider(index)),
+                        testTag = StudioWelcomeTags.provider(index)
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.4.dp),
             ) {
@@ -313,3 +314,6 @@ private fun ProvidersFooter(providers: List<ProviderAvailability>) {
 }
 
 private val LogoSize: Dp = 16.dp
+
+/** CSS `ch` in Manrope: the "0" advance, 578/1000 em (manrope_variable.ttf hmtx). */
+private const val CH_EM = 0.578f

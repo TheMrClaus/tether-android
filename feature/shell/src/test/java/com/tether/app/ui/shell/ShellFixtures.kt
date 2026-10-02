@@ -75,6 +75,8 @@ fun ShellUnderTest(
     onEvent: (String) -> Unit = {},
     /** ta-abm: the hosted surfaces (the draft's launching stage rides here). */
     slots: PhoneShellSlots = placeholderSlots(),
+    /** ta-3e7: the link the top bar prints (the welcome's offline goldens). */
+    link: LinkReadout = LinkReadout.Connected,
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
@@ -104,6 +106,7 @@ fun ShellUnderTest(
                     onCopyTetherId = { onEvent("copyId") },
                 ),
                 slots = slots,
+                link = link,
             )
           }
         }
