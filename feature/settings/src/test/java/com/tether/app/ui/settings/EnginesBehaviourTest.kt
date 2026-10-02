@@ -603,6 +603,91 @@ class EnginesBehaviourTest {
         assertEquals(emptyList<Any>(), writer.patches)
     }
 
+    /**
+     * ta-q9l: the client dropped its frame (a sign-out, an auth-required state, a server switch)
+     * between the tap on Change and the send, and the screen has not caught up (the composed frame
+     * is still there): nothing is sent; the write is never built from the on-screen frame.
+     */
+    @Test fun aFrameDroppedBetweenConfirmAndSendSendsNothing() {
+        val writer = RecordingWriter()
+        val live = ServerFixtures.view(settings)
+        var clientFrame: com.tether.app.client.ServerSettingsView? = live
+        show(ServerFixtures.binding(view = live, writer = writer).copy(fresh = { clientFrame }))
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        arm()
+        val action = tag(EngineTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            clientFrame = null
+            action()
+            flushWrites()
+        }
+        compose.waitForIdle()
+        assertTrue("the screen still draws the old frame", binding.settings != null)
+        assertFalse(exists(EngineTags.ConfirmSheet))
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /** ta-q9l: the positive control: the same tap with the client's frame live sends the confirmed value once. */
+    @Test fun aLiveClientFrameAtConfirmSends() {
+        val writer = RecordingWriter()
+        val live = ServerFixtures.view(settings)
+        show(ServerFixtures.binding(view = live, writer = writer).copy(fresh = { live }))
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        arm()
+        val action = tag(EngineTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            action()
+            flushWrites()
+        }
+        waitForWrites(writer, 1)
+        assertEquals(frames("""{"codexCommand":"/opt/codex"}"""), writer.frames())
+        assertEquals(1, writer.confirmedWrites.size)
+    }
+
+    /** ta-q9l: the binding's newest frame is the client's, never the composed one once the client has none. */
+    @Test fun latestSettingsNeverFallsBackToTheComposedFrame() {
+        val composed = ServerFixtures.view(settings)
+        val newer = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "/opt/newer")))
+        val b = ServerFixtures.binding(view = composed)
+        assertEquals("no hook: the composed frame", composed, b.latestSettings())
+        assertEquals("the client's newer frame", newer, b.copy(fresh = { newer }).latestSettings())
+        assertEquals("the client dropped it: none", null, b.copy(fresh = { null }).latestSettings())
+        assertEquals("no origin: none", null, b.copy(origin = null, fresh = { newer }).latestSettings())
+    }
+
+    /**
+     * ta-q9l: the server's value changes while the confirmation is open (another client wrote it):
+     * the confirmation shows the new "Now" and its key re-arms, the whole window again.
+     */
+    @Test fun aNowReplacedWhileTheConfirmationIsOpenReArmsTheKey() {
+        val writer = RecordingWriter()
+        showWith(writer)
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        arm()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            binding = binding.copy(settings = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "/opt/other")), envForced = forced))
+            flushWrites()
+        }
+        compose.mainClock.advanceTimeBy(32)
+        assertEquals("/opt/other", SafeText.original(textOf(EngineTags.ConfirmNow)))
+        tag(EngineTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { flushWrites() }
+        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS - 150)
+        tag(EngineTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { flushWrites() }
+        compose.mainClock.advanceTimeBy(32)
+        assertEquals(emptyList<Any>(), writer.patches)
+        tag(EngineTags.ConfirmSheet).assertExists()
+        // The window has run again: the tap sends.
+        compose.mainClock.advanceTimeBy(200)
+        tag(EngineTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { flushWrites() }
+        compose.mainClock.autoAdvance = true
+        waitForWrites(writer, 1)
+        assertEquals(frames("""{"codexCommand":"/opt/codex"}"""), writer.frames())
+    }
+
     /** r2 (F1): a no-break space is a visible token in the confirmation, and the value is sent exactly. */
     @Test fun aNoBreakSpaceIsShownAsATokenAndSentExactly() {
         val writer = answering()
@@ -641,6 +726,7 @@ class EnginesBehaviourTest {
     }
 
     /** r2 (F3): the send path refuses an unconfirmed patch naming what the server runs, whichever builder made it. */
+    @OptIn(com.tether.app.client.EngineConfirmationOnly::class)
     @Test fun theBindingRefusesAnUnconfirmedEngineWrite() {
         val writer = RecordingWriter()
         val b = ServerFixtures.binding(writer = writer)

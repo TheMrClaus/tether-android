@@ -370,7 +370,9 @@ fun WorktreeSetupConfirmDialog(confirmation: SetupConfirmation, onConfirm: () ->
         title = confirmation.title,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(WorktreeTags.Cancel))
-            ArmedConfirmKey(SETUP_CONFIRM_ACTION, WorktreeTags.ConfirmKey, onConfirm)
+            // ta-q9l: the host already keys the dialog on the confirmation's id; keyed here too, so
+            // a confirmation replaced under any host re-arms.
+            ArmedConfirmKey(SETUP_CONFIRM_ACTION, WorktreeTags.ConfirmKey, onConfirm, shown = confirmation)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(WorktreeTags.Confirm), verticalArrangement = Arrangement.spacedBy(12.dp)) {

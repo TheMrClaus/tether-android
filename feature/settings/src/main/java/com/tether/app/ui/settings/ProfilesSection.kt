@@ -635,7 +635,7 @@ internal fun ProfileConfirmDialog(r: ProfileRunsReview, onConfirm: () -> Unit, o
         title = ProfileRows.confirmTitle(r),
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ProfileTags.Cancel))
-            ArmedConfirmKey(ProfileRows.confirmAction(r), ProfileTags.Confirm, onConfirm)
+            ArmedConfirmKey(ProfileRows.confirmAction(r), ProfileTags.Confirm, onConfirm, shown = r)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(ProfileTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -666,7 +666,7 @@ internal fun ExtendsConfirmDialog(r: ExtendsReview, onConfirm: () -> Unit, onCan
         title = ProfileRows.extendsTitle(r),
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ProfileTags.Cancel))
-            ArmedConfirmKey(ProfileRows.ENGINE_ACTION, ProfileTags.Confirm, onConfirm)
+            ArmedConfirmKey(ProfileRows.ENGINE_ACTION, ProfileTags.Confirm, onConfirm, shown = r)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(ProfileTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -695,7 +695,7 @@ internal fun EnvConfirmDialog(r: EnvReview, onConfirm: () -> Unit, onCancel: () 
         title = ProfileRows.envTitle(r),
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ProfileTags.Cancel))
-            ArmedConfirmKey(ProfileRows.ENV_CONFIRM, ProfileTags.Confirm, onConfirm)
+            ArmedConfirmKey(ProfileRows.ENV_CONFIRM, ProfileTags.Confirm, onConfirm, shown = r)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(ProfileTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -57,12 +57,22 @@ data class ServerSettingsBinding(
     val replies: Long = 0L,
     /**
      * ta-dh1 r2: the client's NEWEST frame, read when a confirmed write is built (the composed
-     * [settings] may be a frame behind it). Null: [settings] is the newest (tests, previews).
+     * [settings] may be a frame behind it). Null: [settings] is the newest (tests, previews). A hook
+     * that returns null means the client holds no frame: a confirmed write is refused (ta-q9l).
      */
     val fresh: (() -> ServerSettingsView?)? = null,
 ) {
-    /** r2: the newest frame of this binding's server, or null without one. */
-    fun latestSettings(): ServerSettingsView? = if (origin == null) null else fresh?.invoke() ?: settings
+    /**
+     * r2: the newest frame of this binding's server, or null without one. ta-q9l: with a [fresh]
+     * hook, ONLY the client's frame counts: when the client has dropped it (a sign-out, an
+     * auth-required state, a server switch) and the composed [settings] has not caught up yet, this
+     * is null and a confirmed write sends nothing; it never falls back to the on-screen frame.
+     */
+    fun latestSettings(): ServerSettingsView? {
+        if (origin == null) return null
+        val newest = fresh
+        return if (newest != null) newest() else settings
+    }
 
     /**
      * A write to the server this binding was drawn from; false (nothing sent) without one. r2: never

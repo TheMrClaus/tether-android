@@ -288,7 +288,10 @@ object ServerSettingsPatch {
      *
      * r2: the ONLY producer of a [ConfirmedEngineWrite], the only form in which the client sends a
      * [SettingKind.Runs] key ([TetherClient.setServerSettings] refuses one in a plain patch).
+     * ta-q9l: [EngineConfirmationOnly]: a caller must opt in, so the confirmation path (and the
+     * tests) are the only, greppable, places that mint one.
      */
+    @EngineConfirmationOnly
     fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String): ConfirmedEngineWrite? {
         if (setting.kind != SettingKind.Runs || view.forced(setting)) return null
         if (value == view.text(setting) || !fits(setting, value)) return null
@@ -300,6 +303,20 @@ object ServerSettingsPatch {
     fun fits(setting: ServerSetting, value: String): Boolean =
         setting.maxBytes <= 0 || value.toByteArray(Charsets.UTF_8).size <= setting.maxBytes
 }
+
+/**
+ * ta-q9l: marks [ServerSettingsPatch.engineValue], the one producer of a [ConfirmedEngineWrite].
+ * Only the code that runs after the user confirmed a value (feature/settings' pending engine edit)
+ * opts in; any other use is a compile error. Kotlin has no friend modules, so this is the
+ * cross-module restriction: an opt-in is explicit and greppable, never silent.
+ */
+@RequiresOptIn(
+    level = RequiresOptIn.Level.ERROR,
+    message = "Only the engine confirmation may build a ConfirmedEngineWrite (ta-dh1 r2, ta-q9l).",
+)
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.FUNCTION)
+annotation class EngineConfirmationOnly
 
 /**
  * ta-dh1 r2: a `set-server-settings` patch naming a key that sets what the server RUNS (an engine's

@@ -924,6 +924,11 @@ val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
 /**
  * The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed.
  * ta-23f: public, so the new-session composer's setup confirmation (feature/shell) arms the same way.
+ *
+ * ta-q9l: [shown] is what the confirmation shows (its edit, its "Now"): when it changes while the
+ * dialog is open, the key disarms and the window runs again, so a value replaced under the user's
+ * finger cannot be confirmed unread. Pass a stable value (equal across recompositions while the
+ * same thing is shown); null keys on nothing (the key arms once per composition).
  */
 @Composable
 fun ArmedConfirmKey(
@@ -932,10 +937,11 @@ fun ArmedConfirmKey(
     onConfirm: () -> Unit,
     // T10.4: the web's `button-primary button-danger` for a destructive confirmation.
     classes: Set<com.tether.app.ui.components.KeyClass> = KeyClasses.ButtonPrimary,
+    shown: Any? = null,
 ) {
     val ms = LocalConfirmArmMs.current
-    var armed by remember { mutableStateOf(ms <= 0L) }
-    LaunchedEffect(ms) {
+    var armed by remember(shown) { mutableStateOf(ms <= 0L) }
+    LaunchedEffect(ms, shown) {
         if (ms > 0L) {
             delay(ms)
             armed = true
@@ -955,7 +961,7 @@ internal fun ClaudeCliConfirmDialog(current: String, next: String, onConfirm: ()
         title = ClaudeCliCopy.CONFIRM_TITLE,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ServerSettingsTags.CliCancel))
-            ArmedConfirmKey(ClaudeCliCopy.CONFIRM_ACTION, ServerSettingsTags.CliConfirm, onConfirm)
+            ArmedConfirmKey(ClaudeCliCopy.CONFIRM_ACTION, ServerSettingsTags.CliConfirm, onConfirm, shown = current to next)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(ServerSettingsTags.CliConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {

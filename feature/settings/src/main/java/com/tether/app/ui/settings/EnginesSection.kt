@@ -335,6 +335,7 @@ private fun EngineValueRow(
  * tap closes the confirmation and sends nothing. One confirmation is one write, a double tap
  * included.
  */
+@OptIn(com.tether.app.client.EngineConfirmationOnly::class) // ta-q9l: the one place a confirmed write is built
 @Composable
 private fun PendingEngineEdit(pending: EngineEdit?, binding: ServerSettingsBinding, onDone: () -> Unit) {
     val edit = pending ?: return
@@ -379,7 +380,8 @@ internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () ->
         title = EngineRows.confirmTitle(edit),
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(EngineTags.Cancel))
-            ArmedConfirmKey(EngineRows.confirmAction(edit), EngineTags.Confirm, onConfirm)
+            // ta-q9l: a replaced edit, or a "Now" that changed meanwhile, re-arms the key.
+            ArmedConfirmKey(EngineRows.confirmAction(edit), EngineTags.Confirm, onConfirm, shown = edit to now)
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(EngineTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {

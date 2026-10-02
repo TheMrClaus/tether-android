@@ -19,6 +19,7 @@ import java.io.File
  * and writes (the switch's `headlessModes` join with the issue #86 rule, and the confirmed
  * home / command / launch command value), plus `detect-engines` over a real socket.
  */
+@OptIn(EngineConfirmationOnly::class)
 class EngineSettingsTest {
     private fun frame(json: String) = ServerMessage.parse(json) as ServerMessage.ServerSettings
 
