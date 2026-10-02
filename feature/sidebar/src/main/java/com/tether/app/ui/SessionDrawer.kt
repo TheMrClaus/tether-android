@@ -237,22 +237,26 @@ private fun WorkspaceFolderPicker(
  * lists the current workspace (else the server's root) as it opens, and a chosen folder is pinned
  * and made current exactly as from the drawer. The host composes it at shell level, so it opens
  * whether or not the rail is showing.
+ *
+ * [scope] runs the preference write (the pin and the unfold) and must OUTLIVE this picker: choosing
+ * dismisses it before the write has run, so a scope of its own would cancel the write with it
+ * (ta-3e7 r2). The shell passes its own, as the drawer's controller writes on the drawer's.
  */
 @Composable
 fun WorkspacePickerHost(
     vm: TetherViewModel,
     prefs: UiPrefs,
     workspaceRoot: String?,
+    scope: kotlinx.coroutines.CoroutineScope,
     onDismiss: () -> Unit,
 ) {
     val client = vm.client
-    val scope = rememberCoroutineScope()
     val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
     val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
     val latestPrefs by rememberUpdatedState(preferences)
-    val controller = remember(vm, prefs) {
+    val controller = remember(vm, prefs, scope) {
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },

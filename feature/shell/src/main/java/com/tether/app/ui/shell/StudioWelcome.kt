@@ -28,6 +28,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -176,10 +180,45 @@ private fun WelcomeKey(label: String, icon: ImageVector, classes: Set<com.tether
 
 private class WorkflowItem(val icon: ImageVector, val title: String, val body: String)
 
+/**
+ * The tiles' glyphs as the web draws them: lucide-react 1.47.0 (tether 887c222's lock) at
+ * `strokeWidth={1.7}`. The app's lucide build is older and its git-branch is a different shape, so
+ * the three are drawn here from the web's own path data (circles as two arcs).
+ */
+private fun lucide1_7(name: String, vararg paths: String): ImageVector =
+    ImageVector.Builder("Welcome.$name", 24.dp, 24.dp, 24f, 24f).apply {
+        paths.forEach { d ->
+            addPath(
+                pathData = addPathNodes(d),
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 1.7f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            )
+        }
+    }.build()
+
+private fun circle(cx: Float, cy: Float, r: Float) = "M${cx + r} ${cy}a$r $r 0 1 1 ${-2 * r} 0a$r $r 0 1 1 ${2 * r} 0"
+
+private val WelcomeGitBranch = lucide1_7("GitBranch", "M15 6a9 9 0 0 0-9 9V3", circle(18f, 6f, 3f), circle(6f, 18f, 3f))
+private val WelcomeMessageSquare = lucide1_7(
+    "MessageSquare",
+    "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z",
+)
+private val WelcomeRadio = lucide1_7(
+    "Radio",
+    "M16.247 7.761a6 6 0 0 1 0 8.478",
+    "M19.075 4.933a10 10 0 0 1 0 14.134",
+    "M4.925 19.067a10 10 0 0 1 0-14.134",
+    "M7.753 16.239a6 6 0 0 1 0-8.478",
+    circle(12f, 12f, 2f),
+)
+
 private val WorkflowItems = listOf(
-    WorkflowItem(TetherIcons.GitBranch, "Start with your project", "Work in an existing folder or give an idea its own worktree."),
-    WorkflowItem(TetherIcons.MessageSquare, "Choose your collaborator", "Bring your preferred coding agent, models, and tools."),
-    WorkflowItem(TetherIcons.Radio, "Stay in the conversation", "Follow progress and answer your agents from any screen."),
+    WorkflowItem(WelcomeGitBranch, "Start with your project", "Work in an existing folder or give an idea its own worktree."),
+    WorkflowItem(WelcomeMessageSquare, "Choose your collaborator", "Bring your preferred coding agent, models, and tools."),
+    WorkflowItem(WelcomeRadio, "Stay in the conversation", "Follow progress and answer your agents from any screen."),
 )
 
 /**

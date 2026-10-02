@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.tether.app.client.ConnectionState
+import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.MainShell
 import com.tether.app.ui.TetherViewModel
@@ -25,11 +26,13 @@ import com.tether.app.ui.draft.DraftComposerTags
 import com.tether.app.ui.draft.DraftFixtures
 import com.tether.app.ui.draft.DraftTestClient
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.sidebar.SidebarTags
 import com.tether.app.ui.theme.TetherTheme
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -52,7 +55,7 @@ abstract class StudioWelcomeBase(private val width: Int, private val height: Int
     @get:Rule val tmp = TemporaryFolder()
 
     private val job = Job()
-    private val prefs: UiPrefs by lazy {
+    protected val prefs: UiPrefs by lazy {
         UiPrefs.on(PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + job)) { File(tmp.root, "ui.preferences_pb") })
     }
     protected val client = DraftTestClient()
@@ -89,7 +92,7 @@ abstract class StudioWelcomeBase(private val width: Int, private val height: Int
 
     protected fun tap(tag: String) {
         awaitTag(tag)
-        rule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNodeWithTag(tag, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
     }
 
     protected fun pickerShown() = rule.onAllNodesWithText("Choose a folder").fetchSemanticsNodes().isNotEmpty()
@@ -122,6 +125,48 @@ abstract class StudioWelcomeBase(private val width: Int, private val height: Int
         assertFalse("the sheet is not the picker", vm.draftOpen.value)
         rule.onNodeWithText("Cancel").performSemanticsAction(SemanticsActions.OnClick)
         until("the picker closed") { !pickerShown() }
+    }
+
+    protected fun pinned(): List<String> = runBlocking { prefs.preferences.first().pinnedProjects }
+
+    /** The picker lists [folder]; "Use this folder" chooses it; the pin must reach the stored preferences. */
+    private fun chooseAndAwaitPin(folder: String, open: () -> Unit) {
+        client.directories.value = DirectoryListing(current = folder)
+        open()
+        until("the folder picker") { pickerShown() }
+        rule.onNodeWithText("Use this folder").performSemanticsAction(SemanticsActions.OnClick)
+        until("the picker closed") { !pickerShown() }
+        until("$folder pinned in the stored preferences (now ${pinned()})") { folder in pinned() }
+    }
+
+    /**
+     * r2 (F1): choosing from Open workspace dismisses the picker before the preference write runs;
+     * the write must survive that (it ran on the picker's own scope and was cancelled with it, 12 of
+     * 13 on a phone). Repeated: the loss was timing-dependent.
+     */
+    @Test
+    fun choosingAFolderFromOpenWorkspacePinsItEveryTime() {
+        launch()
+        repeat(8) { i ->
+            val folder = "${DraftFixtures.ROOT}/welcome-$i"
+            chooseAndAwaitPin(folder) { tap(StudioWelcomeTags.OpenWorkspace) }
+            // It is also the current workspace (new sessions default to it).
+            until("$folder current") { vm.currentWorkspace.value == folder }
+        }
+        assertEquals((0 until 8).map { "${DraftFixtures.ROOT}/welcome-$it" }.toSet(), pinned().filter { "/welcome-" in it }.toSet())
+    }
+
+    /** r2 control: the drawer's Add workspace, the same picker on the drawer's own (long-lived) scope. */
+    @Test
+    fun choosingAFolderFromTheDrawersAddWorkspacePinsItToo() {
+        launch()
+        repeat(3) { i ->
+            val folder = "${DraftFixtures.ROOT}/drawer-$i"
+            chooseAndAwaitPin(folder) {
+                if (!exists(SidebarTags.AddWorkspace)) tap(ShellTags.MenuKey)
+                tap(SidebarTags.AddWorkspace)
+            }
+        }
     }
 
     @Test
