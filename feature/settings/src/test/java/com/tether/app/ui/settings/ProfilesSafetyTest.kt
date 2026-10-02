@@ -392,27 +392,24 @@ class ProfilesSafetyTest {
 
     // ---- r3 ------------------------------------------------------------------------------------------
 
-    /** The verifier's probe: a key holding `=` (it would set LD_PRELOAD in the child) is refused at the Add row, with no confirmation and nothing sent. */
-    @Test fun anEqualsSignInANewKeyIsRefusedAndSaid() {
-        val w = recording()
+    /**
+     * ta-coik.4: a key holding `=` is any name the web's env editor takes (settings-dialog.tsx:366-372),
+     * so it is no longer refused for its shape. Still risky (it would set LD_PRELOAD in the child), it
+     * goes through the confirmation (ta-coik.5's), and confirmed it is written exactly as typed.
+     */
+    @Test fun anEqualsSignInANewKeyIsTakenThroughItsConfirmation() {
+        val w = answering()
         show(writer = w)
         tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("LD_PRELOAD=/tmp/x.so:")
         tap(ProfileTags.envNewReveal("claude-work"))
         tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("v")
         tap(ProfileTags.envAdd("claude-work"))
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(ProfileTags.envNewNote("claude-work")).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_BAD_NAME))
-        // Nor through a rename (Done or a focus loss).
-        val key = ProfileTags.envKey("zai", "ANTHROPIC_BASE_URL")
-        tag(key).performScrollTo().performClick()
-        tag(key).performTextReplacement("MODE=x")
-        tag(ProfileTags.field("zai", ProfileTags.LABEL)).performScrollTo().performClick()
-        compose.waitForIdle()
-        typeAndDone(key, "MODE=x")
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_BAD_NAME))
+        assertFalse("no shape refusal", texts().any { it.startsWith("Not saved: use letters") })
+        tag(ProfileTags.ConfirmSheet).assertExists()
         assertEquals(emptyList<Any>(), w.writes)
+        confirm()
+        waitForWrites(w, 1)
+        assertTrue(w.frames().single().toString().contains("LD_PRELOAD=/tmp/x.so:"))
     }
 
     /** A key the server already holds that is not a plain name is changed only through the confirmation. */

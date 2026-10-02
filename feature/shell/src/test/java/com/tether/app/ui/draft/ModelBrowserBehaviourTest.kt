@@ -15,7 +15,6 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import com.tether.app.client.CustomModelId
 import com.tether.app.protocol.SessionModelOption
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.MainShell
@@ -176,7 +175,7 @@ class ModelBrowserBehaviourTest {
     }
 
     @Test
-    fun retrySendsOnceIsDebouncedAndASocketChangeDropsIt() {
+    fun everyRetryTapSendsLikeTheWebAndASocketChangeDropsIt() {
         val failed = DraftFixtures.catalog.map {
             if (it.key == "codex") it.copy(status = "error", models = emptyList(), error = "codex app-server timed out", fetchedAt = 100) else it
         }
@@ -186,32 +185,29 @@ class ModelBrowserBehaviourTest {
         awaitTag(ModelBrowserTags.error("codex"))
         tap(ModelBrowserTags.retry("codex"))
         until("one refresh went out") { client.refreshes.size == 1 }
-        // A double tap, then another tap long after the debounce while nothing settled it: still one.
+        // ta-coik.4: a double tap sends twice, as the web's Retry (no 2 s debounce, no in-flight hold).
         tap(ModelBrowserTags.retry("codex"))
-        client.now.addAndGet(5_000)
-        tap(ModelBrowserTags.retry("codex"))
-        rule.waitForIdle()
-        assertEquals(listOf("codex" to 1L), client.refreshes.toList())
-        // The socket is replaced: the flight is dropped and nothing is resent on the new one.
+        until("the second tap went out too") { client.refreshes.size == 2 }
+        assertEquals(listOf("codex" to 1L, "codex" to 1L), client.refreshes.toList())
+        // The socket is replaced: nothing is resent on the new one.
         rule.runOnUiThread { client.newSocket() }
         until("the old catalog is no longer shown") { !exists(ModelBrowserTags.error("codex")) }
         rule.waitForIdle()
-        assertEquals(1, client.refreshes.size)
+        assertEquals(2, client.refreshes.size)
         // The new socket's own catalog: a tap there goes (drawn on socket 2).
         rule.runOnUiThread { client.push(failed) }
         awaitTag(ModelBrowserTags.retry("codex"))
         tap(ModelBrowserTags.retry("codex"))
-        until("a refresh on the new socket") { client.refreshes.size == 2 }
+        until("a refresh on the new socket") { client.refreshes.size == 3 }
         assertEquals("codex" to 2L, client.refreshes.last())
-        // The settings panel's Refresh goes through the same throttle.
+        // The settings panel's Refresh sends each tap as well.
         tap(ModelBrowserTags.cog("codex"))
         tap(ModelBrowserTags.refresh("codex"))
-        rule.waitForIdle()
-        assertEquals(2, client.refreshes.size)
+        until("the panel's Refresh went out") { client.refreshes.size == 4 }
     }
 
     @Test
-    fun customIdsAreAddedRemovedAndValidated() {
+    fun customIdsAreAddedRemovedAndFollowTheWebsRule() {
         openBrowser()
         tap(NEW_SESSION_ROW_TAG + "claude")
         tap(ModelBrowserTags.cog("claude"))
@@ -227,11 +223,22 @@ class ModelBrowserBehaviourTest {
             rule.waitForIdle()
             assertTrue(composer.state.value.customModels.isEmpty())
         }
-        refused("two words", CustomModelId.Problem.NotOneWord.copy)
-        refused("evil\u202Etxt.exe", CustomModelId.Problem.NotOneWord.copy)
-        refused("\u200Bhidden", CustomModelId.Problem.NotOneWord.copy)
-        refused("é".repeat(100) + "x", CustomModelId.Problem.TooLong.copy)
         refused("m1", "This provider already offers that model.")
+        // ta-coik.4: the web's rule (model-browser.tsx:530-532): blank is refused, with no words.
+        typeInto(add, "   ")
+        rule.waitForIdle()
+        rule.onNodeWithTag(plus, useUnmergedTree = true).assertIsNotEnabled()
+        assertFalse(exists(ModelBrowserTags.AddProblem))
+        // Taken, as on the web: two words, a bidi override, a zero-width character, past 200 bytes.
+        for (ok in listOf("two words", "evil\u202Etxt.exe", "\u200Bhidden", "é".repeat(100) + "x")) {
+            typeInto(add, ok)
+            until("+ enabled for $ok") { enabled(plus) }
+            assertFalse(exists(ModelBrowserTags.AddProblem))
+            tap(plus)
+            until("added: $ok") { composer.state.value.customModels["claude"].orEmpty().contains(ok) }
+            rule.runOnUiThread { composer.removeCustomModel("claude", ok) }
+            until("removed: $ok") { composer.state.value.customModels.isEmpty() }
+        }
         typeInto(add, "  my-model[1m]  ")
         until("+ enabled") { enabled(plus) }
         tap(plus)

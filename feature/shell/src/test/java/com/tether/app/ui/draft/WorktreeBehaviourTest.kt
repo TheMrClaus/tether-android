@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.tether.app.client.READINESS_NEED_BRANCH
 import com.tether.app.client.READINESS_NEED_PR
-import com.tether.app.client.READINESS_PR_TOO_LARGE
 import com.tether.app.client.SETUP_BODY_MAY_DEFAULT
 import com.tether.app.client.SETUP_BODY_MAY_PR
 import com.tether.app.client.SETUP_CHANGED_COPY
@@ -294,7 +293,10 @@ class WorktreePhoneBehaviourTest : WorktreeHarness(412, 915) {
         until("the number is asked for") { shown(DraftComposerTags.Readiness) == READINESS_NEED_PR }
         type(WorktreeField.Pr, "12a345678")
         until("digits only, as the web's input") { formStr("worktreePr") == "12345678" }
-        until("past the server's limit") { shown(DraftComposerTags.Readiness) == READINESS_PR_TOO_LARGE }
+        // ta-coik.4: the web's Number.parseInt rule, no app limit (the server validates).
+        until("ready past the retired 9,999,999 limit") { !exists(DraftComposerTags.Readiness) && sendEnabled() }
+        type(WorktreeField.Pr, "0")
+        until("0 asks for the number") { shown(DraftComposerTags.Readiness) == READINESS_NEED_PR }
         type(WorktreeField.Pr, "42")
         until("ready") { !exists(DraftComposerTags.Readiness) && sendEnabled() }
         assertTrue(client.creates.isEmpty())

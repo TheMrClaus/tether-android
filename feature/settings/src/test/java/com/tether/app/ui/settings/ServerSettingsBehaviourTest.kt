@@ -215,20 +215,26 @@ class ServerSettingsBehaviourTest {
         )
     }
 
-    /** r2 (verifier): an edit that is not all digits is refused whole, never rewritten and sent. */
-    @Test fun aNumberFieldRefusesAnythingButDigits() {
+    /**
+     * ta-coik.4: the field takes what a browser's number input takes and commits `Number(text)`
+     * (settings-dialog.tsx:181-187): "6e4" is 60000 on the wire. Negative control: a character a
+     * number input does not take (a space, Arabic-Indic digits) is refused and nothing is sent.
+     */
+    @Test fun aNumberFieldCommitsAsTheBrowsersNumberInput() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
         val port = tag(ServerSettingsTags.input(ServerSetting.Port))
-        for (bad in listOf("6e4", "-5", "41.5", "4 173", "١٢")) {
+        for (bad in listOf("4 173", "١٢")) {
             port.performTextReplacement(bad)
             port.performImeAction()
             compose.waitForIdle()
             assertTrue(bad, allSemantics().contains("EditableText=4173"))
         }
-        shown = false
-        compose.waitForIdle()
         assertEquals(emptyList<Any>(), writer.patches)
+        port.performTextReplacement("6e4")
+        port.performImeAction()
+        compose.waitForIdle()
+        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"port":60000}}""")), writer.frames())
     }
 
     /** r2: without a server (signed out) no settings are drawn, even with a frame in hand. */
