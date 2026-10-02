@@ -373,7 +373,7 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
         c.devicesLine?.takeIf { it.error }?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) }
         // The code card's own clock (the web's `now`): read on the hand-driven clock in the goldens.
         var now by remember { mutableLongStateOf(binding.now()) }
-        c.shown?.let { shown -> key(shown.serial) { PairingCodeCard(c, shown, now, onTick = { now = binding.now() }) } }
+        c.shown?.let { shown -> key(shown.serial) { PairingCodeCard(c, shown, now, readNow = binding.now, onTick = { now = it }) } }
         val devices = c.devices
         val busy = c.devicesBusy != null || c.ownerNeeded
         devices?.forEach { device ->
@@ -451,7 +451,7 @@ private fun DeviceRow(device: PairedDevice, self: Boolean, now: Long, narrow: Bo
  * Once it expires the plaintext is dropped and the card says so.
  */
 @Composable
-private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, onTick: () -> Unit) {
+private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, readNow: () -> Long, onTick: (Long) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val code = shown.code
@@ -464,11 +464,14 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, o
             c.expire(shown.serial)
             return@LaunchedEffect
         }
-        // Bounded: one tick a second for the seconds the code had left when it was drawn, then one
-        // more read of the clock (a code that has run out then relaunches this as expired).
-        repeat(left.coerceAtMost(PAIRING_TICKS_MAX).toInt()) {
+        // One tick a second while the clock says the code has time left (bounded): the tick that
+        // finds it run out relaunches this as expired.
+        var ticks = 0L
+        while (ticks++ < PAIRING_TICKS_MAX) {
             delay(1_000)
-            onTick()
+            val at = readNow()
+            onTick(at)
+            if (DevicesRules.secondsLeft(shown.expiresAt, at) <= 0) break
         }
     }
     LaunchedEffect(copied) {
