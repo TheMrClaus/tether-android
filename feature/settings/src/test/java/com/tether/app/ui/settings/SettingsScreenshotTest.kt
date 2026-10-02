@@ -50,10 +50,20 @@ enum class SettingsShot(
     val server: ServerShot? = null,
     val profiles: ProfilesShot? = null,
     val nodes: NodesShot? = null,
+    val devices: DevicesShot? = null,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
-    Devices("settings-devices", SettingsTab.Devices),
+    Devices("settings-devices", SettingsTab.Devices, devices = DevicesShot.Top),
+    DevicesSessions("settings-devices-sessions", SettingsTab.Devices, devices = DevicesShot.Sessions),
+    DevicesPaired("settings-devices-paired", SettingsTab.Devices, devices = DevicesShot.Paired),
+    DevicesSelf("settings-devices-self", SettingsTab.Devices, devices = DevicesShot.Self),
+    DevicesCode("settings-devices-code", SettingsTab.Devices, devices = DevicesShot.Code),
+    DevicesCodeRevealed("settings-devices-code-revealed", SettingsTab.Devices, devices = DevicesShot.CodeRevealed),
+    DevicesCodeExpired("settings-devices-code-expired", SettingsTab.Devices, devices = DevicesShot.CodeExpired),
+    DevicesOwner("settings-devices-owner", SettingsTab.Devices, devices = DevicesShot.Owner),
+    DevicesChecking("settings-devices-checking", SettingsTab.Devices, devices = DevicesShot.Checking),
+    DevicesError("settings-devices-error", SettingsTab.Devices, devices = DevicesShot.Error),
     Engines("settings-engines", SettingsTab.Engines, accounts = AccountsShot.Loaded),
     EnginesSync("settings-engines-sync", SettingsTab.Engines, accounts = AccountsShot.Sync),
     EnginesLoading("settings-engines-loading", SettingsTab.Engines, accounts = AccountsShot.Loading),
@@ -107,6 +117,44 @@ enum class NodesShot(
     ;
 
     fun binding(actions: NodesActions) = NodesBinding(list, NodeFixtures.ORIGIN, actions, NodeFixtures.CONSOLE, now = { NodeFixtures.NOW })
+}
+
+/**
+ * T10.4: the Devices seeds, timing-free like the others: the controller is handed a state built HERE
+ * (so the first frame is the drawn tab and nothing is read), over a source that fails the shot on
+ * any call, the clock fixed. `settings-devices` the top (Notifications, Passkeys), `-sessions` the
+ * signed-in sessions (the app's passkey session marked), `-paired` the paired devices with the pair
+ * hint and Revoke every device, `-self` a device-token sign-in whose only device is this phone,
+ * `-code` a fresh code masked, `-code-revealed` the same shown (an obviously FAKE code; the one tap
+ * of the shot, a synchronous state change on the hand clock), `-code-expired` the expired card,
+ * `-owner` the owner-grade refusal before tether #236 is deployed, `-checking` the opening reads in
+ * flight, `-error` a refusal in each area.
+ */
+enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
+    Top(null),
+    Sessions(DevicesTags.Sessions),
+    Paired(DevicesTags.Paired),
+    Self(DevicesTags.Paired),
+    Code(DevicesTags.Paired),
+    CodeRevealed(DevicesTags.Paired, reveal = true),
+    CodeExpired(DevicesTags.Paired),
+    Owner(null),
+    Checking(null),
+    Error(DevicesTags.Paired),
+    ;
+
+    fun seed(): DevicesSeed = when (this) {
+        Top, Sessions, Paired -> DevicesFixtures.seed()
+        Self -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, devices = listOf(DevicesFixtures.PHONE))
+        Code, CodeRevealed -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE))
+        CodeExpired -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE, expiresAt = DevicesFixtures.NOW - 1_000))
+        Owner -> DevicesSeed(ownerNeeded = true, signIn = com.tether.app.client.AppSignIn.DeviceToken)
+        Checking -> DevicesSeed()
+        Error -> DevicesFixtures.seed().copy(
+            devicesLine = DevicesLine("No such device.", error = true),
+            securityLine = DevicesLine("Sign in with a passkey first, then turn password sign-in off — this proves the passkey works before it becomes the only way in.", error = true),
+        )
+    }
 }
 
 /**
@@ -240,6 +288,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     setContent {
         focus = androidx.compose.ui.platform.LocalFocusManager.current
         val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
+        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed()) }
         SettingsUnderTest(
             store.prefs,
             state,
@@ -251,6 +300,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             serverSettings = shot.server?.binding() ?: ServerSettingsBinding.None,
             providers = shot.profiles?.binding() ?: ProvidersBinding.None,
             nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
+            devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
         )
     }
     mainClock.advanceTimeBy(600)
@@ -272,12 +322,17 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
+    if (shot.devices?.reveal == true) {
+        onNodeWithTag(DevicesTags.CodeReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
     if (shot.profiles?.reveal == true) {
         onNodeWithTag(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
-    (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo)?.let { scrollTo ->
+    (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo ?: shot.devices?.scrollTo)?.let { scrollTo ->
         // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
         // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
         // shows), and the scroll runs out on the hand-driven clock.
@@ -328,7 +383,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards, the custom providers and the Nodes list and form; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards, the custom providers, the Nodes list and form, and the Devices top, paired devices and pairing code; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -337,6 +392,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

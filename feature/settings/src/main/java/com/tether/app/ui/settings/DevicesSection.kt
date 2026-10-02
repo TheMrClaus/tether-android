@@ -650,7 +650,7 @@ private fun Tag(text: String, modifier: Modifier = Modifier) {
 
 /** The confirmations, in the web's confirm chrome; the confirm key is armed after a beat (ta-dh1 r2) and drawn as danger. */
 @Composable
-private fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
+internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val (title, body, action) = when (confirm) {
         is DevicesConfirm.Revoke -> Triple(DevicesCopy.REVOKE_TITLE, DevicesRules.revokeBody(DevicesRules.label(confirm.device.label, "Paired device"), confirm.self), DevicesCopy.REVOKE_CONFIRM)
         is DevicesConfirm.RevokeAll -> Triple(DevicesCopy.REVOKE_ALL_TITLE, DevicesRules.revokeAllBody(confirm.effect), DevicesCopy.REVOKE_ALL_CONFIRM)
