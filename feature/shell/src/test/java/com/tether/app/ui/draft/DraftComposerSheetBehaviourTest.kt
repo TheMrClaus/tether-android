@@ -144,10 +144,30 @@ class DraftComposerSheetBehaviourTest {
         awaitTag(DraftComposerTags.Sheet)
     }
 
+    private fun chipSays() = rule.onNodeWithTag(ModelBrowserTags.Chip, useUnmergedTree = true).fetchSemanticsNode().config
+        .getOrNull(SemanticsProperties.ContentDescription)?.joinToString().orEmpty()
+
+    /**
+     * ta-2uq: pick [key]'s [model] through the Model chip and its browser (the provider rows are in
+     * the browser's "all" view now), as the web does: the provider row, then the model row.
+     */
+    private fun pick(key: String, model: String = "m1") {
+        tap(ModelBrowserTags.Chip)
+        awaitTag(ModelBrowserTags.Browser)
+        if (!exists(ModelBrowserTags.row(key, model))) {
+            if (exists(ModelBrowserTags.Back)) tap(ModelBrowserTags.Back)
+            tap(NEW_SESSION_ROW_TAG + key)
+        }
+        tap(ModelBrowserTags.row(key, model))
+        awaitGone(ModelBrowserTags.Browser)
+        until("the draft picked $key / $model") { formKey() == key && formModel() == model }
+    }
+
+    private fun formModel() = (composer.state.value.form["model"] as? JsStr)?.value.orEmpty()
+
     /** Pick [key], type [text] and Send (each step waited on). */
     private fun compose(key: String, text: String) {
-        tap(NEW_SESSION_ROW_TAG + key)
-        until("the draft picked $key") { formKey() == key }
+        pick(key)
         type(text)
         until("Send enabled") { runCatching { rule.onNodeWithTag(DraftComposerTags.Send, useUnmergedTree = true).assertIsEnabled() }.isSuccess }
     }
@@ -198,11 +218,9 @@ class DraftComposerSheetBehaviourTest {
         client.directories.value = DirectoryListing(current = "/srv/other", parent = "/srv", entries = emptyList())
         runBlocking { prefs.updatePreferences { it.copy(pinnedProjects = listOf("/srv/ws/app"), defaultWorkspace = "/srv/ws/docs") } }
         openSheet()
-        // A provider row picks that row (checked, announced selected).
-        tap(NEW_SESSION_ROW_TAG + "personal")
-        until("personal picked") { formKey() == "personal" }
-        until("the row is drawn selected") { selected(NEW_SESSION_ROW_TAG + "personal") }
-        assertFalse(selected(NEW_SESSION_ROW_TAG + "work"))
+        // ta-2uq: the Model chip's browser picks the row and its model; the chip names them.
+        pick("personal")
+        until("the chip names the pick") { chipSays().contains("Claude (personal) · Model 1") }
         // The folder chip's quick picks (pinned → default → current → root).
         until("the root seeded the folder") { formCwd() == DraftFixtures.ROOT }
         tap(DraftComposerTags.WorkspaceChip)
@@ -257,9 +275,12 @@ class DraftComposerSheetBehaviourTest {
         reason(READINESS_NEED_PROMPT)
         type("Hello")
         reason(READINESS_NEED_PROVIDER)
-        tap(NEW_SESSION_ROW_TAG + "opencode")
+        pick("claude")
+        reason(READINESS_NEED_CWD)
+        // ta-2uq: the picked row starts loading again (a refresh with nothing cached): the web's order.
+        rule.runOnUiThread { client.push(DraftFixtures.catalog.map { if (it.key == "claude") it.copy(status = "loading", models = emptyList()) else it }) }
         reason(READINESS_MODELS_LOADING)
-        tap(NEW_SESSION_ROW_TAG + "claude")
+        rule.runOnUiThread { client.push(DraftFixtures.catalog) }
         reason(READINESS_NEED_CWD)
         // A disabled Send sends nothing, however it is reached.
         rule.onNodeWithTag(DraftComposerTags.Send, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
@@ -269,7 +290,10 @@ class DraftComposerSheetBehaviourTest {
         rule.runOnUiThread { client.workspaceRoot.value = DraftFixtures.ROOT }
         awaitGone(DraftComposerTags.Readiness)
         until("Send enabled") { runCatching { rule.onNodeWithTag(DraftComposerTags.Send, useUnmergedTree = true).assertIsEnabled() }.isSuccess }
-        // An unavailable row cannot be picked.
+        // An unavailable row cannot be opened in the browser.
+        tap(ModelBrowserTags.Chip)
+        tap(ModelBrowserTags.Back)
+        awaitTag(NEW_SESSION_ROW_TAG + "pi")
         rule.onNodeWithTag(NEW_SESSION_ROW_TAG + "pi", useUnmergedTree = true).assertIsNotEnabled()
     }
 
@@ -285,7 +309,7 @@ class DraftComposerSheetBehaviourTest {
         rule.onNode(androidx.compose.ui.test.hasContentDescription("Remove notes.txt"), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         until("one is left") { composer.state.value.staged.map { it.attachment.name } == listOf("a.png") }
         // Attachments alone are a first turn: only a provider is needed.
-        tap(NEW_SESSION_ROW_TAG + "claude")
+        pick("claude")
         until("Send enabled") { runCatching { rule.onNodeWithTag(DraftComposerTags.Send, useUnmergedTree = true).assertIsEnabled() }.isSuccess }
         tap(DraftComposerTags.Send)
         until("the create went out") { client.creates.size == 1 }
@@ -343,7 +367,7 @@ class DraftComposerSheetBehaviourTest {
         restorer.emulateSavedInstanceStateRestore()
         awaitTag(DraftComposerTags.Sheet)
         until("the text is back") { textOf(DraftComposerTags.Input) == "Survive a rotation" }
-        until("the pick is back") { selected(NEW_SESSION_ROW_TAG + "personal") }
+        until("the pick is back") { chipSays().contains("Claude (personal)") }
         // Selecting a session closes the sheet; the draft stays for the next opening.
         val other = com.tether.app.protocol.model.AgentSession(id = "s-other", provider = "claude", name = "other", cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1)
         rule.runOnUiThread {
@@ -371,7 +395,7 @@ class DraftComposerSheetBehaviourTest {
         rule.runOnUiThread { vm.openDraft() }
         awaitTag(DraftComposerTags.Sheet)
         until("it opens empty") { textOf(DraftComposerTags.Input).isEmpty() }
-        assertFalse(selected(NEW_SESSION_ROW_TAG + "work"))
+        until("the chip says nothing is picked") { chipSays().contains("Select model") }
         assertTrue(client.creates.isEmpty())
     }
 

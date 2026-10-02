@@ -52,6 +52,22 @@ import org.robolectric.annotation.Config
  * Every state is seeded synchronously through the real engine on an unconfined scope, the clock is
  * driven by hand, and the client throws on any send (a golden that sends anything fails).
  */
+/**
+ * ta-2uq: the model browser over the sheet. `all` = the provider rows; `provider` = one profile row's
+ * models with its pick checked; `error` = a row whose fetch failed (its words, Retry); `settings` = the
+ * cog panel (Discovered, a custom id, Updated 12m ago, Refresh); `empty` = a live catalog offering nothing.
+ */
+enum class BrowserShot(val id: String) {
+    All("model-browser-all"),
+    Provider("model-browser-provider"),
+    Error("model-browser-error"),
+    Settings("model-browser-settings"),
+    Empty("model-browser-empty"),
+}
+
+/** The goldens' clock (display only: "Updated …"). */
+private const val NOW = 1_700_000_000_000L
+
 enum class DraftShot(val id: String) {
     Empty("draft-empty"),
     Ready("draft-ready"),
@@ -66,9 +82,18 @@ private const val REFUSAL = "Skipping tool approvals needs a browser sign-in, no
 private const val PROMPT = "Summarize the README, then list the open issues that mention the sidebar."
 
 /** The seeded draft, through the engine: what the sheet would show for [shot]. */
-private class Seed(shot: DraftShot) {
+private class Seed(shot: DraftShot, val browser: BrowserShot? = null) {
     private val job = Job()
-    val client = DraftTestClient(failOnSend = true)
+    val client = DraftTestClient(failOnSend = true).apply {
+        when (browser) {
+            BrowserShot.Empty -> providerCatalog.value = emptyList()
+            BrowserShot.Error -> providerCatalog.value = DraftFixtures.catalog.map {
+                if (it.key == "codex") it.copy(status = "error", models = emptyList(), error = "codex app-server did not answer in time.", fetchedAt = NOW - 30_000) else it
+            }
+            BrowserShot.Settings -> providerCatalog.value = DraftFixtures.catalog.map { if (it.key == "claude") it.copy(fetchedAt = NOW - 12 * 60_000) else it }
+            else -> Unit
+        }
+    }
     val model = DraftComposerModel(
         client = client,
         draftStore = InMemoryDraftStore(),
@@ -81,8 +106,10 @@ private class Seed(shot: DraftShot) {
     init {
         model.onOrigin(DraftFixtures.ORIGIN)
         model.refresh()
-        if (shot != DraftShot.Empty) {
-            model.selectProvider("work")
+        if (browser == BrowserShot.Settings) model.addCustomModel("claude", "claude-opus-4-5[1m]")
+        if ((shot != DraftShot.Empty || browser != null) && browser != BrowserShot.Empty) {
+            // ta-2uq: picked through the Model chip: the row and its model together.
+            model.selectProviderAndModel("work", "m1")
             model.setText(PROMPT)
         }
         if (shot == DraftShot.Ready || shot == DraftShot.Keyboard || shot == DraftShot.Launching) {
@@ -92,11 +119,19 @@ private class Seed(shot: DraftShot) {
         state = model.state.value.let { if (shot == DraftShot.Error) it.copy(error = REFUSAL) else it }
     }
 
+    fun browserInputs() = draftBrowserInputs(state, client.providerCatalog.value, DraftFixtures.providers, com.tether.app.ui.chat.IcuJsCollator.forLocale(java.util.Locale.US), NOW)
+
+    fun browserState() = when (browser) {
+        BrowserShot.Provider -> ModelBrowserState(open = true, view = BrowserView.Provider("work"))
+        BrowserShot.Error -> ModelBrowserState(open = true, view = BrowserView.Provider("codex"))
+        BrowserShot.Settings -> ModelBrowserState(open = true, view = BrowserView.Provider("claude"), settingsOpen = true)
+        else -> ModelBrowserState(open = true)
+    }
+
     fun inputs() = DraftSheetInputs(
         draft = state,
-        rows = NewSessionGuard.rows(DraftFixtures.catalog, DraftFixtures.providers),
-        providers = DraftFixtures.providers,
-        catalogPending = false,
+        browser = browserInputs(),
+        browserOpen = browser != null,
         quickPicks = workspaceQuickPicks(listOf("/srv/ws/parity-app"), "", DraftFixtures.ROOT, DraftFixtures.ROOT),
         workspaceRoot = DraftFixtures.ROOT,
         readiness = readiness,
@@ -110,7 +145,7 @@ private fun noSend(what: String): Nothing = throw AssertionError("a golden must 
 private val failingActions = DraftSheetActions(
     onClose = { noSend("close") },
     onText = { noSend("type") },
-    onPickProvider = { noSend("pick") },
+    onModelChip = { noSend("open the browser") },
     onPickFolder = { noSend("pick a folder") },
     onBrowse = { noSend("browse") },
     onAttach = { noSend("attach") },
@@ -130,9 +165,17 @@ private fun launchingSlots(phone: Boolean, seed: Seed): PhoneShellSlots {
     )
 }
 
-fun ComposeContentTestRule.snapDraft(shot: DraftShot, skin: TetherSkin, phone: Boolean, name: String) {
+private val failingBrowserActions = ModelBrowserActions(
+    onSelect = { _, _ -> noSend("pick a model") },
+    onRetry = { noSend("retry") },
+    onAddModel = { _, _ -> noSend("add a model") },
+    onRemoveModel = { _, _ -> noSend("remove a model") },
+    onClose = { noSend("close the browser") },
+)
+
+fun ComposeContentTestRule.snapDraft(shot: DraftShot, skin: TetherSkin, phone: Boolean, name: String, browser: BrowserShot? = null) {
     mainClock.autoAdvance = false
-    val seed = Seed(shot)
+    val seed = Seed(shot, browser)
     val layout = if (phone) TetherLayoutClass.Phone else TetherLayoutClass.Expanded
     setContent {
         val shell: @Composable () -> Unit = {
@@ -149,6 +192,7 @@ fun ComposeContentTestRule.snapDraft(shot: DraftShot, skin: TetherSkin, phone: B
                         LocalKeyboardInset provides FixedKeyboardInset(if (shot == DraftShot.Keyboard) 300.dp else 0.dp),
                     ) {
                         DraftComposerFrame(seed.inputs(), failingActions, layout = layout)
+                        if (browser != null) ModelBrowserFrame(seed.browserInputs(), seed.browserState(), failingBrowserActions, layout)
                     }
                 }
             }
@@ -202,5 +246,50 @@ class DraftComposerFontScaleScreenshotTest(private val shot: DraftShot, private 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(DraftShot.Empty, DraftShot.Ready).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/** ta-2uq: every browser state × both Studio skins on a phone (the panel docked at the foot). */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ModelBrowserPhoneScreenshotTest(private val shot: BrowserShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun browser() = rule.snapDraft(DraftShot.Empty, skin, phone = true, shot.id, browser = shot)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = BrowserShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/** ta-2uq: every browser state × both Studio skins on a tablet (the centred card). */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class ModelBrowserExpandedScreenshotTest(private val shot: BrowserShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun browser() = rule.snapDraft(DraftShot.Empty, skin, phone = false, shot.id, browser = shot)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = BrowserShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/** ta-2uq, PLAN §4: 1.3× font scale on a phone: the provider list and the settings panel. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
+class ModelBrowserFontScaleScreenshotTest(private val shot: BrowserShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun browser() = rule.snapDraft(DraftShot.Empty, skin, phone = true, "${shot.id}-font-1.3x", browser = shot)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = listOf(BrowserShot.All, BrowserShot.Settings).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

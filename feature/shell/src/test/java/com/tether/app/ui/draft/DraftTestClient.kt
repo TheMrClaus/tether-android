@@ -7,6 +7,8 @@ import com.tether.app.client.NewSessionGuard
 import com.tether.app.client.NewSessionRequest
 import com.tether.app.client.NewSessionResult
 import com.tether.app.client.ProviderCatalogEntry
+import com.tether.app.client.ProviderRefreshResult
+import com.tether.app.client.ProviderRefreshThrottle
 import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
@@ -71,6 +73,16 @@ class DraftTestClient(
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
     override val liveSessions: StateFlow<Set<String>> get() = inner.live
 
+    /** ta-2uq: the socket the sheet is drawn on; [newSocket] replaces it. */
+    override val linkEpoch = MutableStateFlow(1L)
+
+    /** ta-2uq: the hand clock the refresh throttle reads. */
+    val now = java.util.concurrent.atomic.AtomicLong(1_000_000)
+    private val throttle = ProviderRefreshThrottle()
+
+    /** ta-2uq: every `refresh-providers` that went out: (row key, socket). */
+    val refreshes = CopyOnWriteArrayList<Pair<String, Long>>()
+
     @Volatile var catalogRequests = 0
     val creates = CopyOnWriteArrayList<ClientMessage.Create>()
     val firstSends = CopyOnWriteArrayList<Pair<String, String>>()
@@ -86,6 +98,31 @@ class DraftTestClient(
         refuseInGolden("refresh catalog")
         catalogRequests += 1
         return true
+    }
+
+    /** ta-2uq: as the real client: the drawn socket, a row of its live catalog, the throttle's say. */
+    override fun refreshProviders(key: String, expectedEpoch: Long): ProviderRefreshResult {
+        refuseInGolden("refresh-providers")
+        if (expectedEpoch != linkEpoch.value) return ProviderRefreshResult.NotConnected
+        if (!providerCatalogLive.value) return ProviderRefreshResult.NotOffered
+        val entry = providerCatalog.value.singleOrNull { it.key == key } ?: return ProviderRefreshResult.NotOffered
+        synchronized(throttle) { if (!throttle.admit(key, expectedEpoch, now.get(), entry)) return ProviderRefreshResult.Throttled }
+        refreshes += key to expectedEpoch
+        return ProviderRefreshResult.Sent
+    }
+
+    /** ta-2uq: the server pushes a catalog on the current socket. */
+    fun push(entries: List<ProviderCatalogEntry>) {
+        providerCatalog.value = entries
+        providerCatalogLive.value = true
+        synchronized(throttle) { throttle.onCatalog(linkEpoch.value, entries) }
+    }
+
+    /** ta-2uq: the socket is replaced: its catalog is no longer live and its refreshes are dropped. */
+    fun newSocket() {
+        providerCatalogLive.value = false
+        synchronized(throttle) { throttle.clear() }
+        linkEpoch.value = linkEpoch.value + 1
     }
 
     override fun createNewSession(request: NewSessionRequest, expectedOrigin: String?): NewSessionResult {

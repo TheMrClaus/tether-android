@@ -55,7 +55,7 @@ class DraftKeyboardGeometryTest {
         if (rich) model.setStagedAttachments(listOf(StagedAttachment(1, Attachment(name = "sidebar-notes.md", mediaType = "text/markdown", data = "aGVsbG8="), 2_458)))
         val state = model.state.value.let { if (rich) it.copy(error = "Skipping tool approvals needs a browser sign-in, not a paired device.") else it }
         return DraftSheetInputs(
-            state, NewSessionGuard.rows(DraftFixtures.catalog, DraftFixtures.providers), DraftFixtures.providers, false,
+            state, draftBrowserInputs(state, DraftFixtures.catalog, DraftFixtures.providers, com.tether.app.ui.chat.IcuJsCollator.forLocale(java.util.Locale.US), 0L),
             workspaceQuickPicks(emptyList(), "", DraftFixtures.ROOT, DraftFixtures.ROOT), DraftFixtures.ROOT, model.readiness(),
         )
     }
