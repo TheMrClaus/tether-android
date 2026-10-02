@@ -34,6 +34,12 @@ exits 13, so re-read instead of retrying.
 
 ## Standing rules
 
+- **The app is exactly as capable and as trusted as the web console (owner, binding, repeated).** If something is
+  allowed in the browser, it is allowed in the app: same actions, same permissions, same defaults, same frame
+  fields (sandbox tier, permission mode, approvals). Never add an app-only restriction, refusal, stricter default
+  or extra gate, and never record one as a "divergence". The only exceptions are rules the browser itself enforces
+  too (e.g. passkeys over https). If unsure, the answer is: do what the web does. Asking the owner whether the app
+  may do something the web does is itself a mistake.
 - **Never touch the production Tether service.** This is the client's rebuild.
 - `S*` tasks execute in `~/git/tether` and ship as pull requests; `T*` tasks execute in this repo.
 - Commit by explicit path; never `git add -A`; no AI `Co-authored-by` trailers.
