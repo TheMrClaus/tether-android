@@ -55,8 +55,11 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 
-/** One `.provider-availability` entry (the providers list of the `ready` frame). */
-data class ProviderAvailability(val label: String, val available: Boolean)
+/**
+ * One `.provider-availability` entry (the providers list of the `ready` frame). [id] picks the
+ * Studio welcome's logo (ta-3e7); empty = the "?" letter.
+ */
+data class ProviderAvailability(val label: String, val available: Boolean, val id: String = "")
 
 /** What the workspace shows when no session is open (dashboard.tsx:1480-1528). */
 sealed interface EmptyStage {
@@ -76,7 +79,8 @@ sealed interface EmptyStage {
  * margin `space-md`, padding `space-xl space-lg`, content centred
  * (globals.css 2218-2295, 11241-11269, 11713-11717). The orbit turns once per 24s (static under
  * reduced motion). Studio forks this stage into `StudioWelcome` (T8.1); [studioWelcome] is that
- * slot, and until it is filled Studio renders this composition in its own tokens.
+ * slot (ta-3e7: MainShell fills it with [StudioWelcome]; given [expanded]). Without it (the
+ * shell's own goldens) Studio renders this composition in its own tokens.
  *
  * [expanded] (from 48rem, T4.2): the well is seated in the bay like the chat screen —
  * `margin: calc(space-lg + 7px)`, `padding: space-2xl space-xl`, the contact shade
@@ -89,13 +93,13 @@ fun EmptyWorkspace(
     stage: EmptyStage,
     onStartSession: () -> Unit,
     modifier: Modifier = Modifier,
-    studioWelcome: (@Composable () -> Unit)? = null,
+    studioWelcome: (@Composable (expanded: Boolean) -> Unit)? = null,
     expanded: Boolean = false,
     viewportWidth: Int = 0,
 ) {
     val t = LocalTetherTokens.current
     if (studioWelcome != null && stage is EmptyStage.Welcome) {
-        studioWelcome()
+        studioWelcome(expanded)
         return
     }
     val type = LocalTetherTypography.current

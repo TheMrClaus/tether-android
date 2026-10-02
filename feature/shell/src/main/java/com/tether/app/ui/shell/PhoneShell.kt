@@ -96,8 +96,8 @@ class PhoneShellSlots(
     },
     /** The statusline in the "Session links" popover (T4.3). */
     val statusline: StatuslineSlot = {},
-    /** Studio's empty stage, StudioWelcome (T8.1). */
-    val studioWelcome: (@Composable () -> Unit)? = null,
+    /** Studio's empty stage, [StudioWelcome] (T8.1, ta-3e7); the argument is the expanded layout. */
+    val studioWelcome: (@Composable (expanded: Boolean) -> Unit)? = null,
     /**
      * T15.2: the Overview (feature:overview). Non-null while it is showing: it replaces the
      * workspace's header, stage and empty stage (the host passes no session meanwhile).

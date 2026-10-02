@@ -198,6 +198,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val sessionsView = view == DashboardView.Sessions
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    // ta-3e7: the Studio welcome's "Open workspace" (dashboard.tsx folderDialogRef), at shell level.
+    var workspacePickerOpen by rememberSaveable { mutableStateOf(false) }
     var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSession = sessions.firstOrNull { it.id == selectedId }
@@ -319,7 +321,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val emptyStage = if (selectedId != null && session == null && sessions.isEmpty()) {
         EmptyStage.Reopening(connected)
     } else {
-        EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available) })
+        EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available, it.id) })
     }
 
     val metrics = TelemetryMetrics.from(session?.metrics)
@@ -417,6 +419,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
                     SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
+                },
+                // ta-3e7: components/studio-welcome.tsx on the empty Sessions stage (both Studio lightings).
+                studioWelcome = { expanded ->
+                    com.tether.app.ui.shell.StudioWelcome(
+                        connected = connected,
+                        providers = (emptyStage as? EmptyStage.Welcome)?.providers.orEmpty(),
+                        onNewSession = vm::openDraft,
+                        onOpenWorkspace = { workspacePickerOpen = true },
+                        expanded = expanded,
+                    )
                 },
                 launching = if (!draftLaunching) null else {
                     {
@@ -576,6 +588,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
 
     // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
     if (settingsOpen) ShellSettings(vm, prefs, workspaceRoot, onDismiss = { settingsOpen = false })
+    if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, onDismiss = { workspacePickerOpen = false })
 
     if (showLogoutConfirm) {
         TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {
