@@ -142,8 +142,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
-| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | TODO |  |  | From the T4.1 verifier: the web workspace header shows the DeepSeek peak-hours badge (workspace-header.tsx:111). The phone shell (T4.1) has… |
-| T9.3 | Scheduled actions | TODO |  |  |  |
+| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | claim (maker, worktree ~/git/tether-android-wt/T9.2 @0b5aebb2). Plan: web Accounts = UsageAccountsDialog (components/usage-accounts-dialog.… |
+| T9.3 | Scheduled actions | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  |  |
 
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
