@@ -83,6 +83,11 @@ data class ProviderCatalogEntry(
     val error: String? = null,
     /** ta-895 (v86): a PROFILE row's engine, echoed for its badge; absent on the default rows. */
     val extends: String? = null,
+    /**
+     * ta-2uq: when the server last settled this row's model list (epoch ms; the model browser's
+     * "Updated …" and the refresh throttle's settle signal). Null when absent or not a finite number.
+     */
+    val fetchedAt: Long? = null,
 ) {
     companion object {
         /**
@@ -97,7 +102,9 @@ data class ProviderCatalogEntry(
             val models = (o["models"] as? JsonArray).orEmpty().asSequence().take(LabelText.MAX_ITEMS).mapNotNull { m ->
                 runCatching { TetherJson.decodeFromJsonElement(SessionModelOption.serializer(), m) }.getOrNull()
             }.toList()
-            ProviderCatalogEntry(key, provider, status, models, s("defaultModel"), s("label"), s("profileId"), s("error"), s("extends"))
+            val fetchedAt = (o["fetchedAt"] as? JsonPrimitive)?.takeIf { !it.isString }?.contentOrNull?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it >= 0 && it <= Long.MAX_VALUE.toDouble() }?.toLong()
+            ProviderCatalogEntry(key, provider, status, models, s("defaultModel"), s("label"), s("profileId"), s("error"), s("extends"), fetchedAt)
         }.toList()
     }
 }

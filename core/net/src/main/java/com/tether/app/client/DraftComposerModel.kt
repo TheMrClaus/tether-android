@@ -41,6 +41,14 @@ data class DraftComposerState(
     val error: String = "",
     /** How many creates of this draft have been answered by their own `created` (the picker closes on one). */
     val completed: Long = 0,
+    /**
+     * ta-2uq: the rows the model browser lists (use-draft-composer.ts `entries: mergedEntries`): the
+     * live catalog of the current socket (else the base providers' default rows), each with this
+     * server's valid custom model ids appended as models ([CustomModelId]).
+     */
+    val entries: List<ProviderCatalogEntry> = emptyList(),
+    /** ta-2uq: this server's custom model ids per row key, valid ones only (the browser's Custom section). */
+    val customModels: Map<String, List<String>> = emptyMap(),
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -51,7 +59,7 @@ data class DraftComposerState(
      */
     override fun toString(): String =
         "DraftComposerState(text=${text.length} chars, attachments=${staged.size}, creating=$creating, " +
-            "error=${if (error.isEmpty()) "none" else "set"}, completed=$completed)"
+            "error=${if (error.isEmpty()) "none" else "set"}, completed=$completed, entries=${entries.size})"
 }
 
 /** ta-8cv: what became of a submit. */
@@ -185,7 +193,8 @@ class DraftComposerModel(
             if (prefsOrigin != origin) return@launch // the server changed while reading
             val picks = prefsPending.orEmpty()
             prefsPending = null
-            preferences = picks.fold(stored) { acc, pick -> pick(acc) }
+            // ta-2uq: a stored custom model id that is not valid now is dropped: never drawn, never sent.
+            preferences = picks.fold(CustomModelId.cleanPreferences(stored)) { acc, pick -> pick(acc) }
             if (picks.isNotEmpty()) prefsWrites.trySend(origin to preferences)
             refresh()
         }
@@ -233,6 +242,8 @@ class DraftComposerModel(
     fun refresh() {
         val live = if (client.providerCatalogLive.value) client.providerCatalog.value else null
         entries = NewSessionGuard.draftEntries(live, client.providers.value)
+        val custom = CustomModelId.asMap(preferences["customModels"])
+        _state.update { it.copy(entries = mergeCustomModels(entries, custom), customModels = custom) }
         dispatch(
             JsObj.of(
                 "type" to JsStr("RESOLVE"),
@@ -296,8 +307,9 @@ class DraftComposerModel(
         return true
     }
 
-    /** use-draft-composer.ts selectModel. */
+    /** use-draft-composer.ts selectModel. ta-2uq: a value past the server's bound is never picked (it could not be sent). */
     fun selectModel(modelId: String) {
+        if (!modelSendable(modelId)) return
         val key = formKey()
         val entry = entryJs(key) ?: return
         dispatch(JsObj.of("type" to JsStr("SET_MODEL_FROM_USER"), "modelId" to JsStr(modelId), "entry" to entry, "preferences" to preferences))
@@ -306,6 +318,7 @@ class DraftComposerModel(
 
     /** use-draft-composer.ts selectProviderAndModel (one atomic provider + model pick). */
     fun selectProviderAndModel(key: String, modelId: String) {
+        if (!modelSendable(modelId)) return
         val entry = entryJs(key) ?: return
         if ((entry as? JsObj)?.get("status") == JsStr("unavailable")) return
         dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_AND_MODEL_FROM_USER"), "entry" to entry, "modelId" to JsStr(modelId), "preferences" to preferences))
@@ -340,17 +353,30 @@ class DraftComposerModel(
     /** v98: the isolation block (worktreeMode / worktreeBaseRef / worktreeBranch / worktreeSlug / worktreePr). */
     fun setWorktreeOptions(options: JsObj) = dispatch(JsObj.of("type" to JsStr("SET_WORKTREE_OPTIONS_FROM_USER"), "options" to options))
 
-    /** use-draft-composer.ts addCustomModel (issue #45): a hand-typed id, client-only. */
-    fun addCustomModel(entryKey: String, modelId: String) {
-        if (modelId.isBlank()) return
-        persist { DraftForm.addCustomModelPref(it, JsStr(entryKey), JsStr(modelId)) as JsObj }
+    /**
+     * use-draft-composer.ts addCustomModel (issue #45): a hand-typed id, client-only, kept in this
+     * server's preferences. ta-2uq: only a [CustomModelId]-valid id, on a row the browser lists, that
+     * the row does not already offer (model-browser.tsx `alreadyExists`), within the per-row bound.
+     * True when it was added.
+     */
+    fun addCustomModel(entryKey: String, modelId: String): Boolean {
+        if (CustomModelId.problem(modelId) != null) return false
+        val id = CustomModelId.normalize(modelId)
+        val entry = _state.value.entries.firstOrNull { it.key == entryKey } ?: return false
+        if (entry.models.any { it.value == id }) return false
+        if (CustomModelId.asMap(preferences["customModels"])[entryKey].orEmpty().size >= CustomModelId.MAX_PER_ENTRY) return false
+        persist { DraftForm.addCustomModelPref(it, JsStr(entryKey), JsStr(id)) as JsObj }
         refresh()
+        return true
     }
 
     fun removeCustomModel(entryKey: String, modelId: String) {
         persist { DraftForm.removeCustomModelPref(it, JsStr(entryKey), JsStr(modelId)) as JsObj }
         refresh()
     }
+
+    /** "" (the engine default) or a value within `create.model`'s bound. */
+    private fun modelSendable(modelId: String): Boolean = modelId.toByteArray(Charsets.UTF_8).size <= CustomModelId.MAX_BYTES
 
     /** The picker shows its own words for a new opening (UI only; the web's error lives until the next submit). */
     fun clearError() = _state.update { it.copy(error = "") }
@@ -616,6 +642,21 @@ class DraftComposerModel(
     }
 
     companion object {
+        /**
+         * lib/draft-form.ts mergeCustomModelsIntoEntries, on the typed rows: each row's custom ids it
+         * does not already list are appended as models named by their id; untouched rows by identity.
+         */
+        fun mergeCustomModels(entries: List<ProviderCatalogEntry>, custom: Map<String, List<String>>): List<ProviderCatalogEntry> {
+            if (custom.isEmpty()) return entries
+            return entries.map { entry ->
+                val ids = custom[entry.key].orEmpty()
+                if (ids.isEmpty()) return@map entry
+                val present = entry.models.mapTo(HashSet()) { it.value }
+                val additions = ids.filter { present.add(it) }.map { com.tether.app.protocol.SessionModelOption(value = it, displayName = it) }
+                if (additions.isEmpty()) entry else entry.copy(models = entry.models + additions)
+            }
+        }
+
         /** A staged attachment's raw size from its base64 [data] (padding excluded). */
         internal fun decodedSize(data: String): Long {
             val pad = data.takeLast(2).count { it == '=' }

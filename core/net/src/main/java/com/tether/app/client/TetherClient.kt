@@ -351,6 +351,16 @@ interface TetherClient {
     val providerCatalogLive: StateFlow<Boolean> get() = NO_CATALOG_LIVE
 
     /**
+     * ta-2uq: the model browser's Retry / Refresh for one catalog row ([key]): sends
+     * `{type:"refresh-providers", providers:[key]}` (use-tether.ts refreshProviders) only from an
+     * explicit tap, and only when, under the client's lock, the socket is live, handshaken and still
+     * the one the browser was drawn on ([expectedEpoch] = [linkEpoch]), the row is in the catalog that
+     * socket delivered, and [ProviderRefreshThrottle] admits it (one in flight per row, taps
+     * debounced, dropped on a socket change). Never queued, never resent.
+     */
+    fun refreshProviders(key: String, expectedEpoch: Long): ProviderRefreshResult = ProviderRefreshResult.NotConnected
+
+    /**
      * ta-895 / ta-8cv: start a new session as the draft composer submitted it ([request]: the row
      * drawn, the draft form, a fresh `requestId`). Call it ONLY from an explicit submit (a tap on a
      * row, the composer's Send), never in answer to anything received, and never again for the

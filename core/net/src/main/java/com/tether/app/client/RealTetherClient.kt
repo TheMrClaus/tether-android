@@ -445,6 +445,9 @@ class RealTetherClient(
     private var catalogEpoch = -1L
     private var catalogOrigin: String? = null
     private val providerCatalogLiveState = MutableStateFlow(false)
+
+    /** ta-2uq: `refresh-providers` bookkeeping (one in flight per row and socket, taps debounced). Guarded by [lock]. */
+    private val refreshThrottle = ProviderRefreshThrottle()
     private val workspaceRootState = MutableStateFlow<String?>(null)
     private val hiddenAgentSessionCountState = MutableStateFlow<Int?>(null)
 
@@ -1043,6 +1046,7 @@ class RealTetherClient(
             catalogEpoch = -1L
             catalogOrigin = null
             providerCatalogLiveState.value = false
+            refreshThrottle.clear()
         }
         workspaceRootState.value = null
         hiddenAgentSessionCountState.value = null
@@ -2342,6 +2346,8 @@ class RealTetherClient(
                 linkEpochState.value = epoch
                 // ta-895: and no catalog of this socket is in yet.
                 providerCatalogLiveState.value = false
+                // ta-2uq: a refresh sent on the previous socket is dropped with it.
+                refreshThrottle.clear()
                 attachedThisEpoch.clear()
                 // T6.7: interrupts sent on the previous socket are answered there, if at all.
                 interruptsBound.clear()
@@ -2510,11 +2516,15 @@ class RealTetherClient(
             is ServerMessage.Log -> ifCurrent(webSocket) { eventLogState.update { it.accept(message) } }
             // T7.3: use-tether.ts:1129 — the catalog is replaced wholesale (the `@` Agents read it).
             // ta-895: stamped with the socket that delivered it (the New session picker's profile rows).
+            // ta-2uq: a push (every catalog change is broadcast) replaces it too, so an open model
+            // browser follows it; the rows it shows settled end their refresh's flight.
             is ServerMessage.ProvidersSnapshot -> ifCurrent(webSocket) {
-                providerCatalogState.value = ProviderCatalogEntry.parse(message.entries)
+                val entries = ProviderCatalogEntry.parse(message.entries)
+                providerCatalogState.value = entries
                 catalogEpoch = epoch
                 catalogOrigin = socketOrigin
                 providerCatalogLiveState.value = socketOrigin != null
+                refreshThrottle.onCatalog(epoch, entries)
             }
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
@@ -2649,6 +2659,9 @@ class RealTetherClient(
         // ta-q6p r2 (security F1): a registry asked for in this sign-in is asked for again on every
         // new socket, so the list a write is built from is always this socket's. On THIS socket only.
         if (synchronized(lock) { socket === webSocket && providersWanted }) sendFrameOn(webSocket, ClientMessage.ProvidersRequest)
+        // ta-2uq (use-tether.ts:798-800): the pre-session catalog for the new-session composer, asked
+        // for on every new socket; later changes arrive as the server's pushes. On THIS socket only.
+        sendFrameOn(webSocket, ClientMessage.ProvidersSnapshotRequest)
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
         // session's snapshot.
@@ -3624,6 +3637,17 @@ class RealTetherClient(
 
     /** T7.3: use-tether.ts:787 `providers-snapshot` (a read). */
     override fun requestProviderCatalog(): Boolean = sendFrame(ClientMessage.ProvidersSnapshotRequest)
+
+    override fun refreshProviders(key: String, expectedEpoch: Long): ProviderRefreshResult = synchronized(lock) {
+        val ws = socket
+        if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ProviderRefreshResult.NotConnected
+        if (expectedEpoch != epoch) return@synchronized ProviderRefreshResult.NotConnected
+        if (key.isEmpty() || key.length > NewSessionGuard.KEY_MAX) return@synchronized ProviderRefreshResult.NotOffered
+        val entry = liveCatalogLocked()?.singleOrNull { it.key == key } ?: return@synchronized ProviderRefreshResult.NotOffered
+        if (!refreshThrottle.admit(key, epoch, clock(), entry)) return@synchronized ProviderRefreshResult.Throttled
+        if (!ws.send(ClientMessage.RefreshProviders(listOf(key)).encode())) return@synchronized ProviderRefreshResult.NotConnected
+        ProviderRefreshResult.Sent
+    }
 
     /**
      * T6.6: the one path a notice's dismissal takes to the wire. Under the lock, in order: a live,
