@@ -43,8 +43,12 @@ enum class AppSignIn { DeviceToken, SessionCookie }
  * dead" ([DeviceSecuritySource.credentialRejected]), which the client honours only while that very
  * credential is still the one in force (compare-and-clear).
  *
- * ta-x5e: only this module mints one (the client, over the credential a call actually went out
- * with); a feature can carry a handle back but cannot make one up.
+ * ta-x5e: the constructor is `internal`, so Kotlin code outside this module cannot write one; the
+ * client mints them, over the credential a call actually went out with. That is a compile-time
+ * boundary only (the JVM constructor stays public, reflection reaches it). What makes a fabricated
+ * handle harmless is the client's own check: it acts only when the handle holds, by reference, the
+ * very credential still in force (`credentialValue !== credential` returns), and nothing outside the
+ * client holds that object.
  */
 class SignInHandle internal constructor(internal val credential: Any) {
     override fun toString(): String = "SignInHandle"
