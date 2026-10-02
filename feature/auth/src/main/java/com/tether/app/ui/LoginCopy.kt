@@ -29,11 +29,23 @@ fun loginSurfaceFor(variant: LoginVariant): LoginSurface =
 enum class AuthMode { Password, Pairing }
 
 /**
- * use-login-flow.ts LoginPhase, minus the passkey states (T10.5). [Checking] is
- * native-only: a password submit that arrived before the sign-in probe answered
- * waits for it (ta-s4r), where the web simply hides the form while probing.
+ * use-login-flow.ts LoginPhase. [Verifying] is the web's verifying-password (or a pairing claim),
+ * [VerifyingPasskey] its verifying-passkey (T10.5). [Checking] is native-only: a password submit that
+ * arrived before the sign-in probe answered waits for it (ta-s4r), where the web simply hides the
+ * form while probing.
  */
-enum class LoginPhase { Ready, Checking, Verifying, Success, Error }
+enum class LoginPhase { Ready, Checking, Verifying, VerifyingPasskey, Success, Error }
+
+/**
+ * use-login-flow.ts `passkeyReady`: a passkey is registered, the console's address allows one
+ * (`passkeysUsable`), and this phone can run the ceremony (the web's `browserSupportsWebAuthn()`).
+ * Unknown requirements (still probing, or the probe failed) offer no passkey, like the web.
+ */
+fun passkeyReady(requirements: SignInRequirements?, available: Boolean): Boolean =
+    requirements != null && requirements.passkeyCount > 0 && requirements.passkeysUsable && available
+
+/** The web's notice when the operator closes the passkey prompt (not an error: back to ready). */
+const val PASSKEY_DISMISSED_NOTICE = "Passkey prompt dismissed."
 
 /** Host shown in the readouts ("console · host"), or "" while the URL does not parse. */
 fun hostnameOf(rawUrl: String): String {
@@ -108,7 +120,9 @@ fun versionCopy(incompatibility: Incompatibility): String = when (incompatibilit
  * [usernameHint] (see [usernameHintFor]) adds [USERNAME_MISSING_HINT] to a refusal.
  */
 fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? = when (result) {
-    is LoginResult.Success, is LoginResult.LocalNetworkBlocked -> null
+    // A dismissed passkey prompt is a notice, not an error ([PASSKEY_DISMISSED_NOTICE]).
+    is LoginResult.Success, is LoginResult.LocalNetworkBlocked, is LoginResult.PasskeyDismissed -> null
+    is LoginResult.PasskeyFailed -> result.message.ifBlank { "Passkey sign-in failed." }
     is LoginResult.BadPassword -> result.message.ifBlank { "Those credentials are not correct." } +
         if (usernameHint) " $USERNAME_MISSING_HINT" else ""
     is LoginResult.GatewayRefused -> gatewayRefusedCopy(result)

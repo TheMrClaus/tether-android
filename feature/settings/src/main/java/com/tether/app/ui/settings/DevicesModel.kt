@@ -16,7 +16,10 @@ import com.tether.app.client.LabelText
 import com.tether.app.client.OutstandingPairing
 import com.tether.app.client.PairedDevice
 import com.tether.app.client.Passkey
+import com.tether.app.client.PasskeyAuthenticator
+import com.tether.app.client.PasskeyCeremony
 import com.tether.app.client.PasskeyPolicySource
+import com.tether.app.client.PasskeyRules
 import com.tether.app.client.PasskeysView
 import com.tether.app.client.SecurityResult
 import com.tether.app.client.SecuritySession
@@ -83,6 +86,14 @@ object DevicesCopy {
     const val PASSKEYS_CHECKING = "Checking passkeys…"
     const val PASSKEYS_NEED_HTTPS = "Passkeys need HTTPS (or localhost) to work — this console is neither right now."
     const val ADD_PASSKEY = "Add a passkey"
+    const val ADDING_PASSKEY = "Adding…"
+    /** The web's placeholder says "this laptop"; the app is a phone. */
+    const val PASSKEY_LABEL_PLACEHOLDER = "Label (e.g. this phone)"
+    const val PASSKEY_LABEL = "Passkey label"
+    const val DEFAULT_PASSKEY_LABEL = "Passkey"
+    const val PASSKEY_DISMISSED = "Passkey prompt dismissed."
+    const val PASSKEY_DUPLICATE = "This authenticator already has a passkey for Tether."
+    const val ADD_PASSKEY_FAILED = "The passkey could not be added."
     const val PASSWORD_TITLE = "Password sign-in"
     const val PASSWORD_ENV = "Set by TETHER_PASSKEY_REQUIRED in the environment"
     const val PASSWORD_NEEDS_PASSKEY = "Add a passkey before turning off the password"
@@ -127,7 +138,10 @@ object DevicesCopy {
     const val CODE_HIDDEN = "Pairing code, hidden"
     fun codeSpoken(code: String) = "Pairing code " + code.toCharArray().joinToString(" ")
     const val MASK = "•••• ••••"
-    const val ADD_PASSKEY_LATER = "Adding a passkey needs this phone’s passkey prompt, which comes in a later update. Add one from the web console for now; the ones you add are listed here."
+    /** T10.5: the app's own words for what only a phone can meet. */
+    const val PASSKEY_UNSUPPORTED = "No passkey provider on this phone can create one. Turn one on in Android Settings, then try again."
+    const val PASSKEY_UNAVAILABLE = "This phone cannot create passkeys here."
+    const val PASSKEY_WRONG_RP = "This server asked for a passkey for another address, so none was created. Add it from the address the console itself uses."
     const val SIGN_OUT_OTHERS_BODY = "This phone stays signed in. Every other session closes immediately."
     const val SELF_SIGNS_OUT = "This is the phone you are using: it is signed out of this server, and you sign in again from the start screen."
     const val MAYBE_SELF = "If this is the phone you are using, it is signed out of this server too, and you sign in again from the start screen."
@@ -143,7 +157,7 @@ object DevicesCopy {
 /** Which of the two web hooks a write belongs to (each has its own `busy`). */
 enum class DevicesArea { Devices, Security }
 
-enum class DevicesAction { Pair, Revoke, Rename, RemovePasskey, Policy, SignOutSession, SignOutOthers }
+enum class DevicesAction { Pair, Revoke, Rename, AddPasskey, RemovePasskey, Policy, SignOutSession, SignOutOthers }
 
 /** A line under a section: [error] true is the web's `role="alert"` warning, else its `role="status"` notice. */
 data class DevicesLine(val text: String, val error: Boolean)
@@ -272,6 +286,8 @@ class DevicesController(
     private val clipboard: PairingClipboard = PairingClipboard.None,
     /** The wall clock a code's expiry is measured on (a seam for the tests). */
     private val now: () -> Long = { System.currentTimeMillis() },
+    /** T10.5: Credential Manager on a device, a fake in tests; [PasskeyAuthenticator.None] offers nothing. */
+    val authenticator: PasskeyAuthenticator = PasskeyAuthenticator.None,
 ) {
     private val job = SupervisorJob(parent.coroutineContext[Job])
     private val scope = CoroutineScope(parent.coroutineContext + job)
@@ -307,6 +323,9 @@ class DevicesController(
     var securityBusy: DevicesAction? by mutableStateOf(null)
         private set
     var shown: ShownCode? by mutableStateOf(seed?.code?.let { ShownCode(it, it.expiresAt, 0L) })
+        private set
+    /** T10.5: bumped by every passkey this panel added (the label field clears on it, as the web's does). */
+    var passkeysAdded: Int by mutableStateOf(0)
         private set
 
     private var opened = seed != null
@@ -438,6 +457,43 @@ class DevicesController(
             if (r !is SecurityResult.Ok) settle(r, DevicesArea.Security, DevicesCopy.RENAME_FAILED)
             refreshSecurity()
         }
+    }
+
+    /**
+     * T10.5, the web's registerPasskey: a challenge, the ceremony on this phone, the answer with
+     * [label] (`label.trim() || "Passkey"`), then a re-read. No confirmation of the app's own: the tap
+     * opens Credential Manager's prompt, which the operator unlocks or closes. The prompt is asked
+     * only for this server's own rpId (PasskeyRules.rpIdMatches); anything else creates nothing.
+     */
+    fun addPasskey(label: String): Boolean {
+        if (!authenticator.available || passkeys?.passkeysUsable != true) return false
+        return write(DevicesArea.Security, DevicesAction.AddPasskey) { o ->
+            val options = source.passkeyRegistrationOptions(o)
+            if (!mine(options)) return@write
+            if (options !is SecurityResult.Ok) return@write settle(options, DevicesArea.Security, DevicesCopy.ADD_PASSKEY_FAILED)
+            val challenge = options.value
+            if (!PasskeyRules.rpIdMatches(challenge.rpId, o)) return@write failLine(DevicesCopy.PASSKEY_WRONG_RP)
+            val answer = when (val ceremony = authenticator.register(challenge.optionsJson())) {
+                is PasskeyCeremony.Done -> PasskeyRules.response(ceremony) ?: return@write failLine(DevicesCopy.ADD_PASSKEY_FAILED)
+                PasskeyCeremony.Dismissed -> return@write failLine(DevicesCopy.PASSKEY_DISMISSED)
+                PasskeyCeremony.Duplicate -> return@write failLine(DevicesCopy.PASSKEY_DUPLICATE)
+                PasskeyCeremony.Unsupported, PasskeyCeremony.NoCredential -> return@write failLine(DevicesCopy.PASSKEY_UNSUPPORTED)
+                PasskeyCeremony.Failed -> return@write failLine(DevicesCopy.ADD_PASSKEY_FAILED)
+            }
+            val r = source.registerPasskey(o, challenge.challengeId, answer, label.trim().ifEmpty { DevicesCopy.DEFAULT_PASSKEY_LABEL })
+            if (!mine(r)) return@write
+            if (r is SecurityResult.Ok) {
+                securityLine = DevicesLine(DevicesCopy.PASSKEY_ADDED, false)
+                passkeysAdded += 1
+                refreshSecurity()
+            } else {
+                settle(r, DevicesArea.Security, DevicesCopy.ADD_PASSKEY_FAILED)
+            }
+        }
+    }
+
+    private fun failLine(text: String) {
+        securityLine = DevicesLine(text, error = true)
     }
 
     fun removePasskey(passkey: Passkey): Boolean {
@@ -590,9 +646,10 @@ fun rememberDevicesController(
     seed: DevicesSeed? = null,
     clipboard: PairingClipboard = PairingClipboard.None,
     now: () -> Long = { System.currentTimeMillis() },
+    authenticator: PasskeyAuthenticator = PasskeyAuthenticator.None,
 ): DevicesController {
     val scope = rememberCoroutineScope()
-    val controller = remember(source, origin) { DevicesController(source, origin, scope, seed?.takeIf { origin != null }, clipboard, now) }
+    val controller = remember(source, origin, authenticator) { DevicesController(source, origin, scope, seed?.takeIf { origin != null }, clipboard, now, authenticator) }
     LaunchedEffect(controller) { controller.activate() }
     DisposableEffect(controller) { onDispose { controller.dispose() } }
     return controller

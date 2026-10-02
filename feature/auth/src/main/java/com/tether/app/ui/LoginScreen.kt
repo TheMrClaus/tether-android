@@ -1,5 +1,8 @@
 package com.tether.app.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -52,7 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tether.app.client.CredentialManagerPasskeys
 import com.tether.app.client.LoginResult
+import com.tether.app.client.PasskeyAuthenticator
 import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
@@ -85,6 +92,12 @@ private const val PROBE_DEBOUNCE_MS = 500L
 /** Pause before a submit re-asks a probe that just failed (one retry, ta-s4r). */
 private const val PROBE_RETRY_MS = 400L
 
+/** Tags of the login screen's passkey parts (T10.5). */
+object LoginTags {
+    const val Passkey = "login-passkey"
+    const val PasskeyOr = "login-passkey-or"
+}
+
 /**
  * Everything a surface renders, plus the callbacks. One state machine
  * ([LoginScreen]) drives both surfaces, like use-login-flow.ts on the web.
@@ -111,8 +124,11 @@ class LoginUi(
     val onPassword: (String) -> Unit,
     val onCode: (String) -> Unit,
     val onSubmit: () -> Unit,
+    /** T10.5: use-login-flow.ts `passkeyReady` (see [passkeyReady]), on the password path. */
+    val passkeyReady: Boolean = false,
+    val onPasskey: () -> Unit = {},
 ) {
-    val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.Success
+    val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
 
     /** The username line is on screen: required, or the probe failed ([usernameOptional]). */
     val usernameShown: Boolean get() = usernameFieldShown(requirements, probeFailed)
@@ -149,7 +165,17 @@ fun LoginScreen(
     onLocalNetworkBlocked: (retry: () -> Unit) -> Unit = {},
     /** The latest attempt was not blocked, so any earlier local-network prompt is stale. */
     onLocalNetworkClear: () -> Unit = {},
+    /**
+     * T10.5: the passkey ceremony. Null = this activity's Credential Manager; tests hand a fake. A
+     * passkey is offered only when the probe says one is registered and usable (use-login-flow.ts).
+     */
+    passkeys: PasskeyAuthenticator? = null,
 ) {
+    val context = LocalContext.current
+    val authenticator = passkeys ?: remember(context) {
+        val activity = context.findActivity()
+        CredentialManagerPasskeys { activity }
+    }
     val scope = rememberCoroutineScope()
     val signedOutReason by client.signedOutReason.collectAsStateWithLifecycle()
     val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
@@ -165,6 +191,8 @@ fun LoginScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var requirements by remember { mutableStateOf<SignInRequirements?>(null) }
     var probeFailed by remember { mutableStateOf(false) }
+    // The web's flow.notice after a dismissed passkey prompt; cleared by the next attempt.
+    var passkeyNotice by remember { mutableStateOf<String?>(null) }
 
     val deviceLabel = remember { Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android device" }
 
@@ -197,6 +225,44 @@ fun LoginScreen(
 
     // The local-network retry re-enters submit (so it re-probes too); set below.
     var submitAgain: () -> Unit = {}
+    var passkeyAgain: () -> Unit = {}
+
+    val passkeyOffered = mode == AuthMode.Password && hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
+
+    /**
+     * use-login-flow.ts signInWithPasskey: one ceremony, nothing retried. A dismissed prompt is the
+     * web's notice and back to ready; a refusal is the error line. The client asks Credential Manager
+     * only for this server's own rpId.
+     */
+    fun passkey() {
+        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success) return
+        if (!passkeyOffered) return
+        val url = baseUrl.trim()
+        phase = LoginPhase.VerifyingPasskey
+        error = null
+        passkeyNotice = null
+        scope.launch {
+            val result = client.passkeyLogin(url, authenticator)
+            val blocked = result is LoginResult.LocalNetworkBlocked
+            when {
+                blocked -> phase = LoginPhase.Ready
+                result is LoginResult.Success -> {
+                    phase = LoginPhase.Success
+                    password = ""
+                    code = ""
+                }
+                result is LoginResult.PasskeyDismissed -> {
+                    passkeyNotice = PASSKEY_DISMISSED_NOTICE
+                    phase = LoginPhase.Ready
+                }
+                else -> {
+                    error = loginErrorCopy(result) ?: "Passkey sign-in failed."
+                    phase = LoginPhase.Error
+                }
+            }
+            if (blocked) onLocalNetworkBlocked { passkeyAgain() } else onLocalNetworkClear()
+        }
+    }
 
     fun send(url: String) {
         validateAttempt(mode, url, username, password, code, requirements)?.let {
@@ -244,7 +310,10 @@ fun LoginScreen(
     }
 
     fun submit() {
-        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.Success) return
+        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success) return
+        // retro-login.tsx: Enter on an empty password line is the passkey, when one is ready.
+        if (surface == LoginSurface.Retro && mode == AuthMode.Password && password.isEmpty() && passkeyOffered) return passkey()
+        passkeyNotice = null
         val url = baseUrl.trim()
         // ta-s4r: a password never goes out with the sign-in requirements
         // unknown. A console with a username refuses a password-only login with
@@ -275,6 +344,7 @@ fun LoginScreen(
     }
 
     submitAgain = ::submit
+    passkeyAgain = ::passkey
 
     val hostname = hostnameOf(baseUrl)
     val probing = hostname.isNotEmpty() && requirements == null && !probeFailed
@@ -286,16 +356,17 @@ fun LoginScreen(
         code = code,
         phase = phase,
         error = error,
-        notice = logoutNotice ?: signedOutReason?.let(::signedOutCopy),
+        notice = passkeyNotice ?: logoutNotice ?: signedOutReason?.let(::signedOutCopy),
         requirements = requirements,
         probeFailed = probeFailed,
         probing = probing,
         hostname = hostname,
         statusLines = statusLines(hostname, requirements, probeFailed),
         onMode = { next ->
-            if (phase != LoginPhase.Checking && phase != LoginPhase.Verifying && phase != LoginPhase.Success) {
+            if (phase != LoginPhase.Checking && phase != LoginPhase.Verifying && phase != LoginPhase.VerifyingPasskey && phase != LoginPhase.Success) {
                 mode = next
                 error = null
+                passkeyNotice = null
                 if (phase == LoginPhase.Error) phase = LoginPhase.Ready
             }
         },
@@ -307,6 +378,8 @@ fun LoginScreen(
         // disagree.
         onCode = { code = it.uppercase().take(CODE_FIELD_MAX) },
         onSubmit = ::submit,
+        passkeyReady = passkeyOffered,
+        onPasskey = ::passkey,
     )
     when (surface) {
         LoginSurface.Studio -> StudioLogin(ui)
@@ -317,6 +390,13 @@ fun LoginScreen(
 // ---------------------------------------------------------------------------
 // Shared pieces
 // ---------------------------------------------------------------------------
+
+/** The activity hosting [this] context, or null (Credential Manager needs it for its prompt). */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 @Composable
 private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope) {
@@ -518,6 +598,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
         LoginPhase.Checking -> "Checking sign-in…" to t.violet
         LoginPhase.Verifying ->
             (if (ui.mode == AuthMode.Pairing) "Pairing this device…" else "Checking your password…") to t.violet
+        LoginPhase.VerifyingPasskey -> "Waiting for your passkey…" to t.violet
         LoginPhase.Success -> "You’re in. Opening your workspace…" to t.running
         LoginPhase.Error -> ui.error.orEmpty() to t.danger
         LoginPhase.Ready -> ui.notice.orEmpty() to t.warning
@@ -540,6 +621,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
         ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
         when (ui.mode) {
             AuthMode.Password -> if (ui.passwordEnabled) {
+                StudioPasskey(ui)
                 if (ui.usernameShown) {
                     StudioLabel(if (ui.usernameOptional) "Username (optional)" else "Username")
                     UsernameField(ui, Modifier.fillMaxWidth())
@@ -560,6 +642,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                     enabled = !ui.busy,
                 )
             } else {
+                StudioPasskey(ui)
                 Text(
                     "Password sign-in is turned off for this workspace. Pair this device with a code instead.",
                     color = t.muted,
@@ -601,6 +684,31 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
     }
 }
 
+/** studio-login.tsx's passkey key, above the password form, with its "or" separator (T10.5). */
+@Composable
+private fun StudioPasskey(ui: LoginUi) {
+    if (!ui.passkeyReady) return
+    val t = LocalTetherTokens.current
+    TetherKey(
+        onClick = ui.onPasskey,
+        modifier = Modifier.fillMaxWidth().testTag(LoginTags.Passkey),
+        classes = KeyClasses.ButtonPrimary,
+        label = if (ui.phase == LoginPhase.VerifyingPasskey) "Waiting for your passkey…" else "Sign in with a passkey",
+        icon = TetherIcons.Fingerprint,
+        enabled = !ui.busy,
+    )
+    if (ui.passwordEnabled) {
+        Text(
+            "or continue with your password",
+            color = t.faint,
+            fontFamily = Manrope,
+            fontSize = 12.5.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().testTag(LoginTags.PasskeyOr),
+        )
+    }
+}
+
 @Composable
 private fun StudioLabel(text: String) {
     val t = LocalTetherTokens.current
@@ -622,16 +730,19 @@ private fun RetroLogin(ui: LoginUi) {
     val feedback: Pair<String, Color>? = when (ui.phase) {
         LoginPhase.Checking -> "checking sign-in" to t.violet
         LoginPhase.Verifying -> "authenticating" to t.violet
+        LoginPhase.VerifyingPasskey -> "authenticating with passkey" to t.violet
         LoginPhase.Success -> "ACCESS GRANTED" to t.running
         LoginPhase.Error -> "ACCESS DENIED — ${ui.error.orEmpty()}" to t.danger
         LoginPhase.Ready -> ui.notice?.let { it to t.warning }
     }
-    val hint = when {
+    val passwordHint = when {
         ui.mode == AuthMode.Pairing -> "type the code from your browser, ⏎ to send"
         ui.passwordEnabled && ui.usernameOptional -> "login only if this console has a username · type your password, ⏎ to send"
         ui.passwordEnabled -> "type your password, ⏎ to send"
         else -> "password sign-in is off for this console — use a pairing code"
     }
+    // retro-login.tsx: the passkey part leads, joined by the web's wide separator.
+    val hint = if (ui.passkeyReady) "⏎ on an empty line = passkey    ·    $passwordHint" else passwordHint
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -651,6 +762,16 @@ private fun RetroLogin(ui: LoginUi) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             RetroMenuItem("password", selected = ui.mode == AuthMode.Password, enabled = !ui.busy) { ui.onMode(AuthMode.Password) }
             RetroMenuItem("pairing code", selected = ui.mode == AuthMode.Pairing, enabled = !ui.busy) { ui.onMode(AuthMode.Pairing) }
+        }
+        if (ui.passkeyReady) {
+            // retro-login.tsx's `retroMenuItem`: "›" then the line, 44dp like every key.
+            TetherKey(
+                onClick = ui.onPasskey,
+                modifier = Modifier.testTag(LoginTags.Passkey),
+                classes = KeyClasses.ChatJump,
+                label = if (ui.phase == LoginPhase.VerifyingPasskey) "› waiting for your passkey…" else "› sign in with passkey",
+                enabled = !ui.busy,
+            )
         }
         when (ui.mode) {
             AuthMode.Password -> if (ui.passwordEnabled) {

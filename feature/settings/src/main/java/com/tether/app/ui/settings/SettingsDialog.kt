@@ -227,7 +227,10 @@ fun SettingsDialog(
     // screen; closing Settings drops them, the code's clipboard copy with it).
     val context = androidx.compose.ui.platform.LocalContext.current
     val pairingClipboard = remember(context) { AndroidPairingClipboard.forApp(context) }
-    val devicesController = rememberDevicesController(client.deviceSecurity, origin, clipboard = pairingClipboard)
+    // T10.5: passkey registration runs on this activity's Credential Manager prompt.
+    val activity = context.findActivity()
+    val passkeys = remember(activity) { com.tether.app.client.CredentialManagerPasskeys { activity } }
+    val devicesController = rememberDevicesController(client.deviceSecurity, origin, clipboard = pairingClipboard, authenticator = passkeys)
     val devicesBinding = DevicesBinding(devicesController)
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {

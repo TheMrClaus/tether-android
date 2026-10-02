@@ -72,7 +72,8 @@ object DevicesTags {
     const val PasskeysEmpty = "passkeys-empty"
     const val PasskeysHttps = "passkeys-https"
     const val AddPasskey = "passkeys-add"
-    const val AddPasskeyLater = "passkeys-add-later"
+    const val PasskeyLabel = "passkeys-label"
+    const val PasskeyUnavailable = "passkeys-unavailable"
     const val PasswordToggle = "passkeys-password"
     const val SessionsChecking = "sessions-checking"
     const val SignOutOthers = "sessions-sign-out-others"
@@ -165,18 +166,25 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         if (view != null && view.passkeys.isEmpty()) MutedLine(DevicesCopy.PASSKEYS_EMPTY, DevicesTags.PasskeysEmpty)
         if (view == null && !ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.PASSKEYS_CHECKING, DevicesTags.PasskeysChecking, status = true)
         if (view != null && !view.passkeysUsable) MutedLine(DevicesCopy.PASSKEYS_NEED_HTTPS, DevicesTags.PasskeysHttps)
-        // Registration is a WebAuthn ceremony on this phone (T10.5, Credential Manager): not here yet.
+        // T10.5: sign-in-security.tsx's add row: a label and Add a passkey, which opens this phone's
+        // passkey prompt (Credential Manager). The label is plain `remember` (never saved) and clears
+        // once a passkey is added, as the web's does.
+        var label by remember(c) { mutableStateOf("") }
+        LaunchedEffect(c.passkeysAdded) { if (c.passkeysAdded > 0) label = "" }
+        val canAdd = view != null && view.passkeysUsable && c.authenticator.available && !busy
+        val adding = c.securityBusy == DevicesAction.AddPasskey
         Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PasskeyLabelField(label, narrow, enabled = canAdd, onChange = { label = it }, onDone = { if (canAdd) c.addPasskey(label) })
             TetherKey(
-                onClick = {},
-                enabled = false,
+                onClick = { c.addPasskey(label) },
+                enabled = canAdd,
                 classes = KeyClasses.ButtonSecondary,
-                label = DevicesCopy.ADD_PASSKEY,
+                label = if (adding) DevicesCopy.ADDING_PASSKEY else DevicesCopy.ADD_PASSKEY,
                 icon = TetherIcons.Fingerprint,
                 iconSize = 15.dp,
                 modifier = Modifier.testTag(DevicesTags.AddPasskey),
             )
-            MutedLine(DevicesCopy.ADD_PASSKEY_LATER, DevicesTags.AddPasskeyLater, rule = false)
+            if (!c.authenticator.available) MutedLine(DevicesCopy.PASSKEY_UNAVAILABLE, DevicesTags.PasskeyUnavailable, rule = false)
         }
         if (view != null) {
             SettingsToggleRow(
@@ -294,6 +302,30 @@ private fun PasskeyRenameField(passkey: Passkey, shown: String, narrow: Boolean,
                 focused = f.isFocused
             },
         decorationBox = { inner -> ServerFieldBox(true, focused, style, null, inner) },
+    )
+}
+
+/** sign-in-security.tsx's `passkey-label-input`: at most the server's 64 characters; Done adds. */
+@Composable
+private fun PasskeyLabelField(text: String, narrow: Boolean, enabled: Boolean, onChange: (String) -> Unit, onDone: () -> Unit) {
+    val t = LocalTetherTokens.current
+    var focused by remember { mutableStateOf(false) }
+    val style = serverFieldStyle(narrow)
+    BasicTextField(
+        value = text,
+        onValueChange = { if (it.length <= com.tether.app.client.DeviceSecurityJson.MAX_LABEL_SENT) onChange(it) },
+        enabled = enabled,
+        singleLine = true,
+        textStyle = style.copy(color = t.ink),
+        cursorBrush = SolidColor(t.violet),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(DevicesTags.PasskeyLabel)
+            .semantics { contentDescription = DevicesCopy.PASSKEY_LABEL }
+            .onFocusChanged { focused = it.isFocused },
+        decorationBox = { inner -> ServerFieldBox(enabled, focused, style, if (text.isEmpty()) AnnotatedString(DevicesCopy.PASSKEY_LABEL_PLACEHOLDER) else null, inner) },
     )
 }
 
