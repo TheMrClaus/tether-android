@@ -131,4 +131,20 @@ class LoginCopyTest {
         // The /healthz pre-flight against the same server reads the same.
         assertEquals(versionCopy(incompatibility), versionCopy(Compatibility.evaluate(136, 129)!!))
     }
+
+    /** T10.5: use-login-flow.ts `passkeyReady` and the passkey outcomes' words. */
+    @Test
+    fun aPasskeyIsReadyOnlyWhenRegisteredUsableAndRunnable() {
+        val ready = probe.copy(passkeyCount = 2, passkeysUsable = true)
+        assertTrue(passkeyReady(ready, available = true))
+        assertEquals(false, passkeyReady(ready, available = false))
+        assertEquals(false, passkeyReady(ready.copy(passkeyCount = 0), available = true))
+        assertEquals(false, passkeyReady(ready.copy(passkeysUsable = false), available = true))
+        assertEquals("unknown requirements offer none, like the web", false, passkeyReady(null, available = true))
+        // A dismissed prompt is a notice, not an error; a refusal is the server's own sentence.
+        assertNull(loginErrorCopy(LoginResult.PasskeyDismissed))
+        assertEquals("That passkey could not be verified.", loginErrorCopy(LoginResult.PasskeyFailed("That passkey could not be verified.")))
+        assertEquals("Passkey sign-in failed.", loginErrorCopy(LoginResult.PasskeyFailed(" ")))
+        assertEquals("Passkey prompt dismissed.", PASSKEY_DISMISSED_NOTICE)
+    }
 }
