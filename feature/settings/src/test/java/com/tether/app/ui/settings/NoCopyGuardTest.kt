@@ -329,7 +329,11 @@ class NoCopyGuardTest {
             val own = runCatching { NoCopyToolbar::class.java.getDeclaredMethod(m.name, *m.parameterTypes) }.getOrNull()
             assertNotNull("NoCopyToolbar does not implement ${sig(m)} itself", own)
         }
-        assertTrue("NoCopyToolbar delegates with `by`", NoCopyToolbar::class.java.declaredFields.none { it.name.startsWith("\$\$delegate") })
+        // `by delegate` over a constructor property leaves no trace in the bytecode (Kotlin writes the
+        // forwarding methods into the class), so the declaration itself is checked.
+        val source = listOf(GUARD_SOURCE, "feature/settings/$GUARD_SOURCE").map { java.io.File(it) }.first { it.exists() }.readText()
+        val header = checkNotNull(Regex("""class NoCopyToolbar\b[^{]*\{""").find(source)) { "NoCopyToolbar not found" }.value
+        assertFalse("NoCopyToolbar delegates with `by`: $header", Regex("""\bby\b""").containsMatchIn(header))
         // What it forwards: the status and hide, and a menu with Copy and Cut stripped.
         val platform = ToolbarSpy()
         val guarded = NoCopyToolbar(platform)
@@ -384,6 +388,7 @@ class NoCopyGuardTest {
     }
 
     private companion object {
+        const val GUARD_SOURCE = "src/main/java/com/tether/app/ui/settings/ServerSettingsRows.kt"
         const val CONTROL = "nocopy-control"
         const val GUARDED = "nocopy-guarded"
         const val PROCESS_APP = "test.process.text"
