@@ -3,8 +3,11 @@ package com.tether.app.ui.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.text.contextmenu.data.ProcessTextKey
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
 import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
 import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -12,6 +15,9 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.KeyInjectionScope
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
@@ -56,6 +62,7 @@ internal fun SemanticsNodeInteraction.selectAllAndPress(keys: ClipKeys) {
 }
 
 /** The new text context menu as the platform toolbar would get it: what it was asked to show, and how often. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 internal class MenuSpy : TextContextMenuProvider {
     var shown: TextContextMenuDataProvider? = null
     var opened = 0
@@ -71,4 +78,26 @@ internal class MenuSpy : TextContextMenuProvider {
     }
 
     fun keys(): List<Any> = checkNotNull(shown) { "no text menu is open" }.data().components.map { it.key }
+
+    /** [keys], named (the menu's keys are bare objects). */
+    fun names(): List<String> = keys().map { k ->
+        with(TextContextMenuKeys) {
+            when (k) {
+                CopyKey -> "Copy"
+                CutKey -> "Cut"
+                PasteKey -> "Paste"
+                SelectAllKey -> "SelectAll"
+                AutofillKey -> "Autofill"
+                is ProcessTextKey -> "ProcessText"
+                else -> k.javaClass.simpleName.ifEmpty { "Other" }
+            }
+        }
+    }
+}
+
+/** Long-press [this] near its start and wait until the new text menu is open (an idle frame alone is not always enough). */
+internal fun SemanticsNodeInteraction.longPressForMenu(rule: ComposeTestRule, menu: MenuSpy) {
+    val before = menu.opened
+    performTouchInput { longClick(centerLeft + Offset(24f, 0f)) }
+    rule.waitUntil(5_000) { menu.opened > before && menu.shown != null }
 }

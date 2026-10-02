@@ -22,8 +22,6 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.longClick
 import com.tether.app.client.ServerSetting
 import com.tether.app.ui.settings.ServerFixtures.FAKE_PASSWORD
 import com.tether.app.ui.settings.ServerFixtures.ORIGIN
@@ -604,16 +602,13 @@ class ServerSettingsBehaviourTest {
         val plain = tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot))
         plain.performScrollTo()
         plain.performTextReplacement("/srv/workspaces")
-        plain.performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(24f, 0f)) }
-        compose.waitForIdle()
-        assertTrue("the control offers no Copy: ${menu.keys()}", androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey in menu.keys())
+        plain.longPressForMenu(compose, menu)
+        assertTrue("the control offers no Copy: ${menu.names()}", menu.names().containsAll(listOf("Copy", "Cut")))
         tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
         val field = tag(ServerSettingsTags.input(ServerSetting.Password))
-        field.performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(24f, 0f)) }
-        compose.waitForIdle()
-        val keys = menu.keys()
-        val allowed = with(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys) { setOf(PasteKey, SelectAllKey, AutofillKey) }
-        assertTrue("the revealed secret's menu offers $keys", keys.isNotEmpty() && keys.all { it in allowed })
+        field.longPressForMenu(compose, menu)
+        val names = menu.names()
+        assertTrue("the revealed secret's menu offers $names", names.isNotEmpty() && names.all { it in setOf("Paste", "SelectAll", "Autofill") })
     }
 
     /** r2: the revealed field's text menu offers neither Copy nor Cut (paste and select-all stay). */

@@ -39,11 +39,9 @@ import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -279,17 +277,15 @@ class NoCopyGuardTest {
         val menu = MenuSpy()
         val toolbar = ToolbarSpy()
         show(recording(), menu, toolbar, guardedField = { NoCopyScope(true) { g -> BasicTextField(guarded, { guarded = it }, g.fillMaxWidth().testTag(GUARDED)) } })
-        tag(CONTROL).performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(12f, 0f)) }
-        compose.waitForIdle()
+        tag(CONTROL).longPressForMenu(compose, menu)
         val controlKeys = menu.keys()
-        assertTrue("control: $controlKeys", controlKeys.containsAll(listOf(TextContextMenuKeys.CopyKey, TextContextMenuKeys.CutKey)))
+        assertTrue("control: ${menu.names()}", controlKeys.containsAll(listOf(TextContextMenuKeys.CopyKey, TextContextMenuKeys.CutKey)))
         assertTrue("no process-text item in the control: $controlKeys", controlKeys.any { it is ProcessTextKey })
-        tag(GUARDED).performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(12f, 0f)) }
-        compose.waitForIdle()
+        tag(GUARDED).longPressForMenu(compose, menu)
         assertNotNull("the guarded field opened no menu", menu.shown)
         val keys = menu.keys()
         val allowed = setOf(TextContextMenuKeys.PasteKey, TextContextMenuKeys.SelectAllKey, TextContextMenuKeys.AutofillKey)
-        assertTrue("the guarded field's menu offers $keys", keys.all { it in allowed })
+        assertTrue("the guarded field's menu offers ${menu.names()}", keys.all { it in allowed })
         assertTrue("the guarded field's menu lost Select all: $keys", TextContextMenuKeys.SelectAllKey in keys)
         assertEquals("the old TextToolbar was used", 0, toolbar.shows)
         assertEquals(2, menu.opened)
