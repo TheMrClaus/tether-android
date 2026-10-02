@@ -37,4 +37,11 @@ for skin in studio studio-dark; do
   java "$TOOL" montage "$OUT/empty-$skin-phone.png" "Phone shell · empty state · $skin" \
     "$WEB/empty-state/$skin-phone.png@0,110,360,200" "$G/shell-empty/$skin-phone.png@0,110,360,200" \
     "$WEB/empty-state/$skin-phone.png@0,560,1080,1260" "$G/shell-empty/$skin-phone.png@0,560,1080,1260"
+
+  # ta-3e7: the Studio welcome (MainShell's empty Sessions stage) against the same web shots:
+  # the whole stage under the topbar, phone and the 1280×800 tablet (both 1:1 in px).
+  java "$TOOL" montage "$OUT/welcome-$skin-phone.png" "Studio welcome · empty state · $skin (phone)" \
+    "$WEB/empty-state/$skin-phone.png@0,150,1080,2250" "$G/studio-welcome-connected/$skin-phone.png@0,150,1080,2250"
+  java "$TOOL" montage "$OUT/welcome-$skin-tablet.png" "Studio welcome · empty state · $skin (tablet, stage)" \
+    "$WEB/empty-state/$skin-tablet.png@272,64,1008,736" "$G/studio-welcome-connected/$skin-tablet.png@272,64,1008,736"
 done

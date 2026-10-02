@@ -83,6 +83,8 @@ fun ExpandedShellUnderTest(
     persisted: PersistedPanels? = null,
     /** ta-abm: the hosted surfaces (the draft's launching stage rides here). */
     slots: PhoneShellSlots = expandedSlots(),
+    /** ta-3e7: the link the top bar prints (the welcome's offline goldens). */
+    link: LinkReadout = LinkReadout.Connected,
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
@@ -114,6 +116,7 @@ fun ExpandedShellUnderTest(
                     onCopyTetherId = { onEvent("copyId") },
                 ),
                 slots = slots,
+                link = link,
             )
           }
         }
