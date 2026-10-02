@@ -40,7 +40,9 @@ import org.robolectric.annotation.Config
  * `settings-general` / `-appearance` / `-devices` / `-engines` are those tabs; `settings-restart` is
  * General under the restart banner. ta-9q2: the Engines shots are scrolled to Claude accounts:
  * `-engines` the seeded list (two accounts checked: one signed in, one refused), `-engines-sync`
- * its read-only sync rows, `-engines-loading` / `-blocked` / `-error` the other states.
+ * its sync rows, `-engines-loading` / `-blocked` / `-error` the other states. ta-7rh: `-engines-owner`
+ * a pre-#236 server's owner refusal, `-engines-login` a login waiting for its code, `-engines-adding`
+ * the nickname row with a refusal, `-engines-rename` Rename open (and a card's failure line).
  */
 enum class SettingsShot(
     val id: String,
@@ -74,6 +76,10 @@ enum class SettingsShot(
     EnginesLoading("settings-engines-loading", SettingsTab.Engines, accounts = AccountsShot.Loading),
     EnginesBlocked("settings-engines-blocked", SettingsTab.Engines, accounts = AccountsShot.Blocked),
     EnginesError("settings-engines-error", SettingsTab.Engines, accounts = AccountsShot.Error),
+    EnginesOwner("settings-engines-owner", SettingsTab.Engines, accounts = AccountsShot.Owner),
+    EnginesLogin("settings-engines-login", SettingsTab.Engines, accounts = AccountsShot.Login),
+    EnginesAdding("settings-engines-adding", SettingsTab.Engines, accounts = AccountsShot.Adding),
+    EnginesRename("settings-engines-rename", SettingsTab.Engines, accounts = AccountsShot.Rename),
     Restart("settings-restart", SettingsTab.General, restart = true),
     Advanced("settings-advanced", SettingsTab.Advanced, server = ServerShot.Advanced),
     AdvancedRevealed("settings-advanced-revealed", SettingsTab.Advanced, server = ServerShot.Revealed),
@@ -266,7 +272,31 @@ enum class AccountsShot(val scrollTo: String) {
     Loading(ClaudeAccountsTags.Section),
     Blocked(ClaudeAccountsTags.Section),
     Error(ClaudeAccountsTags.Section),
+    /** ta-7rh: a server without #236 refused a change: the note and Try again, every change at rest. */
+    Owner(ClaudeAccountsTags.Section),
+    /** ta-7rh: a login waiting for its code: the link's host, Open, the empty code field and Submit. */
+    Login(ClaudeAccountsTags.loginPanel("claude-work")),
+    /** ta-7rh: the nickname row open with a name typed, and the server's refusal under it. */
+    Adding(ClaudeAccountsTags.AddField),
+    /** ta-7rh: Rename open on "work" (filled with the nickname), and a removal's outcome under another card. */
+    Rename(ClaudeAccountsTags.card("claude-work")),
     ;
+
+    /** The changes' state of the shot (null: none; the reads' seed alone). */
+    fun writeSeed(): AccountsWriteSeed? = when (this) {
+        Owner -> AccountsWriteSeed(ownerNeeded = true)
+        Login -> AccountsWriteSeed(
+            logins = mapOf("claude-work" to LoginPanel(com.tether.app.client.ClaudeLoginStatus.AwaitingCode, com.tether.app.client.ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE"))),
+        )
+        Adding -> AccountsWriteSeed(adding = true, addText = "home", line = AccountsLine(ClaudeAccountsCopy.ADD_FAILED, error = true))
+        Rename -> AccountsWriteSeed(
+            renaming = "claude-work",
+            renameText = "work",
+            deleteCredentials = mapOf("claude-fresh" to true),
+            lines = mapOf("claude-fresh" to AccountsLine(com.tether.app.client.ClaudeAccountActionCopy.NOT_A_CLAUDE_ACCOUNT, error = true)),
+        )
+        else -> null
+    }
 
     fun seed(): ClaudeAccountsState {
         val origin = AccountsFixtures.ORIGIN
@@ -280,14 +310,21 @@ enum class AccountsShot(val scrollTo: String) {
             sync = AccountsFixtures.SYNC,
         )
         return when (this) {
-            Loaded, Sync -> loaded
+            Loaded, Sync, Owner, Login, Adding, Rename -> loaded
             Loading -> ClaudeAccountsState(origin = origin)
             Blocked -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Blocked(302))
             Error -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Unavailable(500))
         }
     }
 
-    fun binding() = ClaudeAccountsBinding(NeverAsked, AccountsFixtures.ORIGIN, AccountsFixtures.TIME, initial = seed())
+    fun binding() = ClaudeAccountsBinding(NeverAsked, AccountsFixtures.ORIGIN, AccountsFixtures.TIME, initial = seed(), actions = NeverChanged, writeSeed = writeSeed())
+}
+
+/** The changes behind a seeded shot: any call is a timing dependency (and a write), so it fails the shot. */
+private object NeverChanged : com.tether.app.client.ClaudeAccountActions by com.tether.app.client.ClaudeAccountActions.Unavailable {
+    override suspend fun add(origin: String, nickname: String): com.tether.app.client.SecurityResult<Unit> = error("a seeded shot must not change anything")
+    override suspend fun pollLogin(origin: String, accountId: String): com.tether.app.client.SecurityResult<com.tether.app.client.ClaudeLoginState> = error("a seeded shot must not poll")
+    override suspend fun runSync(origin: String): com.tether.app.client.SecurityResult<com.tether.app.client.ClaudeSyncSaved> = error("a seeded shot must not sync")
 }
 
 /** The source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
@@ -328,6 +365,12 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
+    if (shot.accounts != null) {
+        // ta-7rh: a field that took focus on opening (Add, Rename) is drawn at rest: no cursor in the shot.
+        runOnIdle { focus?.clearFocus(force = true) }
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
     if (shot.nodes?.fill == true) {
         onNodeWithTag(NodeTags.Label, useUnmergedTree = true).performTextReplacement("Workstation")
         onNodeWithTag(NodeTags.BaseUrl, useUnmergedTree = true).performTextReplacement("http://10.0.0.2:4173")
@@ -406,7 +449,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list, Advanced, Metadata, the engine cards, the custom providers, the Nodes list and form, and the Devices top, paired devices and pairing code; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list and a login (ta-7rh), Advanced, Metadata, the engine cards, the custom providers, the Nodes list and form, and the Devices top, paired devices and pairing code; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -415,6 +458,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.EnginesLogin, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
