@@ -68,4 +68,39 @@ class TetherViewModelCreatedOriginTest {
         val attach = fx.framesUntilBarrier(fx.b).single { it.type() == "attach" }
         assertEquals("s-on-b", (attach["sessionId"] as JsonPrimitive).content)
     }
+
+    /**
+     * r2 (security P4-1): the same, after a sign-out instead of a switch. The URL stays (the login
+     * screen's prefill), so only the missing sign-in refuses it: a resume reply A sent before the
+     * logout, handled after it, selects nothing and subscribes nothing, so the next sign-in to A does
+     * not attach it either.
+     */
+    @Test
+    fun aResumeReplyHandledAfterASignOutOpensAndAttachesNothingEvenAfterSigningBackIn() {
+        val aws = fx.connectedToA()
+        val vm = vms.track(TetherViewModel(fx.client, InMemoryDraftStore(), monotonicClock = { 0 }))
+        main.scheduler.advanceUntilIdle()
+        aws.send(createdFrame("s-resumed", null))
+        fx.await(fx.client.createdSessions) { it?.session?.id == "s-resumed" }
+        // Main is held: the reply waits in the stream while the sign-out runs.
+        kotlinx.coroutines.runBlocking { fx.client.logout() }
+        main.scheduler.advanceUntilIdle()
+        assertNull("a session was selected while signed out", vm.selectedSessionId.value)
+
+        fx.loginTo(fx.a)
+        val ws = fx.a.nextSocket()
+        fx.handshake(fx.a, ws)
+        main.scheduler.advanceUntilIdle()
+        val sent = fx.framesUntilBarrier(fx.a)
+        assertTrue("re-attached after the sign-in: $sent", sent.none { it.type() == "attach" })
+        assertFalse(fx.a.allFrames.any { it.contains("\"attach\"") && it.contains("s-resumed") })
+
+        // Positive control: signed in again, A's own resume reply opens and attaches.
+        ws.send(createdFrame("s-after", null))
+        fx.await(fx.client.createdSessions) { it?.session?.id == "s-after" }
+        main.scheduler.advanceUntilIdle()
+        assertEquals("s-after", vm.selectedSessionId.value)
+        val attach = fx.framesUntilBarrier(fx.a).single { it.type() == "attach" }
+        assertEquals("s-after", (attach["sessionId"] as JsonPrimitive).content)
+    }
 }

@@ -151,17 +151,102 @@ class CreateReplyOriginTest {
         assertEquals("first words for A", frames.single { it.type() == "send" }.str("text"))
     }
 
+    /** Signed in to A again after a sign-out: a fresh socket of A, handshaken. */
+    private fun signBackInToA(): okhttp3.WebSocket {
+        fx.loginTo(fx.a)
+        val ws = fx.a.nextSocket()
+        fx.handshake(fx.a, ws)
+        assertTrue(fx.client.isConfiguredOrigin(fx.a.origin()))
+        return ws
+    }
+
+    /**
+     * R2: a sign-out empties the record. A sign-in to the SAME server afterwards is no switch (the URL
+     * stayed), so nothing else would: the old answers must not come back with it.
+     */
     @Test
-    fun aSignOutForgetsTheRecordedCreateAnswers() {
+    fun aSignOutForgetsTheRecordedCreateAnswersEvenAfterSigningBackIn() {
         val aws = fx.connectedToA()
         aws.send(createdFrame("s-on-a", "r-1"))
         aws.send("""{"type":"error","message":"no","requestId":"r-2"}""")
         fx.awaitCondition("both answers were recorded") { fx.client.createReply("r-1") != null && fx.client.createReply("r-2") != null }
         assertEquals(fx.a.origin(), fx.client.createReply("r-2")!!.origin)
         runBlocking { fx.client.logout() }
-        // The URL stays (the login screen's prefill), so the origin filter alone would still return them.
-        assertTrue(fx.client.isConfiguredOrigin(fx.a.origin()))
+        // r2 (P4-1): the URL stays (the login screen's prefill), but nobody is signed in.
+        assertEquals(OriginStanding.SignedOut, fx.client.originStanding(fx.a.origin()))
         assertNull(fx.client.createReply("r-1"))
+        signBackInToA()
+        assertNull("an answer from before the sign-out came back", fx.client.createReply("r-1"))
         assertNull(fx.client.createReply("r-2"))
+    }
+
+    /** r2 (security P4-3): a sign-out empties the latest replies; their seq keeps rising after it. */
+    @Test
+    fun aSignOutEmptiesTheLatestRepliesAndTheirSeqKeepsRising() {
+        val aws = fx.connectedToA()
+        aws.send(createdFrame("s-on-a", "r-1"))
+        aws.send("""{"type":"error","message":"no","requestId":"r-2"}""")
+        val created = fx.await(fx.client.createdSessions) { it?.requestId == "r-1" }!!
+        val error = fx.await(fx.client.createErrors) { it?.requestId == "r-2" }!!
+        runBlocking { fx.client.logout() }
+        assertNull("the last created outlived the sign-out", fx.client.createdSessions.value)
+        assertNull("the last error outlived the sign-out", fx.client.createErrors.value)
+        val ws = signBackInToA()
+        ws.send(createdFrame("s-later", "r-3"))
+        ws.send("""{"type":"error","message":"later","requestId":"r-4"}""")
+        assertTrue(fx.await(fx.client.createdSessions) { it?.requestId == "r-3" }!!.seq > created.seq)
+        assertTrue(fx.await(fx.client.createErrors) { it?.requestId == "r-4" }!!.seq > error.seq)
+    }
+
+    /** Delegates to [inner]; clear() always fails, as a store that can write neither file does. */
+    private class FailingClear(private val inner: SettingsStore) : SettingsStore by inner {
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        override suspend fun clear() {
+            attempts.incrementAndGet()
+            throw java.io.IOException("disk full")
+        }
+    }
+
+    /**
+     * r2 (security P4-2): a stop() whose store clear fails leaves the URL on disk, so the next sign-in
+     * to the same server is no switch; the answers recorded before the stop must not come back.
+     */
+    @Test
+    fun aStopWhoseStoreClearFailsStillForgetsTheCreateAnswers() {
+        var failing: FailingClear? = null
+        TwoOriginFixture { FailingClear(it).also { f -> failing = f } }.use { own ->
+            own.client.start()
+            val aws = own.a.nextSocket()
+            own.handshake(own.a, aws)
+            aws.send(createdFrame("s-on-a", "r-1"))
+            own.awaitCondition("the answer was recorded") { own.client.createReply("r-1") != null }
+            own.client.stop()
+            own.awaitCondition("the store clear was tried, and failed") { failing!!.attempts.get() >= 2 }
+            own.loginTo(own.a)
+            own.handshake(own.a, own.a.nextSocket())
+            assertTrue(own.client.isConfiguredOrigin(own.a.origin()))
+            assertNull("an answer from before the stop came back", own.client.createReply("r-1"))
+        }
+    }
+
+    /** Verifier P4 (r2): a create pending at a sign-out says so, not that the server changed. */
+    @Test
+    fun aCreatePendingAtALogoutIsSettledWithTheSignOutWording() {
+        val (_, engine) = createInFlightOnA()
+        runBlocking { fx.client.logout() }
+        engine.onLink(fx.client.connection.value, fx.client.linkEpoch.value)
+        assertFalse(engine.state.value.creating)
+        assertEquals(DRAFT_SIGNED_OUT_COPY, engine.state.value.error)
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun aCreatePendingAtAStopIsSettledWithTheSignOutWording() {
+        val (_, engine) = createInFlightOnA()
+        fx.client.stop()
+        engine.onLink(fx.client.connection.value, fx.client.linkEpoch.value)
+        assertFalse(engine.state.value.creating)
+        assertEquals(DRAFT_SIGNED_OUT_COPY, engine.state.value.error)
+        assertTrue(opened.isEmpty())
     }
 }

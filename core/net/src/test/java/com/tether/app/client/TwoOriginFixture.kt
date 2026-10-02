@@ -28,9 +28,12 @@ import org.junit.Assert.assertTrue
 
 /**
  * ta-2ew: two MockWebServer "Tethers" on different ports (= two origins) and one RealTetherClient
- * signed in to the first. Every credential here is obviously fake.
+ * signed in to the first. Every credential here is obviously fake. [wrapSettings] may wrap its store
+ * (e.g. one whose clear fails).
  */
-internal class TwoOriginFixture : AutoCloseable {
+internal class TwoOriginFixture(
+    wrapSettings: (SettingsStore) -> SettingsStore = { it },
+) : AutoCloseable {
 
     /** One fake Tether: every frame any of its sockets received (the ready's catalog read aside). */
     class FakeTether : AutoCloseable {
@@ -97,7 +100,7 @@ internal class TwoOriginFixture : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val now = AtomicLong(1_000_000)
     val client: RealTetherClient = RealTetherClient(
-        settings = InMemorySettings(initialBaseUrl = a.url(), initialCookie = "parity-fake-cookie-a"),
+        settings = wrapSettings(InMemorySettings(initialBaseUrl = a.url(), initialCookie = "parity-fake-cookie-a")),
         httpClient = OkHttpClient(),
         scope = scope,
         clock = { now.get() },

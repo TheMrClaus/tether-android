@@ -789,14 +789,16 @@ class DraftComposerModel(
     }
 
     /**
-     * ta-2ew (R1): the server [p] went to is no longer the configured one: [p] is over (settled, the
-     * draft unlocked with its text and told so), and nothing that arrives for it later completes it.
-     * True when it was.
+     * ta-2ew (R1): the server [p] went to is no longer the configured one, or (r2) nobody is signed
+     * in any more: [p] is over (settled, the draft unlocked with its text and told which), and
+     * nothing that arrives for it later completes it. True when it was.
      */
     private fun settleIfServerChanged(p: PendingCreate): Boolean {
-        if (client.isConfiguredOrigin(p.origin)) return false
+        val standing = client.originStanding(p.origin)
+        if (standing == OriginStanding.Configured) return false
         settle(p)
-        _state.update { it.copy(creating = false, error = DRAFT_SERVER_CHANGED_COPY) }
+        val copy = if (standing == OriginStanding.SignedOut) DRAFT_SIGNED_OUT_COPY else DRAFT_SERVER_CHANGED_COPY
+        _state.update { it.copy(creating = false, error = copy) }
         return true
     }
 
@@ -1018,6 +1020,9 @@ const val DRAFT_NOT_LIVE_COPY = "The server changed. Nothing was created; pick a
 
 /** ta-2ew: the configured server changed while a create was in flight; it is not completed here. */
 const val DRAFT_SERVER_CHANGED_COPY = "The server changed while the session was being created, so it was not opened here and your message was not sent."
+
+/** ta-2ew r2: signed out (a logout, a stop, a rejected credential) while a create was in flight. */
+const val DRAFT_SIGNED_OUT_COPY = "You were signed out while the session was being created, so it was not opened and your message was not sent."
 
 /** ta-895: the live catalog no longer offers the row as drawn. */
 const val DRAFT_NOT_OFFERED_COPY = "This server no longer offers that choice. Nothing was created; pick again from the updated list."

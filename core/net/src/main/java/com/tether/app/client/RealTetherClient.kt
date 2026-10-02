@@ -640,12 +640,25 @@ class RealTetherClient(
     private val createRepliesByRequest = LinkedHashMap<String, CreateReplyRecord>()
 
     // ta-2ew (R1): an answer recorded on another server is never returned, even in the window
-    // between a sign-in switch moving the URL and clearServerViews emptying the record.
+    // between a sign-in switch moving the URL and clearServerViews emptying the record; r2: nor
+    // while signed out.
     override fun createReply(requestId: String): CreateReplyRecord? = synchronized(lock) {
-        createRepliesByRequest[requestId]?.takeIf { it.origin != null && it.origin == currentOriginLocked() }
+        createRepliesByRequest[requestId]?.takeIf { record -> record.origin?.let { originStandingLocked(it) } == OriginStanding.Configured }
     }
 
-    override fun isConfiguredOrigin(origin: String): Boolean = synchronized(lock) { currentOriginLocked() == origin }
+    override fun originStanding(origin: String): OriginStanding = synchronized(lock) { originStandingLocked(origin) }
+
+    /**
+     * ta-2ew r2 (security P4-1): a logout keeps the URL (the login screen's prefill), so the URL alone
+     * does not make [origin] the server in force: a live credential does too. logout(), stop() and a
+     * rejected credential null [credentialValue] under this lock; a sign-in sets it with the URL.
+     * Caller holds [lock].
+     */
+    private fun originStandingLocked(origin: String): OriginStanding = when {
+        credentialValue == null -> OriginStanding.SignedOut
+        currentOriginLocked() == origin -> OriginStanding.Configured
+        else -> OriginStanding.OtherServer
+    }
 
     /** Caller holds [lock]. */
     private fun recordCreateReplyLocked(requestId: String, record: CreateReplyRecord) {
@@ -1783,6 +1796,9 @@ class RealTetherClient(
             setAside.clear()
             pendingWipe++
             clearServerStateLocked()
+            // ta-2ew r2 (security P4-2): no create answer outlives the sign-out, even if the store's
+            // clear fails and the next sign-in to the same server is not seen as a switch.
+            createRepliesByRequest.clear()
             detachSocketLocked() to dropped
         }.let { (socketGone, dropped) ->
             if (dropped > 0) {
@@ -1883,11 +1899,15 @@ class RealTetherClient(
             // re-sign-in in this process must still never send a decision twice (at most once).
             decidedState.value = emptySet()
             unconfirmedState.value = emptySet()
-            // ta-2ew (R2): no create answer outlives the sign-out (the URL stays, so the origin
-            // filter alone would still return it to the next sign-in to the same server).
+            // ta-2ew (R2): no create answer outlives the sign-out (the URL stays, so a sign-in to the
+            // same server is no switch, and the filter alone would return it again then).
             createRepliesByRequest.clear()
         }
         ws?.close(1000, "logout")
+        // ta-2ew r2 (security P4-3): the latest replies go with the record; the seq counters keep
+        // rising, so a reply after the next sign-in is still newer than any seen before.
+        createdState.value = null
+        createErrorsState.value = null
         clearSignInViews()
         val mirror = unbindMirrorForWipe()
 
@@ -3559,7 +3579,7 @@ class RealTetherClient(
     private fun attachNow(sessionId: String, expectedOrigin: String?): Boolean {
         var on: WebSocket? = null
         val afterSeq = synchronized(lock) {
-            if (expectedOrigin != null && currentOriginLocked() != expectedOrigin) return false
+            if (expectedOrigin != null && originStandingLocked(expectedOrigin) != OriginStanding.Configured) return false
             on = socket
             subscribed.add(sessionId)
             // §3.1 rule 5: "most recently opened" orders the capped ready re-attach.

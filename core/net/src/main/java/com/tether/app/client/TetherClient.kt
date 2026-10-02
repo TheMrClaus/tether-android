@@ -443,11 +443,17 @@ interface TetherClient {
     fun createReply(requestId: String): CreateReplyRecord? = null
 
     /**
-     * ta-2ew: is [origin] the server configured right now? Read under the client's lock, so it never
-     * lags a sign-in switch the way [serverUrl] (published later) can. A client that does not stamp
-     * its replies ([CreatedReply.origin] null: test doubles) does not say: true.
+     * ta-2ew: where [origin] stands right now: the server configured AND signed in to
+     * ([OriginStanding.Configured]), no live sign-in at all (a logout, a stop, a rejected credential:
+     * [OriginStanding.SignedOut]), or another server configured ([OriginStanding.OtherServer]).
+     * Read under the client's lock, so it never lags a sign-in switch or a sign-out the way
+     * [serverUrl] and [configured] (published later) can. A client that does not stamp its replies
+     * ([CreatedReply.origin] null: test doubles) does not say: Configured.
      */
-    fun isConfiguredOrigin(origin: String): Boolean = true
+    fun originStanding(origin: String): OriginStanding = OriginStanding.Configured
+
+    /** ta-2ew: [origin] is the configured server, and signed in to ([originStanding]). */
+    fun isConfiguredOrigin(origin: String): Boolean = originStanding(origin) == OriginStanding.Configured
 
     /**
      * ta-2ew: [attach] a session a `created` reply named, only while [origin] (the reply's
@@ -926,6 +932,9 @@ data class CreateErrorReply(
     val linkEpoch: Long? = null,
     val origin: String? = null,
 )
+
+/** ta-2ew: [TetherClient.originStanding]. */
+enum class OriginStanding { Configured, SignedOut, OtherServer }
 
 /** ta-8cv r2: the recorded answer to one create ([TetherClient.createReply]). */
 sealed interface CreateReplyRecord {
