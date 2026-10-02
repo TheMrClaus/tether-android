@@ -204,9 +204,10 @@ class DevicesBehaviourTest {
         assertTrue(all.contains(DevicesCopy.pairHint(1)))
         // A cookie sign-in: no device is this phone.
         assertFalse(exists(DevicesTags.deviceSelf(PHONE.id)))
-        // Passkey registration waits for T10.5: drawn off, with why.
+        // T10.5: no passkey prompt on this controller (PasskeyAuthenticator.None): Add a passkey is
+        // drawn off, with why (DevicesPasskeyBehaviourTest covers the ceremony).
         assertFalse(enabled(DevicesTags.AddPasskey))
-        assertTrue(all.contains(DevicesCopy.ADD_PASSKEY_LATER))
+        assertTrue(all.contains(DevicesCopy.PASSKEY_UNAVAILABLE))
         // A tab change and back reads nothing more.
         state.tab = SettingsTab.General
         compose.waitForIdle()

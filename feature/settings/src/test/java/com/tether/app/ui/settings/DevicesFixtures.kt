@@ -9,6 +9,9 @@ import com.tether.app.client.OutstandingPairing
 import com.tether.app.client.PairedDevice
 import com.tether.app.client.PairingCode
 import com.tether.app.client.Passkey
+import com.tether.app.client.PasskeyAuthenticator
+import com.tether.app.client.PasskeyCeremony
+import com.tether.app.client.PasskeyChallenge
 import com.tether.app.client.PasskeyPolicySource
 import com.tether.app.client.PasskeysView
 import com.tether.app.client.PasswordPolicy
@@ -19,6 +22,7 @@ import com.tether.app.client.SessionsRevoked
 import com.tether.app.client.SignInHandle
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.serialization.json.JsonObject
 
 /** T10.4: the Devices panel's seeds. Every code here is a sentinel or obviously FAKE. */
 object DevicesFixtures {
@@ -123,6 +127,14 @@ class RecordingSecuritySource : DeviceSecuritySource {
     override suspend fun sessions(origin: String) = record<List<SecuritySession>>("sessions", origin)
     override suspend fun revokeSession(origin: String, sessionId: String) = record<Unit>("revokeSession", origin, sessionId)
     override suspend fun revokeOtherSessions(origin: String) = record<SessionsRevoked>("revokeOthers", origin)
+    override suspend fun passkeyRegistrationOptions(origin: String) = record<PasskeyChallenge>("registerOptions", origin)
+
+    /** T10.5: the verify call's body parts, as sent (the answer as JSON text, the label as given). */
+    val verified = CopyOnWriteArrayList<Triple<String, JsonObject, String>>()
+    override suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String): SecurityResult<Passkey> {
+        verified += Triple(challengeId, response, label)
+        return record("registerVerify", origin, label)
+    }
 
     companion object {
         val READS = setOf("devices", "passkeys", "sessions")
@@ -145,4 +157,49 @@ object NeverCalledSecurity : DeviceSecuritySource {
     override suspend fun sessions(origin: String) = no()
     override suspend fun revokeSession(origin: String, sessionId: String) = no()
     override suspend fun revokeOtherSessions(origin: String) = no()
+    override suspend fun passkeyRegistrationOptions(origin: String) = no()
+    override suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String) = no()
+}
+
+/**
+ * T10.5: a fake Credential Manager whose every ceremony waits for the test's answer (as the real
+ * prompt waits for the operator). [requests] holds the options JSON each ceremony was handed.
+ */
+class WaitingPasskeys(override val available: Boolean = true) : PasskeyAuthenticator {
+    val requests = CopyOnWriteArrayList<String>()
+    private val replies = CopyOnWriteArrayList<CompletableDeferred<PasskeyCeremony>>()
+
+    override suspend fun register(requestJson: String): PasskeyCeremony = wait(requestJson)
+    override suspend fun authenticate(requestJson: String): PasskeyCeremony = wait(requestJson)
+
+    private suspend fun wait(requestJson: String): PasskeyCeremony {
+        val reply = CompletableDeferred<PasskeyCeremony>()
+        requests += requestJson
+        replies += reply
+        return reply.await()
+    }
+
+    fun pending(): Boolean = replies.any { !it.isCompleted }
+
+    fun answer(ceremony: PasskeyCeremony) {
+        (replies.firstOrNull { !it.isCompleted } ?: error("no ceremony is waiting")).complete(ceremony)
+    }
+}
+
+/** T10.5: the shapes tether 90fbb9f sends and an authenticator answers (core/net PasskeyFixtures has the full set). */
+object PasskeyShapes {
+    const val CHALLENGE_ID = "0123456789abcdef0123456789abcdef"
+
+    fun challenge(rpId: String): PasskeyChallenge = com.tether.app.client.PasskeyRules.challenge(
+        com.tether.app.protocol.TetherJson.parseToJsonElement(
+            """{"challengeId":"$CHALLENGE_ID","options":{"challenge":"Y2hhbGxlbmdl","rp":{"name":"Tether","id":"$rpId"},"user":{"id":"dQ","name":"operator","displayName":"operator"},"pubKeyCredParams":[{"alg":-7,"type":"public-key"}],"excludeCredentials":[],"authenticatorSelection":{"residentKey":"required","userVerification":"required"}}}""",
+        ) as JsonObject,
+        com.tether.app.client.PasskeyPurpose.Register,
+    )!!
+
+    /** The answer; [SIGNATURE] stands where a real one would carry key material. */
+    const val SIGNATURE = "QVRURVNUQVRJT04tU0VOVElORUw"
+    const val ANSWER = """{"id":"bmV3LWtleQ","rawId":"bmV3LWtleQ","type":"public-key","clientExtensionResults":{},"response":{"clientDataJSON":"eyJ9","attestationObject":"$SIGNATURE","transports":["internal","hybrid"]}}"""
+
+    val NEW_KEY = Passkey("bmV3LWtleQ", "Pixel", DevicesFixtures.NOW, 0L, backedUp = true)
 }
