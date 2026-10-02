@@ -312,6 +312,37 @@ class AttachmentTransmissionTest {
         assertTrue("an attachment was resent", h.framesUntilBarrier().none { it.type() == "send" })
     }
 
+    /**
+     * ta-2ew (R3): a first message bound to its create's socket ([expectedEpoch]) never goes on a
+     * later one, even with the session live there, on the same server: the epoch is checked under
+     * the lock, with the send (the draft composer's own live check runs outside it).
+     */
+    @Test
+    fun attachmentsBoundToTheCreatesSocketAreRefusedOnTheNextSocket() {
+        val (client, ws) = connected()
+        val origin = client.consentOrigin.value
+        val createdOn = client.linkEpoch.value
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        client.reconnectIfIdle()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, ready())
+        h.expectFrame("attach")
+        ws2.send(snapshotFrame("s1", 5, idleState()))
+        h.await(client.liveSessions) { "s1" in it }
+        assertTrue(client.linkEpoch.value > createdOn)
+        assertEquals(origin, client.consentOrigin.value)
+        // The same server, the session live on the new socket: still refused, nothing sent.
+        assertEquals(AttachmentSendResult.NotConnected, client.sendAttachments("s1", "first", listOf(picture), null, origin, createdOn))
+        assertTrue("an attachment bound to the old socket went out", frames("send").isEmpty())
+        // Positive controls: bound to the live socket, or unbound (the chat composer): sent.
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "first", listOf(picture), null, origin, client.linkEpoch.value))
+        assertEquals(1, frames("send").size)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "chat", listOf(picture), null, origin))
+        assertEquals(1, frames("send").size)
+    }
+
     @Test
     fun aConfirmedTurnLeavesNothingToWarnAbout() {
         val (client, ws) = connected()

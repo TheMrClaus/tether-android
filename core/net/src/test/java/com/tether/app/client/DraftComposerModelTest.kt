@@ -89,24 +89,28 @@ class DraftComposerModelTest {
 
         override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?, expectedEpoch: Long?): AttachmentSendResult {
             attachmentSends += Triple(sessionId, text, attachments.size)
+            attachmentEpochs += expectedEpoch
             return attachmentResult
         }
+
+        /** ta-2ew (R3): the socket each attachment send was bound to (null: any live one). */
+        val attachmentEpochs = mutableListOf<Long?>()
 
         private var seq = 0L
 
         /** The reply as the real client records it: stamped with the socket it came on. */
-        fun created(id: String, requestId: String?, seq: Long = ++this.seq, epoch: Long = linkEpoch.value) {
+        fun created(id: String, requestId: String?, seq: Long = ++this.seq, epoch: Long = linkEpoch.value, origin: String? = null) {
             this.seq = maxOf(this.seq, seq)
-            val reply = CreatedReply(session(id), seq, requestId, epoch)
+            val reply = CreatedReply(session(id), seq, requestId, epoch, origin)
             createdSessions.value = reply
             if (requestId != null) records[requestId] = CreateReplyRecord.Created(reply)
         }
 
         private var errorSeq = 0L
 
-        fun error(message: String, requestId: String?, seq: Long = ++errorSeq, epoch: Long = linkEpoch.value) {
+        fun error(message: String, requestId: String?, seq: Long = ++errorSeq, epoch: Long = linkEpoch.value, origin: String? = null) {
             errorSeq = maxOf(errorSeq, seq)
-            val reply = CreateErrorReply(message, seq, requestId, epoch)
+            val reply = CreateErrorReply(message, seq, requestId, epoch, origin)
             createErrors.value = reply
             if (requestId != null) records[requestId] = CreateReplyRecord.Failed(reply)
         }
@@ -573,6 +577,34 @@ class DraftComposerModelTest {
         assertEquals(listOf("new"), h.opened)
     }
 
+    /**
+     * ta-2ew (R1): a reply stamped with another server than the create's never answers it, whether it
+     * arrives on the stream or is found in the record; one stamped with the create's server does.
+     */
+    @Test
+    fun aReplyStampedWithAnotherServerNeverAnswersTheCreate() = runTest {
+        val h = harness()
+        h.model.submitChoice(claude, A)
+        h.client.created("from-b", "req-1", origin = B)
+        assertNull(h.deliverCreated())
+        h.client.error("from b", "req-1", origin = B)
+        assertEquals(false, h.deliverError())
+        // The socket drops with only B's answers on record: not completed from them either.
+        h.client.created("from-b-2", "req-1", origin = B)
+        h.model.onLink(ConnectionState.Disconnected, 1)
+        assertTrue(h.opened.isEmpty())
+        assertFalse(h.model.state.value.creating)
+        assertEquals(DRAFT_LINK_DROPPED_COPY, h.model.state.value.error)
+
+        // Positive control: stamped with the create's own server, it answers.
+        h.client.connection.value = ConnectionState.Connected
+        h.model.onLink(ConnectionState.Connected, 1)
+        assertEquals(DraftSubmitResult.Sent, h.model.submitChoice(claude, A))
+        h.client.created("from-a", "req-2", origin = A)
+        assertEquals("from-a", h.deliverCreated())
+        assertEquals(listOf("from-a"), h.opened)
+    }
+
     @Test
     fun aRefusalSeenAfterTheDropStillShowsTheServersWords() = runTest {
         val h = harness()
@@ -619,6 +651,8 @@ class DraftComposerModelTest {
         h.client.liveSessions.value = setOf("new")
         runCurrent()
         assertEquals(listOf(Triple("new", "look", 1)), h.client.attachmentSends)
+        // ta-2ew (R3): bound to the create's socket, checked again under the client's lock.
+        assertEquals(listOf<Long?>(1L), h.client.attachmentEpochs)
         assertTrue(h.client.sends.isEmpty())
         val s = h.model.state.value
         assertFalse(s.creating)

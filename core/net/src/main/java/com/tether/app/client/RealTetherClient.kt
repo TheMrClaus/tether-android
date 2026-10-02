@@ -86,7 +86,12 @@ internal fun displayHost(origin: String, versus: String? = null): String {
 }
 
 /** See RealTetherClient.raceHook (tests only). */
-internal enum class RacePoint { FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted, OriginSwitched }
+internal enum class RacePoint {
+    FrameAdmitted, FrameHandled, DrainComputed, VerdictChecked, SignInStarted, OriginSwitched,
+
+    /** ta-2ew: a sign-in moved the URL to another origin; its views (the create answers too) are not cleared yet. */
+    ServerMoved,
+}
 
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
 private const val MAX_CONTROL_MESSAGE = 500
@@ -1047,6 +1052,7 @@ class RealTetherClient(
             // moves the URL, so no connection to the new server can see them.
             switch = followServerLocked(fallbackOwner = serverOrigin(configuredBefore), adoptUnbound = false)
         }
+        if (switch != null) raceHook?.invoke(RacePoint.ServerMoved, null)
         if (previousWasOpen) previous?.close(1000, "signed in again") else previous?.cancel()
         signedOutReasonState.value = null
         // A new sign-in (possibly to another server): its hello brings its own list.
