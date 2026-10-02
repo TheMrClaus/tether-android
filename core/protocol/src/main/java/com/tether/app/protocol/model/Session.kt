@@ -3,6 +3,7 @@ package com.tether.app.protocol.model
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Wire shape of an AgentSession row (server publicSession()). */
@@ -143,7 +144,45 @@ data class SessionMetrics(
     val codexResetCredits: JsonElement? = null,
     /** v126: `ClaudeResetGrantsSummary` (Claude only; a cache the Usage page fills), raw like [codexResetCredits]. */
     val claudeResetGrants: JsonElement? = null,
-)
+    /**
+     * v138 (ta-coik.10): `Record<agentType, SubagentDefault>`, the model and/or effort each Claude
+     * subagent TYPE declares (a declaration, never a reading; at most 64 entries server-side). Raw so
+     * a malformed map never drops the row; read it with [subagentDefaultMap]. Absent from older
+     * servers and from sessions where no type declares either.
+     */
+    val subagentDefaults: JsonElement? = null,
+) {
+    /**
+     * [subagentDefaults] decoded tolerantly: entries that are not objects, and fields that are not
+     * non-blank strings, are skipped; an entry left with neither field is dropped. Capped at
+     * [MAX_SUBAGENT_DEFAULTS] (the server's own cap), in the server's order.
+     */
+    val subagentDefaultMap: Map<String, SubagentDefault>
+        get() {
+            val obj = subagentDefaults as? JsonObject ?: return emptyMap()
+            val out = LinkedHashMap<String, SubagentDefault>()
+            for ((name, value) in obj) {
+                if (out.size >= MAX_SUBAGENT_DEFAULTS) break
+                val entry = value as? JsonObject ?: continue
+                fun field(key: String): String? =
+                    (entry[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() }
+                val model = field("model")
+                val effort = field("effort")
+                if (model == null && effort == null) continue
+                out[name] = SubagentDefault(model, effort)
+            }
+            return out
+        }
+
+    companion object {
+        /** lib/subagent-defaults.mjs MAX_SUBAGENT_DEFAULTS. */
+        const val MAX_SUBAGENT_DEFAULTS: Int = 64
+    }
+}
+
+/** v138: one entry of [SessionMetrics.subagentDefaults] (lib/protocol.ts `SubagentDefault`). */
+@Serializable
+data class SubagentDefault(val model: String? = null, val effort: String? = null)
 
 @Serializable
 data class UsageWindow(
