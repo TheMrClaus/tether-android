@@ -14,12 +14,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tether.app.client.LabelText
 import com.tether.app.client.NodeCredential
 import com.tether.app.client.NodeRegistryRules
@@ -375,7 +381,9 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
         val notice = actions?.noticeFor(origin)
         NodeAddForm(origin, actions, busy, notice, narrow)
         notice?.let { NodeNoticeLine(it) }
-        binding.list.forEach { node -> NodeRow(node, binding, actions, busy, narrow) }
+        // r2 (security F1): each row keyed by its node, so a `nodes` broadcast that adds, drops or
+        // reorders rows never moves a row's state or a tap in flight onto another node.
+        binding.list.forEach { node -> key(node.nodeId) { NodeRow(node, binding, actions, busy, narrow) } }
         if (binding.list.isEmpty()) {
             Column(Modifier.fillMaxWidth()) {
                 RowRule()
@@ -405,11 +413,30 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
     var label by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var credential by remember { mutableStateOf("") }
+    // r2 (security F2): the credential last handed to the server (an answer that kept it: refused,
+    // lost, no answer). While the field still holds exactly that, the app going to the background
+    // CLEARS it; a credential never sent as it stands is only masked (the operator may be away
+    // copying it). Plain remember, like the field.
+    var sentText by remember { mutableStateOf<String?>(null) }
     var revealed by rememberMaskedReveal()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && sentText != null) {
+                if (credential == sentText) credential = ""
+                sentText = null
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     // The answer that was already shown when this form appeared is not this form's.
     val shownBefore = remember { notice?.serial }
     LaunchedEffect(notice?.serial) {
-        if (notice != null && notice.serial != shownBefore && notice.action == NodeAction.Add && notice.heldByServer) credential = ""
+        if (notice != null && notice.serial != shownBefore && notice.action == NodeAction.Add && notice.heldByServer) {
+            credential = ""
+            sentText = null
+        }
     }
     val ui = settingsText(type.ui, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     val mono = serverFieldStyle(narrow)
@@ -446,7 +473,7 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
             onClick = {
                 // Masked at once: the credential leaves the screen the moment it is sent.
                 revealed = false
-                actions?.add(origin, credential, label, baseUrl)
+                if (actions?.add(origin, credential, label, baseUrl) == true) sentText = credential
             },
             classes = KeyClasses.ButtonSecondary,
             label = if (adding) NodesCopy.ADDING else NodesCopy.ADD,
@@ -485,10 +512,16 @@ private fun NodeField(value: String, onChange: (String) -> Unit, placeholder: St
 private fun CredentialField(value: String, onChange: (String) -> Unit, style: TextStyle, modifier: Modifier) {
     val t = LocalTetherTokens.current
     var focused by remember { mutableStateOf(false) }
-    NoCopyScope(true) {
+    // r2 (verifier L2): a Cut deletes nothing (slice 3's shared guard).
+    val cutGuard = remember { CutGuard() }
+    val latestValue by rememberUpdatedState(value)
+    NoCopyScope(true, onRefusedClip = { clip -> cutGuard.undo(clip)?.let(onChange) }) {
         BasicTextField(
             value = value,
-            onValueChange = onChange,
+            onValueChange = { typed ->
+                cutGuard.edited(latestValue, typed)
+                onChange(typed)
+            },
             singleLine = false,
             textStyle = style.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
@@ -567,7 +600,8 @@ private fun NodeRow(node: NodeSummary, binding: NodesBinding, actions: NodesActi
                     Row(
                         Modifier
                             .testTag(NodeTags.skew(node.nodeId))
-                            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+                            // r2 (verifier L3): the web's `role="alert"`, announced at once.
+                            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive }
                             .padding(top = 4.dp)
                             .fillMaxWidth()
                             .background(t.attentionBg, RoundedCornerShape(8.dp))

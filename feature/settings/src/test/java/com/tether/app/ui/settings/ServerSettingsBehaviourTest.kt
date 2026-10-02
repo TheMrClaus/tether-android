@@ -537,6 +537,8 @@ class ServerSettingsBehaviourTest {
         compose.waitForIdle()
         if (field.fetchSemanticsNode().config.contains(SemanticsActions.CutText)) field.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
+        // T10.3 r2 (verifier L2, the shared guard): a cut deletes nothing either.
+        assertEquals(SENTINEL, field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
         val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
             .getSystemService(android.content.ClipboardManager::class.java)
         val clip = clipboard.primaryClip

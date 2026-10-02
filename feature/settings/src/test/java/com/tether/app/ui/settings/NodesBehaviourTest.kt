@@ -1,6 +1,7 @@
 package com.tether.app.ui.settings
 
 import android.text.InputType
+import androidx.activity.compose.setContent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.compose.runtime.CompositionLocalProvider
@@ -21,6 +22,8 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
@@ -211,6 +214,8 @@ class NodesBehaviourTest {
         assertTrue(exists(NodeTags.skew("node_old")))
         assertEquals(listOf("node_old"), LIST.map { it.nodeId }.filter { exists(NodeTags.skew(it)) })
         assertTrue(texts().contains(NodesCopy.skew(129, CONSOLE)))
+        // r2 (verifier L3): announced at once, like the web's role="alert".
+        assertEquals(androidx.compose.ui.semantics.LiveRegionMode.Assertive, tag(NodeTags.skew("node_old")).fetchSemanticsNode().config[SemanticsProperties.LiveRegion])
         assertEquals("This node speaks protocol v129; this console speaks v137. Upgrade the older host before driving its sessions.", NodesCopy.skew(129, CONSOLE))
         // The keys are named for their node (the web's aria-label).
         assertEquals("Probe Workstation", description(NodeTags.probe("node_ws")))
@@ -531,6 +536,86 @@ class NodesBehaviourTest {
         assertNowhere(SENTINEL)
     }
 
+    /**
+     * r2 (security F1): a `nodes` broadcast landing between the press and the release of a key never
+     * sends a request for another node: each row is keyed by its node, so the pressed key goes with
+     * its row (and, moved from under the finger, the tap is dropped) instead of its slot taking the
+     * node now drawn there.
+     */
+    @Test fun aBroadcastMidTapNeverSendsAnotherNodesRequest() {
+        show()
+        tag(NodeTags.probe("node_lab")).performScrollTo()
+        compose.waitForIdle()
+        val at = tag(NodeTags.probe("node_lab")).fetchSemanticsNode().boundsInRoot.center
+        compose.onRoot().performTouchInput { down(at) }
+        // A new peer arrives at the top of the list while the finger is down.
+        list = listOf(NodeFixtures.node("node_top", "Top peer", "https://top.example.test", "unknown")) + LIST
+        waitFor(NodeTags.row("node_top"))
+        compose.onRoot().performTouchInput { up() }
+        compose.waitForIdle()
+        assertTrue("a tap meant for node_lab went to ${writer.calls.map { it.nodeId }}", writer.calls.all { it.nodeId == "node_lab" })
+    }
+
+    /** r2 (security F2): a credential already sent once (here refused) is CLEARED when the app stops, not only masked. */
+    @Test fun aSentCredentialIsClearedWhenTheAppStops() {
+        val owner = TestOwner()
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        show(owner)
+        typeCredential(SENTINEL)
+        tapAdd()
+        waitCalls(1)
+        writer.answer(answered(false, null, REFUSAL))
+        waitText(REFUSAL)
+        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
+        compose.waitUntil(5_000) { description(NodeTags.CredentialMasked) == "Credential bundle, not set" }
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        compose.waitForIdle()
+        // Gone for good: revealing shows an empty field, and Add cannot send it again.
+        reveal()
+        assertEquals("", fieldText(NodeTags.Credential))
+        assertFalse(enabled(NodeTags.Add))
+        assertEquals(1, writer.calls.size)
+    }
+
+    /** r2 (security F2): a credential edited after its send has not been sent as it stands: the app stopping only masks it. */
+    @Test fun aCredentialEditedAfterItsSendIsOnlyMaskedWhenTheAppStops() {
+        val owner = TestOwner()
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        show(owner)
+        typeCredential(SENTINEL)
+        tapAdd()
+        waitCalls(1)
+        writer.answer(NodeRequestOutcome.TimedOut)
+        waitText(NodesCopy.TIMED_OUT)
+        typeCredential(SENTINEL + "-edited")
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
+        compose.waitForIdle()
+        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+        assertFalse(allSemantics().contains(SENTINEL))
+    }
+
+    /** r2 (verifier L2): a Cut (an accessibility action or a key; the menu offers none) neither copies nor deletes the credential. */
+    @Test fun aCutLeavesTheCredentialWhereItIs() {
+        show()
+        typeCredential(SENTINEL, keepRevealed = true)
+        val field = tag(NodeTags.Credential)
+        field.performClick()
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        compose.waitForIdle()
+        assertTrue("the field offers cut", field.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
+        field.performSemanticsAction(SemanticsActions.CutText)
+        compose.waitForIdle()
+        assertEquals("the cut deleted the credential", SENTINEL, fieldText(NodeTags.Credential))
+        val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSystemService(android.content.ClipboardManager::class.java)
+        val clip = clipboard.primaryClip
+        assertFalse(clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+        // The field still edits normally afterwards.
+        field.performTextReplacement("x")
+        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "x" }
+    }
+
     @Test fun stoppingTheAppMasksTheCredential() {
         val owner = TestOwner()
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
@@ -596,23 +681,58 @@ class NodesRecreationTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    @Test fun recreatingTheActivitySendsNothing() {
+    /**
+     * r2 (verifier L1): the recreated activity draws Settings again (its own content, set as it is
+     * created, like an app's onCreate, with the dialog's saved state restored), so the test sees the
+     * tab after the recreation: the Nodes tab back (saved state), the form empty, the credential
+     * masked and gone, nothing sent before, during or after.
+     */
+    @Test fun recreatingTheActivitySendsNothingAndStartsTheFormEmpty() {
         val writer = RecordingNodesWriter()
-        val state = SettingsDialogState(SettingsTab.Nodes)
-        compose.setContent {
+        val content: @androidx.compose.runtime.Composable () -> Unit = {
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Nodes) }
             val actions = rememberNodesActions(writer)
             SettingsUnderTest(store.prefs, state, nodes = NodesBinding(LIST, ORIGIN, actions, CONSOLE, now = { NOW }))
         }
-        compose.waitUntil(5_000) { state.draft != null }
-        fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
-        tag(NodeTags.Label).performTextReplacement("Workstation")
-        tag(NodeTags.CredentialReveal).performScrollTo().performClick()
-        tag(NodeTags.Credential).performClick()
-        tag(NodeTags.Credential).performTextReplacement(SENTINEL)
-        compose.waitForIdle()
-        assertTrue(writer.calls.isEmpty())
-        compose.activityRule.scenario.recreate()
-        compose.waitForIdle()
-        assertTrue(writer.calls.isEmpty())
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        val first = arrayOfNulls<android.app.Activity>(1)
+        val recreated = java.util.concurrent.atomic.AtomicInteger()
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {
+                if (activity !== first[0] && savedInstanceState != null && activity is androidx.activity.ComponentActivity) {
+                    recreated.incrementAndGet()
+                    activity.setContent(content = content)
+                }
+            }
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivityResumed(activity: android.app.Activity) = Unit
+            override fun onActivityPaused(activity: android.app.Activity) = Unit
+            override fun onActivityStopped(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
+        compose.activityRule.scenario.onActivity { first[0] = it }
+        app.registerActivityLifecycleCallbacks(callbacks)
+        try {
+            compose.setContent(content)
+            fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
+            fun one(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            compose.waitUntil(5_000) { one(NodeTags.Section) }
+            tag(NodeTags.Label).performTextReplacement("Workstation")
+            tag(NodeTags.CredentialReveal).performScrollTo().performClick()
+            tag(NodeTags.Credential).performClick()
+            tag(NodeTags.Credential).performTextReplacement(SENTINEL)
+            compose.waitForIdle()
+            assertTrue(writer.calls.isEmpty())
+            compose.activityRule.scenario.recreate()
+            compose.waitUntil(5_000) { recreated.get() == 1 && one(NodeTags.Section) && one(NodeTags.CredentialMasked) }
+            tag(NodeTags.Credential).assertDoesNotExist()
+            assertEquals("Credential bundle, not set", tag(NodeTags.CredentialMasked).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString())
+            assertEquals("", tag(NodeTags.Label).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
+            compose.waitForIdle()
+            assertTrue(writer.calls.isEmpty())
+        } finally {
+            app.unregisterActivityLifecycleCallbacks(callbacks)
+        }
     }
 }

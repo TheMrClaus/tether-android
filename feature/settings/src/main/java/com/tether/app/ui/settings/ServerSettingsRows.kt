@@ -154,6 +154,8 @@ internal fun CommitField(
     // The value last refused (or under review): a focus loss or leaving never retries it (only Done does).
     var refused by remember(shown) { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf(false) }
+    // T10.3 r2: a Cut on a no-copy (secret) field takes nothing away (see [CutGuard]).
+    val cutGuard = remember { CutGuard() }
     val commit: (Boolean) -> Unit = { retry ->
         if (text != shown && text != sent && (retry || text != refused)) {
             when (val outcome = onCommit(text)) {
@@ -182,12 +184,13 @@ internal fun CommitField(
     DisposableEffect(Unit) { onDispose { if (leaves && !recreating() && latestBlurCommits(latestText)) latestCommit(false) } }
     val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     Column(modifier) {
-        NoCopyScope(noCopy) {
+        NoCopyScope(noCopy, onRefusedClip = { clip -> cutGuard.undo(clip)?.let { text = it } }) {
             BasicTextField(
                 value = text,
                 onValueChange = {
                     if (accept(it)) {
                         if (it != text) note = null
+                        cutGuard.edited(text, it)
                         text = it
                     }
                 },
@@ -316,21 +319,74 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 // throws in its paste check), so the guard implements it.
 @SuppressLint("VisibleForTests")
 @Composable
-internal fun NoCopyScope(on: Boolean, content: @Composable () -> Unit) {
+internal fun NoCopyScope(on: Boolean, onRefusedClip: (CharSequence?) -> Unit = {}, content: @Composable () -> Unit) {
     if (!on) return content()
     val clipboard = LocalClipboard.current
     val toolbar = LocalTextToolbar.current
+    val refused by rememberUpdatedState(onRefusedClip)
     // The text field reads the platform manager for paste (AndroidClipboard); only writes are dropped.
-    val guarded = remember(clipboard) { (clipboard as? AndroidClipboard)?.let(::NoCopyClipboard) ?: clipboard }
+    val guarded = remember(clipboard) { (clipboard as? AndroidClipboard)?.let { NoCopyClipboard(it) { refused } } ?: clipboard }
     val menu = remember(toolbar) { NoCopyToolbar(toolbar) }
     CompositionLocalProvider(LocalClipboard provides guarded, LocalTextToolbar provides menu, content = content)
 }
 
+/**
+ * The clipboard of a secret field: reads pass (paste), every write is dropped and reported to
+ * [refused] with the text it would have put there (T10.3 r2: the field's [CutGuard] uses it).
+ */
 @SuppressLint("VisibleForTests")
-private class NoCopyClipboard(private val delegate: AndroidClipboard) : AndroidClipboard {
+private class NoCopyClipboard(private val delegate: AndroidClipboard, private val refused: () -> (CharSequence?) -> Unit) : AndroidClipboard {
     override val clipboardManager: android.content.ClipboardManager get() = delegate.clipboardManager
     override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
-    override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+        val data = clipEntry?.clipData
+        refused()(if (data != null && data.itemCount > 0) data.getItemAt(0).text else null)
+    }
+}
+
+/**
+ * T10.3 r2 (verifier L2): a Cut on a secret field (an accessibility action or a hardware key; the
+ * menu offers none) must delete nothing. The text field's cut DELETES the selection first (its
+ * onValueChange) and only then writes the clipboard, so dropping the write is not enough: the
+ * field records its last edit here, and when the refused write carries exactly the text that edit
+ * removed (the cut's signature), the field takes back the text it had. A Backspace over a selection
+ * writes no clipboard, so it still deletes. Never saved state; holds what the field already holds.
+ */
+internal class CutGuard(private val nanos: () -> Long = System::nanoTime) {
+    private var before: String? = null
+    private var after: String? = null
+    private var at = 0L
+
+    fun edited(before: String, after: String) {
+        this.before = before
+        this.after = after
+        at = nanos()
+    }
+
+    /**
+     * The text to put back when [clip] is what the last edit removed, written right after it (a
+     * cut writes in the same call; a later Copy of the same words is not a cut), else null.
+     * Forgets the edit either way.
+     */
+    fun undo(clip: CharSequence?): String? {
+        val b = before ?: return null
+        val a = after ?: return null
+        before = null
+        after = null
+        if (nanos() - at > CUT_WINDOW_NANOS) return null
+        val c = clip?.toString() ?: return null
+        if (c.isEmpty() || b.length != a.length + c.length) return null
+        val prefix = b.commonPrefixWith(a).length.coerceAtMost(a.length)
+        // The removed run may sit anywhere inside a repeated stretch; any split that matches is the cut.
+        for (i in prefix downTo 0) {
+            if (b.regionMatches(i, c, 0, c.length) && b.regionMatches(i + c.length, a, i, a.length - i) && b.regionMatches(0, a, 0, i)) return b
+        }
+        return null
+    }
+
+    private companion object {
+        const val CUT_WINDOW_NANOS = 500_000_000L
+    }
 }
 
 internal class NoCopyToolbar(private val delegate: TextToolbar) : TextToolbar by delegate {

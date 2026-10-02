@@ -40,7 +40,9 @@ class NodeCredential(value: String) {
      * T10.3: whether this credential is [text] (trimmed, as sent), compared in constant time.
      * It confirms a guess and never gives the value back, so a caller outside this module (the
      * Settings screen's tests) can check what it handed over without the text being readable.
+     * r2 (security F5): tests only.
      */
+    @androidx.annotation.VisibleForTesting
     fun matches(text: String): Boolean =
         java.security.MessageDigest.isEqual(value.toByteArray(Charsets.UTF_8), text.trim().toByteArray(Charsets.UTF_8))
 

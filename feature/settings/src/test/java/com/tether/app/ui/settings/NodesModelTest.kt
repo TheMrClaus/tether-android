@@ -191,6 +191,36 @@ class NodesModelTest {
         assertFalse(actions.noticeFor(ORIGIN)!!.ok)
     }
 
+    /** r2 (verifier L2): the shared guard takes back exactly a cut, and nothing else. */
+    @Test fun theCutGuardUndoesACutAndOnlyACut() {
+        var now = 0L
+        val guard = CutGuard { now }
+        // A cut: the edit removed "bearer", then the refused write carries "bearer".
+        guard.edited("tok-bearer-9", "tok--9")
+        assertEquals("tok-bearer-9", guard.undo("bearer"))
+        // Forgotten once used: a second write restores nothing.
+        assertNull(guard.undo("bearer"))
+        // A Backspace over a selection writes no clipboard: nothing to undo (and a later write of other text is no match).
+        guard.edited("tok-bearer-9", "tok--9")
+        assertNull(guard.undo("tok"))
+        // Removed text inside a repeated stretch still matches.
+        guard.edited("aaaa", "aa")
+        assertEquals("aaaa", guard.undo("aa"))
+        // A plain typed edit followed by a copy of the whole is not a cut.
+        guard.edited("abc", "abcd")
+        assertNull(guard.undo("abcd"))
+        // A write well after the edit is a Copy, not the cut's own write.
+        guard.edited("tok-bearer-9", "tok--9")
+        now += 600_000_000L
+        assertNull(guard.undo("bearer"))
+        // No edit at all, an empty or a missing clip: nothing.
+        assertNull(CutGuard { 0L }.undo("x"))
+        guard.edited("ab", "a")
+        assertNull(guard.undo(""))
+        guard.edited("ab", "a")
+        assertNull(guard.undo(null))
+    }
+
     @Test fun theGoldenCredentialIsObviouslyFake() {
         assertTrue(NodeFixtures.FAKE_CREDENTIAL.startsWith("FAKE-"))
         assertTrue(NodeFixtures.FAKE_CREDENTIAL.contains("not-a-real-credential"))

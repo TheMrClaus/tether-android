@@ -70,12 +70,18 @@ sealed interface ClientMessage {
 
     // ---- multi-host nodes (v109) --------------------------------------------
 
-    data class NodeAdd(
-        val credential: String,
+    /**
+     * T10.3 r2 (security F5): a plain class, not a data class, so the credential has no generated
+     * `copy()` / `component1()` path out; equality is explicit. Only this module reads [credential].
+     */
+    class NodeAdd(
+        credential: String,
         val label: String? = null,
         val baseUrl: String? = null,
         val requestId: String? = null,
     ) : ClientMessage {
+        internal val credential: String = credential
+
         override fun toJsonObject() = frame("node-add") {
             put("credential", credential)
             opt("label", label)
@@ -85,6 +91,11 @@ sealed interface ClientMessage {
 
         /** Redacted: [credential] is a secret and must never reach a log. The wire form is [toJsonObject]. */
         override fun toString(): String = "NodeAdd(credential=***, label=$label, baseUrl=$baseUrl, requestId=$requestId)"
+
+        override fun equals(other: Any?): Boolean = other is NodeAdd && other.credential == credential &&
+            other.label == label && other.baseUrl == baseUrl && other.requestId == requestId
+
+        override fun hashCode(): Int = listOf(credential, label, baseUrl, requestId).hashCode()
     }
 
     data class NodeRemove(val nodeId: String, val requestId: String? = null) : ClientMessage {

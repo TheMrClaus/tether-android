@@ -146,7 +146,6 @@ class NodesWireTest {
         val secret = "parity-fake-n0de-bearer"
         val frame = ClientMessage.NodeAdd(credential = secret, label = "Peer", requestId = "r1")
         assertFalse(frame.toString().contains(secret))
-        assertFalse(frame.copy(label = "x").toString().contains(secret))
         assertFalse(listOf(frame).toString().contains(secret))
         assertFalse(mapOf("k" to frame).toString().contains(secret))
         // A decode failure names the field, never the value of another one.
@@ -155,5 +154,24 @@ class NodesWireTest {
         )
         if (bad.isFailure) assertFalse(bad.exceptionOrNull().toString().contains(secret))
         else assertFalse(bad.getOrThrow().toString().contains(secret))
+    }
+
+    /** T10.3 r2 (security F5): no generated `copy()` / `componentN()` path out; equality stays exact. */
+    @Test
+    fun aNodeAddHasNoDataClassPathToItsCredential() {
+        val methods = ClientMessage.NodeAdd::class.java.methods.map { it.name }
+        assertFalse("copy() exposes the credential", methods.any { it == "copy" || it.startsWith("copy$") })
+        assertFalse("componentN() exposes the credential", methods.any { it.startsWith("component") })
+        assertFalse("a public getter exposes the credential", methods.any { it == "getCredential" })
+        val a = ClientMessage.NodeAdd("parity-fake-a", "Peer", null, "r1")
+        assertEquals(a, ClientMessage.NodeAdd("parity-fake-a", "Peer", null, "r1"))
+        assertEquals(a.hashCode(), ClientMessage.NodeAdd("parity-fake-a", "Peer", null, "r1").hashCode())
+        assertFalse(a == ClientMessage.NodeAdd("parity-fake-b", "Peer", null, "r1"))
+        assertFalse(a == ClientMessage.NodeAdd("parity-fake-a", "Peer", null, "r2"))
+        // The decoder still reads it field for field.
+        val decoded = ClientMessage.decode(
+            TetherJson.parseToJsonElement("""{"type":"node-add","credential":"parity-fake-a","label":"Peer","requestId":"r1"}""").jsonObject,
+        ).getOrThrow()
+        assertEquals(a, decoded)
     }
 }

@@ -2499,7 +2499,9 @@ class RealTetherClient(
                     createErrorRepliesFlow.tryEmit(reply)
                     message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Failed(reply)) }
                 }
-                message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.ServerError(message.message)) }
+                // T10.3 r2 (security F3): only an error of the CURRENT socket ends a node request,
+                // checked and ended in one step under the lock, as onNodeResult does.
+                message.requestId?.let { completeNodeRequestOn(webSocket, it, NodeRequestOutcome.ServerError(message.message)) }
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
             is ServerMessage.Nodes -> ifCurrent(webSocket) { nodesState.value = message.nodes }
@@ -3955,7 +3957,7 @@ class RealTetherClient(
      * The waiter is always removed, including when the caller is cancelled.
      */
     private suspend fun nodeRequest(origin: String, build: (requestId: String) -> ClientMessage): NodeRequestOutcome {
-        val requestId = "node-" + UUID.randomUUID()
+        val requestId = nodeRequestIds()
         val waiter = CompletableDeferred<NodeRequestOutcome>()
         val sent = transmitNodeRequest(origin, requestId, waiter, build)
         if (sent == null) {
@@ -4007,7 +4009,7 @@ class RealTetherClient(
     private fun onNodeResult(webSocket: WebSocket, message: ServerMessage.NodeResult) {
         val result = NodeActionResult(message.ok, message.nodeId, message.message, clock())
         if (!ifCurrent(webSocket) { nodeResultState.value = result }) return
-        message.requestId?.let { completeNodeRequest(it, NodeRequestOutcome.Answered(result)) }
+        message.requestId?.let { completeNodeRequestOn(webSocket, it, NodeRequestOutcome.Answered(result)) }
     }
 
     /**
@@ -4066,11 +4068,19 @@ class RealTetherClient(
     /** Test seam: node requests still waiting for an answer (must return to 0: nothing leaks). */
     internal fun pendingNodeRequestCount(): Int = synchronized(lock) { nodeRequests.size }
 
-    /** An unknown / already-settled requestId is ignored. */
-    private fun completeNodeRequest(requestId: String, outcome: NodeRequestOutcome) {
-        val waiter = synchronized(lock) { nodeRequests.remove(requestId) } ?: return
+    /**
+     * An unknown / already-settled requestId is ignored. T10.3 r2: only while [webSocket] is the
+     * current socket (checked and removed under one lock), so a frame of a socket already let go
+     * can never end a request of the one that replaced it.
+     */
+    private fun completeNodeRequestOn(webSocket: WebSocket, requestId: String, outcome: NodeRequestOutcome) {
+        val waiter = synchronized(lock) { if (socket !== webSocket) null else nodeRequests.remove(requestId) } ?: return
         waiter.complete(outcome)
     }
+
+    /** Test seam (T10.3 r2): each node request's id (production: a fresh random one). */
+    @Volatile
+    internal var nodeRequestIds: () -> String = { "node-" + UUID.randomUUID() }
 
     /**
      * Another server's registry and event log, or ones seen before a sign-out, must never show.

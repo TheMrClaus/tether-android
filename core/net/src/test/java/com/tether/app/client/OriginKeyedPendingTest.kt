@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -1012,6 +1013,36 @@ class OriginKeyedPendingTest {
         awaitCondition("B's error is shown") { seen.any { it.text == "words from B" } }
         assertTrue("A's late words reached the toast after the switch: $seen", seen.none { it.text == "late words from A" })
         assertEquals(listOf(ServerErrorText("words from B", b.origin())), seen.toList())
+    }
+
+    /**
+     * T10.3 r2 (security F3): an `error` A's socket admitted, echoing a node request id, but had
+     * not handled when the sign-in to B let that socket go, never ends B's request of the same id
+     * (forced here through the id seam: a real id is random). Only B's own answer ends it.
+     */
+    @Test
+    fun aLateNodeErrorFromTheOldServerNeverEndsTheNewServersRequest() {
+        val aws = connectedToA()
+        val hold = Hold(RacePoint.FrameAdmitted) { it is com.tether.app.protocol.ServerMessage.ErrorFrame && it.requestId == "node-same-id" }
+        aws.send("""{"type":"error","message":"late refusal from A","requestId":"node-same-id"}""")
+        hold.awaitReached() // admitted by A's listener, not yet handled...
+        loginTo(b) // ...when the sign-in to B lets A's socket go
+        val bws = b.nextSocket()
+        handshake(b, bws)
+        client.nodeRequestIds = { "node-same-id" }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes += it }
+        val probe = scope.async { client.probeNode(b.origin(), "node-b") }
+        val frame = b.frame()
+        assertEquals("node-probe", frame.type())
+        assertEquals("node-same-id", frame["requestId"]!!.jsonPrimitive.content)
+        assertEquals(1, client.pendingNodeRequestCount())
+        hold.release()
+        hold.awaitHandled()
+        assertFalse("A's late error ended B's request", probe.isCompleted)
+        assertEquals(1, client.pendingNodeRequestCount())
+        bws.send("""{"type":"node-result","ok":true,"nodeId":"node-b","message":"Reachable.","requestId":"node-same-id"}""")
+        val outcome = runBlocking { withTimeout(10_000) { probe.await() } }
+        assertEquals("Reachable.", (outcome as NodeRequestOutcome.Answered).result.message)
     }
 
     @Test
