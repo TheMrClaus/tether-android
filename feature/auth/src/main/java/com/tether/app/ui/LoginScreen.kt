@@ -208,6 +208,9 @@ fun LoginScreen(
     var phase by remember { mutableStateOf(LoginPhase.Ready) }
     var error by remember { mutableStateOf<String?>(null) }
     var requirements by remember { mutableStateOf<SignInRequirements?>(null) }
+    // ta-coik.1 r2 (security F2): the address (trimmed) [requirements] was read for. A reading counts for
+    // the passkey only while it is the address now typed, so an edit never inherits the last one's.
+    var requirementsFor by remember { mutableStateOf<String?>(null) }
     var probeFailed by remember { mutableStateOf(false) }
     // The web's flow.notice after a dismissed passkey prompt; cleared by the next attempt.
     var passkeyNotice by remember { mutableStateOf<String?>(null) }
@@ -222,23 +225,31 @@ fun LoginScreen(
 
     // A probe reading lands only while it is still news: a newer answer (the
     // submit's own probe) is never overwritten by a failure.
-    fun adoptProbe(probe: SignInRequirements?) {
+    fun adoptProbe(url: String, probe: SignInRequirements?) {
         if (probe != null) {
             requirements = probe
+            requirementsFor = url.trim()
             probeFailed = false
         } else if (requirements == null) {
             probeFailed = true
         }
     }
 
+    /** The reading no longer describes the address (it was edited). */
+    fun forgetRequirements() {
+        requirements = null
+        requirementsFor = null
+        probeFailed = false
+    }
+
     // use-login-flow.ts probes /api/auth/session on load; natively the URL is
     // typed first, so probe once it settles. No credential is sent.
     LaunchedEffect(baseUrl) {
-        requirements = null
-        probeFailed = false
-        if (hostnameOf(baseUrl).isEmpty()) return@LaunchedEffect
+        val url = baseUrl
+        forgetRequirements()
+        if (hostnameOf(url).isEmpty()) return@LaunchedEffect
         delay(PROBE_DEBOUNCE_MS)
-        adoptProbe(client.signInRequirements(baseUrl))
+        adoptProbe(url, client.signInRequirements(url))
     }
 
     // The local-network retry re-enters submit (so it re-probes too); set below.
@@ -247,14 +258,19 @@ fun LoginScreen(
 
     // ta-coik.1: offered on every path, as the web's one sign-in screen offers it (use-login-flow.ts
     // passkeyReady, studio-login.tsx:41, retro-login.tsx:164), the Pairing path included.
-    val passkeyPossible = hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
+    // ta-coik.1 r2 (security F2): and only from a reading taken for the address now typed. In the frame
+    // after an edit the old reading is still held; without this the autofill offer below would ask the
+    // edited text for a challenge (a /healthz and an options POST per keystroke, before any debounce).
+    val passkeyPossible = hostnameOf(baseUrl).isNotEmpty() && requirementsFor == baseUrl.trim() &&
+        passkeyReady(requirements, authenticator.available)
     // r2 (security F1): never offered for an http address.
     val passkeyOffered = passkeyPossible && passkeyAddressAllowed(baseUrl)
     fun busyNow() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
 
-    // ta-coik.1: the armed autofill offer, and the address it was armed for (once per page, as the web).
+    // ta-coik.1: the armed autofill offer, and the arming run that claimed its address (once per page,
+    // as the web). r2 (security F2): a claim is an object, so only the run that made it can release it.
     var autofill by remember { mutableStateOf<ArmedAutofill?>(null) }
-    var autofillArmedFor by remember { mutableStateOf<String?>(null) }
+    var autofillClaim by remember { mutableStateOf<AutofillClaim?>(null) }
 
     /** use-login-flow.ts signInWithPasskey's outcomes, for the prompt and the autofill offer alike. */
     fun passkeyOutcome(result: LoginResult) {
@@ -281,7 +297,7 @@ fun LoginScreen(
     /**
      * use-login-flow.ts signInWithPasskey: one ceremony, nothing retried. A dismissed prompt is the
      * web's notice and back to ready; a refusal is the error line. The client asks Credential Manager
-     * only for this server's own rpId (its host or a registrable parent, the browser's rule).
+     * only for this server's own host as the rpId (ta-coik.1 r2; see Passkeys.kt).
      */
     fun passkey() {
         if (busyNow()) return
@@ -300,12 +316,16 @@ fun LoginScreen(
      * suggestions. Only the offer still armed for this address counts; the offer is used up either way.
      * Anything but an answer stays quiet (the web keeps an unused or failed conditional offer quiet);
      * an answer is an attempt from here on, sent to the server that issued the challenge.
+     * r2 (verifier finding 2): whatever else is in flight. The web's conditional branch checks no phase:
+     * a pick during "verifying-password" sets "verifying-passkey" and verifies, and the password fetch is
+     * neither aborted nor awaited; each attempt settles on its own (use-login-flow.ts:186-201). So here:
+     * no busy check, and the password attempt's coroutine is left running.
      */
     fun autofillAnswered(armed: ArmedAutofill, answer: PasskeyCeremony) {
         if (autofill !== armed) return
         autofill = null
         if (answer !is PasskeyCeremony.Done) return
-        if (busyNow() || !passkeyOffered || baseUrl.trim() != armed.url) return
+        if (!passkeyOffered || baseUrl.trim() != armed.url) return
         phase = LoginPhase.VerifyingPasskey
         error = null
         passkeyNotice = null
@@ -321,9 +341,10 @@ fun LoginScreen(
     val offerUrl = baseUrl.trim()
     LaunchedEffect(passkeyOffered, offerUrl) {
         if (autofill != null && autofill?.url != offerUrl) autofill = null
-        if (autofillArmedFor != null && autofillArmedFor != offerUrl) autofillArmedFor = null
-        if (!passkeyOffered || !authenticator.autofillAvailable || autofillArmedFor == offerUrl) return@LaunchedEffect
-        autofillArmedFor = offerUrl
+        if (autofillClaim != null && autofillClaim?.url != offerUrl) autofillClaim = null
+        if (!passkeyOffered || !authenticator.autofillAvailable || autofillClaim?.url == offerUrl) return@LaunchedEffect
+        val claim = AutofillClaim(offerUrl)
+        autofillClaim = claim
         var armedNow = false
         try {
             val request = (client.passkeyLoginStart(offerUrl) as? PasskeyLoginStart.Ready)?.request ?: return@LaunchedEffect
@@ -336,8 +357,11 @@ fun LoginScreen(
             autofill = armed
             armedNow = true
         } finally {
-            // Cancelled before it was armed (the address moved on): the next visit may arm again.
-            if (!armedNow && autofill == null && autofillArmedFor == offerUrl && !isActive) autofillArmedFor = null
+            // Cancelled before it was armed (the address moved on): the next visit may arm again. r2
+            // (security F2): only while this run still holds the claim. A cancelled run's finally waits
+            // for its blocking options call, so it can land after a newer run claimed the same address;
+            // clearing that claim would let a third run arm the address twice.
+            if (!armedNow && autofill == null && autofillClaim === claim && !isActive) autofillClaim = null
         }
     }
 
@@ -410,7 +434,7 @@ fun LoginScreen(
                     probe = requirements ?: client.signInRequirements(url)
                     if (probe != null) break
                 }
-                adoptProbe(probe)
+                adoptProbe(url, probe)
                 // Still unknown: the username line is now shown as optional and
                 // the attempt goes out with whatever it holds; a refusal says
                 // the username may be the missing part.
@@ -449,7 +473,11 @@ fun LoginScreen(
                 if (phase == LoginPhase.Error) phase = LoginPhase.Ready
             }
         },
-        onBaseUrl = { baseUrl = it },
+        onBaseUrl = { next ->
+            // ta-coik.1 r2 (security F2): the reading is dropped with the keystroke, not a frame later.
+            if (next != baseUrl) forgetRequirements()
+            baseUrl = next
+        },
         onUsername = { username = it },
         onPassword = { password = it },
         // Upper-case as typed (the code alphabet is upper-case only); everything
@@ -474,6 +502,9 @@ fun LoginScreen(
 
 /** ta-coik.1: one armed autofill offer: the address, the checked challenge, what the password field carries. */
 private class ArmedAutofill(val url: String, val request: PasskeyLoginRequest, val data: CredentialRequestData)
+
+/** ta-coik.1 r2: one arming run's claim on [url]; compared by identity, so a run releases only its own. */
+private class AutofillClaim(val url: String)
 
 /** The activity hosting [this] context, or null (Credential Manager needs it for its prompt). */
 private tailrec fun Context.findActivity(): Activity? = when (this) {

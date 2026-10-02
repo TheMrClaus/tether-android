@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.InMemorySettings
 import com.tether.app.client.PasskeyAuthenticator
 import com.tether.app.client.PasskeyAutofillOffer
@@ -27,6 +28,8 @@ import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import com.tether.app.ui.theme.mode
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -97,19 +100,39 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         val logins = ConcurrentLinkedQueue<String>()
         val probes = java.util.concurrent.atomic.AtomicInteger()
         val optionsCalls = java.util.concurrent.atomic.AtomicInteger()
+        /** ta-coik.1 r2: [optionsCalls] as each sign-in probe arrived (what had been asked before it). */
+        val optionsAtProbe = ConcurrentLinkedQueue<Int>()
+        /** ta-coik.1 r2: when set, a sign-in probe is held here until the test releases it. */
+        @Volatile var holdProbe: CountDownLatch? = null
+        /** ta-coik.1 r2: the Nth options call (1-based) is held at gate N-1, when there is one. */
+        @Volatile var optionsGates: List<CountDownLatch> = emptyList()
+        /** ta-coik.1 r2: when set, a password sign-in is held here (after it is recorded) until released. */
+        @Volatile var holdLogin: CountDownLatch? = null
+
+        fun releaseAll() {
+            holdProbe?.countDown()
+            optionsGates.forEach { it.countDown() }
+            holdLogin?.countDown()
+        }
+
+        private fun hold(gate: CountDownLatch?) {
+            gate?.await(15, TimeUnit.SECONDS)
+        }
 
         override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
             "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
             "/api/auth/session" -> if (request.getHeader("Cookie") != null) {
                 MockResponse().setBody("""{"authenticated":true}""")
             } else {
+                optionsAtProbe += optionsCalls.get()
                 probes.incrementAndGet()
+                hold(holdProbe)
                 MockResponse().setBody(
                     """{"authenticated":false,"usernameRequired":false,"passkeyCount":$passkeyCount,"passwordLoginEnabled":$passwordLoginEnabled,""" +
                         """"passkeysUsable":$passkeysUsable,"rpId":"${request.requestUrl!!.host}","sessionMethod":null}""",
                 )
             }
-            "/api/auth/passkey/login/options" -> MockResponse().also { optionsCalls.incrementAndGet() }.setHeader("Content-Type", "application/json").setBody(
+            "/api/auth/passkey/login/options" -> MockResponse().also { hold(optionsGates.getOrNull(optionsCalls.incrementAndGet() - 1)) }.setHeader("Content-Type", "application/json").setBody(
                 """{"challengeId":"0123456789abcdef0123456789abcdef","options":{"rpId":"${rpId ?: request.requestUrl!!.host}","challenge":"Y2hhbGxlbmdl","timeout":60000,"userVerification":"required"}}""",
             )
             "/api/auth/passkey/login/verify" -> {
@@ -123,6 +146,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
             }
             "/api/auth/login" -> {
                 logins += request.body.readUtf8()
+                hold(holdLogin)
                 MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}""")
             }
             else -> MockResponse().setResponseCode(404).setBody("""{"error":"not found"}""")
@@ -152,6 +176,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
 
     @After fun tearDown() {
         writeObserver?.dispose()
+        console.releaseAll()
         scope.cancel()
         server.shutdown()
         assertTrue("screen state written off the main thread: ${offMainWrites.distinct()}", offMainWrites.isEmpty())
@@ -373,6 +398,105 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         rule.waitForIdle()
         assertTrue(console.verifies.isEmpty())
         assertFalse(shows(waitingCopy))
+    }
+
+    /**
+     * ta-coik.1 r2 (security F2): an edited address asks for no challenge on the last address's reading.
+     * Before the fix the old reading was still held in the frame after the edit, and the offer asked the
+     * edited text for a challenge at once (a /healthz and an options POST per keystroke, no debounce).
+     * Now nothing is asked until the edited address's own probe has answered; then the offer re-arms once
+     * for it, and a pick of that offer signs in.
+     */
+    @Test fun anEditedAddressAsksForNoChallengeUntilItsOwnProbeHasAnswered() {
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        waitFor { armedNodes().isNotEmpty() }
+        val stale = armedOffer()
+        assertEquals(1, console.optionsCalls.get())
+        val gate = CountDownLatch(1)
+        console.holdProbe = gate
+        field("Server URL").performTextInput("/")
+        // The edited address's own probe reaches the console (after the debounce) and is held there.
+        waitFor { console.probes.get() == 2 }
+        assertEquals("nothing asked between the edit and the edited address's probe", listOf(0, 1), console.optionsAtProbe.toList())
+        rule.waitForIdle()
+        assertEquals("still nothing while that probe is unanswered", 1, console.optionsCalls.get())
+        assertTrue("the old offer is withdrawn", armedNodes().isEmpty())
+        assertFalse("no key on another address's reading", offered())
+        gate.countDown()
+        // The reading lands: the offer re-arms, once, for the new address.
+        waitFor { armedNodes().isNotEmpty() }
+        assertTrue(armedOffer() !== stale)
+        assertEquals(2, console.optionsCalls.get())
+        pick(armedOffer())
+        waitFor { shows(successCopy) }
+        assertEquals(1, console.verifies.size)
+    }
+
+    /**
+     * ta-coik.1 r2 (security F2): an arming run cancelled while its options call is still at the console
+     * finishes only when that call returns, which can be after a newer run claimed the same address. It
+     * must not release the newer run's claim, or a later re-read of the address arms it a second time.
+     */
+    @Test fun aCancelledArmingNeverReleasesANewerArmingsClaim() {
+        val first = CountDownLatch(1)
+        val second = CountDownLatch(1)
+        console.optionsGates = listOf(first, second)
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        // Run 1 asks for its challenge and is held at the console.
+        waitFor { console.optionsCalls.get() == 1 }
+        // The address is cleared and typed again: run 1 is cancelled (its blocking call still pending) ...
+        field("Server URL").performTextReplacement("")
+        rule.waitForIdle()
+        field("Server URL").performTextReplacement(base)
+        // ... and once the address's reading is back, run 2 claims it and is held too.
+        waitFor { console.optionsCalls.get() == 2 }
+        // Run 1's call returns now, so its cancelled run finishes after run 2's claim.
+        first.countDown()
+        val settle = System.currentTimeMillis() + 750
+        waitFor { System.currentTimeMillis() > settle }
+        second.countDown()
+        waitFor { armedNodes().isNotEmpty() }
+        val armed = armedOffer()
+        // A re-read of the same address (a trailing space: the same address once trimmed) ...
+        val probesBefore = console.probes.get()
+        field("Server URL").performTextInput(" ")
+        waitFor { console.probes.get() == probesBefore + 1 }
+        waitFor { armedNodes().isNotEmpty() }
+        // A wrongful re-arm would go out on IO after this frame (a /healthz, then the options call): give
+        // it time to reach the console before saying nothing was asked.
+        val quiet = System.currentTimeMillis() + 1_500
+        waitFor { System.currentTimeMillis() > quiet }
+        rule.waitForIdle()
+        // ... arms nothing again: once per address.
+        assertEquals("once per address", 2, console.optionsCalls.get())
+        assertTrue("the same offer", armedOffer() === armed)
+    }
+
+    /**
+     * ta-coik.1 r2 (verifier finding 2): use-login-flow.ts's conditional branch checks no phase. A pick
+     * that lands while a password attempt is at the console goes ahead (verifying-passkey, then verify),
+     * and the password fetch is neither aborted nor awaited. Before the fix the app dropped the pick.
+     */
+    @Test fun aPickWhileAPasswordAttemptIsInFlightGoesAheadAsOnTheWeb() {
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        waitFor { armedNodes().isNotEmpty() }
+        val offer = armedOffer()
+        val gate = CountDownLatch(1)
+        console.holdLogin = gate
+        field("Dashboard password").performTextInput("not-the-passkey")
+        field("Dashboard password").performImeAction()
+        // The password attempt is at the console, unanswered: the screen is busy with it.
+        waitFor { console.logins.size == 1 }
+        assertFalse(keyEnabled())
+        pick(offer)
+        waitFor { console.verifies.size == 1 }
+        assertEquals(TetherJson.parseToJsonElement(ANSWER), console.verifies.single()["response"])
+        waitFor { shows(successCopy) }
+        assertEquals("the password attempt was left to settle on its own", 1, console.logins.size)
+        gate.countDown()
     }
 
     @Test fun aPhoneThatCannotOfferPasskeysInAutofillAsksForNoChallenge() {
