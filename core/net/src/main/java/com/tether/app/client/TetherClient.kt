@@ -632,6 +632,13 @@ interface TetherClient {
     val deviceSecurity: DeviceSecuritySource get() = DeviceSecuritySource.Unavailable
 
     /**
+     * ta-coik.2: a worktree service's "Open" (`GET /api/worktree/open`) with the credential in force,
+     * never following the redirect (see [HttpServiceOpen]). The default refuses without touching the
+     * network.
+     */
+    val serviceOpen: ServiceOpenSource get() = ServiceOpenSource.Unavailable
+
+    /**
      * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
      * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
      * session's cached hunks, so an expanded file refetches. Emptied with the other server views.

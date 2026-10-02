@@ -3521,6 +3521,19 @@ class RealTetherClient(
     })
 
     /**
+     * ta-coik.2: a worktree service's "Open", over [authHttp] (the 303 is read, never followed) with
+     * the same per-call (server, credential) read as [files].
+     */
+    override val serviceOpen: ServiceOpenSource = HttpServiceOpen(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
+    /**
      * T10.4: Settings → Devices, over [authHttp] with the same per-call (server, credential) read as
      * [files], plus which kind of sign-in that credential is (read in the same lock, so the two
      * always agree). Each call goes only to the server the screen names. r2 (security F2): each call
