@@ -406,6 +406,26 @@ class DraftWorktreeModelTest {
     }
 
     @Test
+    fun aSocketChangeClosesAConfirmationOpenedWithNoAnswer() = runTest {
+        val h = harness()
+        h.isolate("checkout-pr", null)
+        h.model.setWorktreeField(WorktreeField.Pr, "42")
+        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
+        val id = h.model.state.value.setupConfirmId
+        h.client.newSocket()
+        h.link()
+        assertNull("closed with its socket, not only refused on confirm", h.model.state.value.setupConfirm)
+        assertEquals(SETUP_CHANGED_COPY, h.model.state.value.error)
+        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
+        // A dropped link (same socket number, not connected) closes it too.
+        h.model.submit(A)
+        h.client.connection.value = ConnectionState.Disconnected
+        h.link()
+        assertNull(h.model.state.value.setupConfirm)
+        assertTrue(h.client.frames.isEmpty())
+    }
+
+    @Test
     fun aConfirmDrawnForAnotherServerSendsNothing() = runTest {
         val h = harness()
         h.isolate("checkout-pr", null)
