@@ -152,6 +152,24 @@ class DraftTestClient(
         return AttachmentSendResult.Sent
     }
 
+    /** ta-23f: every `worktree-inspect` that went out: (cwd, requestId, socket). */
+    val inspects = CopyOnWriteArrayList<Triple<String, String, Long>>()
+    private val sources = kotlinx.coroutines.flow.MutableSharedFlow<com.tether.app.client.WorktreeSourceReply>(extraBufferCapacity = 64)
+    override val worktreeSources: kotlinx.coroutines.flow.Flow<com.tether.app.client.WorktreeSourceReply> get() = sources
+
+    /** ta-23f: as the real client: only on the socket the composer asked on. */
+    override fun inspectWorktree(cwd: String, requestId: String, expectedEpoch: Long): Boolean {
+        refuseInGolden("worktree-inspect")
+        if (expectedEpoch != linkEpoch.value) return false
+        inspects += Triple(cwd, requestId, expectedEpoch)
+        return true
+    }
+
+    /** ta-23f: the server's `worktree-source`, for the last inspect unless told otherwise, on the current socket. */
+    fun answerInspect(info: com.tether.app.client.WorktreeSourceInfo, requestId: String? = inspects.last().second, epoch: Long = linkEpoch.value) {
+        check(sources.tryEmit(com.tether.app.client.WorktreeSourceReply(info, requestId, epoch)))
+    }
+
     override fun browse(cwd: String?) {
         refuseInGolden("browse")
         browsed += cwd
