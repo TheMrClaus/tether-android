@@ -279,7 +279,7 @@ class OverviewFeedTest {
         val received = LinkedBlockingQueue<String>()
         private val listener = object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) { sockets.put(webSocket) }
-            override fun onMessage(webSocket: WebSocket, text: String) { if (text != READY_CATALOG_REQUEST) received.put(text) }
+            override fun onMessage(webSocket: WebSocket, text: String) { if (!isReadyRead(text)) received.put(text) }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
         }
         init {

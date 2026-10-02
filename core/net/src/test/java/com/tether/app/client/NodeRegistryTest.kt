@@ -168,7 +168,7 @@ class NodeRegistryTest {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text != READY_CATALOG_REQUEST) received.put(text)
+                if (!isReadyRead(text)) received.put(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -222,7 +222,7 @@ class NodeRegistryTest {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text != READY_CATALOG_REQUEST) h.received.put(text)
+                if (!isReadyRead(text)) h.received.put(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -386,7 +386,7 @@ class NodeRegistryTest {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text != READY_CATALOG_REQUEST) h.received.put(text)
+                if (!isReadyRead(text)) h.received.put(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -485,7 +485,7 @@ class NodeRegistryTest {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text != READY_CATALOG_REQUEST) h.received.put(text)
+                if (!isReadyRead(text)) h.received.put(text)
             }
             // onClosing deliberately unanswered.
         }

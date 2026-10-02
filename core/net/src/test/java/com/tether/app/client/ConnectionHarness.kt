@@ -145,6 +145,10 @@ class ConnectionHarness {
     @Volatile var separateCatalogRequests = true
     val catalogRequests = LinkedBlockingQueue<String>()
 
+    /** T9.3: every `ready` also asks for the scheduled actions snapshot (a read); kept apart likewise. */
+    @Volatile var separateScheduledRequests = true
+    val scheduledRequests = LinkedBlockingQueue<String>()
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
             sockets.put(webSocket)
@@ -153,7 +157,13 @@ class ConnectionHarness {
         override fun onMessage(webSocket: WebSocket, text: String) {
             log.add("${System.identityHashCode(webSocket)}:${text.take(40)}")
             onServerMessage?.invoke(text)
-            if (separateCatalogRequests && text == READY_CATALOG_REQUEST) catalogRequests.put(text) else received.put(text)
+            if (separateCatalogRequests && text == READY_CATALOG_REQUEST) {
+                catalogRequests.put(text)
+            } else if (separateScheduledRequests && text == READY_SCHEDULED_REQUEST) {
+                scheduledRequests.put(text)
+            } else {
+                received.put(text)
+            }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -296,6 +306,12 @@ class ConnectionHarness {
  * listeners leave it out of the frames they prove an exact order on (as [ConnectionHarness] does).
  */
 const val READY_CATALOG_REQUEST = """{"type":"providers-snapshot"}"""
+
+/** T9.3: the bare scheduled-actions request every `ready` sends (use-tether.ts:801), left out likewise. */
+const val READY_SCHEDULED_REQUEST = """{"type":"scheduled-actions"}"""
+
+/** One of the two bare reads every `ready` sends (the catalog, the scheduled actions). */
+fun isReadyRead(text: String): Boolean = text == READY_CATALOG_REQUEST || text == READY_SCHEDULED_REQUEST
 
 fun JsonObject.type(): String? = this["type"]?.jsonPrimitive?.content
 
