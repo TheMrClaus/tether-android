@@ -1,14 +1,24 @@
 package com.tether.app.client
 
+import com.tether.app.protocol.ModelVariantOption
+import com.tether.app.protocol.SessionModelOption
+import com.tether.app.protocol.helpers.CodexModePresets
 import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -29,8 +39,17 @@ class CreateFrameTest {
         val expected: String,
     )
 
+    /**
+     * ta-xki: every row lists two models: `opus` with two reasoning-effort variants and `gpt-5` with
+     * one (an effort rides only when the selected model offers it).
+     */
+    private val models = listOf(
+        SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("low", "Low"), ModelVariantOption("high", "High"))),
+        SessionModelOption("gpt-5", "GPT-5", variants = listOf(ModelVariantOption("high", "High"))),
+    )
+
     private fun entry(provider: String, profileId: String? = null) =
-        ProviderCatalogEntry(profileId ?: provider, provider, "ready", emptyList(), profileId = profileId)
+        ProviderCatalogEntry(profileId ?: provider, provider, "ready", models, profileId = profileId)
 
     private fun form(vararg fields: Pair<String, Any>): JsObj =
         DraftForm.INITIAL_DRAFT_FORM.put("cwd", JsStr("/w")).with(
@@ -171,6 +190,121 @@ class CreateFrameTest {
             form("worktreeBranch" to "feat/x", "worktreeSlug" to "x"),
             expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
         ),
+        // --- ta-xki: Mode x Effort x profile, as the composer picks them ----------------------------------
+        Row(
+            "claude Accept Edits + effort high on a profile",
+            entry("claude", profileId = "work"),
+            form("mode" to "acceptEdits", "model" to "opus", "reasoningEffort" to "high"),
+            picked("mode", "reasoningEffort"),
+            expected = frame("claude", """"permissionMode":"acceptEdits","sandboxPolicy":"workspace-write","profileId":"work","reasoningEffort":"high","""),
+        ),
+        Row(
+            "claude Plan + model and effort low",
+            entry("claude"),
+            form("mode" to "plan", "model" to "opus", "reasoningEffort" to "low"),
+            picked("mode", "model", "reasoningEffort"),
+            expected = frame("claude", """"permissionMode":"plan","sandboxPolicy":"workspace-write","model":"opus","reasoningEffort":"low","""),
+        ),
+        Row(
+            "claude Auto with an untouched effort (the engine's default)",
+            entry("claude"),
+            form("mode" to "bypassPermissions", "model" to "opus"),
+            picked("mode", "model"),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"opus","""),
+        ),
+        Row(
+            "codex auto-review + effort high",
+            entry("codex"),
+            form("mode" to "auto-review", "model" to "gpt-5", "reasoningEffort" to "high"),
+            picked("mode", "model", "reasoningEffort"),
+            expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","approvalsReviewer":"auto_review","model":"gpt-5","reasoningEffort":"high","""),
+        ),
+        Row(
+            "codex full-access on a profile + effort",
+            entry("codex", profileId = "codex-work"),
+            form("mode" to "full-access", "model" to "opus", "reasoningEffort" to "low"),
+            picked("reasoningEffort"),
+            expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"off","approvalPolicy":"never","profileId":"codex-work","reasoningEffort":"low","""),
+        ),
+        Row(
+            "opencode Build (default) + effort",
+            entry("opencode"),
+            form("mode" to "default", "model" to "gpt-5", "reasoningEffort" to "high"),
+            picked("mode", "model", "reasoningEffort"),
+            expected = frame("opencode", """"permissionMode":"default","model":"gpt-5","reasoningEffort":"high","""),
+        ),
+        Row(
+            "opencode Auto chip on a profile",
+            entry("opencode", profileId = "oc"),
+            form("mode" to "bypassPermissions"),
+            picked("mode"),
+            expected = frame("opencode", """"permissionMode":"bypassPermissions","approvalPolicy":"never","profileId":"oc","""),
+        ),
+        Row(
+            "pi with an effort (no Mode row)",
+            entry("pi"),
+            form("mode" to "acceptEdits", "model" to "opus", "reasoningEffort" to "high"),
+            picked("reasoningEffort"),
+            expected = frame("pi", """"permissionMode":"bypassPermissions","reasoningEffort":"high","""),
+        ),
+    )
+
+    /**
+     * ta-xki: the rows where the app's frame differs from the web's ON PURPOSE (a stale, tampered or
+     * hand-built form): a mode the provider does not offer becomes its default, an effort the selected
+     * model does not offer is dropped. [web] is what the web would send; [expected] the app's frame.
+     */
+    private data class Clamp(val name: String, val entry: ProviderCatalogEntry, val form: JsObj, val modified: JsObj, val web: String, val expected: String)
+
+    private val clamps = listOf(
+        Clamp(
+            "claude retired dontAsk: the default (Auto)",
+            entry("claude"), form("mode" to "dontAsk"), DraftForm.INITIAL_USER_MODIFIED,
+            web = frame("claude", """"permissionMode":"dontAsk","sandboxPolicy":"off","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+        ),
+        Clamp(
+            "claude garbage mode",
+            entry("claude", profileId = "work"), form("mode" to "rm -rf /"), DraftForm.INITIAL_USER_MODIFIED,
+            web = frame("claude", """"permissionMode":"rm -rf /","sandboxPolicy":"off","profileId":"work","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","profileId":"work","""),
+        ),
+        Clamp(
+            "claude codex preset name",
+            entry("claude"), form("mode" to "full-access"), DraftForm.INITIAL_USER_MODIFIED,
+            web = frame("claude", """"permissionMode":"full-access","sandboxPolicy":"off","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+        ),
+        Clamp(
+            "opencode acceptEdits (not an opencode row): Build, no approval policy",
+            entry("opencode"), form("mode" to "acceptEdits"), DraftForm.INITIAL_USER_MODIFIED,
+            web = frame("opencode", """"permissionMode":"acceptEdits","""),
+            expected = frame("opencode", """"permissionMode":"bypassPermissions","""),
+        ),
+        Clamp(
+            "opencode garbage mode",
+            entry("opencode"), form("mode" to "yolo"), DraftForm.INITIAL_USER_MODIFIED,
+            web = frame("opencode", """"permissionMode":"yolo","""),
+            expected = frame("opencode", """"permissionMode":"bypassPermissions","""),
+        ),
+        Clamp(
+            "an effort the model does not offer is dropped",
+            entry("claude"), form("mode" to "plan", "model" to "gpt-5", "reasoningEffort" to "low"), picked("model", "reasoningEffort"),
+            web = frame("claude", """"permissionMode":"plan","sandboxPolicy":"off","model":"gpt-5","reasoningEffort":"low","""),
+            expected = frame("claude", """"permissionMode":"plan","sandboxPolicy":"workspace-write","model":"gpt-5","""),
+        ),
+        Clamp(
+            "an effort for a hand-added model id (no variants) is dropped",
+            entry("codex"), form("mode" to "default", "model" to "my-custom", "reasoningEffort" to "high"), picked("model", "reasoningEffort"),
+            web = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","reasoningEffort":"high","""),
+            expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","""),
+        ),
+        Clamp(
+            "an effort on a row with no models is dropped",
+            ProviderCatalogEntry("claude", "claude", "ready", emptyList()), form("reasoningEffort" to "high"), picked("reasoningEffort"),
+            web = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"off","reasoningEffort":"high","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+        ),
     )
 
     @Test
@@ -219,4 +353,117 @@ class CreateFrameTest {
         assertEquals("bypassPermissions", pi.permissionMode)
         assertEquals(null, pi.sandboxPolicy)
     }
+
+    /** ta-xki: the clamps, each against the web's frame (they differ) and the app's (exactly). */
+    @Test
+    fun aModeOrEffortOutsideTheKnownSetsNeverReachesTheFrame() {
+        for (c in clamps) {
+            val built = CreateFrame.build(c.form, c.entry, c.modified, "r").toJsonObject()
+            assertEquals(c.name, Json.parseToJsonElement(c.expected).jsonObject, built)
+            // Negative control: the web's own frame for the row is different, so the clamp is live.
+            assertNotEquals(c.name + ": the web's frame", Json.parseToJsonElement(c.web).jsonObject, built)
+            assertEquals(c.name + ": the oracle agrees on the web side", Json.parseToJsonElement(c.web).jsonObject, webFrame(c.entry, c.form, c.modified))
+        }
+    }
+
+    // --- ta-xki: the whole cross-product against a port of the web's object literal ------------------------
+
+    private val providers = listOf("claude", "codex", "opencode", "pi", "reasonix", "acp")
+    private val modes = listOf("", "default", "acceptEdits", "plan", "bypassPermissions", "auto-review", "full-access", "dontAsk", "off", "bogus")
+    private val modelEfforts = listOf("" to "", "opus" to "", "opus" to "high", "opus" to "low", "gpt-5" to "high", "gpt-5" to "low", "custom-id" to "high", "" to "high")
+    private val pickedSets = listOf(emptyList(), listOf("mode"), listOf("model"), listOf("reasoningEffort"), listOf("model", "reasoningEffort", "mode"))
+    private val profiles = listOf(null, "work")
+
+    /**
+     * hooks/use-draft-composer.ts 887c222 ~313-347, ported key for key with no app rule in it: the
+     * oracle the app is checked against. (Worktree is covered by the literal rows above.)
+     */
+    private fun webFrame(entry: ProviderCatalogEntry, form: JsObj, modified: JsObj): JsonObject {
+        fun f(k: String) = (form[k] as? JsStr)?.value ?: ""
+        fun m(k: String) = modified[k] == JsBool.TRUE
+        val provider = entry.provider
+        val isClaude = provider == "claude"
+        val isCodex = provider == "codex"
+        val isOpencode = provider == "opencode"
+        val preset = CodexModePresets.codexModePreset(JsStr(f("mode")))
+        val autoMode = !isCodex && f("mode") == "bypassPermissions"
+        return buildJsonObject {
+            put("type", "create")
+            put("provider", provider)
+            put("cwd", f("cwd"))
+            put("requestId", "r")
+            put("permissionMode", if (isClaude || isOpencode) f("mode").ifEmpty { "bypassPermissions" } else "bypassPermissions")
+            when {
+                isCodex -> put("sandboxPolicy", (preset["sandboxPolicy"] as JsStr).value)
+                isClaude -> put("sandboxPolicy", "off")
+            }
+            if (isCodex) {
+                (preset["approvalPolicy"] as? JsStr)?.let { put("approvalPolicy", it.value) }
+            } else if (autoMode && isOpencode) {
+                put("approvalPolicy", "never")
+            }
+            if (isCodex && preset["approvalsReviewer"] == JsStr("auto_review")) put("approvalsReviewer", "auto_review")
+            put("useWorktree", form["useWorktree"] == JsBool.TRUE)
+            entry.profileId?.let { put("profileId", it) }
+            if (m("model") && f("model").isNotEmpty()) put("model", f("model"))
+            if (m("reasoningEffort") && f("reasoningEffort").isNotEmpty()) put("reasoningEffort", f("reasoningEffort"))
+        }
+    }
+
+    /** The values each key may ever take on the app's wire, per provider (the known sets). */
+    private fun assertWithinKnownSets(name: String, provider: String, frame: JsonObject, entry: ProviderCatalogEntry, model: String) {
+        fun v(k: String): String? = (frame[k] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+        val permission = v("permissionMode")
+        when (provider) {
+            "claude" -> assertTrue("$name: $permission", permission in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
+            "opencode" -> assertTrue("$name: $permission", permission in setOf("default", "plan", "bypassPermissions"))
+            else -> assertEquals(name, "bypassPermissions", permission)
+        }
+        when (provider) {
+            "claude" -> assertEquals(name, "workspace-write", v("sandboxPolicy"))
+            "codex" -> assertTrue(name, v("sandboxPolicy") in setOf("workspace-write", "off"))
+            else -> assertEquals(name, null, v("sandboxPolicy"))
+        }
+        assertTrue(name, v("approvalPolicy") in setOf(null, "never"))
+        if (v("approvalPolicy") != null) assertTrue(name, provider == "codex" || provider == "opencode")
+        assertTrue(name, v("approvalsReviewer") in setOf(null, "auto_review"))
+        if (v("approvalsReviewer") != null) assertEquals(name, "codex", provider)
+        v("reasoningEffort")?.let { e -> assertTrue("$name: $e", DraftSessionOptionsModel.offeredEfforts(entry, model).any { it.value == e }) }
+    }
+
+    @Test
+    fun theCrossProductMatchesTheWebForEveryOfferedValueAndStaysInsideTheKnownSets() {
+        var exact = 0
+        var clamped = 0
+        for (provider in providers) for (mode in modes) for ((model, effort) in modelEfforts) for (picks in pickedSets) for (profile in profiles) {
+            val e = entry(provider, profileId = profile)
+            val f = form("mode" to mode, "model" to model, "reasoningEffort" to effort)
+            val mod = picked(*picks.toTypedArray())
+            val name = "$provider/$mode/$model/$effort/$picks/$profile"
+            val built = CreateFrame.build(f, e, mod, "r").toJsonObject()
+            assertWithinKnownSets(name, provider, built, e, model)
+            val known = DraftModes.known(provider)
+            val modeOffered = known == null || mode in known
+            val effortOffered = effort.isEmpty() || !mod.flag("reasoningEffort") || DraftSessionOptionsModel.offeredEfforts(e, model).any { it.value == effort }
+            // The web's frame for the same row, with the app's one owner-decided change applied.
+            val web = webFrame(e, f, mod).let { w -> if (provider == "claude") JsonObject(w + ("sandboxPolicy" to JsonPrimitive("workspace-write"))) else w }
+            if (modeOffered && effortOffered) {
+                assertEquals("$name: keys", web.keys, built.keys)
+                assertEquals(name, web, built)
+                exact++
+            } else {
+                // Off the known sets the app's frame is the web's frame for the fallback values.
+                val fallback = f.put("mode", JsStr(DraftModes.normalize(provider, mode)))
+                    .put("reasoningEffort", JsStr(effort.takeIf { effortOffered }.orEmpty()))
+                val expected = webFrame(e, fallback, mod).let { w -> if (provider == "claude") JsonObject(w + ("sandboxPolicy" to JsonPrimitive("workspace-write"))) else w }
+                assertEquals("$name (fallback)", expected, built)
+                clamped++
+            }
+        }
+        // 6 providers x 10 modes x 8 model/effort x 5 pick sets x 2 profiles.
+        assertEquals(4800, exact + clamped)
+        assertTrue("both halves are exercised: $exact exact, $clamped clamped", exact > 1000 && clamped > 500)
+    }
+
+    private fun JsObj.flag(key: String) = this[key] == JsBool.TRUE
 }
