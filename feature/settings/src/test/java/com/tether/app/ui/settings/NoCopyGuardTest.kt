@@ -16,7 +16,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.contextmenu.data.ProcessTextKey
 import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
 import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
-import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
 import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -46,7 +45,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,24 +89,6 @@ class NoCopyGuardTest {
         override suspend fun setClipEntry(clipEntry: ClipEntry?) {
             writes += clipEntry
         }
-    }
-
-    /** The new text context menu, as the platform toolbar would get it. */
-    private class MenuSpy : TextContextMenuProvider {
-        var shown: TextContextMenuDataProvider? = null
-        var opened = 0
-
-        override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) {
-            shown = dataProvider
-            opened++
-            try {
-                awaitCancellation()
-            } finally {
-                if (shown === dataProvider) shown = null
-            }
-        }
-
-        fun keys(): List<Any> = checkNotNull(shown) { "no text menu is open" }.data().components.map { it.key }
     }
 
     /** The old [TextToolbar]: counts every menu it is asked to show. */

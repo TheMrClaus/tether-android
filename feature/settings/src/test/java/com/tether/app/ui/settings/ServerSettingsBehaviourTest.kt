@@ -22,6 +22,8 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import com.tether.app.client.ServerSetting
 import com.tether.app.ui.settings.ServerFixtures.FAKE_PASSWORD
 import com.tether.app.ui.settings.ServerFixtures.ORIGIN
@@ -535,7 +537,8 @@ class ServerSettingsBehaviourTest {
         compose.waitForIdle()
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        if (field.fetchSemanticsNode().config.contains(SemanticsActions.CutText)) field.performSemanticsAction(SemanticsActions.CutText)
+        assertTrue("the field offers cut", field.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
+        field.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
         // T10.3 r2 (verifier L2, the shared guard): a cut deletes nothing either.
         assertEquals(SENTINEL, field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
@@ -543,6 +546,74 @@ class ServerSettingsBehaviourTest {
             .getSystemService(android.content.ClipboardManager::class.java)
         val clip = clipboard.primaryClip
         assertFalse("the clipboard holds the secret", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+    }
+
+    /** ta-78a (1): the hardware copy and cut keys (Ctrl+C, Ctrl+Insert, KEYCODE_COPY, Ctrl+X, KEYCODE_CUT) write nothing and delete nothing. */
+    @Config(shadows = [DeviceKeyCharacterMap::class])
+    @Test fun aRevealedSecretSurvivesTheCopyAndCutKeysAndNothingReachesTheClipboard() {
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
+        field.performClick()
+        compose.waitForIdle()
+        NoCopyProbe.seed()
+        for (keys in ClipKeys.entries) {
+            field.selectAllAndPress(keys)
+            compose.waitForIdle()
+            assertEquals("$keys changed the secret", SENTINEL, field.editableText())
+        }
+        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+    }
+
+    /**
+     * ta-oqx N1: a deletion followed at once by a Copy of text that fits the gap never brings the
+     * deleted text back (the old CutGuard took any refused write that matched the removed run as a
+     * cut and restored it).
+     */
+    @Test fun aDeletionThenACopyNeverBringsTheDeletedTextBack() {
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
+        field.performClick()
+        field.performTextReplacement(SENTINEL + SENTINEL)
+        compose.waitForIdle()
+        // The second copy deleted (not cut: nothing is written), then the rest copied straight away.
+        field.performTextReplacement(SENTINEL)
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        field.performSemanticsAction(SemanticsActions.CopyText)
+        compose.waitForIdle()
+        assertEquals("the deleted text came back", SENTINEL, field.editableText())
+    }
+
+    /**
+     * ta-78a (2): the revealed secret's REAL menu (a long press; the new text context menu in
+     * foundation 1.12.1) holds no Copy, no Cut and nothing else that reads the text. The plain
+     * field beside it (Workspace root) shows the harness reads the menu that would be drawn.
+     */
+    @Config(shadows = [NoMagnifier::class])
+    @Test fun theRevealedSecretsRealMenuOffersNothingThatReadsIt() {
+        val menu = MenuSpy()
+        binding = ServerFixtures.binding(view = ServerFixtures.view(secretSettings()))
+        state.tab = SettingsTab.Advanced
+        compose.setContent {
+            CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
+                SettingsUnderTest(store.prefs, state, serverSettings = binding)
+            }
+        }
+        compose.waitUntil(5_000) { state.draft != null }
+        val plain = tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot))
+        plain.performScrollTo()
+        plain.performTextReplacement("/srv/workspaces")
+        plain.performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(24f, 0f)) }
+        compose.waitForIdle()
+        assertTrue("the control offers no Copy: ${menu.keys()}", androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey in menu.keys())
+        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
+        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
+        field.performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(24f, 0f)) }
+        compose.waitForIdle()
+        val keys = menu.keys()
+        val allowed = with(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys) { setOf(PasteKey, SelectAllKey, AutofillKey) }
+        assertTrue("the revealed secret's menu offers $keys", keys.isNotEmpty() && keys.all { it in allowed })
     }
 
     /** r2: the revealed field's text menu offers neither Copy nor Cut (paste and select-all stay). */

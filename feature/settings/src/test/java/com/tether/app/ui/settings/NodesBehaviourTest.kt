@@ -484,12 +484,47 @@ class NodesBehaviourTest {
         compose.waitForIdle()
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        if (field.fetchSemanticsNode().config.contains(SemanticsActions.CutText)) field.performSemanticsAction(SemanticsActions.CutText)
+        assertTrue("the field offers cut", field.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
+        field.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
+        assertEquals("the cut deleted the credential", SENTINEL, fieldText(NodeTags.Credential))
         val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
             .getSystemService(android.content.ClipboardManager::class.java)
         val clip = clipboard.primaryClip
         assertFalse("the clipboard holds the credential", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+    }
+
+    /** ta-78a (1): the hardware copy and cut keys write nothing and delete nothing from the revealed credential. */
+    @Config(shadows = [DeviceKeyCharacterMap::class])
+    @Test fun theRevealedCredentialSurvivesTheCopyAndCutKeys() {
+        show()
+        typeCredential(SENTINEL, keepRevealed = true)
+        val field = tag(NodeTags.Credential)
+        field.performClick()
+        compose.waitForIdle()
+        NoCopyProbe.seed()
+        for (keys in ClipKeys.entries) {
+            field.selectAllAndPress(keys)
+            compose.waitForIdle()
+            assertEquals("$keys changed the credential", SENTINEL, fieldText(NodeTags.Credential))
+        }
+        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+    }
+
+    /**
+     * ta-oqx N1 / N2: a deletion followed at once by a Copy that fits the gap never brings the
+     * deleted text back (the field no longer remembers its last edit at all).
+     */
+    @Test fun aDeletionThenACopyNeverBringsTheCredentialBack() {
+        show()
+        typeCredential(SENTINEL + SENTINEL, keepRevealed = true)
+        val field = tag(NodeTags.Credential)
+        field.performClick()
+        field.performTextReplacement(SENTINEL)
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        field.performSemanticsAction(SemanticsActions.CopyText)
+        compose.waitForIdle()
+        assertEquals("the deleted text came back", SENTINEL, fieldText(NodeTags.Credential))
     }
 
     @Test fun nothingButAddNodeSendsTheCredential() {

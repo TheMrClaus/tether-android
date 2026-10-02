@@ -747,12 +747,48 @@ class ProfilesBehaviourTest {
         compose.waitForIdle()
         f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        if (f.fetchSemanticsNode().config.contains(SemanticsActions.CutText)) f.performSemanticsAction(SemanticsActions.CutText)
+        assertTrue("the field offers cut", f.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
+        f.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
+        // ta-oqx N4: the cut took nothing away either.
+        assertEquals("the cut deleted the value", SENTINEL, editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
         val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
             .getSystemService(android.content.ClipboardManager::class.java)
         val clip = clipboard.primaryClip
         assertFalse("the clipboard holds the value", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+    }
+
+    /**
+     * ta-oqx N4: the Add row's revealed value (a draft, never sent until Add) cannot be copied, and a
+     * cut (the accessibility action, Ctrl+X, KEYCODE_CUT) deletes nothing: the text survives. ta-78a:
+     * the copy keys put nothing on the clipboard.
+     */
+    @Config(shadows = [DeviceKeyCharacterMap::class])
+    @Test fun aNewValueCannotBeCopiedAndACutTakesNothingAway() {
+        show(secretList())
+        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("ANTHROPIC_API_KEY")
+        tap(ProfileTags.envNewReveal("claude-work"))
+        val f = tag(ProfileTags.envNewInput("claude-work"))
+        f.performTextReplacement(SENTINEL)
+        f.performClick()
+        compose.waitForIdle()
+        NoCopyProbe.seed()
+        f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        compose.waitForIdle()
+        f.performSemanticsAction(SemanticsActions.CopyText)
+        compose.waitForIdle()
+        f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
+        compose.waitForIdle()
+        assertTrue("the field offers cut", f.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
+        f.performSemanticsAction(SemanticsActions.CutText)
+        compose.waitForIdle()
+        assertEquals("the accessibility cut deleted the draft", SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
+        for (keys in ClipKeys.entries) {
+            f.selectAllAndPress(keys)
+            compose.waitForIdle()
+            assertEquals("$keys deleted the draft", SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
+        }
+        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
     }
 
     @Test fun aNewValueIsMaskedUntilRevealedAndSentOnlyByAdd() {

@@ -3,6 +3,8 @@ package com.tether.app.ui.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.withKeyDown
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.awaitCancellation
 
 /**
  * ta-78a / ta-oqx: a secret field's copy and cut driven every way a user can (the hardware keys
@@ -50,4 +53,22 @@ internal fun SemanticsNodeInteraction.selectAllAndPress(keys: ClipKeys) {
     val n = editableText().orEmpty().length
     performSemanticsAction(SemanticsActions.SetSelection) { it(0, n, false) }
     performKeyInput(keys.press)
+}
+
+/** The new text context menu as the platform toolbar would get it: what it was asked to show, and how often. */
+internal class MenuSpy : TextContextMenuProvider {
+    var shown: TextContextMenuDataProvider? = null
+    var opened = 0
+
+    override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) {
+        shown = dataProvider
+        opened++
+        try {
+            awaitCancellation()
+        } finally {
+            if (shown === dataProvider) shown = null
+        }
+    }
+
+    fun keys(): List<Any> = checkNotNull(shown) { "no text menu is open" }.data().components.map { it.key }
 }
