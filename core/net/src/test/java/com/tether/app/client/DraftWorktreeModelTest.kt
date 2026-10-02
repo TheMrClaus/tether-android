@@ -106,9 +106,11 @@ class DraftWorktreeModelTest {
         return Harness(client, model)
     }
 
-    private fun repo(hasSetup: Boolean, defaultBaseRef: String = "origin/main", scripts: Int = 0) = WorktreeSourceInfo(
+    private fun repo(hasSetup: Boolean, defaultBaseRef: String = "origin/main", scripts: Int = 0, remote: String? = "origin") = WorktreeSourceInfo(
         cwd = "/w",
         isRepo = true,
+        remote = remote,
+        remotes = listOfNotNull(remote),
         defaultBaseRef = defaultBaseRef,
         branches = listOf("origin/main", "origin/dev", "main", "feat/x"),
         configPresent = hasSetup || scripts > 0,
@@ -479,5 +481,57 @@ class DraftWorktreeModelTest {
         assertNull(h.model.state.value.worktreeSource)
         assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(1, A))
         assertTrue(h.client.frames.isEmpty())
+    }
+    // --- r2: a default base the answer cannot vouch for --------------------------------------------
+
+    /**
+     * The verifier's reproduction against the 887c222 engine: the repo's only remote is `upstream`,
+     * inspect reads `hasSetup` at upstream/main (false) while the create, with no `remote` in the
+     * frame, resolves remote origin, finds none and cuts from HEAD, whose committed setup runs. Send
+     * must open the may-run confirmation, naming no inspected base.
+     */
+    @Test
+    fun onlyAnUpstreamRemoteWithNoSetupAndNoBaseConfirms() = runTest {
+        val h = harness()
+        h.isolate("branch-off", repo(hasSetup = false, defaultBaseRef = "upstream/main", remote = "upstream"))
+        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
+        val shown = h.model.state.value.setupConfirm!!
+        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), shown)
+        assertEquals(SETUP_BODY_MAY_DEFAULT, shown.body)
+        assertTrue("nothing sent before the confirm", h.client.frames.isEmpty())
+        assertEquals(DraftSubmitResult.Sent, h.model.confirmSetup(h.model.state.value.setupConfirmId, A))
+        val block = h.client.frames.single().worktree!!
+        assertEquals("the frame stays the web's: no remote, no base", "branch-off", block.mode)
+        assertNull(block.baseRef)
+    }
+
+    @Test
+    fun aNullRemoteAHeadDefaultOrNotARepoConfirms() = runTest {
+        for (info in listOf(
+            repo(hasSetup = false, defaultBaseRef = "HEAD", remote = null),
+            repo(hasSetup = false, defaultBaseRef = "HEAD"),
+            repo(hasSetup = true, defaultBaseRef = "HEAD"),
+            repo(hasSetup = true, defaultBaseRef = "upstream/main", remote = "upstream"),
+            notARepo,
+            repo(hasSetup = false).copy(configKnown = false),
+        )) {
+            val h = harness()
+            h.isolate("branch-off", info)
+            assertEquals("$info", DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
+            val shown = h.model.state.value.setupConfirm!!
+            assertFalse("$info: may run, never will", shown.certain)
+            assertNull("$info: the dialog names no inspected base", shown.ref)
+            assertTrue(h.client.frames.isEmpty())
+        }
+    }
+
+    /** Positive control: origin, an origin/… default, no setup -> no dialog, the web's frame at once. */
+    @Test
+    fun originWithANonHeadDefaultAndNoSetupStillSendsAtOnce() = runTest {
+        val h = harness()
+        h.isolate("branch-off", repo(hasSetup = false, defaultBaseRef = "origin/trunk"))
+        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertNull(h.model.state.value.setupConfirm)
+        assertNull(h.client.frames.single().worktree?.baseRef)
     }
 }

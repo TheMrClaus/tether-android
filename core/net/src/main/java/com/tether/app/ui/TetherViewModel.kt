@@ -103,7 +103,17 @@ class TetherViewModel(
 
     /** dashboard.tsx closeDraft: the sheet goes; the draft (text, folder, provider, attachments) stays. */
     fun closeDraft() {
+        hideDraft()
+    }
+
+    /**
+     * Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out).
+     * ta-23f r2: an open setup confirmation goes with it, unsent, so reopening the sheet never shows
+     * a confirmation that was opened before it closed (Send has to be pressed again).
+     */
+    private fun hideDraft() {
         _draftOpen.value = false
+        draftComposer.cancelSetup()
     }
 
     /**
@@ -224,7 +234,7 @@ class TetherViewModel(
         draftComposer.onOrigin(origin)
         if (origin == draftOrigin) return
         // ta-abm: the dropped draft's sheet goes with its server.
-        _draftOpen.value = false
+        hideDraft()
         draftOrigin = origin
         draftLoads.clear()
         _drafts.value = emptyMap()
@@ -427,7 +437,7 @@ class TetherViewModel(
         // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
         _openingHistoryId.value = null
         // ta-abm (dashboard.tsx selectSession): a selection closes the new-session sheet; the draft stays.
-        _draftOpen.value = false
+        hideDraft()
         // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView);
         // r2: another selection drops a first pick still being read for the previous one as well.
         val staged = stagedAttachments.current.value
@@ -580,7 +590,7 @@ class TetherViewModel(
             _selectedSessionId.value = null
             _openingHistoryId.value = null
             // ta-abm: so does the new-session sheet (the draft itself is the server's, kept in memory).
-            _draftOpen.value = false
+            hideDraft()
             // T5.3: the web's search state lives in the Dashboard, which /login unmounts.
             _globalSearchOpen.value = false
             _globalSearchForm.value = GlobalSearchForm()
@@ -604,7 +614,7 @@ class TetherViewModel(
      */
     fun resumeHistory(history: HistorySession): Boolean {
         if (!client.resume(history)) return false
-        _draftOpen.value = false
+        hideDraft()
         _openingHistoryId.value = history.historyId
         _selectedSessionId.value = null
         return true
@@ -637,7 +647,7 @@ class TetherViewModel(
     private fun openCreated(sessionId: String) {
         _openingHistoryId.value = null
         // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
-        _draftOpen.value = false
+        hideDraft()
         if (_selectedSessionId.value == sessionId) return
         selectSession(sessionId)
     }
