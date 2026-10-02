@@ -250,7 +250,10 @@ class ClaudeAccountsModelTest {
         )
         assertNull(view.warning)
         assertEquals("Last synced at 10:13:20 — 2 updated, 1 already current.", view.summary)
-        assertFalse(view.canRun)
+        // ta-7rh: Sync now runs whenever the mode syncs (the web's `config.mode === "none"` rule), and never for a mode this client does not know.
+        assertTrue(view.canRun)
+        assertFalse(ClaudeAccountsPresentation.sync(list, sync.copy(config = sync.config.copy(mode = ClaudeSyncMode.None)), time)!!.canRun)
+        assertFalse(ClaudeAccountsPresentation.sync(list, sync.copy(config = sync.config.copy(mode = ClaudeSyncMode.Unknown)), time)!!.canRun)
         // A sync answer is taken only for the shown server, and a failure keeps what was there.
         val state = loaded()
         assertSame(state, ClaudeAccountsModel.foldSync(state, ClaudeAccountsResult.Ok(sync, OTHER_ORIGIN), ORIGIN))

@@ -16,8 +16,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ClaudeAccountsResult
 import com.tether.app.client.FilesAuthority
+import com.tether.app.client.HttpClaudeAccountActions
 import com.tether.app.client.HttpClaudeAccounts
 import com.tether.app.ui.settings.AccountsFixtures.ORIGIN
 import com.tether.app.ui.settings.AccountsFixtures.OTHER_ORIGIN
@@ -43,8 +45,9 @@ import org.robolectric.shadows.ShadowLog
 
 /**
  * ta-9q2 / ta-ebc: the Engines tab's Claude accounts section (settings-dialog.tsx 887c222
- * :1380-1867), read only: what it reads and when, what it shows, the owner-grade controls drawn
- * disabled and never sent, the answers bound to the shown server, and `plan.raw` nowhere.
+ * :1380-1867): what it reads and when, what it shows, the answers bound to the shown server, and
+ * `plan.raw` nowhere. ta-7rh: the changes are offered (their behaviour: ClaudeAccountsChangesBehaviourTest),
+ * and over the real client only their fixed routes leave.
  *
  * ta-b72: the v2 rule (a StandardTestDispatcher for the composition). Under the v1 rule the
  * section's effects ran on an unconfined dispatcher, so an answer the real reader finished on an
@@ -116,9 +119,13 @@ class ClaudeAccountsBehaviourTest {
         assertTrue(all.contains("/srv/tether/state/claude-accounts/claude-work"))
         assertTrue(all.contains(ClaudeAccountsPresentation.NO_HOME))
         assertEquals(1, all.count { it == "/srv/tether/.claude" })
-        // The sync state, read only.
-        for (text in listOf("Sync across accounts", "Sync selected categories", "Plugins, Skills, MCP servers", "Last synced at 10:13:20 — 2 updated, 1 already current.")) {
+        // The sync state (ta-7rh: as its controls: the mode and primary said with their values, the categories ticked).
+        for (text in listOf("Sync across accounts", "Sync across accounts: Sync selected categories", "Primary account for sync: Claude Code (default)", "Last synced at 10:13:20 — 2 updated, 1 already current.")) {
             assertTrue(text, all.contains(text))
+        }
+        for ((key, on) in listOf("plugins" to true, "skills" to true, "mcp" to true, "hooks" to false)) {
+            val state = tag(ClaudeAccountsTags.syncCategory(key)).fetchSemanticsNode().config[SemanticsProperties.ToggleableState]
+            assertEquals(key, if (on) androidx.compose.ui.state.ToggleableState.On else androidx.compose.ui.state.ToggleableState.Off, state)
         }
     }
 
@@ -138,26 +145,43 @@ class ClaudeAccountsBehaviourTest {
         }
     }
 
-    @Test fun theOwnerGradeControlsAreDisabledAndExplained() {
-        show(FakeAccounts().binding())
+    /**
+     * ta-7rh (owner 2026-10-02, tether #236: the app has the web's permissions): the changes are
+     * offered, with no owner note until a server refuses one; the host default still has no Rename.
+     */
+    @Test fun theChangeControlsAreOfferedWithNoOwnerNote() {
+        show(FakeAccounts().binding().copy(actions = FakeAccountActions()))
         waitFor("Claude Code (work)")
-        tag(ClaudeAccountsTags.OwnerOnly).assertExists()
-        assertTrue(everything().contains(ClaudeAccountsPresentation.OWNER_ONLY))
+        tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
         for (id in listOf("claude-default", "claude-work", "claude-fresh")) {
-            tag(ClaudeAccountsTags.login(id)).assertIsNotEnabled()
-            tag(ClaudeAccountsTags.logout(id)).assertIsNotEnabled()
-            tag(ClaudeAccountsTags.remove(id)).assertIsNotEnabled()
+            tag(ClaudeAccountsTags.login(id)).assertIsEnabled()
+            tag(ClaudeAccountsTags.logout(id)).assertIsEnabled()
+            tag(ClaudeAccountsTags.remove(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.check(id)).assertIsEnabled()
         }
-        tag(ClaudeAccountsTags.rename("claude-work")).assertIsNotEnabled()
-        // The host default has nothing to rename (settings-dialog.tsx:1688): no key at all.
+        tag(ClaudeAccountsTags.rename("claude-work")).assertIsEnabled()
         tag(ClaudeAccountsTags.rename("claude-default")).assertDoesNotExist()
-        tag(ClaudeAccountsTags.Add).assertIsNotEnabled()
-        tag(ClaudeAccountsTags.SyncNow).assertIsNotEnabled()
+        tag(ClaudeAccountsTags.Add).assertIsEnabled()
+        tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
     }
 
-    /** Over the real reader on a fake server: whatever is tapped, only the three GETs ever leave. */
-    @Test fun overTheRealReaderOnlyTheReadableGetsAreSent() {
+    /** An account whose id cannot be put in a path is listed, but nothing may change it. */
+    @Test fun anAccountThatCannotBeNamedOffersNoChange() {
+        val json = """{"accounts":[{"id":"Bad/Id","label":"Odd"},{"id":"claude-work","label":"Claude Code (work)"}]}"""
+        show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding().copy(actions = FakeAccountActions()))
+        waitFor("Odd")
+        for (key in listOf(ClaudeAccountsTags.login("Bad/Id"), ClaudeAccountsTags.logout("Bad/Id"), ClaudeAccountsTags.remove("Bad/Id"), ClaudeAccountsTags.rename("Bad/Id"))) {
+            tag(key).assertIsNotEnabled()
+        }
+        tag(ClaudeAccountsTags.login("claude-work")).assertIsEnabled()
+    }
+
+    /**
+     * Over the real reader and the real changes on a fake server (tether 90fbb9f shapes): Add, Log out
+     * (confirmed), Remove (confirmed) and Sync now each send exactly their fixed route, by their own
+     * method, with the credential and the web's body, and nothing else leaves.
+     */
+    @Test fun overTheRealClientOnlyTheFixedRoutesAreSent() {
         val server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -165,36 +189,57 @@ class ClaudeAccountsBehaviourTest {
                 return when (request.method to request.path) {
                     "GET" to "/api/claude-accounts" -> json.setBody(AccountsFixtures.LIST_JSON)
                     "GET" to "/api/claude-accounts/sync" -> json.setBody(AccountsFixtures.SYNC_JSON)
-                    "GET" to "/api/claude-accounts/claude-work/status" -> json.setBody("""{"ok":true,"id":"claude-work","loggedIn":true,"authMethod":"claude.ai","email":"work@example.com"}""")
-                    else -> json.setResponseCode(403).setBody("""{"error":"This needs an owner sign-in (password or passkey in a browser)."}""")
+                    "GET" to "/api/claude-accounts/claude-work/status" -> json.setBody("""{"ok":true,"id":"claude-work","loggedIn":false,"authMethod":"none"}""")
+                    "POST" to "/api/claude-accounts" -> json.setResponseCode(201).setBody("""{"profile":{"id":"claude-home","extends":"claude","label":"Claude Code (home)"}}""")
+                    "POST" to "/api/claude-accounts/claude-work/logout" -> json.setBody("""{"ok":true,"id":"claude-work","loggedOut":true}""")
+                    "DELETE" to "/api/claude-accounts/claude-fresh" -> json.setBody("""{"ok":true,"removed":true,"credentialsDeleted":false}""")
+                    "POST" to "/api/claude-accounts/sync/run" -> json.setBody("""{"config":{"mode":"selected","categories":{"plugins":true,"skills":true,"hooks":false,"mcp":true},"primaryAccountId":"claude-default"},"result":{"ranAt":1790000000000,"status":"ok","entries":[]}}""")
+                    else -> json.setResponseCode(404).setBody("""{"error":"unexpected"}""")
                 }
             }
         }
         server.start()
         try {
             val http = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
-            val reader = HttpClaudeAccounts(http, authority = { FilesAuthority.Paired(server.url("/")) { it.header("Authorization", "Bearer tthr_test") } })
+            val authority = { FilesAuthority.Paired(server.url("/")) { it.header("Authorization", "Bearer tthr_test") } }
             val origin = "http://${server.hostName}:${server.port}"
-            show(ClaudeAccountsBinding(reader, origin, AccountsFixtures.TIME))
+            val binding = ClaudeAccountsBinding(HttpClaudeAccounts(http, authority = authority), origin, AccountsFixtures.TIME, actions = HttpClaudeAccountActions(http, authority = authority))
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(LocalConfirmArmMs provides 0L) { SettingsUnderTest(store.prefs, state, claudeAccounts = binding) }
+            }
+            compose.waitUntil(5_000) { state.draft != null }
             waitFor("Claude Code (work)")
             waitFor("Sync across accounts")
-            // Tap every control of the section, enabled or not.
-            val keys = listOf("claude-default", "claude-work", "claude-fresh").flatMap { id ->
-                listOf(ClaudeAccountsTags.rename(id), ClaudeAccountsTags.login(id), ClaudeAccountsTags.logout(id), ClaudeAccountsTags.remove(id))
-            } + listOf(ClaudeAccountsTags.Add, ClaudeAccountsTags.SyncNow)
-            for (key in keys) {
-                val nodes = compose.onAllNodesWithTag(key, useUnmergedTree = true).fetchSemanticsNodes()
-                if (nodes.isNotEmpty()) tag(key).performScrollTo().performClick()
-            }
-            tag(ClaudeAccountsTags.check("claude-work")).performScrollTo().performClick()
-            waitFor("Logged in — work@example.com")
+            tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
+            compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
+            tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            tag(ClaudeAccountsTags.logout("claude-work")).performScrollTo().performClick()
+            tag(ClaudeAccountsTags.ConfirmGo).performClick()
+            compose.waitUntil(5_000) { compose.isDrawnEnabled(ClaudeAccountsTags.remove("claude-fresh")) }
+            tag(ClaudeAccountsTags.remove("claude-fresh")).performScrollTo().performClick()
+            tag(ClaudeAccountsTags.ConfirmGo).performClick()
+            waitFor("Removed Claude Code (fresh).")
+            compose.waitUntil(5_000) { compose.isDrawnEnabled(ClaudeAccountsTags.SyncNow) }
+            tag(ClaudeAccountsTags.SyncNow).performScrollTo().performClick()
+            waitFor("0 updated, 0 already current.")
             compose.waitForIdle()
             val seen = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
-            assertTrue(seen.isNotEmpty())
+            val writes = seen.filter { it.method != "GET" }.map { Triple(it.method, it.path, it.body.readUtf8()) }
+            assertEquals(
+                listOf(
+                    Triple("POST", "/api/claude-accounts", """{"nickname":"home"}"""),
+                    Triple("POST", "/api/claude-accounts/claude-work/logout", "{}"),
+                    Triple("DELETE", "/api/claude-accounts/claude-fresh", """{"deleteCredentials":false}"""),
+                    Triple("POST", "/api/claude-accounts/sync/run", "{}"),
+                ),
+                writes,
+            )
             for (req in seen) {
-                assertEquals(req.path, "GET", req.method)
-                assertTrue(req.path, req.path in setOf("/api/claude-accounts", "/api/claude-accounts/sync", "/api/claude-accounts/claude-work/status"))
-                assertEquals(0L, req.bodySize)
+                assertEquals(req.path, "Bearer tthr_test", req.getHeader("Authorization"))
+                if (req.method == "GET") {
+                    assertTrue(req.path, req.path in setOf("/api/claude-accounts", "/api/claude-accounts/sync", "/api/claude-accounts/claude-work/status"))
+                }
             }
         } finally {
             server.shutdown()

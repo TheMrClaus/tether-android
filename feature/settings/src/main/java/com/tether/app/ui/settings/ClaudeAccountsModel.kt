@@ -1,6 +1,7 @@
 package com.tether.app.ui.settings
 
 import com.tether.app.client.ClaudeAccount
+import com.tether.app.client.ClaudeAccountActions
 import com.tether.app.client.ClaudeAccountPlanSource
 import com.tether.app.client.ClaudeAccountRefusal
 import com.tether.app.client.ClaudeAccountStatus
@@ -12,10 +13,11 @@ import com.tether.app.client.ClaudeSyncResult
 import com.tether.app.client.LabelText
 
 /**
- * What the Engines tab needs to read Claude accounts: the client's read-only source and the
- * canonical origin of the server it is signed in to (null when signed out). Every answer about any
- * other origin is dropped ([ClaudeAccountsModel]). [timeOf] draws a sync time (the web's
- * `toLocaleTimeString`; a seam for the goldens).
+ * What the Engines tab needs for Claude accounts: the client's read-only source, its changes
+ * ([actions], ta-7rh), and the canonical origin of the server it is signed in to (null when signed
+ * out). Every answer about any other origin is dropped ([ClaudeAccountsModel]); every change is sent
+ * for [origin] only. [timeOf] draws a sync time (the web's `toLocaleTimeString`; a seam for the
+ * goldens).
  *
  * [initial] (the goldens' seam, as `initialPreferences` is SettingsFrame's): a state already built
  * for [origin]. The section's first frame is then that state, and it does not read the list or
@@ -26,6 +28,14 @@ data class ClaudeAccountsBinding(
     val origin: String?,
     val timeOf: (Long) -> String = ::localTime,
     val initial: ClaudeAccountsState? = null,
+    /** ta-7rh: the owner-grade changes; [ClaudeAccountActions.Unavailable] sends nothing. */
+    val actions: ClaudeAccountActions = ClaudeAccountActions.Unavailable,
+    /** ta-7rh: where a login link is opened (the phone's browser); [LoginLinkOpener.None] opens nothing. */
+    val opener: LoginLinkOpener = LoginLinkOpener.None,
+    /** ta-7rh, the goldens' seam: the changes' state beside [initial] (taken only with it). */
+    val writeSeed: AccountsWriteSeed? = null,
+    /** ta-7rh: the login poll's pace (a seam for the tests). */
+    val pace: LoginPollPace = LoginPollPace(),
 ) {
     companion object {
         /** No client (previews): nothing is fetched and the section says it is signed out. */
@@ -164,12 +174,6 @@ object ClaudeAccountsPresentation {
     const val PRE_EXISTING_TIP = "This account existed on your machine before Tether — Tether can drive it but does not own its credential directory"
     const val BLOCKED = "Blocked by a sign-in page"
     const val BLOCKED_DETAIL = "A sign-in gateway (SSO or a proxy) answered instead of Tether. Exempt /api/claude-accounts for paired devices."
-
-    /**
-     * The owner-grade explanation (server.mjs `requireOwnerGrade`'s own words): every write here
-     * answers this device 403, so the controls are shown disabled and never sent.
-     */
-    const val OWNER_ONLY = "Adding, renaming, signing in or out of and removing accounts, and changing sync, need an owner sign-in (password or passkey in a browser). Use the web console for those; this device can see each account and check its status."
 
     /** lib/claude-accounts.mjs HOST_DEFAULT_ACCOUNT_ID: no Rename (settings-dialog.tsx:1688). */
     const val HOST_DEFAULT_ID = "claude-default"
@@ -321,8 +325,8 @@ object ClaudeAccountsPresentation {
                 "No primary account is set (its previous primary may have been removed) — synced content is still backed up, but nothing new will sync until you choose one."
             } else null,
             summary = summary(sync.lastResult, timeOf),
-            // `disabled={running || config.mode === "none"}`; and here always: it is owner-grade.
-            canRun = false,
+            // `disabled={running || config.mode === "none"}` (ta-7rh: and a mode this client does not know).
+            canRun = config.mode != ClaudeSyncMode.None && config.mode != ClaudeSyncMode.Unknown,
         )
     }
 

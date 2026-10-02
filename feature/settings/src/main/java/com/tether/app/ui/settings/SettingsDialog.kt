@@ -172,7 +172,15 @@ fun SettingsDialog(
     // ta-9q2: Claude accounts are read for the server signed in to, and only for it.
     val server by client.serverUrl.collectAsStateWithLifecycle()
     val configured by client.configured.collectAsStateWithLifecycle()
-    val claudeAccounts = ClaudeAccountsBinding(client.claudeAccounts, if (configured) serverOrigin(server) else null)
+    // ta-7rh: and changed there (the app has the web's permissions, tether #236); a login link opens in the phone's browser.
+    val linkContext = androidx.compose.ui.platform.LocalContext.current
+    val loginOpener = remember(linkContext) { LoginLinkOpener.browser(linkContext) }
+    val claudeAccounts = ClaudeAccountsBinding(
+        client.claudeAccounts,
+        if (configured) serverOrigin(server) else null,
+        actions = client.claudeAccountActions,
+        opener = loginOpener,
+    )
     // ta-t7l: Advanced and Metadata, read from the client's per-server frames and written back to
     // the server they were drawn from (the client refuses a write once the socket is another's).
     val advanced by client.advancedSettings.collectAsStateWithLifecycle()

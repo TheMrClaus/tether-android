@@ -84,3 +84,58 @@ class FakeAccounts(
 
     fun binding() = ClaudeAccountsBinding(this, origin, AccountsFixtures.TIME)
 }
+
+/**
+ * ta-7rh: a scripted [com.tether.app.client.ClaudeAccountActions]: each call is recorded with its
+ * server and argument and waits for [answer], unless [auto] answers it at once. The pasted code is
+ * kept as the client's own [com.tether.app.client.ClaudeLoginCode] (it prints `***`; compared by
+ * equality only).
+ */
+class FakeAccountActions(
+    private val auto: ((String) -> com.tether.app.client.SecurityResult<*>?)? = null,
+) : com.tether.app.client.ClaudeAccountActions {
+    class Call(val name: String, val origin: String, val arg: String?, val code: com.tether.app.client.ClaudeLoginCode? = null) {
+        val reply = kotlinx.coroutines.CompletableDeferred<com.tether.app.client.SecurityResult<*>>()
+        override fun toString() = "$name($origin, $arg)"
+    }
+
+    val calls = java.util.concurrent.CopyOnWriteArrayList<Call>()
+
+    fun names(): List<String> = calls.map { it.name }
+
+    fun pending(name: String): Boolean = calls.any { it.name == name && !it.reply.isCompleted }
+
+    fun answer(name: String, result: com.tether.app.client.SecurityResult<*>) {
+        val call = calls.firstOrNull { it.name == name && !it.reply.isCompleted } ?: error("no pending $name in ${names()}")
+        call.reply.complete(result)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> record(name: String, origin: String, arg: String? = null, code: com.tether.app.client.ClaudeLoginCode? = null): com.tether.app.client.SecurityResult<T> {
+        val call = Call(name, origin, arg, code)
+        calls += call
+        auto?.invoke(name)?.let { call.reply.complete(it) }
+        return call.reply.await() as com.tether.app.client.SecurityResult<T>
+    }
+
+    override suspend fun add(origin: String, nickname: String) = record<Unit>("add", origin, nickname)
+    override suspend fun rename(origin: String, accountId: String, nickname: String) = record<Unit>("rename", origin, "$accountId=$nickname")
+    override suspend fun remove(origin: String, accountId: String, deleteCredentials: Boolean) =
+        record<com.tether.app.client.ClaudeAccountRemoved>("remove", origin, "$accountId deleteCredentials=$deleteCredentials")
+    override suspend fun logout(origin: String, accountId: String) = record<Unit>("logout", origin, accountId)
+    override suspend fun startLogin(origin: String, accountId: String) = record<com.tether.app.client.ClaudeLoginState>("startLogin", origin, accountId)
+    override suspend fun pollLogin(origin: String, accountId: String) = record<com.tether.app.client.ClaudeLoginState>("pollLogin", origin, accountId)
+    override suspend fun submitCode(origin: String, accountId: String, code: com.tether.app.client.ClaudeLoginCode) = record<Unit>("submitCode", origin, accountId, code)
+    override suspend fun cancelLogin(origin: String, accountId: String) = record<Unit>("cancelLogin", origin, accountId)
+    override suspend fun saveSync(origin: String, config: com.tether.app.client.ClaudeSyncConfig) = record<com.tether.app.client.ClaudeSyncSaved>("saveSync", origin, config.toString())
+    override suspend fun runSync(origin: String) = record<com.tether.app.client.ClaudeSyncSaved>("runSync", origin)
+}
+
+/** A [LoginLinkOpener] that records what it was handed and opens nothing. */
+class RecordingOpener(private val opens: Boolean = true) : LoginLinkOpener {
+    val opened = java.util.concurrent.CopyOnWriteArrayList<com.tether.app.client.ClaudeLoginLink>()
+    override fun open(link: com.tether.app.client.ClaudeLoginLink): Boolean {
+        opened += link
+        return opens
+    }
+}
