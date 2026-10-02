@@ -69,8 +69,8 @@ class NewSessionTransmissionTest {
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.content
 
-    /** ta-8cv: the web's keys for a cold draft (use-draft-composer.ts:313-347); Claude's sandbox explicit. */
-    private val coldKeys = setOf("type", "provider", "cwd", "requestId", "permissionMode", "sandboxPolicy", "useWorktree")
+    /** ta-8cv: the web's keys for a cold draft (use-draft-composer.ts); ta-93qs: no sandbox tier for Claude (6e38663). */
+    private val coldKeys = setOf("type", "provider", "cwd", "requestId", "permissionMode", "useWorktree")
 
     @Test
     fun aProfileRowCreatesOnThatProfile() {
@@ -83,7 +83,7 @@ class NewSessionTransmissionTest {
         assertEquals("/w", sent.str("cwd"))
         assertEquals("req-work", sent.str("requestId"))
         assertEquals("bypassPermissions", sent.str("permissionMode"))
-        assertEquals("workspace-write", sent.str("sandboxPolicy"))
+        assertEquals(null, sent.str("sandboxPolicy"))
     }
 
     @Test
@@ -247,7 +247,7 @@ class NewSessionTransmissionTest {
             val create = creates().single()
             assertEquals(coldKeys + "profileId", create.keys)
             assertEquals("e2e-1", create.str("requestId"))
-            assertEquals("workspace-write", create.str("sandboxPolicy"))
+            assertFalse("sandboxPolicy" in create)
             assertEquals("bypassPermissions", create.str("permissionMode"))
 
             ws.send(createdFrame("resumed", null))

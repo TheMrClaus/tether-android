@@ -165,14 +165,14 @@ class DraftComposerModelTest {
     // --- the cold draft and the frame ---------------------------------------------------------------
 
     @Test
-    fun aColdDraftStartsOnTheWebsDefaultsAndClaudeIsSandboxed() = runTest {
+    fun aColdDraftStartsOnTheWebsDefaultsAndClaudeNamesNoSandboxTier() = runTest {
         val h = harness()
         assertEquals(DraftSubmitResult.Sent, h.model.submitChoice(claude, A))
         val frame = h.client.frames.single()
         assertEquals("claude", frame.provider)
         assertEquals("/w", frame.cwd)
         assertEquals("bypassPermissions", frame.permissionMode)
-        assertEquals("workspace-write", frame.sandboxPolicy)
+        assertNull("ta-93qs: the server decides Claude's tier, as for the web", frame.sandboxPolicy)
         assertEquals("req-1", frame.requestId)
         assertNull("no model is pinned", frame.model)
         assertTrue(h.model.state.value.creating)

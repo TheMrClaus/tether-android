@@ -189,7 +189,7 @@ class DraftOptionsPhoneBehaviourTest : DraftOptionsHarness(412, 915) {
         val create = client.creates.single()
         assertEquals("acceptEdits", create.permissionMode)
         assertEquals("high", create.reasoningEffort)
-        assertEquals("workspace-write", create.sandboxPolicy)
+        assertNull("ta-93qs: Claude names no sandbox tier, as the web", create.sandboxPolicy)
         assertEquals("work", create.profileId)
     }
 
@@ -277,7 +277,7 @@ class DraftOptionsPhoneBehaviourTest : DraftOptionsHarness(412, 915) {
         tap(DraftComposerTags.Send)
         until("a second create") { client.creates.size == 2 }
         assertEquals("bypassPermissions", client.creates.last().permissionMode)
-        assertEquals("workspace-write", client.creates.last().sandboxPolicy)
+        assertNull(client.creates.last().sandboxPolicy)
     }
 
     @Test
@@ -328,7 +328,7 @@ class DraftOptionsTabletBehaviourTest : DraftOptionsHarness(1280, 800) {
         val create = client.creates.single()
         assertEquals("plan", create.permissionMode)
         assertEquals("medium", create.reasoningEffort)
-        assertEquals("workspace-write", create.sandboxPolicy)
+        assertNull("ta-93qs: Claude names no sandbox tier, as the web", create.sandboxPolicy)
     }
 
     @Test

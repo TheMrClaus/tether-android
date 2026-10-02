@@ -50,7 +50,7 @@ class LiveServerTest {
                 }
 
                 // ta-895 / ta-8cv: the one create path (the base provider's default row, no profile),
-                // with the web's frame (Claude Auto, sandbox workspace-write) and a requestId the
+                // with the web's frame (Claude Auto, no sandbox tier: the server decides) and a requestId the
                 // server must echo on the `created` that names the new session.
                 val requestId = "live-${System.nanoTime()}"
                 assertEquals(

@@ -252,7 +252,7 @@ class DraftComposerSheetBehaviourTest {
         assertEquals("claude", create.provider)
         assertEquals("work", create.profileId)
         assertEquals(DraftFixtures.ROOT, create.cwd)
-        assertEquals("workspace-write", create.sandboxPolicy)
+        assertNull("ta-93qs: Claude names no sandbox tier, as the web", create.sandboxPolicy)
         assertTrue(create.requestId!!.isNotEmpty())
         assertTrue("nothing is sent before created", client.firstSends.isEmpty())
         client.answer("new-work")

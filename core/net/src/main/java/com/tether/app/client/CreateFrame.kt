@@ -22,8 +22,9 @@ import com.tether.app.protocol.tree.JsStr
  * - `permissionMode`: Claude and opencode send the form's mode (empty: `bypassPermissions`, the web's
  *   cold-start default); every other engine sends `bypassPermissions` (no engine meaning there; the
  *   web keeps it for wire-shape symmetry).
- * - `sandboxPolicy`: Codex sends its Mode preset's tier ([CodexModePresets]); Claude sends
- *   [CLAUDE_SANDBOX_POLICY]; every other engine sends none.
+ * - `sandboxPolicy`: Codex sends its Mode preset's tier ([CodexModePresets]); every other engine,
+ *   Claude included, sends none (ta-93qs: tether 6e38663's composer names no tier for Claude, so the
+ *   server's one rule decides, as it does for the web).
  * - `approvalPolicy`: Codex sends `"never"` when its preset says so (Full access); opencode sends
  *   `"never"` when its mode is `bypassPermissions` (Build + Auto, issue #44); otherwise absent.
  * - `approvalsReviewer`: `"auto_review"` for Codex's Auto-review preset only.
@@ -35,11 +36,6 @@ import com.tether.app.protocol.tree.JsStr
  * - `model` / `reasoningEffort` only when the operator picked them in THIS draft (userModified) and
  *   they are non-empty: a display pre-selection is never pinned.
  *
- * ONE deliberate divergence (owner decision 2026-10-02, TRACKER Decision log): the web sends
- * `sandboxPolicy: "off"` for Claude; the app sends `"workspace-write"`, so a Claude session's Bash
- * runs sandboxed whatever the server's default (with no server default, an omitted policy ran
- * unsandboxed).
- *
  * ta-xki (slice 4): the frame never carries a value outside the known sets, whatever the form holds
  * (a stale or tampered preference, a form built by hand). A mode the provider does not offer is its
  * default ([DraftModes.normalize]; the web would send it raw), and an effort the selected model does
@@ -49,9 +45,6 @@ import com.tether.app.protocol.tree.JsStr
  * Pure: no I/O, no clock, no randomness (the caller mints [requestId]).
  */
 object CreateFrame {
-
-    /** Owner decision 2026-10-02: Claude creates are sandboxed explicitly (the web sends "off"). */
-    const val CLAUDE_SANDBOX_POLICY = "workspace-write"
 
     /** use-draft-composer.ts: the cold-start / non-mode providers' permissionMode. */
     const val DEFAULT_PERMISSION_MODE = DraftForm.CLAUDE_DEFAULT_PERMISSION_MODE
@@ -82,11 +75,7 @@ object CreateFrame {
             cwd = form.s("cwd"),
             requestId = requestId,
             permissionMode = if (isClaude || isOpencode) mode.ifEmpty { DEFAULT_PERMISSION_MODE } else DEFAULT_PERMISSION_MODE,
-            sandboxPolicy = when {
-                isCodex -> (codexPreset["sandboxPolicy"] as JsStr).value
-                isClaude -> CLAUDE_SANDBOX_POLICY
-                else -> null
-            },
+            sandboxPolicy = if (isCodex) (codexPreset["sandboxPolicy"] as JsStr).value else null,
             approvalPolicy = approvalPolicy?.let { OrNull(it) },
             approvalsReviewer = approvalsReviewer?.let { OrNull(it) },
             useWorktree = form["useWorktree"] == JsBool.TRUE,

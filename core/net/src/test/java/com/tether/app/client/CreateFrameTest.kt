@@ -17,16 +17,18 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * ta-8cv: the `create` frame, key for key, against the web's submit (hooks/use-draft-composer.ts
  * 887c222 ~313-347), over provider × mode × profile × worktree × model/effort. Each expected frame
- * is the web's object literal evaluated by hand for that row; the ONE place the app differs on
- * purpose is Claude's `sandboxPolicy` ("workspace-write" where the web sends "off", owner decision
- * 2026-10-02), asserted on its own below.
+ * is the web's object literal evaluated by hand for that row. ta-93qs: Claude's create carries no
+ * `sandboxPolicy` at all, exactly as tether 6e38663's composer (it names no tier for Claude and the
+ * server's one rule decides), asserted on its own below.
  */
 class CreateFrameTest {
 
@@ -64,43 +66,43 @@ class CreateFrameTest {
 
     private val rows = listOf(
         // --- Claude: permissionMode = form.mode || bypassPermissions; sandbox explicit ------------------
-        Row("claude cold (Auto)", entry("claude"), form(), expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write",""")),
-        Row("claude default", entry("claude"), form("mode" to "default"), expected = frame("claude", """"permissionMode":"default","sandboxPolicy":"workspace-write",""")),
-        Row("claude acceptEdits", entry("claude"), form("mode" to "acceptEdits"), expected = frame("claude", """"permissionMode":"acceptEdits","sandboxPolicy":"workspace-write",""")),
-        Row("claude plan", entry("claude"), form("mode" to "plan"), expected = frame("claude", """"permissionMode":"plan","sandboxPolicy":"workspace-write",""")),
-        Row("claude bypass explicit", entry("claude"), form("mode" to "bypassPermissions"), expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write",""")),
+        Row("claude cold (Auto)", entry("claude"), form(), expected = frame("claude", """"permissionMode":"bypassPermissions",""")),
+        Row("claude default", entry("claude"), form("mode" to "default"), expected = frame("claude", """"permissionMode":"default",""")),
+        Row("claude acceptEdits", entry("claude"), form("mode" to "acceptEdits"), expected = frame("claude", """"permissionMode":"acceptEdits",""")),
+        Row("claude plan", entry("claude"), form("mode" to "plan"), expected = frame("claude", """"permissionMode":"plan",""")),
+        Row("claude bypass explicit", entry("claude"), form("mode" to "bypassPermissions"), expected = frame("claude", """"permissionMode":"bypassPermissions",""")),
         Row(
             "claude on a profile",
             entry("claude", profileId = "work"),
             form("mode" to "default"),
-            expected = frame("claude", """"permissionMode":"default","sandboxPolicy":"workspace-write","profileId":"work","""),
+            expected = frame("claude", """"permissionMode":"default","profileId":"work","""),
         ),
         Row(
             "claude model + effort picked in this draft",
             entry("claude"),
             form("model" to "opus", "reasoningEffort" to "high"),
             picked("model", "reasoningEffort"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"opus","reasoningEffort":"high","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","model":"opus","reasoningEffort":"high","""),
         ),
         Row(
             "claude model shown but not picked (display only)",
             entry("claude"),
             form("model" to "opus", "reasoningEffort" to "high"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
         Row(
             "claude picked but empty (engine default)",
             entry("claude"),
             form(),
             picked("model", "reasoningEffort"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
         Row(
             "claude effort picked, model not",
             entry("claude"),
             form("model" to "opus", "reasoningEffort" to "low"),
             picked("reasoningEffort"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","reasoningEffort":"low","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","reasoningEffort":"low","""),
         ),
         // --- Codex: the Mode preset gives sandbox / approvalPolicy / approvalsReviewer --------------------
         Row("codex default", entry("codex"), form("mode" to "default"), expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write",""")),
@@ -146,7 +148,7 @@ class CreateFrameTest {
             form("useWorktree" to true, "worktreeBaseRef" to " origin/main ", "worktreeBranch" to "feat/x", "worktreeSlug" to "x"),
             expected = frame(
                 "claude",
-                """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","worktree":{"mode":"branch-off","slug":"x","branch":"feat/x","baseRef":"origin/main"},""",
+                """"permissionMode":"bypassPermissions","worktree":{"mode":"branch-off","slug":"x","branch":"feat/x","baseRef":"origin/main"},""",
                 useWorktree = true,
             ),
         ),
@@ -154,7 +156,7 @@ class CreateFrameTest {
             "worktree branch-off, nothing filled (server decides)",
             entry("claude"),
             form("useWorktree" to true),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","worktree":{"mode":"branch-off"},""", useWorktree = true),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","worktree":{"mode":"branch-off"},""", useWorktree = true),
         ),
         Row(
             "worktree checkout-pr",
@@ -170,25 +172,25 @@ class CreateFrameTest {
             "worktree checkout-pr unparseable: no block",
             entry("claude"),
             form("useWorktree" to true, "worktreeMode" to "checkout-pr", "worktreePr" to "abc"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write",""", useWorktree = true),
+            expected = frame("claude", """"permissionMode":"bypassPermissions",""", useWorktree = true),
         ),
         Row(
             "worktree checkout-branch",
             entry("claude"),
             form("useWorktree" to true, "worktreeMode" to "checkout-branch", "worktreeBranch" to "main"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","worktree":{"mode":"checkout-branch","branch":"main"},""", useWorktree = true),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","worktree":{"mode":"checkout-branch","branch":"main"},""", useWorktree = true),
         ),
         Row(
             "worktree checkout-branch without a branch: no block",
             entry("claude"),
             form("useWorktree" to true, "worktreeMode" to "checkout-branch"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write",""", useWorktree = true),
+            expected = frame("claude", """"permissionMode":"bypassPermissions",""", useWorktree = true),
         ),
         Row(
             "worktree fields filled but isolation off",
             entry("claude"),
             form("worktreeBranch" to "feat/x", "worktreeSlug" to "x"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
         // --- ta-xki: Mode x Effort x profile, as the composer picks them ----------------------------------
         Row(
@@ -196,21 +198,21 @@ class CreateFrameTest {
             entry("claude", profileId = "work"),
             form("mode" to "acceptEdits", "model" to "opus", "reasoningEffort" to "high"),
             picked("mode", "reasoningEffort"),
-            expected = frame("claude", """"permissionMode":"acceptEdits","sandboxPolicy":"workspace-write","profileId":"work","reasoningEffort":"high","""),
+            expected = frame("claude", """"permissionMode":"acceptEdits","profileId":"work","reasoningEffort":"high","""),
         ),
         Row(
             "claude Plan + model and effort low",
             entry("claude"),
             form("mode" to "plan", "model" to "opus", "reasoningEffort" to "low"),
             picked("mode", "model", "reasoningEffort"),
-            expected = frame("claude", """"permissionMode":"plan","sandboxPolicy":"workspace-write","model":"opus","reasoningEffort":"low","""),
+            expected = frame("claude", """"permissionMode":"plan","model":"opus","reasoningEffort":"low","""),
         ),
         Row(
             "claude Auto with an untouched effort (the engine's default)",
             entry("claude"),
             form("mode" to "bypassPermissions", "model" to "opus"),
             picked("mode", "model"),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"opus","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","model":"opus","""),
         ),
         Row(
             "codex auto-review + effort high",
@@ -261,20 +263,20 @@ class CreateFrameTest {
             // r2 (verifier F2, owner-delegated): a retired mode more restrictive than the default is Manual.
             "claude retired dontAsk (Locked): Manual, never Auto",
             entry("claude"), form("mode" to "dontAsk"), DraftForm.INITIAL_USER_MODIFIED,
-            web = frame("claude", """"permissionMode":"dontAsk","sandboxPolicy":"off","""),
-            expected = frame("claude", """"permissionMode":"default","sandboxPolicy":"workspace-write","""),
+            web = frame("claude", """"permissionMode":"dontAsk","""),
+            expected = frame("claude", """"permissionMode":"default","""),
         ),
         Clamp(
             "claude garbage mode",
             entry("claude", profileId = "work"), form("mode" to "rm -rf /"), DraftForm.INITIAL_USER_MODIFIED,
-            web = frame("claude", """"permissionMode":"rm -rf /","sandboxPolicy":"off","profileId":"work","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","profileId":"work","""),
+            web = frame("claude", """"permissionMode":"rm -rf /","profileId":"work","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","profileId":"work","""),
         ),
         Clamp(
             "claude codex preset name",
             entry("claude"), form("mode" to "full-access"), DraftForm.INITIAL_USER_MODIFIED,
-            web = frame("claude", """"permissionMode":"full-access","sandboxPolicy":"off","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            web = frame("claude", """"permissionMode":"full-access","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
         Clamp(
             "opencode acceptEdits (not an opencode row): Build, no approval policy",
@@ -291,8 +293,8 @@ class CreateFrameTest {
         Clamp(
             "an effort the model does not offer is dropped",
             entry("claude"), form("mode" to "plan", "model" to "gpt-5", "reasoningEffort" to "low"), picked("model", "reasoningEffort"),
-            web = frame("claude", """"permissionMode":"plan","sandboxPolicy":"off","model":"gpt-5","reasoningEffort":"low","""),
-            expected = frame("claude", """"permissionMode":"plan","sandboxPolicy":"workspace-write","model":"gpt-5","""),
+            web = frame("claude", """"permissionMode":"plan","model":"gpt-5","reasoningEffort":"low","""),
+            expected = frame("claude", """"permissionMode":"plan","model":"gpt-5","""),
         ),
         Clamp(
             "an effort for a hand-added model id (no variants) is dropped",
@@ -304,14 +306,14 @@ class CreateFrameTest {
             "r2 (security F2): an effort past the server's 200-byte bound is never sent",
             ProviderCatalogEntry("claude", "claude", "ready", listOf(SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("x".repeat(201), "Huge"), ModelVariantOption("high", "High"))))),
             form("model" to "opus", "reasoningEffort" to "x".repeat(201)), picked("reasoningEffort"),
-            web = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"off","reasoningEffort":"${"x".repeat(201)}","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            web = frame("claude", """"permissionMode":"bypassPermissions","reasoningEffort":"${"x".repeat(201)}","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
         Clamp(
             "an effort on a row with no models is dropped",
             ProviderCatalogEntry("claude", "claude", "ready", emptyList()), form("reasoningEffort" to "high"), picked("reasoningEffort"),
-            web = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"off","reasoningEffort":"high","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            web = frame("claude", """"permissionMode":"bypassPermissions","reasoningEffort":"high","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
     )
 
@@ -326,16 +328,17 @@ class CreateFrameTest {
     }
 
     /**
-     * The one divergence, on its own (negative control): the web's Claude frame says "off"; the app's
-     * never does, for any mode, profile or worktree.
+     * ta-93qs (negative control for the retired divergence): the app sends what the web sends, so a
+     * Claude create names no sandbox tier at all, for any mode, profile or worktree; the server decides.
      */
     @Test
-    fun claudeIsAlwaysSandboxedExplicitlyNeverOff() {
-        assertEquals("workspace-write", CreateFrame.CLAUDE_SANDBOX_POLICY)
-        for (row in rows.filter { it.entry.provider == "claude" }) {
+    fun claudeCreateCarriesNoSandboxPolicyKey() {
+        val claudeRows = rows.filter { it.entry.provider == "claude" }
+        assertTrue(claudeRows.isNotEmpty())
+        for (row in claudeRows) {
             val built = CreateFrame.build(row.form, row.entry, row.modified, "r")
-            assertEquals(row.name, "workspace-write", built.sandboxPolicy)
-            assertNotEquals(row.name, "off", built.sandboxPolicy)
+            assertNull(row.name, built.sandboxPolicy)
+            assertFalse(row.name, "sandboxPolicy" in built.toJsonObject())
         }
     }
 
@@ -401,10 +404,8 @@ class CreateFrameTest {
             put("cwd", f("cwd"))
             put("requestId", "r")
             put("permissionMode", if (isClaude || isOpencode) f("mode").ifEmpty { "bypassPermissions" } else "bypassPermissions")
-            when {
-                isCodex -> put("sandboxPolicy", (preset["sandboxPolicy"] as JsStr).value)
-                isClaude -> put("sandboxPolicy", "off")
-            }
+            // tether 6e38663 (ta-zzl): only Codex names a tier; Claude's is the server's one rule.
+            if (isCodex) put("sandboxPolicy", (preset["sandboxPolicy"] as JsStr).value)
             if (isCodex) {
                 (preset["approvalPolicy"] as? JsStr)?.let { put("approvalPolicy", it.value) }
             } else if (autoMode && isOpencode) {
@@ -428,7 +429,6 @@ class CreateFrameTest {
             else -> assertEquals(name, "bypassPermissions", permission)
         }
         when (provider) {
-            "claude" -> assertEquals(name, "workspace-write", v("sandboxPolicy"))
             "codex" -> assertTrue(name, v("sandboxPolicy") in setOf("workspace-write", "off"))
             else -> assertEquals(name, null, v("sandboxPolicy"))
         }
@@ -453,8 +453,8 @@ class CreateFrameTest {
             val known = DraftModes.known(provider)
             val modeOffered = known == null || mode in known
             val effortOffered = effort.isEmpty() || !mod.flag("reasoningEffort") || DraftSessionOptionsModel.offeredEfforts(e, model).any { it.value == effort }
-            // The web's frame for the same row, with the app's one owner-decided change applied.
-            val web = webFrame(e, f, mod).let { w -> if (provider == "claude") JsonObject(w + ("sandboxPolicy" to JsonPrimitive("workspace-write"))) else w }
+            // The web's frame for the same row (no app-only change: ta-93qs retired the last one).
+            val web = webFrame(e, f, mod)
             if (modeOffered && effortOffered) {
                 assertEquals("$name: keys", web.keys, built.keys)
                 assertEquals(name, web, built)
@@ -463,7 +463,7 @@ class CreateFrameTest {
                 // Off the known sets the app's frame is the web's frame for the fallback values.
                 val fallback = f.put("mode", JsStr(DraftModes.normalize(provider, mode)))
                     .put("reasoningEffort", JsStr(effort.takeIf { effortOffered }.orEmpty()))
-                val expected = webFrame(e, fallback, mod).let { w -> if (provider == "claude") JsonObject(w + ("sandboxPolicy" to JsonPrimitive("workspace-write"))) else w }
+                val expected = webFrame(e, fallback, mod)
                 assertEquals("$name (fallback)", expected, built)
                 clamped++
             }

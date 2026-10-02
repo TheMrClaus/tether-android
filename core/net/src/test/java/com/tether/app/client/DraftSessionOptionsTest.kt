@@ -253,7 +253,7 @@ class DraftSessionOptionsTest {
         assertEquals("acceptEdits", frame.permissionMode)
         assertEquals("high", frame.reasoningEffort)
         assertEquals("work", frame.profileId)
-        assertEquals("workspace-write", frame.sandboxPolicy)
+        assertNull(frame.sandboxPolicy)
         runCurrent()
         val stored = h.store.prefsOf(A, "work") as JsObj
         assertEquals(JsStr("acceptEdits"), stored["mode"])
@@ -383,7 +383,7 @@ class DraftSessionOptionsTest {
             assertTrue("$prefs -> $mode", mode in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
             val frame = h.send()
             assertTrue("$prefs -> ${frame.permissionMode}", frame.permissionMode in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
-            assertEquals("workspace-write", frame.sandboxPolicy)
+            assertNull(frame.sandboxPolicy)
             assertTrue("$prefs -> ${frame.reasoningEffort}", frame.reasoningEffort == null || frame.reasoningEffort in setOf("low", "medium", "high"))
             assertNull(frame.approvalPolicy)
             // A pick on top of the garbage is remembered without a crash, and is valid.

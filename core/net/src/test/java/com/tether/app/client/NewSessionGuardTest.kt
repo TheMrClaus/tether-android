@@ -67,7 +67,7 @@ class NewSessionGuardTest {
         requestId = "req-1",
         permissionMode = "bypassPermissions",
         sandboxPolicy = when (provider) {
-            "claude", "codex" -> "workspace-write"
+            "codex" -> "workspace-write"
             else -> null
         },
         useWorktree = false,
@@ -185,7 +185,7 @@ class NewSessionGuardTest {
     @Test
     fun theCreateFrameIsTheWebsShapeWithTheProfileOnlyWhenThereIsOne() {
         // ta-8cv: every key the web sends for a cold Claude draft (use-draft-composer.ts:313-347).
-        val base = setOf("type", "provider", "cwd", "requestId", "permissionMode", "sandboxPolicy", "useWorktree")
+        val base = setOf("type", "provider", "cwd", "requestId", "permissionMode", "useWorktree")
         val withProfile = resolve(choice(catalog[0]), catalog, providers, "/w")!!.toJsonObject()
         assertEquals(base + "profileId", withProfile.keys)
         val without = resolve(choice(catalog[3]), catalog, providers, "/w")!!.toJsonObject()
@@ -205,7 +205,7 @@ class NewSessionGuardTest {
         val frame = NewSessionGuard.resolve(request, catalog, providers)!!
         assertEquals("claude", frame.provider)
         assertEquals("work", frame.profileId)
-        assertEquals("workspace-write", frame.sandboxPolicy)
+        assertNull(frame.sandboxPolicy)
         assertNull(frame.approvalPolicy)
     }
 
