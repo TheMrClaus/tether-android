@@ -10,9 +10,6 @@ import android.os.SystemClock
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.window.Dialog
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.PairingCode
@@ -167,13 +164,17 @@ class PairingClipboardTest {
     /** r2 (verifier P4-1): the listener comes off the dialog's window as it goes, not later off a floating observer. */
     @Test fun theDialogsFocusListenerLeavesWithItsWindow() {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-        var open by mutableStateOf(true)
-        activity.setContent { if (open) Dialog(onDismissRequest = {}) { RetryClipboardClearOnFocus(clip) } }
+        activity.setContent { Dialog(onDismissRequest = {}) { RetryClipboardClearOnFocus(clip) } }
         idle(1_000)
-        val observer = ShadowDialog.getLatestDialog()!!.window!!.decorView.viewTreeObserver
+        val dialog = ShadowDialog.getLatestDialog()!!
+        val observer = dialog.window!!.decorView.viewTreeObserver
         assertTrue("control: watched while open", holdsOurs(observer))
-        open = false
+        // Settings closes: the Dialog leaves the composition (Compose dismisses its window, then disposes its
+        // content). Disposed directly, synchronously: a recomposition here would wait on frames, which this
+        // plain Robolectric class cannot count on in a full module run.
+        (activity.findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as androidx.compose.ui.platform.ComposeView).disposeComposition()
         idle(1_000)
+        assertFalse("precondition: the dialog closed", dialog.isShowing)
         assertFalse("the closed dialog's window keeps no listener of ours", holdsOurs(observer))
     }
 
