@@ -196,21 +196,21 @@ class NoticeTransmissionTest {
     fun autoContinueSendsOnlyTheFlipOfTheStoredValue() {
         val (client, ws) = connected()
         val origin = client.consentOrigin.value
-        // Stored off: "off" is not a change, "on" is; "on" is a grant and needs the confirmation.
+        // Stored off: "off" is not a change, "on" is, and goes out on the first call (ta-coik.7: the web's
+        // toggle, chat-view.tsx:2546-2548 -> use-tether.ts:1726-1728, asks nothing).
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(false), origin))
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
-        assertTrue("an unconfirmed grant sends nothing", frames("set-auto-continue-on-limit").isEmpty())
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
         val sent = frames("set-auto-continue-on-limit")
         assertEquals(1, sent.size)
         assertEquals(setOf("type", "sessionId", "enabled"), sent[0].keys)
+        assertEquals("s1", sent[0].str("sessionId"))
         assertEquals("true", sent[0].str("enabled"))
-        // Another device turned it on: a toggle still drawn "off" (offering "on") sends nothing, even confirmed.
+        // Another device turned it on: a toggle still drawn "off" (offering "on") sends nothing.
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":2,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","autoContinueOnLimit":true}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.autoContinueOnLimit } }
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
         assertTrue("nothing further went out", frames("set-auto-continue-on-limit").isEmpty())
-        // Turning it off withdraws the grant: no confirmation.
+        // Turning it off: the same frame with false.
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(false), origin))
         assertEquals(listOf("false"), frames("set-auto-continue-on-limit").map { it.str("enabled") })
     }
@@ -224,7 +224,7 @@ class NoticeTransmissionTest {
     private fun lockedSessionSendsNoGrant(extra: String) {
         val (client, _) = connected(readyWithSessions("s1", extra = extra))
         val origin = client.consentOrigin.value
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
         assertTrue(frames("set-auto-continue-on-limit").isEmpty() && frames("rate-limit-resume").isEmpty())
@@ -260,7 +260,7 @@ class NoticeTransmissionTest {
         h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("scheduled") }
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), origin))
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
         assertEquals(listOf("dismiss"), frames("rate-limit-resume").map { it.str("action") })
         assertTrue(frames("set-auto-continue-on-limit").isEmpty())
@@ -272,7 +272,7 @@ class NoticeTransmissionTest {
     @Test
     fun autoContinueIsClaudeAndCodexOnly() {
         val (client, _) = connected(readyWithSessions("s1").replace("\"provider\":\"claude\"", "\"provider\":\"pi\""))
-        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true, confirmed = true), client.consentOrigin.value))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), client.consentOrigin.value))
         assertTrue(frames("set-auto-continue-on-limit").isEmpty())
     }
 

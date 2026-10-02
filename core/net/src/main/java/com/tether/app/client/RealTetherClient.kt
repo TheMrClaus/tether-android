@@ -4018,8 +4018,8 @@ class RealTetherClient(
      * read-only nor handed off (fail closed) — the one exception (T6.6 r2): a handed-off source may
      * still decline its limit prompt / cancel its scheduled resume
      * ([SessionControlsGuard.allowedWhileHandedOff]), since that resume would otherwise start a turn
-     * there after the handoff; the value one the session's current state offers, and
-     * a most-permissive posture confirmed ([SessionControlsGuard.check]); then enqueued on that
+     * there after the handoff; the value one the session's current state offers
+     * ([SessionControlsGuard.check]); then enqueued on that
      * socket. Nothing is retried, held or persisted.
      */
     override fun sessionControl(sessionId: String, control: SessionControl, expectedOrigin: String?): ControlResult {

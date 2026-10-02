@@ -86,10 +86,13 @@ class SessionControlsTransmissionTest {
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.Model("claude-evil"), origin))
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.Effort("max"), origin))
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.CodexCompaction("catalog-3"), origin))
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.Mode("bypassPermissions"), origin))
         assertTrue(controlFrames().isEmpty())
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("bypassPermissions", confirmed = true), origin))
-        assertEquals("bypassPermissions", controlFrames().single().str("permissionMode"))
+        // ta-coik.7: Auto is offered and goes out on the first call, the web's set-mode (use-tether.ts:1693-1695).
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("bypassPermissions"), origin))
+        val auto = controlFrames().single()
+        assertEquals(setOf("type", "sessionId", "permissionMode"), auto.keys)
+        assertEquals("set-mode", auto.str("type"))
+        assertEquals("bypassPermissions", auto.str("permissionMode"))
     }
 
     @Test
@@ -217,15 +220,20 @@ class SessionControlsTransmissionTest {
     }
 
     @Test
-    fun codexAutoApproveNeedsTheConfirmationFlag() {
+    fun codexAutoApproveIsSentOnTheFirstCall() {
         val (client, ws) = connected(ready("codex", CODEX_V2), controls = null)
         ws.send("""{"type":"codex-controls","sessionId":"s1","snapshot":${codexRaw()}}""")
         h.await(client.codexControls) { it["s1"]?.snapshot != null }
         val origin = client.consentOrigin.value
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, "catalog-3"), origin))
-        assertTrue(controlFrames().isEmpty())
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true), origin))
-        assertEquals("never", controlFrames().single()["action"]!!.jsonObject.str("approvalPolicy"))
+        // ta-coik.7: chat-view.tsx:2488-2497 + 2552-2555, no confirmation.
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.CodexAutoApprove(true, "catalog-3"), origin))
+        val frame = controlFrames().single()
+        assertEquals("codex-control-action", frame.str("type"))
+        val action = frame["action"]!!.jsonObject
+        assertEquals(setOf("type", "approvalPolicy", "revision", "operatorAction", "operatorActionId"), action.keys)
+        assertEquals("set-approval-policy", action.str("type"))
+        assertEquals("never", action.str("approvalPolicy"))
+        assertEquals("catalog-3", action.str("revision"))
     }
 
     @Test
@@ -235,7 +243,12 @@ class SessionControlsTransmissionTest {
         h.await(client.opencodeControls) { it["s1"]?.snapshot != null }
         val origin = client.consentOrigin.value
         assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "max", "oc-1"), origin))
-        assertEquals(ControlResult.NeedsConfirmation, client.sessionControl("s1", SessionControl.OpencodeMode("yolo", "oc-1"), origin))
+        // ta-coik.7: a danger agent applies on the first call (opencode-serve-controls.tsx:132-139).
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.OpencodeMode("yolo", "oc-1"), origin))
+        val mode = controlFrames().single()["action"]!!.jsonObject
+        assertEquals(setOf("type", "mode", "revision", "operatorAction", "operatorActionId"), mode.keys)
+        assertEquals("set-mode", mode.str("type"))
+        assertEquals("yolo", mode.str("mode"))
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.OpencodeModelSelection("openai/gpt-5", "high", "oc-1"), origin))
         val action = controlFrames().single()["action"]!!.jsonObject
         assertEquals("oc-1", action.str("revision"))

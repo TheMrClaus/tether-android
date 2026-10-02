@@ -30,15 +30,15 @@ enum class ControlResult {
 
     /** The value is not one the server (or, for the static vocabularies, the web) offers this session now. */
     NotOffered,
-
-    /** A change to the most permissive posture that did not come through the confirmation. */
-    NeedsConfirmation,
 }
 
 /** One operator choice on the composer row, the session sheet or a provider-controls panel. */
 sealed interface SessionControl {
-    /** `set-mode`: a permission / agent mode from the provider's vocabulary. */
-    data class Mode(val value: String, val confirmed: Boolean = false) : SessionControl
+    /**
+     * `set-mode`: a permission / agent mode from the provider's vocabulary. Auto and a danger agent
+     * are sent on the pick, as the web's chooseMode (chat-view.tsx:2500-2510) sends them.
+     */
+    data class Mode(val value: String) : SessionControl
 
     /** `set-model`: a listed row, or ([typed]) a `/model <id>` argument that passes [looksLikeModelId]. */
     data class Model(val value: String, val typed: Boolean = false) : SessionControl
@@ -52,10 +52,9 @@ sealed interface SessionControl {
     /**
      * T6.6 `set-auto-continue-on-limit` (v101, Claude / Codex): [enabled] is the flip of the value the
      * toggle was drawn with, and is refused once the session already holds it (another device moved it).
-     * Turning it ON is a grant (the session will start a turn by itself after the reset): it needs
-     * [confirmed] (Android addition; the web toggles it without asking).
+     * Either way it is sent on the tap, as the web's toggle (chat-view.tsx:2546-2548).
      */
-    data class AutoContinueOnLimit(val enabled: Boolean, val confirmed: Boolean = false) : SessionControl
+    data class AutoContinueOnLimit(val enabled: Boolean) : SessionControl
 
     /**
      * T6.6 `rate-limit-resume` (v88): one of the limit card's three choices, bound to the [resetsAt] of
@@ -79,8 +78,8 @@ sealed interface SessionControl {
     /** Codex `set-collaboration-mode`: a catalog item id. */
     data class CodexCollaboration(val collaborationId: String, override val revision: String) : ProviderAction
 
-    /** Codex `set-approval-policy`: Auto approve on ("never") or off (null). On needs [confirmed]. */
-    data class CodexAutoApprove(val enabled: Boolean, override val revision: String, val confirmed: Boolean = false) : ProviderAction
+    /** Codex `set-approval-policy`: Auto approve on ("never") or off (null), as chat-view.tsx:2488-2497. */
+    data class CodexAutoApprove(val enabled: Boolean, override val revision: String) : ProviderAction
 
     /** Codex `set-skill-enabled`: a catalog skill. */
     data class CodexSkill(val skillId: String, val enabled: Boolean, override val revision: String) : ProviderAction
@@ -94,17 +93,8 @@ sealed interface SessionControl {
     /** opencode-serve `set-model-selection`: a catalog model and null or one of ITS variants. */
     data class OpencodeModelSelection(val modelId: String, val variantId: String?, override val revision: String) : ProviderAction
 
-    /** opencode-serve `set-mode`: a catalog agent. A possibly-permissive agent needs [confirmed]. */
-    data class OpencodeMode(val mode: String, override val revision: String, val confirmed: Boolean = false) : ProviderAction
-}
-
-/** [this] re-issued as confirmed by the operator (the confirmation dialog), or null when it has no such flag. */
-fun SessionControl.confirmedCopy(): SessionControl? = when (this) {
-    is SessionControl.Mode -> copy(confirmed = true)
-    is SessionControl.CodexAutoApprove -> copy(confirmed = true)
-    is SessionControl.OpencodeMode -> copy(confirmed = true)
-    is SessionControl.AutoContinueOnLimit -> if (enabled) copy(confirmed = true) else null
-    else -> null
+    /** opencode-serve `set-mode`: a catalog agent (a danger one too, as on the web). */
+    data class OpencodeMode(val mode: String, override val revision: String) : ProviderAction
 }
 
 /** codex-control-action `start-review` targets (validateCodexReviewTarget). */
@@ -121,8 +111,9 @@ sealed interface ReviewTarget {
  * the last `session-controls` reply, and the provider-control snapshot received on this socket. A
  * value is sent only when it is exactly one the state offers (the web's static vocabularies for
  * Claude / reasonix / pi modes), a typed `/model` id only when it passes [looksLikeModelId], a review
- * target only in the shape the server validates, and a change to the most permissive posture only
- * with the confirmation flag the confirmation dialog sets.
+ * target only in the shape the server validates. A change to the most permissive posture (Auto,
+ * Codex Auto approve, a danger agent, auto-continue on) is sent like any other offered value, with no
+ * confirmation: the web switches on the pick.
  */
 object SessionControlsGuard {
 
@@ -152,15 +143,7 @@ object SessionControlsGuard {
                 val options = ComposerControlsModel.modeOptions(session, controls, opencode)
                 val option = options.firstOrNull { it.value == control.value }
                 val auto = control.value == ModeVocabulary.AUTO && offered.auto != null
-                if (option == null && !auto) return ControlResult.NotOffered
-                // Round 2 (M2): an opencode agent is confirmed unless it is a built-in or BOTH
-                // sources that list it leave it undangerous; the static vocabularies by their flag.
-                val escalates = if (provider == "opencode") {
-                    ComposerControlsModel.opencodeAgentNeedsConfirmation(control.value, controls, opencode)
-                } else {
-                    option?.danger == true || control.value == ModeVocabulary.AUTO
-                }
-                if (escalates && !control.confirmed) ControlResult.NeedsConfirmation else null
+                if (option == null && !auto) ControlResult.NotOffered else null
             }
             is SessionControl.Model -> {
                 if (provider !in MODEL_PROVIDERS) return ControlResult.NotOffered
@@ -184,7 +167,6 @@ object SessionControlsGuard {
             is SessionControl.AutoContinueOnLimit ->
                 when {
                     offered.autoContinue == null || control.enabled == session.autoContinueOnLimit -> ControlResult.NotOffered
-                    control.enabled && !control.confirmed -> ControlResult.NeedsConfirmation
                     else -> null
                 }
             is SessionControl.RateLimitResume -> rateLimitResumeOffered(tree, control)
@@ -200,10 +182,7 @@ object SessionControlsGuard {
                 if (!snap.collaborationModes.ready) return ControlResult.NotOffered
                 if (snap.collaborationModes.items.any { it.id == control.collaborationId } && bounded(control.collaborationId, 200)) null else ControlResult.NotOffered
             }
-            is SessionControl.CodexAutoApprove -> {
-                codexV2(session, codex) ?: return ControlResult.NotOffered
-                if (control.enabled && !control.confirmed) ControlResult.NeedsConfirmation else null
-            }
+            is SessionControl.CodexAutoApprove -> if (codexV2(session, codex) == null) ControlResult.NotOffered else null
             is SessionControl.CodexSkill -> {
                 val snap = codexV2(session, codex) ?: return ControlResult.NotOffered
                 if (!snap.skills.ready) return ControlResult.NotOffered
@@ -231,9 +210,7 @@ object SessionControlsGuard {
                 val snap = opencodeV2(session, opencode) ?: return ControlResult.NotOffered
                 if (!snap.modes.ready) return ControlResult.NotOffered
                 snap.modes.items.firstOrNull { it.value == control.mode } ?: return ControlResult.NotOffered
-                if (!bounded(control.mode, 200)) return ControlResult.NotOffered
-                val escalates = ComposerControlsModel.opencodeAgentNeedsConfirmation(control.mode, controls, snap)
-                if (escalates && !control.confirmed) ControlResult.NeedsConfirmation else null
+                if (!bounded(control.mode, 200)) ControlResult.NotOffered else null
             }
         }
     }

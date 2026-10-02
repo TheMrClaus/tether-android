@@ -516,7 +516,7 @@ interface TetherClient {
      * socket of the server that drew the control ([expectedOrigin], the [consentOrigin] the row was
      * composed with), for a session confirmed live on it that is neither read-only nor handed off,
      * and only with a value the session's CURRENT state offers ([SessionControlsGuard]); the most
-     * permissive postures also need their confirmation. Otherwise nothing is sent or held: no retry,
+     * permissive postures go out on the tap, as on the web. Otherwise nothing is sent or held: no retry,
      * no queue, nothing persisted.
      */
     fun sessionControl(sessionId: String, control: SessionControl, expectedOrigin: String?): ControlResult = ControlResult.NotConnected

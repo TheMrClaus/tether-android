@@ -36,23 +36,23 @@ class SessionControlsGuardTest {
         SessionControlsGuard.check(s, c, codex, opencode, control)
 
     @Test
-    fun claudeModesAreTheWebsFourAndAutoNeedsTheConfirmation() {
+    fun claudeModesAreTheWebsFourAndAutoIsSentLikeTheWeb() {
         for (mode in listOf("default", "acceptEdits", "plan")) assertNull(mode, check(claude, claudeControls, SessionControl.Mode(mode)))
         // v100: Locked (dontAsk) is no longer offered; anything else is refused.
         assertEquals(ControlResult.NotOffered, check(claude, claudeControls, SessionControl.Mode("dontAsk")))
         assertEquals(ControlResult.NotOffered, check(claude, claudeControls, SessionControl.Mode("BYPASSPERMISSIONS")))
         assertEquals(ControlResult.NotOffered, check(claude, claudeControls, SessionControl.Mode("")))
-        assertEquals(ControlResult.NeedsConfirmation, check(claude, claudeControls, SessionControl.Mode("bypassPermissions")))
-        assertNull(check(claude, claudeControls, SessionControl.Mode("bypassPermissions", confirmed = true)))
+        // ta-coik.7: Auto passes on the first tap, as the web's chooseMode (chat-view.tsx:2500-2510).
+        assertNull(check(claude, claudeControls, SessionControl.Mode("bypassPermissions")))
         // The mode list does not depend on the controls reply for Claude.
         assertNull(check(claude, null, SessionControl.Mode("plan")))
     }
 
     @Test
-    fun reasonixYoloAndPiAutoNeedTheConfirmationToo() {
-        assertEquals(ControlResult.NeedsConfirmation, check(session("reasonix"), null, SessionControl.Mode("bypassPermissions")))
+    fun reasonixYoloAndPiAutoAreSentLikeTheWebToo() {
+        assertNull(check(session("reasonix"), null, SessionControl.Mode("bypassPermissions")))
         assertEquals(ControlResult.NotOffered, check(session("reasonix"), null, SessionControl.Mode("acceptEdits")))
-        assertEquals(ControlResult.NeedsConfirmation, check(session("pi"), null, SessionControl.Mode("bypassPermissions")))
+        assertNull(check(session("pi"), null, SessionControl.Mode("bypassPermissions")))
         assertNull(check(session("pi"), null, SessionControl.Mode("acceptEdits")))
     }
 
@@ -60,35 +60,35 @@ class SessionControlsGuardTest {
     fun opencodeModesAreTheDiscoveredAgentsAndAutoOnlyOnServeV2() {
         val discovered = controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("review", "Review", ""), ModeOption("yolo", "YOLO", "", danger = true)))
         val run = session("opencode")
-        // Round 2 (M2): a non-built-in agent no source calls safe is confirmed.
-        assertEquals(ControlResult.NeedsConfirmation, check(run, discovered, SessionControl.Mode("review")))
-        assertNull(check(run, discovered, SessionControl.Mode("review", confirmed = true)))
+        // ta-coik.7: a non-built-in or danger agent is sent like any other listed agent.
+        assertNull(check(run, discovered, SessionControl.Mode("review")))
         assertEquals(ControlResult.NotOffered, check(run, discovered, SessionControl.Mode("plan")))
-        assertEquals(ControlResult.NeedsConfirmation, check(run, discovered, SessionControl.Mode("yolo")))
+        assertNull(check(run, discovered, SessionControl.Mode("yolo")))
         // Without the reply, the static Build / Plan fallback.
         assertNull(check(run, null, SessionControl.Mode("plan")))
         // Auto (bypassPermissions) is the serve-v2 toggle only; run-v1 has no toggle.
-        assertEquals(ControlResult.NotOffered, check(run, null, SessionControl.Mode("bypassPermissions", confirmed = true)))
+        assertEquals(ControlResult.NotOffered, check(run, null, SessionControl.Mode("bypassPermissions")))
         val serve = session("opencode", engine = OPENCODE_V2)
-        assertEquals(ControlResult.NeedsConfirmation, check(serve, null, SessionControl.Mode("bypassPermissions")))
-        assertNull(check(serve, null, SessionControl.Mode("bypassPermissions", confirmed = true)))
+        assertNull(check(serve, null, SessionControl.Mode("bypassPermissions")))
     }
 
     @Test
-    fun anOpencodeAgentCallingItselfPlanWithNoDangerFlagIsConfirmedOnBothPaths() {
+    fun anOpencodeAgentCallingItselfPlanWithNoDangerFlagIsMarkedButSentOnBothPaths() {
         val serve = session("opencode", engine = OPENCODE_V2)
         val sneaky = controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("planx", "Plan", "Plans only (really: everything)")))
         val snap = OpencodeSnapshot.parse(json("""{"revision":"oc-1","models":{"status":"ready","items":[]},"modes":{"status":"ready","items":[{"value":"planx","label":"Plan","hint":"Plans only"}]}}"""))!!
         // The composer row / sheet path (set-mode) and the panel path (opencode-control-action).
-        assertEquals(ControlResult.NeedsConfirmation, check(serve, sneaky, SessionControl.Mode("planx"), opencode = snap))
-        assertEquals(ControlResult.NeedsConfirmation, check(serve, sneaky, SessionControl.OpencodeMode("planx", "oc-1"), opencode = snap))
-        // The real built-ins stay one tap unless a source flags them.
+        // ta-coik.7: drawn in --warning (styling), but sent on the tap on both paths, as on the web.
+        assertTrue(ComposerControlsModel.opencodeAgentMarkedDanger("planx", sneaky, snap))
+        assertNull(check(serve, sneaky, SessionControl.Mode("planx"), opencode = snap))
+        assertNull(check(serve, sneaky, SessionControl.OpencodeMode("planx", "oc-1"), opencode = snap))
+        assertFalse(ComposerControlsModel.opencodeAgentMarkedDanger("default", sneaky, snap))
         assertNull(check(serve, sneaky, SessionControl.Mode("default"), opencode = snap))
         val flagged = OpencodeSnapshot.parse(json("""{"revision":"oc-1","models":{"status":"ready","items":[]},"modes":{"status":"ready","items":[{"value":"plan","label":"Plan","hint":"","danger":true}]}}"""))!!
-        assertEquals(ControlResult.NeedsConfirmation, check(serve, controls(modes = listOf(ModeOption("plan", "Plan", "", danger = false))), SessionControl.Mode("plan"), opencode = flagged))
-        assertEquals(ControlResult.NeedsConfirmation, check(serve, null, SessionControl.OpencodeMode("plan", "oc-1"), opencode = flagged))
-        // Either source flagging it is enough; an explicit false on a custom agent is honoured.
-        assertNull(check(serve, controls(modes = listOf(ModeOption("review", "Review", "", danger = false))), SessionControl.Mode("review")))
+        assertNull(check(serve, controls(modes = listOf(ModeOption("plan", "Plan", "", danger = false))), SessionControl.Mode("plan"), opencode = flagged))
+        assertNull(check(serve, null, SessionControl.OpencodeMode("plan", "oc-1"), opencode = flagged))
+        // Either source flagging it is enough to mark it; an explicit false on a custom agent is honoured.
+        assertFalse(ComposerControlsModel.opencodeAgentMarkedDanger("review", controls(modes = listOf(ModeOption("review", "Review", "", danger = false))), null))
         assertEquals(true, ComposerControlsModel.opencodeAgentDanger("plan", controls(modes = listOf(ModeOption("plan", "Plan", "", danger = false))), flagged))
     }
 
@@ -228,8 +228,7 @@ class SessionControlsGuardTest {
         assertNull(c(SessionControl.CodexSkill("skill-a", false, "catalog-3")))
         assertEquals(ControlResult.NotOffered, c(SessionControl.CodexSkill("skill-z", true, "catalog-3")))
         assertNull(c(SessionControl.CodexCompaction("catalog-3")))
-        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.CodexAutoApprove(true, "catalog-3")))
-        assertNull(c(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)))
+        assertNull(c(SessionControl.CodexAutoApprove(true, "catalog-3")))
         assertNull(c(SessionControl.CodexAutoApprove(false, "catalog-3")))
         // No snapshot (none on this socket) = nothing to bind an action to.
         assertEquals(ControlResult.NotOffered, c(SessionControl.CodexCompaction("catalog-3"), null))
@@ -271,8 +270,7 @@ class SessionControlsGuardTest {
         assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("openai/gpt-5", "max", "oc-1")))
         assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeModelSelection("anthropic/x", null, "oc-1")))
         assertNull(c(SessionControl.OpencodeMode("plan", "oc-1")))
-        assertEquals(ControlResult.NeedsConfirmation, c(SessionControl.OpencodeMode("yolo", "oc-1")))
-        assertNull(c(SessionControl.OpencodeMode("yolo", "oc-1", confirmed = true)))
+        assertNull(c(SessionControl.OpencodeMode("yolo", "oc-1")))
         assertEquals(ControlResult.NotOffered, c(SessionControl.OpencodeMode("unknown", "oc-1")))
         assertEquals(ControlResult.NotOffered, check(session("opencode"), null, SessionControl.OpencodeMode("plan", "oc-1"), opencode = snap))
     }
@@ -285,6 +283,11 @@ class SessionControlsGuardTest {
         assertEquals(json("""{"type":"set-model","sessionId":"s1","model":"claude-sonnet-5"}"""), frame(SessionControl.Model("claude-sonnet-5")))
         assertEquals(json("""{"type":"set-reasoning-effort","sessionId":"s1","reasoningEffort":""}"""), frame(SessionControl.Effort("")))
         assertEquals(json("""{"type":"set-fast-mode","sessionId":"s1","enabled":true}"""), frame(SessionControl.FastMode(true)))
+        // ta-coik.7: the most permissive switches, exactly the web's frames (use-tether.ts:1693-1695 set-mode,
+        // :1726-1728 set-auto-continue-on-limit; chat-view.tsx:2488-2497 set-approval-policy below).
+        assertEquals(json("""{"type":"set-mode","sessionId":"s1","permissionMode":"bypassPermissions"}"""), frame(SessionControl.Mode("bypassPermissions")))
+        assertEquals(json("""{"type":"set-auto-continue-on-limit","sessionId":"s1","enabled":true}"""), frame(SessionControl.AutoContinueOnLimit(true)))
+        assertEquals(json("""{"type":"set-auto-continue-on-limit","sessionId":"s1","enabled":false}"""), frame(SessionControl.AutoContinueOnLimit(false)))
         val envelope = """"revision":"catalog-3","operatorAction":true,"operatorActionId":"op-1""""
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"set-model-selection","modelId":"gpt-5.5","reasoningEffortId":"high",$envelope}}"""),
@@ -296,7 +299,7 @@ class SessionControlsGuardTest {
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"set-approval-policy","approvalPolicy":"never",$envelope}}"""),
-            frame(SessionControl.CodexAutoApprove(true, "catalog-3", confirmed = true)),
+            frame(SessionControl.CodexAutoApprove(true, "catalog-3")),
         )
         assertEquals(
             json("""{"type":"codex-control-action","sessionId":"s1","action":{"type":"start-review","target":{"type":"commit","sha":"abc1234","title":null},"delivery":"detached",$envelope}}"""),
@@ -313,6 +316,11 @@ class SessionControlsGuardTest {
         assertEquals(
             json("""{"type":"opencode-control-action","sessionId":"s1","action":{"type":"set-mode","mode":"plan","revision":"oc-1","operatorAction":true,"operatorActionId":"op-1"}}"""),
             frame(SessionControl.OpencodeMode("plan", "oc-1")),
+        )
+        // opencode-serve-controls.tsx:132-139: a danger agent's frame is the same shape.
+        assertEquals(
+            json("""{"type":"opencode-control-action","sessionId":"s1","action":{"type":"set-mode","mode":"yolo","revision":"oc-1","operatorAction":true,"operatorActionId":"op-1"}}"""),
+            frame(SessionControl.OpencodeMode("yolo", "oc-1")),
         )
     }
 

@@ -112,7 +112,7 @@ object ComposerControlsModel {
     /**
      * chat-view.tsx:2136-2142 (+ the v62 discovered opencode agents). Round 2 (M2): a discovered
      * agent is shown as "label (value)" unless it is a built-in pair, and marked dangerous by
-     * [opencodeAgentNeedsConfirmation] (either source's flag, or a non-built-in with no `false`);
+     * [opencodeAgentMarkedDanger] (either source's flag, or a non-built-in with no `false`);
      * [opencode] is the provider-controls snapshot, the second source.
      */
     fun modeOptions(session: AgentSession, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot? = null): List<ModeChoice> = when (session.provider) {
@@ -122,11 +122,11 @@ object ComposerControlsModel {
                     it.value,
                     opencodeAgentLabel(it.value, it.label),
                     LabelText.hint(it.hint),
-                    opencodeAgentNeedsConfirmation(it.value, controls, opencode),
+                    opencodeAgentMarkedDanger(it.value, controls, opencode),
                 )
             }
             // Round 3 (N-L3): the static fallback rows take the same danger rule.
-            val fallback = ModeVocabulary.OPENCODE.map { it.copy(danger = opencodeAgentNeedsConfirmation(it.value, controls, opencode)) }
+            val fallback = ModeVocabulary.OPENCODE.map { it.copy(danger = opencodeAgentMarkedDanger(it.value, controls, opencode)) }
             when {
                 discovered == null -> fallback
                 // "default" is opencode's build agent even when the discovered list omits it.
@@ -139,7 +139,7 @@ object ComposerControlsModel {
         else -> ModeVocabulary.PERMISSION
     }
 
-    /** opencode's own agents: never escalations unless a source flags them. */
+    /** opencode's own agents: never marked dangerous unless a source flags them. */
     val OPENCODE_BUILTIN_AGENTS: Set<String> = setOf("default", "build", "plan")
 
     private val OPENCODE_BUILTIN_PAIRS = setOf("default" to "build", "build" to "build", "plan" to "plan")
@@ -160,8 +160,11 @@ object ComposerControlsModel {
         }
     }
 
-    /** Round 2 (M2): confirmed unless a built-in agent, or one no source flags and one says `false`. Auto always. */
-    fun opencodeAgentNeedsConfirmation(value: String, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot?): Boolean {
+    /**
+     * Round 2 (M2): the agent's row is drawn in `--warning` unless it is a built-in, or one no source
+     * flags and one says `false`; Auto always. Styling only: picking it sends at once, as on the web.
+     */
+    fun opencodeAgentMarkedDanger(value: String, controls: ServerMessage.SessionControls?, opencode: OpencodeSnapshot?): Boolean {
         if (value == ModeVocabulary.AUTO) return true
         val danger = opencodeAgentDanger(value, controls, opencode)
         return danger == true || (value !in OPENCODE_BUILTIN_AGENTS && danger != false)
