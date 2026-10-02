@@ -129,7 +129,40 @@ class PasskeyWireTest {
     private val base get() = h.server.url("/").toString().trimEnd('/')
     private val host get() = h.server.hostName
 
-    private fun signedOutClient(): RealTetherClient = h.newClient(configured = false)
+    /**
+     * r2 (security F1): a passkey sign-in goes only to an https server, so these run over TLS: the
+     * console serves a test certificate the client alone trusts.
+     */
+    private fun signedOutClient(): RealTetherClient {
+        val cert = okhttp3.tls.HeldCertificate.Builder().addSubjectAlternativeName("localhost").addSubjectAlternativeName(h.server.hostName).build()
+        val serverTls = okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(cert).build()
+        val clientTls = okhttp3.tls.HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate).build()
+        h.server.useHttps(serverTls.sslSocketFactory(), false)
+        h.server.start()
+        h.settings = InMemorySettings()
+        h.client = RealTetherClient(
+            settings = h.settings,
+            httpClient = OkHttpClient.Builder().sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build(),
+            scope = h.scope,
+            clock = { h.now.get() },
+            backoff = testBackoff(),
+            sweepIntervalMs = 3_600_000,
+            scheduler = h.scheduler,
+        )
+        return h.client
+    }
+
+    @Test fun anHttpServerIsNeverAskedAndNoPromptOpens() {
+        h.server.start()
+        val client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = h.scope, scheduler = h.scheduler)
+        val passkeys = RecordingPasskeys()
+        val http = h.server.url("/").toString().trimEnd('/')
+        assertTrue(http.startsWith("http://"))
+        assertEquals(LoginResult.PasskeyFailed(PasskeyLoginCopy.NEEDS_HTTPS), runBlocking { client.passkeyLogin(http, passkeys) })
+        assertEquals("nothing sent, not even /healthz", 0, h.server.requestCount)
+        assertTrue("no prompt", passkeys.authenticated.isEmpty())
+        client.stop()
+    }
 
     @Test fun signInIsThreeUncredentialedCallsThenTheCookieRidesTheSocketWithTheConsoleOrigin() {
         val client = signedOutClient()
@@ -175,7 +208,7 @@ class PasskeyWireTest {
         assertEquals("websocket", upgrade.getHeader("Upgrade")?.lowercase())
         assertEquals("tether_session=0123456789abcdef0123456789abcdef.c2VjcmV0", upgrade.getHeader("Cookie"))
         // A cookie upgrade must carry the console's Origin (server.mjs upgrade: only a device skips it).
-        assertEquals("http://$host:${h.server.port}", upgrade.getHeader("Origin"))
+        assertEquals("https://$host:${h.server.port}", upgrade.getHeader("Origin"))
         h.handshake(h.nextSocket())
     }
 

@@ -61,6 +61,39 @@ class PasskeyRulesTest {
         assertFalse(PasskeyRules.rpIdMatches("console.example.test", "not a url"))
     }
 
+    /** r2 (security F1): https only, both overloads, no loopback exception; https is the control. */
+    @Test fun aCeremonyRunsOnlyAgainstAnHttpsServer() {
+        assertTrue("control", PasskeyRules.rpIdMatches("console.example.test", "https://console.example.test".toHttpUrl()))
+        assertTrue("control", PasskeyRules.rpIdMatches("console.example.test", "https://console.example.test"))
+        for (server in listOf("http://console.example.test", "http://console.example.test:443", "http://localhost:4290", "http://127.0.0.1:4290")) {
+            val host = server.toHttpUrl().host
+            assertFalse(server, PasskeyRules.rpIdMatches(host, server.toHttpUrl()))
+            assertFalse(server, PasskeyRules.rpIdMatches(host, server))
+            assertFalse(server, PasskeyRules.ceremonyAllowed(server))
+        }
+        assertTrue(PasskeyRules.ceremonyAllowed("https://localhost:4290"))
+        assertFalse(PasskeyRules.ceremonyAllowed("not a url"))
+    }
+
+    /**
+     * r2 (security F2): ASCII only. Unicode case folding maps a dotless ı to I, a long ſ to S and the
+     * Kelvin sign to k, so each would have matched a host with i, s or k; each is refused. An IDN host
+     * arrives from OkHttp as punycode, and the same punycode rpId matches (the positive control).
+     */
+    @Test fun theRpIdIsComparedAsAsciiOnly() {
+        val server = "https://kiosk.example.test".toHttpUrl()
+        assertTrue("control", PasskeyRules.rpIdMatches("kiosk.example.test", server))
+        assertTrue("ASCII case is still ignored", PasskeyRules.rpIdMatches("KIOSK.Example.TEST", server))
+        for (lookalike in listOf("k\u0131osk.example.test", "kio\u017Fk.example.test", "\u212Aiosk.example.test")) {
+            assertTrue("control: Unicode folding would accept '$lookalike'", lookalike.equals("kiosk.example.test", ignoreCase = true))
+            assertFalse("refused: '$lookalike'", PasskeyRules.rpIdMatches(lookalike, server))
+        }
+        val idn = "https://b\u00FCcher.example".toHttpUrl()
+        assertEquals("xn--bcher-kva.example", idn.host)
+        assertTrue("the punycode rpId of an IDN host", PasskeyRules.rpIdMatches("xn--bcher-kva.example", idn))
+        assertFalse("its Unicode spelling is not ASCII", PasskeyRules.rpIdMatches("b\u00FCcher.example", idn))
+    }
+
     // ---- the options answers ------------------------------------------------------------------
 
     @Test fun theOptionsAnswersAreReadAsTheServerSendsThem() {
