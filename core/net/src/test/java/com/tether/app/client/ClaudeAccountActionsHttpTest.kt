@@ -246,15 +246,78 @@ class ClaudeAccountActionsHttpTest {
         nothingSent()
     }
 
-    @Test fun anEmptyOrOverlongNicknameOrCodeAndAnUnknownSyncModeAreNotSent() = runBlocking<Unit> {
+    /**
+     * r2 (from the verifier's wire probe): every traversal, encoding, case, unicode, control and length
+     * trick is refused by EVERY call that puts an id in a path, and nothing reaches the server; the
+     * longest id of the registry's shape (^[a-z][a-z0-9-]{0,63}$) is sent (the positive control).
+     */
+    @Test fun noCallPutsAnIdOutsideTheShapeInAPathAndTheLongestValidOneIsSent() = runBlocking<Unit> {
+        val bad = listOf(
+            "", "..", "../etc", "claude-a/../../x", "claude-a/logout", "claude-a%2Flogout", "claude-a%2e%2e", "Claude-A",
+            "claude-a\n", "claude-a\u0000", "claude-a?x=1", "claude-a#f", "claud\u00e9", "claude-\u0430", " claude-a", "claude-a ", "-claude", "1claude",
+            "c" + "a".repeat(64), "claude_a", "claude.a",
+        )
+        for (id in bad) {
+            for (r in listOf(
+                actions.rename(origin, id, "n"), actions.remove(origin, id, true), actions.logout(origin, id), actions.startLogin(origin, id),
+                actions.pollLogin(origin, id), actions.submitCode(origin, id, ClaudeLoginCode("x")), actions.cancelLogin(origin, id),
+            )) {
+                assertTrue("$id -> $r", r is SecurityResult.NotSent)
+            }
+        }
+        nothingSent()
+        val good = "c" + "a".repeat(63)
+        server.enqueue(reply(200, """{"ok":true}"""))
+        assertTrue(actions.logout(origin, good) is SecurityResult.Ok)
+        assertEquals("/api/claude-accounts/$good/logout", take().path)
+    }
+
+    /** r2 (verifier probe): signed in to ANOTHER server than the one drawn, nothing goes to either; signed in to the drawn one, it goes. */
+    @Test fun signedInElsewhereNothingIsSentToEitherServer() = runBlocking<Unit> {
+        authority = FilesAuthority.Paired(elsewhere.url("/")) { it.header("Authorization", "Bearer tthr_test") }
+        val r = actions.add(origin, "w")
+        assertTrue("$r", r is SecurityResult.NotSent && r.origin == "http://${elsewhere.hostName}:${elsewhere.port}")
+        assertTrue(actions.runSync(origin) is SecurityResult.NotSent)
+        nothingSent()
+        assertNull(elsewhere.takeRequest(100, TimeUnit.MILLISECONDS))
+        authority = FilesAuthority.Paired(server.url("/")) { it.header("Authorization", "Bearer tthr_test") }
+        server.enqueue(reply(201, """{"profile":{}}"""))
+        assertTrue(actions.add(origin, "w") is SecurityResult.Ok)
+        take()
+    }
+
+    /** r2 (verifier probe): a 403 that is not the owner sentence stays a plain refusal, and a sign-in page is a gateway. */
+    @Test fun aForbiddenThatIsNotTheOwnerSentenceIsNotNamedAsOne() = runBlocking<Unit> {
+        server.enqueue(reply(403, """{"error":"Cross-origin request refused."}"""))
+        assertTrue(actions.runSync(origin) is SecurityResult.Refused)
+        take()
+        server.enqueue(MockResponse().setResponseCode(403).setHeader("Content-Type", "text/html").setBody("<html>sso</html>"))
+        assertTrue(actions.runSync(origin) is SecurityResult.Blocked)
+        take()
+        // Positive control: the owner sentence is named.
+        server.enqueue(reply(403, """{"error":"This needs an owner sign-in (password or passkey in a browser)."}"""))
+        assertTrue(actions.runSync(origin) is SecurityResult.OwnerSignInNeeded)
+        take()
+    }
+
+    /** As the web: only a blank nickname or code is held back, and a mode this client cannot spell; lengths are the server's to judge. */
+    @Test fun aBlankNicknameOrCodeAndAnUnknownSyncModeAreNotSent() = runBlocking<Unit> {
         assertEquals(SecurityResult.NotSent(origin), actions.add(origin, "   "))
-        assertEquals(SecurityResult.NotSent(origin), actions.add(origin, "x".repeat(ClaudeAccountActions.NICKNAME_MAX + 1)))
         assertEquals(SecurityResult.NotSent(origin), actions.rename(origin, "claude-work", ""))
         assertEquals(SecurityResult.NotSent(origin), actions.submitCode(origin, "claude-work", ClaudeLoginCode(" \n ")))
-        assertEquals(SecurityResult.NotSent(origin), actions.submitCode(origin, "claude-work", ClaudeLoginCode("x".repeat(ClaudeAccountActions.CODE_MAX + 1))))
         assertEquals(SecurityResult.NotSent(origin), actions.saveSync(origin, ClaudeSyncConfig(ClaudeSyncMode.Unknown, ClaudeSyncCategories(true, true, true, true), null)))
-        assertEquals(SecurityResult.NotSent(origin), actions.saveSync(origin, ClaudeSyncConfig(ClaudeSyncMode.All, ClaudeSyncCategories(true, true, true, true), "x".repeat(129))))
         nothingSent()
+    }
+
+    /** The owner's standing rule: no app-only length limit. A long nickname goes to the server, whose own 400 is shown. */
+    @Test fun aLongNicknameGoesToTheServerWhichJudgesIt() = runBlocking<Unit> {
+        val long = "x".repeat(65)
+        server.enqueue(reply(400, """{"error":"An account nickname must be 64 characters or fewer."}"""))
+        assertEquals(SecurityResult.Refused(400, "An account nickname must be 64 characters or fewer.", origin), actions.add(origin, long))
+        assertSent(take(), "POST", "/api/claude-accounts", """{"nickname":"$long"}""")
+        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code"}"""))
+        assertTrue(actions.submitCode(origin, "claude-work", ClaudeLoginCode("c".repeat(3000))) is SecurityResult.Ok)
+        assertEquals(3000, body(take())["code"]!!.jsonPrimitive.content.length)
     }
 
     /** A redirect is a gateway's: never followed, so the credential and the body never reach another host. */
@@ -291,6 +354,32 @@ class ClaudeAccountActionsHttpTest {
             assertNull(bad, ClaudeLoginLink.parse(bad))
         }
         assertFalse(ClaudeLoginLink.parse("https://claude.ai/oauth?state=S")!!.toString().contains("state"))
+    }
+
+    /** r2 (security P3-1): a long host is cut in the middle, so its end (whose domain it is) always shows. */
+    @Test fun aLongHostKeepsItsEnd() {
+        // DNS labels are at most 63 characters: the padding is several of them.
+        val host = "claude.ai.oauth." + ("a".repeat(40) + ".").repeat(3) + "evil.example"
+        val link = ClaudeLoginLink.parse("https://$host/oauth/authorize")!!
+        assertEquals(host, link.host)
+        val shown = link.shownHost
+        assertEquals(ClaudeLoginLink.HOST_SHOWN, shown.length)
+        assertTrue(shown, shown.endsWith(".evil.example"))
+        assertTrue(shown, shown.startsWith("claude.ai.oauth."))
+        assertTrue(shown, shown.contains("…"))
+        assertEquals("claude.ai", ClaudeLoginLink.parse("https://claude.ai/oauth/authorize")!!.shownHost)
+        val exact = "a".repeat(ClaudeLoginLink.HOST_SHOWN - 8) + ".example"
+        assertEquals(exact, ClaudeLoginLink.parse("https://$exact/")!!.shownHost)
+    }
+
+    /** r2 (security P3-1): only Anthropic's own sign-in hosts, exactly, count as Anthropic's. */
+    @Test fun onlyAnthropicsOwnHostsAreAnthropics() {
+        for (ok in listOf("https://claude.ai/oauth/authorize", "https://CLAUDE.AI/x", "https://claude.com/cai/oauth/authorize", "https://console.anthropic.com/oauth/code/callback", "https://platform.claude.com/x")) {
+            assertTrue(ok, ClaudeLoginLink.parse(ok)!!.anthropic)
+        }
+        for (bad in listOf("https://claude.ai.evil.example/oauth", "https://evil-claude.ai/x", "https://xclaude.ai/x", "https://claude.ai.oauth.example/x", "https://anthropic.com.evil.example/x", "https://sub.claude.ai.evil/x")) {
+            assertFalse(bad, ClaudeLoginLink.parse(bad)!!.anthropic)
+        }
     }
 
     @Test fun aLinkTheClientWillNotOpenIsFlaggedNotKept() = runBlocking<Unit> {

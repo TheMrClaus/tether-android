@@ -57,8 +57,6 @@ import com.tether.app.client.LabelText
 import com.tether.app.client.TextCut
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.TetherDialog
-import com.tether.app.ui.components.TetherDialogText
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
@@ -79,7 +77,6 @@ import kotlinx.coroutines.delay
 object ClaudeAccountsTags {
     const val Section = "claude-accounts"
     const val OwnerNeeded = "claude-accounts-owner-needed"
-    const val TryAgain = "claude-accounts-try-again"
     const val Loading = "claude-accounts-loading"
     const val Notice = "claude-accounts-notice"
     const val Retry = "claude-accounts-retry"
@@ -93,9 +90,6 @@ object ClaudeAccountsTags {
     const val SyncPrimary = "claude-accounts-sync-primary"
     const val SyncNow = "claude-accounts-sync-now"
     const val SyncLine = "claude-accounts-sync-line"
-    const val ConfirmSheet = "claude-accounts-confirm"
-    const val ConfirmCancel = "claude-accounts-confirm-cancel"
-    const val ConfirmGo = "claude-accounts-confirm-go"
     fun syncCategory(key: String) = "claude-accounts-sync-category:$key"
     fun card(id: String) = "claude-account:$id"
     fun plan(id: String) = "claude-account-plan:$id"
@@ -118,6 +112,8 @@ object ClaudeAccountsTags {
     fun loginCancel(id: String) = "claude-account-login-cancel:$id"
     fun loginOpen(id: String) = "claude-account-login-open:$id"
     fun loginLinkRefused(id: String) = "claude-account-login-refused:$id"
+    fun loginHost(id: String) = "claude-account-login-host:$id"
+    fun loginNotAnthropic(id: String) = "claude-account-login-not-anthropic:$id"
     fun code(id: String) = "claude-account-code:$id"
     fun codeSubmit(id: String) = "claude-account-code-submit:$id"
 }
@@ -129,8 +125,8 @@ object ClaudeAccountsTags {
  *   Retry and every change read again; one plan re-read [ClaudeAccountsModel.PLAN_RETRY_MS] after a
  *   first paint from the offline snapshot, once per opening (the web's `planRetriedRef`);
  * - Check reads one account's status; the sync state is read once two accounts are listed;
- * - Add, Rename, Log in (link and code), Log out, Remove and the sync settings as on the web, Log out
- *   and Remove asked first ([ClaudeAccountsConfirmDialog]);
+ * - Add, Rename, Log in (link and code), Log out, Remove (the web's two-tap arm) and the sync
+ *   settings as on the web, with no app-only confirmation (the owner's standing rule);
  * - every answer is bound to [ClaudeAccountsBinding.origin] and every change sent for it only;
  *   changing server or closing the tab cancels what is in flight, ends each login's poll and drops
  *   any pasted code.
@@ -149,25 +145,24 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     DisposableEffect(c) { onDispose { c.dispose() } }
     var planRetried by remember(c) { mutableStateOf(false) }
 
+    // r2 (verifier P2): each answer is folded into the state AS IT IS when the answer lands, never
+    // into a snapshot read before the call suspended (a sync change made meanwhile would be undone).
     LaunchedEffect(c, c.reloads) {
         if (current == null || (seed != null && c.reloads == 0)) return@LaunchedEffect
-        c.state = ClaudeAccountsModel.foldList(c.state, source.list(), current)
+        c.foldList(source.list())
         if (!planRetried && c.state.listFault == null && ClaudeAccountsModel.wantsPlanRetry(c.state.accounts)) {
             planRetried = true
             delay(ClaudeAccountsModel.PLAN_RETRY_MS)
-            c.state = ClaudeAccountsModel.foldList(c.state, source.list(), current)
+            c.foldList(source.list())
         }
     }
     val wantsSync = ClaudeAccountsModel.wantsSync(c.state)
     LaunchedEffect(c, wantsSync) {
         if (current == null || seed != null || !wantsSync || c.state.sync != null) return@LaunchedEffect
-        c.state = ClaudeAccountsModel.foldSync(c.state, source.sync(), current)
+        c.foldSync(source.sync())
     }
 
     ClaudeAccountsSection(c, ClaudeAccountsPresentation.view(c.state, binding.timeOf), narrow, binding.opener)
-    c.confirm?.let { shown ->
-        ClaudeAccountsConfirmDialog(shown, onCancel = c::dismissConfirm, onConfirm = { c.confirmed(shown) })
-    }
 }
 
 /** `new Date(ranAt).toLocaleTimeString()`. */
@@ -187,7 +182,7 @@ private fun ClaudeAccountsSection(
         narrow,
         modifier = Modifier.testTag(ClaudeAccountsTags.Section),
     ) {
-        if (c.ownerNeeded) OwnerNeeded(c)
+        if (c.ownerNeeded) OwnerNeeded()
         when {
             view.notice != null -> ListNotice(view.notice, narrow, c::reload)
             view.loading -> {
@@ -232,20 +227,13 @@ internal fun OwnerGradeNote(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** ta-7rh: a server without #236 refused a change with its owner sign-in sentence: said once, with Try again. */
+/** ta-7rh: a server without #236 refused a change with its owner sign-in sentence: said, as the web shows a change's error. Nothing is disabled. */
 @Composable
-private fun OwnerNeeded(c: ClaudeAccountsController) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OwnerGradeNote(ClaudeAccountsCopy.OWNER_NEEDED, Modifier.testTag(ClaudeAccountsTags.OwnerNeeded).semantics { liveRegion = LiveRegionMode.Polite })
-        TetherKey(
-            onClick = c::retryOwner,
-            classes = KeyClasses.ButtonSecondary,
-            label = ClaudeAccountsCopy.TRY_AGAIN,
-            icon = TetherIcons.RefreshCw,
-            iconSize = 14.dp,
-            modifier = Modifier.testTag(ClaudeAccountsTags.TryAgain),
-        )
-    }
+private fun OwnerNeeded() {
+    OwnerGradeNote(
+        ClaudeAccountsCopy.OWNER_NEEDED,
+        Modifier.padding(bottom = 16.dp).testTag(ClaudeAccountsTags.OwnerNeeded).semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 /** settings-dialog.tsx:1666-1670 (the Status row with Retry), or the native blocked notice. */
@@ -384,7 +372,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
         Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(1.dp).background(t.line))
         if (renaming) {
             CardRow(narrow = narrow, title = ClaudeAccountsCopy.NICKNAME, caption = AnnotatedString(ClaudeAccountsCopy.RENAME_CAPTION), first = true, stack = true) {
-                val saving = c.busy == AccountsAction.Rename && c.busyId == id
+                val saving = c.busy(AccountsAction.Rename, id)
                 AccountField(
                     value = c.renameText,
                     onChange = c::editRename,
@@ -399,7 +387,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
                 )
                 TetherKey(
                     onClick = { c.submitRename() },
-                    enabled = can && c.renameText.isNotBlank(),
+                    enabled = can && !saving && c.renameText.isNotBlank(),
                     classes = KeyClasses.ButtonSecondary,
                     label = if (saving) ClaudeAccountsCopy.SAVING else ClaudeAccountsCopy.SAVE,
                     modifier = Modifier.testTag(ClaudeAccountsTags.renameSave(id)),
@@ -414,15 +402,17 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
             captionTag = ClaudeAccountsTags.path(id),
             first = !renaming,
         ) {
-            val loggingOut = c.busy == AccountsAction.Logout && c.busyId == id
+            val loggingOut = c.busy(AccountsAction.Logout, id)
             ChangeKey(ClaudeAccountsCopy.LOG_IN, TetherIcons.LogIn, "Log in ${card.title}", ClaudeAccountsTags.login(id), enabled = can && login == null) { c.startLogin(account) }
-            ChangeKey(if (loggingOut) ClaudeAccountsCopy.LOGGING_OUT else ClaudeAccountsCopy.LOG_OUT, TetherIcons.LogOut, "Log out ${card.title}", ClaudeAccountsTags.logout(id), enabled = can) {
-                c.askLogout(account, card.title)
+            // settings-dialog.tsx `doLogout`: sent at once, as on the web.
+            ChangeKey(if (loggingOut) ClaudeAccountsCopy.LOGGING_OUT else ClaudeAccountsCopy.LOG_OUT, TetherIcons.LogOut, "Log out ${card.title}", ClaudeAccountsTags.logout(id), enabled = can && !loggingOut) {
+                c.logout(account)
             }
         }
         login?.let { LoginRows(card, it, c, narrow, opener) }
         CardRow(narrow = narrow, title = "Remove account", caption = AnnotatedString("Deletes the profile entry from Tether")) {
-            val removing = c.busy == AccountsAction.Remove && c.busyId == id
+            val removing = c.busy(AccountsAction.Remove, id)
+            val armed = c.armedRemove == id
             AccountCheckbox(
                 label = ClaudeAccountsCopy.ALSO_DELETE,
                 checked = c.deleteCredentials[id] == true,
@@ -431,8 +421,19 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
                 tag = ClaudeAccountsTags.deleteCredentials(id),
                 onChange = { c.setDeleteCredentials(id, it) },
             )
-            ChangeKey(if (removing) ClaudeAccountsCopy.REMOVING else ClaudeAccountsCopy.REMOVE, TetherIcons.Trash2, "Remove ${card.title}", ClaudeAccountsTags.remove(id), enabled = can) {
-                c.askRemove(account, card.title)
+            // settings-dialog.tsx `armRemove`: tap, then "Confirm remove" within 4 s (r2: it names the profile id when the card does).
+            ChangeKey(
+                when {
+                    removing -> ClaudeAccountsCopy.REMOVING
+                    armed -> ClaudeAccountsCopy.CONFIRM_REMOVE
+                    else -> ClaudeAccountsCopy.REMOVE
+                },
+                TetherIcons.Trash2,
+                if (armed) ClaudeAccountsCopy.confirmRemoveLabel(card.title, card.idLine) else "Remove ${card.title}",
+                ClaudeAccountsTags.remove(id),
+                enabled = can && !removing,
+            ) {
+                c.tapRemove(account, card.title)
             }
         }
         c.lines[id]?.let { NoteLine(it, ClaudeAccountsTags.cardLine(id)) }
@@ -461,7 +462,7 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
             TetherKey(onClick = { c.cancelLogin(id) }, classes = KeyClasses.ButtonSecondary, label = ClaudeAccountsCopy.CANCEL, contentDescription = "Cancel login for ${card.title}", modifier = Modifier.testTag(ClaudeAccountsTags.loginCancel(id)))
         }
         login.link?.let { link ->
-            CardRow(narrow = narrow, title = ClaudeAccountsCopy.OPEN_TITLE, caption = AnnotatedString(ClaudeAccountsCopy.openCaption(LabelText.visibleValue(link.host)))) {
+            CardRow(narrow = narrow, title = ClaudeAccountsCopy.OPEN_TITLE, caption = AnnotatedString(ClaudeAccountsCopy.openCaption(link.shownHost)), captionTag = ClaudeAccountsTags.loginHost(id)) {
                 TetherKey(
                     onClick = { unopened = !opener.open(link) },
                     classes = KeyClasses.ButtonSecondary,
@@ -472,6 +473,8 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
                     modifier = Modifier.testTag(ClaudeAccountsTags.loginOpen(id)),
                 )
             }
+            // r2 (security P3-1): a host that is not Anthropic's own is said, quietly (a warning, not a refusal).
+            if (!link.anthropic) NoteLine(AccountsLine(ClaudeAccountsCopy.NOT_ANTHROPIC, error = true), ClaudeAccountsTags.loginNotAnthropic(id))
             if (unopened) NoteLine(AccountsLine(ClaudeAccountsCopy.LINK_UNOPENED, error = true), ClaudeAccountsTags.loginOpen(id) + ":unopened")
         }
         if (login.link == null && login.linkRefused) {
@@ -479,7 +482,7 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
         }
         if (login.status != ClaudeLoginStatus.Error && login.status != ClaudeLoginStatus.Success) {
             CardRow(narrow = narrow, title = ClaudeAccountsCopy.CODE_TITLE, caption = AnnotatedString(ClaudeAccountsCopy.CODE_CAPTION), stack = true) {
-                val submitting = c.busy == AccountsAction.Code && c.busyId == id
+                val submitting = c.busy(AccountsAction.Code, id)
                 val code = c.codes[id].orEmpty()
                 AccountField(
                     value = code,
@@ -489,13 +492,12 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
                     tag = ClaudeAccountsTags.code(id),
                     narrow = narrow,
                     enabled = !submitting,
-                    sensitive = true,
                     onDone = { c.submitCode(id) },
                     modifier = Modifier.weight(1f),
                 )
                 TetherKey(
                     onClick = { c.submitCode(id) },
-                    enabled = c.canChange && !login.starting && code.isNotBlank(),
+                    enabled = c.canChange && !submitting && !login.starting && code.isNotBlank(),
                     classes = KeyClasses.ButtonSecondary,
                     label = if (submitting) ClaudeAccountsCopy.SUBMITTING else ClaudeAccountsCopy.SUBMIT,
                     modifier = Modifier.testTag(ClaudeAccountsTags.codeSubmit(id)),
@@ -521,7 +523,7 @@ private fun AddRow(c: ClaudeAccountsController, narrow: Boolean, topGap: Boolean
         )
         return
     }
-    val adding = c.busy == AccountsAction.Add
+    val adding = c.busy(AccountsAction.Add)
     Column(Modifier.padding(top = if (topGap) 8.dp else 0.dp)) {
         CardRow(narrow = narrow, title = ClaudeAccountsCopy.NICKNAME, caption = AnnotatedString(ClaudeAccountsCopy.NICKNAME_CAPTION), stack = true) {
             AccountField(
@@ -538,7 +540,7 @@ private fun AddRow(c: ClaudeAccountsController, narrow: Boolean, topGap: Boolean
             )
             TetherKey(
                 onClick = { c.submitAdd() },
-                enabled = c.canChange && c.addText.isNotBlank(),
+                enabled = c.canChange && !adding && c.addText.isNotBlank(),
                 classes = KeyClasses.ButtonSecondary,
                 label = if (adding) ClaudeAccountsCopy.ADDING else ClaudeAccountsCopy.ADD_KEY,
                 modifier = Modifier.testTag(ClaudeAccountsTags.AddSubmit),
@@ -597,9 +599,9 @@ private fun ChangeKey(label: String, icon: ImageVector, description: String, tag
 }
 
 /**
- * `.settings-server-input` for a nickname or the authorization code. Plain `remember`d by the
- * controller, never saved. [sensitive]: the code: the keyboard is told it is a password (no
- * suggestions, no learning), drawn as typed, as the web's text field shows it.
+ * `.settings-server-input` for a nickname or the authorization code: the web's plain text field
+ * (the owner's standing rule: no app-only guard on it). The code lives only in the controller
+ * (plain state, never saved), dropped once the server took it, on cancel and on close.
  */
 @Composable
 private fun AccountField(
@@ -612,7 +614,6 @@ private fun AccountField(
     enabled: Boolean,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
-    sensitive: Boolean = false,
     focusOnStart: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
@@ -627,11 +628,7 @@ private fun AccountField(
         singleLine = true,
         textStyle = style.copy(color = t.ink),
         cursorBrush = SolidColor(t.violet),
-        keyboardOptions = KeyboardOptions(
-            autoCorrectEnabled = false,
-            keyboardType = if (sensitive) KeyboardType.Password else KeyboardType.Text,
-            imeAction = ImeAction.Done,
-        ),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         modifier = modifier
             .testTag(tag)
@@ -856,14 +853,14 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
         SettingsRow(
             narrow = narrow,
             text = { m ->
-                val summary = if (c.busy == AccountsAction.SyncSave) ClaudeAccountsCopy.SAVING else sync.summary
+                val summary = if (c.syncSaves > 0) ClaudeAccountsCopy.SAVING else sync.summary
                 SettingsRowText("Sync status", AnnotatedString(summary), m.semantics { liveRegion = LiveRegionMode.Polite })
             },
             control = { m ->
-                val running = c.busy == AccountsAction.SyncRun
+                val running = c.busy(AccountsAction.SyncRun)
                 TetherKey(
                     onClick = { c.runSync() },
-                    enabled = sync.canRun && c.canChange,
+                    enabled = sync.canRun && c.canChange && !running,
                     classes = KeyClasses.ButtonSecondary,
                     label = if (running) ClaudeAccountsCopy.SYNCING else ClaudeAccountsCopy.SYNC_NOW,
                     icon = if (running) TetherIcons.Loader else TetherIcons.RefreshCw,
@@ -873,42 +870,5 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
             },
         )
         c.syncLine?.let { NoteLine(it, ClaudeAccountsTags.SyncLine) }
-    }
-}
-
-/**
- * ta-7rh: Remove and Log out, asked first, in the web's confirm chrome (Devices' pattern). The
- * confirm key is armed after a beat for the confirmation it SHOWS (ta-q9l): one replaced while open
- * disarms it and the beat runs again; and what is sent is the confirmation shown
- * ([ClaudeAccountsController.confirmed]).
- */
-@Composable
-internal fun ClaudeAccountsConfirmDialog(confirm: AccountsConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    val (title, body, action) = when (confirm) {
-        is AccountsConfirm.Remove -> Triple(
-            ClaudeAccountsCopy.REMOVE_TITLE,
-            listOf(
-                ClaudeAccountsCopy.removeBody(confirm.title),
-                when {
-                    confirm.hostDefault -> ClaudeAccountsCopy.REMOVE_HOST_DEFAULT
-                    confirm.deleteCredentials -> ClaudeAccountsCopy.REMOVE_ALSO_LOGIN
-                    else -> ClaudeAccountsCopy.REMOVE_KEEPS_LOGIN
-                },
-            ),
-            ClaudeAccountsCopy.REMOVE_CONFIRM,
-        )
-        is AccountsConfirm.Logout -> Triple(ClaudeAccountsCopy.LOGOUT_TITLE, listOf(ClaudeAccountsCopy.logoutBody(confirm.title)), ClaudeAccountsCopy.LOGOUT_CONFIRM)
-    }
-    TetherDialog(
-        onDismiss = onCancel,
-        title = title,
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ClaudeAccountsTags.ConfirmCancel))
-            ArmedConfirmKey(action, ClaudeAccountsTags.ConfirmGo, onConfirm, classes = KeyClasses.ButtonDanger, shown = confirm)
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().testTag(ClaudeAccountsTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            body.forEach { TetherDialogText(it) }
-        }
     }
 }

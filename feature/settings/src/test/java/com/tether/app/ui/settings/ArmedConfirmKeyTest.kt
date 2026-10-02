@@ -193,6 +193,15 @@ class ArmedConfirmKeyTest {
         assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.SignOutOthers }
     }
 
+    /** ta-7rh r2 (the verifier's ta-ban probe, permanent): Sign out others replaced by a Revoke re-arms. */
+    @Test fun aSignOutOthersConfirmationReplacedByARevokeReArms() {
+        var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.SignOutOthers)
+        host { DevicesConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
+        tap(DevicesTags.ConfirmGo)
+        assertEquals("not armed at once", 0, confirmed)
+        assertReArms(DevicesTags.ConfirmGo) { confirm = DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.No) }
+    }
+
     /** No spurious re-arm in Devices either: an equal confirmation (a new but equal object) keeps the key armed. */
     @Test fun anEqualDevicesConfirmationKeepsTheKeyArmed() {
         var confirm by mutableStateOf<DevicesConfirm>(DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.No))
@@ -201,40 +210,6 @@ class ArmedConfirmKeyTest {
         replace { confirm = DevicesConfirm.Revoke(DevicesFixtures.PHONE.copy(), SelfMatch.No) }
         tap(DevicesTags.ConfirmGo)
         assertEquals(1, confirmed)
-    }
-
-    // ---- Claude accounts (ta-7rh) -------------------------------------------------------------------
-
-    private val removeWork = AccountsConfirm.Remove("claude-work", "Claude Code (work)", deleteCredentials = false, hostDefault = false)
-
-    @Test fun aClaudeAccountConfirmationIsNotArmedAtOnce() {
-        host { ClaudeAccountsConfirmDialog(removeWork, onCancel = {}, onConfirm = count) }
-        tap(ClaudeAccountsTags.ConfirmGo)
-        assertEquals("a tap at once", 0, confirmed)
-        frame(CONFIRM_ARM_MS - 100)
-        tap(ClaudeAccountsTags.ConfirmGo)
-        assertEquals("a tap inside the beat", 0, confirmed)
-        frame(200)
-        tap(ClaudeAccountsTags.ConfirmGo)
-        assertEquals(1, confirmed)
-    }
-
-    @Test fun aRemoveConfirmationReArmsWhenTheAccountIsReplaced() {
-        var confirm by mutableStateOf<AccountsConfirm>(removeWork)
-        host { ClaudeAccountsConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
-        assertReArms(ClaudeAccountsTags.ConfirmGo) { confirm = removeWork.copy(id = "claude-home", title = "Claude Code (home)") }
-    }
-
-    @Test fun aRemoveConfirmationReArmsWhenTheLoginChoiceChanges() {
-        var confirm by mutableStateOf<AccountsConfirm>(removeWork)
-        host { ClaudeAccountsConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
-        assertReArms(ClaudeAccountsTags.ConfirmGo) { confirm = removeWork.copy(deleteCredentials = true) }
-    }
-
-    @Test fun aLogoutConfirmationReplacedByARemoveReArms() {
-        var confirm by mutableStateOf<AccountsConfirm>(AccountsConfirm.Logout("claude-work", "Claude Code (work)"))
-        host { ClaudeAccountsConfirmDialog(confirm, onCancel = {}, onConfirm = count) }
-        assertReArms(ClaudeAccountsTags.ConfirmGo) { confirm = removeWork }
     }
 
     // ---- the default (no shown value) -------------------------------------------------------------

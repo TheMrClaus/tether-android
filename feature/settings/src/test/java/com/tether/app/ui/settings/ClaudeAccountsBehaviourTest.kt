@@ -178,13 +178,17 @@ class ClaudeAccountsBehaviourTest {
 
     /**
      * Over the real reader and the real changes on a fake server (tether 90fbb9f shapes): Add, Log out
-     * (confirmed), Remove (confirmed) and Sync now each send exactly their fixed route, by their own
-     * method, with the credential and the web's body, and nothing else leaves.
+     * (sent at once, as on the web), Remove (the web's two taps) and Sync now each send exactly their
+     * fixed route, by their own method, with the credential and the web's body, and nothing else leaves.
+     * r2: the Sync now result lands while the post-Remove list re-read may still be in flight, and is
+     * kept (the fold is of the state as it is when an answer lands): this used to flake.
      */
     @Test fun overTheRealClientOnlyTheFixedRoutesAreSent() {
         val server = MockWebServer()
+        val arrived = java.util.concurrent.CopyOnWriteArrayList<String>()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
+                arrived += "${request.method} ${request.path}"
                 val json = MockResponse().setHeader("Content-Type", "application/json")
                 return when (request.method to request.path) {
                     "GET" to "/api/claude-accounts" -> json.setBody(AccountsFixtures.LIST_JSON)
@@ -214,11 +218,14 @@ class ClaudeAccountsBehaviourTest {
             compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
             tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            // Log out goes at once (no confirmation, as on the web); its status re-read follows it.
             tag(ClaudeAccountsTags.logout("claude-work")).performScrollTo().performClick()
-            tag(ClaudeAccountsTags.ConfirmGo).performClick()
-            compose.waitUntil(5_000) { compose.isDrawnEnabled(ClaudeAccountsTags.remove("claude-fresh")) }
+            compose.waitUntil(5_000) { "GET /api/claude-accounts/claude-work/status" in arrived }
+            // Remove: the first tap arms it ("Confirm remove"), the second sends it.
             tag(ClaudeAccountsTags.remove("claude-fresh")).performScrollTo().performClick()
-            tag(ClaudeAccountsTags.ConfirmGo).performClick()
+            waitFor(ClaudeAccountsCopy.CONFIRM_REMOVE)
+            assertFalse("one tap sends nothing", arrived.any { it.startsWith("DELETE") })
+            tag(ClaudeAccountsTags.remove("claude-fresh")).performScrollTo().performClick()
             waitFor("Removed Claude Code (fresh).")
             compose.waitUntil(5_000) { compose.isDrawnEnabled(ClaudeAccountsTags.SyncNow) }
             tag(ClaudeAccountsTags.SyncNow).performScrollTo().performClick()

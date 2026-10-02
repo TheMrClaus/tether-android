@@ -63,9 +63,32 @@ class ClaudeLoginLink private constructor(val url: String, val host: String) {
     override fun equals(other: Any?): Boolean = other is ClaudeLoginLink && other.url == url
     override fun hashCode(): Int = url.hashCode()
 
+    /**
+     * r2 (security P3-1): the host as drawn. A long one is cut in the MIDDLE so its END (the
+     * registrable domain, the part that says whose it is) always shows: `claude.ai.oauth.<padding>
+     * .evil.example` keeps `.evil.example`. The host is OkHttp's canonical form (ASCII, punycode).
+     */
+    val shownHost: String
+        get() = if (host.length <= HOST_SHOWN) host else host.take(HOST_HEAD) + "…" + host.takeLast(HOST_SHOWN - HOST_HEAD - 1)
+
+    /** r2 (security P3-1): whether the host is one of Anthropic's own sign-in hosts ([ANTHROPIC_HOSTS]); a warning only, never a refusal. */
+    val anthropic: Boolean get() = host in ANTHROPIC_HOSTS
+
     companion object {
         /** An Anthropic authorize URL with its PKCE challenge and state is ~600 characters. */
         const val MAX_LENGTH = 4096
+
+        /** The most of a host drawn, and how much of its start is kept when it is cut. */
+        const val HOST_SHOWN = 64
+        const val HOST_HEAD = 16
+
+        /**
+         * Anthropic's sign-in hosts, exact. The server and web name none for the login (they relay
+         * whatever `claude auth login` prints); tether 90fbb9f tests/claude-accounts.test.mjs:804 uses
+         * `https://claude.ai/oauth/authorize`. The others are Anthropic's own hosts for the same OAuth
+         * page in other CLI versions (claude.com) and its console sign-in. A small allowlist kept here.
+         */
+        val ANTHROPIC_HOSTS: Set<String> = setOf("claude.ai", "claude.com", "console.anthropic.com", "platform.claude.com")
 
         fun parse(raw: String?): ClaudeLoginLink? {
             if (raw == null || raw.isEmpty() || raw.length > MAX_LENGTH) return null
@@ -137,15 +160,6 @@ interface ClaudeAccountActions {
         fun pollPath(id: String) = "$ACCOUNTS_PATH/$id/login/poll"
         fun codePath(id: String) = "$ACCOUNTS_PATH/$id/login/code"
 
-        /** lib/claude-accounts.mjs NICKNAME_MAX (JS length: UTF-16 units, as Kotlin's). */
-        const val NICKNAME_MAX = 64
-
-        /** The most of a pasted code sent (an Anthropic code with its state is ~100 characters). */
-        const val CODE_MAX = 2048
-
-        /** lib/claude-account-sync.mjs `sanitizeSyncConfig`'s bound on `primaryAccountId`. */
-        const val PRIMARY_MAX = 128
-
         /** A reply is a few hundred bytes; a sync result lists one entry per account and category. */
         const val MAX_BODY_BYTES: Long = 256L * 1024L
 
@@ -188,8 +202,9 @@ class HttpClaudeAccountActions(
     private val route = FixedRouteHttp(http, maxBytes, callTimeoutMs)
 
     override suspend fun add(origin: String, nickname: String): SecurityResult<Unit> {
+        // As the web: only a blank nickname is not sent; the server judges the rest (its 400 is shown).
         val name = nickname.trim()
-        if (name.isEmpty() || name.length > ClaudeAccountActions.NICKNAME_MAX) return SecurityResult.NotSent(origin)
+        if (name.isEmpty()) return SecurityResult.NotSent(origin)
         return call(origin, FixedRouteHttp.Method.POST, ClaudeAccountActions.ACCOUNTS_PATH, buildJsonObject { put("nickname", name) }) { o ->
             if (o["profile"] is JsonObject) Unit else null
         }
@@ -197,7 +212,7 @@ class HttpClaudeAccountActions(
 
     override suspend fun rename(origin: String, accountId: String, nickname: String): SecurityResult<Unit> = withId(origin, accountId) {
         val name = nickname.trim()
-        if (name.isEmpty() || name.length > ClaudeAccountActions.NICKNAME_MAX) return@withId SecurityResult.NotSent(origin)
+        if (name.isEmpty()) return@withId SecurityResult.NotSent(origin)
         call(origin, FixedRouteHttp.Method.POST, ClaudeAccountActions.renamePath(accountId), buildJsonObject { put("nickname", name) }, ::okUnit)
     }
 
@@ -221,7 +236,7 @@ class HttpClaudeAccountActions(
 
     override suspend fun submitCode(origin: String, accountId: String, code: ClaudeLoginCode): SecurityResult<Unit> = withId(origin, accountId) {
         val value = code.reveal()
-        if (value.isEmpty() || value.length > ClaudeAccountActions.CODE_MAX) return@withId SecurityResult.NotSent(origin)
+        if (value.isEmpty()) return@withId SecurityResult.NotSent(origin)
         call(origin, FixedRouteHttp.Method.POST, ClaudeAccountActions.codePath(accountId), buildJsonObject { put("code", value) }, ::okUnit)
     }
 
@@ -237,8 +252,7 @@ class HttpClaudeAccountActions(
             // A mode this client does not know is never written back.
             ClaudeSyncMode.Unknown -> return SecurityResult.NotSent(origin)
         }
-        val primary = config.primaryAccountId
-        if (primary != null && (primary.isEmpty() || primary.length > ClaudeAccountActions.PRIMARY_MAX)) return SecurityResult.NotSent(origin)
+        val primary = config.primaryAccountId?.takeIf { it.isNotEmpty() }
         val body = buildJsonObject {
             put("mode", mode)
             put(

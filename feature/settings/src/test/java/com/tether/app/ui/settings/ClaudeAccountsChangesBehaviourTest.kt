@@ -47,9 +47,11 @@ import org.robolectric.shadows.ShadowLog
 /**
  * ta-7rh: the Claude accounts section's CHANGES (settings-dialog.tsx 887c222 :1380-1867, server
  * 90fbb9f), on a phone and on an expanded window: each sends exactly the web's call for the server
- * drawn from, one at a time; Remove and Log out are asked first and send what the confirmation shows;
- * the login runs start → poll → link → code → success, ends on Cancel, and keeps the code only until it
- * is handed over; a server without #236 (its owner-sign-in 403) is said once and nothing breaks.
+ * drawn from, each key busy on its own as the web's; Log out goes at once and Remove is the web's two
+ * taps within 4 s (r2: no app-only confirmation); the login runs start → poll → link → code → success,
+ * ends on Cancel, its deadline or an error (the server then told), and keeps the code only until it
+ * is handed over; a server without #236 (its owner-sign-in 403) is said and nothing breaks; answers
+ * fold into the state as it is when they land (r2).
  */
 abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayoutClass) {
     private val tmp = TemporaryFolder()
@@ -65,21 +67,20 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     private fun binding(reads: FakeAccounts, actions: FakeAccountActions, opener: LoginLinkOpener = LoginLinkOpener.None, origin: String = ORIGIN) =
         ClaudeAccountsBinding(reads, origin, AccountsFixtures.TIME, actions = actions, opener = opener, pace = fast)
 
-    private fun show(binding: ClaudeAccountsBinding, armMs: Long = 0L) {
+    private fun show(binding: ClaudeAccountsBinding, armMs: Long = 0L, wait: String = "Claude Code (work)") {
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides armMs) {
                 SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = binding)
             }
         }
         compose.waitUntil(5_000) { state.draft != null }
-        waitFor("Claude Code (work)")
+        waitFor(wait)
     }
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
     private fun tap(t: String) {
-        // A dialog's keys (the confirmation) sit in no scrolling body.
-        if (t == ClaudeAccountsTags.ConfirmGo || t == ClaudeAccountsTags.ConfirmCancel) tag(t).performClick() else tag(t).performScrollTo().performClick()
+        tag(t).performScrollTo().performClick()
         compose.waitForIdle()
     }
 
@@ -93,7 +94,6 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
             node.children.forEach(::walk)
         }
         compose.onAllNodesWithTag(ClaudeAccountsTags.Section, useUnmergedTree = true).fetchSemanticsNodes().forEach(::walk)
-        compose.onAllNodesWithTag(ClaudeAccountsTags.ConfirmSheet, useUnmergedTree = true).fetchSemanticsNodes().forEach(::walk)
         return out
     }
 
@@ -164,7 +164,10 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         compose.waitUntil(5_000) { reads.calls.count { it == "list" } == 2 }
     }
 
-    /** One change at a time: two taps in one frame send ONE call (the key's busy is set in the tap's frame). */
+    /**
+     * Each key has its own busy, as each of the web's rows (addBusy, logoutBusyId, …): two taps in one
+     * frame send ONE call (set in the tap's frame), and the other rows stay usable meanwhile.
+     */
     @Test fun twoTapsInOneFrameSendOnce() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
@@ -178,73 +181,115 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         }
         compose.waitForIdle()
         assertEquals(1, actions.calls.count { it.name == "add" })
-        // And while it is in flight every other change rests.
-        tag(ClaudeAccountsTags.login("claude-work")).assertIsNotEnabled()
-        tag(ClaudeAccountsTags.remove("claude-work")).assertIsNotEnabled()
+        tag(ClaudeAccountsTags.AddSubmit).assertIsNotEnabled()
+        waitFor(ClaudeAccountsCopy.ADDING)
+        // The web keeps every other row usable while an Add is in flight.
+        tag(ClaudeAccountsTags.login("claude-work")).assertIsEnabled()
+        tag(ClaudeAccountsTags.remove("claude-work")).assertIsEnabled()
+        tag(ClaudeAccountsTags.logout("claude-work")).assertIsEnabled()
+        // So is the same tap twice on Log out: one call.
+        val logout = tag(ClaudeAccountsTags.logout("claude-work")).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            logout()
+            logout()
+        }
+        compose.waitForIdle()
+        assertEquals(1, actions.calls.count { it.name == "logout" })
+        tag(ClaudeAccountsTags.logout("claude-work")).assertIsNotEnabled()
+        waitFor(ClaudeAccountsCopy.LOGGING_OUT)
     }
 
-    // ---- Remove and Log out: asked first --------------------------------------------------------------
+    // ---- Remove (the web's two taps) and Log out (at once) ---------------------------------------------
 
-    @Test fun removeIsAskedFirstAndSendsWhatTheConfirmationShows() {
+    /** Every text and description drawn on (or in) the key, so its label and its spoken name are both read. */
+    private fun removeKeyText(id: String): String {
+        val out = StringBuilder()
+        fun walk(n: SemanticsNode) {
+            n.config.getOrNull(SemanticsProperties.Text)?.forEach { out.append(it.text).append('|') }
+            n.config.getOrNull(SemanticsProperties.ContentDescription)?.forEach { out.append(it).append('|') }
+            n.children.forEach(::walk)
+        }
+        walk(tag(ClaudeAccountsTags.remove(id)).fetchSemanticsNode())
+        return out.toString()
+    }
+
+    /**
+     * settings-dialog.tsx `armRemove` (:1509-1519): the first tap arms the key ("Confirm remove") and
+     * sends nothing; the second, within CLAUDE_ACCOUNT_REMOVE_ARM_MS (4 s), removes with "Also delete
+     * stored login" as it is THEN (`performRemove` reads deleteCredsById at that moment). No dialog.
+     */
+    @Test fun removeIsTheWebsTwoTapsAndSendsTheBoxAsItIsOnTheSecond() {
         val reads = FakeAccounts()
         val actions = FakeAccountActions()
         show(binding(reads, actions))
+        tap(ClaudeAccountsTags.remove("claude-work"))
+        assertTrue("one tap sends nothing", actions.calls.isEmpty())
+        compose.waitUntil(5_000) { removeKeyText("claude-work").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        // The box is ticked after arming: the second tap sends it ticked, as the web.
         tap(ClaudeAccountsTags.deleteCredentials("claude-work"))
         assertEquals(ToggleableState.On, tag(ClaudeAccountsTags.deleteCredentials("claude-work")).fetchSemanticsNode().config[SemanticsProperties.ToggleableState])
         tap(ClaudeAccountsTags.remove("claude-work"))
-        tag(ClaudeAccountsTags.ConfirmSheet).assertExists()
-        assertTrue(everything().contains(ClaudeAccountsCopy.REMOVE_ALSO_LOGIN))
-        assertTrue(everything().contains(ClaudeAccountsCopy.removeBody("Claude Code (work)")))
-        assertTrue("nothing before the confirmation", actions.calls.isEmpty())
-        // Cancel sends nothing.
-        tap(ClaudeAccountsTags.ConfirmCancel)
-        tag(ClaudeAccountsTags.ConfirmSheet).assertDoesNotExist()
-        assertTrue(actions.calls.isEmpty())
-        // Asked again and confirmed: exactly the shown account and choice.
-        tap(ClaudeAccountsTags.remove("claude-work"))
-        tap(ClaudeAccountsTags.ConfirmGo)
         waitForCall(actions, "remove")
         assertEquals("remove($ORIGIN, claude-work deleteCredentials=true)", actions.calls.single().toString())
+        waitFor(ClaudeAccountsCopy.REMOVING)
         actions.answer("remove", SecurityResult.Ok(removedKept, ORIGIN, null))
         // The server kept the login it does not own: said, not hidden.
         waitFor(ClaudeAccountsCopy.removedKeptLogin("Claude Code (work)"))
         compose.waitUntil(5_000) { reads.calls.count { it == "list" } == 2 }
     }
 
-    @Test fun removeWithoutTheBoxKeepsTheLoginAndSaysSo() {
+    /** The arm lapses after 4 s (the web's timer): a tap after that arms again and sends nothing. */
+    @Test fun anArmedRemoveLapsesAfterFourSeconds() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.remove("claude-fresh"))
-        assertTrue(everything().contains(ClaudeAccountsCopy.REMOVE_KEEPS_LOGIN))
-        tap(ClaudeAccountsTags.ConfirmGo)
+        compose.waitUntil(5_000) { removeKeyText("claude-fresh").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        compose.mainClock.advanceTimeBy(ClaudeAccountsCopy.REMOVE_ARM_MS + 200)
+        compose.waitUntil(5_000) { !removeKeyText("claude-fresh").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        tap(ClaudeAccountsTags.remove("claude-fresh"))
+        assertTrue("a tap after the arm lapsed only arms again", actions.calls.isEmpty())
+        // Positive control: tapped again inside the new window, it goes.
+        tap(ClaudeAccountsTags.remove("claude-fresh"))
         waitForCall(actions, "remove")
         assertEquals("remove($ORIGIN, claude-fresh deleteCredentials=false)", actions.calls.single().toString())
         actions.answer("remove", SecurityResult.Ok(ClaudeAccountRemoved(removed = true, credentialsDeleted = false), ORIGIN, null))
         waitFor(ClaudeAccountsCopy.removed("Claude Code (fresh)"))
     }
 
+    /** One account armed at a time (the web's single armedRemoveId): arming another moves the arm. */
+    @Test fun armingAnotherAccountMovesTheArm() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        tap(ClaudeAccountsTags.remove("claude-work"))
+        tap(ClaudeAccountsTags.remove("claude-fresh"))
+        assertTrue(actions.calls.isEmpty())
+        compose.waitUntil(5_000) { removeKeyText("claude-fresh").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        assertFalse(removeKeyText("claude-work").contains(ClaudeAccountsCopy.CONFIRM_REMOVE))
+        // claude-work is no longer armed: its tap arms it again, it removes nothing.
+        tap(ClaudeAccountsTags.remove("claude-work"))
+        assertTrue(actions.calls.isEmpty())
+        tap(ClaudeAccountsTags.remove("claude-work"))
+        waitForCall(actions, "remove")
+        assertEquals("remove($ORIGIN, claude-work deleteCredentials=false)", actions.calls.single().toString())
+    }
+
     @Test fun theHostDefaultsRemovalSaysItsLoginIsNeverDeleted() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.remove("claude-default"))
-        assertTrue(everything().contains(ClaudeAccountsCopy.REMOVE_HOST_DEFAULT))
-        tap(ClaudeAccountsTags.ConfirmGo)
+        tap(ClaudeAccountsTags.remove("claude-default"))
         waitForCall(actions, "remove")
         actions.answer("remove", SecurityResult.Ok(ClaudeAccountRemoved(removed = false, credentialsDeleted = false), ORIGIN, null))
         waitFor(ClaudeAccountsCopy.notRemoved("Claude Code (default)"))
     }
 
-    // The confirm key's beat (armed only after CONFIRM_ARM_MS, re-armed for a replaced confirmation)
-    // is ArmedConfirmKeyTest's, on a hand-driven clock.
-
-    @Test fun logOutIsAskedFirstThenTheStatusIsCheckedAgain() {
+    /** settings-dialog.tsx `doLogout` (:1541-1555): sent on the tap, nothing asked first; then the status is read again. */
+    @Test fun logOutIsSentAtOnceThenTheStatusIsCheckedAgain() {
         val reads = FakeAccounts()
         val actions = FakeAccountActions()
         show(binding(reads, actions))
+        assertTrue("positive control: nothing before the tap", actions.calls.isEmpty())
         tap(ClaudeAccountsTags.logout("claude-work"))
-        assertTrue(everything().contains(ClaudeAccountsCopy.logoutBody("Claude Code (work)")))
-        assertTrue(actions.calls.isEmpty())
-        tap(ClaudeAccountsTags.ConfirmGo)
         waitForCall(actions, "logout")
         assertEquals("logout($ORIGIN, claude-work)", actions.calls.single().toString())
         actions.answer("logout", SecurityResult.Ok(Unit, ORIGIN, null))
@@ -356,7 +401,12 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     // ---- a server without #236 ----------------------------------------------------------------------
 
-    @Test fun aServerWithoutTheOwnerGradeChangeIsSaidOnceAndNothingBreaks() {
+    /**
+     * The refusal is said (as the web shows a change's error) and nothing is disabled because of it:
+     * reads go on, and the next change is simply sent and clears the note (the web clears a change's
+     * error when it starts). No app-only "Try again" gate.
+     */
+    @Test fun aServerWithoutTheOwnerGradeChangeIsSaidAndNothingBreaks() {
         val reads = FakeAccounts()
         val actions = FakeAccountActions()
         show(binding(reads, actions))
@@ -368,21 +418,22 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         actions.answer("add", SecurityResult.OwnerSignInNeeded(ORIGIN))
         compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
         assertTrue(everything().contains(ClaudeAccountsCopy.OWNER_NEEDED))
-        // Every change rests; reading still works.
         for (id in listOf("claude-default", "claude-work", "claude-fresh")) {
-            tag(ClaudeAccountsTags.login(id)).assertIsNotEnabled()
-            tag(ClaudeAccountsTags.logout(id)).assertIsNotEnabled()
-            tag(ClaudeAccountsTags.remove(id)).assertIsNotEnabled()
+            tag(ClaudeAccountsTags.login(id)).assertIsEnabled()
+            tag(ClaudeAccountsTags.logout(id)).assertIsEnabled()
+            tag(ClaudeAccountsTags.remove(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.check(id)).assertIsEnabled()
         }
-        tag(ClaudeAccountsTags.SyncNow).assertIsNotEnabled()
+        tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
         tap(ClaudeAccountsTags.check("claude-work"))
         waitFor("Logged in — work@example.com")
         assertEquals(listOf("add"), actions.names())
-        // Try again offers the changes again; the next change asks the server again.
-        tap(ClaudeAccountsTags.TryAgain)
+        // The next change is sent as it is on the web, and the note goes while it runs.
+        tap(ClaudeAccountsTags.SyncNow)
+        waitForCall(actions, "runSync")
         tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
-        tag(ClaudeAccountsTags.login("claude-work")).assertIsEnabled()
+        actions.answer("runSync", SecurityResult.OwnerSignInNeeded(ORIGIN))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
     }
 
     @Test fun anOwnerRefusalOfTheLoginDropsItsPanel() {
@@ -425,7 +476,6 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertFalse(everything().any { it.contains("FAKE-OLD-SERVER") })
         // A change now goes to the new server only.
         tap(ClaudeAccountsTags.logout("claude-work"))
-        tap(ClaudeAccountsTags.ConfirmGo)
         waitForCall(actions, "logout")
         assertEquals(OTHER_ORIGIN, actions.calls.last().origin)
     }
@@ -494,6 +544,211 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitFor(ClaudeAccountsCopy.SYNCING)
         actions.answer("runSync", SecurityResult.Ok(ClaudeSyncSaved(AccountsFixtures.SYNC.config, com.tether.app.client.ClaudeSyncResult(1790000000000, "ok", changed = 0, upToDate = 3, error = null)), ORIGIN, null))
         waitFor("0 updated, 3 already current.")
+    }
+
+    // ---- r2: answers fold into the state as it is when they land (verifier P2) ---------------------------
+
+    private fun hooksOn(): ClaudeSyncSaved {
+        val c = AccountsFixtures.SYNC.config
+        return ClaudeSyncSaved(c.copy(categories = c.categories.copy(hooks = true)), AccountsFixtures.SYNC.lastResult)
+    }
+
+    private fun hooks(): ToggleableState = tag(ClaudeAccountsTags.syncCategory("hooks")).fetchSemanticsNode().config[SemanticsProperties.ToggleableState]
+
+    /** Add, then hold the list re-read it triggers; return the gate that releases it. */
+    private fun addWithTheReReadHeld(reads: () -> Int, actions: FakeAccountActions) {
+        tap(ClaudeAccountsTags.Add)
+        tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
+        tap(ClaudeAccountsTags.AddSubmit)
+        waitForCall(actions, "add")
+        actions.answer("add", SecurityResult.Ok(Unit, ORIGIN, null))
+        compose.waitUntil(5_000) { reads() == 2 }
+        compose.waitForIdle()
+    }
+
+    @Test fun aSyncChangeSurvivesAListReReadThatWasInFlightAndTheNextSaveCarriesIt() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var lists = 0
+        val reads = FakeAccounts(listGate = { if (++lists == 2) gate.await() })
+        val actions = FakeAccountActions()
+        show(binding(reads, actions))
+        waitFor("Sync across accounts")
+        addWithTheReReadHeld({ lists }, actions)
+        tap(ClaudeAccountsTags.syncCategory("hooks"))
+        waitForCall(actions, "saveSync")
+        actions.answer("saveSync", SecurityResult.Ok(hooksOn(), ORIGIN, null))
+        compose.waitUntil(5_000) { !actions.pending("saveSync") && compose.isDrawnEnabled(ClaudeAccountsTags.syncCategory("skills")) }
+        assertEquals("positive control: the save turned Hooks on", ToggleableState.On, hooks())
+        // The re-read that was in flight lands now: it must not put the old sync state back.
+        gate.complete(Unit)
+        compose.waitUntil(5_000) { "list" in reads.calls && lists == 2 }
+        compose.waitForIdle()
+        compose.waitForIdle()
+        assertEquals(ToggleableState.On, hooks())
+        tap(ClaudeAccountsTags.syncCategory("skills"))
+        compose.waitUntil(5_000) { actions.calls.count { it.name == "saveSync" } == 2 }
+        val second = actions.calls.filter { it.name == "saveSync" }[1].arg!!
+        assertTrue("the next save keeps Hooks on: $second", second.contains("hooks=true") && second.contains("skills=false"))
+    }
+
+    @Test fun aSyncNowResultSurvivesAListReReadThatWasInFlight() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var lists = 0
+        val reads = FakeAccounts(listGate = { if (++lists == 2) gate.await() })
+        val actions = FakeAccountActions()
+        show(binding(reads, actions))
+        waitFor("Sync across accounts")
+        addWithTheReReadHeld({ lists }, actions)
+        tap(ClaudeAccountsTags.SyncNow)
+        waitForCall(actions, "runSync")
+        actions.answer("runSync", SecurityResult.Ok(ClaudeSyncSaved(AccountsFixtures.SYNC.config, com.tether.app.client.ClaudeSyncResult(1790000000000, "ok", changed = 0, upToDate = 0, error = null)), ORIGIN, null))
+        waitFor("0 updated, 0 already current.")
+        gate.complete(Unit)
+        compose.waitForIdle()
+        compose.waitForIdle()
+        assertTrue(everything().any { it.contains("0 updated, 0 already current.") })
+        assertFalse(everything().any { it.contains("2 updated, 1 already current.") })
+    }
+
+    /** The status fold too: a status answer that lands after a sync change keeps the change. */
+    @Test fun aStatusAnswerFoldsIntoTheStateAsItIsWhenItLands() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val reads = FakeAccounts(statusGate = { gate.await() })
+        val actions = FakeAccountActions()
+        show(binding(reads, actions))
+        waitFor("Sync across accounts")
+        tap(ClaudeAccountsTags.check("claude-work"))
+        compose.waitUntil(5_000) { "status:claude-work" in reads.calls }
+        tap(ClaudeAccountsTags.syncCategory("hooks"))
+        waitForCall(actions, "saveSync")
+        actions.answer("saveSync", SecurityResult.Ok(hooksOn(), ORIGIN, null))
+        compose.waitUntil(5_000) { !actions.pending("saveSync") }
+        compose.waitForIdle()
+        gate.complete(Unit)
+        waitFor("Logged in — work@example.com")
+        assertEquals(ToggleableState.On, hooks())
+    }
+
+    // ---- r2: the poll's deadline and its end (verifier P4, security P4-1, P4-3) -----------------------
+
+    /** A poll that never answers is still ended by the deadline (request time counts), and the server is told. */
+    @Test fun aHungPollIsEndedByTheDeadlineAndTheServerIsTold() {
+        val actions = FakeAccountActions()
+        val reads = FakeAccounts()
+        show(ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions, pace = LoginPollPace(first = 20, next = 20, afterFailure = 20, limitMs = 2_000)))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.PendingUrl, null, false, null), ORIGIN, null))
+        // The first poll is sent and never answered.
+        waitForCall(actions, "pollLogin")
+        compose.mainClock.advanceTimeBy(2_500)
+        waitFor(ClaudeAccountsCopy.LOGIN_TOO_LONG)
+        compose.waitUntil(5_000) { actions.calls.any { it.name == "cancelLogin" } }
+        assertEquals("cancelLogin($ORIGIN, claude-work)", actions.calls.single { it.name == "cancelLogin" }.toString())
+        assertEquals("one poll, hung, then the end", 1, actions.calls.count { it.name == "pollLogin" })
+        tag(ClaudeAccountsTags.code("claude-work")).assertDoesNotExist()
+    }
+
+    @Test fun aLoginThatEndsInAnErrorTellsTheServer() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.PendingUrl, null, false, null), ORIGIN, null))
+        waitForCall(actions, "pollLogin")
+        actions.answer("pollLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.Error, null, false, "Claude login did not complete (exit code 1)."), ORIGIN, null))
+        compose.waitUntil(5_000) { actions.calls.any { it.name == "cancelLogin" } }
+        assertEquals(ORIGIN, actions.calls.single { it.name == "cancelLogin" }.origin)
+    }
+
+    @Test fun aLoginTheServerNoLongerRunsIsNotCancelledAgain() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.PendingUrl, null, false, null), ORIGIN, null))
+        waitForCall(actions, "pollLogin")
+        actions.answer("pollLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.Idle, null, false, null), ORIGIN, null))
+        waitFor(ClaudeAccountsCopy.LOGIN_GONE)
+        compose.mainClock.advanceTimeBy(200)
+        compose.waitForIdle()
+        assertFalse(actions.calls.any { it.name == "cancelLogin" })
+    }
+
+    // ---- r2: the login host (security P3-1) ------------------------------------------------------------
+
+    @Test fun aLongHostKeepsItsEndAndAHostThatIsNotAnthropicsIsSaid() {
+        val evil = ClaudeLoginLink.parse("https://claude.ai.oauth." + ("a".repeat(40) + ".").repeat(2) + "evil.example/oauth/authorize")!!
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions, RecordingOpener()))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, evil, false, null), ORIGIN, null))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.loginNotAnthropic("claude-work")) }
+        assertTrue(everything().contains(ClaudeAccountsCopy.NOT_ANTHROPIC))
+        val caption = everything().single { it.startsWith("Complete sign-in in your browser") }
+        assertTrue(caption, caption.contains(".evil.example)"))
+        // Still a warning, never a refusal: Open is offered.
+        tag(ClaudeAccountsTags.loginOpen("claude-work")).assertIsEnabled()
+    }
+
+    @Test fun anAnthropicHostHasNoWarning() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, link, false, null), ORIGIN, null))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.loginOpen("claude-work")) }
+        tag(ClaudeAccountsTags.loginNotAnthropic("claude-work")).assertDoesNotExist()
+    }
+
+    // ---- r2: the profile id of a look-alike, on its card and its armed Remove (security P4-4) -------------
+
+    /**
+     * Two titles that could pass for each other ("Work" and Cyrillic "W\u043Erk"): each card shows its
+     * profile id, and the armed Remove names the profile it will remove. A title nothing else could
+     * pass for (the control) has neither.
+     */
+    @Test fun aLookAlikesArmedRemoveNamesItsProfileId() {
+        val json = """{"accounts":[{"id":"claude-work","label":"Work"},{"id":"claude-work-2","label":"W\u043Erk"},{"id":"claude-home","label":"Home"}]}"""
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(lists = listOf(com.tether.app.client.ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))), actions), wait = "Home")
+        tag(ClaudeAccountsTags.id("claude-work")).assertExists()
+        tag(ClaudeAccountsTags.id("claude-work-2")).assertExists()
+        tag(ClaudeAccountsTags.id("claude-home")).assertDoesNotExist()
+        tap(ClaudeAccountsTags.remove("claude-work-2"))
+        compose.waitUntil(5_000) { removeKeyText("claude-work-2").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        assertTrue(removeKeyText("claude-work-2"), removeKeyText("claude-work-2").contains("profile claude-work-2"))
+        // The control: the unique title's armed key names no profile.
+        tap(ClaudeAccountsTags.remove("claude-home"))
+        compose.waitUntil(5_000) { removeKeyText("claude-home").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
+        assertFalse(removeKeyText("claude-home"), removeKeyText("claude-home").contains("profile"))
+        assertTrue(actions.calls.isEmpty())
+    }
+
+    // ---- r2: the code field is the web's plain text field (security P4-2, decided by the web) ---------------
+
+    /**
+     * settings-dialog.tsx:1776-1784: `<input type="text">`, no autocomplete or copy guard. The owner's
+     * standing rule: no app-only guard, so the code field is no password field and copy is not taken
+     * away. What does guard the code stays: it lives only in memory and goes once handed over.
+     */
+    @Test fun theCodeFieldIsTheWebsPlainTextField() {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, link, false, null), ORIGIN, null))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.code("claude-work")) }
+        tag(ClaudeAccountsTags.code("claude-work")).performTextReplacement("FAKE-PLAIN-CODE")
+        val node = tag(ClaudeAccountsTags.code("claude-work")).fetchSemanticsNode()
+        // Positive control: the field took the paste, drawn as typed (as the web's).
+        assertEquals("FAKE-PLAIN-CODE", node.config[SemanticsProperties.EditableText].text)
+        assertFalse(node.config.contains(SemanticsProperties.Password))
+        val copy = compose.onAllNodesWithTag(ClaudeAccountsTags.code("claude-work"), useUnmergedTree = true).fetchSemanticsNodes()
+            .flatMap { listOf(it) + generateSequence(it.parent) { p -> p.parent }.toList() }
+            .firstNotNullOfOrNull { it.config.getOrNull(SemanticsActions.CopyText) }
+        assertTrue("no copy guard on the code field", copy == null || copy.label != NoCopyGuardCopy.ACTION_LABEL)
     }
 
     /** Nothing in the section is ever the client's raw state: a seed-free dispose leaves no code anywhere. */

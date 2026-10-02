@@ -29,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** ta-7rh: the section's words for the changes (the web's, where it has them). */
 object ClaudeAccountsCopy {
@@ -77,25 +78,22 @@ object ClaudeAccountsCopy {
     fun openCaption(host: String) = "Complete sign-in in your browser ($host), then come back here and paste the code."
     const val LINK_REFUSED = "The server sent a sign-in link that is not a plain https address, so the app will not open it. Finish this login from the web console."
     const val LINK_UNOPENED = "No browser on this phone could open the link."
+    /** r2 (security P3-1). */
+    const val NOT_ANTHROPIC = "This is not an Anthropic sign-in address. Open it only if you expected this server to send you there."
     const val LOGIN_GONE = "This login is no longer running on the server. Start it again."
     const val LOGIN_TOO_LONG = "The login took too long and was stopped here. Start it again."
 
     /**
      * The owner-grade refusal of a server without tether #236 (it says "needs an owner sign-in"): said
-     * once, with the one way to try again.
+     * as the web shows a change's error; nothing is disabled, and the next change clears it.
      */
     const val OWNER_NEEDED = "This server has not been updated yet to let the app change Claude accounts: it asks for an owner sign-in. Once the server is updated this works from the phone like the web; until then, use the web console."
-    const val TRY_AGAIN = "Try again"
 
-    const val REMOVE_TITLE = "Remove Claude account?"
-    fun removeBody(title: String) = "$title is removed from Tether. Sessions can no longer use it."
-    const val REMOVE_ALSO_LOGIN = "Its stored login is deleted too: signing in again needs a new login."
-    const val REMOVE_KEEPS_LOGIN = "Its stored login stays on the server."
-    const val REMOVE_HOST_DEFAULT = "This is the machine's own Claude login: Tether lists it again on the next read and never deletes its login."
-    const val REMOVE_CONFIRM = "Remove"
-    const val LOGOUT_TITLE = "Log out of this Claude account?"
-    fun logoutBody(title: String) = "$title is signed out on the server. Sessions using it stop working until it is logged in again."
-    const val LOGOUT_CONFIRM = "Log out"
+    /** settings-dialog.tsx:1806 the armed Remove key, and CLAUDE_ACCOUNT_REMOVE_ARM_MS (:1189). */
+    const val CONFIRM_REMOVE = "Confirm remove"
+    const val REMOVE_ARM_MS = 4_000L
+    /** r2 (security P4-4): the armed key names the profile id when the card shows it (look-alike titles). */
+    fun confirmRemoveLabel(title: String, idLine: String?) = "Confirm remove $title" + (idLine?.let { ", profile ${LabelText.visibleValue(it)}" } ?: "")
 
     fun removed(title: String) = "Removed $title."
     fun removedKeptLogin(title: String) = "Removed $title, but its stored login was not deleted: Tether deletes only the logins it keeps itself."
@@ -108,7 +106,7 @@ object ClaudeAccountsCopy {
     fun blocked(code: Int) = "A sign-in page answered instead of Tether (HTTP $code). Nothing was sent past it."
 }
 
-/** What a write is (one at a time, as each of the web's rows has its own busy key). */
+/** What a write is (each row's own busy key, as on the web: settings-dialog.tsx addBusy, renameBusyId, removeBusyId, logoutBusyId, login busy, saving, running). */
 enum class AccountsAction { Add, Rename, Remove, Logout, Login, Code, SyncSave, SyncRun }
 
 /** A line under a card or the section: [error] is the web's `is-warning` note, else a quiet status. */
@@ -122,12 +120,6 @@ data class LoginPanel(
     val error: String? = null,
     val starting: Boolean = false,
 )
-
-/** A confirmation the section asks before a destructive change (the web's two-tap arm, as a dialog). */
-sealed interface AccountsConfirm {
-    data class Remove(val id: String, val title: String, val deleteCredentials: Boolean, val hostDefault: Boolean) : AccountsConfirm
-    data class Logout(val id: String, val title: String) : AccountsConfirm
-}
 
 /** Opens a login link outside the app (the phone's browser). False when nothing could. */
 fun interface LoginLinkOpener {
@@ -169,10 +161,15 @@ data class AccountsWriteSeed(
     val deleteCredentials: Map<String, Boolean> = emptyMap(),
     val lines: Map<String, AccountsLine> = emptyMap(),
     val line: AccountsLine? = null,
-    val confirm: AccountsConfirm? = null,
+    /** The account whose Remove is armed (the web's "Confirm remove"). */
+    val armedRemove: String? = null,
 )
 
-/** The login poll's pace (settings-dialog.tsx `startLogin` / `pollLogin`), and how long it is kept up here. */
+/**
+ * The login poll's pace (settings-dialog.tsx `startLogin` / `pollLogin`), and how long it is kept up
+ * here. r2: [limitMs] is a deadline on the whole poll loop (request time included), on the controller
+ * scope's monotonic clock, never a sum of the waits.
+ */
 data class LoginPollPace(val first: Long = 500L, val next: Long = 1_500L, val afterFailure: Long = 2_000L, val limitMs: Long = 15 * 60_000L)
 
 /**
@@ -181,13 +178,15 @@ data class LoginPollPace(val first: Long = 500L, val next: Long = 1_500L, val af
  * the web's ClaudeAccountsSection is mounted only on its tab; never saved state, so a rotation starts
  * with nothing and sends nothing but the opening reads.
  *
- * - One change in flight at a time ([busy] set in the tap's own frame: a second tap sends nothing);
- *   each is followed by a re-read, as on the web. Nothing is retried.
+ * - Each row's change has its own busy key, as on the web ([busy], set in the tap's own frame: a
+ *   second tap on the same key sends nothing; other rows stay usable); each change is followed by a
+ *   re-read, as on the web. Nothing is retried.
  * - Every answer must be about [origin]; any other is dropped. Every change is sent for [origin] only
  *   (the source refuses another server).
- * - Remove and Log out are asked first ([confirm]).
- * - A server without #236 answers a change 403 "needs an owner sign-in": [ownerNeeded], said once,
- *   and the change controls rest until Try again.
+ * - Log out is sent at once and Remove is the web's two-tap arm ([armedRemove], 4 s), no app-only
+ *   confirmation (the owner's standing rule: the app does what the web does, and asks no more).
+ * - A server without #236 answers a change 403 "needs an owner sign-in": [ownerNeeded] says so, as the
+ *   web shows a change's error; nothing is disabled, and the next change clears it.
  * - A login runs a poll loop per account, stopped by its generation (cancel or a fresh start), a
  *   success, an error, the section closing, or [LoginPollPace.limitMs]. The pasted code lives in
  *   [codes] only until it is handed over, cancelled or the section closes.
@@ -210,9 +209,10 @@ class ClaudeAccountsController(
     var reloads: Int by mutableIntStateOf(0)
         private set
 
-    var busy: AccountsAction? by mutableStateOf(null)
-        private set
-    var busyId: String? by mutableStateOf(null)
+    /** The busy keys ("Action:id"), each set in the tap's own frame. */
+    private var inFlight: Set<String> by mutableStateOf(emptySet())
+    /** Sync saves in flight (the web lets one follow another; "Saving…" while any is). */
+    var syncSaves: Int by mutableIntStateOf(0)
         private set
     var ownerNeeded: Boolean by mutableStateOf(writeSeed?.ownerNeeded == true)
         private set
@@ -237,8 +237,9 @@ class ClaudeAccountsController(
         private set
     var syncLine: AccountsLine? by mutableStateOf(null)
         private set
-    var confirm: AccountsConfirm? by mutableStateOf(writeSeed?.confirm)
+    var armedRemove: String? by mutableStateOf(writeSeed?.armedRemove)
         private set
+    private var armJob: Job? = null
 
     private val generations = HashMap<String, Int>()
     // r3 (ta-9q2): the ids being asked, checked and set synchronously at click time (main thread
@@ -246,11 +247,30 @@ class ClaudeAccountsController(
     // refused however fast the first read returns.
     private val asked = HashSet<String>()
 
-    /** Whether a change may start now (the keys are drawn enabled only then). */
-    val canChange: Boolean get() = origin != null && !ownerNeeded && busy == null && state.listFault == null && state.accounts != null
+    /** Whether changes may be made at all (signed in, the list read): the web draws them once it has the list. */
+    val canChange: Boolean get() = origin != null && state.listFault == null && state.accounts != null
+
+    /** Whether [action] on [id] is in flight (its key then says so and is drawn disabled, as the web's). */
+    fun busy(action: AccountsAction, id: String? = null): Boolean = key(action, id) in inFlight
+
+    private fun key(action: AccountsAction, id: String?) = "${action.name}:${id.orEmpty()}"
 
     fun reload() {
         reloads++
+    }
+
+    /**
+     * r2 (verifier P2): fold a list answer into the state as it is NOW. The caller fetches first and
+     * hands the answer in; nothing suspends between this read of [state] and its write, so a change
+     * that landed while the read was in flight (a sync toggle, a Sync now result) is kept.
+     */
+    fun foldList(answer: com.tether.app.client.ClaudeAccountsResult<List<ClaudeAccount>>) {
+        state = ClaudeAccountsModel.foldList(state, answer, origin)
+    }
+
+    /** As [foldList], for the sync GET. */
+    fun foldSync(answer: com.tether.app.client.ClaudeAccountsResult<ClaudeAccountsSync>) {
+        state = ClaudeAccountsModel.foldSync(state, answer, origin)
     }
 
     // ---- reads (ta-9q2, unchanged) ---------------------------------------------------------------
@@ -265,7 +285,9 @@ class ClaudeAccountsController(
         state = next
         scope.launch {
             try {
-                state = ClaudeAccountsModel.foldStatus(state, id, source.status(id), o)
+                // r2: the answer first, then the state as it is when it lands.
+                val answer = source.status(id)
+                state = ClaudeAccountsModel.foldStatus(state, id, answer, o)
                 withFrameNanos { }
             } finally {
                 asked -= id
@@ -287,7 +309,7 @@ class ClaudeAccountsController(
     }
 
     fun editAdd(text: String) {
-        if (text.length <= ClaudeAccountActions.NICKNAME_MAX) addText = text
+        addText = text
         if (line?.error == true) line = null
     }
 
@@ -321,7 +343,7 @@ class ClaudeAccountsController(
     }
 
     fun editRename(text: String) {
-        if (text.length <= ClaudeAccountActions.NICKNAME_MAX) renameText = text
+        renameText = text
         renaming?.let { id -> if (lines[id]?.error == true) lines = lines - id }
     }
 
@@ -342,65 +364,75 @@ class ClaudeAccountsController(
         }
     }
 
-    // ---- Remove and Log out (asked first) -----------------------------------------------------------
+    // ---- Remove (the web's two-tap arm) and Log out (sent at once, as on the web) ----------------------
 
     fun setDeleteCredentials(id: String, on: Boolean) {
         deleteCredentials = deleteCredentials + (id to on)
     }
 
-    fun askRemove(account: ClaudeAccount, title: String) {
-        if (!canChange || !account.checkable) return
-        confirm = AccountsConfirm.Remove(account.id, title, deleteCredentials[account.id] == true, account.id == ClaudeAccountsPresentation.HOST_DEFAULT_ID)
+    /**
+     * settings-dialog.tsx `armRemove`: the first tap arms this account's Remove ("Confirm remove", for
+     * [ClaudeAccountsCopy.REMOVE_ARM_MS]); a second tap while armed removes it, with the "Also delete
+     * stored login" choice as it is then (the web's `performRemove`). Arming another account moves the arm.
+     */
+    fun tapRemove(account: ClaudeAccount, title: String): Boolean {
+        if (!canChange || !account.checkable || busy(AccountsAction.Remove, account.id)) return false
+        if (armedRemove == account.id) {
+            disarm()
+            return remove(account.id, title)
+        }
+        armJob?.cancel()
+        armedRemove = account.id
+        armJob = scope.launch {
+            delay(ClaudeAccountsCopy.REMOVE_ARM_MS)
+            if (armedRemove == account.id) armedRemove = null
+        }
+        return false
     }
 
-    fun askLogout(account: ClaudeAccount, title: String) {
-        if (!canChange || !account.checkable) return
-        confirm = AccountsConfirm.Logout(account.id, title)
+    private fun disarm() {
+        armJob?.cancel()
+        armJob = null
+        armedRemove = null
     }
 
-    fun dismissConfirm() {
-        confirm = null
-    }
-
-    /** The confirmation's key: what it SHOWS is what is sent. */
-    fun confirmed(shown: AccountsConfirm): Boolean {
-        if (confirm != shown) return false
-        confirm = null
-        return when (shown) {
-            is AccountsConfirm.Remove -> remove(shown)
-            is AccountsConfirm.Logout -> logout(shown)
+    private fun remove(id: String, title: String): Boolean {
+        val delete = deleteCredentials[id] == true
+        return write(AccountsAction.Remove, id) { o ->
+            val r = actions.remove(o, id, delete)
+            if (!mine(r)) return@write
+            if (r is SecurityResult.Ok) {
+                stopLogin(id)
+                deleteCredentials = deleteCredentials - id
+                lines = lines - id
+                line = AccountsLine(
+                    when {
+                        !r.value.removed -> ClaudeAccountsCopy.notRemoved(title)
+                        delete && !r.value.credentialsDeleted -> ClaudeAccountsCopy.removedKeptLogin(title)
+                        else -> ClaudeAccountsCopy.removed(title)
+                    },
+                    error = false,
+                )
+            } else {
+                settle(r, ClaudeAccountsCopy.REMOVE_FAILED) { lines = lines + (id to it) }
+            }
+            reload()
         }
     }
 
-    private fun remove(c: AccountsConfirm.Remove): Boolean = write(AccountsAction.Remove, c.id) { o ->
-        val r = actions.remove(o, c.id, c.deleteCredentials)
-        if (!mine(r)) return@write
-        if (r is SecurityResult.Ok) {
-            stopLogin(c.id)
-            deleteCredentials = deleteCredentials - c.id
-            lines = lines - c.id
-            line = AccountsLine(
-                when {
-                    !r.value.removed -> ClaudeAccountsCopy.notRemoved(c.title)
-                    c.deleteCredentials && !r.value.credentialsDeleted -> ClaudeAccountsCopy.removedKeptLogin(c.title)
-                    else -> ClaudeAccountsCopy.removed(c.title)
-                },
-                error = false,
-            )
-        } else {
-            settle(r, ClaudeAccountsCopy.REMOVE_FAILED) { lines = lines + (c.id to it) }
-        }
-        reload()
-    }
-
-    private fun logout(c: AccountsConfirm.Logout): Boolean = write(AccountsAction.Logout, c.id) { o ->
-        val r = actions.logout(o, c.id)
-        if (!mine(r)) return@write
-        if (r is SecurityResult.Ok) {
-            lines = lines - c.id
-            check(c.id)
-        } else {
-            settle(r, ClaudeAccountsCopy.LOGOUT_FAILED) { lines = lines + (c.id to it) }
+    /** settings-dialog.tsx `doLogout`: sent at once (the web asks nothing first), then the status is read again. */
+    fun logout(account: ClaudeAccount): Boolean {
+        if (!account.checkable) return false
+        val id = account.id
+        return write(AccountsAction.Logout, id) { o ->
+            val r = actions.logout(o, id)
+            if (!mine(r)) return@write
+            if (r is SecurityResult.Ok) {
+                lines = lines - id
+                check(id)
+            } else {
+                settle(r, ClaudeAccountsCopy.LOGOUT_FAILED) { lines = lines + (id to it) }
+            }
         }
     }
 
@@ -433,49 +465,66 @@ class ClaudeAccountsController(
         }
     }
 
+    /**
+     * r2 (verifier P4, security P4-1): the limit is a deadline on the whole loop
+     * ([LoginPollPace.limitMs] of the scope's clock, request time included: a hung poll is cancelled
+     * there), not a sum of the waits. Security P4-3: a login that ends here on its limit, an error
+     * or a failure also tells the server to drop it (the same best-effort cancel as the Cancel key),
+     * so its CLI child does not run on and the next Log in is not refused as already in progress.
+     */
     private fun poll(o: String, id: String, gen: Int) {
         scope.launch {
-            var wait = pace.first
-            var spent = 0L
-            while (spent < pace.limitMs) {
-                delay(wait)
-                spent += wait
-                if (generations[id] != gen) return@launch
-                val r = actions.pollLogin(o, id)
-                if (generations[id] != gen || !mine(r)) return@launch
-                when (r) {
-                    is SecurityResult.Ok -> when (r.value.status) {
-                        ClaudeLoginStatus.Success -> {
-                            dropLogin(id)
-                            check(id)
-                            return@launch
-                        }
-                        ClaudeLoginStatus.Error -> return@launch endLogin(id, r.value.error?.let(LabelText::error)?.takeIf { it.isNotEmpty() } ?: ClaudeAccountsCopy.LOGIN_FAILED)
-                        ClaudeLoginStatus.Idle -> return@launch endLogin(id, ClaudeAccountsCopy.LOGIN_GONE)
-                        else -> {
-                            val now = logins[id] ?: return@launch
-                            logins = logins + (id to now.copy(status = r.value.status, link = r.value.link ?: now.link, linkRefused = r.value.linkRefused || (now.linkRefused && r.value.link == null), starting = false))
-                            wait = pace.next
-                        }
-                    }
-                    is SecurityResult.Unavailable, SecurityResult.LocalNetworkBlocked -> wait = pace.afterFailure
-                    is SecurityResult.OwnerSignInNeeded -> {
-                        dropLogin(id)
-                        ownerNeeded = true
-                        return@launch
-                    }
-                    else -> return@launch endLogin(id, failure(r, ClaudeAccountsCopy.LOGIN_FAILED))
-                }
-            }
-            if (generations[id] == gen) endLogin(id, ClaudeAccountsCopy.LOGIN_TOO_LONG)
+            val ended = withTimeoutOrNull(pace.limitMs) { pollUntilEnd(o, id, gen) }
+            if (ended == null && generations[id] == gen) endLogin(id, ClaudeAccountsCopy.LOGIN_TOO_LONG, tellServer = o)
         }
     }
 
-    /** The panel shows why it ended; the code goes (the web hides the field then). */
-    private fun endLogin(id: String, why: String) {
+    /** The poll loop; returns when the login ended (or is no longer this generation's). */
+    private suspend fun pollUntilEnd(o: String, id: String, gen: Int) {
+        var wait = pace.first
+        while (true) {
+            delay(wait)
+            if (generations[id] != gen) return
+            val r = actions.pollLogin(o, id)
+            if (generations[id] != gen || !mine(r)) return
+            when (r) {
+                is SecurityResult.Ok -> when (r.value.status) {
+                    ClaudeLoginStatus.Success -> {
+                        dropLogin(id)
+                        check(id)
+                        return
+                    }
+                    ClaudeLoginStatus.Error -> return endLogin(id, r.value.error?.let(LabelText::error)?.takeIf { it.isNotEmpty() } ?: ClaudeAccountsCopy.LOGIN_FAILED, tellServer = o)
+                    // Nothing runs on the server any more: nothing to tell it.
+                    ClaudeLoginStatus.Idle -> return endLogin(id, ClaudeAccountsCopy.LOGIN_GONE)
+                    else -> {
+                        val now = logins[id] ?: return
+                        logins = logins + (id to now.copy(status = r.value.status, link = r.value.link ?: now.link, linkRefused = r.value.linkRefused || (now.linkRefused && r.value.link == null), starting = false))
+                        wait = pace.next
+                    }
+                }
+                is SecurityResult.Unavailable, SecurityResult.LocalNetworkBlocked -> wait = pace.afterFailure
+                is SecurityResult.OwnerSignInNeeded -> {
+                    dropLogin(id)
+                    ownerNeeded = true
+                    return
+                }
+                else -> return endLogin(id, failure(r, ClaudeAccountsCopy.LOGIN_FAILED), tellServer = o)
+            }
+        }
+    }
+
+    /**
+     * The panel shows why it ended; the code goes (the web hides the field then). [tellServer]: the
+     * server [origin] to send the best-effort cancel to (null: nothing is sent).
+     */
+    private fun endLogin(id: String, why: String, tellServer: String? = null) {
         codes = codes - id
         val now = logins[id] ?: LoginPanel(ClaudeLoginStatus.Error)
         logins = logins + (id to now.copy(status = ClaudeLoginStatus.Error, error = why, starting = false))
+        if (tellServer != null && tellServer == origin && ClaudeAccountsJson.isAccountId(id)) {
+            tellCancel(tellServer, id)
+        }
     }
 
     private fun dropLogin(id: String) {
@@ -494,12 +543,25 @@ class ClaudeAccountsController(
         val o = origin ?: return
         if (!logins.containsKey(id)) return
         stopLogin(id)
-        if (ClaudeAccountsJson.isAccountId(id)) scope.launch { runCatching { actions.cancelLogin(o, id) } }
+        if (ClaudeAccountsJson.isAccountId(id)) tellCancel(o, id)
+    }
+
+    /** The best-effort cancel (the web's `try { DELETE } catch {}`): its answer changes nothing here. */
+    private fun tellCancel(o: String, id: String) {
+        scope.launch {
+            try {
+                actions.cancelLogin(o, id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // best effort
+            }
+        }
     }
 
     fun editCode(id: String, text: String) {
         if (!logins.containsKey(id)) return
-        if (text.length <= ClaudeAccountActions.CODE_MAX) codes = codes + (id to text)
+        codes = codes + (id to text)
         logins[id]?.let { if (it.error != null && it.status != ClaudeLoginStatus.Error) logins = logins + (id to it.copy(error = null)) }
     }
 
@@ -535,15 +597,17 @@ class ClaudeAccountsController(
     fun saveSync(next: ClaudeSyncConfig): Boolean {
         val before = state.sync ?: return false
         if (before.config.mode == ClaudeSyncMode.Unknown || next.mode == ClaudeSyncMode.Unknown || next == before.config) return false
-        return write(AccountsAction.SyncSave, null) { o ->
+        return write(AccountsAction.SyncSave, null, exclusive = false) { o ->
             syncLine = null
-            state = state.copy(sync = before.copy(config = next))
+            state = state.copy(sync = (state.sync ?: before).copy(config = next))
             val r = actions.saveSync(o, next)
             if (!mine(r) || state.origin != o) return@write
             if (r is SecurityResult.Ok) {
                 state = state.copy(sync = ClaudeAccountsSync(r.value.config, r.value.result))
             } else {
-                if (state.sync?.config == next) state = state.copy(sync = before)
+                // r2: only the config goes back (to the server's), on the state as it is now.
+                val now = state.sync
+                if (now?.config == next) state = state.copy(sync = now.copy(config = before.config))
                 settle(r, ClaudeAccountsCopy.SYNC_SAVE_FAILED) { syncLine = it }
             }
         }
@@ -566,11 +630,6 @@ class ClaudeAccountsController(
     }
 
     // ---- the owner-grade refusal, and the rest ------------------------------------------------------------
-
-    /** "Try again": the change controls are offered again (the next change asks the server again). */
-    fun retryOwner() {
-        ownerNeeded = false
-    }
 
     /** The section closed or the server changed: every loop ends, every code goes, nothing answers here. */
     fun dispose() {
@@ -601,11 +660,18 @@ class ClaudeAccountsController(
         is SecurityResult.Unavailable -> fallback
     }
 
-    private fun write(action: AccountsAction, id: String?, call: suspend (String) -> Unit): Boolean {
+    /**
+     * One change: refused only when signed out, before the list, or when this very key is in flight
+     * ([exclusive]; a sync save may follow another, as on the web). A change clears the owner note (the
+     * web clears a change's error when it starts); a refusal puts it back.
+     */
+    private fun write(action: AccountsAction, id: String?, exclusive: Boolean = true, call: suspend (String) -> Unit): Boolean {
         val o = origin ?: return false
         if (!canChange) return false
-        busy = action
-        busyId = id
+        val k = key(action, id)
+        if (exclusive && k in inFlight) return false
+        ownerNeeded = false
+        if (exclusive) inFlight = inFlight + k else syncSaves++
         scope.launch {
             try {
                 call(o)
@@ -616,8 +682,7 @@ class ClaudeAccountsController(
                 val generic = AccountsLine(ClaudeAccountsCopy.NOT_SENT, error = true)
                 if (id != null) lines = lines + (id to generic) else line = generic
             } finally {
-                busy = null
-                busyId = null
+                if (exclusive) inFlight = inFlight - k else syncSaves--
             }
         }
         return true
@@ -629,7 +694,6 @@ internal object Nickname {
     private val SHAPE = Regex("^Claude Code \\((.*)\\)$", RegexOption.DOT_MATCHES_ALL)
 
     fun of(label: String): String {
-        val nickname = SHAPE.matchEntire(label)?.groupValues?.get(1) ?: label
-        return if (nickname.length <= ClaudeAccountActions.NICKNAME_MAX) nickname else com.tether.app.client.TextCut.cut(nickname, ClaudeAccountActions.NICKNAME_MAX)
+        return SHAPE.matchEntire(label)?.groupValues?.get(1) ?: label
     }
 }

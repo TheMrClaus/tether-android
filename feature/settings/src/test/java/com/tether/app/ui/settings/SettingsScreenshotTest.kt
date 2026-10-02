@@ -78,6 +78,7 @@ enum class SettingsShot(
     EnginesError("settings-engines-error", SettingsTab.Engines, accounts = AccountsShot.Error),
     EnginesOwner("settings-engines-owner", SettingsTab.Engines, accounts = AccountsShot.Owner),
     EnginesLogin("settings-engines-login", SettingsTab.Engines, accounts = AccountsShot.Login),
+    EnginesLoginElsewhere("settings-engines-login-elsewhere", SettingsTab.Engines, accounts = AccountsShot.LoginElsewhere),
     EnginesAdding("settings-engines-adding", SettingsTab.Engines, accounts = AccountsShot.Adding),
     EnginesRename("settings-engines-rename", SettingsTab.Engines, accounts = AccountsShot.Rename),
     Restart("settings-restart", SettingsTab.General, restart = true),
@@ -276,9 +277,11 @@ enum class AccountsShot(val scrollTo: String) {
     Owner(ClaudeAccountsTags.Section),
     /** ta-7rh: a login waiting for its code: the link's host, Open, the empty code field and Submit. */
     Login(ClaudeAccountsTags.loginPanel("claude-work")),
+    /** ta-7rh r2: a login link to a long host that is not Anthropic's: its end shown, the quiet warning. */
+    LoginElsewhere(ClaudeAccountsTags.loginPanel("claude-work")),
     /** ta-7rh: the nickname row open with a name typed, and the server's refusal under it. */
     Adding(ClaudeAccountsTags.AddField),
-    /** ta-7rh: Rename open on "work" (filled with the nickname), and a removal's outcome under another card. */
+    /** ta-7rh: Rename open on "work" (filled with the nickname), its Remove armed ("Confirm remove"), and a failure line under another card. */
     Rename(ClaudeAccountsTags.card("claude-work")),
     ;
 
@@ -288,10 +291,15 @@ enum class AccountsShot(val scrollTo: String) {
         Login -> AccountsWriteSeed(
             logins = mapOf("claude-work" to LoginPanel(com.tether.app.client.ClaudeLoginStatus.AwaitingCode, com.tether.app.client.ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE"))),
         )
+        LoginElsewhere -> AccountsWriteSeed(
+            logins = mapOf("claude-work" to LoginPanel(com.tether.app.client.ClaudeLoginStatus.AwaitingCode, com.tether.app.client.ClaudeLoginLink.parse("https://claude.ai.oauth.sign-in-for-your-account-to-continue-securely.evil.example/oauth/authorize"))),
+        )
         Adding -> AccountsWriteSeed(adding = true, addText = "home", line = AccountsLine(ClaudeAccountsCopy.ADD_FAILED, error = true))
         Rename -> AccountsWriteSeed(
             renaming = "claude-work",
             renameText = "work",
+            // r2: the web's armed Remove ("Confirm remove", tap again within 4 s).
+            armedRemove = "claude-work",
             deleteCredentials = mapOf("claude-fresh" to true),
             lines = mapOf("claude-fresh" to AccountsLine(com.tether.app.client.ClaudeAccountActionCopy.NOT_A_CLAUDE_ACCOUNT, error = true)),
         )
@@ -310,7 +318,7 @@ enum class AccountsShot(val scrollTo: String) {
             sync = AccountsFixtures.SYNC,
         )
         return when (this) {
-            Loaded, Sync, Owner, Login, Adding, Rename -> loaded
+            Loaded, Sync, Owner, Login, LoginElsewhere, Adding, Rename -> loaded
             Loading -> ClaudeAccountsState(origin = origin)
             Blocked -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Blocked(302))
             Error -> ClaudeAccountsState(origin = origin, listFault = AccountsFault.Unavailable(500))
