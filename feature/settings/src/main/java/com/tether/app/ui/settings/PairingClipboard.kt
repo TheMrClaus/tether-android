@@ -3,7 +3,6 @@ package com.tether.app.ui.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
@@ -35,8 +34,8 @@ interface PairingClipboard {
         const val CLEAR_AFTER_MS = 30_000L
         const val CLIP_LABEL = "Tether pairing code"
 
-        /** `ClipDescription.EXTRA_IS_SENSITIVE` (API 33); the same key is honoured by the platform's own preview on earlier releases' backports. */
-        const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
+        /** The platform's own key (API 33; minSdk is above it). */
+        const val EXTRA_IS_SENSITIVE = android.content.ClipDescription.EXTRA_IS_SENSITIVE
     }
 }
 
@@ -74,7 +73,7 @@ class AndroidPairingClipboard(
             // Readable while the app has focus; if it is not, the label (ours alone) is enough.
             val text = m.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
             if (text != null && !MessageDigest.isEqual(digest(text), stamp)) return
-            if (Build.VERSION.SDK_INT >= 28) m.clearPrimaryClip() else m.setPrimaryClip(ClipData.newPlainText("", ""))
+            m.clearPrimaryClip()
         } catch (_: RuntimeException) {
             // Best effort: the clip is marked sensitive either way.
         }
