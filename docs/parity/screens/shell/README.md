@@ -39,12 +39,24 @@ content block is one row shorter, so the centred block sits about 10-30dp lower 
 (2) **Provider logos**: the app's ProviderLogo (designsystem) has only the claude, codex and
 opencode marks. At 887c222 the web also has pi, reasonix/dsh (the DeepSeek whale) and gemini, so the
 app shows those as fallback letters ("RReasonix", "PPi", "DDeepSeek Harness") with no tile. That
-is a ProviderLogo port gap (follow-up bead), not a rule of this screen. (3) The workflow glyphs are
-lucide at the default stroke (2) rather than the web's `strokeWidth={1.7}`. (4) On a phone the copy
+is a ProviderLogo port gap (follow-up ta-d6z), not a rule of this screen. (3) The workflow glyphs
+match the web's: the app's lucide build is older (its git-branch is a different shape), so the
+three are drawn from lucide-react 1.47.0's path data at `strokeWidth={1.7}`. (4) On a phone the copy
 breaks after "progress." rather than before it: the 44ch measure is the same (Manrope "0" = 0.578em),
 but Chromium's advances are about 1.5% wider, so the word does not fit on the web's first line. (5)
 The rest of the red is glyph rasterization. Offline the top bar says "Reconnecting", the keys are
-drawn disabled, and a click on them does nothing, even through accessibility.
+drawn disabled, and a click on them does nothing, even through accessibility. (6) **Open
+workspace's picker** is the interim FolderPickerDialog (T8.2 replaces it with the web's
+folder-picker-dialog), the same one as the drawer's Add workspace. It is hosted at shell level,
+with its own SidebarController instance, so it opens whether or not the rail is showing. Choosing
+a folder pins it (on this device and on the server) and makes it current, like the drawer. The
+preference write runs on the shell's scope, because choosing closes the picker before the write
+runs. r1 ran the write on the picker's own scope, and on a phone the pin was usually lost; tests
+now choose eight folders in a row and wait for each pin. The only remaining difference from the
+drawer: because the drawer's controller tracks its own watch set, it may send one extra workspace
+discovery request after the pin. (7) **Breakpoint**: the welcome switches between its phone and
+desktop layouts at the shell's expanded cutoff (840dp, PLAN D10), not at the web's 48rem media
+query, so a 768-839dp window gets the phone layout.
 
 ## Deliberate deviations (for review)
 
