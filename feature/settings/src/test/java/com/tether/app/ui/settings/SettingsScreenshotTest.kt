@@ -58,6 +58,7 @@ enum class SettingsShot(
     DevicesSessions("settings-devices-sessions", SettingsTab.Devices, devices = DevicesShot.Sessions),
     DevicesPaired("settings-devices-paired", SettingsTab.Devices, devices = DevicesShot.Paired),
     DevicesSelf("settings-devices-self", SettingsTab.Devices, devices = DevicesShot.Self),
+    DevicesTokenPassword("settings-devices-token-password", SettingsTab.Devices, devices = DevicesShot.TokenPassword),
     DevicesCode("settings-devices-code", SettingsTab.Devices, devices = DevicesShot.Code),
     DevicesCodeRevealed("settings-devices-code-revealed", SettingsTab.Devices, devices = DevicesShot.CodeRevealed),
     DevicesCodeExpired("settings-devices-code-expired", SettingsTab.Devices, devices = DevicesShot.CodeExpired),
@@ -124,7 +125,8 @@ enum class NodesShot(
  * (so the first frame is the drawn tab and nothing is read), over a source that fails the shot on
  * any call, the clock fixed. `settings-devices` the top (Notifications, Passkeys), `-sessions` the
  * signed-in sessions (the app's passkey session marked), `-paired` the paired devices with the pair
- * hint and Revoke every device, `-self` a device-token sign-in whose only device is this phone,
+ * hint, `-self` a device-token sign-in whose only device is this phone, `-token-password` the
+ * password switch a device-token sign-in cannot turn off (r2, security F6),
  * `-code` a fresh code masked, `-code-revealed` the same shown (an obviously FAKE code; the one tap
  * of the shot, a synchronous state change on the hand clock), `-code-expired` the expired card,
  * `-owner` the owner-grade refusal before tether #236 is deployed, `-checking` the opening reads in
@@ -135,6 +137,7 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
     Sessions(DevicesTags.Sessions),
     Paired(DevicesTags.Paired),
     Self(DevicesTags.Paired),
+    TokenPassword(DevicesTags.PasswordToggle),
     Code(DevicesTags.Paired),
     CodeRevealed(DevicesTags.Paired, reveal = true),
     CodeExpired(DevicesTags.Paired),
@@ -145,7 +148,8 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
 
     fun seed(): DevicesSeed = when (this) {
         Top, Sessions, Paired -> DevicesFixtures.seed()
-        Self -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, devices = listOf(DevicesFixtures.PHONE))
+        Self -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, devices = listOf(DevicesFixtures.PHONE), sessions = listOf(DevicesFixtures.BROWSER))
+        TokenPassword -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, sessions = listOf(DevicesFixtures.BROWSER))
         Code, CodeRevealed -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE))
         CodeExpired -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE, expiresAt = DevicesFixtures.NOW - 1_000))
         Owner -> DevicesSeed(ownerNeeded = true, signIn = com.tether.app.client.AppSignIn.DeviceToken)
