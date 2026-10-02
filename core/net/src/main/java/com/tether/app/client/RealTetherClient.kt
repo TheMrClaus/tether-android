@@ -814,26 +814,41 @@ class RealTetherClient(
      *  1. /healthz: the native window, as for a password.
      *  2. `POST /api/auth/passkey/login/options {}` (JSON, no Origin: a native caller, so the server
      *     issues the legacy cookie name the app reads) -> `{ challengeId, options }`. The options go to
-     *     the authenticator ONLY when their rpId is this server's host ([PasskeyRules.rpIdMatches]).
+     *     the authenticator ONLY when their rpId is this server's host or a registrable parent of it,
+     *     the browser's rule, and with the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]).
      *  3. `POST /api/auth/passkey/login/verify {challengeId, response}` -> 200 + the session cookie,
      *     adopted exactly like a password sign-in's (sealed by the store, sent with the console Origin).
      * Nothing is retried: a challenge is single use, and a dismissed prompt sends nothing more.
+     * ta-coik.1: steps 0-2 are [passkeyLoginStart], step 3 [passkeyLoginFinish] (the autofill offer
+     * runs them apart, as the web's conditional ceremony does).
      */
     override suspend fun passkeyLogin(baseUrl: String, passkeys: PasskeyAuthenticator): LoginResult = withContext(Dispatchers.IO) {
+        val request = when (val start = passkeyLoginStart(baseUrl, passkeys.available)) {
+            is PasskeyLoginStart.Ready -> start.request
+            is PasskeyLoginStart.Refused -> return@withContext start.result
+        }
+        // The ceremony (the authenticator moves to the main thread itself).
+        passkeyLoginFinish(request, passkeys.authenticate(request.requestJson()))
+    }
+
+    override suspend fun passkeyLoginStart(baseUrl: String): PasskeyLoginStart = passkeyLoginStart(baseUrl, available = true)
+
+    private suspend fun passkeyLoginStart(baseUrl: String, available: Boolean): PasskeyLoginStart = withContext(Dispatchers.IO) {
+        fun refused(result: LoginResult) = PasskeyLoginStart.Refused(result)
         val normalized = normalizeBaseUrl(baseUrl)
-            ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
+            ?: return@withContext refused(LoginResult.Unreachable("That server URL is not valid."))
         // r2 (security F1): https only, decided before anything is sent (see Passkeys.kt).
-        if (!PasskeyRules.ceremonyAllowed(normalized)) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.NEEDS_HTTPS)
-        if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
-        if (!passkeys.available) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED)
+        if (!PasskeyRules.ceremonyAllowed(normalized)) return@withContext refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.NEEDS_HTTPS))
+        if (blockedBeforeConnect(normalized)) return@withContext refused(LoginResult.LocalNetworkBlocked)
+        if (!available) return@withContext refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED))
 
         val health = try {
             probeHealth(normalized)
         } catch (e: IOException) {
-            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
-            return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
+            if (blockedAfterFailure(normalized, e)) return@withContext refused(LoginResult.LocalNetworkBlocked)
+            return@withContext refused(LoginResult.Unreachable(e.message ?: "The server could not be reached."))
         }
-        health.incompatibility()?.let { return@withContext LoginResult.VersionMismatch(it) }
+        health.incompatibility()?.let { return@withContext refused(LoginResult.VersionMismatch(it)) }
 
         // 2. The challenge.
         val challenge = try {
@@ -845,21 +860,24 @@ class RealTetherClient(
             ).execute().use { response ->
                 when (response.code) {
                     200 -> readCappedJson(response)?.let { PasskeyRules.challenge(it, PasskeyPurpose.Login) }
-                        ?: return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNREADABLE)
-                    else -> return@withContext passkeyRefusal(response)
+                        ?: return@withContext refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.UNREADABLE))
+                    else -> return@withContext refused(passkeyRefusal(response))
                 }
             }
         } catch (e: IOException) {
-            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
-            return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
+            if (blockedAfterFailure(normalized, e)) return@withContext refused(LoginResult.LocalNetworkBlocked)
+            return@withContext refused(LoginResult.Unreachable(e.message ?: "The server could not be reached."))
         }
-        // The anti-relay guard: only this server's own relying party is ever asked for.
-        if (!PasskeyRules.rpIdMatches(challenge.rpId, normalized)) {
-            return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP)
-        }
+        // The anti-relay guard: only this server's own relying party (its host or a registrable parent,
+        // as a browser allows) is ever asked for, and under the spelling that was checked.
+        val requestJson = PasskeyRules.ceremonyOptions(challenge, normalized)
+            ?: return@withContext refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP))
+        PasskeyLoginStart.Ready(PasskeyLoginRequest(normalized, challenge.challengeId, requestJson))
+    }
 
-        // The ceremony (the authenticator moves to the main thread itself).
-        val answer = when (val ceremony = passkeys.authenticate(challenge.optionsJson())) {
+    override suspend fun passkeyLoginFinish(request: PasskeyLoginRequest, ceremony: PasskeyCeremony): LoginResult = withContext(Dispatchers.IO) {
+        val normalized = request.server
+        val answer = when (ceremony) {
             is PasskeyCeremony.Done -> PasskeyRules.response(ceremony)
                 ?: return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNREADABLE_ANSWER)
             PasskeyCeremony.Dismissed -> return@withContext LoginResult.PasskeyDismissed
@@ -867,10 +885,12 @@ class RealTetherClient(
             PasskeyCeremony.Unsupported -> return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED)
             PasskeyCeremony.Duplicate, PasskeyCeremony.Failed -> return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.FAILED)
         }
+        // r2 (security F1), held: a request is only ever minted for https, so the answer only goes over https.
+        if (!PasskeyRules.ceremonyAllowed(normalized)) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.NEEDS_HTTPS)
 
         // 3. The signed answer.
         val body = buildJsonObject {
-            put("challengeId", JsonPrimitive(challenge.challengeId))
+            put("challengeId", JsonPrimitive(request.challengeId))
             put("response", answer)
         }.toString()
         try {

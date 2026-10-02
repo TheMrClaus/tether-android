@@ -22,7 +22,9 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.CredentialRequestData
 import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.credentialRequest
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.VisualTransformation
@@ -87,6 +89,12 @@ fun TetherInputWell(
      * the editable node itself so a password manager never has to guess which field is which.
      */
     contentType: ContentType? = null,
+    /**
+     * ta-coik.1: a pending Credential Manager request on the same editable node (the web's
+     * `autocomplete="… webauthn"`): from Android 15 an autofill service lists its passkey among the
+     * field's suggestions. Ignored below API 35.
+     */
+    credentialRequest: CredentialRequestData? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -110,7 +118,16 @@ fun TetherInputWell(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier
-                .then(if (contentType != null) Modifier.semantics { this.contentType = contentType } else Modifier)
+                .then(
+                    if (contentType != null || credentialRequest != null) {
+                        Modifier.semantics {
+                            if (contentType != null) this.contentType = contentType
+                            if (credentialRequest != null) this.credentialRequest = credentialRequest
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
                 .fillMaxWidth()
                 .padding(horizontal = t.css.spaceMd, vertical = 11.dp),
             enabled = enabled,

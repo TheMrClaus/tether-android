@@ -39,6 +39,8 @@ class PasskeyRulesTest {
     private fun obj(text: String) = TetherJson.parseToJsonElement(text) as JsonObject
 
     // ---- the anti-relay guard -----------------------------------------------------------------
+    // ta-coik.1: the parent-domain, public-suffix, IDN, trailing-dot and IP cases are in
+    // PasskeyRelyingPartyTest (Robolectric: the Public Suffix List is an Android asset).
 
     @Test fun onlyTheServersOwnHostIsARelyingPartyTheAppWillAskFor() {
         val server = "https://console.example.test".toHttpUrl()
@@ -47,7 +49,6 @@ class PasskeyRulesTest {
         assertTrue("the port is not part of an rpId", PasskeyRules.rpIdMatches("console.example.test", "https://console.example.test:8443".toHttpUrl()))
         for (other in listOf(
             "other-console.example.test", // another Tether console vouching for the same app
-            "example.test", // a parent domain: a browser allows it, the app does not (fail closed)
             "evil.console.example.test", // a child
             "console.example.test.evil", // a suffix trick
             "xconsole.example.test",
@@ -76,22 +77,20 @@ class PasskeyRulesTest {
     }
 
     /**
-     * r2 (security F2): ASCII only. Unicode case folding maps a dotless ı to I, a long ſ to S and the
-     * Kelvin sign to k, so each would have matched a host with i, s or k; each is refused. An IDN host
-     * arrives from OkHttp as punycode, and the same punycode rpId matches (the positive control).
+     * r2 (security F2), as ta-coik.1 keeps it: never Unicode case folding (which maps a dotless \u0131
+     * to I, so it would match a host with i); the rpId is parsed as a browser parses a host (UTS #46,
+     * then punycode), and what is checked is what Credential Manager is given (PasskeyRelyingPartyTest).
      */
-    @Test fun theRpIdIsComparedAsAsciiOnly() {
+    @Test fun theRpIdIsComparedAsTheHostItParsesTo() {
         val server = "https://kiosk.example.test".toHttpUrl()
         assertTrue("control", PasskeyRules.rpIdMatches("kiosk.example.test", server))
         assertTrue("ASCII case is still ignored", PasskeyRules.rpIdMatches("KIOSK.Example.TEST", server))
-        for (lookalike in listOf("k\u0131osk.example.test", "kio\u017Fk.example.test", "\u212Aiosk.example.test")) {
-            assertTrue("control: Unicode folding would accept '$lookalike'", lookalike.equals("kiosk.example.test", ignoreCase = true))
-            assertFalse("refused: '$lookalike'", PasskeyRules.rpIdMatches(lookalike, server))
-        }
+        assertTrue("control: Unicode folding would accept it", "k\u0131osk.example.test".equals("kiosk.example.test", ignoreCase = true))
+        assertFalse("the dotless \u0131 is another host", PasskeyRules.rpIdMatches("k\u0131osk.example.test", server))
         val idn = "https://b\u00FCcher.example".toHttpUrl()
         assertEquals("xn--bcher-kva.example", idn.host)
         assertTrue("the punycode rpId of an IDN host", PasskeyRules.rpIdMatches("xn--bcher-kva.example", idn))
-        assertFalse("its Unicode spelling is not ASCII", PasskeyRules.rpIdMatches("b\u00FCcher.example", idn))
+        assertEquals("its Unicode spelling, handed over as punycode", "xn--bcher-kva.example", PasskeyRules.relyingParty("b\u00FCcher.example", idn))
     }
 
     // ---- the options answers ------------------------------------------------------------------

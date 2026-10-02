@@ -103,6 +103,22 @@ interface TetherClient {
         LoginResult.PasskeyFailed("Passkey sign-in is not available.")
 
     /**
+     * ta-coik.1: the first half of [passkeyLogin] (everything up to the prompt: /healthz, the options,
+     * the rpId rule), for the web's conditional offer (use-login-flow.ts `runPasskeyCeremony({
+     * conditional: true })`), which asks for a challenge as soon as a passkey is ready and holds it
+     * until the operator picks the passkey from the sign-in field's suggestions.
+     */
+    suspend fun passkeyLoginStart(baseUrl: String): PasskeyLoginStart =
+        PasskeyLoginStart.Refused(LoginResult.PasskeyFailed("Passkey sign-in is not available."))
+
+    /**
+     * ta-coik.1: the second half: [ceremony] (the authenticator's answer to [request]) sent to the server
+     * [request] came from, `POST /api/auth/passkey/login/verify`, the session adopted as [passkeyLogin]'s.
+     */
+    suspend fun passkeyLoginFinish(request: PasskeyLoginRequest, ceremony: PasskeyCeremony): LoginResult =
+        LoginResult.PasskeyFailed("Passkey sign-in is not available.")
+
+    /**
      * The unauthenticated sign-in probe (`GET /api/auth/session`, no credential
      * sent): what the login screen needs to choose its fields, like the web's
      * use-login-flow. Null when the server cannot be asked (bad URL, unreachable,

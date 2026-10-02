@@ -1,7 +1,10 @@
 package com.tether.app.client
 
 import android.app.Activity
+import android.os.Build
+import android.os.OutcomeReceiver
 import androidx.credentials.CreatePublicKeyCredentialRequest
+import androidx.credentials.Credential
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -28,7 +31,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T10.5: passkeys through Android Credential Manager, the app's side of the web's two WebAuthn
@@ -43,15 +46,24 @@ import java.util.Locale
 // from it is an "app-passkey" cookie session (owner-grade since tether #236).
 //
 // SECURITY (the guard a browser gives the web for free): a browser binds every ceremony to the page's
-// origin, so a page can only ask for its own site's passkeys. The app's origin is the same for EVERY
-// Tether server, so a server could hand the app options naming ANOTHER console's rpId and relay the
-// signed answer there. The app therefore asks Credential Manager only for the rpId of the server it
-// is talking to ([PasskeyRules.rpIdMatches]); anything else is refused before any prompt appears.
-// r2 (security F1): and only over https. Neither the rpId nor the android origin carries a scheme, so
-// over http an on-path attacker posing as the server could pass the real server's options through and
-// relay the answer to its https console. No ceremony starts and nothing is sent for an http server,
-// loopback included. (Residual: neither carries a port either, so any service on the same hostname,
-// on any port, could relay an app passkey the same way.)
+// origin, so a page can only ask for passkeys of its own site: the rpId must be the page's host or a
+// registrable domain suffix of it (WebAuthn §5.1.3/§5.1.4 step 8, HTML "is a registrable domain
+// suffix of or is equal to"). The app's origin is the same for EVERY Tether server, so the app applies
+// that same rule itself against the server it is talking to ([PasskeyRules.relyingParty]): the host,
+// or a parent of it that is not a public suffix (Public Suffix List, the one OkHttp ships), compared
+// as canonical ASCII. Anything else is refused before any prompt appears, and Credential Manager is
+// handed the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]), never another spelling.
+// ta-coik.1: this replaces T10.5's exact-host-only rule (a browser allows the parent; so does the app).
+// r2 (security F1): and only over https, as a browser requires a secure context. Neither the rpId nor
+// the android origin carries a scheme, so over http an on-path attacker posing as the server could pass
+// the real server's options through and relay the answer to its https console. No ceremony starts and
+// nothing is sent for an http server, loopback included. A browser also counts http://localhost as a
+// secure context; the app does not need that exception, because Credential Manager verifies the rpId
+// against https://<rpId>/.well-known/assetlinks.json and cannot do so for localhost (or an IP address,
+// which WebAuthn refuses as an rpId anyway), so a passkey cannot work there whatever the app allowed.
+// (Residual: neither carries a port either, so any service on the same hostname, on any port, could
+// relay an app passkey the same way; with a parent rpId, so could any host under that parent, exactly
+// as any page under that parent can in a browser.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** What one passkey ceremony came to. */
@@ -94,6 +106,21 @@ interface PasskeyAuthenticator {
 
     suspend fun authenticate(requestJson: String): PasskeyCeremony
 
+    /**
+     * ta-coik.1: whether this phone can offer a passkey among a sign-in field's autofill suggestions
+     * (the web's `browserSupportsWebAuthnAutofill()`). Android 15 (API 35) and later: the framework's
+     * pending credential request on an autofill node. False here unless an authenticator says so.
+     */
+    val autofillAvailable: Boolean get() = false
+
+    /**
+     * ta-coik.1: the web's conditional ceremony for [requestJson]: an offer a sign-in field carries
+     * (Compose `semantics { credentialRequest }`), answered through [onAnswer] at most once, when the
+     * operator picks the passkey from the field's suggestions (or the pick fails). Null when
+     * [autofillAvailable] is false.
+     */
+    fun autofillOffer(requestJson: String, onAnswer: (PasskeyCeremony) -> Unit): PasskeyAutofillOffer? = null
+
     /** No authenticator (previews, fakes): nothing is ever offered. */
     object None : PasskeyAuthenticator {
         override val available: Boolean get() = false
@@ -109,9 +136,57 @@ enum class PasskeyPurpose { Register, Login }
  * as they came, [rpId] is the relying party they ask for. Single use (the server burns it on the first
  * verify). Not a data class; prints nothing of the challenge.
  */
-class PasskeyChallenge internal constructor(val challengeId: String, val options: JsonObject, val rpId: String) {
+class PasskeyChallenge internal constructor(
+    val challengeId: String,
+    val options: JsonObject,
+    val rpId: String,
+    private val purpose: PasskeyPurpose,
+) {
+    /** The options as they came. What goes to Credential Manager is [PasskeyRules.ceremonyOptions]. */
     fun optionsJson(): String = options.toString()
+
+    /**
+     * The options naming [relyingParty] (the canonical spelling [PasskeyRules.relyingParty] checked) in
+     * the field this purpose reads: `rp.id` for a registration, `rpId` for a sign-in. Identical to
+     * [optionsJson] when the server already sent it that way (lower-case ASCII), which a Tether server does.
+     */
+    internal fun optionsJsonFor(relyingParty: String): String {
+        if (relyingParty == rpId) return optionsJson()
+        val named = when (purpose) {
+            PasskeyPurpose.Register -> {
+                val rp = options["rp"] as? JsonObject ?: return optionsJson()
+                JsonObject(options + ("rp" to JsonObject(rp + ("id" to JsonPrimitive(relyingParty)))))
+            }
+            PasskeyPurpose.Login -> JsonObject(options + ("rpId" to JsonPrimitive(relyingParty)))
+        }
+        return named.toString()
+    }
+
     override fun toString(): String = "PasskeyChallenge(rpId=$rpId)"
+}
+
+/**
+ * ta-coik.1: a sign-in challenge that passed [PasskeyRules.ceremonyOptions] for [server]: what the
+ * authenticator is given ([requestJson], the canonical rpId in it) and, once the operator answers, which
+ * server and challenge the answer goes back to ([TetherClient.passkeyLoginFinish]). Minted only by the
+ * client that asked for it. Single use. Not a data class; prints nothing of the challenge.
+ */
+class PasskeyLoginRequest internal constructor(
+    val server: HttpUrl,
+    internal val challengeId: String,
+    private val requestJson: String,
+) {
+    fun requestJson(): String = requestJson
+    override fun toString(): String = "PasskeyLoginRequest(${server.host})"
+}
+
+/** ta-coik.1: the first half of a passkey sign-in ([TetherClient.passkeyLoginStart]). */
+sealed interface PasskeyLoginStart {
+    /** A checked challenge, ready for a prompt or an autofill offer. */
+    class Ready(val request: PasskeyLoginRequest) : PasskeyLoginStart
+
+    /** No challenge: what [TetherClient.passkeyLogin] would have answered instead. */
+    data class Refused(val result: LoginResult) : PasskeyLoginStart
 }
 
 /** The pure rules, tested on their own. */
@@ -135,7 +210,7 @@ object PasskeyRules {
             PasskeyPurpose.Register -> string((options["rp"] as? JsonObject)?.get("id"))
             PasskeyPurpose.Login -> string(options["rpId"])
         } ?: return null
-        return PasskeyChallenge(id, options, rpId)
+        return PasskeyChallenge(id, options, rpId, purpose)
     }
 
     /** r2 (security F1): a ceremony runs only against an https server (no loopback exception). */
@@ -145,18 +220,107 @@ object PasskeyRules {
     fun ceremonyAllowed(origin: String): Boolean = origin.toHttpUrlOrNull()?.let(::ceremonyAllowed) == true
 
     /**
-     * The anti-relay guard (see the file header): an https server, and options naming exactly its host.
-     * A browser also allows a parent domain; the app does not (fail closed). r2 (security F2): compared
-     * as ASCII only: OkHttp's host is already lower-case ASCII (an IDN as punycode), so a non-ASCII rpId
-     * is refused and the rest is compared after an ASCII-only lower-casing (`Locale.ROOT`), never by
-     * Unicode case folding (which would let a dotless ı, a long ſ or the Kelvin sign stand in for i, s, k).
+     * The anti-relay guard (see the file header), the browser's own rule: for an https [server], the
+     * relying party [rpId] names as canonical ASCII when it is the server's host or a registrable domain
+     * suffix of it; null otherwise. WebAuthn §5.1.3/§5.1.4 step 8 by way of HTML's "is a registrable
+     * domain suffix of or is equal to":
+     *  - the rpId is parsed as a host, as a browser's URL host parser does it: percent-decoded, UTS #46
+     *    mapped (so ASCII case and compatibility forms fold the way a browser folds them) and punycoded
+     *    (OkHttp's own IDNA table, identical on the JVM and Android). r2 (security F2) stays closed a
+     *    different way: the spelling that is checked is the spelling Credential Manager is given
+     *    ([ceremonyOptions]), so no lookalike can be checked as one name and signed as another;
+     *  - it must be a valid domain: no forbidden domain code point, not an IP address (WebAuthn refuses
+     *    an IP origin and an IP rpId; nor could Credential Manager verify assetlinks for one);
+     *  - equal to the server's host: allowed;
+     *  - otherwise the host must end with "." + rpId, the rpId must not be a public suffix, and both must
+     *    share one registrable domain (Public Suffix List, private section included, as browsers use it;
+     *    a trailing dot handled as the URL Standard's "public suffix" does). `co.uk`, `github.io` or a
+     *    bare TLD are refused; so is anything the list cannot be read for (fail closed: the exact host
+     *    still works).
      */
-    fun rpIdMatches(rpId: String, server: HttpUrl): Boolean =
-        ceremonyAllowed(server) && rpId.isNotEmpty() && rpId.all { it.code < 0x80 } && rpId.lowercase(Locale.ROOT) == server.host
+    fun relyingParty(rpId: String, server: HttpUrl): String? = relyingParty(rpId, server, ::registrableDomainOf)
+
+    /** [relyingParty] with the PSL lookup handed in (tests: the fail-closed path). */
+    internal fun relyingParty(rpId: String, server: HttpUrl, registrable: (String) -> String?): String? {
+        if (!ceremonyAllowed(server)) return null
+        val host = server.host
+        if (!isValidDomain(host)) return null
+        val rp = canonicalHost(rpId)?.takeIf(::isValidDomain) ?: return null
+        if (rp == host) return rp
+        if (!host.endsWith(".$rp")) return null
+        val rpRegistrable = registrable(rp) ?: return null // rp is a public suffix (or the list is unreadable)
+        val hostRegistrable = registrable(host) ?: return null
+        return rp.takeIf { rpRegistrable == hostRegistrable }
+    }
+
+    /** [relyingParty] against a canonical origin (`https://host[:port]`). */
+    fun relyingParty(rpId: String, origin: String): String? =
+        origin.toHttpUrlOrNull()?.let { relyingParty(rpId, it) }
+
+    fun rpIdMatches(rpId: String, server: HttpUrl): Boolean = relyingParty(rpId, server) != null
 
     /** [rpIdMatches] against a canonical origin (`https://host[:port]`). */
-    fun rpIdMatches(rpId: String, origin: String): Boolean =
-        origin.toHttpUrlOrNull()?.let { rpIdMatches(rpId, it) } == true
+    fun rpIdMatches(rpId: String, origin: String): Boolean = relyingParty(rpId, origin) != null
+
+    /**
+     * What Credential Manager is given for [challenge] from [server]: its options naming the canonical
+     * relying party [relyingParty] checked, or null (no prompt) when that rule refuses it.
+     */
+    fun ceremonyOptions(challenge: PasskeyChallenge, server: HttpUrl): String? =
+        relyingParty(challenge.rpId, server)?.let(challenge::optionsJsonFor)
+
+    /** [ceremonyOptions] against a canonical origin (`https://host[:port]`). */
+    fun ceremonyOptions(challenge: PasskeyChallenge, origin: String): String? =
+        origin.toHttpUrlOrNull()?.let { ceremonyOptions(challenge, it) }
+
+    /**
+     * [raw] parsed as a host (OkHttp's canonical form: percent-decoded, IDNA-mapped, punycode, lower
+     * case), or null when it is not one. Only the host component is set, so no URL syntax in [raw] can
+     * move a boundary; OkHttp refuses its own invalid host characters, and the URL Standard's remaining
+     * forbidden domain code points are refused here.
+     */
+    private fun canonicalHost(raw: String): String? {
+        if (raw.isEmpty()) return null
+        val host = try {
+            HttpUrl.Builder().scheme("https").host(raw).build().host
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        return host.takeIf { h -> h.isNotEmpty() && h.none { it.code <= 0x20 || it.code >= 0x7F || it in FORBIDDEN_DOMAIN_CHARS } }
+    }
+
+    /** URL Standard "forbidden domain code point" (ASCII part; controls, space and DEL are checked apart). */
+    private const val FORBIDDEN_DOMAIN_CHARS = "#%/:<>?@[\\]^|"
+
+    /**
+     * A domain, not an IP address: no ':' (IPv6, as OkHttp prints it) and not "ending in a number" (the
+     * URL Standard's IPv4 test: the last label, a trailing dot aside, all digits or `0x` hex).
+     */
+    private fun isValidDomain(host: String): Boolean {
+        if (host.isEmpty() || ':' in host) return false
+        val last = host.removeSuffix(".").substringAfterLast('.')
+        if (last.isEmpty()) return false
+        if (last.all { it in '0'..'9' }) return false
+        if ((last.startsWith("0x") || last.startsWith("0X")) && last.drop(2).all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return false
+        return true
+    }
+
+    /**
+     * The registrable domain (eTLD+1) of a canonical [host] by the Public Suffix List OkHttp ships
+     * (`HttpUrl.topPrivateDomain`, the list's private section included); null for a public suffix, or
+     * when the list cannot be read. A trailing dot is set aside for the lookup and kept on the answer,
+     * as the URL Standard's "obtain a public suffix" does.
+     */
+    private fun registrableDomainOf(host: String): String? {
+        val dot = if (host.endsWith(".")) "." else ""
+        val bare = host.removeSuffix(".")
+        if (bare.isEmpty()) return null
+        return try {
+            HttpUrl.Builder().scheme("https").host(bare).build().topPrivateDomain()?.let { it + dot }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * The authenticator's answer as the JSON object the verify route takes, or null when it is too
@@ -187,6 +351,12 @@ object PasskeyRules {
 class CredentialManagerPasskeys(private val activity: () -> Activity?) : PasskeyAuthenticator {
     override val available: Boolean get() = true
 
+    /** ta-coik.1: `ViewStructure#setPendingCredentialRequest`, which Compose fills in from API 35. */
+    override val autofillAvailable: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+
+    override fun autofillOffer(requestJson: String, onAnswer: (PasskeyCeremony) -> Unit): PasskeyAutofillOffer? =
+        if (autofillAvailable) PasskeyAutofillOffer.of(requestJson, onAnswer) else null
+
     override suspend fun register(requestJson: String): PasskeyCeremony = withContext(Dispatchers.Main) {
         val a = activity()?.takeIf { !it.isFinishing && !it.isDestroyed } ?: return@withContext PasskeyCeremony.Failed
         try {
@@ -208,6 +378,62 @@ class CredentialManagerPasskeys(private val activity: () -> Activity?) : Passkey
             throw e
         } catch (e: GetCredentialException) {
             CredentialManagerOutcomes.of(e)
+        }
+    }
+}
+
+/**
+ * ta-coik.1: one autofill-style passkey offer: the framework request a sign-in field's autofill node
+ * carries ([request], built as androidx's own conversion builds it, from the same
+ * [GetPublicKeyCredentialOption] a prompt uses) and the receiver the framework answers once the
+ * operator picks the passkey ([receiver]: [onAnswer] at most once; a cancel or any error is
+ * [PasskeyCeremony.Dismissed] / [PasskeyCeremony.Failed], which the login screen keeps quiet, as the
+ * web keeps an unused conditional offer quiet). Prints nothing of the request.
+ */
+class PasskeyAutofillOffer private constructor(
+    val request: android.credentials.GetCredentialRequest,
+    val receiver: OutcomeReceiver<android.credentials.GetCredentialResponse, android.credentials.GetCredentialException>,
+) {
+    override fun toString(): String = "PasskeyAutofillOffer(***)"
+
+    companion object {
+        /** The offer for [requestJson] (options [PasskeyRules.ceremonyOptions] checked). */
+        fun of(requestJson: String, onAnswer: (PasskeyCeremony) -> Unit): PasskeyAutofillOffer {
+            val option = GetPublicKeyCredentialOption(requestJson)
+            val metadata = GetCredentialRequest.getRequestMetadataBundle(GetCredentialRequest(listOf(option)))
+            val request = android.credentials.GetCredentialRequest.Builder(metadata)
+                .addCredentialOption(
+                    android.credentials.CredentialOption.Builder(option.type, option.requestData, option.candidateQueryData)
+                        .setIsSystemProviderRequired(option.isSystemProviderRequired)
+                        .setAllowedProviders(option.allowedProviders)
+                        .build(),
+                )
+                .build()
+            val answered = AtomicBoolean(false)
+            fun answer(c: PasskeyCeremony) {
+                if (answered.compareAndSet(false, true)) onAnswer(c)
+            }
+            val receiver = object : OutcomeReceiver<android.credentials.GetCredentialResponse, android.credentials.GetCredentialException> {
+                override fun onResult(result: android.credentials.GetCredentialResponse) {
+                    val credential = try {
+                        Credential.createFrom(result.credential)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    answer((credential as? PublicKeyCredential)?.let { PasskeyCeremony.Done(it.authenticationResponseJson) } ?: PasskeyCeremony.Failed)
+                }
+
+                override fun onError(error: android.credentials.GetCredentialException) {
+                    answer(
+                        when (error.type) {
+                            android.credentials.GetCredentialException.TYPE_USER_CANCELED -> PasskeyCeremony.Dismissed
+                            android.credentials.GetCredentialException.TYPE_NO_CREDENTIAL -> PasskeyCeremony.NoCredential
+                            else -> PasskeyCeremony.Failed
+                        },
+                    )
+                }
+            }
+            return PasskeyAutofillOffer(request, receiver)
         }
     }
 }
