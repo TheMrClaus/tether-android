@@ -27,7 +27,7 @@
 **Resume point (2026-10-02 ~09:00 CEST, coordinator handover):** `main` @ `4d98de53` (code head = gated `7abcdca8`/`bcaad5d5`: T8.1 slices 1-4, T10.3, T10.4). **Nothing in flight; no agent running.**
 **Releases** (cert SHA-256 `4f8c22de...b74d`; the coordinator publishes; every release bumps the MINOR): **v0.15.0 Latest** (code 33). Next: 0.16.0 (code 34). The workflow puts Highlights after Changes: reorder before publishing.
 **Two app branches are DONE and pushed, awaiting review/merge (worktrees kept):**
-- `ta-23f` (T8.1 slice 5, worktree isolation + setup confirmation, security-review) @ `2d21e6d5`, worktree `~/git/tether-android-wt/ta-23f`: needs verifier + security review + full gate twice. Option A rule (Decision log) + fail-closed case accepted.
+- `ta-23f` (T8.1 slice 5, worktree isolation + setup confirmation): MERGED ff-only `28298284` and VERIFIED (2026-10-02, r2). T8.1 now waits only on M.lib.hooks-use-draft-composer-ts (T8.5). In flight: T10.5 (passkeys), worktree `~/git/tether-android-wt/T10.5`.
 - `ta-3e7` (T8.1 slice 6, Studio welcome): MERGED ff-only `20090256` and VERIFIED (2026-10-02): r2 probes 55/0 x2, full gate x2 5154/0/4.
 **Tether PRs awaiting the OWNER (left unmerged on purpose):** #238 (ta-m73, no silent unsandboxed Claude creates; read the owner notes + rollback order in the Decision log first), #240 (ta-vda, `current` on GET /api/devices). Standalone clones `~/git/tether-wt/ta-m73-clone`, `~/git/tether-wt/ta-vda-clone`.
 **Production checkout `~/git/tether` is now at `90fbb9f` (#237), i.e. it has pulled #236 and #237**; the owner should confirm whether they are deployed (#236 = the phone has the web's permissions; before it, phone sign-ins are refused for elevated modes and node/device management).
@@ -131,7 +131,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 8 — New session, workspaces, worktrees, GitHub
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | coordinator 2026-10-02: sliced (read-only plan): 1 create engine (ta-8cv, first), 2 composer sheet, 3 model browser (ta-2uq), 4 effort+mode… |
+| T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | coordinator 2026-10-02: all six slices merged and verified (ta-8cv, ta-abm, ta-2uq, ta-xki, ta-23f, ta-3e7). T8.1 stays open only for M.lib… |
 | T8.2 | Folder picker, workspaces | TODO |  |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | TODO |  |  |  |
@@ -153,7 +153,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T10.3 | Nodes settings | VERIFIED | security-executor-T10.3 @ 2026-10-01 22… | `bd show` |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | VERIFIED | security-executor-T10.4 @ 2026-10-02 01… |  |  |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
-| T10.5 | Passkeys via Credential Manager | TODO |  |  | coordinator (from the tether#216 review): once #216 lands, every cookie-authenticated POST from the app (incl. an app-passkey session) must… |
+| T10.5 | Passkeys via Credential Manager | IN-PROGRESS | TheMrClaus @ 2026-10-02 09:29 |  | checkpoint: done: androidx.credentials 1.6.0 in :core:net; Passkeys.kt (PasskeyAuthenticator seam, CredentialManagerPasskeys, PasskeyRules … |
 | T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
 
 ### Phase 11 — Files
@@ -371,6 +371,8 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-02 | Coordinator (owner-delegated), ta-23f worktree setup confirmation: the server runs tether.json setup from the CHOSEN ref (PR head, existing branch, typed base) while worktree-inspect reports hasSetup only for the default branch, so the app always confirms for Pull request, Existing branch and a non-default base ("the setup committed there may run and cannot be checked beforehand") and confirms a New branch from the default base only when hasSetup; a server change to report setup for the chosen ref or enforce a consent is filed for the owner | ta-23f maker stop | coordinator (owner-delegated) |
 | 2026-10-02 | ta-3e7: the Studio welcome drops the web's /web#demo link (it points to the public landing page, not a console feature, and would add a new outbound link from the app) | ta-3e7 maker + verify | coordinator (owner-delegated) |
 | 2026-10-02 | ta-23f: when no inspect answer has matched yet for the folder, or hasSetup is not a real boolean, a New branch also confirms as "may run" (fail closed, beyond option A's wording) | ta-23f maker | coordinator (owner-delegated) |
+| 2026-10-02 | ta-23f r2, worktree setup confirmation: the inspect reads `hasSetup` at the first remote's default (origin if present) while the create, given no `remote`, resolves origin's default or HEAD. So a New branch from the default base skips the confirmation ONLY when the matched answer is a repo, remote `origin`, an `origin/...` default, a JSON-boolean `hasSetup` false and a config read not flagged as failed; everything else (other or no remote, a HEAD default, not a repo, an unknown mode) confirms as "may run" naming "the default base". The frame stays the web's (no `remote`). A draft closing cancels an open confirmation. No client re-inspect: a default base that moved since the server's last fetch is a residual for ta-6t1 | ta-23f security review + verifier (same P2) | coordinator (owner-delegated) |
+| 2026-10-02 | ta-23f divergences from the web, accepted: worktree-inspect is matched by requestId+folder+socket and asked again on a new socket, its answer dropped on a folder change, isolation off or a socket change; the PR number must be plain digits 1..9999999 after the web's trim (else no block, with the app's own readiness words); NewSessionGuard refuses useWorktree=true with no block; ref/branch/name edits over 256 chars are refused whole; the worktree-source parse is bounded (200 branches, 20 remotes, 24 warnings, 64 scripts) | ta-23f maker + verify | coordinator |
 
 ## Session log (append-only)
 
@@ -440,3 +442,4 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-02 (morning) | claude-main / Opus 5.5 | release | v0.15.0 (code 33) built from main `b56338f8` (code = gated `7abcdca8`); cert 4f8c22de...b74d and 0.15.0/33 checked; asset renamed; Highlights moved above Changes; PUBLISHED as Latest. | ta-23f (option A), ta-3e7 in flight |
 | 2026-10-02 (morning) | claude-main / Opus 5.5 | handover | Clean handover: nothing running. ta-23f (slice 5) and ta-3e7 (slice 6, r2) DONE on their branches, awaiting review/merge. tether #238 and #240 await the owner. v0.15.0 Latest. | next coordinator: ta-3e7 recheck+gate+merge, ta-23f verify+security+gate+merge |
 | 2026-10-02 (late morning) | claude-main / Opus 5.5 | ta-3e7, ta-23f | ta-3e7 (T8.1 slice 6, Studio welcome) r2 rechecked (verifier probes 55/0 x2, the pin probe green every repeat), full gate x2 on `e870fdd9` 5154/0/4, merged ff-only `20090256`, VERIFIED with M.cmp.studio-welcome. ta-23f: security review FAIL (P2 remote mismatch: inspect reads the first remote, create uses origin/HEAD; P3 stale default base; P4 x3), verifier running. | ta-23f fix round |
+| 2026-10-02 (midday) | claude-main / Opus 5.5 | ta-23f, T10.5 | ta-23f (T8.1 slice 5, worktree isolation + setup confirmation) r2 fixed the remote mismatch (gate trusts only an origin/... default from an origin remote), closeDraft cancels, unknown mode confirms; verifier probes 10/10 (adapted), security re-review PASS WITH FINDINGS (P4 comments -> ta-6ul); full gate 5249/0/4 x2 (one interim run: flake ta-194); merged ff-only `28298284`, VERIFIED with 3 matrix rows. T8.1 complete except M.lib.hooks-use-draft-composer-ts (T8.5). T10.5 (passkeys) claimed by a maker, scoping against tether 90fbb9f. | T10.5, then bd ready |
