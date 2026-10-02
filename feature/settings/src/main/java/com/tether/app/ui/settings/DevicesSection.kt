@@ -173,8 +173,11 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         LaunchedEffect(c.passkeysAdded) { if (c.passkeysAdded > 0) label = "" }
         val canAdd = view != null && view.passkeysUsable && c.authenticator.available && !busy
         val adding = c.securityBusy == DevicesAction.AddPasskey
-        Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PasskeyLabelField(label, narrow, enabled = canAdd, onChange = { label = it }, onDone = { if (canAdd) c.addPasskey(label) })
+        // The web's `settings-passkey-add`: stacked, the key full width, on a phone; one row when wide.
+        val field: @Composable (Modifier) -> Unit = { m ->
+            PasskeyLabelField(label, narrow, enabled = canAdd, onChange = { label = it }, onDone = { if (canAdd) c.addPasskey(label) }, modifier = m)
+        }
+        val addKey: @Composable (Modifier) -> Unit = { m ->
             TetherKey(
                 onClick = { c.addPasskey(label) },
                 enabled = canAdd,
@@ -182,8 +185,19 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
                 label = if (adding) DevicesCopy.ADDING_PASSKEY else DevicesCopy.ADD_PASSKEY,
                 icon = TetherIcons.Fingerprint,
                 iconSize = 15.dp,
-                modifier = Modifier.testTag(DevicesTags.AddPasskey),
+                modifier = m.testTag(DevicesTags.AddPasskey),
             )
+        }
+        Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (narrow) {
+                field(Modifier.fillMaxWidth())
+                addKey(Modifier.fillMaxWidth())
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    field(Modifier.weight(1f))
+                    addKey(Modifier)
+                }
+            }
             if (!c.authenticator.available) MutedLine(DevicesCopy.PASSKEY_UNAVAILABLE, DevicesTags.PasskeyUnavailable, rule = false)
         }
         if (view != null) {
@@ -307,10 +321,11 @@ private fun PasskeyRenameField(passkey: Passkey, shown: String, narrow: Boolean,
 
 /** sign-in-security.tsx's `passkey-label-input`: at most the server's 64 characters; Done adds. */
 @Composable
-private fun PasskeyLabelField(text: String, narrow: Boolean, enabled: Boolean, onChange: (String) -> Unit, onDone: () -> Unit) {
+private fun PasskeyLabelField(text: String, narrow: Boolean, enabled: Boolean, onChange: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     var focused by remember { mutableStateOf(false) }
-    val style = serverFieldStyle(narrow)
+    // The web's `passkey-label-input` is the UI face, not the server fields' mono.
+    val style = settingsText(LocalTetherTypography.current.ui, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     BasicTextField(
         value = text,
         onValueChange = { if (it.length <= com.tether.app.client.DeviceSecurityJson.MAX_LABEL_SENT) onChange(it) },
@@ -320,8 +335,7 @@ private fun PasskeyLabelField(text: String, narrow: Boolean, enabled: Boolean, o
         cursorBrush = SolidColor(t.violet),
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .testTag(DevicesTags.PasskeyLabel)
             .semantics { contentDescription = DevicesCopy.PASSKEY_LABEL }
             .onFocusChanged { focused = it.isFocused },
