@@ -78,7 +78,6 @@ object DevicesTags {
     const val SignOutOthers = "sessions-sign-out-others"
     const val Pair = "devices-pair"
     const val PairHint = "devices-pair-hint"
-    const val RevokeAll = "devices-revoke-all"
     const val CodeCard = "pairing-code-card"
     const val CodeMasked = "pairing-code-masked"
     const val CodeRevealed = "pairing-code-revealed"
@@ -100,10 +99,9 @@ object DevicesTags {
     fun signOut(id: String) = "session-sign-out:$id"
 }
 
-/** A confirmation the panel is asking (the web's `<dialog>`s, plus the app's two that sign the phone out). */
+/** A confirmation the panel is asking (the web's `<dialog>`s; revoking this phone also says it signs out). */
 sealed interface DevicesConfirm {
     data class Revoke(val device: PairedDevice, val self: SelfMatch) : DevicesConfirm
-    data class RevokeAll(val effect: RevokeAllEffect) : DevicesConfirm
     data class RemovePasskey(val passkey: Passkey) : DevicesConfirm
     data object SignOutOthers : DevicesConfirm
 }
@@ -130,7 +128,6 @@ internal fun DevicesSecuritySections(binding: DevicesBinding, narrow: Boolean) {
                 confirm = null
                 when (pending) {
                     is DevicesConfirm.Revoke -> controller.revoke(pending.device, pending.self)
-                    is DevicesConfirm.RevokeAll -> controller.revokeAll(pending.effect)
                     is DevicesConfirm.RemovePasskey -> controller.removePasskey(pending.passkey)
                     DevicesConfirm.SignOutOthers -> controller.revokeOtherSessions()
                 }
@@ -146,11 +143,12 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
     SettingsSection(DevicesCopy.PASSKEYS_TITLE, AnnotatedString(DevicesCopy.PASSKEYS_CAPTION), narrow, modifier = Modifier.testTag(DevicesTags.Passkeys)) {
         val c = controller ?: return@SettingsSection
         if (c.signedOut) return@SettingsSection SignedOutLine()
-        if (c.ownerNeeded) OwnerNeeded(c, DevicesArea.Security)
+        val ownerNeeded = c.ownerNeeded(DevicesArea.Security)
+        if (ownerNeeded) OwnerNeeded(c, DevicesArea.Security)
         c.securityLine?.let { LineView(it, DevicesTags.line(DevicesArea.Security)) }
         val view = c.passkeys
         val now = binding.now()
-        val busy = c.securityBusy != null || c.ownerNeeded
+        val busy = c.securityBusy != null || ownerNeeded
         var renaming by remember(c) { mutableStateOf<String?>(null) }
         view?.passkeys?.forEach { passkey ->
             key(passkey.id) {
@@ -165,7 +163,7 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
             }
         }
         if (view != null && view.passkeys.isEmpty()) MutedLine(DevicesCopy.PASSKEYS_EMPTY, DevicesTags.PasskeysEmpty)
-        if (view == null && !c.ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.PASSKEYS_CHECKING, DevicesTags.PasskeysChecking, status = true)
+        if (view == null && !ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.PASSKEYS_CHECKING, DevicesTags.PasskeysChecking, status = true)
         if (view != null && !view.passkeysUsable) MutedLine(DevicesCopy.PASSKEYS_NEED_HTTPS, DevicesTags.PasskeysHttps)
         // Registration is a WebAuthn ceremony on this phone (T10.5, Credential Manager): not here yet.
         Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -183,12 +181,12 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         if (view != null) {
             SettingsToggleRow(
                 title = DevicesCopy.PASSWORD_TITLE,
-                caption = DevicesRules.passwordNote(view),
+                caption = DevicesRules.passwordNote(view, c.signIn),
                 tip = null,
                 checked = view.policy.passwordLoginEnabled,
                 onToggle = { c.setPasswordLogin(!view.policy.passwordLoginEnabled) },
                 narrow = narrow,
-                enabled = DevicesRules.passwordToggleable(view) && !busy,
+                enabled = DevicesRules.passwordToggleable(view, c.signIn) && !busy,
                 modifier = Modifier.testTag(DevicesTags.PasswordToggle),
             )
         }
@@ -308,9 +306,10 @@ private fun SessionsSection(controller: DevicesController?, binding: DevicesBind
         if (c.signedOut) return@SettingsSection
         val sessions = c.sessions
         val now = binding.now()
-        val busy = c.securityBusy != null || c.ownerNeeded
+        val ownerNeeded = c.ownerNeeded(DevicesArea.Security)
+        val busy = c.securityBusy != null || ownerNeeded
         sessions?.forEach { session -> key(session.id) { SessionRow(session, now, narrow, busy) { c.revokeSession(session) } } }
-        if (sessions == null && !c.ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.SESSIONS_CHECKING, DevicesTags.SessionsChecking, status = true)
+        if (sessions == null && !ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.SESSIONS_CHECKING, DevicesTags.SessionsChecking, status = true)
         val others = sessions.orEmpty().count { !it.current }
         TetherKey(
             onClick = { onConfirm(DevicesConfirm.SignOutOthers) },
@@ -369,13 +368,14 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
             c.devicesLine?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) } ?: SignedOutLine()
             return@SettingsSection
         }
-        if (c.ownerNeeded) OwnerNeeded(c, DevicesArea.Devices)
+        val ownerNeeded = c.ownerNeeded(DevicesArea.Devices)
+        if (ownerNeeded) OwnerNeeded(c, DevicesArea.Devices)
         c.devicesLine?.takeIf { it.error }?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) }
         // The code card's own clock (the web's `now`): read on the hand-driven clock in the goldens.
         var now by remember { mutableLongStateOf(binding.now()) }
         c.shown?.let { shown -> key(shown.serial) { PairingCodeCard(c, shown, now, readNow = binding.now, onTick = { now = it }) } }
         val devices = c.devices
-        val busy = c.devicesBusy != null || c.ownerNeeded
+        val busy = c.devicesBusy != null || ownerNeeded
         devices?.forEach { device ->
             key(device.id) {
                 val self = DevicesRules.selfMatch(c.signIn, devices, device)
@@ -383,7 +383,7 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
             }
         }
         if (devices != null && devices.isEmpty()) MutedLine(DevicesCopy.DEVICES_EMPTY, DevicesTags.DevicesEmpty)
-        if (devices == null && !c.ownerNeeded && c.devicesLine == null) MutedLine(DevicesCopy.DEVICES_CHECKING, DevicesTags.DevicesChecking, status = true)
+        if (devices == null && !ownerNeeded && c.devicesLine == null) MutedLine(DevicesCopy.DEVICES_CHECKING, DevicesTags.DevicesChecking, status = true)
         c.devicesLine?.takeIf { !it.error }?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) }
         Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             TetherKey(
@@ -395,15 +395,6 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
             )
             val others = DevicesRules.otherPairings(c.pairings, now, c.shown?.expiresAt)
             MutedLine(DevicesCopy.pairHint(others), DevicesTags.PairHint, rule = false, small = true)
-            if (!devices.isNullOrEmpty()) {
-                TetherKey(
-                    onClick = { onConfirm(DevicesConfirm.RevokeAll(DevicesRules.revokeAllEffect(c.signIn, c.sessions))) },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = DevicesCopy.REVOKE_ALL,
-                    enabled = !busy,
-                    modifier = Modifier.padding(top = 6.dp).testTag(DevicesTags.RevokeAll),
-                )
-            }
         }
     }
 }
@@ -653,7 +644,6 @@ private fun Tag(text: String, modifier: Modifier = Modifier) {
 internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val (title, body, action) = when (confirm) {
         is DevicesConfirm.Revoke -> Triple(DevicesCopy.REVOKE_TITLE, DevicesRules.revokeBody(DevicesRules.label(confirm.device.label, "Paired device"), confirm.self), DevicesCopy.REVOKE_CONFIRM)
-        is DevicesConfirm.RevokeAll -> Triple(DevicesCopy.REVOKE_ALL_TITLE, DevicesRules.revokeAllBody(confirm.effect), DevicesCopy.REVOKE_ALL_CONFIRM)
         is DevicesConfirm.RemovePasskey -> Triple(DevicesCopy.REMOVE_PASSKEY_TITLE, listOf(DevicesCopy.removePasskeyBody(DevicesRules.label(confirm.passkey.label, "Passkey"))), DevicesCopy.REMOVE_PASSKEY_CONFIRM)
         DevicesConfirm.SignOutOthers -> Triple(DevicesCopy.SIGN_OUT_OTHERS_TITLE, listOf(DevicesCopy.SIGN_OUT_OTHERS_BODY), DevicesCopy.SIGN_OUT_OTHERS)
     }

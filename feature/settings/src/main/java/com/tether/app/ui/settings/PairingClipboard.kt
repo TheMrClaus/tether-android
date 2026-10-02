@@ -1,11 +1,15 @@
 package com.tether.app.ui.settings
 
+import android.app.Activity
+import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
+import android.os.SystemClock
 import com.tether.app.client.PairingCode
 import java.security.MessageDigest
 
@@ -39,45 +43,120 @@ interface PairingClipboard {
     }
 }
 
-/** The app's [PairingClipboard] over the system clipboard, its timer on the main looper (it outlives the dialog). */
+/**
+ * What [AndroidPairingClipboard] asks of the system clipboard. A read the system refuses (Android 10+
+ * gives a backgrounded app no clipboard: the description and the clip read as null) comes back null,
+ * never as "not ours".
+ */
+interface ClipAccess {
+    fun label(): CharSequence?
+    fun text(): CharSequence?
+    fun set(clip: ClipData)
+    fun clear()
+
+    class System(private val manager: ClipboardManager) : ClipAccess {
+        override fun label(): CharSequence? = manager.primaryClipDescription?.label
+        override fun text(): CharSequence? = manager.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text
+        override fun set(clip: ClipData) = manager.setPrimaryClip(clip)
+        override fun clear() = manager.clearPrimaryClip()
+    }
+}
+
+/**
+ * The app's [PairingClipboard] over the system clipboard, its timer on the main looper (it outlives
+ * the dialog).
+ *
+ * r2 (security F1): Android 10+ lets only the app in focus read the clipboard, so a clear due while
+ * Tether is in the background (the 30 s timer, an expiry, a close) cannot tell whether the clip is
+ * still ours. It is then NOT done blindly: the copy's stamp stays pending and the clear runs again on
+ * the next resume once its deadline has passed ([onResume], wired by [forApp] to every activity
+ * resume). A clip is cleared only when it can be read and is positively this copy (its label and its
+ * text's SHA-256); anything else is never touched.
+ */
 class AndroidPairingClipboard(
-    context: Context,
+    private val access: ClipAccess?,
     private val handler: Handler = Handler(Looper.getMainLooper()),
     private val clearAfterMs: Long = PairingClipboard.CLEAR_AFTER_MS,
+    private val uptime: () -> Long = SystemClock::uptimeMillis,
 ) : PairingClipboard {
-    private val manager = context.applicationContext.getSystemService(ClipboardManager::class.java)
+    constructor(context: Context) : this(context.applicationContext.getSystemService(ClipboardManager::class.java)?.let(ClipAccess::System))
+
     private val token = Any()
 
+    /** The copy still on the clipboard as far as known: its stamp and when it is due off (uptime). */
+    private class Pending(val stamp: ByteArray, var dueAt: Long)
+
+    private var pending: Pending? = null
+
     override fun copy(code: PairingCode): Boolean {
-        val m = manager ?: return false
+        val a = access ?: return false
         val clip = ClipData.newPlainText(PairingClipboard.CLIP_LABEL, code.reveal())
         clip.description.extras = PersistableBundle().apply { putBoolean(PairingClipboard.EXTRA_IS_SENSITIVE, true) }
         return try {
-            m.setPrimaryClip(clip)
-            val stamp = digest(code.reveal())
+            a.set(clip)
+            pending = Pending(digest(code.reveal()), uptime() + clearAfterMs)
             handler.removeCallbacksAndMessages(token)
-            handler.postAtTime({ clearIfStamp(stamp) }, token, android.os.SystemClock.uptimeMillis() + clearAfterMs)
+            handler.postAtTime({ attempt() }, token, SystemClock.uptimeMillis() + clearAfterMs)
             true
         } catch (_: RuntimeException) {
             false
         }
     }
 
-    override fun clearIfHolds(code: PairingCode) = clearIfStamp(digest(code.reveal()))
+    /** The code expired or Settings closed: if [code] is the copy still pending, it is due off now. */
+    override fun clearIfHolds(code: PairingCode) {
+        val p = pending ?: return
+        if (!MessageDigest.isEqual(p.stamp, digest(code.reveal()))) return
+        p.dueAt = minOf(p.dueAt, uptime())
+        attempt()
+    }
 
-    private fun clearIfStamp(stamp: ByteArray) {
-        val m = manager ?: return
+    /** An activity of the app resumed (it has focus again): a clear that came due meanwhile runs now. */
+    fun onResume() {
+        val p = pending ?: return
+        if (uptime() >= p.dueAt) attempt()
+    }
+
+    /** Clear the pending copy if it is due and the clipboard can be read and still holds it; keep it pending while it cannot be read. */
+    private fun attempt() {
+        val a = access ?: return
+        val p = pending ?: return
+        if (uptime() < p.dueAt) return
         try {
-            val description = m.primaryClipDescription ?: return
-            if (description.label?.toString() != PairingClipboard.CLIP_LABEL) return
-            // Readable while the app has focus; if it is not, the label (ours alone) is enough.
-            val text = m.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
-            if (text != null && !MessageDigest.isEqual(digest(text), stamp)) return
-            m.clearPrimaryClip()
+            val label = a.label()
+            val text = a.text()
+            if (label == null || text == null) return // unreadable (background): retried on the next resume
+            pending = null
+            if (label.toString() != PairingClipboard.CLIP_LABEL) return // something else was copied since
+            if (!MessageDigest.isEqual(digest(text.toString()), p.stamp)) return
+            a.clear()
+            handler.removeCallbacksAndMessages(token)
         } catch (_: RuntimeException) {
-            // Best effort: the clip is marked sensitive either way.
+            // Best effort: still pending, retried on the next resume; the clip is marked sensitive either way.
         }
     }
 
     private fun digest(text: String): ByteArray = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+
+    companion object {
+        @Volatile private var app: AndroidPairingClipboard? = null
+
+        /** The one clipboard of the process, its clears retried on every activity resume (security F1). */
+        fun forApp(context: Context): AndroidPairingClipboard = app ?: synchronized(this) {
+            app ?: AndroidPairingClipboard(context).also { clip ->
+                (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(ResumeHook(clip))
+                app = clip
+            }
+        }
+    }
+
+    private class ResumeHook(private val clip: AndroidPairingClipboard) : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(activity: Activity) = clip.onResume()
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        override fun onActivityDestroyed(activity: Activity) = Unit
+    }
 }

@@ -4,7 +4,6 @@ import com.tether.app.client.AppSignIn
 import com.tether.app.client.DeviceRevoked
 import com.tether.app.client.DeviceSecuritySource
 import com.tether.app.client.DevicesList
-import com.tether.app.client.DevicesRevokedAll
 import com.tether.app.client.FreshPairingCode
 import com.tether.app.client.OutstandingPairing
 import com.tether.app.client.PairedDevice
@@ -17,6 +16,7 @@ import com.tether.app.client.SecurityResult
 import com.tether.app.client.SecuritySession
 import com.tether.app.client.SessionMethod
 import com.tether.app.client.SessionsRevoked
+import com.tether.app.client.SignInHandle
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 
@@ -74,6 +74,13 @@ class RecordingSecuritySource : DeviceSecuritySource {
 
     val calls = CopyOnWriteArrayList<Call>()
 
+    /** r2 (security F2): the credential handles the panel reported dead. */
+    val rejected = CopyOnWriteArrayList<SignInHandle>()
+
+    override fun credentialRejected(handle: SignInHandle) {
+        rejected += handle
+    }
+
     val writes: List<Call> get() = calls.filter { it.name !in READS }
 
     fun names(): List<String> = calls.map { it.name }
@@ -109,7 +116,6 @@ class RecordingSecuritySource : DeviceSecuritySource {
     override suspend fun devices(origin: String) = record<DevicesList>("devices", origin)
     override suspend fun pair(origin: String) = record<FreshPairingCode>("pair", origin)
     override suspend fun revokeDevice(origin: String, deviceId: String) = record<DeviceRevoked>("revokeDevice", origin, deviceId)
-    override suspend fun revokeAllDevices(origin: String) = record<DevicesRevokedAll>("revokeAll", origin)
     override suspend fun passkeys(origin: String) = record<PasskeysView>("passkeys", origin)
     override suspend fun renamePasskey(origin: String, passkeyId: String, label: String) = record<Unit>("rename", origin, "$passkeyId=$label")
     override suspend fun removePasskey(origin: String, passkeyId: String) = record<Unit>("removePasskey", origin, passkeyId)
@@ -132,7 +138,6 @@ object NeverCalledSecurity : DeviceSecuritySource {
     override suspend fun devices(origin: String) = no()
     override suspend fun pair(origin: String) = no()
     override suspend fun revokeDevice(origin: String, deviceId: String) = no()
-    override suspend fun revokeAllDevices(origin: String) = no()
     override suspend fun passkeys(origin: String) = no()
     override suspend fun renamePasskey(origin: String, passkeyId: String, label: String) = no()
     override suspend fun removePasskey(origin: String, passkeyId: String) = no()

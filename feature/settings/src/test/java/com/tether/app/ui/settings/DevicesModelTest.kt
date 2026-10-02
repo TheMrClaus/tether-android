@@ -4,10 +4,7 @@ import com.tether.app.client.AppSignIn
 import com.tether.app.client.PasskeyPolicySource
 import com.tether.app.client.PasswordPolicy
 import com.tether.app.client.SecurityResult
-import com.tether.app.ui.settings.DevicesFixtures.APP
-import com.tether.app.ui.settings.DevicesFixtures.BROWSER
 import com.tether.app.ui.settings.DevicesFixtures.NOW
-import com.tether.app.ui.settings.DevicesFixtures.PASSWORD_HERE
 import com.tether.app.ui.settings.DevicesFixtures.PHONE
 import com.tether.app.ui.settings.DevicesFixtures.TABLET
 import org.junit.Assert.assertEquals
@@ -28,13 +25,16 @@ class DevicesModelTest {
         assertEquals(SelfMatch.Maybe, DevicesRules.selfMatch(null, listOf(PHONE), PHONE))
     }
 
-    @Test fun whatRevokingEveryDeviceDoesToThisPhone() {
-        assertEquals(RevokeAllEffect.SignsOutToken, DevicesRules.revokeAllEffect(AppSignIn.DeviceToken, null))
-        assertEquals(RevokeAllEffect.SignsOutPasskey, DevicesRules.revokeAllEffect(AppSignIn.SessionCookie, listOf(BROWSER, APP)))
-        assertEquals(RevokeAllEffect.KeepsPassword, DevicesRules.revokeAllEffect(AppSignIn.SessionCookie, listOf(BROWSER, PASSWORD_HERE)))
-        assertEquals(RevokeAllEffect.Unknown, DevicesRules.revokeAllEffect(AppSignIn.SessionCookie, null))
-        assertEquals(RevokeAllEffect.Unknown, DevicesRules.revokeAllEffect(AppSignIn.SessionCookie, listOf(BROWSER)))
-        assertEquals(RevokeAllEffect.Unknown, DevicesRules.revokeAllEffect(null, null))
+    /** tether #240 (unmerged): a device-token sign-in's own entry carries `current`; it then decides, exactly. */
+    @Test fun theCurrentFlagDecidesWhenTheServerSendsIt() {
+        val mine = PHONE.copy(current = true)
+        val list = listOf(mine, TABLET)
+        assertEquals(SelfMatch.Yes, DevicesRules.selfMatch(AppSignIn.DeviceToken, list, mine))
+        assertEquals("marked elsewhere: not this phone", SelfMatch.No, DevicesRules.selfMatch(AppSignIn.DeviceToken, list, TABLET))
+        // Alone and marked, or alone on an older server: this phone either way.
+        assertEquals(SelfMatch.Yes, DevicesRules.selfMatch(AppSignIn.DeviceToken, listOf(mine), mine))
+        // A cookie sign-in is never a device, flag or not.
+        assertEquals(SelfMatch.No, DevicesRules.selfMatch(AppSignIn.SessionCookie, list, mine))
     }
 
     @Test fun theConfirmationsSayWhenThePhoneSignsOut() {
@@ -42,10 +42,6 @@ class DevicesModelTest {
         assertEquals(DevicesCopy.SELF_SIGNS_OUT, DevicesRules.revokeBody("Pixel 8", SelfMatch.Yes).last())
         assertEquals(DevicesCopy.MAYBE_SELF, DevicesRules.revokeBody("Pixel 8", SelfMatch.Maybe).last())
         assertTrue(DevicesCopy.SELF_SIGNS_OUT.contains("signed out of this server"))
-        assertEquals(DevicesCopy.ALL_SIGNS_OUT_TOKEN, DevicesRules.revokeAllBody(RevokeAllEffect.SignsOutToken).last())
-        assertEquals(DevicesCopy.ALL_SIGNS_OUT_PASSKEY, DevicesRules.revokeAllBody(RevokeAllEffect.SignsOutPasskey).last())
-        assertEquals(DevicesCopy.ALL_KEEPS_PASSWORD, DevicesRules.revokeAllBody(RevokeAllEffect.KeepsPassword).last())
-        assertEquals(DevicesCopy.ALL_MAYBE, DevicesRules.revokeAllBody(RevokeAllEffect.Unknown).last())
     }
 
     @Test fun theWebsCountsAndClock() {
@@ -69,13 +65,24 @@ class DevicesModelTest {
     }
 
     @Test fun thePasswordSwitchFollowsTheWeb() {
+        val cookie = AppSignIn.SessionCookie
         val env = DevicesFixtures.PASSKEYS.copy(policy = PasswordPolicy(true, PasskeyPolicySource.Env))
-        assertEquals(DevicesCopy.PASSWORD_ENV, DevicesRules.passwordNote(env))
-        assertFalse(DevicesRules.passwordToggleable(env))
-        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY, DevicesRules.passwordNote(DevicesFixtures.NO_PASSKEYS))
-        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.NO_PASSKEYS))
-        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS))
-        assertTrue(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS))
+        assertEquals(DevicesCopy.PASSWORD_ENV, DevicesRules.passwordNote(env, cookie))
+        assertFalse(DevicesRules.passwordToggleable(env, cookie))
+        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY, DevicesRules.passwordNote(DevicesFixtures.NO_PASSKEYS, cookie))
+        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.NO_PASSKEYS, cookie))
+        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS, cookie))
+        assertTrue(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS, cookie))
+    }
+
+    /** r2 (security F6): a device token proves no passkey, so the server always refuses turning the password off from it. */
+    @Test fun aDeviceTokenCannotTurnThePasswordOffButCanTurnItOn() {
+        val token = AppSignIn.DeviceToken
+        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS, token))
+        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY_SIGN_IN, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS, token))
+        val off = DevicesFixtures.PASSKEYS.copy(policy = PasswordPolicy(false, PasskeyPolicySource.Stored))
+        assertTrue("turning it back on is allowed", DevicesRules.passwordToggleable(off, token))
+        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(off, token))
     }
 
     @Test fun serverTextIsDrawnByTheLabelRule() {

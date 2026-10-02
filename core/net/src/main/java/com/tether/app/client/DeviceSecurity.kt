@@ -176,6 +176,12 @@ sealed interface SecurityResult<out T> {
     data class NotSent(override val origin: String?) : SecurityResult<Nothing>
 }
 
+/** [SecurityResult.Ok] carrying [handle] (fakes and tests; the real source sets it itself). Grants nothing: the client acts only on its own credential in force. */
+fun <T> SecurityResult.Ok<T>.withHandle(handle: SignInHandle?): SecurityResult.Ok<T> = also { it.handle = handle }
+
+/** [SecurityResult.SignedOut] carrying [handle] (as [withHandle] for an answer). */
+fun SecurityResult.SignedOut.withHandle(handle: SignInHandle?): SecurityResult.SignedOut = also { it.handle = handle }
+
 /**
  * The panel's calls, with the paired credential. Every call names the server ([origin]) the screen
  * was drawn from; it goes only there. There is no other way to these routes from the UI.

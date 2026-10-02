@@ -19,12 +19,10 @@ import org.robolectric.annotation.Config
 /**
  * T10.4: the Devices confirmations, seeded synchronously (composed with their values, no tap, the
  * clock driven by hand) and captured with their own window: `-confirm-self` revoking the phone the
- * app is signed in with, `-confirm-all` revoking every device from a device-token sign-in (both say
- * the phone signs out), `-confirm-passkey` the web's Remove this passkey.
+ * app is signed in with (it says the phone signs out), `-confirm-passkey` the web's Remove this passkey.
  */
 enum class DevicesConfirmShot(val id: String, val confirm: DevicesConfirm) {
     Self("settings-devices-confirm-self", DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.Yes)),
-    All("settings-devices-confirm-all", DevicesConfirm.RevokeAll(RevokeAllEffect.SignsOutToken)),
     Passkey("settings-devices-confirm-passkey", DevicesConfirm.RemovePasskey(DevicesFixtures.LAPTOP_KEY)),
 }
 

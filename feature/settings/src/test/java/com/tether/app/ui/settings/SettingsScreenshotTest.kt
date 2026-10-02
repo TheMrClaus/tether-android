@@ -288,7 +288,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     setContent {
         focus = androidx.compose.ui.platform.LocalFocusManager.current
         val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
-        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed()) }
+        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), now = { DevicesFixtures.NOW }) }
         SettingsUnderTest(
             store.prefs,
             state,

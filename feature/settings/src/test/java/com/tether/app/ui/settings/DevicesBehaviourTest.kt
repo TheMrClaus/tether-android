@@ -26,7 +26,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.AppSignIn
 import com.tether.app.client.DeviceRevoked
 import com.tether.app.client.DevicesList
-import com.tether.app.client.DevicesRevokedAll
+import com.tether.app.client.SignInHandle
+import com.tether.app.client.withHandle
 import com.tether.app.client.PasskeyPolicySource
 import com.tether.app.client.PasswordPolicy
 import com.tether.app.client.SecurityResult
@@ -37,7 +38,6 @@ import com.tether.app.ui.settings.DevicesFixtures.LAPTOP_KEY
 import com.tether.app.ui.settings.DevicesFixtures.NOW
 import com.tether.app.ui.settings.DevicesFixtures.ORIGIN
 import com.tether.app.ui.settings.DevicesFixtures.OTHER_ORIGIN
-import com.tether.app.ui.settings.DevicesFixtures.PASSWORD_HERE
 import com.tether.app.ui.settings.DevicesFixtures.PHONE
 import com.tether.app.ui.settings.DevicesFixtures.SENTINEL
 import com.tether.app.ui.settings.DevicesFixtures.TABLET
@@ -91,7 +91,7 @@ class DevicesBehaviourTest {
         compose.setContent {
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry, LocalConfirmArmMs provides 0L) {
                 if (shown) {
-                    val controller = rememberDevicesController(source, origin, clipboard = clipboard)
+                    val controller = rememberDevicesController(source, origin, clipboard = clipboard, now = { NOW })
                     SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
                 }
             }
@@ -265,7 +265,7 @@ class DevicesBehaviourTest {
     }
 
     @Test fun aRefusedWriteShowsTheServersWordsCleaned() {
-        opened(AppSignIn.DeviceToken)
+        opened()
         tap(DevicesTags.PasswordToggle)
         waitCalls(4)
         assertEquals("false", source.calls.last().arg)
@@ -368,7 +368,7 @@ class DevicesBehaviourTest {
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         compose.setContent {
             CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner, LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             }
         }
@@ -391,7 +391,7 @@ class DevicesBehaviourTest {
         var clock = NOW
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { clock })
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
             }
         }
@@ -411,6 +411,33 @@ class DevicesBehaviourTest {
         assertFalse(clipText()?.contains(SENTINEL) == true)
     }
 
+    /** r2 (security F7): the code expires in the controller, so its plaintext and copy go even while another tab is shown. */
+    @Test fun aCodeExpiresWhileItsCardIsOffScreen() {
+        var clock = NOW
+        compose.setContent {
+            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { clock })
+                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
+            }
+        }
+        waitCalls(3)
+        source.answerReads()
+        tap(DevicesTags.Pair)
+        waitCalls(4)
+        source.answer("pair", ok(DevicesFixtures.code(expiresAt = NOW + 5_000)))
+        waitFor(DevicesTags.CodeCopy)
+        tag(DevicesTags.CodeCopy).performScrollTo().performClick()
+        compose.waitUntil(5_000) { clipText() == SENTINEL }
+        state.tab = SettingsTab.General
+        waitGone(DevicesTags.CodeCard)
+        clock = NOW + 20_000
+        compose.mainClock.advanceTimeBy(20_000)
+        compose.waitUntil(5_000) { clipText()?.contains(SENTINEL) != true }
+        state.tab = SettingsTab.Devices
+        waitText(DevicesCopy.EXPIRED)
+        assertFalse(exists(DevicesTags.CodeCopy))
+    }
+
     @Test fun aDoubleTapOnPairMintsOnce() {
         opened()
         tap(DevicesTags.Pair)
@@ -425,7 +452,7 @@ class DevicesBehaviourTest {
         var captured: DevicesController? = null
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
                 captured = controller
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             }
@@ -437,7 +464,7 @@ class DevicesBehaviourTest {
             val c = captured!!
             assertTrue(c.pair())
             assertFalse(c.pair())
-            assertFalse(c.revokeAll(RevokeAllEffect.KeepsPassword))
+            assertFalse(c.revoke(TABLET, SelfMatch.No))
             assertTrue(c.setPasswordLogin(false))
             assertFalse(c.setPasswordLogin(true))
             assertFalse(c.revokeOtherSessions())
@@ -482,8 +509,11 @@ class DevicesBehaviourTest {
         assertTrue(texts().contains(DevicesCopy.SELF_SIGNS_OUT))
         tapInDialog(DevicesTags.ConfirmGo)
         waitCalls(4)
-        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken))
+        val handle = SignInHandle(Any())
+        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken).withHandle(handle))
         waitText(DevicesCopy.SIGNED_OUT_HERE)
+        // r2 (security F2): the client is told at once that this credential is dead.
+        assertEquals(listOf(handle), source.rejected.toList())
         // No re-read of a list it may no longer read, no write key left.
         compose.mainClock.advanceTimeBy(60_000)
         compose.waitForIdle()
@@ -505,28 +535,10 @@ class DevicesBehaviourTest {
         assertTrue(texts().contains(DevicesCopy.MAYBE_SELF))
     }
 
-    /** Revoking every device always asks (the web has no such key), and says what becomes of this phone. */
-    private fun revokeAllSays(signIn: AppSignIn, sessions: List<com.tether.app.client.SecuritySession>, expected: String) {
-        opened(signIn, sessions = sessions)
-        tap(DevicesTags.RevokeAll)
-        waitFor(DevicesTags.ConfirmSheet)
-        assertTrue("$signIn: ${texts()}", texts().contains(expected))
-        assertTrue(texts().contains(DevicesCopy.REVOKE_ALL_BODY))
-        tapInDialog(DevicesTags.ConfirmCancel)
-        waitGone(DevicesTags.ConfirmSheet)
-        assertTrue(source.writes.isEmpty())
-    }
-
-    @Test fun revokingEveryDeviceSaysATokenSignInSignsOut() = revokeAllSays(AppSignIn.DeviceToken, DevicesFixtures.SESSIONS, DevicesCopy.ALL_SIGNS_OUT_TOKEN)
-
-    @Test fun revokingEveryDeviceSaysAnAppPasskeySignInSignsOut() = revokeAllSays(AppSignIn.SessionCookie, listOf(BROWSER, APP), DevicesCopy.ALL_SIGNS_OUT_PASSKEY)
-
-    @Test fun revokingEveryDeviceSaysAPasswordSignInStays() = revokeAllSays(AppSignIn.SessionCookie, listOf(BROWSER, PASSWORD_HERE), DevicesCopy.ALL_KEEPS_PASSWORD)
-
     /** Settings closed after a cancelled confirmation and opened again: nothing pending survives, the panel reads afresh, nothing is sent. */
     @Test fun reopeningAfterACancelledConfirmationReadsAfreshAndSendsNothing() {
         opened(AppSignIn.DeviceToken)
-        tap(DevicesTags.RevokeAll)
+        tap(DevicesTags.revoke(PHONE.id))
         waitFor(DevicesTags.ConfirmSheet)
         tapInDialog(DevicesTags.ConfirmCancel)
         waitGone(DevicesTags.ConfirmSheet)
@@ -541,20 +553,142 @@ class DevicesBehaviourTest {
         assertTrue(source.writes.isEmpty())
     }
 
-    @Test fun confirmingRevokeAllForATokenSignInSignsThePhoneOutCleanly() {
+    /** r2 (security F2): after revoking a device that may have been this phone, Tether's own 401 on the re-read means it was. */
+    @Test fun aFourOhOneRightAfterRevokingWhatMayBeThisPhoneSignsOutAndDropsTheCredential() {
         opened(AppSignIn.DeviceToken)
-        mint()
-        tap(DevicesTags.RevokeAll)
+        tap(DevicesTags.revoke(PHONE.id))
         tapInDialog(DevicesTags.ConfirmGo)
-        compose.waitUntil(5_000) { source.pending("revokeAll") }
-        assertEquals(1, source.writes.count { it.name == "revokeAll" })
-        source.answer("revokeAll", ok(DevicesRevokedAll(2, 0, 2), signIn = AppSignIn.DeviceToken))
+        waitCalls(4)
+        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken))
+        waitCalls(5)
+        assertEquals("devices", source.calls.last().name)
+        assertTrue("not yet: it may have been another device", source.rejected.isEmpty())
+        val handle = SignInHandle(Any())
+        source.answer("devices", SecurityResult.SignedOut(ORIGIN).withHandle(handle))
         waitText(DevicesCopy.SIGNED_OUT_HERE)
-        assertFalse("the code goes with the devices", exists(DevicesTags.CodeCard))
-        val calls = source.calls.size
+        assertEquals(listOf(handle), source.rejected.toList())
         compose.mainClock.advanceTimeBy(60_000)
         compose.waitForIdle()
-        assertEquals(calls, source.calls.size)
+        assertEquals(5, source.calls.size)
+    }
+
+    @Test fun aRevokedDeviceThatWasNotThisPhoneKeepsTheSignIn() {
+        opened(AppSignIn.DeviceToken)
+        tap(DevicesTags.revoke(TABLET.id))
+        tapInDialog(DevicesTags.ConfirmGo)
+        waitCalls(4)
+        source.answer("revokeDevice", ok(DeviceRevoked(1), signIn = AppSignIn.DeviceToken).withHandle(SignInHandle(Any())))
+        waitCalls(5)
+        source.answer("devices", SecurityResult.Ok(DevicesList(listOf(PHONE), emptyList()), ORIGIN, AppSignIn.DeviceToken).withHandle(SignInHandle(Any())))
+        waitGone(DevicesTags.device(TABLET.id))
+        assertTrue(source.rejected.isEmpty())
+        assertTrue(exists(DevicesTags.Pair))
+    }
+
+    /** tether #240 (unmerged): when the server marks the caller's own entry, it alone is "This device", exactly. */
+    @Test fun theServersCurrentFlagMarksThisDeviceExactly() {
+        opened(AppSignIn.DeviceToken, devices = listOf(PHONE.copy(current = true), TABLET))
+        waitFor(DevicesTags.deviceSelf(PHONE.id))
+        assertFalse(exists(DevicesTags.deviceSelf(TABLET.id)))
+        tap(DevicesTags.revoke(TABLET.id))
+        waitFor(DevicesTags.ConfirmSheet)
+        assertFalse("the other device is known not to be this phone", texts().any { it == DevicesCopy.SELF_SIGNS_OUT || it == DevicesCopy.MAYBE_SELF })
+        tapInDialog(DevicesTags.ConfirmCancel)
+        waitGone(DevicesTags.ConfirmSheet)
+        tap(DevicesTags.revoke(PHONE.id))
+        waitFor(DevicesTags.ConfirmSheet)
+        assertTrue(texts().contains(DevicesCopy.SELF_SIGNS_OUT))
+    }
+
+    // ---- ids the server sent that no route may name (r2, verifier F1/F2) -------------------------
+
+    @Test fun aRowWhoseIdCannotBeNamedIsListedButNothingCanBeSentForIt() {
+        var captured: DevicesController? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
+                captured = controller
+                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
+            }
+        }
+        waitCalls(3)
+        val long = PHONE.copy(id = "x".repeat(1400), label = "Too long", actionable = false)
+        val sibling = TABLET.copy(id = "pairings", label = "Sibling", actionable = false)
+        val key = LAPTOP_KEY.copy(id = "policy", actionable = false)
+        val session = BROWSER.copy(id = "sessions", actionable = false)
+        source.answerReads(devices = listOf(long, sibling), passkeys = DevicesFixtures.PASSKEYS.copy(passkeys = listOf(key)), sessions = listOf(session, APP))
+        waitFor(DevicesTags.device(long.id))
+        assertTrue(exists(DevicesTags.device(sibling.id)))
+        assertFalse(enabled(DevicesTags.revoke(long.id)))
+        assertFalse(enabled(DevicesTags.revoke(sibling.id)))
+        assertFalse(enabled(DevicesTags.remove(key.id)))
+        assertFalse(enabled(DevicesTags.rename(key.id)))
+        assertFalse(enabled(DevicesTags.signOut(session.id)))
+        compose.runOnIdle {
+            val c = captured!!
+            assertFalse(c.revoke(long, SelfMatch.No))
+            assertFalse(c.revoke(sibling, SelfMatch.No))
+            assertFalse(c.removePasskey(key))
+            assertFalse(c.renamePasskey(key, "New name"))
+            assertFalse(c.revokeSession(session))
+        }
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.waitForIdle()
+        assertTrue(source.writes.isEmpty())
+    }
+
+    // ---- the owner refusal is per area (r2, verifier F3) ----------------------------------------
+
+    @Test fun ownerNoteSurvivesTheOtherAreasSuccess() {
+        show()
+        waitCalls(3)
+        source.answer("passkeys", SecurityResult.OwnerSignInNeeded(ORIGIN))
+        source.answer("sessions", SecurityResult.OwnerSignInNeeded(ORIGIN))
+        waitFor(DevicesTags.ownerNote(DevicesArea.Security))
+        source.answer("devices", ok(DevicesList(DevicesFixtures.DEVICES, emptyList())))
+        waitFor(DevicesTags.device(PHONE.id))
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertTrue("the Security owner note is still shown", exists(DevicesTags.ownerNote(DevicesArea.Security)))
+        assertFalse(exists(DevicesTags.ownerNote(DevicesArea.Devices)))
+        assertTrue("devices stay usable", enabled(DevicesTags.Pair))
+        assertFalse("security writes stay off", enabled(DevicesTags.SignOutOthers))
+    }
+
+    @Test fun theDevicesOwnerNoteSurvivesSecuritysSuccess() {
+        show()
+        waitCalls(3)
+        source.answer("devices", SecurityResult.OwnerSignInNeeded(ORIGIN))
+        waitFor(DevicesTags.ownerNote(DevicesArea.Devices))
+        source.answer("passkeys", ok(DevicesFixtures.PASSKEYS))
+        source.answer("sessions", ok(DevicesFixtures.SESSIONS))
+        waitFor(DevicesTags.passkey(LAPTOP_KEY.id))
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertTrue(exists(DevicesTags.ownerNote(DevicesArea.Devices)))
+        assertFalse(exists(DevicesTags.ownerNote(DevicesArea.Security)))
+        assertFalse(enabled(DevicesTags.Pair))
+    }
+
+    // ---- the password switch from a device token (r2, security F6) -----------------------------
+
+    @Test fun aDeviceTokenSignInIsNotOfferedTurningThePasswordOff() {
+        var captured: DevicesController? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
+                captured = controller
+                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
+            }
+        }
+        waitCalls(3)
+        source.answerReads(AppSignIn.DeviceToken)
+        waitFor(DevicesTags.PasswordToggle)
+        compose.waitUntil(5_000) { texts().contains(DevicesCopy.PASSWORD_NEEDS_PASSKEY_SIGN_IN) }
+        assertFalse(enabled(DevicesTags.PasswordToggle))
+        compose.runOnIdle { assertFalse(captured!!.setPasswordLogin(false)) }
+        compose.waitForIdle()
+        assertTrue(source.writes.isEmpty())
     }
 
     @Test fun removingAPasskeyAsksAndRenamingDoesNot() {
@@ -660,7 +794,7 @@ class DevicesRotationTest {
         var saved: String? = null
         restoration.setContent {
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Devices) }
-            val controller = rememberDevicesController(source, ORIGIN)
+            val controller = rememberDevicesController(source, ORIGIN, now = { NOW })
             SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             val registry = LocalSaveableStateRegistry.current
             androidx.compose.runtime.SideEffect { saved = registry?.performSave()?.toString() }
@@ -702,7 +836,7 @@ class DevicesRecreationTest {
         val source = RecordingSecuritySource()
         val content: @androidx.compose.runtime.Composable () -> Unit = {
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Devices) }
-            val controller = rememberDevicesController(source, ORIGIN)
+            val controller = rememberDevicesController(source, ORIGIN, now = { NOW })
             SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
         }
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()

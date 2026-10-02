@@ -226,7 +226,7 @@ fun SettingsDialog(
     // T10.4: one controller per server, held here (a tab change keeps a call and the code on
     // screen; closing Settings drops them, the code's clipboard copy with it).
     val context = androidx.compose.ui.platform.LocalContext.current
-    val pairingClipboard = remember(context) { AndroidPairingClipboard(context) }
+    val pairingClipboard = remember(context) { AndroidPairingClipboard.forApp(context) }
     val devicesController = rememberDevicesController(client.deviceSecurity, origin, clipboard = pairingClipboard)
     val devicesBinding = DevicesBinding(devicesController)
     val layout = currentLayoutClass()
