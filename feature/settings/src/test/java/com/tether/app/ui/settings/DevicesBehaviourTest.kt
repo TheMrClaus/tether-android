@@ -362,6 +362,30 @@ class DevicesBehaviourTest {
         assertFalse(allSemantics().contains(SENTINEL))
     }
 
+    /** The app going to the background (ON_STOP) masks the code again: no Recents snapshot or glance holds it. Kept for when the operator comes back. */
+    @Test fun stoppingTheAppMasksTheCode() {
+        val owner = TestOwner()
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        compose.setContent {
+            CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner, LocalConfirmArmMs provides 0L) {
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
+            }
+        }
+        waitCalls(3)
+        source.answerReads()
+        mint()
+        tap(DevicesTags.CodeReveal)
+        waitFor(DevicesTags.CodeRevealed)
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
+        waitFor(DevicesTags.CodeMasked)
+        assertFalse(allSemantics().contains(SENTINEL))
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        compose.waitForIdle()
+        assertEquals(DevicesCopy.CODE_HIDDEN, description(DevicesTags.CodeMasked))
+        assertTrue(exists(DevicesTags.CodeCopy))
+    }
+
     @Test fun anExpiredCodeIsDroppedAndItsCopyCleared() {
         // A clock the test moves: the code expires in 5 s.
         var clock = NOW
@@ -394,6 +418,34 @@ class DevicesBehaviourTest {
         tag(DevicesTags.Pair).performClick()
         compose.waitForIdle()
         assertEquals(1, source.writes.size)
+    }
+
+    /** Two writes asked in one frame (before the key can draw itself off): the controller starts one, per area. */
+    @Test fun twoWritesInOneFrameStartOnePerArea() {
+        var captured: DevicesController? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+                captured = controller
+                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
+            }
+        }
+        waitCalls(3)
+        source.answerReads()
+        waitFor(DevicesTags.Pair)
+        compose.runOnIdle {
+            val c = captured!!
+            assertTrue(c.pair())
+            assertFalse(c.pair())
+            assertFalse(c.revokeAll(RevokeAllEffect.KeepsPassword))
+            assertTrue(c.setPasswordLogin(false))
+            assertFalse(c.setPasswordLogin(true))
+            assertFalse(c.revokeOtherSessions())
+        }
+        waitCalls(5)
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.waitForIdle()
+        assertEquals(listOf("pair", "policy"), source.writes.map { it.name }.sorted())
     }
 
     // ---- confirmations --------------------------------------------------------------------------
