@@ -5,6 +5,7 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
@@ -44,10 +45,17 @@ import org.robolectric.annotation.Config
  * (1280×800 @1): `login-passkey` the passkey offered above the password (Studio's key and "or continue
  * with your password", Retro's "› sign in with passkey" and its ⏎ hint), `-waiting` the ceremony
  * running ("Waiting for your passkey…" / "authenticating with passkey"), `-dismissed` the web's notice
- * after a closed prompt. Timing-free: the probe and the sign-in are answered by hand (no network), the
+ * after a closed prompt, `-pairing` (ta-coik.1) the passkey on the Pairing path. Timing-free: the probe and the sign-in are answered by hand (no network), the
  * clock is driven by hand, the focus is cleared (no caret), and the URL is a fixed example.
  */
-enum class LoginPasskeyShot(val id: String) { Ready("login-passkey"), Waiting("login-passkey-waiting"), Dismissed("login-passkey-dismissed") }
+enum class LoginPasskeyShot(val id: String) {
+    Ready("login-passkey"),
+    Waiting("login-passkey-waiting"),
+    Dismissed("login-passkey-dismissed"),
+
+    /** ta-coik.1: the passkey offered on the app's Pairing path too (Studio's key and separator, Retro's line and ⏎ hint). */
+    Pairing("login-passkey-pairing"),
+}
 
 /** The real client for everything the screen reads, with the probe and the passkey sign-in answered by the shot. */
 private class ShotClient(real: TetherClient, private val answer: CompletableDeferred<LoginResult>) : TetherClient by real {
@@ -86,7 +94,15 @@ private fun ComposeContentTestRule.snapLogin(shot: LoginPasskeyShot, surface: Lo
     runOnIdle { focus?.clearFocus(force = true) }
     mainClock.advanceTimeBy(600)
     waitForIdle()
-    if (shot != LoginPasskeyShot.Ready) {
+    if (shot == LoginPasskeyShot.Pairing) {
+        onNode(hasContentDescription("Pairing code", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+        runOnIdle { focus?.clearFocus(force = true) }
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
+    if (shot == LoginPasskeyShot.Waiting || shot == LoginPasskeyShot.Dismissed) {
         onNodeWithTag(LoginTags.Passkey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         mainClock.advanceTimeBy(1_000)
         waitForIdle()

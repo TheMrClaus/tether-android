@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,6 +43,7 @@ import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CredentialRequestData
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -60,6 +62,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.CredentialManagerPasskeys
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PasskeyAuthenticator
+import com.tether.app.client.PasskeyCeremony
+import com.tether.app.client.PasskeyLoginRequest
+import com.tether.app.client.PasskeyLoginStart
 import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
@@ -76,6 +81,7 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherWeights
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -125,11 +131,20 @@ class LoginUi(
     val onPassword: (String) -> Unit,
     val onCode: (String) -> Unit,
     val onSubmit: () -> Unit,
-    /** T10.5: use-login-flow.ts `passkeyReady` (see [passkeyReady]), on the password path. */
+    /**
+     * T10.5: use-login-flow.ts `passkeyReady` (see [passkeyReady]). ta-coik.1: on every path, as the web
+     * offers it on its one sign-in screen (the Pairing path too, not the Password path only).
+     */
     val passkeyReady: Boolean = false,
     /** r2 (security F1): a passkey would be ready but the address is http: none offered, and why. */
     val passkeyNeedsHttps: Boolean = false,
     val onPasskey: () -> Unit = {},
+    /**
+     * ta-coik.1: the web's conditional offer (`autocomplete="current-password webauthn"`): the pending
+     * Credential Manager request the password field carries, so from Android 15 the passkey is among
+     * its autofill suggestions. Null while none is armed.
+     */
+    val passkeyAutofill: CredentialRequestData? = null,
 ) {
     val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
 
@@ -230,42 +245,99 @@ fun LoginScreen(
     var submitAgain: () -> Unit = {}
     var passkeyAgain: () -> Unit = {}
 
-    val passkeyPossible = mode == AuthMode.Password && hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
+    // ta-coik.1: offered on every path, as the web's one sign-in screen offers it (use-login-flow.ts
+    // passkeyReady, studio-login.tsx:41, retro-login.tsx:164), the Pairing path included.
+    val passkeyPossible = hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
     // r2 (security F1): never offered for an http address.
     val passkeyOffered = passkeyPossible && passkeyAddressAllowed(baseUrl)
+    fun busyNow() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
+
+    // ta-coik.1: the armed autofill offer, and the address it was armed for (once per page, as the web).
+    var autofill by remember { mutableStateOf<ArmedAutofill?>(null) }
+    var autofillArmedFor by remember { mutableStateOf<String?>(null) }
+
+    /** use-login-flow.ts signInWithPasskey's outcomes, for the prompt and the autofill offer alike. */
+    fun passkeyOutcome(result: LoginResult) {
+        val blocked = result is LoginResult.LocalNetworkBlocked
+        when {
+            blocked -> phase = LoginPhase.Ready
+            result is LoginResult.Success -> {
+                phase = LoginPhase.Success
+                password = ""
+                code = ""
+            }
+            result is LoginResult.PasskeyDismissed -> {
+                passkeyNotice = PASSKEY_DISMISSED_NOTICE
+                phase = LoginPhase.Ready
+            }
+            else -> {
+                error = loginErrorCopy(result) ?: "Passkey sign-in failed."
+                phase = LoginPhase.Error
+            }
+        }
+        if (blocked) onLocalNetworkBlocked { passkeyAgain() } else onLocalNetworkClear()
+    }
 
     /**
      * use-login-flow.ts signInWithPasskey: one ceremony, nothing retried. A dismissed prompt is the
      * web's notice and back to ready; a refusal is the error line. The client asks Credential Manager
-     * only for this server's own rpId.
+     * only for this server's own rpId (its host or a registrable parent, the browser's rule).
      */
     fun passkey() {
-        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success) return
+        if (busyNow()) return
         if (!passkeyOffered) return
         val url = baseUrl.trim()
         phase = LoginPhase.VerifyingPasskey
         error = null
         passkeyNotice = null
-        scope.launch {
-            val result = client.passkeyLogin(url, authenticator)
-            val blocked = result is LoginResult.LocalNetworkBlocked
-            when {
-                blocked -> phase = LoginPhase.Ready
-                result is LoginResult.Success -> {
-                    phase = LoginPhase.Success
-                    password = ""
-                    code = ""
-                }
-                result is LoginResult.PasskeyDismissed -> {
-                    passkeyNotice = PASSKEY_DISMISSED_NOTICE
-                    phase = LoginPhase.Ready
-                }
-                else -> {
-                    error = loginErrorCopy(result) ?: "Passkey sign-in failed."
-                    phase = LoginPhase.Error
-                }
-            }
-            if (blocked) onLocalNetworkBlocked { passkeyAgain() } else onLocalNetworkClear()
+        // The web's modal ceremony supersedes a pending conditional one (AbortError, quiet), not re-armed.
+        autofill = null
+        scope.launch { passkeyOutcome(client.passkeyLogin(url, authenticator)) }
+    }
+
+    /**
+     * ta-coik.1, use-login-flow.ts:180-216: the operator picked the passkey from the password field's
+     * suggestions. Only the offer still armed for this address counts; the offer is used up either way.
+     * Anything but an answer stays quiet (the web keeps an unused or failed conditional offer quiet);
+     * an answer is an attempt from here on, sent to the server that issued the challenge.
+     */
+    fun autofillAnswered(armed: ArmedAutofill, answer: PasskeyCeremony) {
+        if (autofill !== armed) return
+        autofill = null
+        if (answer !is PasskeyCeremony.Done) return
+        if (busyNow() || !passkeyOffered || baseUrl.trim() != armed.url) return
+        phase = LoginPhase.VerifyingPasskey
+        error = null
+        passkeyNotice = null
+        scope.launch { passkeyOutcome(client.passkeyLoginFinish(armed.request, answer)) }
+    }
+    // An answer can come long after the offer was armed: it is judged by the screen as it is then.
+    val onAutofillAnswer by rememberUpdatedState<(ArmedAutofill, PasskeyCeremony) -> Unit> { a, c -> autofillAnswered(a, c) }
+
+    // ta-coik.1, use-login-flow.ts:224-246: once a passkey is ready, ask for a challenge and offer it
+    // through the sign-in field's autofill suggestions (Android 15+, as the web arms it only where
+    // `browserSupportsWebAuthnAutofill()`). Once per page: a used, superseded or dismissed offer is not
+    // re-armed for the same address; the key (and Retro's Enter) remain. A failure stays quiet.
+    val offerUrl = baseUrl.trim()
+    LaunchedEffect(passkeyOffered, offerUrl) {
+        if (autofill != null && autofill?.url != offerUrl) autofill = null
+        if (autofillArmedFor != null && autofillArmedFor != offerUrl) autofillArmedFor = null
+        if (!passkeyOffered || !authenticator.autofillAvailable || autofillArmedFor == offerUrl) return@LaunchedEffect
+        autofillArmedFor = offerUrl
+        var armedNow = false
+        try {
+            val request = (client.passkeyLoginStart(offerUrl) as? PasskeyLoginStart.Ready)?.request ?: return@LaunchedEffect
+            var armed: ArmedAutofill? = null
+            val offer = authenticator.autofillOffer(request.requestJson()) { answer ->
+                // The framework may answer on any thread; the screen's state is only written on its own.
+                scope.launch { armed?.let { onAutofillAnswer(it, answer) } }
+            } ?: return@LaunchedEffect
+            armed = ArmedAutofill(offerUrl, request, CredentialRequestData(offer.request, offer.receiver))
+            autofill = armed
+            armedNow = true
+        } finally {
+            // Cancelled before it was armed (the address moved on): the next visit may arm again.
+            if (!armedNow && autofill == null && autofillArmedFor == offerUrl && !isActive) autofillArmedFor = null
         }
     }
 
@@ -316,8 +388,10 @@ fun LoginScreen(
 
     fun submit() {
         if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success) return
-        // retro-login.tsx: Enter on an empty password line is the passkey, when one is ready.
-        if (surface == LoginSurface.Retro && mode == AuthMode.Password && password.isEmpty() && passkeyOffered) return passkey()
+        // retro-login.tsx: Enter on an empty password line is the passkey, when one is ready. ta-coik.1:
+        // the Pairing path's line too, so the hint's "⏎ on an empty line = passkey" holds on either path.
+        val lineEmpty = if (mode == AuthMode.Password) password.isEmpty() else code.isEmpty()
+        if (surface == LoginSurface.Retro && lineEmpty && passkeyOffered) return passkey()
         passkeyNotice = null
         val url = baseUrl.trim()
         // ta-s4r: a password never goes out with the sign-in requirements
@@ -386,6 +460,7 @@ fun LoginScreen(
         passkeyReady = passkeyOffered,
         passkeyNeedsHttps = passkeyPossible && !passkeyOffered,
         onPasskey = ::passkey,
+        passkeyAutofill = autofill?.takeIf { passkeyOffered && it.url == baseUrl.trim() }?.data,
     )
     when (surface) {
         LoginSurface.Studio -> StudioLogin(ui)
@@ -396,6 +471,9 @@ fun LoginScreen(
 // ---------------------------------------------------------------------------
 // Shared pieces
 // ---------------------------------------------------------------------------
+
+/** ta-coik.1: one armed autofill offer: the address, the checked challenge, what the password field carries. */
+private class ArmedAutofill(val url: String, val request: PasskeyLoginRequest, val data: CredentialRequestData)
 
 /** The activity hosting [this] context, or null (Credential Manager needs it for its prompt). */
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -454,15 +532,17 @@ private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
         keyboardActions = KeyboardActions(onGo = { ui.onSubmit() }),
         fontFamily = fontFamily,
         contentType = ContentType.Password,
+        // ta-coik.1: studio-login.tsx:137 / retro-login.tsx:208 `autocomplete="current-password webauthn"`.
+        credentialRequest = ui.passkeyAutofill,
     )
 }
 
 @Composable
-private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier) {
+private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: String = "Pairing code") {
     TetherInputWell(
         value = ui.code,
         onValueChange = ui.onCode,
-        modifier = modifier.semantics { contentDescription = "Pairing code" },
+        modifier = modifier.semantics { contentDescription = description },
         placeholder = "8-character code",
         singleLine = true,
         enabled = !ui.busy,
@@ -657,6 +737,8 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
                 )
             }
             AuthMode.Pairing -> {
+                // ta-coik.1: the passkey on this path too (the web offers it wherever you sign in).
+                StudioPasskey(ui)
                 StudioLabel("Pairing code")
                 CodeField(ui, Modifier.fillMaxWidth())
                 Text(PAIRING_HELP, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
@@ -707,9 +789,15 @@ private fun StudioPasskey(ui: LoginUi) {
         icon = TetherIcons.Fingerprint,
         enabled = !ui.busy,
     )
-    if (ui.passwordEnabled) {
+    // studio-login.tsx:112's separator, and the app's own for its Pairing path (ta-coik.1).
+    val or = when {
+        ui.mode == AuthMode.Pairing -> PASSKEY_OR_PAIRING
+        ui.passwordEnabled -> "or continue with your password"
+        else -> null
+    }
+    if (or != null) {
         Text(
-            "or continue with your password",
+            or,
             color = t.faint,
             fontFamily = Manrope,
             fontSize = 12.5.sp,
@@ -789,7 +877,9 @@ private fun RetroLogin(ui: LoginUi) {
                 if (ui.usernameShown) LabeledRow("login:", 88) { UsernameField(ui, it, JetBrainsMono) }
                 LabeledRow("password:", 88) { mod -> RetroPromptWithEnter(mod, ui) { PasswordField(ui, it, JetBrainsMono, if (ui.passkeyReady) RETRO_PASSWORD_WITH_PASSKEY else "Dashboard password") } }
             }
-            AuthMode.Pairing -> LabeledRow("code:", 88) { mod -> RetroPromptWithEnter(mod, ui) { CodeField(ui, it) } }
+            AuthMode.Pairing -> LabeledRow("code:", 88) { mod ->
+                RetroPromptWithEnter(mod, ui) { CodeField(ui, it, if (ui.passkeyReady) RETRO_CODE_WITH_PASSKEY else "Pairing code") }
+            }
         }
         MonoText(hint, t.faint, fontSize = 11.5.sp)
         feedback?.let { (text, color) -> MonoText(text, color, Modifier.politeLiveRegion(), fontSize = 12.5.sp) }

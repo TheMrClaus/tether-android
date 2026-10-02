@@ -61,6 +61,12 @@ const val PASSKEY_NEEDS_HTTPS = com.tether.app.client.PasskeyLoginCopy.NEEDS_HTT
 /** r2: retro-login.tsx:213, the password line's accessible name while a passkey is ready. */
 const val RETRO_PASSWORD_WITH_PASSKEY = "Dashboard password — or press Enter alone to use a passkey"
 
+/** ta-coik.1: the same for Retro's pairing-code line (the app's own path), where Enter alone is the passkey too. */
+const val RETRO_CODE_WITH_PASSKEY = "Pairing code — or press Enter alone to use a passkey"
+
+/** ta-coik.1: Studio's separator under the passkey key on the app's own Pairing path. */
+const val PASSKEY_OR_PAIRING = "or pair this device with a code"
+
 /**
  * r2 (security F4): server-supplied text (a refusal's `{error}`, a transport message) as the login
  * screen shows it: through the same cleanup the Devices panel uses (hidden and bidi characters dropped,
