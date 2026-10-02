@@ -267,15 +267,19 @@ fun LoginScreen(
     val passkeyOffered = passkeyPossible && passkeyAddressAllowed(baseUrl)
     fun busyNow() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
 
+    // ta-coik.1 r3: the order of this screen's sign-in attempts (see [AttemptOrder]).
+    val attempts = remember { AttemptOrder() }
+
     // ta-coik.1: the armed autofill offer, and the arming run that claimed its address (once per page,
     // as the web). r2 (security F2): a claim is an object, so only the run that made it can release it.
     var autofill by remember { mutableStateOf<ArmedAutofill?>(null) }
     var autofillClaim by remember { mutableStateOf<AutofillClaim?>(null) }
 
     /** use-login-flow.ts signInWithPasskey's outcomes, for the prompt and the autofill offer alike. */
-    fun passkeyOutcome(result: LoginResult) {
+    fun passkeyOutcome(attempt: Long, result: LoginResult) {
         // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
         if (result is LoginResult.Superseded) return
+        if (!attempts.settle(attempt)) return
         val blocked = result is LoginResult.LocalNetworkBlocked
         when {
             blocked -> phase = LoginPhase.Ready
@@ -310,7 +314,8 @@ fun LoginScreen(
         passkeyNotice = null
         // The web's modal ceremony supersedes a pending conditional one (AbortError, quiet), not re-armed.
         autofill = null
-        scope.launch { passkeyOutcome(client.passkeyLogin(url, authenticator)) }
+        val attempt = attempts.begin()
+        scope.launch { passkeyOutcome(attempt, client.passkeyLogin(url, authenticator)) }
     }
 
     /**
@@ -331,7 +336,8 @@ fun LoginScreen(
         phase = LoginPhase.VerifyingPasskey
         error = null
         passkeyNotice = null
-        scope.launch { passkeyOutcome(client.passkeyLoginFinish(armed.request, answer)) }
+        val attempt = attempts.begin()
+        scope.launch { passkeyOutcome(attempt, client.passkeyLoginFinish(armed.request, answer)) }
     }
     // An answer can come long after the offer was armed: it is judged by the screen as it is then.
     val onAutofillAnswer by rememberUpdatedState<(ArmedAutofill, PasskeyCeremony) -> Unit> { a, c -> autofillAnswered(a, c) }
@@ -376,6 +382,7 @@ fun LoginScreen(
         phase = LoginPhase.Verifying
         error = null
         val attemptMode = mode
+        val attempt = attempts.begin()
         val sentUsername = username.trim()
         val usernameHint = usernameHintFor(requirements, sentUsername)
         scope.launch {
@@ -395,6 +402,9 @@ fun LoginScreen(
             }
             // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
             if (superseded) return@launch
+            // ta-coik.1 r3 (verifier r2, Low): a newer attempt has already settled; this older one's
+            // outcome (a late refusal after a picked passkey signed in, say) leaves the screen as it is.
+            if (!attempts.settle(attempt)) return@launch
             when {
                 blocked -> phase = LoginPhase.Ready
                 failure != null -> {
@@ -512,6 +522,26 @@ private class ArmedAutofill(val url: String, val request: PasskeyLoginRequest, v
 
 /** ta-coik.1 r2: one arming run's claim on [url]; compared by identity, so a run releases only its own. */
 private class AutofillClaim(val url: String)
+
+/**
+ * ta-coik.1 r3 (verifier r2, Low): a password or pairing send, the passkey key and a picked autofill
+ * passkey can be in flight together (the web lets a pick go ahead during a password attempt). Each takes
+ * a number when it begins; its outcome is shown only if no newer attempt has settled since, so an older
+ * attempt's late answer never covers a newer one's (a refusal over a passkey sign-in). Main thread only.
+ */
+private class AttemptOrder {
+    private var begun = 0L
+    private var settled = 0L
+
+    fun begin(): Long = ++begun
+
+    /** Whether [attempt]'s outcome may land: true, and it is the latest settled, unless a newer one has. */
+    fun settle(attempt: Long): Boolean {
+        if (attempt < settled) return false
+        settled = attempt
+        return true
+    }
+}
 
 /** The activity hosting [this] context, or null (Credential Manager needs it for its prompt). */
 private tailrec fun Context.findActivity(): Activity? = when (this) {

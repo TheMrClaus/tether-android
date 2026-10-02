@@ -108,11 +108,20 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         @Volatile var optionsGates: List<CountDownLatch> = emptyList()
         /** ta-coik.1 r2: when set, a password sign-in is held here (after it is recorded) until released. */
         @Volatile var holdLogin: CountDownLatch? = null
+        /** ta-coik.1 r3: a password sign-in answers 200 with a session cookie (otherwise the 401). */
+        @Volatile var loginSucceeds = false
+        /** ta-coik.1 r3: when set, a passkey verify is held here (after it is recorded) until released. */
+        @Volatile var holdVerify: CountDownLatch? = null
+        /** ta-coik.1 r3: the Cookie header of each `POST /api/auth/logout` (a revoke). */
+        val logouts = ConcurrentLinkedQueue<String>()
+        /** ta-coik.1 r3: password sign-ins answered (after any hold). */
+        val loginsAnswered = java.util.concurrent.atomic.AtomicInteger()
 
         fun releaseAll() {
             holdProbe?.countDown()
             optionsGates.forEach { it.countDown() }
             holdLogin?.countDown()
+            holdVerify?.countDown()
         }
 
         private fun hold(gate: CountDownLatch?) {
@@ -137,6 +146,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
             )
             "/api/auth/passkey/login/verify" -> {
                 verifies += TetherJson.parseToJsonElement(request.body.readUtf8()) as JsonObject
+                hold(holdVerify)
                 if (verifyRefuses) {
                     MockResponse().setResponseCode(401).setHeader("Content-Type", "application/json").setBody("""{"error":"That passkey could not be verified."}""")
                 } else {
@@ -147,7 +157,17 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
             "/api/auth/login" -> {
                 logins += request.body.readUtf8()
                 hold(holdLogin)
-                MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}""")
+                loginsAnswered.incrementAndGet()
+                if (loginSucceeds) {
+                    MockResponse().setHeader("Content-Type", "application/json").setBody("""{"ok":true}""")
+                        .addHeader("Set-Cookie", "tether_session=fedcba9876543210fedcba9876543210.cGFzc3dvcmQ; Path=/; HttpOnly; SameSite=Strict")
+                } else {
+                    MockResponse().setResponseCode(401).setBody("""{"error":"Those credentials are not correct."}""")
+                }
+            }
+            "/api/auth/logout" -> {
+                logouts += request.getHeader("Cookie").orEmpty()
+                MockResponse().setHeader("Content-Type", "application/json").setBody("""{"ok":true}""")
             }
             else -> MockResponse().setResponseCode(404).setBody("""{"error":"not found"}""")
         }
@@ -497,6 +517,67 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         waitFor { shows(successCopy) }
         assertEquals("the password attempt was left to settle on its own", 1, console.logins.size)
         gate.countDown()
+    }
+
+    /**
+     * ta-coik.1 r3 (verifier r2, Low; the idea of its probe scratchLatePasswordRefusalAfterPickedPasskeySuccess):
+     * with the screen still mounted, the slow password's refusal lands after the picked passkey signed
+     * in. It is the older attempt's late answer, so the screen keeps the passkey's outcome. (In the app
+     * the host has unmounted the screen by then; this holds the screen to the same rule on its own.)
+     */
+    @Test fun aLatePasswordRefusalAfterAPickedPasskeySignedInLeavesTheScreenAsItIs() {
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        waitFor { armedNodes().isNotEmpty() }
+        val offer = armedOffer()
+        val gate = CountDownLatch(1)
+        console.holdLogin = gate
+        field("Dashboard password").performTextInput("not-the-passkey")
+        field("Dashboard password").performImeAction()
+        waitFor { console.logins.size == 1 }
+        pick(offer)
+        waitFor { console.verifies.size == 1 }
+        waitFor { shows(successCopy) }
+        // Now the password's refusal is answered, and given time to reach the screen.
+        gate.countDown()
+        waitFor { console.loginsAnswered.get() == 1 }
+        val settle = System.currentTimeMillis() + 1_000
+        waitFor { System.currentTimeMillis() > settle }
+        rule.waitForIdle()
+        assertFalse("no late refusal over the passkey sign-in", shows("Those credentials are not correct."))
+        assertTrue("the passkey's outcome stands", shows(successCopy))
+    }
+
+    /**
+     * ta-coik.1 r3 (security re-review): the password and a picked passkey both at the console; the
+     * password is answered first and signs in. The passkey's 200 then lands late: it is not adopted (the
+     * client revokes that session) and the screen keeps the password's outcome, with no failure shown.
+     */
+    @Test fun aLatePasskeyAfterThePasswordWonChangesNothingOnScreenAndIsRevoked() {
+        console.loginSucceeds = true
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        waitFor { armedNodes().isNotEmpty() }
+        val offer = armedOffer()
+        val login = CountDownLatch(1)
+        val verify = CountDownLatch(1)
+        console.holdLogin = login
+        console.holdVerify = verify
+        field("Dashboard password").performTextInput("correct horse")
+        field("Dashboard password").performImeAction()
+        waitFor { console.logins.size == 1 }
+        pick(offer)
+        waitFor { console.verifies.size == 1 }
+        // The password is answered first: it signs in.
+        login.countDown()
+        waitFor { shows(successCopy) }
+        // Then the passkey's answer: superseded, revoked, and nothing else on screen.
+        verify.countDown()
+        waitFor { console.logins.size == 1 && console.logouts.isNotEmpty() }
+        rule.waitForIdle()
+        assertEquals(listOf("tether_session=0123456789abcdef0123456789abcdef.YXBwLXBhc3NrZXk"), console.logouts.toList())
+        assertTrue("the password's outcome stands", shows(successCopy))
+        assertFalse(shows("Passkey sign-in failed."))
     }
 
     @Test fun aPhoneThatCannotOfferPasskeysInAutofillAsksForNoChallenge() {

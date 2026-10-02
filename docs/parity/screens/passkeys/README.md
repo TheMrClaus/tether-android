@@ -59,6 +59,10 @@ against `components/sign-in-security.tsx` and `components/login/{studio,retro}-l
   for the address now typed: an edited address asks no challenge until its own probe has answered.
   A pick that lands while a password attempt is in flight goes ahead, as on the web (its conditional
   branch has no phase check). The password attempt is not cancelled either; each settles on its own.
+  The first sign-in to be adopted wins (ta-coik.1 r3): a later 200 from the other attempt, or one that
+  lands after a sign-out or a sign-in to another server, is not adopted, and its session is revoked on
+  the server that minted it. The screen likewise keeps the newer attempt's outcome over an older
+  attempt's late answer.
 
 ## Platform limits (not app rules)
 
