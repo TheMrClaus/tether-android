@@ -54,6 +54,10 @@ fun SessionDrawer(
      * report is then not seen, so it is never marked seen.
      */
     selectedOnScreen: Boolean = true,
+    /** T9.3 (dashboard.tsx:387 openScheduledActions): the rail's Scheduled actions key. Null: unavailable. */
+    onOpenScheduledActions: (() -> Unit)? = null,
+    /** T9.3: the Scheduled destination is on screen (the key reads `is-active`). */
+    scheduledActionsActive: Boolean = false,
 ) {
     val client = vm.client
     val scope = rememberCoroutineScope()
@@ -70,6 +74,8 @@ fun SessionDrawer(
     val connected = connection == ConnectionState.Connected
     val syncStates by client.syncStates.collectAsStateWithLifecycle()
     val consentOrigin by client.consentOrigin.collectAsStateWithLifecycle()
+    // T9.3 dashboard.tsx:1542: the key's count — the schedules not completed plus the continuations.
+    val scheduled by client.scheduledActions.collectAsStateWithLifecycle()
 
     val latestPrefs by rememberUpdatedState(preferences)
     val controller = remember(vm, prefs) {
@@ -135,6 +141,8 @@ fun SessionDrawer(
         now = now,
         syncStates = syncStates,
         origin = consentOrigin,
+        scheduledActionCount = scheduled.schedules.count { it.status != "completed" } + scheduled.continuations.size,
+        scheduledActionsActive = scheduledActionsActive,
     )
 
     // T5.3 dashboard.tsx:835-844 — debounce the typed filter into a server-side content search;
@@ -197,7 +205,7 @@ fun SessionDrawer(
             },
             onOpenSettings = onOpenSettings ?: { settingsOpen = true },
             onOpenGlobalSearch = vm::openGlobalSearch,
-        ),
+        ).copy(onOpenScheduledActions = onOpenScheduledActions),
     )
 
     // Outside the sidebar's token scope: the web raises these outside `.session-sidebar`.

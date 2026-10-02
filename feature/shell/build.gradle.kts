@@ -34,6 +34,8 @@ dependencies {
     implementation(project(":feature:files"))
     // T15.2: the Overview screen (components/overview/), shown in the workspace area.
     implementation(project(":feature:overview"))
+    // T9.3: the Scheduled destination (components/scheduled-actions-view.tsx), shown in the workspace area.
+    implementation(project(":feature:scheduled"))
     // T10.1: the Settings dialog behind the top bar's and the rail footer's Settings.
     implementation(project(":feature:settings"))
     implementation(project(":core:protocol"))

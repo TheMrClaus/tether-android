@@ -47,12 +47,11 @@ class SidebarController(
         resolveCurrentWorkspace(picked, prefs, workspaceRoot)
 
     /** v128 `pinnedWorkspaces` from the server-settings frame: a string array, or null ("never written"). */
-    fun serverPinned(settings: ServerMessage.ServerSettings?): List<String>? =
-        (settings?.settings?.get("pinnedWorkspaces") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+    fun serverPinned(settings: ServerMessage.ServerSettings?): List<String>? = serverPinnedOf(settings)
 
     /** dashboard.tsx:349 — the server's list once it has one, else this device's. */
     fun pinnedWorkspaces(settings: ServerMessage.ServerSettings?, prefs: TetherPreferences): List<String> =
-        SidebarModel.pinnedWorkspaces(serverPinned(settings), prefs.pinnedProjects)
+        pinnedWorkspacesOf(settings, prefs)
 
     /**
      * dashboard.tsx:354-367: adopt the server's list when it differs (a workspace pinned on another
@@ -250,6 +249,14 @@ class SidebarController(
     companion object {
         /** use-tether.ts:1316. */
         const val REDISCOVER_INTERVAL_MS = 20_000L
+
+        /** [serverPinned], for a host without a controller (T9.3's Scheduled workspace suggestions). */
+        fun serverPinnedOf(settings: ServerMessage.ServerSettings?): List<String>? =
+            (settings?.settings?.get("pinnedWorkspaces") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+
+        /** [pinnedWorkspaces], for a host without a controller (dashboard.tsx:420 `pinnedProjects`). */
+        fun pinnedWorkspacesOf(settings: ServerMessage.ServerSettings?, prefs: TetherPreferences): List<String> =
+            SidebarModel.pinnedWorkspaces(serverPinnedOf(settings), prefs.pinnedProjects)
 
         /**
          * [currentWorkspace]'s rule on its own, for a host without a controller (T10.1: the shell's

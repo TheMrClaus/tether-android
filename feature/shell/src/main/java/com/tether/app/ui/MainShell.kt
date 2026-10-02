@@ -191,8 +191,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val navigateTo: (DashboardView) -> Unit = { next ->
         viewHistorySaved = ViewHistory.decode(viewHistorySaved).navigate(next).encode()
     }
-    // Only a view with a screen here is ever shown (Scheduled is T9.3's; the bar shows it unavailable).
     val overviewOpen = view == DashboardView.Overview
+    // T9.3: Scheduled (dashboard.tsx:223 `scheduledActionsOpen`), in the workspace area beside the rail.
+    val scheduledOpen = view == DashboardView.Scheduled
     // T15.2: the selected session is on screen only in Sessions (dashboard.tsx:725 `activeSession`);
     // elsewhere the shell gets none: no header, stage, chat or inspector, and nothing marks it seen.
     val sessionsView = view == DashboardView.Sessions
@@ -342,13 +343,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenUsageAnalytics = null,
                 onOpenSettings = { settingsOpen = true },
                 // dashboard.tsx:1351 navigateTo. Sessions comes back to the conversation still
-                // selected (or the empty workspace); Scheduled (T9.3) has no screen here yet.
+                // selected (or the empty workspace).
                 onNavigate = { next ->
                     shell.closeDrawer()
                     userNavigated = true
                     navigateTo(next)
                 },
-                views = setOf(DashboardView.Overview, DashboardView.Sessions),
+                views = setOf(DashboardView.Overview, DashboardView.Sessions, DashboardView.Scheduled),
                 // dashboard.tsx:199 openLog: acknowledge the warnings, open, fetch fresh stats.
                 onOpenLog = {
                     vm.openLog()
@@ -397,6 +398,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         onClose = shell::closeDrawer,
                         onOpenSettings = { settingsOpen = true },
                         selectedOnScreen = sessionsView,
+                        // T9.3 dashboard.tsx:387-392 openScheduledActions: the sheet and the drawer
+                        // close, and Scheduled shows.
+                        onOpenScheduledActions = {
+                            vm.closeDraft()
+                            shell.closeTelemetry()
+                            shell.closeDrawer()
+                            userNavigated = true
+                            navigateTo(DashboardView.Scheduled)
+                        },
+                        scheduledActionsActive = scheduledOpen,
                     )
                 },
                 chat = {
@@ -448,6 +459,17 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 } else if (view == null) {
                     // Boot: no view-specific content yet (the web's "boot" view paints none).
                     { Box(Modifier.fillMaxSize()) }
+                } else if (scheduledOpen) {
+                    {
+                        // T9.3 dashboard.tsx:1587-1600: "Open last session" / "Open conversation" select
+                        // the session (`selectSession`), which shows Sessions.
+                        ScheduledHost(vm, prefs, workspaceRoot) { id ->
+                            userNavigated = true
+                            vm.selectSession(id)
+                            navigateTo(DashboardView.Sessions)
+                            shell.onSessionSelected()
+                        }
+                    }
                 } else if (!overviewOpen) {
                     null
                 } else {

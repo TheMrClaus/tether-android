@@ -675,6 +675,13 @@ class RealTetherClient(
     override val searchResults: StateFlow<SearchResults> = searchSync.searchResults
     override val globalSearchResults: StateFlow<GlobalSearchResults> = searchSync.globalSearchResults
 
+    // T9.3 scheduled actions (ScheduledActions.kt): fire-and-forget like the web's `send`, on the
+    // current handshaken socket; an unsent frame says so, with the web's words.
+    private val scheduledSync = ScheduledActionsSync { message ->
+        sendFrame(message).also { sent -> if (!sent) emitError(NodeRegistryRules.NOT_SENT_MESSAGE) }
+    }
+    override val scheduledActions: StateFlow<ScheduledActionsState> = scheduledSync.state
+
     // T15.1 v131 Overview feed (OverviewSync.kt). Every call is made under [lock]; its frames go out
     // on the live, handshaken socket of that moment only ([sendOverviewLocked]).
     private val overviewSync = OverviewSync()
@@ -1236,6 +1243,7 @@ class RealTetherClient(
         createErrorsState.value = null
         synchronized(lock) { createRepliesByRequest.clear() }
         searchSync.clear()
+        scheduledSync.clear()
         // T15.1: another server's overview must never show, and its subscription does not carry over.
         synchronized(lock) { overviewSync.clear() }
     }
@@ -2663,6 +2671,8 @@ class RealTetherClient(
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
             is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
                 ifCurrent(webSocket) { searchSync.onFrame(message) }
+            // T9.3: use-tether.ts:885-887 — the snapshot / broadcast replaces both lists.
+            is ServerMessage.ScheduledActions -> ifCurrent(webSocket) { scheduledSync.onFrame(message) }
             // T15.1: use-tether.ts:1010-1017 — fold; out of step re-subscribes on THIS socket only.
             is ServerMessage.OverviewSnapshot, is ServerMessage.OverviewDelta -> ifCurrent(webSocket) {
                 overviewSync.onFrame(message, clock()) { sendOverviewLocked(webSocket, it) }
@@ -2846,6 +2856,9 @@ class RealTetherClient(
         // ta-2uq (use-tether.ts:798-800): the pre-session catalog for the new-session composer, asked
         // for on every new socket; later changes arrive as the server's pushes. On THIS socket only.
         sendFrameOn(webSocket, ClientMessage.ProvidersSnapshotRequest)
+        // T9.3 (use-tether.ts:801): the scheduled actions snapshot, asked for on every new socket;
+        // later changes arrive as the server's broadcasts. On THIS socket only.
+        sendFrameOn(webSocket, ClientMessage.ScheduledActionsRequest)
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
         // session's snapshot.
@@ -4210,6 +4223,19 @@ class RealTetherClient(
     override fun runGlobalSearch(params: GlobalSearchParams): Boolean = searchSync.runGlobalSearch(params)
 
     override fun clearGlobalSearch() = searchSync.clearGlobalSearch()
+
+    // T9.3 scheduled actions (ScheduledActions.kt).
+    override fun requestScheduledActions(): Boolean = scheduledSync.request()
+
+    override fun createSchedule(schedule: com.tether.app.protocol.ScheduledActionInput): Boolean = scheduledSync.create(schedule)
+
+    override fun updateSchedule(scheduleId: String, schedule: com.tether.app.protocol.ScheduledActionInput): Boolean =
+        scheduledSync.update(scheduleId, schedule)
+
+    override fun controlSchedule(scheduleId: String, action: String): Boolean = scheduledSync.control(scheduleId, action)
+
+    override fun cancelScheduledContinuation(sessionId: String, resetsAt: Long): Boolean =
+        scheduledSync.cancelContinuation(sessionId, resetsAt)
 
     // T15.1 v131 Overview feed (OverviewSync.kt): the only two frames it ever sends.
     override fun subscribeOverview(subscription: com.tether.app.protocol.overview.OverviewSubscription): Boolean =

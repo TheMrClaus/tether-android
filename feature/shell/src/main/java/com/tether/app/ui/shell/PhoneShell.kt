@@ -99,7 +99,7 @@ class PhoneShellSlots(
     /** Studio's empty stage, [StudioWelcome] (T8.1, ta-3e7); the argument is the expanded layout. */
     val studioWelcome: (@Composable (expanded: Boolean) -> Unit)? = null,
     /**
-     * T15.2: the Overview (feature:overview). Non-null while it is showing: it replaces the
+     * T15.2: the Overview (feature:overview), or T9.3's Scheduled (feature:scheduled). Non-null while it is showing: it replaces the
      * workspace's header, stage and empty stage (the host passes no session meanwhile).
      */
     val overview: (@Composable () -> Unit)? = null,

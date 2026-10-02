@@ -838,6 +838,11 @@ data class GrantedPermissions(
 /**
  * `schedule-create` / `schedule-update` payload. Every field is REQUIRED on the
  * wire; the nullable ones are TS `T | null` and are sent as explicit JSON null.
+ *
+ * T9.3: [extra] carries fields this client does not model (a newer server's, e.g. tether #241's
+ * `setupConsent`), so an edit of a schedule sends them back exactly as the server stored them
+ * instead of silently dropping them. They are written after the modelled fields and can never
+ * replace one (a modelled key in [extra] is ignored). Empty for a schedule made here.
  */
 data class ScheduledActionInput(
     val name: String,
@@ -853,6 +858,7 @@ data class ScheduledActionInput(
     val cron: String,
     val timeZone: String,
     val maxRuns: Int?,
+    val extra: JsonObject = EMPTY_EXTRA,
 ) {
     fun toJsonObject(): JsonObject = buildJsonObject {
         put("name", name)
@@ -868,10 +874,19 @@ data class ScheduledActionInput(
         put("cron", cron)
         put("timeZone", timeZone)
         put("maxRuns", maxRuns)
+        for ((key, value) in extra) if (key !in KEYS) put(key, value)
     }
 
-    internal companion object {
-        fun from(r: Req) = ScheduledActionInput(
+    companion object {
+        /** The fields this client models, in the web's order (scheduled-actions-view.tsx submit). */
+        val KEYS: Set<String> = linkedSetOf(
+            "name", "prompt", "cwd", "provider", "profileId", "model", "reasoningEffort",
+            "permissionMode", "sandboxPolicy", "useWorktree", "cron", "timeZone", "maxRuns",
+        )
+
+        private val EMPTY_EXTRA = JsonObject(emptyMap())
+
+        internal fun from(r: Req) = ScheduledActionInput(
             name = r.str("name"),
             prompt = r.str("prompt"),
             cwd = r.str("cwd"),
@@ -885,6 +900,7 @@ data class ScheduledActionInput(
             cron = r.str("cron"),
             timeZone = r.str("timeZone"),
             maxRuns = r.o.long("maxRuns")?.toInt(),
+            extra = JsonObject(r.o.filterKeys { it !in KEYS }),
         )
     }
 }

@@ -892,6 +892,30 @@ interface TetherClient {
     fun clearGlobalSearch() {}
 
     // ------------------------------------------------------------------
+    // T9.3 scheduled actions (ScheduledActions.kt): defaults keep other implementations compiling.
+    // Every send returns whether a frame went out (an unsent one says so on [errors], like the
+    // web's `send`).
+    // ------------------------------------------------------------------
+
+    /** use-tether.ts `scheduledActions` + `scheduledContinuations`: the last `scheduled-actions` frame. */
+    val scheduledActions: StateFlow<ScheduledActionsState> get() = NO_SCHEDULED_ACTIONS
+
+    /** `scheduled-actions`: ask for the snapshot (also asked for on every new socket). */
+    fun requestScheduledActions(): Boolean = false
+
+    /** use-tether.ts createScheduledAction: `schedule-create`. */
+    fun createSchedule(schedule: com.tether.app.protocol.ScheduledActionInput): Boolean = false
+
+    /** use-tether.ts updateScheduledAction: `schedule-update`. */
+    fun updateSchedule(scheduleId: String, schedule: com.tether.app.protocol.ScheduledActionInput): Boolean = false
+
+    /** use-tether.ts controlScheduledAction: `schedule-control` with "pause" | "resume" | "run" | "delete". */
+    fun controlSchedule(scheduleId: String, action: String): Boolean = false
+
+    /** dashboard.tsx:1598 onCancelContinuation: `rate-limit-resume` with `dismiss`. */
+    fun cancelScheduledContinuation(sessionId: String, resetsAt: Long): Boolean = false
+
+    // ------------------------------------------------------------------
     // T15.1 v131 Overview feed (OverviewSync.kt): defaults keep other implementations compiling.
     // ------------------------------------------------------------------
 
@@ -918,6 +942,7 @@ private val NO_OVERVIEW: StateFlow<OverviewClientState> = MutableStateFlow(Overv
 
 private val NO_SEARCH_RESULTS: StateFlow<SearchResults> = MutableStateFlow(SearchResults())
 private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableStateFlow(GlobalSearchResults())
+private val NO_SCHEDULED_ACTIONS: StateFlow<ScheduledActionsState> = MutableStateFlow(ScheduledActionsState())
 
 /**
  * One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`).

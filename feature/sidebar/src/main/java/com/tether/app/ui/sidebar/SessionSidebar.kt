@@ -248,7 +248,7 @@ private fun SidebarContent(
         if (phone) MobileHeader(onClose = actions.onCloseDrawer)
 
         NewSessionKey(onClick = actions.onNewSession)
-        ScheduledNav(count = state.scheduledActionCount, onClick = actions.onOpenScheduledActions)
+        ScheduledNav(count = state.scheduledActionCount, active = state.scheduledActionsActive, onClick = actions.onOpenScheduledActions)
 
         ListHeader(
             openCount = view.openCount,
@@ -396,9 +396,13 @@ private fun NewSessionKey(onClick: () -> Unit) {
     )
 }
 
-/** `.scheduled-actions-nav` (globals.css 10399-10446, 10987-10993; studio.css 305-307). */
+/**
+ * `.scheduled-actions-nav` (globals.css 10399-10446, 10987-10993; studio.css 305-307). T9.3: while
+ * the destination is on screen it is `is-active` (studio.css 312: white on `--graphite-raised`; the
+ * count's ring `--violet-strong`, its figure `--violet-deep`) and `aria-current="page"`.
+ */
 @Composable
-private fun ScheduledNav(count: Int, onClick: (() -> Unit)?) {
+private fun ScheduledNav(count: Int, active: Boolean, onClick: (() -> Unit)?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
@@ -407,6 +411,7 @@ private fun ScheduledNav(count: Int, onClick: (() -> Unit)?) {
             .padding(top = 0.6f.rem, bottom = 1f.rem)
             .fillMaxWidth()
             .heightIn(min = 2.75f.rem)
+            .then(if (active) Modifier.background(t.graphiteRaised, shape).semantics { selected = true } else Modifier)
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .alpha(if (onClick == null) 0.48f else 1f)
             .border(1.dp, Color.Transparent, shape)
@@ -414,20 +419,20 @@ private fun ScheduledNav(count: Int, onClick: (() -> Unit)?) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        SmallIcon(TetherIcons.CalendarClock, t.muted, 17.dp)
-        Text("Scheduled actions", style = css(type.ui, 0.8125f, 650), color = t.muted, modifier = Modifier.weight(1f))
-        if (count > 0) CountPill(count, t.lineStrong, 0.64f)
+        val ink = if (active) t.white else t.muted
+        SmallIcon(TetherIcons.CalendarClock, ink, 17.dp)
+        Text("Scheduled actions", style = css(type.ui, 0.8125f, 650), color = ink, modifier = Modifier.weight(1f))
+        if (count > 0) CountPill(count, if (active) t.violetStrong else t.lineStrong, 0.64f, if (active) t.violetDeep else t.faint)
     }
 }
 
 @Composable
-private fun CountPill(count: Int, border: Color, rem: Float) {
-    val t = LocalTetherTokens.current
+private fun CountPill(count: Int, border: Color, rem: Float, ink: Color = LocalTetherTokens.current.faint) {
     val type = LocalTetherTypography.current
     Box(
         Modifier.widthIn(min = 1.4f.rem).heightIn(min = 1.4f.rem).border(1.dp, border, RoundedCornerShape(999.dp)).padding(horizontal = 0.3f.rem),
         contentAlignment = Alignment.Center,
-    ) { Text("$count", style = css(type.mono, rem, 650, lineHeight = 1f), color = t.faint) }
+    ) { Text("$count", style = css(type.mono, rem, 650, lineHeight = 1f), color = ink) }
 }
 
 /** `.session-list-header`: the legend, the open count, and the filter bank (globals.css 928-1042, 10995-11075; studio.css 308-314, 445-447). */

@@ -105,7 +105,7 @@ object TopbarReasons {
     const val FILES = "Open a session to browse its files"
 
     /**
-     * App-only: a destination the web has and this app does not yet (Scheduled T9.3, Usage and
+     * App-only: a destination the web has and this app does not yet (Usage and
      * Accounts T9.2). Shown the way the web shows an unavailable control: `aria-disabled`, dimmed,
      * with its reason.
      */
@@ -133,7 +133,7 @@ data class TopbarActions(
     val onOpenSettings: (() -> Unit)? = null,
     /** `onNavigate`: in-app navigation between the console's views. */
     val onNavigate: ((DashboardView) -> Unit)? = null,
-    /** The views this app can show (Scheduled is T9.3's): any other is shown unavailable. */
+    /** The views this host can show (the app's shell passes Scheduled too, T9.3): any other is shown unavailable. */
     val views: Set<DashboardView> = setOf(DashboardView.Overview, DashboardView.Sessions),
 ) {
     internal fun hostOf(destination: TopBarDestination): (() -> Unit)? {
