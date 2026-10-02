@@ -1,5 +1,6 @@
 package com.tether.app.ui.settings
 
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -138,7 +139,9 @@ fun interface LoginLinkOpener {
         /**
          * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the checked https URL ([ClaudeLoginLink]): the
          * phone's browser, no app credential with it (the T15.7 / CompatibilityBanner pattern).
+         * Uri.parse, not core-ktx's toUri: this module does not depend on androidx.core (ExternalLinks' rule).
          */
+        @SuppressLint("UseKtx")
         fun browser(context: Context) = LoginLinkOpener { link ->
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.url))
                 .addCategory(Intent.CATEGORY_BROWSABLE)
