@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -42,6 +43,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -89,13 +92,25 @@ class NoCopyGuardTest {
         }
     }
 
-    /** The old [TextToolbar]: counts every menu it is asked to show. */
+    /** The old [TextToolbar]: records every menu it is asked to show (the items offered), and hides. */
     private class ToolbarSpy : TextToolbar {
         var shows = 0
-        override val status = TextToolbarStatus.Hidden
-        override fun hide() = Unit
-        override fun showMenu(rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?, onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?) {
+        var hides = 0
+        var last: List<String> = emptyList()
+        override var status = TextToolbarStatus.Hidden
+        override fun hide() {
+            hides++
+            status = TextToolbarStatus.Hidden
+        }
+        override fun showMenu(rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?, onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?) =
+            showMenu(rect, onCopyRequested, onPasteRequested, onCutRequested, onSelectAllRequested, null)
+        override fun showMenu(rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?, onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?, onAutofillRequested: (() -> Unit)?) {
             shows++
+            status = TextToolbarStatus.Shown
+            last = listOfNotNull(
+                "Copy".takeIf { onCopyRequested != null }, "Paste".takeIf { onPasteRequested != null }, "Cut".takeIf { onCutRequested != null },
+                "SelectAll".takeIf { onSelectAllRequested != null }, "Autofill".takeIf { onAutofillRequested != null },
+            )
         }
     }
 
@@ -238,6 +253,10 @@ class NoCopyGuardTest {
         assertEquals("the control copies then cuts", listOf<String?>(TEXT, TEXT), clipboard.writes)
         assertEquals("", control)
         assertEquals("the guarded field lost its text", TEXT, guarded)
+        // P4-4: TalkBack names the inert actions for what they are.
+        val config = tag(GUARDED).fetchSemanticsNode().config
+        assertEquals(NoCopyGuardCopy.ACTION_LABEL, config[SemanticsActions.CopyText].label)
+        assertEquals(NoCopyGuardCopy.ACTION_LABEL, config[SemanticsActions.CutText].label)
     }
 
     /** ta-78a (1): an IME's Cut and Copy (InputConnection.performContextMenuAction) do nothing either. */
@@ -274,6 +293,7 @@ class NoCopyGuardTest {
     @Test fun theFieldsRealMenuIsTheNewContextMenuAndTheGuardedOneKeepsNothingThatReadsTheText() {
         assertTrue("the new context menu is off: NoCopyToolbar is the guard again", ComposeFoundationFlags.isNewContextMenuEnabled)
         installProcessTextApp()
+        NoCopyProbe.seed()
         val menu = MenuSpy()
         val toolbar = ToolbarSpy()
         show(recording(), menu, toolbar, guardedField = { NoCopyScope(true) { g -> BasicTextField(guarded, { guarded = it }, g.fillMaxWidth().testTag(GUARDED)) } })
@@ -287,8 +307,65 @@ class NoCopyGuardTest {
         val allowed = setOf(TextContextMenuKeys.PasteKey, TextContextMenuKeys.SelectAllKey, TextContextMenuKeys.AutofillKey)
         assertTrue("the guarded field's menu offers ${menu.names()}", keys.all { it in allowed })
         assertTrue("the guarded field's menu lost Select all: $keys", TextContextMenuKeys.SelectAllKey in keys)
+        assertTrue("the guarded field's menu has no Paste with text on the clipboard: ${menu.names()}", TextContextMenuKeys.PasteKey in keys)
         assertEquals("the old TextToolbar was used", 0, toolbar.shows)
         assertEquals(2, menu.opened)
+    }
+
+    /**
+     * ta-78a r2 (P3-1): [NoCopyToolbar] implements every [TextToolbar] member itself (no `by`
+     * delegation, which would forward a member Compose adds unfiltered). Fails when the interface
+     * changes: then decide, member by member, what the guard forwards.
+     */
+    @Test fun noCopyToolbarImplementsEveryTextToolbarMemberItself() {
+        fun sig(m: java.lang.reflect.Method) = m.name + m.parameterTypes.joinToString(",", "(", ")") { it.simpleName }
+        val members = TextToolbar::class.java.declaredMethods.filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.isSynthetic }
+        assertEquals(
+            "TextToolbar changed: re-check NoCopyToolbar",
+            setOf("getStatus()", "hide()", "showMenu(Rect,Function0,Function0,Function0,Function0)", "showMenu(Rect,Function0,Function0,Function0,Function0,Function0)"),
+            members.map(::sig).toSet(),
+        )
+        for (m in members) {
+            val own = runCatching { NoCopyToolbar::class.java.getDeclaredMethod(m.name, *m.parameterTypes) }.getOrNull()
+            assertNotNull("NoCopyToolbar does not implement ${sig(m)} itself", own)
+        }
+        assertTrue("NoCopyToolbar delegates with `by`", NoCopyToolbar::class.java.declaredFields.none { it.name.startsWith("\$\$delegate") })
+        // What it forwards: the status and hide, and a menu with Copy and Cut stripped.
+        val platform = ToolbarSpy()
+        val guarded = NoCopyToolbar(platform)
+        guarded.showMenu(Rect.Zero, {}, {}, {}, {}, {})
+        assertEquals(listOf("Paste", "SelectAll", "Autofill"), platform.last)
+        assertEquals(TextToolbarStatus.Shown, guarded.status)
+        guarded.hide()
+        assertEquals(1, platform.hides)
+        assertEquals(TextToolbarStatus.Hidden, guarded.status)
+    }
+
+    /**
+     * ta-78a r2 (P3-1): with the new context menu turned OFF, the field's menu goes to the old
+     * [TextToolbar], and the guarded field's offers no Copy and no Cut (Paste and Select all stay);
+     * the control's offers both. The new provider is never used.
+     */
+    @Test fun withTheNewContextMenuOffTheOldToolbarIsTheMenuAndIsFiltered() {
+        val was = ComposeFoundationFlags.isNewContextMenuEnabled
+        ComposeFoundationFlags.isNewContextMenuEnabled = false
+        try {
+            NoCopyProbe.seed()
+            val menu = MenuSpy()
+            val toolbar = ToolbarSpy()
+            show(recording(), menu, toolbar, guardedField = { NoCopyScope(true) { g -> BasicTextField(guarded, { guarded = it }, g.fillMaxWidth().testTag(GUARDED)) } })
+            tag(CONTROL).performTouchInput { longClick(centerLeft + Offset(12f, 0f)) }
+            compose.waitUntil(5_000) { toolbar.shows > 0 }
+            assertTrue("control: ${toolbar.last}", toolbar.last.containsAll(listOf("Copy", "Cut", "Paste")))
+            val before = toolbar.shows
+            tag(GUARDED).performTouchInput { longClick(centerLeft + Offset(12f, 0f)) }
+            compose.waitUntil(5_000) { toolbar.shows > before }
+            assertTrue("the guarded field's old toolbar offers ${toolbar.last}", toolbar.last.none { it == "Copy" || it == "Cut" })
+            assertTrue("the guarded field's old toolbar: ${toolbar.last}", toolbar.last.containsAll(listOf("Paste", "SelectAll")))
+            assertEquals("the new menu was used with the flag off", 0, menu.opened)
+        } finally {
+            ComposeFoundationFlags.isNewContextMenuEnabled = was
+        }
     }
 
     /** A translate-like app that takes ACTION_PROCESS_TEXT (what a real device offers in the menu). */

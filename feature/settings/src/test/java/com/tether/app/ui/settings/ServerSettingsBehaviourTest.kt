@@ -64,12 +64,14 @@ class ServerSettingsBehaviourTest {
 
     private fun secretSettings() = ServerFixtures.settingsJson(password = SENTINEL, proxyToken = TOKEN_SENTINEL)
 
-    private fun show(b: ServerSettingsBinding, tab: SettingsTab = SettingsTab.Advanced) {
+    private fun show(b: ServerSettingsBinding, tab: SettingsTab = SettingsTab.Advanced, menus: MenuSpies? = null) {
         binding = b
         state.tab = tab
         compose.setContent {
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                if (shown) SettingsUnderTest(store.prefs, state, serverSettings = binding)
+                WithMenuSpies(menus) {
+                    if (shown) SettingsUnderTest(store.prefs, state, serverSettings = binding)
+                }
             }
         }
         compose.waitUntil(5_000) { state.draft != null }
@@ -561,6 +563,7 @@ class ServerSettingsBehaviourTest {
             assertEquals("$keys changed the secret", SENTINEL, field.editableText())
         }
         assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+        field.assertCtrlVPastesTheClipboard(compose, "Password")
     }
 
     /**
@@ -584,31 +587,22 @@ class ServerSettingsBehaviourTest {
     }
 
     /**
-     * ta-78a (2): the revealed secret's REAL menu (a long press; the new text context menu in
-     * foundation 1.12.1) holds no Copy, no Cut and nothing else that reads the text. The plain
-     * field beside it (Workspace root) shows the harness reads the menu that would be drawn.
+     * ta-78a (2), r2: each revealed secret's REAL menus (the long-press toolbar of the new text
+     * context menu, and the right-click dropdown) hold no Copy, no Cut, nothing else that reads the
+     * text, and still Paste. The plain field beside them (Workspace root) is the control.
      */
     @Config(shadows = [NoMagnifier::class])
-    @Test fun theRevealedSecretsRealMenuOffersNothingThatReadsIt() {
-        val menu = MenuSpy()
-        binding = ServerFixtures.binding(view = ServerFixtures.view(secretSettings()))
-        state.tab = SettingsTab.Advanced
-        compose.setContent {
-            CompositionLocalProvider(androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu) {
-                SettingsUnderTest(store.prefs, state, serverSettings = binding)
-            }
-        }
-        compose.waitUntil(5_000) { state.draft != null }
+    @Test fun theRevealedSecretsRealMenusOfferNothingThatReadsThem() {
+        val menus = MenuSpies()
+        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())), menus = menus)
         val plain = tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot))
         plain.performScrollTo()
         plain.performTextReplacement("/srv/workspaces")
-        plain.longPressForMenu(compose, menu)
-        assertTrue("the control offers no Copy: ${menu.names()}", menu.names().containsAll(listOf("Copy", "Cut")))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
-        field.longPressForMenu(compose, menu)
-        val names = menu.names()
-        assertTrue("the revealed secret's menu offers $names", names.isNotEmpty() && names.all { it in setOf("Paste", "SelectAll", "Autofill") })
+        for (secret in listOf(ServerSetting.Password, ServerSetting.ProxyToken)) {
+            tag(ServerSettingsTags.reveal(secret)).performScrollTo().performClick()
+            compose.waitForIdle()
+            assertSecretMenus(compose, menus, plain, tag(ServerSettingsTags.input(secret)), secret.key)
+        }
     }
 
     /** r2: the revealed field's text menu offers neither Copy nor Cut (paste and select-all stay). */

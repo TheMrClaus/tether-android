@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -322,7 +323,7 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 
 /**
  * A secret field's copy and cut, closed (ta-78a, ta-oqx). With [on], [content] gets the [guard]
- * modifier to put FIRST on its text field, and runs under a clipboard that drops every write.
+ * modifier to put FIRST on its text field, and runs under a clipboard whose writes are dropped.
  *
  * Every way the text field (foundation 1.12, the String BasicTextField) copies or cuts is closed
  * where it starts, before anything is written or deleted:
@@ -333,14 +334,18 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
  *   ([NoCopyToolbar]);
  * - hardware keys and an IME's cut or copy (sent to the field as KEYCODE_CUT / KEYCODE_COPY):
  *   consumed before the field sees them ([NoCopyKeys]);
- * - the accessibility Copy and Cut actions: replaced with ones that do nothing.
- * Behind them, fail closed: whatever clipboard the host provides, nothing the field writes reaches
- * it ([noCopyClipboard]); reads (paste) pass.
+ * - the accessibility Copy and Cut actions: replaced with ones that do nothing, labelled
+ *   [NoCopyGuardCopy.ACTION_LABEL] so TalkBack says why.
+ * These source guards are THE control. Behind them, a backstop only: the Compose clipboard the field
+ * gets drops what is written through it ([noCopyClipboard]; reads, paste, pass). It cannot stop a
+ * write that goes around that object (the platform ClipboardManager it must expose for the paste
+ * check); foundation 1.12.1 makes none (its bytecode writes only via Clipboard.setClipEntry).
  *
  * ta-oqx N1: with cut stopped at its source nothing is deleted, so nothing has to be put back (the
  * old CutGuard, which restored text from what a refused write carried, is gone).
- * Re-check on every Compose upgrade: NoCopyGuardTest's menu-path test fails when the field stops
- * using the new context menu.
+ * Re-check ALL of this on every Compose upgrade: the menu path (NoCopyGuardTest fails when the
+ * field stops using the new context menu or TextToolbar changes), the key mapping, and that
+ * foundation still writes only through Clipboard.setClipEntry (a bytecode grep for setPrimaryClip).
  */
 @Composable
 internal fun NoCopyScope(on: Boolean, content: @Composable (guard: Modifier) -> Unit) {
@@ -361,9 +366,16 @@ internal val NoCopyGuard: Modifier = Modifier
     .filterTextContextMenuComponents { NoCopyMenu.keeps(it) }
     .onPreviewKeyEvent { NoCopyKeys.copiesOrCuts(it) }
     .semantics {
-        copyText { false }
-        cutText { false }
+        // P4-4: still listed (an action cannot be removed), but named for what it is, and it does nothing.
+        copyText(label = NoCopyGuardCopy.ACTION_LABEL) { false }
+        cutText(label = NoCopyGuardCopy.ACTION_LABEL) { false }
     }
+
+/** The words of the guard. */
+internal object NoCopyGuardCopy {
+    /** The name TalkBack gives a secret field's (inert) Copy and Cut actions. */
+    const val ACTION_LABEL = "Copying is off for this field"
+}
 
 /** The new text menu's items a secret field keeps: none of them reads the text. */
 internal object NoCopyMenu {
@@ -387,9 +399,11 @@ internal object NoCopyKeys {
 }
 
 /**
- * The clipboard of a secret field, whatever [delegate] is: reads pass (paste), every write is
- * dropped. An [AndroidClipboard] stays one (the text field's paste check reads its platform manager;
- * foundation never writes through it), any other clipboard still has its writes dropped.
+ * The backstop clipboard of a secret field (the source guards in [NoCopyScope] are the control):
+ * reads pass (paste); a write through THIS object is dropped, whether [delegate] is an
+ * [AndroidClipboard] or not. An [AndroidClipboard] stays one, so it still exposes the platform
+ * manager (the text field's paste check reads it): a write made straight to that manager is not
+ * stopped here. Foundation 1.12.1 makes none; re-check that on every Compose upgrade.
  */
 // AndroidClipboard is marked @VisibleForTesting, but the text field requires it (a plain Clipboard
 // throws in its paste check), so the guard implements it.
@@ -410,8 +424,16 @@ private class NoCopyPlainClipboard(private val delegate: Clipboard) : Clipboard 
     override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
 }
 
-/** The old [TextToolbar] menu (the new context menu turned off) of a secret field: no Copy, no Cut. */
-internal class NoCopyToolbar(private val delegate: TextToolbar) : TextToolbar by delegate {
+/**
+ * The old [TextToolbar] menu (the new context menu turned off) of a secret field: no Copy, no Cut.
+ * Implemented member by member, never `by delegate`: a member a later Compose adds to [TextToolbar]
+ * must not reach the platform toolbar unfiltered. NoCopyGuardTest fails when the interface changes.
+ */
+internal class NoCopyToolbar(private val delegate: TextToolbar) : TextToolbar {
+    override val status: TextToolbarStatus get() = delegate.status
+
+    override fun hide() = delegate.hide()
+
     override fun showMenu(
         rect: Rect,
         onCopyRequested: (() -> Unit)?,

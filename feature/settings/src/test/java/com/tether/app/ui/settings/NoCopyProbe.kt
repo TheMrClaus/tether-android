@@ -1,6 +1,15 @@
 package com.tether.app.ui.settings
 
 import android.content.ClipData
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import androidx.compose.ui.test.rightClick
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuDropdownProvider
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.text.contextmenu.data.ProcessTextKey
@@ -100,4 +109,72 @@ internal fun SemanticsNodeInteraction.longPressForMenu(rule: ComposeTestRule, me
     val before = menu.opened
     performTouchInput { longClick(centerLeft + Offset(24f, 0f)) }
     rule.waitUntil(5_000) { menu.opened > before && menu.shown != null }
+}
+
+/** Where a screen test shows its text menus: the long-press toolbar and the right-click dropdown, both recorded. */
+internal class MenuSpies {
+    val toolbar = MenuSpy()
+    val dropdown = MenuSpy()
+}
+
+/** [content] with [spies] as the new context menu's toolbar and dropdown providers (null: the platform's). */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun WithMenuSpies(spies: MenuSpies?, content: @Composable () -> Unit) {
+    if (spies == null) return content()
+    CompositionLocalProvider(
+        LocalTextContextMenuToolbarProvider provides spies.toolbar,
+        LocalTextContextMenuDropdownProvider provides spies.dropdown,
+        content = content,
+    )
+}
+
+/**
+ * Select all of [this], right-click inside the selection (a mouse) and wait until the dropdown menu
+ * is open. (A right-click with nothing selected offers no Copy or Cut, so it would prove nothing.)
+ */
+@OptIn(ExperimentalTestApi::class)
+internal fun SemanticsNodeInteraction.rightClickForMenu(rule: ComposeTestRule, menu: MenuSpy) {
+    val n = editableText().orEmpty().length
+    performSemanticsAction(SemanticsActions.SetSelection) { it(0, n, false) }
+    rule.waitForIdle()
+    val before = menu.opened
+    performMouseInput { rightClick(centerLeft + Offset(24f, 0f)) }
+    rule.waitUntil(5_000) { menu.opened > before && menu.shown != null }
+}
+
+/** The items a secret field's menu may offer (the coordinator kept Autofill). */
+internal val SecretMenuItems = setOf("Paste", "SelectAll", "Autofill")
+
+/**
+ * ta-78a r2: [field]'s REAL menus, the long-press toolbar and the right-click dropdown, offer only
+ * [SecretMenuItems], and Paste among them (the clipboard is seeded first). [control], an unguarded
+ * field holding text on the same screen, offers Copy and Cut in both: the menu read is the one drawn.
+ */
+internal fun assertSecretMenus(rule: ComposeTestRule, spies: MenuSpies, control: SemanticsNodeInteraction, field: SemanticsNodeInteraction, what: String) {
+    NoCopyProbe.seed()
+    for ((how, menu) in listOf("long press" to spies.toolbar, "right click" to spies.dropdown)) {
+        control.performScrollTo()
+        if (menu === spies.toolbar) control.longPressForMenu(rule, menu) else control.rightClickForMenu(rule, menu)
+        assertTrue("the control's $how menu: ${menu.names()}", menu.names().containsAll(listOf("Copy", "Cut")))
+        field.performScrollTo()
+        if (menu === spies.toolbar) field.longPressForMenu(rule, menu) else field.rightClickForMenu(rule, menu)
+        val names = menu.names()
+        assertTrue("$what: the $how menu offers $names", names.all { it in SecretMenuItems })
+        assertTrue("$what: the $how menu has no Paste with text on the clipboard: $names", "Paste" in names)
+    }
+}
+
+/**
+ * ta-78a r2 (P3-2) positive control: with the cursor at the end, Ctrl+V pastes the clipboard's
+ * [NoCopyProbe.MARKER] into [this]. Proves the field had focus for the keys pressed before it, and
+ * that paste still works through the guard.
+ */
+@OptIn(ExperimentalTestApi::class)
+internal fun SemanticsNodeInteraction.assertCtrlVPastesTheClipboard(rule: ComposeTestRule, what: String) {
+    val before = editableText().orEmpty()
+    performSemanticsAction(SemanticsActions.SetSelection) { it(before.length, before.length, false) }
+    performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.V) } }
+    rule.waitForIdle()
+    assertEquals("$what: Ctrl+V did not paste (no focus, or paste broken)", before + NoCopyProbe.MARKER, editableText())
 }

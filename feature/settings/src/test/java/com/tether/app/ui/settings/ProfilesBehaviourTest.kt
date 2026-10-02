@@ -94,11 +94,13 @@ class ProfilesBehaviourTest {
     /** A writer that records only (no broadcast). */
     private fun recording() = RecordingProvidersWriter(newest = { providers.list })
 
-    private fun show(list: ProvidersList? = ProfileFixtures.list(), writer: ProvidersWriter = ProvidersWriter.None, origin: String? = ORIGIN) {
+    private fun show(list: ProvidersList? = ProfileFixtures.list(), writer: ProvidersWriter = ProvidersWriter.None, origin: String? = ORIGIN, menus: MenuSpies? = null) {
         providers = ProvidersBinding(list, origin, writer)
         compose.setContent {
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                if (shown) SettingsUnderTest(store.prefs, state, providers = providers)
+                WithMenuSpies(menus) {
+                    if (shown) SettingsUnderTest(store.prefs, state, providers = providers)
+                }
             }
         }
         compose.waitUntil(5_000) { state.draft != null }
@@ -789,6 +791,43 @@ class ProfilesBehaviourTest {
             assertEquals("$keys deleted the draft", SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
         }
         assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+        f.assertCtrlVPastesTheClipboard(compose, "Add-row value")
+    }
+
+    /** ta-78a r2: the hardware copy and cut keys write nothing and delete nothing from a revealed env value; Ctrl+V still pastes. */
+    @Config(shadows = [DeviceKeyCharacterMap::class])
+    @Test fun aRevealedEnvValueSurvivesTheCopyAndCutKeys() {
+        show(secretList())
+        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
+        val f = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"))
+        f.performClick()
+        compose.waitForIdle()
+        NoCopyProbe.seed()
+        for (keys in ClipKeys.entries) {
+            f.selectAllAndPress(keys)
+            compose.waitForIdle()
+            assertEquals("$keys changed the value", SENTINEL, editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
+        }
+        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+        f.assertCtrlVPastesTheClipboard(compose, "env value")
+    }
+
+    /**
+     * ta-78a r2: the real menus (long press, right click) of a revealed env value and of the Add
+     * row's revealed value offer nothing that reads them; the Add row's NAME field is the control.
+     */
+    @Config(shadows = [NoMagnifier::class])
+    @Test fun theRevealedEnvValuesRealMenusOfferNothingThatReadsThem() {
+        val menus = MenuSpies()
+        show(secretList(), menus = menus)
+        val name = tag(ProfileTags.envNewName("claude-work"))
+        name.performScrollTo().performTextReplacement("ANTHROPIC_API_KEY")
+        tap(ProfileTags.envNewReveal("claude-work"))
+        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement(SENTINEL)
+        compose.waitForIdle()
+        assertSecretMenus(compose, menus, name, tag(ProfileTags.envNewInput("claude-work")), "Add-row value")
+        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
+        assertSecretMenus(compose, menus, name, tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")), "env value")
     }
 
     @Test fun aNewValueIsMaskedUntilRevealedAndSentOnlyByAdd() {

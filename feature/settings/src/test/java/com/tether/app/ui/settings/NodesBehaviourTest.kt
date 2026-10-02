@@ -82,7 +82,7 @@ class NodesBehaviourTest {
     private val writer = RecordingNodesWriter()
     private var root: View? = null
 
-    private fun show(owner: androidx.lifecycle.LifecycleOwner? = null) {
+    private fun show(owner: androidx.lifecycle.LifecycleOwner? = null, menus: MenuSpies? = null) {
         compose.setContent {
             val view = LocalView.current
             SideEffect { root = view }
@@ -90,7 +90,7 @@ class NodesBehaviourTest {
                 if (shown) {
                     val actions = rememberNodesActions(writer)
                     val content = @androidx.compose.runtime.Composable {
-                        SettingsUnderTest(store.prefs, state, nodes = NodesBinding(list, origin, actions, CONSOLE, now = { NOW }))
+                        WithMenuSpies(menus) { SettingsUnderTest(store.prefs, state, nodes = NodesBinding(list, origin, actions, CONSOLE, now = { NOW })) }
                     }
                     if (owner != null) {
                         CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner) { content() }
@@ -509,6 +509,17 @@ class NodesBehaviourTest {
             assertEquals("$keys changed the credential", SENTINEL, fieldText(NodeTags.Credential))
         }
         assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
+        field.assertCtrlVPastesTheClipboard(compose, "credential")
+    }
+
+    /** ta-78a r2: the revealed credential's real menus (long press, right click) offer nothing that reads it; the Label field is the control. */
+    @Config(shadows = [NoMagnifier::class])
+    @Test fun theRevealedCredentialsRealMenusOfferNothingThatReadsIt() {
+        val menus = MenuSpies()
+        show(menus = menus)
+        tag(NodeTags.Label).performTextReplacement("Workstation peer")
+        typeCredential(SENTINEL, keepRevealed = true)
+        assertSecretMenus(compose, menus, tag(NodeTags.Label), tag(NodeTags.Credential), "credential")
     }
 
     /**
