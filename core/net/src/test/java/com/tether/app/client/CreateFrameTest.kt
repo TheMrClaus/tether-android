@@ -65,7 +65,7 @@ class CreateFrameTest {
         """{"type":"create","provider":"$provider","cwd":"/w","requestId":"r",$rest"useWorktree":$useWorktree}"""
 
     private val rows = listOf(
-        // --- Claude: permissionMode = form.mode || bypassPermissions; sandbox explicit ------------------
+        // --- Claude: permissionMode = form.mode || bypassPermissions; no sandbox tier --------------------
         Row("claude cold (Auto)", entry("claude"), form(), expected = frame("claude", """"permissionMode":"bypassPermissions",""")),
         Row("claude default", entry("claude"), form("mode" to "default"), expected = frame("claude", """"permissionMode":"default",""")),
         Row("claude acceptEdits", entry("claude"), form("mode" to "acceptEdits"), expected = frame("claude", """"permissionMode":"acceptEdits",""")),
@@ -339,6 +339,16 @@ class CreateFrameTest {
             val built = CreateFrame.build(row.form, row.entry, row.modified, "r")
             assertNull(row.name, built.sandboxPolicy)
             assertFalse(row.name, "sandboxPolicy" in built.toJsonObject())
+        }
+    }
+
+    /** ta-93qs positive control: Codex still sends its Mode preset's tier, on the wire, for every preset. */
+    @Test
+    fun codexCreateStillSendsItsPresetsSandboxTier() {
+        val expected = mapOf("default" to "workspace-write", "auto-review" to "workspace-write", "full-access" to "off")
+        for ((mode, tier) in expected) {
+            val wire = CreateFrame.build(form("mode" to mode), entry("codex"), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+            assertEquals(mode, JsonPrimitive(tier), wire["sandboxPolicy"])
         }
     }
 

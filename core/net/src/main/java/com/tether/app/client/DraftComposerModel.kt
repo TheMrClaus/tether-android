@@ -743,7 +743,7 @@ class DraftComposerModel(
 
     /**
      * ta-895's picker on this engine (slice 1): select the row drawn ([choice], as the live catalog
-     * has it now) and submit with no first message. The explicit mode and sandbox ride along.
+     * has it now) and submit with no first message. The web's mode rides along (and a sandbox tier for Codex only).
      */
     fun submitChoice(choice: NewSessionChoice, expectedOrigin: String?): DraftSubmitResult {
         if (_state.value.creating || submitting) return DraftSubmitResult.Busy

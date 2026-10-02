@@ -83,7 +83,21 @@ class NewSessionTransmissionTest {
         assertEquals("/w", sent.str("cwd"))
         assertEquals("req-work", sent.str("requestId"))
         assertEquals("bypassPermissions", sent.str("permissionMode"))
-        assertEquals(null, sent.str("sandboxPolicy"))
+        assertFalse("ta-93qs: no sandbox tier for Claude, as the web", "sandboxPolicy" in sent)
+    }
+
+    /**
+     * ta-93qs positive control: Codex still names its Mode preset's tier on the wire (the web's
+     * codexModePreset; a cold draft is the "default" preset, workspace-write).
+     */
+    @Test
+    fun aCodexCreateStillCarriesItsPresetsSandboxTier() {
+        val (client, _) = withCatalog()
+        assertEquals(NewSessionResult.Sent, client.createNewSession(NewSessionChoice("codex", "codex", null), "/w", client.consentOrigin.value))
+        val sent = creates().single()
+        assertEquals(coldKeys + "sandboxPolicy", sent.keys)
+        assertEquals("codex", sent.str("provider"))
+        assertEquals("workspace-write", sent.str("sandboxPolicy"))
     }
 
     @Test

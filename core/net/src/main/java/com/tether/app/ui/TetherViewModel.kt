@@ -499,7 +499,7 @@ class TetherViewModel(
     /**
      * ta-895 / ta-8cv: the New session picker's tap on [choice], drawn for [expectedOrigin], in the
      * current workspace, through the draft composer ([DraftComposerModel.submitChoice]: the web's
-     * frame with the explicit mode and sandbox and a fresh requestId; the client re-checks it under
+     * frame with its mode (a sandbox tier for Codex only) and a fresh requestId; the client re-checks it under
      * its lock). Sent: the session whose `created` echoes that requestId is selected when it lands,
      * and no other. Anything else: nothing was created, and nothing is selected later.
      */
