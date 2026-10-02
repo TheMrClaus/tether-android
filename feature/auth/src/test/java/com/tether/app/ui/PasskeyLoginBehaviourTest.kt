@@ -88,6 +88,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         val verifies = ConcurrentLinkedQueue<JsonObject>()
         val logins = ConcurrentLinkedQueue<String>()
         val probes = java.util.concurrent.atomic.AtomicInteger()
+        val optionsCalls = java.util.concurrent.atomic.AtomicInteger()
 
         override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
             "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
@@ -100,7 +101,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
                         """"passkeysUsable":$passkeysUsable,"rpId":"${request.requestUrl!!.host}","sessionMethod":null}""",
                 )
             }
-            "/api/auth/passkey/login/options" -> MockResponse().setHeader("Content-Type", "application/json").setBody(
+            "/api/auth/passkey/login/options" -> MockResponse().also { optionsCalls.incrementAndGet() }.setHeader("Content-Type", "application/json").setBody(
                 """{"challengeId":"0123456789abcdef0123456789abcdef","options":{"rpId":"${rpId ?: request.requestUrl!!.host}","challenge":"Y2hhbGxlbmdl","timeout":60000,"userVerification":"required"}}""",
             )
             "/api/auth/passkey/login/verify" -> {
@@ -122,6 +123,13 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
 
     private val server = MockWebServer()
     private val console = Console()
+
+    // r2 (security F1): the console over TLS with a certificate only this client trusts.
+    private val cert = okhttp3.tls.HeldCertificate.Builder().addSubjectAlternativeName("localhost").addSubjectAlternativeName(server.hostName).build()
+    private val clientTls = okhttp3.tls.HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate).build()
+    private val tlsClient = OkHttpClient.Builder().sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build()
+    /** Off for the one test that types an http address. */
+    private var tls = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val passkeys = WaitingPasskeys()
     private val offMainWrites = ConcurrentLinkedQueue<String>()
@@ -132,7 +140,6 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
             if (Looper.myLooper() != Looper.getMainLooper()) offMainWrites += Thread.currentThread().name
         }
         server.dispatcher = console
-        server.start()
     }
 
     @After fun tearDown() {
@@ -145,7 +152,9 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
     private val base get() = server.url("/").toString().trimEnd('/')
 
     private fun launch(authenticator: PasskeyAuthenticator = passkeys) {
-        val client = RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope)
+        if (tls) server.useHttps(okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(), false)
+        server.start()
+        val client = RealTetherClient(settings = InMemorySettings(), httpClient = tlsClient, scope = scope)
         rule.setContent {
             val skin = if (surface == LoginSurface.Studio) TetherSkin.Studio else TetherSkin.StudioDark
             TetherTheme(skin.mode) {
@@ -160,7 +169,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
     }
 
     private fun field(description: String): SemanticsNodeInteraction =
-        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription(description)))
+        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription(description, substring = true)))
 
     private fun has(matcher: SemanticsMatcher) = rule.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
     private fun shows(text: String) = has(hasText(text, substring = true))
@@ -277,6 +286,34 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         waitFor { passkeys.pending() }
         passkeys.answer(PasskeyCeremony.Done(ANSWER))
         waitFor { shows(successCopy) }
+    }
+
+    /** r2 (security F1): an http address offers no passkey, says why, and Retro's Enter starts nothing. */
+    @Test fun anHttpAddressOffersNoPasskeyAndSaysWhy() {
+        tls = false
+        launch()
+        typeUrlAndWaitForTheProbe()
+        assertTrue(base.startsWith("http://"))
+        waitFor { has(androidx.compose.ui.test.hasTestTag(LoginTags.PasskeyNeedsHttps)) }
+        assertFalse(offered())
+        if (surface == LoginSurface.Retro) {
+            assertFalse(shows("⏎ on an empty line = passkey"))
+            field("Dashboard password").performImeAction()
+            rule.waitForIdle()
+        }
+        assertTrue("no prompt", passkeys.requests.isEmpty())
+        assertEquals("no passkey route was asked", 0, console.optionsCalls.get())
+        assertTrue(console.verifies.isEmpty())
+    }
+
+    /** r2 (verifier P4): retro-login.tsx:213, the password line names the passkey shortcut for TalkBack. */
+    @Test fun retrosPasswordLineNamesThePasskeyShortcut() {
+        launch()
+        typeUrlAndWaitForTheProbe()
+        waitFor { offered() }
+        val named = has(hasContentDescription(RETRO_PASSWORD_WITH_PASSKEY))
+        assertEquals(surface == LoginSurface.Retro, named)
+        assertTrue(has(hasContentDescription("Dashboard password", substring = true)))
     }
 
     @Test fun enterOnAnEmptyPasswordLineIsThePasskeyOnRetroOnly() {

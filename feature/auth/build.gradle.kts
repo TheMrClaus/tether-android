@@ -42,6 +42,8 @@ dependencies {
     testImplementation(libs.junit)
     // ta-s4r: the real screen over the real client against a MockWebServer "Tether".
     testImplementation(libs.okhttp.mockwebserver)
+    // T10.5 r2: a passkey sign-in goes only to https, so its console serves a test certificate.
+    testImplementation(libs.okhttp.tls)
     testImplementation(composeBom)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)

@@ -62,16 +62,16 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
     /** console.example.test: the host of [ORIGIN], the only rpId the prompt may be asked for. */
     private val ownRpId = "console.example.test"
 
-    private fun opened(view: PasskeysView = DevicesFixtures.PASSKEYS, authenticator: WaitingPasskeys = passkeys) {
+    private fun opened(view: PasskeysView = DevicesFixtures.PASSKEYS, authenticator: WaitingPasskeys = passkeys, origin: String = ORIGIN) {
         compose.setContent {
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry, LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, now = { DevicesFixtures.NOW }, authenticator = authenticator)
+                val controller = rememberDevicesController(source, origin, now = { DevicesFixtures.NOW }, authenticator = authenticator)
                 SettingsUnderTest(store.prefs, state, layout = layout, devices = DevicesBinding(controller, now = { DevicesFixtures.NOW }))
             }
         }
         compose.waitUntil(5_000) { state.draft != null }
         compose.waitUntil(5_000) { source.calls.size == 3 }
-        source.answerReads(AppSignIn.DeviceToken, passkeys = view)
+        source.answerReads(AppSignIn.DeviceToken, passkeys = view, origin = origin)
         compose.waitUntil(5_000) { exists(DevicesTags.SignOutOthers) && !exists(DevicesTags.PasskeysChecking) }
     }
 
@@ -252,13 +252,61 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
         passkeys.answer(PasskeyCeremony.Done(PasskeyShapes.ANSWER))
         waitFor { source.pending("registerVerify") }
         source.answer("registerVerify", SecurityResult.Refused(400, "That passkey could not be registered: Unexpected registration response origin", ORIGIN))
-        waitText("That passkey could not be registered: Unexpected registration response origin")
+        // r2 (security F5): the server's words, then that the passkey now exists on the phone only.
+        waitText("That passkey could not be registered: Unexpected registration response origin ${DevicesCopy.PASSKEY_ORPHANED}")
 
         tap(DevicesTags.AddPasskey)
         waitFor { source.pending("registerOptions") }
         source.answer("registerOptions", SecurityResult.OwnerSignInNeeded(ORIGIN))
         waitFor { exists(DevicesTags.ownerNote(DevicesArea.Security)) }
         assertFalse("an owner-grade refusal holds every write", enabled(DevicesTags.AddPasskey))
+    }
+
+    /** r2 (security F1): an http console: no prompt, no call, and the phrase why. https is every other test's control. */
+    @Test fun anHttpConsoleIsNeverAskedForAPasskey() {
+        val http = "http://console.example.test"
+        opened(origin = http)
+        assertTrue(exists(DevicesTags.PasskeyNeedsHttps))
+        assertTrue(texts().contains(DevicesCopy.PASSKEY_NEEDS_HTTPS))
+        assertFalse(enabled(DevicesTags.AddPasskey))
+        assertFalse(enabled(DevicesTags.PasskeyLabel))
+        compose.waitForIdle()
+        assertEquals(3, source.calls.size)
+        assertTrue(passkeys.requests.isEmpty())
+    }
+
+    /**
+     * r2 (security F5): once the ceremony has made a passkey, any verify that does not confirm it is
+     * saved says it exists on the phone only: an answer about another server, an unreachable server.
+     */
+    @Test fun aPasskeyCreatedButNotSavedIsSaidSo() {
+        opened()
+        for (reply in listOf<SecurityResult<*>>(
+            ok(PasskeyShapes.NEW_KEY, AppSignIn.DeviceToken, origin = OTHER_ORIGIN),
+            SecurityResult.Unavailable(null, ORIGIN),
+            SecurityResult.NotSent(OTHER_ORIGIN),
+        )) {
+            upToThePrompt()
+            waitFor { passkeys.pending() }
+            passkeys.answer(PasskeyCeremony.Done(PasskeyShapes.ANSWER))
+            waitFor { source.pending("registerVerify") }
+            source.answer("registerVerify", reply)
+            waitText(DevicesCopy.PASSKEY_ORPHANED)
+            assertFalse("$reply", texts().contains(DevicesCopy.PASSKEY_ADDED))
+            waitFor { enabled(DevicesTags.AddPasskey) }
+        }
+        compose.waitForIdle()
+        assertFalse("no re-read after an unsaved passkey", source.pending("passkeys"))
+    }
+
+    @Test fun theLabelStopsAtTheWebsSixtyCharacters() {
+        opened()
+        label("L".repeat(70))
+        compose.waitForIdle()
+        assertEquals("over the limit: the edit is refused, as the web's maxLength", "", tag(DevicesTags.PasskeyLabel).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
+        label("L".repeat(60))
+        compose.waitForIdle()
+        assertEquals(60, tag(DevicesTags.PasskeyLabel).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text?.length)
     }
 
     @Test fun drawnOffWhenTheConsoleCannotUsePasskeysOrThePhoneHasNoPrompt() {

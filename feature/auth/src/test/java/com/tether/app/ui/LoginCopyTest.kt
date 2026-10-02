@@ -147,4 +147,16 @@ class LoginCopyTest {
         assertEquals("Passkey sign-in failed.", loginErrorCopy(LoginResult.PasskeyFailed(" ")))
         assertEquals("Passkey prompt dismissed.", PASSKEY_DISMISSED_NOTICE)
     }
+
+    /** r2 (security F4): server text on the login screen goes through the Devices panel's cleanup, bounded. */
+    @Test
+    fun serverTextIsCleanedAndBounded() {
+        val hostile = "That\u200B passkey\u202E could not\u2066 be verified."
+        assertEquals("That passkey could not be verified.", loginErrorCopy(LoginResult.PasskeyFailed(hostile)))
+        assertEquals("Those credentials are not correct.", loginErrorCopy(LoginResult.BadPassword("Those\u200B credentials are not\u200F correct.")))
+        assertEquals("Passkey sign-in failed.", loginErrorCopy(LoginResult.PasskeyFailed("\u200B\u202E")))
+        val long = loginErrorCopy(LoginResult.Unreachable("x".repeat(5_000)))!!
+        assertTrue("bounded: ${long.length}", long.length <= com.tether.app.client.LabelText.MAX_ERROR + 1)
+        assertEquals("That pairing code is not valid.", pairErrorCopy(PairResult.Rejected("That\u200B pairing code is not valid.")))
+    }
 }
