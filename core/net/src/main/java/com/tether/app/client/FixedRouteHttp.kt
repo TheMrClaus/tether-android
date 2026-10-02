@@ -29,8 +29,9 @@ import okhttp3.Response
  *   made only when that server is [expectedOrigin], the server the screen that asked was drawn
  *   from. Any other server: [Outcome.OtherOrigin], and nothing is sent.
  * - The path is the caller's fixed text, refused unless it is plain segments ([PATH]), set on that
- *   origin with no query or fragment; building and signing are caught (nothing sent); the built
- *   request is checked again (method, origin = the drawing origin, path, no query) before it goes.
+ *   origin with no fragment and no query but the single parameter a caller may name (T9.2); building
+ *   and signing are caught (nothing sent); the built request is checked again (method, origin = the
+ *   drawing origin, path, exactly that query) before it goes.
  * - A body, when there is one, is JSON (`application/json`, the media type a cookie-authenticated
  *   POST needs, tether #213 lib/origin-guard.mjs rule 3).
  * - The answer: the sign-in gateway rule first ([HttpToolMedia.blockedBySignIn]: a redirect, a 401/403
@@ -78,7 +79,19 @@ class FixedRouteHttp(
         data class Answered(val code: Int, val jsonType: Boolean, val json: JsonObject?, val origin: String) : Outcome
     }
 
-    suspend fun call(authority: FilesAuthority, expectedOrigin: String?, method: Method, path: String, body: JsonObject? = null): Outcome {
+    /**
+     * [query] (T9.2): at most one parameter, its name one of the route's own fixed words ([QUERY_NAME])
+     * and its value percent-encoded by OkHttp as the web's `encodeURIComponent` would (`/api/usage?since=`,
+     * `/api/usage/accounts?force=`). The built request must carry exactly that query, nothing else.
+     */
+    suspend fun call(
+        authority: FilesAuthority,
+        expectedOrigin: String?,
+        method: Method,
+        path: String,
+        body: JsonObject? = null,
+        query: Pair<String, String>? = null,
+    ): Outcome {
         val paired = when (authority) {
             FilesAuthority.SignedOut -> return Outcome.SignedOut
             FilesAuthority.LocalNetworkBlocked -> return Outcome.LocalNetworkBlocked
@@ -89,9 +102,12 @@ class FixedRouteHttp(
         // r2 (security F4): the helper itself refuses a path that is not plain segments (no dot
         // segment, escape, query, fragment or empty segment), whatever its caller passes.
         if (!PATH.matches(path)) return Outcome.NotBuilt(origin)
+        if (query != null && !QUERY_NAME.matches(query.first)) return Outcome.NotBuilt(origin)
         // r2 (security F4): building and signing cannot throw past the caller (nothing is sent then).
         val request = try {
-            val target = paired.origin.newBuilder().encodedPath(path).query(null).fragment(null).build()
+            val target = paired.origin.newBuilder().encodedPath(path).query(null).fragment(null)
+                .apply { if (query != null) addQueryParameter(query.first, query.second) }
+                .build()
             val builder = paired.sign(
                 Request.Builder().url(target).header("Accept", "application/json").header("Cache-Control", "no-store"),
             )
@@ -114,7 +130,7 @@ class FixedRouteHttp(
             !sameOrigin(request.url, paired.origin) ||
             serverOrigin(request.url.toString()) != expectedOrigin ||
             request.url.encodedPath != path ||
-            request.url.query != null
+            !queryIs(request.url, query)
         ) {
             return Outcome.NotBuilt(origin)
         }
@@ -184,6 +200,15 @@ class FixedRouteHttp(
             null
         }
 
+        /** A query parameter's name: a plain lower-case word (`since`, `force`). */
+        val QUERY_NAME = Regex("^[a-z]{1,32}$")
+
         private fun sameOrigin(a: HttpUrl, b: HttpUrl) = a.scheme == b.scheme && a.host == b.host && a.port == b.port
+
+        /** No query when none was asked; else exactly the one parameter asked, with its exact value. */
+        private fun queryIs(url: HttpUrl, query: Pair<String, String>?): Boolean = when (query) {
+            null -> url.query == null
+            else -> url.querySize == 1 && url.queryParameterName(0) == query.first && url.queryParameterValue(0) == query.second
+        }
     }
 }

@@ -3724,6 +3724,19 @@ class RealTetherClient(
     })
 
     /**
+     * T9.2: the Usage page and the Accounts dialog with their two reset actions, over [authHttp]
+     * ([FixedRouteHttp]) with the same per-call (server, credential) read as [files].
+     */
+    override val usage: UsageSource = HttpUsage(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
+    /**
      * ta-coik.2: a worktree service's "Open", over [authHttp] (the 303 is read, never followed) with
      * the same per-call (server, credential) read as [files].
      */

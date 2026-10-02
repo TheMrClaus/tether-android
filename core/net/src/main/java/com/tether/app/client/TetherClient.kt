@@ -663,6 +663,14 @@ interface TetherClient {
     val serviceOpen: ServiceOpenSource get() = ServiceOpenSource.Unavailable
 
     /**
+     * T9.2: the Usage page and the Accounts dialog (`GET /api/usage`, `/api/usage/accounts`) and their
+     * two reset actions (`POST /api/codex/reset-credits/consume`, `/api/usage/claude-reset-grants/claim`)
+     * on the paired server, with the credential in force and never following a redirect (see
+     * [HttpUsage]). The default refuses every call without touching the network.
+     */
+    val usage: UsageSource get() = UsageSource.Unavailable
+
+    /**
      * T6.2 (#159 #2, v110): the per-file hunks the `git-diff-file` replies carried, per session then
      * per path (use-tether.ts `fileDiffs`). A fresh `worktree-diff` summary for a session drops that
      * session's cached hunks, so an expanded file refetches. Emptied with the other server views.
