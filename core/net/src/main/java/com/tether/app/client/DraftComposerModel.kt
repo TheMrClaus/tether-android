@@ -104,6 +104,11 @@ enum class DraftSubmitResult {
  *   paths ([TetherClient.sendFirst], durable and bound to the create's server and socket; with attachments [TetherClient.sendAttachments], once the
  *   new session is live on the same socket). If it cannot go out, the prompt is saved as the new
  *   session's draft ([saveSessionDraft]) and is never resent (attachments are dropped, as on the web).
+ * - **Effort and Mode** (ta-xki, slice 4): [selectMode] / [selectEffort] / [toggleAuto] take only
+ *   what the picked row offers ([DraftModes], [DraftSessionOptionsModel]); an elevated mode is an
+ *   ordinary choice with no confirmation (owner 2026-10-02). After every reduce the form's mode is
+ *   one the provider offers, so a stale or garbage stored preference falls back to the provider's
+ *   default and what the composer shows is what the create carries.
  *
  * Room left for later slices: the handoff / takeover create (T8.5, issue #144: the first action
  * becomes `handoff`), the GitHub work dialog's prefill (T8.4: [setText], [setCwd]) and the worktree
