@@ -247,13 +247,26 @@ data class ServiceRow(
     val error: Seg?,
     /** T15.7: the "Open" link, pinned by [ServiceOpenLink]; null = no link. */
     val open: ServiceOpen? = null,
+    /**
+     * ta-coik.2: the "On this machine" link (`proxyPath`, sent only to a loopback console), pinned by
+     * [ServiceOpenLink.resolveLocal]; null = no link. [toString] never prints it (it carries the
+     * path form's capability).
+     */
+    val local: ServiceLocal? = null,
 )
 
+/** ta-coik.2: a running service's "On this machine" link ([url]: the path form on the paired origin). */
+@Immutable
+data class ServiceLocal(val url: String) {
+    override fun toString(): String = "ServiceLocal(url=<redacted>)"
+}
+
 /**
- * T15.7: a running service's "Open" link: [url] (the console's pinned worktree-open route, resolved
- * against the paired origin) opens in the external browser after the confirm sheet, which shows
- * [host] (the service's own hostname, `proxyHost`, drawn by the line rule). [toString] never
- * prints the URL, so a model dumped into a log or a test failure does not carry it.
+ * T15.7 / ta-coik.2: a running service's "Open" link: [url] (the console's pinned worktree-open
+ * route, resolved against the paired origin) is asked with the app's sign-in, and the browser goes
+ * where it redirects, which must be [host] (the service's own hostname, `proxyHost`, drawn by the
+ * line rule). [toString] never prints the URL, so a model dumped into a log or a test failure does
+ * not carry it.
  */
 @Immutable
 data class ServiceOpen(val url: String, val host: Seg) {
@@ -610,15 +623,20 @@ private fun serviceRow(o: JsonObject, sessionId: String?, serverOrigin: String?)
         },
         error = o.string("error")?.takeIf { it.isNotEmpty() }?.let(::prose),
         open = open,
+        // worktree-services-card.tsx:148: shown for a running service whenever the server sent it.
+        local = if (live && sessionId != null) {
+            ServiceOpenLink.resolveLocal(o.string("proxyPath"), sessionId, name, serverOrigin)?.let(::ServiceLocal)
+        } else {
+            null
+        },
     )
 }
 
 /**
  * T15.7: the row's "Open" link, or null. Fail closed: a service the server gives a reason for
  * (`proxyUnavailable` present and not null, whatever its value) or no `proxyHost` (the confirm sheet
- * must name the service) has no link, nor has any `proxyAuthUrl` [ServiceOpenLink.resolve] refuses.
- * The "On this machine" link (`proxyPath`, the console's loopback-only path form) is never offered:
- * the app is not a browser on the daemon's machine (TRACKER Decision log, 2026-10-01).
+ * must name the service, and the redirect is pinned to it) has no link, nor has any `proxyAuthUrl`
+ * [ServiceOpenLink.resolve] refuses.
  */
 private fun serviceOpen(o: JsonObject, name: String, sessionId: String?, serverOrigin: String?): ServiceOpen? {
     if (sessionId == null) return null

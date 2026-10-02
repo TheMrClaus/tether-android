@@ -8,41 +8,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.tether.app.client.ServiceOpenSource
 import com.tether.app.protocol.model.WorktreeInfo
 import com.tether.app.ui.chat.CustomTabLinkOpener
-import com.tether.app.ui.chat.EXTERNAL_LINK_CANCEL_TAG
-import com.tether.app.ui.chat.EXTERNAL_LINK_OPEN_TAG
-import com.tether.app.ui.chat.EXTERNAL_LINK_TARGET_TAG
-import com.tether.app.ui.chat.ExternalLinkConfirmHost
-import com.tether.app.ui.chat.ExternalLinkGate
 import com.tether.app.ui.chat.LinkOpener
-import com.tether.app.ui.chat.LocalExternalLinkGate
 import com.tether.app.ui.chat.LocalLinkOpener
-import com.tether.app.ui.chat.SERVICE_LINK_BODY
-import com.tether.app.ui.chat.SERVICE_LINK_SERVICE_TAG
-import com.tether.app.ui.chat.SERVICE_LINK_SHEET_TAG
 import com.tether.app.ui.inspector.InspectorBoards.ORIGIN
 import com.tether.app.ui.inspector.InspectorBoards.obj
 import com.tether.app.ui.statusline.screenshots.choiceFor
-import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,10 +45,12 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 
 /**
- * T15.7: a running worktree service's "Open". A tap only raises the confirm sheet (the service's
- * host, the link, "signed in to Tether"); nothing opens until the armed Open key; Cancel opens
- * nothing; what opens is a browsable-only external intent carrying no app credential, never the
- * in-app link router; nothing about it is logged. Every control character in this file is an escape.
+ * T15.7 / ta-coik.2: a running worktree service's links (worktree-services-card.tsx:141-154). As on
+ * the web, a tap opens at once (no confirm sheet): "Open" asks the console's worktree-open route
+ * with the app's sign-in and sends the browser where it redirects (the handoff target), "On this
+ * machine" opens the console-origin path form. What opens is a browsable-only external intent
+ * carrying no app credential, never the in-app link router; a refusal says why and opens nothing;
+ * nothing about it is logged. Every control character in this file is an escape.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -70,92 +59,116 @@ class ServiceLinkBehaviourTest {
 
     private val link = "/api/worktree/open?session=s1&script=web"
     private val url = "$ORIGIN$link"
+    private val handoff = "https://web--feat.svc.example.test/?tether-auth=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+    private val path = "/services/~0abc.AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde/s1/web/"
     private val opened = mutableListOf<String>()
     private val recorder = LinkOpener { _: Context, href: String, _: Color -> opened += href }
+
+    /** Records what it was asked; answers [answer] (or waits on [gate] first). */
+    private class FakeOpen(var answer: ServiceOpenSource.Outcome, val gate: CompletableDeferred<Unit>? = null) : ServiceOpenSource {
+        val asked = mutableListOf<Pair<String, String>>()
+
+        override suspend fun open(link: String, serviceHost: String): ServiceOpenSource.Outcome {
+            asked += link to serviceHost
+            gate?.await()
+            return answer
+        }
+    }
 
     @Before fun clearLogs() {
         ShadowLog.clear()
     }
 
-    private fun model(host: String = "web--feat.svc.example.test", authUrl: String? = link): InspectorModel {
+    private fun model(host: String = "web--feat.svc.example.test", authUrl: String? = link, proxyPath: String? = null): InspectorModel {
         val auth = authUrl?.let { JsonPrimitive(it).toString() } ?: "null"
+        val local = proxyPath?.let { JsonPrimitive(it).toString() } ?: "null"
         val replies = InspectorReplies(
             worktreeScripts = obj(
                 """{"sessionId":"s1","setupStatus":"ok","setupLog":[],"configWarnings":[],"scripts":[
                    {"name":"web","type":"service","command":"npm run dev","status":"running","port":5173,
-                    "proxyHost":${JsonPrimitive(host)},"proxyUrl":"https://web--feat.svc.example.test","proxyPath":null,
+                    "proxyHost":${JsonPrimitive(host)},"proxyUrl":"https://web--feat.svc.example.test","proxyPath":$local,
                     "proxyAuthUrl":$auth,"proxyUnavailable":null}]}""",
             ),
         )
         return InspectorBoards.model(InspectorBoards.session(worktree = WorktreeInfo(path = "/w", branch = "b", status = "active")), replies = replies)
     }
 
-    private fun show(model: () -> InspectorModel, opener: LinkOpener = recorder, gate: ExternalLinkGate? = null, inApp: LinkOpener? = null) {
+    private fun show(model: InspectorModel, source: ServiceOpenSource, opener: LinkOpener = recorder, inApp: LinkOpener? = null) {
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.Studio)) {
-                CompositionLocalProvider(LocalReducedMotion provides true, LocalExternalLinkGate provides gate, LocalLinkOpener provides (inApp ?: CustomTabLinkOpener)) {
+                CompositionLocalProvider(LocalReducedMotion provides true, LocalLinkOpener provides (inApp ?: CustomTabLinkOpener)) {
                     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Inspector(model(), null, onSelectRun = {}, fileDiffs = null, onRequestFileDiff = {}, env = { InspectorBoards.env }, serviceOpener = opener)
+                        Inspector(model, null, onSelectRun = {}, fileDiffs = null, onRequestFileDiff = {}, env = { InspectorBoards.env }, serviceOpener = opener, serviceOpen = source)
                     }
-                    if (gate != null) ExternalLinkConfirmHost(gate)
                 }
             }
         }
         rule.waitForIdle()
     }
 
-    private fun tapOpen() {
-        rule.onNodeWithTag(InspectorTags.ServiceOpen).performScrollTo().performClick()
+    private fun tap(tag: String) {
+        rule.onNodeWithTag(tag).performScrollTo().performClick()
         rule.waitForIdle()
     }
 
-    private fun sheetShown(): Boolean = rule.onAllNodes(hasTestTag(SERVICE_LINK_SHEET_TAG), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    private fun count(tag: String) = rule.onAllNodes(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes().size
 
-    private fun field(tag: String): String =
-        rule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
-
-    private fun arm() {
-        rule.mainClock.advanceTimeBy(600)
-        rule.waitForIdle()
+    @Test fun openAsksTheConsoleWithTheAppSignInAndOpensWhereItRedirectsAtOnce() {
+        val source = FakeOpen(ServiceOpenSource.Outcome.Open(handoff))
+        show(model(), source)
+        tap(InspectorTags.ServiceOpen)
+        assertEquals(listOf(url to "web--feat.svc.example.test"), source.asked)
+        assertEquals("opened on the tap, no confirm sheet", listOf(handoff), opened)
+        assertEquals(0, count(InspectorTags.ServiceOpenRefusal))
     }
 
-    @Test fun aTapAsksFirstAndShowsTheServiceNotTheLabel() {
-        show({ model() })
-        tapOpen()
-        assertEquals("nothing opens on the tap", emptyList<String>(), opened)
-        assertTrue(sheetShown())
-        rule.onNodeWithText("Open this service?").assertExists()
-        rule.onNodeWithText(SERVICE_LINK_BODY).assertExists()
-        assertEquals("Service: web--feat.svc.example.test", field(SERVICE_LINK_SERVICE_TAG))
-        assertEquals("Link: $url", field(EXTERNAL_LINK_TARGET_TAG))
-    }
-
-    @Test fun cancelOpensNothing() {
-        show({ model() })
-        tapOpen()
-        arm()
-        rule.onNodeWithTag(EXTERNAL_LINK_CANCEL_TAG).performClick()
-        rule.waitForIdle()
-        assertFalse(sheetShown())
-        rule.mainClock.advanceTimeBy(5_000)
-        rule.waitForIdle()
+    @Test fun aRefusalSaysWhyAndOpensNothing() {
+        val source = FakeOpen(ServiceOpenSource.Outcome.Refused("That service has no proxied address."))
+        show(model(), source)
+        tap(InspectorTags.ServiceOpen)
         assertEquals(emptyList<String>(), opened)
+        rule.onNodeWithTag(InspectorTags.ServiceOpenRefusal, useUnmergedTree = true).assertExistsAndSays("That service has no proxied address.")
+        // A later success clears it.
+        source.answer = ServiceOpenSource.Outcome.Open(handoff)
+        tap(InspectorTags.ServiceOpen)
+        assertEquals(listOf(handoff), opened)
+        assertEquals(0, count(InspectorTags.ServiceOpenRefusal))
     }
 
-    @Test fun itNeverOpensOnItsOwnAndOnlyOnceFromTheArmedKey() {
-        show({ model() })
-        tapOpen()
-        // Not armed in its first moments: a tap there does nothing.
-        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).assertIsNotEnabled().performClick()
-        // Time alone never opens it.
-        rule.mainClock.advanceTimeBy(10_000)
+    @Test fun aSecondTapWhileTheConsoleIsAskedSendsNothingMore() {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeOpen(ServiceOpenSource.Outcome.Open(handoff), gate)
+        show(model(), source)
+        tap(InspectorTags.ServiceOpen)
+        tap(InspectorTags.ServiceOpen)
+        assertEquals(1, source.asked.size)
+        gate.complete(Unit)
         rule.waitForIdle()
-        assertEquals(emptyList<String>(), opened)
-        assertTrue(sheetShown())
-        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf(url), opened)
-        assertFalse(sheetShown())
+        assertEquals(listOf(handoff), opened)
+    }
+
+    @Test fun onThisMachineOpensThePathFormOnThePairedOrigin() {
+        val source = FakeOpen(ServiceOpenSource.Outcome.Open(handoff))
+        show(model(proxyPath = path), source)
+        rule.onNodeWithText("On this machine").assertExists()
+        tap(InspectorTags.ServiceLocal)
+        assertEquals(listOf("$ORIGIN$path"), opened)
+        assertEquals("the path form never asks the worktree-open route", emptyList<Pair<String, String>>(), source.asked)
+        // Both links, like the web, when both were sent.
+        assertEquals(1, count(InspectorTags.ServiceOpen))
+    }
+
+    @Test fun noPathFormNoOnThisMachine() {
+        show(model(), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)))
+        assertEquals(0, count(InspectorTags.ServiceLocal))
+        assertEquals(1, count(InspectorTags.ServiceOpen))
+    }
+
+    @Test fun onThisMachineAloneShowsWithTheNotConfiguredText() {
+        show(model(authUrl = null, proxyPath = path), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)))
+        assertEquals(0, count(InspectorTags.ServiceOpen))
+        assertEquals(1, count(InspectorTags.ServiceLocal))
+        rule.onNodeWithText("Own address not configured", substring = true).assertExists()
     }
 
     @Test fun theIntentIsBrowsableOnlyCarriesNoCredentialAndSkipsTheInAppRouter() {
@@ -167,15 +180,12 @@ class ServiceLinkBehaviourTest {
 
             override fun opensInApp(href: String): Boolean = true
         }
-        show({ model() }, opener = CustomTabLinkOpener, inApp = inApp)
-        tapOpen()
-        arm()
-        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).performClick()
-        rule.waitForIdle()
+        show(model(), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)), opener = CustomTabLinkOpener, inApp = inApp)
+        tap(InspectorTags.ServiceOpen)
         assertEquals("never the in-app link router", emptyList<String>(), inAppCalls)
         val intent: Intent = checkNotNull(Shadows.shadowOf(rule.activity).nextStartedActivity)
         assertEquals(Intent.ACTION_VIEW, intent.action)
-        assertEquals(url, intent.dataString)
+        assertEquals(handoff, intent.dataString)
         assertEquals(setOf(Intent.CATEGORY_BROWSABLE), intent.categories)
         assertNull("no explicit component", intent.component)
         assertNull("no explicit package", intent.`package`)
@@ -186,50 +196,34 @@ class ServiceLinkBehaviourTest {
         assertNull(Shadows.shadowOf(rule.activity).nextStartedActivity)
     }
 
-    @Test fun aHostileHostIsDrawnWithVisibleTokensInTheRowAndTheSheet() {
+    @Test fun aHostileHostIsDrawnWithVisibleTokensInTheRow() {
         val host = "web\u202Egnp.evil.example\nforged-row\u200B"
-        show({ model(host = host) })
+        show(model(host = host), FakeOpen(ServiceOpenSource.Outcome.Refused("x")))
         val raw = listOf('\u202E', '\n', '\u200B')
-        fun texts() = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+        val texts = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
             .fetchSemanticsNodes().flatMap { n -> n.config.getOrElseNullable(SemanticsProperties.Text) { null }.orEmpty().map { it.text } }
-        val row = texts().first { "Own address" in it }
+        val row = texts.first { "Own address" in it }
         assertTrue(row, raw.none { it in row })
-        tapOpen()
-        val spoken = field(SERVICE_LINK_SERVICE_TAG)
-        assertEquals("Service: ${SafeText.line(host)}", spoken)
-        assertTrue(spoken, raw.none { it in spoken })
-        assertTrue(texts().filter { "gnp" in it }.all { t -> raw.none { it in t } })
     }
 
     @Test fun aRefusedLinkHasNoOpenKeyAndSaysNotConfigured() {
-        show({ model(authUrl = "javascript:alert(1)") })
-        assertEquals(0, rule.onAllNodes(hasTestTag(InspectorTags.ServiceOpen)).fetchSemanticsNodes().size)
+        show(model(authUrl = "javascript:alert(1)"), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)))
+        assertEquals(0, count(InspectorTags.ServiceOpen))
         rule.onNodeWithText("Own address not configured", substring = true).assertExists()
     }
 
-    @Test fun thePendingSheetClosesWhenTheLinkGoesAway() {
-        val gate = ExternalLinkGate()
-        var current by mutableStateOf(model())
-        show({ current }, gate = gate)
-        tapOpen()
-        assertEquals("web--feat.svc.example.test", gate.pending?.service)
-        // The service stopped: the snapshot has no link any more.
-        current = model(authUrl = null)
-        rule.waitForIdle()
-        assertNull(gate.pending)
-        assertFalse(sheetShown())
-        assertEquals(emptyList<String>(), opened)
-    }
-
-    @Test fun nothingAboutTheLinkIsLogged() {
-        show({ model() }, opener = CustomTabLinkOpener)
-        tapOpen()
-        arm()
-        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).performClick()
-        rule.waitForIdle()
+    @Test fun nothingAboutTheLinksIsLogged() {
+        show(model(proxyPath = path), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)), opener = CustomTabLinkOpener)
+        tap(InspectorTags.ServiceOpen)
+        tap(InspectorTags.ServiceLocal)
         val logged = ShadowLog.getLogs().joinToString("\n") { "${it.tag}: ${it.msg} ${it.throwable ?: ""}" }
-        for (needle in listOf("worktree/open", "session=s1", "console.example.test", "web--feat")) {
+        for (needle in listOf("worktree/open", "session=s1", "console.example.test", "web--feat", "tether-auth", "/services/")) {
             assertFalse(needle, needle in logged)
         }
+    }
+
+    private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertExistsAndSays(text: String) {
+        val node = fetchSemanticsNode()
+        assertEquals(text, node.config[SemanticsProperties.Text].joinToString("") { it.text })
     }
 }

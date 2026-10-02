@@ -111,14 +111,12 @@ val LocalLinkOpener = staticCompositionLocalOf<LinkOpener> { CustomTabLinkOpener
 
 /**
  * An external link waiting for the operator's confirmation: what the sheet shows, and the opener it
- * was tapped under. Never saved. [service] (T15.7): a worktree service's "Open" link, shown by
- * [ServiceLinkConfirmDialog] with this service hostname; null for a chat link.
+ * was tapped under. Never saved.
  */
 class PendingLink internal constructor(
     val target: SafeHref.Target,
     internal val opener: LinkOpener,
     val serial: Long,
-    val service: String? = null,
 )
 
 /** What a tap on a link did. */
@@ -175,26 +173,6 @@ class ExternalLinkGate {
         }
         pending = PendingLink(target, opener, ++serial)
         return LinkDecision.Confirm
-    }
-
-    /**
-     * T15.7: a worktree service's "Open" link ([href], already pinned by the caller to the console's
-     * worktree-open route on the paired origin). It ALWAYS asks first, whatever its label: the sheet
-     * names [service] (the service's own hostname) and says the browser must be signed in to the
-     * console. Never in the app: [opener] must be the external one. An http(s) [href] that [SafeHref]
-     * would rewrite or refuses is no link ([LinkDecision.Refused]).
-     */
-    fun requestService(opener: LinkOpener, href: String, service: String): LinkDecision {
-        val target = SafeHref.target(href) ?: return LinkDecision.Refused
-        if (target.scheme == SafeHref.Scheme.Mailto || target.display != href) return LinkDecision.Refused
-        pending = PendingLink(target, opener, ++serial, service)
-        return LinkDecision.Confirm
-    }
-
-    /** T15.7: the service link [href] went away (the service stopped, the row left): its pending sheet closes. */
-    fun dropService(href: String) {
-        val link = pending ?: return
-        if (link.service != null && link.target.display == href) pending = null
     }
 
     /** The Open key: opens [link] if it is still the pending one (once), and closes the sheet. */
@@ -259,23 +237,12 @@ fun ExternalLinkConfirmHost(gate: ExternalLinkGate) {
     val link = gate.pending ?: return
     val context = LocalContext.current
     val t = LocalTetherTokens.current
-    val service = link.service
-    if (service != null) {
-        ServiceLinkConfirmDialog(
-            service = service,
-            target = link.target,
-            identity = link.serial,
-            onConfirm = { gate.confirm(link, context, t.graphite) },
-            onCancel = gate::cancel,
-        )
-    } else {
-        ExternalLinkConfirmDialog(
-            target = link.target,
-            identity = link.serial,
-            onConfirm = { gate.confirm(link, context, t.graphite) },
-            onCancel = gate::cancel,
-        )
-    }
+    ExternalLinkConfirmDialog(
+        target = link.target,
+        identity = link.serial,
+        onConfirm = { gate.confirm(link, context, t.graphite) },
+        onCancel = gate::cancel,
+    )
 }
 
 const val EXTERNAL_LINK_SHEET_TAG = "external-link-confirm"
@@ -285,13 +252,10 @@ const val EXTERNAL_LINK_HOST_TAG = "external-link-host"
 const val EXTERNAL_LINK_PORT_TAG = "external-link-port"
 const val EXTERNAL_LINK_TO_TAG = "external-link-to"
 const val EXTERNAL_LINK_TARGET_TAG = "external-link-target"
-const val SERVICE_LINK_SHEET_TAG = "service-link-confirm"
-const val SERVICE_LINK_SERVICE_TAG = "service-link-service"
 
 internal const val EXTERNAL_LINK_BODY = "This link leaves Tether. Check where it goes before you open it."
 internal const val EXTERNAL_MAIL_BODY = "This link opens your mail app. Check who it writes to before you open it."
 internal const val EXTERNAL_LINK_IDN_NOTE = "International domain name, shown in its ASCII (punycode) form."
-const val SERVICE_LINK_BODY = "Opens in your browser through your Tether console. Your browser needs to be signed in to Tether."
 
 /**
  * ta-fz3: the confirm sheet (the program's confirm dialog, [TetherDialog]). It shows where the
@@ -337,50 +301,6 @@ fun ExternalLinkConfirmDialog(
                     if (target.recipients.isNotEmpty()) LinkField("To", target.recipients.joinToString("\n"), EXTERNAL_LINK_TO_TAG)
                     if (target.international) TetherDialogText(EXTERNAL_LINK_IDN_NOTE)
                     LinkField(if (mail) "Address" else "Link", target.display, EXTERNAL_LINK_TARGET_TAG)
-                }
-            }
-        }
-    }
-}
-
-/**
- * T15.7: the confirm sheet for a worktree service's "Open" link. The same sheet and armed Open key
- * as [ExternalLinkConfirmDialog]; it names the SERVICE ([service], its own hostname, by the line
- * rule: every hidden, reordering or line-breaking code point a visible token) and says the link
- * goes through the console, so the browser must be signed in to Tether. The link itself (the
- * console's worktree-open route; it carries no secret, the handoff is minted on the click) is shown
- * too, so what opens is on screen.
- */
-@Composable
-fun ServiceLinkConfirmDialog(
-    service: String,
-    target: SafeHref.Target,
-    identity: Any,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val arming = rememberArmedControl(identity, actionable = true)
-    TetherDialog(
-        onDismiss = onCancel,
-        title = "Open this service?",
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(EXTERNAL_LINK_CANCEL_TAG))
-            TetherKey(
-                onClick = { if (arming.armed) onConfirm() },
-                classes = KeyClasses.ButtonPrimary,
-                label = "Open in browser",
-                icon = TetherIcons.ExternalLink,
-                enabled = arming.armed,
-                modifier = arming.modifier.testTag(EXTERNAL_LINK_OPEN_TAG),
-            )
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().testTag(SERVICE_LINK_SHEET_TAG), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TetherDialogText(SERVICE_LINK_BODY)
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LinkField("Service", service, SERVICE_LINK_SERVICE_TAG, SafeText.Rule.Line)
-                    LinkField("Link", target.display, EXTERNAL_LINK_TARGET_TAG)
                 }
             }
         }

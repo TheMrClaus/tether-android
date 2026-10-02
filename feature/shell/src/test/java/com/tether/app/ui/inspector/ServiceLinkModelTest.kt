@@ -11,8 +11,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * T15.7: a worktree service row's "Open" link and "not configured" text, mapped from the v134
- * snapshot (worktree-services-card.tsx 140-160). Every control character in this file is written
+ * T15.7 / ta-coik.2: a worktree service row's "Open" and "On this machine" links and "not
+ * configured" text, mapped from the v134 snapshot (worktree-services-card.tsx 140-160). Every control character in this file is written
  * as an escape.
  */
 class ServiceLinkModelTest {
@@ -148,14 +148,23 @@ class ServiceLinkModelTest {
         assertNull(script.unavailable)
     }
 
-    @Test fun onThisMachineIsNeverOffered() {
-        // proxyPath (the console's loopback-only path form) alone: no link at all, the reason shows.
-        val r = running(""","proxyHost":null,"proxyUrl":null,"proxyPath":"/services/s1/web/","proxyAuthUrl":null,"proxyUnavailable":"not-configured"""")
-        assertNull(r.open)
-        assertEquals(notConfigured, r.unavailable)
-        // With a link, what opens is the pinned console route, never the path form.
+    @Test fun onThisMachineIsOfferedWhenTheServerSendsThePathForm() {
+        // worktree-services-card.tsx:148: a loopback console gets proxyPath; shown beside the reason when it has no own address.
+        val alone = running(""","proxyHost":null,"proxyUrl":null,"proxyPath":"/services/s1/web/","proxyAuthUrl":null,"proxyUnavailable":"not-configured"""")
+        assertNull(alone.open)
+        assertEquals("$ORIGIN/services/s1/web/", alone.local!!.url)
+        assertEquals(notConfigured, alone.unavailable)
+        // With an own address: both links, each its own route.
         val both = running(""","proxyHost":"h.example.test","proxyPath":"/services/s1/web/","proxyAuthUrl":"$link"""")
-        assertFalse(both.open!!.url.contains("/services/"))
+        assertEquals("$ORIGIN$link", both.open!!.url)
+        assertEquals("$ORIGIN/services/s1/web/", both.local!!.url)
+        // A remote viewer is sent no path form: no link.
+        assertNull(running(""","proxyHost":"h.example.test","proxyPath":null,"proxyAuthUrl":"$link"""").local)
+        // Only for a running service.
+        assertNull(row(""","name":"web","type":"service","status":"exited","proxyPath":"/services/s1/web/"""").local)
+        // Another session's path form: no link.
+        assertNull(running(""","proxyPath":"/services/s2/web/"""").local)
+        assertFalse("never printed", "/services/" in alone.toString())
     }
 
     @Test fun theModelNeverPrintsTheLink() {

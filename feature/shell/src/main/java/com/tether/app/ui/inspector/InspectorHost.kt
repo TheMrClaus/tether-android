@@ -44,6 +44,7 @@ fun ColumnScope.InspectorHost(vm: TetherViewModel, session: AgentSession, view: 
         onSelectRun = { vm.selectRun(session.id, it) },
         fileDiffs = fileDiffs[session.id],
         onRequestFileDiff = { path -> vm.client.requestGitFileDiff(session.id, path) },
+        serviceOpen = vm.client.serviceOpen,
     )
 }
 

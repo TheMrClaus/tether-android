@@ -6,18 +6,22 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
 /**
- * T15.7: the worktree services card's "Open" link (worktree-services-card.tsx `proxyAuthUrl`).
+ * T15.7 / ta-coik.2: the worktree services card's links (worktree-services-card.tsx:141-154).
  *
- * What the server sends (server.mjs `worktreeScriptsSnapshot`, v134 / tether#220) is NOT a link to
- * the service: it is the console-relative `/api/worktree/open?session=<id>&script=<name>` (both
- * `encodeURIComponent`). That console route is owner-grade, mints a 60-second single-use handoff
- * for the browser that asks and redirects it to the service's own hostname. The app's paired-device
- * credential is refused there, so the app never fetches it: the link opens in the operator's
- * EXTERNAL browser, whose own console sign-in does the rest (no sign-in: a 401 page there).
+ * "Open" (`proxyAuthUrl`): what the server sends (server.mjs `worktreeScriptsSnapshot`, v134 /
+ * tether#220) is NOT a link to the service: it is the console-relative
+ * `/api/worktree/open?session=<id>&script=<name>` (both `encodeURIComponent`). That console route is
+ * owner-grade (a paired device and an app passkey session included, ta-drm), mints a 60-second
+ * single-use handoff for whoever asks and redirects to the service's own hostname. The app asks it
+ * with its own sign-in ([com.tether.app.client.HttpServiceOpen]) and sends the browser where the
+ * server redirects, as the web's browser is sent.
  *
- * Because the app hands a server-supplied path to a browser that may hold an owner sign-in, the
- * path is pinned to exactly that one route, for exactly this session and script ([resolve]). Every
- * other value is no link at all (the row shows the "not configured" text instead).
+ * "On this machine" (`proxyPath`): the console-origin path form, which the server sends only to a
+ * viewer that reached the console over loopback on the daemon's machine ([resolveLocal]).
+ *
+ * Because the app sends its credential to the first and hands the second to a browser, each is
+ * pinned to exactly its one route, for exactly this session and script. Every other value is no
+ * link at all.
  */
 object ServiceOpenLink {
     const val PATH = "/api/worktree/open"
@@ -75,6 +79,40 @@ object ServiceOpenLink {
         val authority = pairedOrigin.substringAfter("://")
         if (authority.isEmpty() || authority.any { it == '/' || it == '?' || it == '#' || it == '@' || it == '\\' }) return null
         val resolved = pairedOrigin + proxyAuthUrl
+        val target = SafeHref.target(resolved) ?: return null
+        if (target.scheme == SafeHref.Scheme.Mailto || target.display != resolved) return null
+        return resolved
+    }
+
+    /** server.mjs / lib/service-capability.mjs: the path form's per-launch capability segment value. */
+    private val CAPABILITY = Regex("^[0-9a-z]{1,12}\\.[A-Za-z0-9_-]{43}$")
+
+    /**
+     * ta-coik.2: the absolute "On this machine" URL for [proxyPath], or null unless it is exactly the
+     * server's path form for [sessionId] / [scriptName] (lib/worktree-scripts.mjs
+     * `/services/<sid>/<script>/`, with lib/service-origin.mjs's optional `~<capability>/` after
+     * `/services/`), each part exactly `encodeURIComponent` of its value, resolved on [pairedOrigin]
+     * and passing [SafeHref] unchanged. Like the web's link it carries no app credential: the
+     * browser's own console sign-in authenticates it.
+     */
+    fun resolveLocal(proxyPath: String?, sessionId: String, scriptName: String, pairedOrigin: String?): String? {
+        if (proxyPath == null || pairedOrigin == null) return null
+        if (sessionId.isEmpty() || scriptName.isEmpty() || proxyPath.length > MAX_RAW) return null
+        val prefix = "/services/"
+        if (!proxyPath.startsWith(prefix)) return null
+        var rest = proxyPath.substring(prefix.length)
+        if (rest.startsWith("~")) {
+            val slash = rest.indexOf('/')
+            if (slash < 0 || !CAPABILITY.matches(rest.substring(1, slash))) return null
+            rest = rest.substring(slash + 1)
+        }
+        val sid = encodeComponent(sessionId) ?: return null
+        val script = encodeComponent(scriptName) ?: return null
+        if (rest != "$sid/$script/") return null
+        if (!pairedOrigin.startsWith("http://") && !pairedOrigin.startsWith("https://")) return null
+        val authority = pairedOrigin.substringAfter("://")
+        if (authority.isEmpty() || authority.any { it == '/' || it == '?' || it == '#' || it == '@' || it == '\\' }) return null
+        val resolved = pairedOrigin + proxyPath
         val target = SafeHref.target(resolved) ?: return null
         if (target.scheme == SafeHref.Scheme.Mailto || target.display != resolved) return null
         return resolved

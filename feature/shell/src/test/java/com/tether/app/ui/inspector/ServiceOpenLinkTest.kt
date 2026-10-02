@@ -208,4 +208,46 @@ class ServiceOpenLinkTest {
         assertNull(resolve(good, paired = "https://good.example@evil.example:443"))
         assertNull(resolve(good, paired = "https://:443"))
     }
+
+    // --- ta-coik.2: "On this machine" (proxyPath) ---
+
+    private val cap = "0abc.AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+
+    private fun local(raw: String?, sessionId: String = session, scriptName: String = script, paired: String? = origin) =
+        ServiceOpenLink.resolveLocal(raw, sessionId, scriptName, paired)
+
+    @Test fun thePathFormResolvesOnThePairedOriginWithOrWithoutItsCapability() {
+        assertEquals("https://tether.example.test:443/services/~$cap/s1/web/", local("/services/~$cap/s1/web/"))
+        assertEquals("https://tether.example.test:443/services/s1/web/", local("/services/s1/web/"))
+        val sid = "a b"
+        val name = "d\u00E9v"
+        assertEquals(
+            "https://tether.example.test:443/services/a%20b/d%C3%A9v/",
+            local("/services/a%20b/d%C3%A9v/", sessionId = sid, scriptName = name),
+        )
+    }
+
+    @Test fun anythingButThisSessionsAndScriptsPathFormIsNoLink() {
+        for (raw in listOf(
+            null,
+            "",
+            "/services/s2/web/",
+            "/services/s1/api/",
+            "/services/s1/web",
+            "/services/s1/web/x",
+            "/services/s1/web/?q=1",
+            "/services/s1/web/#f",
+            "/services/~bad/s1/web/",
+            "/services/~$cap/../s1/web/",
+            "/services//s1/web/",
+            "//evil.example/services/s1/web/",
+            "https://evil.example/services/s1/web/",
+            "/api/worktree/open?session=s1&script=web",
+            "/services/s1/web/\u202E",
+        )) {
+            assertNull(raw, local(raw))
+        }
+        assertNull(local("/services/s1/web/", paired = null))
+        assertNull(local("/services/s1/web/", paired = "https://a.example@evil.example"))
+    }
 }
