@@ -28,8 +28,9 @@ import okhttp3.Response
  * - The (server, credential) pair is read once, through the caller's [FilesAuthority]; the call is
  *   made only when that server is [expectedOrigin], the server the screen that asked was drawn
  *   from. Any other server: [Outcome.OtherOrigin], and nothing is sent.
- * - The path is the caller's fixed text, set on that origin with no query or fragment, and the built
- *   request is checked again (method, origin, path, no query) before it goes.
+ * - The path is the caller's fixed text, refused unless it is plain segments ([PATH]), set on that
+ *   origin with no query or fragment; building and signing are caught (nothing sent); the built
+ *   request is checked again (method, origin = the drawing origin, path, no query) before it goes.
  * - A body, when there is one, is JSON (`application/json`, the media type a cookie-authenticated
  *   POST needs, tether #213 lib/origin-guard.mjs rule 3).
  * - The answer: the sign-in gateway rule first ([HttpToolMedia.blockedBySignIn]: a redirect, a 401/403
@@ -85,20 +86,36 @@ class FixedRouteHttp(
         }
         val origin = serverOrigin(paired.origin.toString()) ?: return Outcome.SignedOut
         if (expectedOrigin == null || origin != expectedOrigin) return Outcome.OtherOrigin(origin)
-        val target = paired.origin.newBuilder().encodedPath(path).query(null).fragment(null).build()
-        val builder = paired.sign(
-            Request.Builder().url(target).header("Accept", "application/json").header("Cache-Control", "no-store"),
-        )
-        val requestBody = body?.toString()?.toRequestBody(JSON_TYPE)
-        val request = when (method) {
-            Method.GET -> builder.get()
-            Method.POST -> builder.post(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
-            Method.PUT -> builder.put(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
-            Method.PATCH -> builder.patch(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
-            Method.DELETE -> if (requestBody != null) builder.delete(requestBody) else builder.delete()
-        }.build()
-        // Nothing but the fixed route, by its own method, on the paired origin ever carries the credential.
-        if (request.method != method.name || !sameOrigin(request.url, paired.origin) || request.url.encodedPath != path || request.url.query != null) {
+        // r2 (security F4): the helper itself refuses a path that is not plain segments (no dot
+        // segment, escape, query, fragment or empty segment), whatever its caller passes.
+        if (!PATH.matches(path)) return Outcome.NotBuilt(origin)
+        // r2 (security F4): building and signing cannot throw past the caller (nothing is sent then).
+        val request = try {
+            val target = paired.origin.newBuilder().encodedPath(path).query(null).fragment(null).build()
+            val builder = paired.sign(
+                Request.Builder().url(target).header("Accept", "application/json").header("Cache-Control", "no-store"),
+            )
+            val requestBody = body?.toString()?.toRequestBody(JSON_TYPE)
+            when (method) {
+                Method.GET -> builder.get()
+                Method.POST -> builder.post(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
+                Method.PUT -> builder.put(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
+                Method.PATCH -> builder.patch(requestBody ?: EMPTY_OBJECT.toRequestBody(JSON_TYPE))
+                Method.DELETE -> if (requestBody != null) builder.delete(requestBody) else builder.delete()
+            }.build()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: RuntimeException) {
+            return Outcome.NotBuilt(origin)
+        }
+        // Nothing but the fixed route, by its own method, on the drawing origin ever carries the credential.
+        if (
+            request.method != method.name ||
+            !sameOrigin(request.url, paired.origin) ||
+            serverOrigin(request.url.toString()) != expectedOrigin ||
+            request.url.encodedPath != path ||
+            request.url.query != null
+        ) {
             return Outcome.NotBuilt(origin)
         }
         val call = http.newCall(request)
@@ -153,6 +170,9 @@ class FixedRouteHttp(
     companion object {
         /** The deepest container read; anything deeper is replaced by null before parsing. */
         const val MAX_DEPTH = 8
+
+        /** A fixed route: `/` then plain segments of letters, digits, `_` and `-` (r2, security F4). */
+        val PATH = Regex("^/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$")
 
         private val JSON_TYPE = "application/json".toMediaType()
         private const val EMPTY_OBJECT = "{}"

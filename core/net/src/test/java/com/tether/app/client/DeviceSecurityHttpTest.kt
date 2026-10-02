@@ -67,7 +67,6 @@ class DeviceSecurityHttpTest {
             Case("GET", "/api/devices", "", { source.devices(origin) }, ok(DeviceSecurityFixtures.DEVICES_JSON)),
             Case("POST", "/api/devices/pair", "{}", { source.pair(origin) }, ok(DeviceSecurityFixtures.PAIR_JSON, 201)),
             Case("DELETE", "/api/devices/a1b2c3d4e5f60718", "", { source.revokeDevice(origin, "a1b2c3d4e5f60718") }, ok("""{"ok":true,"disconnected":1}""")),
-            Case("DELETE", "/api/devices", "", { source.revokeAllDevices(origin) }, ok("""{"ok":true,"revoked":2,"appSessions":1,"disconnected":3}""")),
             Case("GET", "/api/auth/passkeys", "", { source.passkeys(origin) }, ok(DeviceSecurityFixtures.PASSKEYS_JSON)),
             Case("PATCH", "/api/auth/passkeys/cred-AbC_123", """{"label":"Work laptop"}""", { source.renamePasskey(origin, "cred-AbC_123", "Work laptop") }, ok("""{"passkey":{"id":"cred-AbC_123"}}""")),
             Case("DELETE", "/api/auth/passkeys/cred-AbC_123", "", { source.removePasskey(origin, "cred-AbC_123") }, ok("""{"ok":true}""")),
@@ -101,8 +100,8 @@ class DeviceSecurityHttpTest {
         assertEquals(SecurityResult.Ok(DeviceSecurityFixtures.PASSKEYS, origin, AppSignIn.DeviceToken), source.passkeys(origin))
         server.enqueue(ok(DeviceSecurityFixtures.SESSIONS_JSON))
         assertEquals(SecurityResult.Ok(DeviceSecurityFixtures.SESSIONS, origin, AppSignIn.DeviceToken), source.sessions(origin))
-        server.enqueue(ok("""{"ok":true,"revoked":2,"appSessions":1,"disconnected":3}"""))
-        assertEquals(SecurityResult.Ok(DevicesRevokedAll(2, 1, 3), origin, AppSignIn.DeviceToken), source.revokeAllDevices(origin))
+        server.enqueue(ok("""{"ok":true,"disconnected":3}"""))
+        assertEquals(SecurityResult.Ok(DeviceRevoked(3), origin, AppSignIn.DeviceToken), source.revokeDevice(origin, "a1b2c3d4e5f60718"))
         server.enqueue(ok("""{"revoked":0,"disconnected":0}"""))
         assertEquals(SecurityResult.Ok(SessionsRevoked(0), origin, AppSignIn.DeviceToken), source.revokeOtherSessions(origin))
         signIn = AppSignIn.SessionCookie
@@ -146,7 +145,7 @@ class DeviceSecurityHttpTest {
     @Test fun aCallDrawnForAnotherServerSendsNothing() = runBlocking<Unit> {
         val wrong = otherOrigin
         val results = listOf(
-            source.devices(wrong), source.pair(wrong), source.revokeDevice(wrong, "a1b2c3d4e5f60718"), source.revokeAllDevices(wrong),
+            source.devices(wrong), source.pair(wrong), source.revokeDevice(wrong, "a1b2c3d4e5f60718"),
             source.passkeys(wrong), source.renamePasskey(wrong, "cred", "x"), source.removePasskey(wrong, "cred"), source.setPasswordLogin(wrong, true),
             source.sessions(wrong), source.revokeSession(wrong, "s1"), source.revokeOtherSessions(wrong),
         )
@@ -176,13 +175,15 @@ class DeviceSecurityHttpTest {
         val late = withTimeout(10_000) { pending.await() }
         assertEquals(origin, late.origin)
         // And anything drawn for the old server now sends nothing (nowhere).
-        assertEquals(SecurityResult.NotSent(otherOrigin), source.revokeAllDevices(origin))
+        assertEquals(SecurityResult.NotSent(otherOrigin), source.revokeDevice(origin, "a1b2c3d4e5f60718"))
         assertEquals(0, elsewhere.requestCount)
         assertEquals(1, server.requestCount)
     }
 
     @Test fun anIdOutsideAPlainTokenShapeSendsNothing() = runBlocking<Unit> {
-        for (id in listOf("", ".", "..", "../pair", "a/b", "a%2Fb", "a?x=1", "a#f", "a b", "a.b", "pairings/../x", "x".repeat(1401), "é")) {
+        for (id in listOf("", ".", "..", "../pair", "a/b", "a%2Fb", "a?x=1", "a#f", "a b", "a.b", "pairings/../x", "x".repeat(1401), "é",
+            // r2 (verifier F2): an id spelled like a sibling route of /api/devices or /api/auth.
+            "pair", "pairings", "claim", "policy", "register", "options", "verify", "login", "logout", "passkey", "passkeys", "session", "sessions", "Pairings", "POLICY")) {
             assertEquals(id, SecurityResult.NotSent(origin), source.revokeDevice(origin, id))
             assertEquals(id, SecurityResult.NotSent(origin), source.removePasskey(origin, id))
             assertEquals(id, SecurityResult.NotSent(origin), source.renamePasskey(origin, id, "x"))
@@ -191,10 +192,69 @@ class DeviceSecurityHttpTest {
         assertEquals(0, server.requestCount)
     }
 
+    /**
+     * r2 (verifier F1, F2): an id longer than a path may carry, or spelled like a sibling route, is
+     * listed (cut for keeping) but NOT actionable; the decision is made on the id as sent, so the cut
+     * copy of a too-long id never passes for a valid one.
+     */
+    @Test fun anIdTooLongOrNamingASiblingRouteIsListedButNotActionable() = runBlocking<Unit> {
+        val long = "x".repeat(1401)
+        server.enqueue(ok("""{"devices":[{"id":"$long","label":"Long"},{"id":"pairings","label":"Sibling"},{"id":"Claim","label":"Case"},{"id":"${"y".repeat(1400)}","label":"Edge"},{"id":"a1","label":"Fine"}],"pairings":[]}"""))
+        val devices = (source.devices(origin) as SecurityResult.Ok).value.devices.associateBy { it.label }
+        take()
+        assertEquals(5, devices.size)
+        assertEquals("kept cut", DeviceSecurityJson.MAX_ID, devices.getValue("Long").id.length)
+        assertFalse("decided on the id as sent", devices.getValue("Long").actionable)
+        assertTrue("the cut copy alone would pass", DeviceSecurityJson.isPathId(devices.getValue("Long").id))
+        assertFalse(devices.getValue("Sibling").actionable)
+        assertFalse(devices.getValue("Case").actionable)
+        assertTrue("1400 is still a path id", devices.getValue("Edge").actionable)
+        assertTrue(devices.getValue("Fine").actionable)
+        server.enqueue(ok("""{"passkeys":[{"id":"policy","label":"P"},{"id":"register","label":"R"},{"id":"$long","label":"L"},{"id":"cred-1","label":"C"}],"passwordLoginEnabled":true}"""))
+        val passkeys = (source.passkeys(origin) as SecurityResult.Ok).value.passkeys.associateBy { it.label }
+        take()
+        assertEquals(listOf(false, false, false, true), listOf("P", "R", "L", "C").map { passkeys.getValue(it).actionable })
+        server.enqueue(ok("""{"sessions":[{"id":"sessions","method":"password"},{"id":"$long","method":"password"},{"id":"5e55","method":"password"}]}"""))
+        val sessions = (source.sessions(origin) as SecurityResult.Ok).value
+        take()
+        assertEquals(listOf(false, false, true), sessions.map { it.actionable })
+    }
+
+    /** tether #240 (unmerged): the caller's own device carries `current: true`; an older server sends no such field. */
+    @Test fun theCurrentFlagIsReadWhenPresent() = runBlocking<Unit> {
+        server.enqueue(ok("""{"devices":[{"id":"a1","label":"Mine","current":true},{"id":"b2","label":"Other"}],"pairings":[]}"""))
+        assertEquals(listOf(true, false), (source.devices(origin) as SecurityResult.Ok).value.devices.map { it.current })
+        take()
+        server.enqueue(ok("""{"devices":[{"id":"a1","current":"yes"},{"id":"b2","current":1}],"pairings":[]}"""))
+        assertEquals("only a JSON true counts", listOf(false, false), (source.devices(origin) as SecurityResult.Ok).value.devices.map { it.current })
+        take()
+        server.enqueue(ok(DeviceSecurityFixtures.DEVICES_JSON))
+        assertTrue((source.devices(origin) as SecurityResult.Ok).value.devices.none { it.current })
+        take()
+    }
+
+    /** r2 (security F2): each answer carries a handle on the credential it went out with (outside equality), and the screen can hand it back. */
+    @Test fun answersCarryTheCredentialsHandleAndItCanBeHandedBack() = runBlocking<Unit> {
+        val handle = SignInHandle(Any())
+        val rejected = mutableListOf<SignInHandle>()
+        val withHandle = HttpDeviceSecurity(noRedirects, authority = { SecurityAuthority(files, signIn, handle) }, onRejected = { rejected += it })
+        server.enqueue(ok("""{"ok":true,"disconnected":1}"""))
+        val revoked = withHandle.revokeDevice(origin, "a1") as SecurityResult.Ok
+        assertTrue(revoked.handle === handle)
+        assertEquals(SecurityResult.Ok(DeviceRevoked(1), origin, AppSignIn.DeviceToken), revoked)
+        server.enqueue(ok("""{"error":"Authentication required."}""", 401))
+        val refused = withHandle.devices(origin) as SecurityResult.SignedOut
+        assertTrue(refused.handle === handle)
+        withHandle.credentialRejected(handle)
+        assertEquals(listOf(handle), rejected)
+        assertEquals("SignInHandle", handle.toString())
+        repeat(2) { take() }
+    }
+
     @Test fun signedOutOrLocalNetworkBlockedSendsNothing() = runBlocking<Unit> {
         files = FilesAuthority.SignedOut
         assertEquals(SecurityResult.SignedOut(), source.devices(origin))
-        assertEquals(SecurityResult.SignedOut(), source.revokeAllDevices(origin))
+        assertEquals(SecurityResult.SignedOut(), source.revokeDevice(origin, "a1b2c3d4e5f60718"))
         files = FilesAuthority.LocalNetworkBlocked
         assertEquals(SecurityResult.LocalNetworkBlocked, source.pair(origin))
         assertEquals(0, server.requestCount)
@@ -214,8 +274,8 @@ class DeviceSecurityHttpTest {
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", elsewhere.url("/api/devices/pair")))
             assertEquals(SecurityResult.Blocked(code, origin), source.pair(origin))
             take()
-            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", elsewhere.url("/api/devices")))
-            assertEquals(SecurityResult.Blocked(code, origin), source.revokeAllDevices(origin))
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", elsewhere.url("/api/devices/a1")))
+            assertEquals(SecurityResult.Blocked(code, origin), source.revokeDevice(origin, "a1"))
             take()
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/login")))
             assertEquals(SecurityResult.Blocked(code, origin), source.sessions(origin))
@@ -320,7 +380,7 @@ class DeviceSecurityHttpTest {
         assertEquals(SecurityResult.Unavailable(null, origin), source.devices(origin))
         val quick = HttpDeviceSecurity(noRedirects, authority = { SecurityAuthority(files, signIn) }, callTimeoutMs = 300)
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        assertEquals(SecurityResult.Unavailable(null, origin), withTimeout(10_000) { quick.revokeAllDevices(origin) })
+        assertEquals(SecurityResult.Unavailable(null, origin), withTimeout(10_000) { quick.revokeDevice(origin, "a1") })
     }
 
     @Test fun cancellingTheCallerCancelsTheRequest() = runBlocking<Unit> {

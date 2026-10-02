@@ -64,7 +64,7 @@ class DeviceSecurityClientTest {
         h.server.enqueue(json(DeviceSecurityFixtures.DEVICES_JSON))
         assertEquals(SecurityResult.Ok(DeviceSecurityFixtures.DEVICES, origin, AppSignIn.DeviceToken), h.client.deviceSecurity.devices(origin))
         h.server.enqueue(json(DeviceSecurityFixtures.OWNER_REFUSAL_887, 403))
-        assertEquals(SecurityResult.OwnerSignInNeeded(origin), h.client.deviceSecurity.revokeAllDevices(origin))
+        assertEquals(SecurityResult.OwnerSignInNeeded(origin), h.client.deviceSecurity.pair(origin))
         listOf(take(), take()).forEach { req ->
             assertEquals("Bearer tthr_device", req.getHeader("Authorization"))
             assertNull(req.getHeader("Cookie"))
@@ -92,15 +92,35 @@ class DeviceSecurityClientTest {
         assertEquals(0, other.requestCount)
     }
 
+    /**
+     * r2 (security F2): handing back the handle of the credential in force signs the client out at
+     * once (compare-and-clear: the stored credential is dropped); a handle on any other credential
+     * changes nothing.
+     */
+    @Test fun aRejectedHandleSignsOutOnlyWhileItsCredentialIsInForce() = runBlocking<Unit> {
+        loadedButIdle(token = "tthr_device")
+        h.client.deviceSecurity.credentialRejected(SignInHandle(Credential.DeviceToken("tthr_device")))
+        kotlinx.coroutines.delay(300)
+        assertEquals("a different credential object: nothing happens", "tthr_device", h.settings.session().credential.let { (it as? Credential.DeviceToken)?.value })
+        h.server.enqueue(json(DeviceSecurityFixtures.DEVICES_JSON))
+        val listed = h.client.deviceSecurity.devices(origin) as SecurityResult.Ok
+        take()
+        val handle = listed.handle!!
+        h.client.deviceSecurity.credentialRejected(handle)
+        await(h.client.signedOutReason) { it == SignedOutReason.DeviceUnpaired }
+        withTimeout(10_000) { while (h.settings.session().credential != null) kotlinx.coroutines.delay(20) }
+        assertEquals(SecurityResult.SignedOut(), h.client.deviceSecurity.devices(origin))
+    }
+
     @Test fun anotherServersOriginOrASignOutSendsNothing() = runBlocking<Unit> {
         loadedButIdle(token = "tthr_device")
         val before = h.server.requestCount
-        assertEquals(SecurityResult.NotSent(origin), h.client.deviceSecurity.revokeAllDevices("https://elsewhere.example.test:443"))
+        assertEquals(SecurityResult.NotSent(origin), h.client.deviceSecurity.revokeDevice("https://elsewhere.example.test:443", "a1"))
         h.client.logout()
         val after = h.server.requestCount
         assertEquals(before, after)
         assertEquals(SecurityResult.SignedOut(), h.client.deviceSecurity.devices(origin))
-        assertEquals(SecurityResult.SignedOut(), h.client.deviceSecurity.revokeAllDevices(origin))
+        assertEquals(SecurityResult.SignedOut(), h.client.deviceSecurity.revokeDevice(origin, "a1"))
         assertEquals(after, h.server.requestCount)
     }
 }

@@ -15,9 +15,8 @@ import okhttp3.OkHttpClient
 // (components/sign-in-security.tsx, components/paired-devices.tsx, hooks/use-sign-in-security.ts,
 // hooks/use-paired-devices.ts at tether 887c222). The routes (server.mjs 887c222 :7349-7541), every
 // one `requireOwnerGrade`:
-//   GET    /api/devices                    { devices, pairings }
+//   GET    /api/devices                    { devices, pairings }   (tether #240, unmerged: the caller's own entry `current: true`, device tokens only)
 //   POST   /api/devices/pair        {}     201 { code, expiresAt }      the plaintext code, ONCE
-//   DELETE /api/devices                    { ok, revoked, appSessions, disconnected }   (revoke every device)
 //   DELETE /api/devices/<id>               { ok, disconnected } | 404 { error }
 //   GET    /api/auth/passkeys              { passkeys, passwordLoginEnabled, policySource, passkeysUsable, rpId }
 //   PUT    /api/auth/passkeys/policy {passwordLoginEnabled}   { passwordLoginEnabled, policySource } | 409 { error }
@@ -28,22 +27,42 @@ import okhttp3.OkHttpClient
 //   DELETE /api/auth/sessions/<id>         { ok, disconnected } | 404
 // The owner's 2026-10-02 decision (tether #236) makes these owner-grade for the app's sign-ins too;
 // until it is deployed a phone sign-in gets 403 "This needs an owner sign-in …" ([SecurityResult.OwnerSignInNeeded]).
-// `DELETE /api/devices/pairings` (cancel unclaimed codes) and passkey registration (a WebAuthn
-// ceremony, T10.5) have no path here: the web offers neither from this panel (registration needs
-// the browser's authenticator).
+// `DELETE /api/devices` (revoke every device), `DELETE /api/devices/pairings` (cancel unclaimed
+// codes) and passkey registration (a WebAuthn ceremony, T10.5) have no path here: the web offers
+// none of them from this panel (registration needs the browser's authenticator).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** How the app is signed in to the server a call went to: a paired-device bearer token, or a session cookie (a password or app-passkey sign-in). */
 enum class AppSignIn { DeviceToken, SessionCookie }
 
-/** One read of the client's (server, credential) pair: where a call may go, and with which kind of sign-in. */
-class SecurityAuthority(val files: FilesAuthority, val signIn: AppSignIn?)
-
-/** A paired device (lib/device-tokens.mjs `describe`). Never carries the token. [label] is raw server text, bounded. */
-data class PairedDevice(val id: String, val label: String, val createdAt: Long, val lastSeenAt: Long) {
-    /** [id] has a shape that may be put in a path; any other id is listed but cannot be revoked from here. */
-    val actionable: Boolean get() = DeviceSecurityJson.isPathId(id)
+/**
+ * r2 (security F2): an opaque handle on the credential one call went out with. It prints nothing and
+ * gives nothing of the credential back; it only lets the screen tell the client "this credential is
+ * dead" ([DeviceSecuritySource.credentialRejected]), which the client honours only while that very
+ * credential is still the one in force (compare-and-clear).
+ */
+class SignInHandle(internal val credential: Any) {
+    override fun toString(): String = "SignInHandle"
 }
+
+/** One read of the client's (server, credential) pair: where a call may go, with which kind of sign-in, and a [handle] on that credential. */
+class SecurityAuthority(val files: FilesAuthority, val signIn: AppSignIn?, val handle: SignInHandle? = null)
+
+/**
+ * A paired device (lib/device-tokens.mjs `describe`). Never carries the token. [label] is raw server
+ * text, bounded. [actionable]: the id the server sent (before any cut) may be put in a path
+ * ([DeviceSecurityJson.isPathId]); any other is listed but cannot be revoked from here. [current]:
+ * tether #240's `current: true` on the caller's own entry (a device-token sign-in; absent on an older
+ * server and on every other entry).
+ */
+data class PairedDevice(
+    val id: String,
+    val label: String,
+    val createdAt: Long,
+    val lastSeenAt: Long,
+    val current: Boolean = false,
+    val actionable: Boolean = DeviceSecurityJson.isPathId(id),
+)
 
 /** A minted code nothing has claimed yet. Deliberately WITHOUT the code: the server keeps only a hash. */
 data class OutstandingPairing(val label: String, val createdAt: Long, val expiresAt: Long)
@@ -78,12 +97,16 @@ class FreshPairingCode(val code: PairingCode, val expiresAt: Long) {
 
 data class DeviceRevoked(val disconnected: Int)
 
-data class DevicesRevokedAll(val revoked: Int, val appSessions: Int, val disconnected: Int)
-
 /** use-sign-in-security.ts `Passkey`, the fields the panel draws. [label] is raw server text, bounded. */
-data class Passkey(val id: String, val label: String, val createdAt: Long, val lastUsedAt: Long, val backedUp: Boolean) {
-    val actionable: Boolean get() = DeviceSecurityJson.isPathId(id)
-}
+data class Passkey(
+    val id: String,
+    val label: String,
+    val createdAt: Long,
+    val lastUsedAt: Long,
+    val backedUp: Boolean,
+    /** As [PairedDevice.actionable]: decided on the id the server sent, before any cut. */
+    val actionable: Boolean = DeviceSecurityJson.isPathId(id),
+)
 
 enum class PasskeyPolicySource { Env, Stored }
 
@@ -102,9 +125,9 @@ data class SecuritySession(
     val lastSeenAt: Long,
     val userAgent: String,
     val current: Boolean,
-) {
-    val actionable: Boolean get() = DeviceSecurityJson.isPathId(id)
-}
+    /** As [PairedDevice.actionable]: decided on the id the server sent, before any cut. */
+    val actionable: Boolean = DeviceSecurityJson.isPathId(id),
+)
 
 data class SessionsRevoked(val revoked: Int)
 
@@ -115,11 +138,17 @@ data class SessionsRevoked(val revoked: Int)
 sealed interface SecurityResult<out T> {
     val origin: String?
 
-    /** [signIn]: how the app was signed in for this call. */
-    data class Ok<T>(val value: T, override val origin: String, val signIn: AppSignIn?) : SecurityResult<T>
+    /** [signIn]: how the app was signed in for this call; [handle] the credential it went out with (not part of equality). */
+    data class Ok<T>(val value: T, override val origin: String, val signIn: AppSignIn?) : SecurityResult<T> {
+        var handle: SignInHandle? = null
+            internal set
+    }
 
-    /** No credential, or Tether's own 401. */
-    data class SignedOut(override val origin: String? = null) : SecurityResult<Nothing>
+    /** No credential, or Tether's own 401 ([handle]: the credential it refused, when one went out; not part of equality). */
+    data class SignedOut(override val origin: String? = null) : SecurityResult<Nothing> {
+        var handle: SignInHandle? = null
+            internal set
+    }
 
     /**
      * Tether's owner-grade refusal: 403 `{"error":"This needs an owner sign-in …"}` (the sentence
@@ -155,7 +184,6 @@ interface DeviceSecuritySource {
     suspend fun devices(origin: String): SecurityResult<DevicesList>
     suspend fun pair(origin: String): SecurityResult<FreshPairingCode>
     suspend fun revokeDevice(origin: String, deviceId: String): SecurityResult<DeviceRevoked>
-    suspend fun revokeAllDevices(origin: String): SecurityResult<DevicesRevokedAll>
     suspend fun passkeys(origin: String): SecurityResult<PasskeysView>
     suspend fun renamePasskey(origin: String, passkeyId: String, label: String): SecurityResult<Unit>
     suspend fun removePasskey(origin: String, passkeyId: String): SecurityResult<Unit>
@@ -164,13 +192,19 @@ interface DeviceSecuritySource {
     suspend fun revokeSession(origin: String, sessionId: String): SecurityResult<Unit>
     suspend fun revokeOtherSessions(origin: String): SecurityResult<SessionsRevoked>
 
+    /**
+     * r2 (security F2): Tether has shown that the credential behind [handle] is dead (this phone was
+     * revoked, or a 401 right after revoking what may have been it). The client signs out at once if,
+     * and only if, that credential is still the one in force, instead of waiting for the socket close.
+     */
+    fun credentialRejected(handle: SignInHandle) {}
+
     /** No client (previews, fakes): nothing is ever sent. */
     object Unavailable : DeviceSecuritySource {
         private fun <T> none(): SecurityResult<T> = SecurityResult.SignedOut()
         override suspend fun devices(origin: String): SecurityResult<DevicesList> = none()
         override suspend fun pair(origin: String): SecurityResult<FreshPairingCode> = none()
         override suspend fun revokeDevice(origin: String, deviceId: String): SecurityResult<DeviceRevoked> = none()
-        override suspend fun revokeAllDevices(origin: String): SecurityResult<DevicesRevokedAll> = none()
         override suspend fun passkeys(origin: String): SecurityResult<PasskeysView> = none()
         override suspend fun renamePasskey(origin: String, passkeyId: String, label: String): SecurityResult<Unit> = none()
         override suspend fun removePasskey(origin: String, passkeyId: String): SecurityResult<Unit> = none()
@@ -209,7 +243,11 @@ class HttpDeviceSecurity(
     private val authority: () -> SecurityAuthority,
     maxBytes: Long = DeviceSecuritySource.MAX_BODY_BYTES,
     callTimeoutMs: Long = DeviceSecuritySource.CALL_TIMEOUT_MS,
+    /** The client's compare-and-clear sign-out for a dead credential (r2, security F2). */
+    private val onRejected: (SignInHandle) -> Unit = {},
 ) : DeviceSecuritySource {
+    override fun credentialRejected(handle: SignInHandle) = onRejected(handle)
+
     private val route = FixedRouteHttp(http, maxBytes, callTimeoutMs)
     override suspend fun devices(origin: String) = call(origin, FixedRouteHttp.Method.GET, DeviceSecuritySource.DEVICES_PATH, null, DeviceSecurityJson::devices)
 
@@ -218,9 +256,6 @@ class HttpDeviceSecurity(
 
     override suspend fun revokeDevice(origin: String, deviceId: String) =
         withId(origin, deviceId) { call(origin, FixedRouteHttp.Method.DELETE, DeviceSecuritySource.devicePath(deviceId), null, DeviceSecurityJson::revoked) }
-
-    override suspend fun revokeAllDevices(origin: String) =
-        call(origin, FixedRouteHttp.Method.DELETE, DeviceSecuritySource.DEVICES_PATH, null, DeviceSecurityJson::revokedAll)
 
     override suspend fun passkeys(origin: String) = call(origin, FixedRouteHttp.Method.GET, DeviceSecuritySource.PASSKEYS_PATH, null, DeviceSecurityJson::passkeys)
 
@@ -255,7 +290,7 @@ class HttpDeviceSecurity(
         parse: (JsonObject) -> T?,
     ): SecurityResult<T> {
         val a = authority()
-        return when (val out = route.call(a.files, origin, method, path, body)) {
+        val result: SecurityResult<T> = when (val out = route.call(a.files, origin, method, path, body)) {
             FixedRouteHttp.Outcome.SignedOut -> SecurityResult.SignedOut()
             FixedRouteHttp.Outcome.LocalNetworkBlocked -> SecurityResult.LocalNetworkBlocked
             is FixedRouteHttp.Outcome.OtherOrigin -> SecurityResult.NotSent(out.origin)
@@ -264,6 +299,12 @@ class HttpDeviceSecurity(
             is FixedRouteHttp.Outcome.Unreachable -> SecurityResult.Unavailable(null, out.origin)
             is FixedRouteHttp.Outcome.Answered -> answered(out, parse, a.signIn)
         }
+        when (result) {
+            is SecurityResult.Ok -> result.handle = a.handle
+            is SecurityResult.SignedOut -> if (result.origin != null) result.handle = a.handle
+            else -> Unit
+        }
+        return result
     }
 
     private fun <T> answered(out: FixedRouteHttp.Outcome.Answered, parse: (JsonObject) -> T?, signIn: AppSignIn?): SecurityResult<T> {
@@ -282,7 +323,7 @@ class HttpDeviceSecurity(
     private companion object {
         /**
          * The statuses these routes answer with Tether's own `{error}` (server.mjs json(); a refused
-         * write's 403 from lib/origin-guard.mjs; 429 a throttle; 500 the partial revoke-all). A 502,
+         * write's 403 from lib/origin-guard.mjs; 429 a throttle; 500 a write that half failed). A 502,
          * 503 or 504 is a proxy's: its words are never shown.
          */
         val REFUSAL_CODES = setOf(400, 403, 404, 409, 413, 415, 429, 500)
@@ -311,15 +352,44 @@ object DeviceSecurityJson {
     private val CODE = Regex("^[A-Za-z0-9]{4,32}$")
     private val PATH_ID = Regex("^[A-Za-z0-9_-]{1,$MAX_ID}$")
 
-    fun isPathId(id: String): Boolean = PATH_ID.matches(id)
+    /**
+     * r2 (verifier F2): the literal segments of the server's own routes under /api/devices and
+     * /api/auth (server.mjs 887c222 + tether #236): an id spelled like one would name that sibling
+     * route (`DELETE /api/devices/pairings`, `PATCH /api/auth/passkeys/policy`…), so it is never
+     * put in a path. Compared without case.
+     */
+    val RESERVED_SEGMENTS = setOf("claim", "pair", "pairings", "policy", "register", "options", "verify", "login", "logout", "passkey", "passkeys", "session", "sessions")
+
+    /**
+     * Whether a server-supplied id (as the server sent it: r2, verifier F1, never a cut copy) may be
+     * put in a path: a plain token of at most [MAX_ID], and not a sibling route's name.
+     */
+    fun isPathId(id: String): Boolean = PATH_ID.matches(id) && id.lowercase(java.util.Locale.ROOT) !in RESERVED_SEGMENTS
+
+    /** A row's id: the server's string, [actionable] decided on it as sent, then cut for keeping. Null without a non-empty string id. */
+    private class RowId(val id: String, val actionable: Boolean)
+
+    private fun rowId(e: JsonElement?): RowId? {
+        val p = e as? JsonPrimitive ?: return null
+        if (!p.isString || p.content.isEmpty()) return null
+        val raw = p.content
+        return RowId(TextCut.cut(raw, MAX_ID), isPathId(raw))
+    }
 
     fun devices(o: JsonObject): DevicesList? {
         val devices = o["devices"] as? JsonArray ?: return null
         val pairings = o["pairings"] as? JsonArray
         return DevicesList(
             devices = rows(devices) { r ->
-                val id = string(r["id"], MAX_ID)?.takeIf { it.isNotEmpty() } ?: return@rows null
-                PairedDevice(id, string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Paired device", time(r["createdAt"]), time(r["lastSeenAt"]))
+                val id = rowId(r["id"]) ?: return@rows null
+                PairedDevice(
+                    id.id,
+                    string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Paired device",
+                    time(r["createdAt"]),
+                    time(r["lastSeenAt"]),
+                    current = bool(r["current"]) == true,
+                    actionable = id.actionable,
+                )
             },
             pairings = rows(pairings ?: JsonArray(emptyList())) { r ->
                 val expiresAt = number(r["expiresAt"])?.toLong() ?: return@rows null
@@ -338,17 +408,14 @@ object DeviceSecurityJson {
 
     fun revoked(o: JsonObject): DeviceRevoked? = if (bool(o["ok"]) == true) DeviceRevoked(count(o["disconnected"])) else null
 
-    fun revokedAll(o: JsonObject): DevicesRevokedAll? =
-        if (bool(o["ok"]) == true) DevicesRevokedAll(count(o["revoked"]), count(o["appSessions"]), count(o["disconnected"])) else null
-
     fun okUnit(o: JsonObject): Unit? = if (bool(o["ok"]) == true) Unit else null
 
     fun passkeys(o: JsonObject): PasskeysView? {
         val list = o["passkeys"] as? JsonArray ?: return null
         return PasskeysView(
             passkeys = rows(list) { r ->
-                val id = string(r["id"], MAX_ID)?.takeIf { it.isNotEmpty() } ?: return@rows null
-                Passkey(id, string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Passkey", time(r["createdAt"]), time(r["lastUsedAt"]), bool(r["backedUp"]) == true)
+                val id = rowId(r["id"]) ?: return@rows null
+                Passkey(id.id, string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Passkey", time(r["createdAt"]), time(r["lastUsedAt"]), bool(r["backedUp"]) == true, id.actionable)
             },
             policy = policyOf(o),
             passkeysUsable = bool(o["passkeysUsable"]) == true,
@@ -367,9 +434,9 @@ object DeviceSecurityJson {
     fun sessions(o: JsonObject): List<SecuritySession>? {
         val list = o["sessions"] as? JsonArray ?: return null
         return rows(list) { r ->
-            val id = string(r["id"], MAX_ID)?.takeIf { it.isNotEmpty() } ?: return@rows null
+            val id = rowId(r["id"]) ?: return@rows null
             SecuritySession(
-                id = id,
+                id = id.id,
                 method = when (string(r["method"], 32)) {
                     "passkey" -> SessionMethod.Passkey
                     "service" -> SessionMethod.Service
@@ -380,6 +447,7 @@ object DeviceSecurityJson {
                 lastSeenAt = time(r["lastSeenAt"]),
                 userAgent = string(r["userAgent"], MAX_USER_AGENT).orEmpty(),
                 current = bool(r["current"]) == true,
+                actionable = id.actionable,
             )
         }
     }

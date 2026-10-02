@@ -3330,9 +3330,19 @@ class RealTetherClient(
     /**
      * T10.4: Settings → Devices, over [authHttp] with the same per-call (server, credential) read as
      * [files], plus which kind of sign-in that credential is (read in the same lock, so the two
-     * always agree). Each call goes only to the server the screen names.
+     * always agree). Each call goes only to the server the screen names. r2 (security F2): each call
+     * carries a handle on its credential; when the screen learns that credential is dead (this phone
+     * revoked), [handleCredentialRejected] signs out at once, and only if it is still the one in force.
      */
-    override val deviceSecurity: DeviceSecuritySource = HttpDeviceSecurity(authHttp, authority = {
+    override val deviceSecurity: DeviceSecuritySource = HttpDeviceSecurity(authHttp, onRejected = { handle ->
+        val credential = handle.credential as? Credential
+        if (credential != null) {
+            // Off the caller's thread (the screen calls from main): the mirror's shred is a Keystore call.
+            scope.launch(Dispatchers.IO) {
+                handleCredentialRejected(credential, if (credential is Credential.Cookie) SignedOutReason.SessionExpired else SignedOutReason.DeviceUnpaired)
+            }
+        }
+    }, authority = {
         val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
         val files = when {
             base == null || credential == null -> FilesAuthority.SignedOut
@@ -3346,6 +3356,7 @@ class RealTetherClient(
                 is Credential.Cookie -> AppSignIn.SessionCookie
                 null -> null
             },
+            credential?.let(::SignInHandle),
         )
     })
 
