@@ -45,25 +45,36 @@ import java.util.concurrent.atomic.AtomicBoolean
 // certificate>` (lib/assetlinks.mjs), which the server accepts beside its web origin, and a sign-in
 // from it is an "app-passkey" cookie session (owner-grade since tether #236).
 //
-// SECURITY (the guard a browser gives the web for free): a browser binds every ceremony to the page's
-// origin, so a page can only ask for passkeys of its own site: the rpId must be the page's host or a
-// registrable domain suffix of it (WebAuthn §5.1.3/§5.1.4 step 8, HTML "is a registrable domain
-// suffix of or is equal to"). The app's origin is the same for EVERY Tether server, so the app applies
-// that same rule itself against the server it is talking to ([PasskeyRules.relyingParty]): the host,
-// or a parent of it that is not a public suffix (Public Suffix List, the one OkHttp ships), compared
-// as canonical ASCII. Anything else is refused before any prompt appears, and Credential Manager is
-// handed the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]), never another spelling.
-// ta-coik.1: this replaces T10.5's exact-host-only rule (a browser allows the parent; so does the app).
-// r2 (security F1): and only over https, as a browser requires a secure context. Neither the rpId nor
-// the android origin carries a scheme, so over http an on-path attacker posing as the server could pass
-// the real server's options through and relay the answer to its https console. No ceremony starts and
-// nothing is sent for an http server, loopback included. A browser also counts http://localhost as a
-// secure context; the app does not need that exception, because Credential Manager verifies the rpId
+// SECURITY (the binding a browser gives the web for free): a browser puts the page's own origin into
+// every assertion (clientDataJSON.origin), and a Tether server derives its rpId from the hostname of
+// its own origin and accepts only that origin (tether lib/passkeys.mjs resolveRelyingParty and
+// verifyAuthentication). So a browser can only ever sign in to a Tether console with rpId == that
+// console's own host: a page on another host, even one under the same parent domain, would carry its
+// own origin, which the console refuses.
+// The app's origin (`android:apk-key-hash:...`) is the same for EVERY host, so the server's origin
+// check cannot tell one host from another for the app. The app therefore checks the host itself
+// ([PasskeyRules.relyingParty]): the rpId must EQUAL the host of the server it is talking to, compared
+// as a browser's URL parser spells hosts (ASCII case folded, IDN as punycode, a trailing dot only when
+// both carry it). Exact host plus the server's origin check is what the browser achieves; it is not an
+// app-only gate. ta-coik.1 r2 (security F1, coordinator decision): a registrable parent is NOT
+// accepted. The WebAuthn rule would let a browser *ask* for a parent rpId, but against Tether that
+// never signs in, while for the app it would let any host under the console's domain relay the
+// console's challenge (Credential Manager signs it: assetlinks at the parent pass; the console accepts
+// the app origin). Anything else is refused before any prompt appears, and Credential Manager is handed
+// the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]), never another spelling.
+// r2 (T10.5 security F1): and only over https, as a browser requires a secure context. Neither the rpId
+// nor the android origin carries a scheme, so over http an on-path attacker posing as the server could
+// pass the real server's options through and relay the answer to its https console. No ceremony starts
+// and nothing is sent for an http server, loopback included. A browser also counts http://localhost as
+// a secure context; the app does not need that exception, because Credential Manager verifies the rpId
 // against https://<rpId>/.well-known/assetlinks.json and cannot do so for localhost (or an IP address,
 // which WebAuthn refuses as an rpId anyway), so a passkey cannot work there whatever the app allowed.
-// (Residual: neither carries a port either, so any service on the same hostname, on any port, could
-// relay an app passkey the same way; with a parent rpId, so could any host under that parent, exactly
-// as any page under that parent can in a browser.)
+// KNOWN GAP (ta-coik.1 security F3, native only, NOT browser parity): neither the rpId nor the app's
+// origin carries a port, so another service on the same host but a different port (say
+// https://console.example.com:8443 beside https://console.example.com) could fetch the console's
+// challenge, have the app sign it, and relay the answer. A browser closes that with the origin, which
+// does carry the port; the app has nothing to bind a port to. Run nothing untrusted on another port of
+// a console's host.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** What one passkey ceremony came to. */
@@ -220,37 +231,28 @@ object PasskeyRules {
     fun ceremonyAllowed(origin: String): Boolean = origin.toHttpUrlOrNull()?.let(::ceremonyAllowed) == true
 
     /**
-     * The anti-relay guard (see the file header), the browser's own rule: for an https [server], the
-     * relying party [rpId] names as canonical ASCII when it is the server's host or a registrable domain
-     * suffix of it; null otherwise. WebAuthn §5.1.3/§5.1.4 step 8 by way of HTML's "is a registrable
-     * domain suffix of or is equal to":
+     * The anti-relay guard (see the file header): for an https [server], the relying party [rpId] names,
+     * as canonical ASCII, when it IS the server's host; null otherwise. This is the binding a browser
+     * reaches against a Tether console (rpId = the console's hostname, origin checked by the server);
+     * the app's origin cannot carry it, so the app checks the host itself. ta-coik.1 r2 (security F1):
+     * a parent domain, a sibling or a child is refused.
      *  - the rpId is parsed as a host, as a browser's URL host parser does it: percent-decoded, UTS #46
      *    mapped (so ASCII case and compatibility forms fold the way a browser folds them) and punycoded
-     *    (OkHttp's own IDNA table, identical on the JVM and Android). r2 (security F2) stays closed a
-     *    different way: the spelling that is checked is the spelling Credential Manager is given
+     *    (OkHttp's own IDNA table, identical on the JVM and Android). T10.5 r2 (security F2) stays closed
+     *    a different way: the spelling that is checked is the spelling Credential Manager is given
      *    ([ceremonyOptions]), so no lookalike can be checked as one name and signed as another;
      *  - it must be a valid domain: no forbidden domain code point, not an IP address (WebAuthn refuses
      *    an IP origin and an IP rpId; nor could Credential Manager verify assetlinks for one);
-     *  - equal to the server's host: allowed;
-     *  - otherwise the host must end with "." + rpId, the rpId must not be a public suffix, and both must
-     *    share one registrable domain (Public Suffix List, private section included, as browsers use it;
-     *    a trailing dot handled as the URL Standard's "public suffix" does). `co.uk`, `github.io` or a
-     *    bare TLD are refused; so is anything the list cannot be read for (fail closed: the exact host
-     *    still works).
+     *  - it must equal the server's host, spelled the same way (a trailing dot is part of a host, so it
+     *    matches only when both carry it, as the URL Standard keeps it).
+     * Not covered (security F3, native only): the port. See the file header.
      */
-    fun relyingParty(rpId: String, server: HttpUrl): String? = relyingParty(rpId, server, ::registrableDomainOf)
-
-    /** [relyingParty] with the PSL lookup handed in (tests: the fail-closed path). */
-    internal fun relyingParty(rpId: String, server: HttpUrl, registrable: (String) -> String?): String? {
+    fun relyingParty(rpId: String, server: HttpUrl): String? {
         if (!ceremonyAllowed(server)) return null
         val host = server.host
         if (!isValidDomain(host)) return null
         val rp = canonicalHost(rpId)?.takeIf(::isValidDomain) ?: return null
-        if (rp == host) return rp
-        if (!host.endsWith(".$rp")) return null
-        val rpRegistrable = registrable(rp) ?: return null // rp is a public suffix (or the list is unreadable)
-        val hostRegistrable = registrable(host) ?: return null
-        return rp.takeIf { rpRegistrable == hostRegistrable }
+        return rp.takeIf { it == host }
     }
 
     /** [relyingParty] against a canonical origin (`https://host[:port]`). */
@@ -303,23 +305,6 @@ object PasskeyRules {
         if (last.all { it in '0'..'9' }) return false
         if ((last.startsWith("0x") || last.startsWith("0X")) && last.drop(2).all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return false
         return true
-    }
-
-    /**
-     * The registrable domain (eTLD+1) of a canonical [host] by the Public Suffix List OkHttp ships
-     * (`HttpUrl.topPrivateDomain`, the list's private section included); null for a public suffix, or
-     * when the list cannot be read. A trailing dot is set aside for the lookup and kept on the answer,
-     * as the URL Standard's "obtain a public suffix" does.
-     */
-    private fun registrableDomainOf(host: String): String? {
-        val dot = if (host.endsWith(".")) "." else ""
-        val bare = host.removeSuffix(".")
-        if (bare.isEmpty()) return null
-        return try {
-            HttpUrl.Builder().scheme("https").host(bare).build().topPrivateDomain()?.let { it + dot }
-        } catch (_: Exception) {
-            null
-        }
     }
 
     /**

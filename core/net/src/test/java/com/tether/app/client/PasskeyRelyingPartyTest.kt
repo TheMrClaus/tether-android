@@ -12,7 +12,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -27,27 +26,17 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 
 /**
- * ta-coik.1: the browser's rpId rule (WebAuthn §5.1.3/§5.1.4 step 8, HTML "is a registrable domain
- * suffix of or is equal to"): the server's host, or a parent of it that is not a public suffix, by the
- * Public Suffix List OkHttp ships, compared as canonical ASCII. Robolectric: OkHttp reads that list from
- * its Android asset through the application context (androidx-startup in the app; by hand here).
+ * ta-coik.1 r2 (security F1, coordinator decision): the rpId must EQUAL the server's host, compared as
+ * a browser's URL parser spells hosts (case folded, IDN as punycode, a trailing dot only when both carry
+ * it). That is the binding a browser reaches against a Tether console, whose rpId is its own hostname and
+ * whose origin check refuses any other page; a parent domain or a sibling is refused. No Public Suffix
+ * List is read (none is initialised here). Robolectric only for the class runner the file shares.
  */
 @RunWith(RobolectricTestRunner::class)
 class PasskeyRelyingPartyTest {
-    @Before fun psl() = OkHttp.initialize(RuntimeEnvironment.getApplication())
-
     private fun rp(rpId: String, server: String): String? = PasskeyRules.relyingParty(rpId, server.toHttpUrl())
-
-    /** Positive control: the list really is loaded, so each refusal below is the list's, not a failure to read it. */
-    @Test fun thePublicSuffixListIsReadable() {
-        assertEquals("example.co.uk", "https://console.example.co.uk".toHttpUrl().topPrivateDomain())
-        assertEquals("owner.github.io", "https://a.owner.github.io".toHttpUrl().topPrivateDomain())
-        assertNull("co.uk is a public suffix", "https://co.uk".toHttpUrl().topPrivateDomain())
-        assertNull("github.io is one too (the list's private section)", "https://github.io".toHttpUrl().topPrivateDomain())
-    }
 
     @Test fun theExactHostIsItsOwnRelyingParty() {
         assertEquals("console.example.test", rp("console.example.test", "https://console.example.test"))
@@ -59,13 +48,38 @@ class PasskeyRelyingPartyTest {
         assertEquals("localhost", rp("localhost", "https://localhost:4290"))
     }
 
-    @Test fun aRegistrableParentIsAllowedAsABrowserAllowsIt() {
-        assertEquals("example.test", rp("example.test", "https://console.example.test"))
-        assertEquals("example.co.uk", rp("example.co.uk", "https://console.example.co.uk"))
-        assertEquals("example.co.uk", rp("example.co.uk", "https://a.b.console.example.co.uk"))
-        assertEquals("b.console.example.co.uk", rp("b.console.example.co.uk", "https://a.b.console.example.co.uk"))
-        assertEquals("owner.github.io", rp("owner.github.io", "https://tether.owner.github.io"))
-        assertEquals("example.com", rp("example.com", "https://tether.example.com:9443"))
+    /**
+     * The security review's F1: with a parent rpId, any host under the console's domain could fetch the
+     * console's challenge and have the app sign it (the app's origin is the same for every host). A
+     * browser cannot, because the console checks the page's origin; so the app refuses every parent.
+     */
+    @Test fun aParentDomainIsRefused() {
+        for ((rpId, server) in listOf(
+            "example.com" to "https://console.example.com",
+            "example.test" to "https://console.example.test",
+            "Example.TEST" to "https://console.example.test",
+            "example.co.uk" to "https://console.example.co.uk",
+            "example.co.uk" to "https://a.b.console.example.co.uk",
+            "b.console.example.co.uk" to "https://a.b.console.example.co.uk",
+            "owner.github.io" to "https://tether.owner.github.io",
+            "example.com" to "https://tether.example.com:9443",
+            "b\u00FCcher.de" to "https://konsole.b\u00FCcher.de", // an IDN parent, in either spelling
+            "xn--bcher-kva.de" to "https://konsole.b\u00FCcher.de",
+        )) {
+            assertNull("refused: parent '$rpId' for $server", rp(rpId, server))
+        }
+    }
+
+    /** Another host under the same parent (another console, or anything else served there) is refused too. */
+    @Test fun aSiblingIsRefused() {
+        for ((rpId, server) in listOf(
+            "other.example.com" to "https://console.example.com",
+            "www.example.com" to "https://console.example.com",
+            "console2.example.com" to "https://console.example.com",
+            "console.example.com" to "https://other.example.com",
+        )) {
+            assertNull("refused: sibling '$rpId' for $server", rp(rpId, server))
+        }
     }
 
     @Test fun aPublicSuffixIsNeverARelyingParty() {
@@ -116,7 +130,7 @@ class PasskeyRelyingPartyTest {
         assertEquals("xn--bcher-kva.example", PasskeyRules.relyingParty("xn--bcher-kva.example", idn))
         assertEquals("its Unicode spelling parses to the same host", "xn--bcher-kva.example", PasskeyRules.relyingParty("b\u00FCcher.example", idn))
         assertEquals("XN-- in capitals is the same label", "xn--bcher-kva.example", PasskeyRules.relyingParty("XN--BCHER-KVA.EXAMPLE", idn))
-        assertEquals("an IDN parent", "xn--bcher-kva.de", rp("b\u00FCcher.de", "https://konsole.b\u00FCcher.de"))
+        assertNull("an IDN parent", rp("b\u00FCcher.de", "https://konsole.b\u00FCcher.de"))
         assertNull("a different IDN", PasskeyRules.relyingParty("b\u00F6cher.example", idn))
     }
 
@@ -142,7 +156,8 @@ class PasskeyRelyingPartyTest {
 
     @Test fun caseIsFoldedAsAHostIsAndHandedOverInLowerCase() {
         assertEquals("console.example.test", rp("Console.Example.TEST", "https://console.example.test"))
-        assertEquals("example.test", rp("EXAMPLE.test", "https://console.example.test"))
+        assertEquals("console.example.test", rp("CONSOLE.example.test", "https://Console.Example.Test"))
+        assertNull("a parent in capitals is still a parent", rp("EXAMPLE.test", "https://console.example.test"))
         assertNull(rp("CO.UK", "https://console.example.co.uk"))
     }
 
@@ -153,10 +168,10 @@ class PasskeyRelyingPartyTest {
         assertNull(rp("console.example.test..", "https://console.example.test"))
         val dotted = "https://console.example.co.uk.".toHttpUrl()
         assertEquals("control: OkHttp keeps the dot", "console.example.co.uk.", dotted.host)
-        assertEquals("console.example.co.uk.", PasskeyRules.relyingParty("console.example.co.uk.", dotted))
-        assertEquals("example.co.uk.", PasskeyRules.relyingParty("example.co.uk.", dotted))
+        assertEquals("both carry it", "console.example.co.uk.", PasskeyRules.relyingParty("console.example.co.uk.", dotted))
+        assertNull("only the host carries it", PasskeyRules.relyingParty("console.example.co.uk", dotted))
+        assertNull("a parent, with the dot", PasskeyRules.relyingParty("example.co.uk.", dotted))
         assertNull("its public suffix, with the dot", PasskeyRules.relyingParty("co.uk.", dotted))
-        assertNull("without the dot it is not a suffix of that host", PasskeyRules.relyingParty("example.co.uk", dotted))
     }
 
     /** WebAuthn: an IP address is not a valid domain, as an origin or as an rpId (nor could assetlinks be checked). */
@@ -170,31 +185,23 @@ class PasskeyRelyingPartyTest {
         assertEquals("control: a digit-led label that is not last is fine", "1password.example.test", rp("1password.example.test", "https://1password.example.test"))
     }
 
-    /** A browser requires a secure context; so does the app, for the exact host and a parent alike. */
+    /** A browser requires a secure context; so does the app. */
     @Test fun onlyAnHttpsServerHasARelyingParty() {
         assertNull(rp("console.example.test", "http://console.example.test"))
         assertNull(rp("example.test", "http://console.example.test"))
         assertNull(rp("localhost", "http://localhost:4290"))
     }
 
-    /** Fail closed: with the list unreadable a parent is refused; the exact host needs no list and still works. */
-    @Test fun anUnreadableListRefusesEveryParent() {
-        val server = "https://console.example.co.uk".toHttpUrl()
-        assertEquals("console.example.co.uk", PasskeyRules.relyingParty("console.example.co.uk", server) { null })
-        assertNull(PasskeyRules.relyingParty("example.co.uk", server) { null })
-        assertEquals("control: the same with the list", "example.co.uk", PasskeyRules.relyingParty("example.co.uk", server))
-    }
-
     @Test fun credentialManagerIsGivenTheCanonicalRpIdInTheFieldEachPurposeReads() {
         val server = "https://console.example.test".toHttpUrl()
-        val login = PasskeyRules.challenge(obj(PasskeyFixtures.loginOptionsJson("Example.TEST")), PasskeyPurpose.Login)!!
+        val login = PasskeyRules.challenge(obj(PasskeyFixtures.loginOptionsJson("Console.Example.TEST")), PasskeyPurpose.Login)!!
         val handedLogin = obj(PasskeyRules.ceremonyOptions(login, server)!!)
-        assertEquals(JsonPrimitive("example.test"), handedLogin["rpId"])
+        assertEquals(JsonPrimitive("console.example.test"), handedLogin["rpId"])
         assertEquals("nothing else changes", JsonObject(login.options - "rpId"), JsonObject(handedLogin - "rpId"))
 
-        val reg = PasskeyRules.challenge(obj(PasskeyFixtures.registerOptionsJson("EXAMPLE.test")), PasskeyPurpose.Register)!!
+        val reg = PasskeyRules.challenge(obj(PasskeyFixtures.registerOptionsJson("CONSOLE.example.test")), PasskeyPurpose.Register)!!
         val handedReg = obj(PasskeyRules.ceremonyOptions(reg, server)!!)
-        assertEquals(JsonPrimitive("example.test"), (handedReg["rp"] as JsonObject)["id"])
+        assertEquals(JsonPrimitive("console.example.test"), (handedReg["rp"] as JsonObject)["id"])
         assertEquals(JsonPrimitive("Tether"), (handedReg["rp"] as JsonObject)["name"])
         assertEquals(JsonObject(reg.options - "rp"), JsonObject(handedReg - "rp"))
 
@@ -203,6 +210,10 @@ class PasskeyRelyingPartyTest {
         assertEquals(exact.optionsJson(), PasskeyRules.ceremonyOptions(exact, server))
         // Refused: nothing to hand over.
         assertNull(PasskeyRules.ceremonyOptions(PasskeyRules.challenge(obj(PasskeyFixtures.loginOptionsJson("test")), PasskeyPurpose.Login)!!, server))
+        // ta-coik.1 r2: a parent opens nothing, for a sign-in and a registration alike.
+        assertNull(PasskeyRules.ceremonyOptions(PasskeyRules.challenge(obj(PasskeyFixtures.loginOptionsJson("example.test")), PasskeyPurpose.Login)!!, server))
+        assertNull(PasskeyRules.ceremonyOptions(PasskeyRules.challenge(obj(PasskeyFixtures.registerOptionsJson("example.test")), PasskeyPurpose.Register)!!, server))
+        assertNull(PasskeyRules.ceremonyOptions(PasskeyRules.challenge(obj(PasskeyFixtures.registerOptionsJson("other.example.test")), PasskeyPurpose.Register)!!, server))
         assertNull(PasskeyRules.ceremonyOptions(exact, "http://console.example.test"))
     }
 
@@ -265,21 +276,22 @@ class PasskeyAutofillOfferTest {
 }
 
 /**
- * ta-coik.1 end to end: a console on a named host (DNS pinned to loopback, a certificate for that name)
- * whose options name its registrable parent: the prompt is asked for the parent and the answer goes
- * back; options naming the public suffix above it open no prompt and send nothing more. The two halves
- * the autofill offer uses run the same rule.
+ * ta-coik.1 r2 end to end: a console on a named host (DNS pinned to loopback, a certificate for that
+ * name). Options naming the host itself (in any case) open the prompt for that canonical host and the
+ * answer goes back; options naming its parent domain, a sibling under that parent, or the public suffix
+ * above it open no prompt and send nothing more (security F1: no host under the console's domain can
+ * relay the console's challenge through the app). The two halves the autofill offer uses run the same
+ * rule.
  */
 @RunWith(RobolectricTestRunner::class)
-class PasskeyParentRelyingPartyWireTest {
+class PasskeyHostRelyingPartyWireTest {
     private val name = "console.example.co.uk"
     private val server = MockWebServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @Volatile private var rpId = "example.co.uk"
+    @Volatile private var rpId = "CONSOLE.Example.co.uk"
 
     @Before fun setUp() {
-        OkHttp.initialize(RuntimeEnvironment.getApplication())
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
                 "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
@@ -317,35 +329,40 @@ class PasskeyParentRelyingPartyWireTest {
         while (true) add(server.takeRequest(200, TimeUnit.MILLISECONDS)?.path ?: break)
     }
 
-    @Test fun aParentRpIdIsAskedForAndTheAnswerGoesBack() {
+    /** Positive control for the refusals below: the same console, naming itself, signs in. */
+    @Test fun theHostItselfIsAskedForAndTheAnswerGoesBack() {
         val client = client()
         val passkeys = RecordingPasskeys()
         assertEquals(LoginResult.Success, runBlocking { client.passkeyLogin(base, passkeys) })
         val asked = TetherJson.parseToJsonElement(passkeys.authenticated.single()) as JsonObject
-        assertEquals(JsonPrimitive("example.co.uk"), asked["rpId"])
+        assertEquals("the canonical spelling that was checked", JsonPrimitive(name), asked["rpId"])
         client.stop()
         val seen = paths()
         assertEquals(listOf("/healthz", "/api/auth/passkey/login/options", "/api/auth/passkey/login/verify"), seen.take(3))
     }
 
-    @Test fun aPublicSuffixRpIdOpensNoPromptAndSendsNothingMore() {
-        rpId = "co.uk"
-        val client = client()
-        val passkeys = RecordingPasskeys()
-        assertEquals(LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP), runBlocking { client.passkeyLogin(base, passkeys) })
-        assertTrue("no prompt", passkeys.authenticated.isEmpty())
-        assertEquals(listOf("/healthz", "/api/auth/passkey/login/options"), paths())
-        client.stop()
+    @Test fun aParentASiblingOrAPublicSuffixRpIdOpensNoPromptAndSendsNothingMore() {
+        for (other in listOf("example.co.uk", "EXAMPLE.co.uk", "other.example.co.uk", "www.example.co.uk", "co.uk")) {
+            rpId = other
+            val client = client()
+            val passkeys = RecordingPasskeys()
+            assertEquals(other, LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP), runBlocking { client.passkeyLogin(base, passkeys) })
+            assertTrue("no prompt for $other", passkeys.authenticated.isEmpty())
+            assertEquals(other, listOf("/healthz", "/api/auth/passkey/login/options"), paths())
+            client.stop()
+        }
     }
 
     @Test fun theTwoHalvesRunTheSameRuleAndTheAnswerGoesToTheServerThatAsked() {
         val client = client()
-        rpId = "co.uk"
-        assertEquals(PasskeyLoginStart.Refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP)), runBlocking { client.passkeyLoginStart(base) })
-        rpId = "EXAMPLE.co.uk"
+        for (other in listOf("example.co.uk", "other.example.co.uk", "co.uk")) {
+            rpId = other
+            assertEquals(other, PasskeyLoginStart.Refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP)), runBlocking { client.passkeyLoginStart(base) })
+        }
+        rpId = "CONSOLE.example.CO.UK"
         val start = runBlocking { client.passkeyLoginStart(base) }
         val request = (start as PasskeyLoginStart.Ready).request
-        assertEquals(JsonPrimitive("example.co.uk"), (TetherJson.parseToJsonElement(request.requestJson()) as JsonObject)["rpId"])
+        assertEquals(JsonPrimitive(name), (TetherJson.parseToJsonElement(request.requestJson()) as JsonObject)["rpId"])
         assertEquals(name, request.server.host)
         assertTrue("prints nothing of the challenge", !request.toString().contains(PasskeyFixtures.CHALLENGE_ID))
         paths()

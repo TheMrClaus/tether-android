@@ -39,8 +39,8 @@ class PasskeyRulesTest {
     private fun obj(text: String) = TetherJson.parseToJsonElement(text) as JsonObject
 
     // ---- the anti-relay guard -----------------------------------------------------------------
-    // ta-coik.1: the parent-domain, public-suffix, IDN, trailing-dot and IP cases are in
-    // PasskeyRelyingPartyTest (Robolectric: the Public Suffix List is an Android asset).
+    // ta-coik.1 r2: the parent-domain, sibling, public-suffix, IDN, trailing-dot and IP cases are in
+    // PasskeyRelyingPartyTest; the rule is the exact host (no Public Suffix List).
 
     @Test fun onlyTheServersOwnHostIsARelyingPartyTheAppWillAskFor() {
         val server = "https://console.example.test".toHttpUrl()
@@ -50,6 +50,8 @@ class PasskeyRulesTest {
         for (other in listOf(
             "other-console.example.test", // another Tether console vouching for the same app
             "evil.console.example.test", // a child
+            "example.test", // a parent domain (ta-coik.1 r2, security F1: refused, as a browser's origin binding refuses it)
+            "Example.TEST",
             "console.example.test.evil", // a suffix trick
             "xconsole.example.test",
             "console.example.tes",

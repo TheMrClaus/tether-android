@@ -471,8 +471,8 @@ class DevicesController(
      * T10.5, the web's registerPasskey: a challenge, the ceremony on this phone, the answer with
      * [label] (`label.trim() || "Passkey"`), then a re-read. No confirmation of the app's own: the tap
      * opens Credential Manager's prompt, which the operator unlocks or closes. The prompt is asked
-     * only for this server's own rpId: its host or a registrable parent, the browser's rule
-     * (PasskeyRules.ceremonyOptions); anything else creates nothing.
+     * only for this server's own host as the rpId (PasskeyRules.ceremonyOptions; ta-coik.1 r2: no
+     * parent, no sibling); anything else creates nothing.
      */
     fun addPasskey(label: String): Boolean {
         if (!authenticator.available || passkeys?.passkeysUsable != true) return false
@@ -483,7 +483,7 @@ class DevicesController(
             if (!mine(options)) return@write
             if (options !is SecurityResult.Ok) return@write settle(options, DevicesArea.Security, DevicesCopy.ADD_PASSKEY_FAILED)
             val challenge = options.value
-            // ta-coik.1: the host or a registrable parent (the browser's rule), handed over as checked.
+            // ta-coik.1 r2: the server's own host exactly (canonical spelling), handed over as checked.
             val request = PasskeyRules.ceremonyOptions(challenge, o) ?: return@write failLine(DevicesCopy.PASSKEY_WRONG_RP)
             val answer = when (val ceremony = authenticator.register(request)) {
                 is PasskeyCeremony.Done -> PasskeyRules.response(ceremony) ?: return@write failLine(DevicesCopy.ADD_PASSKEY_FAILED)

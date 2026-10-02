@@ -32,15 +32,20 @@ against `components/sign-in-security.tsx` and `components/login/{studio,retro}-l
 
 ## As the browser does it (ta-coik.1)
 
-- **The rpId rule is the browser's** (WebAuthn §5.1.3/§5.1.4 step 8, HTML "is a registrable domain
-  suffix of or is equal to"): the server's host, or a parent of it that is not a public suffix. The
-  check uses the Public Suffix List OkHttp already ships (`HttpUrl.topPrivateDomain()`, an asset of
-  the `okhttp-android` artifact already in the build, private section included, so `co.uk` and
-  `github.io` are refused as browsers refuse them). The rpId is parsed as a browser parses a host
-  (UTS #46, punycode, lower case), and Credential Manager is given that canonical spelling. An IP
-  address is never an rpId, as in WebAuthn. Why the app must apply the rule itself: a browser binds
-  every ceremony to the page's origin, but the app's `android:apk-key-hash` origin is the same for
-  every Tether server.
+- **The rpId must equal the console's host** (ta-coik.1 r2, coordinator decision after the security
+  review's F1). That is what a browser achieves against Tether, not a stricter rule: the server takes
+  its rpId from the hostname of its own origin and accepts only that origin in `clientDataJSON` (tether
+  `lib/passkeys.mjs` `resolveRelyingParty`, `verifyAuthentication`). A browser therefore signs in only
+  with rpId == the console's own host. A page on another host, even one under the same parent domain,
+  carries its own origin and is refused. The app's `android:apk-key-hash` origin is the same for every
+  host, so the server cannot make that check for the app, and the app checks the host itself. **Exact
+  host plus the server's origin check is what the browser achieves.** A registrable parent (for
+  example `example.com` for `console.example.com`) and a sibling (`other.example.com`) are refused,
+  at sign-in and in Settings > Devices > Add a passkey alike. Accepting a parent would let any host
+  under the console's domain relay the console's challenge through the app, which no browser allows.
+  The rpId is still parsed as a browser parses a host (UTS #46, punycode, lower case; a trailing dot
+  matches only when both sides carry it), and Credential Manager is given that canonical spelling. An
+  IP address is never an rpId, as in WebAuthn. No Public Suffix List is involved.
 - **Offered wherever the web offers it.** The web has one sign-in screen and shows the passkey on it
   whatever else is shown (studio-login.tsx:41/99, retro-login.tsx:164), so the app shows the key on
   its Password path and its Pairing path alike. Retro's Enter on an empty line is the passkey on the
@@ -50,7 +55,10 @@ against `components/sign-in-security.tsx` and `components/login/{studio,retro}-l
   `semantics { credentialRequest }`, the web's `autocomplete="current-password webauthn"`), so the
   passkey is among the field's autofill suggestions. Once per address; an offer that goes unused, is
   dismissed or is superseded by the key stays quiet and is not re-armed; a picked passkey is an
-  attempt from then on, with the web's outcomes.
+  attempt from then on, with the web's outcomes. The offer is armed only from a sign-in reading taken
+  for the address now typed: an edited address asks no challenge until its own probe has answered.
+  A pick that lands while a password attempt is in flight goes ahead, as on the web (its conditional
+  branch has no phase check). The password attempt is not cancelled either; each settles on its own.
 
 ## Platform limits (not app rules)
 
@@ -78,10 +86,13 @@ against `components/sign-in-security.tsx` and `components/login/{studio,retro}-l
 
 ## Residual risks
 
-- **Same-hostname relay**: neither the rpId nor the Android origin carries a port or a scheme, so any
-  service on the same hostname, on any port, that the app is pointed at can relay an app passkey to the
-  console. https-only closes the plain-http case, not this one. With a parent rpId (ta-coik.1) the same
-  holds for any host under that parent, exactly as any page under that parent can use it in a browser.
+- **Same host, other port (security F3; a native-only gap, not browser parity)**: neither the rpId
+  nor the Android origin carries a port, so another service on the console's host but on a different
+  port (`https://console.example.com:8443` beside `https://console.example.com`) that the app is
+  pointed at could fetch the console's challenge, have the app sign it, and relay the answer to the
+  console. A browser closes this with the origin, which carries the port; the app has no field to bind
+  a port to, and the exact-host rule cannot see it. https-only closes the plain-http variant, not this
+  one. Run nothing untrusted on another port of a console's host.
 - Real Credential Manager behaviour is not exercised on the JVM (the ceremony is a fake seam, and the
   autofill offer is checked down to the semantics node and the framework request it carries); the
   prompt and the autofill suggestion are the owner's device test (Android 15+ for the suggestion).

@@ -218,7 +218,7 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
         compose.waitForIdle()
         assertTrue("no prompt", passkeys.requests.isEmpty())
         assertEquals(listOf("devices", "passkeys", "sessions", "registerOptions"), source.names())
-        // ta-coik.1: a public suffix above the host is refused, as a browser refuses it.
+        // ta-coik.1: a public suffix above the host is refused.
         upToThePrompt(rpId = "test")
         waitText(DevicesCopy.PASSKEY_WRONG_RP)
         compose.waitForIdle()
@@ -226,17 +226,32 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
     }
 
     /**
-     * ta-coik.1: a registrable parent of the host is the browser's rule too (WebAuthn §5.1.3 step 8),
-     * so the prompt is asked for it, under the canonical spelling that was checked.
+     * ta-coik.1 r2 (security F1, coordinator decision): the rpId must equal this server's host. A parent
+     * domain (example.test for console.example.test) or a sibling under it is refused before any prompt,
+     * as a browser's origin binding refuses it against a Tether console; any spelling of a parent too.
      */
-    @Test fun aRegistrableParentIsAskedForAsABrowserWould() {
-        // The Public Suffix List is an OkHttp asset read through the application context (androidx-startup in the app).
-        okhttp3.OkHttp.initialize(org.robolectric.RuntimeEnvironment.getApplication())
+    @Test fun aParentDomainOrASiblingNeverOpensThePrompt() {
         opened()
-        upToThePrompt(rpId = "Example.TEST")
+        var expectedCalls = source.calls.size
+        for (other in listOf("example.test", "Example.TEST", "other.example.test", "www.example.test")) {
+            upToThePrompt(rpId = other)
+            expectedCalls += 1
+            waitText(DevicesCopy.PASSKEY_WRONG_RP)
+            compose.waitForIdle()
+            assertTrue("no prompt for $other", passkeys.requests.isEmpty())
+            assertEquals("nothing more sent for $other: ${source.names()}", expectedCalls, source.calls.size)
+            waitFor { enabled(DevicesTags.AddPasskey) }
+        }
+        assertTrue(source.verified.isEmpty())
+    }
+
+    /** Positive control: the host itself, in any case, is asked for under the canonical spelling that was checked. */
+    @Test fun theHostInAnyCaseIsAskedForInItsCanonicalSpelling() {
+        opened()
+        upToThePrompt(rpId = "Console.Example.TEST")
         waitFor { passkeys.pending() }
         val asked = obj(passkeys.requests.single())
-        assertEquals(kotlinx.serialization.json.JsonPrimitive("example.test"), (asked["rp"] as JsonObject)["id"])
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(ownRpId), (asked["rp"] as JsonObject)["id"])
         passkeys.answer(PasskeyCeremony.Dismissed)
         waitText(DevicesCopy.PASSKEY_DISMISSED)
     }

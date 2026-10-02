@@ -814,8 +814,8 @@ class RealTetherClient(
      *  1. /healthz: the native window, as for a password.
      *  2. `POST /api/auth/passkey/login/options {}` (JSON, no Origin: a native caller, so the server
      *     issues the legacy cookie name the app reads) -> `{ challengeId, options }`. The options go to
-     *     the authenticator ONLY when their rpId is this server's host or a registrable parent of it,
-     *     the browser's rule, and with the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]).
+     *     the authenticator ONLY when their rpId is this server's own host (ta-coik.1 r2: no parent;
+     *     see Passkeys.kt), and with the canonical rpId that was checked ([PasskeyRules.ceremonyOptions]).
      *  3. `POST /api/auth/passkey/login/verify {challengeId, response}` -> 200 + the session cookie,
      *     adopted exactly like a password sign-in's (sealed by the store, sent with the console Origin).
      * Nothing is retried: a challenge is single use, and a dismissed prompt sends nothing more.
@@ -868,8 +868,8 @@ class RealTetherClient(
             if (blockedAfterFailure(normalized, e)) return@withContext refused(LoginResult.LocalNetworkBlocked)
             return@withContext refused(LoginResult.Unreachable(e.message ?: "The server could not be reached."))
         }
-        // The anti-relay guard: only this server's own relying party (its host or a registrable parent,
-        // as a browser allows) is ever asked for, and under the spelling that was checked.
+        // The anti-relay guard: only this server's own host is ever asked for as the relying party (what
+        // a browser's origin binding yields against a Tether console), under the spelling that was checked.
         val requestJson = PasskeyRules.ceremonyOptions(challenge, normalized)
             ?: return@withContext refused(LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP))
         PasskeyLoginStart.Ready(PasskeyLoginRequest(normalized, challenge.challengeId, requestJson))
