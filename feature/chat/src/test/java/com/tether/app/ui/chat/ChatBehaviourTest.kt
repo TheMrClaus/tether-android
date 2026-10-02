@@ -111,13 +111,7 @@ class ChatBehaviourTest {
         assertEquals("https://example.test/docs", link.tag)
         rule.runOnUiThread { link.linkInteractionListener!!.onClick(link) }
         rule.waitForIdle()
-        // ta-fz3: "link to the docs" is not its href, so the tap only asks (nothing started yet);
-        // the armed Open key of the confirm sheet opens it.
-        assertNull("nothing opens before the confirmation", shadowOf(rule.activity).peekNextStartedActivity())
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
-        rule.onNodeWithTag(EXTERNAL_LINK_OPEN_TAG).performClick()
-        rule.waitForIdle()
-
+        // ta-coik.8: the tap opens it at once, like the web's <a target="_blank"> (no confirm sheet).
         val started: Intent = shadowOf(rule.activity).nextStartedActivity
         assertEquals(Intent.ACTION_VIEW, started.action)
         assertEquals("https://example.test/docs", started.dataString)

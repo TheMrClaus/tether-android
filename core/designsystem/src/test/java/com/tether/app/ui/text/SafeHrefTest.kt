@@ -8,7 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
-import java.text.Bidi
 import kotlin.random.Random
 
 /**
@@ -211,7 +210,7 @@ class SafeHrefTest {
 
     // ---- international names: punycode, fail closed ------------------------------------------
 
-    @Test fun anInternationalHostIsShownAsPunycodeAndNeverOpensDirectly() {
+    @Test fun anInternationalHostBecomesPunycode() {
         // Cyrillic a in a Latin name (mixed script).
         val href = "https://ex\u0430mple.com/docs"
         val t = allowed(href)
@@ -219,7 +218,6 @@ class SafeHrefTest {
         assertTrue(t.international)
         assertFalse(t.ascii)
         assertEquals("https://xn--exmple-4nf.com/docs", t.display)
-        assertFalse("label == href is not enough for a non-ASCII href", SafeHref.opensDirectly(t, href))
         // Cyrillic a in paypal; Greek omicron in google; Hebrew; German umlaut, any case.
         assertTrue(allowed("https://p\u0430ypal.com/").host!!.startsWith("xn--"))
         assertTrue(allowed("https://g\u03BFogle.com/").host!!.startsWith("xn--"))
@@ -282,12 +280,12 @@ class SafeHrefTest {
 
     // ---- mailto -------------------------------------------------------------------------------
 
-    @Test fun mailtoOpensItsRecipientsOnlyAndDropsTheQuery() {
+    @Test fun mailtoDisplayIsItsRecipients() {
         val t = allowed("mailto:ops@example.test,dev@Example.ORG?subject=Hi&Body=see%20log")
         assertEquals(listOf("ops@example.test", "dev@example.org"), t.recipients)
         assertEquals("mailto:ops@example.test,dev@example.org", t.display)
         assertNull(t.host)
-        // r2: whatever the query holds, raw or escaped, it is not opened (a mail app decodes it before it splits it).
+        // The display holds the recipients only (a chat link adds the query back as written: ta-coik.8).
         for (q in listOf("bcc=spy@evil.com", "subject=Deploy%26bcc%3Dspy@evil.test", "subject=x%26to%3Devil@x.com", "CC=spy@evil.com", "to=spy@evil.com", "subject=a%0Abcc:spy@evil.com")) {
             assertEquals(q, "mailto:a@good.com", allowed("mailto:a@good.com?$q").display)
         }
@@ -312,68 +310,13 @@ class SafeHrefTest {
         refused("mailto:a@exa_mple.com", Refusal.Recipient)
     }
 
-    // ---- label == href ------------------------------------------------------------------------
-
-    @Test fun onlyAnExactPrintableAsciiLabelOpensDirectly() {
-        val href = "https://example.com/docs?q=1"
-        val t = allowed(href)
-        assertTrue(SafeHref.opensDirectly(t, href))
-        for (label in listOf("docs", "https://example.com/docs", "HTTPS://example.com/docs?q=1", "https://example.com/docs?q=1 ", " https://example.com/docs?q=1", "https://example.com/docs?q=l", "")) {
-            assertFalse(label, SafeHref.opensDirectly(t, label))
-        }
-        // Non-ASCII anywhere (a Hebrew path): the label's own bidi layout could reorder it, so ask.
-        val rtl = "https://example.com/\u05E9\u05DC\u05D5\u05DD/a"
-        assertFalse(SafeHref.opensDirectly(allowed(rtl), rtl))
-        val mail = "mailto:ops@example.test"
-        assertTrue(SafeHref.opensDirectly(allowed(mail), mail))
-        assertFalse(SafeHref.opensDirectly(allowed(mail), "Email ops"))
-        // ASCII case in the scheme and host is not a difference (they open lowercased).
-        assertTrue(SafeHref.opensDirectly(allowed("HTTPS://Example.COM/Docs"), "HTTPS://Example.COM/Docs"))
-    }
-
-    @Test fun anythingThatCanMisleadWhereItWrapsOrIsCutAsks() {
-        fun direct(href: String) = SafeHref.opensDirectly(allowed(href), href)
-        // r2: an `@` anywhere in an http(s) href.
-        assertFalse(direct("https://evil.example?@bank.example"))
-        assertFalse(direct("https://evil.example/@bank.example"))
-        assertFalse(direct("https://evil.example#@bank.example"))
-        // A host over 40 characters or over 4 labels.
-        assertTrue(direct("https://" + "a".repeat(36) + ".com/")) // 40
-        assertFalse(direct("https://" + "a".repeat(37) + ".com/")) // 41
-        assertTrue(direct("https://a.b.c.example/"))
-        assertFalse(direct("https://bank.example.com.evil.example/"))
-        assertFalse(direct("mailto:ops@bank.example.com.evil.example"))
-        assertFalse(direct("mailto:ops@" + "a".repeat(37) + ".com"))
-        // A mailto query is dropped, so the label no longer says what opens.
-        assertFalse(direct("mailto:ops@example.test?subject=hi"))
-    }
-
-    // ---- display: idempotent, forced LTR ------------------------------------------------------
+    // ---- display: idempotent ----------------------------------------------------------------
 
     @Test fun theDisplayIsItselfAllowedAndStable() {
         for (href in listOf("https://ex\u0430mple.com:8443/a/%E2%80%AE?q#f", "HTTP://[::1]/", "mailto:a@b\u00FCcher.de?subject=x", "https://example.com./x", "https://example.com/\u05E9\u05DC\u05D5\u05DD")) {
             val display = allowed(href).display
             assertEquals(display, allowed(display).display)
         }
-    }
-
-    @Test fun forcedLtrKeepsEveryCharacterInLogicalOrder() {
-        // Hebrew path segments: without the override an LTR paragraph swaps the two segments visually.
-        // (r2: a target's display is ASCII now; the override still holds for any text it is given.)
-        val display = "https://example.com/\u05E9\u05DC\u05D5\u05DD/\u05E2\u05D5\u05DC\u05DD/?x=1"
-        fun visualIsLogical(text: String): Boolean {
-            val bidi = Bidi(text, Bidi.DIRECTION_LEFT_TO_RIGHT)
-            return (0 until text.length).all { bidi.getLevelAt(it) % 2 == 0 }
-        }
-        assertFalse("negative control: implicit bidi reorders the raw display", visualIsLogical(display))
-        val forced = SafeHref.forcedLtr(display)
-        assertEquals('\u202D', forced.first())
-        assertEquals('\u202C', forced.last())
-        assertTrue(visualIsLogical(forced))
-        // The same with the break opportunities the sheet inserts.
-        assertTrue(visualIsLogical(SafeHref.forcedLtr(SafeText.breakAnywhere(SafeText.code(display)))))
-        // Arabic letters and Arabic-Indic digits too.
-        assertTrue(visualIsLogical(SafeHref.forcedLtr("https://example.com/\u0645\u0631\u062D\u0628\u0627/\u0661\u0662")))
     }
 
     // ---- length and fuzz ----------------------------------------------------------------------

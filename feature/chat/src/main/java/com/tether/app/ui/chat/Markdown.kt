@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,7 +45,6 @@ import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -73,7 +71,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.CssBorder
-import com.tether.app.ui.components.LocalInClampedBlock
 import com.tether.app.ui.components.TetherExpandableBlock
 import com.tether.app.ui.components.expandPeek
 import com.tether.app.ui.components.TetherLayoutClass
@@ -201,7 +198,7 @@ internal const val COPIED_RESET_MS = 1500L
 /**
  * [nodes] as an AnnotatedString: `<strong>` = bolder, `<em>` = (synthesised) italic, `.md-code`
  * mono 0.85em with a NBSP pad each side (its background is painted by [MdText]), links violet +
- * underlined and opened through [onLink] (ta-fz3: the link gate; a Custom Tab, never a WebView).
+ * underlined and opened through [onLink] (ta-coik.8: at once, [openChatLink]; a Custom Tab, never a WebView).
  * ta-blf r2: the nodes are ONE line, so one [ProsePlan] over all of them decides its isolates and
  * marks (a word split across emphasis or a link is still one line to the bidi algorithm).
  */
@@ -213,24 +210,6 @@ internal fun inlineAnnotated(
     onLink: (MdInline.Link) -> Unit,
     cursor: FindCursor? = null,
 ): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor, linePlan(nodes)) }
-
-/**
- * ta-fz3: a link's label as it is drawn (its text and inline code, emphasis flattened), compared
- * with the href to decide whether the link needs the confirm sheet.
- */
-internal fun linkLabel(nodes: List<MdInline>): String = buildString {
-    fun walk(list: List<MdInline>) {
-        for (node in list) when (node) {
-            is MdInline.Text -> append(node.text)
-            is MdInline.Code -> append(node.text)
-            is MdInline.Link -> walk(node.children)
-            is MdInline.Span -> walk(node.children)
-            is MdInline.Strong -> walk(node.children)
-            is MdInline.Em -> walk(node.children)
-        }
-    }
-    walk(nodes)
-}
 
 /** The line's pieces in reading order (inline code drawn by the code rule), for its [ProsePlan]. */
 internal fun linePlan(nodes: List<MdInline>): ProsePlan {
@@ -431,37 +410,13 @@ fun MarkdownBody(
     val density = LocalDensity.current
     val context = LocalContext.current
     val opener = LocalLinkOpener.current
-    // ta-fz3: every tap goes through the gate: an external link whose label is not exactly its
-    // href opens only from the confirm sheet. Without a provided gate (a bare transcript) this body
-    // keeps its own, with its own sheet.
-    val providedGate = LocalExternalLinkGate.current
-    val gate = providedGate ?: remember { ExternalLinkGate() }
-    if (providedGate == null) ExternalLinkConfirmHost(gate)
+    // ta-coik.8: a tap opens the link at once, like the web's `<a target="_blank">` (no sheet).
     // The drawn paragraphs are remembered without the handler in their keys, so the handler reads
-    // the CURRENT gate, opener and context: a gate replaced on a server switch is never called.
-    val currentGate by rememberUpdatedState(gate)
+    // the CURRENT opener and context.
     val currentOpener by rememberUpdatedState(opener)
     val currentContext by rememberUpdatedState(context)
     val currentToolbar by rememberUpdatedState(t.graphite)
-    // r2: inside a clamped block, or within the arm delay of appearing or moving, a link always asks.
-    val currentClamped by rememberUpdatedState(LocalInClampedBlock.current)
-    val clock = LocalLinkClock.current
-    val settle = remember(clock) { LinkSettle(clock) }
-    val movePx = with(density) { CONTROL_REARM_MOVE_DP.dp.toPx() }
-    // r3: new content restarts the timer (a link streamed in, or pushed down, under the finger).
-    DisposableEffect(settle, blocks) {
-        settle.changed()
-        onDispose {}
-    }
-    fun handle(link: MdInline.Link, force: Boolean) {
-        currentGate.request(
-            currentContext, currentOpener, link.href, linkLabel(link.children), currentToolbar,
-            forceConfirm = force || currentClamped || !settle.settled(),
-        )
-    }
-    val onLink: (MdInline.Link) -> Unit = remember { { link -> handle(link, force = false) } }
-    // r3: a table cell does not wrap (it scrolls sideways), so its link can be cut off: it always asks.
-    val onTableLink: (MdInline.Link) -> Unit = remember { { link -> handle(link, force = true) } }
+    val onLink: (MdInline.Link) -> Unit = remember { { link -> openChatLink(currentContext, currentOpener, link.href, currentToolbar) } }
     fun em(size: TextUnit, factor: Float): Dp = with(density) { (size.value * factor).sp.toDp() }
     val body = style.fontSize
     val baseWeight = style.fontWeight?.weight ?: 400
@@ -470,7 +425,7 @@ fun MarkdownBody(
         find?.let { f -> blocks.runningFold(0) { acc, b -> acc + countBlockMatches(b, f.needle) } }
     }
 
-    Column(modifier.onGloballyPositioned { settle.positioned(it.positionInWindow(), it.size, movePx) }) {
+    Column(modifier) {
         var previousBottom: Dp? = null
         blocks.forEachIndexed { index, block ->
             val headingStyle = (block as? MdBlock.Heading)?.let { headingStyle(type, it.tag) }
@@ -500,7 +455,7 @@ fun MarkdownBody(
                 is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.Quote -> MdQuote(block, style, t, type, baseWeight, onLink, mark)
-                is MdBlock.Table -> MdTable(block, style, t, type, onTableLink, mark)
+                is MdBlock.Table -> MdTable(block, style, t, type, onLink, mark)
                 is MdBlock.Code -> MdCodeBlock(block, mark)
                 MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             }

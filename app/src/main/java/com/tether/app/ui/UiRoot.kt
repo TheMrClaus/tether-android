@@ -32,9 +32,6 @@ import com.tether.app.nav.NavEffect
 import com.tether.app.nav.NavigationViewModel
 import com.tether.app.nav.SessionLinkOpener
 import com.tether.app.ui.chat.CustomTabLinkOpener
-import com.tether.app.ui.chat.ExternalLinkConfirmHost
-import com.tether.app.ui.chat.ExternalLinkGate
-import com.tether.app.ui.chat.LocalExternalLinkGate
 import com.tether.app.ui.chat.LocalLinkOpener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -259,12 +256,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
                     )
                 } else {
-                    // ta-fz3: one link gate per signed-in server: a server switch or Lock (this branch
-                    // leaving) drops a pending link confirmation; the host drops it on pause and stop.
-                    val linkGate = remember(serverUrl) { ExternalLinkGate() }
-                    CompositionLocalProvider(LocalLinkOpener provides linkOpener, LocalExternalLinkGate provides linkGate) {
+                    CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
                         MainShell(vm = vm, prefs = prefs)
-                        ExternalLinkConfirmHost(linkGate)
                     }
                     if (inputGuard) NavInputGuard(Modifier.matchParentSize())
                 }

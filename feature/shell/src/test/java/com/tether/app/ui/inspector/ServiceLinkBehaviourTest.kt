@@ -177,8 +177,6 @@ class ServiceLinkBehaviourTest {
             override fun open(context: Context, href: String, toolbarColor: Color) {
                 inAppCalls += href
             }
-
-            override fun opensInApp(href: String): Boolean = true
         }
         show(model(), FakeOpen(ServiceOpenSource.Outcome.Open(handoff)), opener = CustomTabLinkOpener, inApp = inApp)
         tap(InspectorTags.ServiceOpen)

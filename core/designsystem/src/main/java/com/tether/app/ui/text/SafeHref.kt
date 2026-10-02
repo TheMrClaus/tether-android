@@ -4,8 +4,9 @@ import java.net.IDN
 import java.text.Normalizer
 
 /**
- * ta-fz3: which server- or agent-supplied link targets may become tappable, and what the operator
- * is shown before one opens. Pure Kotlin (java.net.IDN, java.text.Normalizer), no Compose.
+ * ta-fz3: which server- or agent-supplied link targets may become tappable, and the ASCII form
+ * one opens in. Pure Kotlin (java.net.IDN, java.text.Normalizer), no Compose. ta-coik.8: a chat
+ * link opens at once on a tap, like the web's (no confirm sheet).
  *
  * The web's markdown allowlist (`SAFE_HREF = /^(https?:\/\/|mailto:)/i`) looks at the first
  * characters only; this is a full-string check behind the same scheme allowlist. A href that
@@ -44,26 +45,16 @@ import java.text.Normalizer
  *
  * ALLOWED hrefs become a [Target]:
  * - [Target.host] is the host in ASCII: an internationalised name as punycode (`xn--`), letters
- *   lowercased. [Target.port] is the port when the href names one, default or not; the confirm
- *   sheet shows it on its own row.
- * - [Target.display] is the target the confirm sheet shows and what opens, always printable
+ *   lowercased. [Target.port] is the port when the href names one, default or not.
+ * - [Target.display] is what an http(s) link opens, always printable
  *   ASCII: the scheme lowercased, the host (or each mailto domain) in ASCII, every non-ASCII
  *   character after the host PERCENT-ENCODED as UTF-8 (r2: what the browser sends anyway, so no
  *   look-alike outside the host can draw as a delimiter), every other character exactly as
  *   written. Percent-escapes already in the href are LEFT ENCODED, never decoded: `%E2%80%AE` in a
- *   path is shown as those nine characters, so no decoding can surface a hidden character. Drawn
- *   by the code rule and [forcedLtr].
- * - mailto (r2): only the recipients open (`mailto:a@x,b@y`); the query (subject, body and every
- *   header) is DROPPED. A mail app decodes the query before it splits it (`android.net.MailTo`),
- *   so `subject=x%26bcc%3Dspy@evil` would add a recipient no header check on the raw text sees;
- *   with no query there is nothing to decode. The sheet shows exactly the address that opens.
- * - [opensDirectly]: a link opens without the sheet only when its visible label is exactly its
- *   href, the href is printable ASCII (so no international host and nothing the label's bidi
- *   layout could reorder) and what opens is what the label says ([Target.display] equals the href
- *   but for ASCII case: a dropped mailto query asks), and (r2) nothing in it can mislead where it
- *   is cut or wrapped: no `@` in an http(s) href (`https://evil.example?@bank.example`), and a host
- *   (each mailto domain) of at most [DIRECT_HOST_CHARS] characters and [DIRECT_HOST_LABELS]
- *   labels. Every other external link asks first.
+ *   path stays those nine characters, so no decoding can surface a hidden character.
+ * - mailto: [Target.display] is the recipients only (`mailto:a@x,b@y`), each domain in ASCII. A
+ *   chat link opens it with the href's query (subject, body) as written, like the web
+ *   (ta-coik.8, `openChatLink` in feature/chat).
  */
 object SafeHref {
     enum class Scheme(val prefix: String) { Http("http://"), Https("https://"), Mailto("mailto:") }
@@ -84,7 +75,7 @@ object SafeHref {
         val recipients: List<String>,
         /** A host or mailto domain was an internationalised name (it is shown as punycode). */
         val international: Boolean,
-        /** What the confirm sheet shows and what opens (see the class doc). */
+        /** The ASCII target (see the class doc). */
         val display: String,
         /** Every character of [href] is printable ASCII (U+0021..U+007E). */
         val ascii: Boolean,
@@ -95,18 +86,8 @@ object SafeHref {
         data class Refused(val reason: Refusal) : Verdict
     }
 
-    /** r2: a longer host (or mailto domain) never opens without the sheet: it can wrap or be cut off. */
-    const val DIRECT_HOST_CHARS: Int = 40
-
-    /** r2: a host with more labels never opens without the sheet (`bank.example.com.evil.example`). */
-    const val DIRECT_HOST_LABELS: Int = 4
-
     /** Longer hrefs are refused (bounds the host conversion; far above any real chat link). */
     const val MAX_HREF: Int = 8192
-
-    /** LEFT-TO-RIGHT OVERRIDE and POP DIRECTIONAL FORMATTING, placed by [forcedLtr] only. */
-    private const val LRO = '\u202D'
-    private const val PDF = '\u202C'
 
     /**
      * NFKC-stable characters that draw like a URL delimiter (`/ \ : . @ % ?`). NFKC catches the
@@ -132,18 +113,6 @@ object SafeHref {
 
     /** The [Target] of an allowed [href], or null. */
     fun target(href: String): Target? = (check(href) as? Verdict.Allowed)?.target
-
-    /** May [target] open without the confirm sheet? See the class doc: exact printable-ASCII label, what opens is what it says, a short host, no `@` in http(s). */
-    fun opensDirectly(target: Target, label: String): Boolean {
-        if (!target.ascii || label != target.href) return false
-        if (!target.display.equals(target.href, ignoreCase = true) || target.display.length != target.href.length) return false
-        val hosts = if (target.scheme == Scheme.Mailto) target.recipients.map { it.substringAfter('@') } else listOfNotNull(target.host)
-        if (target.scheme != Scheme.Mailto && '@' in target.href) return false
-        return hosts.isNotEmpty() && hosts.all { it.length <= DIRECT_HOST_CHARS && it.trimEnd('.').split('.').size <= DIRECT_HOST_LABELS }
-    }
-
-    /** [display] (already drawn by the code rule) forced left to right, character by character, whatever it holds. */
-    fun forcedLtr(display: String): String = "$LRO$display$PDF"
 
     fun check(href: String): Verdict {
         if (href.length > MAX_HREF) return refused(Refusal.Length)
