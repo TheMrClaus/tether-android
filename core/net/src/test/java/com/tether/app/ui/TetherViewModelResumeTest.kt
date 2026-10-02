@@ -330,4 +330,20 @@ class TetherViewModelResumeTest {
         assertFalse(vm.draftOpen.value)
         assertEquals("", vm.draftComposer.state.value.text)
     }
+
+    /** ta-abm r2 (F2, T7.4 r2 L4b): a sign-out drops the draft's attachments and any pick still being read. */
+    @Test fun aSignOutDropsTheDraftsAttachmentsAndKeepsItsText() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        vm.draftComposer.setText("kept")
+        vm.draftComposer.setAttachments(listOf(com.tether.app.protocol.Attachment(name = "a.png", mediaType = "image/png", data = "AAAA")))
+        val reading = vm.draftComposer.attachmentGeneration
+        vm.logout()
+        runCurrent()
+        assertTrue(vm.draftComposer.state.value.staged.isEmpty())
+        assertEquals("kept", vm.draftComposer.state.value.text)
+        val late = com.tether.app.client.StagedAttachment(99, com.tether.app.protocol.Attachment(name = "late.png", mediaType = "image/png", data = "AAAA"), 3)
+        assertFalse("a pick read before the sign-out never lands", vm.draftComposer.addAttachments(listOf(late), reading))
+        assertTrue(vm.draftComposer.state.value.staged.isEmpty())
+    }
 }

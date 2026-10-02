@@ -275,6 +275,12 @@ class DraftComposerModel(
         return true
     }
 
+    /**
+     * r2 (F2, T7.4 r2 L4b): a sign-out or a revocation drops what is staged and bumps the generation,
+     * so a pick still being read is discarded too. The text, folder and pick stay (memory only).
+     */
+    fun clearAttachments() = _state.update { dropAttachments(it) }
+
     fun removeAttachment(id: Long) = _state.update { s -> s.copy(staged = s.staged.filterNot { it.id == id }) }
 
     private fun dropAttachments(s: DraftComposerState): DraftComposerState {

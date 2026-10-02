@@ -184,6 +184,15 @@ class DraftComposerSheetBehaviourTest {
         until("the drawer closed") { !exists(ShellTags.DrawerBackdrop) }
     }
 
+    /** r2 (F3): dashboard.tsx starts the operator in the message box. */
+    @Test
+    fun openingTheSheetPutsTheCaretInTheMessageBox() {
+        openSheet()
+        until("the message box has focus") {
+            rule.onAllNodesWithTag(DraftComposerTags.Input).fetchSemanticsNodes().firstOrNull()?.config?.getOrNull(SemanticsProperties.Focused) == true
+        }
+    }
+
     @Test
     fun everyTapReachesTheModel() {
         client.directories.value = DirectoryListing(current = "/srv/other", parent = "/srv", entries = emptyList())

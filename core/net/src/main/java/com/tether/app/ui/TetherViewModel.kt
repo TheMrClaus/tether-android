@@ -347,7 +347,12 @@ class TetherViewModel(
         // T7.4 r2 (L4b): signed out or revoked, even with the same server URL kept (a re-pairing
         // to the same server starts with nothing staged, and nothing still being read lands).
         viewModelScope.launch {
-            client.configured.collect { configured -> if (!configured) stagedAttachments.clear() }
+            client.configured.collect { configured ->
+                if (!configured) {
+                    stagedAttachments.clear()
+                    draftComposer.clearAttachments()
+                }
+            }
         }
         // T5.2: follow this device's own create/resume reply (dashboard.tsx:708-722).
         viewModelScope.launch {
@@ -560,11 +565,14 @@ class TetherViewModel(
     val logoutNotice: StateFlow<String?> = _logoutNotice.asStateFlow()
 
     fun logout() {
-        // T7.4 r2: nothing staged, or still being read, outlives the decision to sign out.
+        // T7.4 r2: nothing staged, or still being read, outlives the decision to sign out (ta-abm r2:
+        // the new-session draft's attachments neither).
         stagedAttachments.clear()
+        draftComposer.clearAttachments()
         viewModelScope.launch {
             _logoutNotice.value = logoutNoticeFor(client.logout())
             stagedAttachments.clear()
+            draftComposer.clearAttachments()
             _selectedSessionId.value = null
             _openingHistoryId.value = null
             // ta-abm: so does the new-session sheet (the draft itself is the server's, kept in memory).

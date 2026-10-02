@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
@@ -132,7 +133,8 @@ import kotlinx.coroutines.launch
  * The draft lives in the view model, as the web keeps useDraftComposer at dashboard level: the sheet
  * only draws it, so closing and reopening it, a rotation, a recreated activity and a session switch
  * keep the text, the folder, the provider pick and the attachments; a server switch drops them (the
- * engine's per-origin rule). Full screen on a phone, the web's centred dialog on an expanded window.
+ * engine's per-origin rule). r2: on a phone it docks to the bottom as the web's sheet does (the
+ * keyboard lifts it, so Send stays above the keyboard); on an expanded window, the web's centred dialog.
  *
  * Contents, in the web's order: the project row (the working-folder chip with its quick picks and
  * "Browse for another folder…"), the provider and profile rows (ta-895's rendering, a tap picks the
@@ -319,7 +321,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     Dialog(onDismissRequest = vm::closeDraft, properties = DraftDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
-        DraftComposerFrame(inputs, actions)
+        DraftComposerFrame(inputs, actions, focusOnOpen = true)
     }
     if (browsing) {
         FolderPickerDialog(
@@ -348,8 +350,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
 internal val DraftDialogProperties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
 
 /**
- * The sheet in place (the inline form the goldens shoot). [TetherLayoutClass.Phone]: the case fills
- * the window. [TetherLayoutClass.Expanded]: `.draft-dialog`, centred on the skin's scrim at
+ * The sheet in place (the inline form the goldens shoot). [TetherLayoutClass.Phone]: docked to the
+ * bottom over the scrim, its top corners rounded, at most `100dvh - 3rem` of the space above the keyboard. [TetherLayoutClass.Expanded]: `.draft-dialog`, centred on the skin's scrim at
  * `min(46rem, 100vw - 1.5rem)`, at most `100dvh - 3rem` tall, a tap on the scrim closes it.
  */
 @Composable
@@ -358,6 +360,8 @@ fun DraftComposerFrame(
     actions: DraftSheetActions,
     modifier: Modifier = Modifier,
     layout: TetherLayoutClass = currentLayoutClass(),
+    /** r2 (F3): put the caret in the message box when the sheet opens (dashboard.tsx 381-384); off in goldens. */
+    focusOnOpen: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val narrow = layout == TetherLayoutClass.Phone
@@ -366,18 +370,24 @@ fun DraftComposerFrame(
     BoxWithConstraints(
         modifier
             .fillMaxSize()
-            .background(if (narrow) t.graphite else dialogScrim(t))
-            .then(if (narrow) Modifier else Modifier.pointerInput(Unit) { detectTapGestures { actions.onClose() } })
+            .background(dialogScrim(t))
+            // `.draft-dialog` closes on a press on its backdrop (onMouseDown target === currentTarget).
+            .pointerInput(Unit) { detectTapGestures { actions.onClose() } }
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            // Expanded: the card centres in what the keyboard leaves (a tablet's keyboard).
-            .padding(bottom = if (narrow) 0.dp else keyboard),
-        contentAlignment = Alignment.Center,
+            // r2 (F1): the keyboard lifts the whole sheet (Compose dialogs do not resize their window):
+            // the phone sheet docks on the keyboard, the expanded card centres in what it leaves.
+            .padding(bottom = keyboard),
+        // globals.css (max-width: 40rem): the phone sheet docks to the bottom, "so the composer sits
+        // where the thumb already is and the on-screen keyboard pushes nothing off-screen".
+        contentAlignment = if (narrow) Alignment.BottomCenter else Alignment.Center,
     ) {
-        val shape = RoundedCornerShape(if (narrow) 0.dp else t.radiusLg)
+        val shape = if (narrow) RoundedCornerShape(topStart = t.radiusLg, topEnd = t.radiusLg) else RoundedCornerShape(t.radiusLg)
+        // `max-height: calc(100dvh - 3rem)`, of the space the keyboard leaves.
+        val maxSheet = (maxHeight - 48.dp).coerceAtLeast(0.dp)
         val case = if (narrow) {
-            Modifier.fillMaxSize()
+            Modifier.fillMaxWidth().heightIn(max = maxSheet)
         } else {
-            Modifier.width(minOf(736.dp, maxWidth - 24.dp)).heightIn(max = maxHeight - 48.dp)
+            Modifier.width(minOf(736.dp, maxWidth - 24.dp).coerceAtLeast(0.dp)).heightIn(max = maxSheet)
         }
         // `.draft-dialog-head p` is hidden below 40rem (it wraps and pushes the composer down).
         val subtitle = maxWidth >= 640.dp
@@ -385,30 +395,36 @@ fun DraftComposerFrame(
             case
                 .testTag(DraftComposerTags.Sheet)
                 .semantics { paneTitle = DRAFT_TITLE }
+                // Phone: `border-width: 1px 0 0` (a top edge only); desktop: the 1px case.
                 .cssSurface(shape, t.graphite, if (narrow) null else CssBorder(1.dp, t.lineStrong), if (narrow) emptyList() else StudioDialog.shadows)
+                .then(if (narrow) Modifier.drawBehind { drawRect(t.lineStrong, Offset.Zero, Size(size.width, 1.dp.toPx())) } else Modifier)
                 .clip(shape)
                 // The card swallows taps (only the scrim, Close and Back close it); a gesture sink,
                 // not a clickable, so its text is never merged into one node.
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
             DraftHeader(narrow, subtitle, actions.onClose)
-            // `.draft-dialog .chat-composer` (Studio): phone `space-md`, bottom
-            // max(space-md, safe-area-bottom, keyboard + space-sm); desktop `space-lg space-xl`, bottom
-            // max(space-xl, keyboard + space-sm) (here the card already sits above the keyboard).
-            val bottom = if (narrow) maxOf(t.css.spaceMd, navBottom, if (keyboard > 0.dp) keyboard + t.css.spaceSm else 0.dp) else t.css.spaceXl
+            val side = if (narrow) t.css.spaceMd else t.css.spaceXl
+            // The options scroll; the message well stays put at the sheet's foot (r2, F1), so Send is
+            // always on screen, above the keyboard, whatever the rows above it hold.
             Column(
                 Modifier
-                    .weight(1f, fill = narrow)
+                    .weight(1f, fill = false)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(
-                        start = if (narrow) t.css.spaceMd else t.css.spaceXl,
-                        end = if (narrow) t.css.spaceMd else t.css.spaceXl,
-                        top = if (narrow) t.css.spaceMd else t.css.spaceLg,
-                        bottom = bottom,
-                    ),
+                    .padding(start = side, end = side, top = if (narrow) t.css.spaceMd else t.css.spaceLg),
             ) {
-                DraftComposerBody(inputs, actions, narrow, keyboardOpen = keyboard > 0.dp)
+                DraftComposerOptions(inputs, actions, narrow)
+            }
+            // `.draft-dialog .chat-composer` (Studio) bottom: phone max(space-md, safe-area-bottom),
+            // space-sm over the keyboard (the sheet already sits on it); desktop space-xl.
+            val bottom = when {
+                !narrow -> t.css.spaceXl
+                keyboard > 0.dp -> t.css.spaceSm
+                else -> maxOf(t.css.spaceMd, navBottom)
+            }
+            Column(Modifier.fillMaxWidth().padding(start = side, end = side, bottom = bottom)) {
+                DraftComposerFoot(inputs, actions, narrow, keyboardOpen = keyboard > 0.dp, focusOnOpen = focusOnOpen)
             }
         }
     }
@@ -458,7 +474,7 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
 /** draft-composer.tsx's composer, in its order. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DraftComposerBody(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, keyboardOpen: Boolean) {
+private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
     // `.chat-project-row`: which folder (slice 5 adds the worktree select, T8.4 the GitHub dialog,
@@ -511,7 +527,14 @@ private fun DraftComposerBody(inputs: DraftSheetInputs, actions: DraftSheetActio
             draft.staged.forEach { item -> StagedAttachmentChip(item, onRemove = { actions.onRemoveAttachment(item.id) }) }
         }
     }
-    MessageWell(draft, inputs.readiness, narrow, keyboardOpen, actions)
+}
+
+/** The sheet's foot: the message well with the paperclip and Send, and why Send is disabled. */
+@Composable
+private fun DraftComposerFoot(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, keyboardOpen: Boolean, focusOnOpen: Boolean) {
+    val t = LocalTetherTokens.current
+    val draft = inputs.draft
+    MessageWell(draft, inputs.readiness, narrow, keyboardOpen, actions, focusOnOpen)
     // App addition: the web only disables Send; the reason it is disabled is said in words here.
     if (draft.error.isEmpty() && inputs.readiness.isNotEmpty()) {
         Text(
@@ -566,11 +589,14 @@ private fun StatusLine(icon: androidx.compose.ui.graphics.vector.ImageVector, te
  * Shift+Enter breaks the line; the soft keyboard's action key is Send (the web's Enter on a phone).
  */
 @Composable
-private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Boolean, keyboardOpen: Boolean, actions: DraftSheetActions) {
+private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Boolean, keyboardOpen: Boolean, actions: DraftSheetActions, focusOnOpen: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    // r2 (F3): dashboard.tsx starts the operator in the message box, not on Close.
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    if (focusOnOpen) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     // The engine owns the text; the field keeps its own selection while the two agree.
     var field by remember { mutableStateOf(TextFieldValue(draft.text, TextRange(draft.text.length))) }
     if (field.text != draft.text) field = TextFieldValue(draft.text, TextRange(draft.text.length))
@@ -600,6 +626,7 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = minInput, max = maxInput)
+                .focusRequester(focus)
                 .onPreviewKeyEvent { event ->
                     val enter = event.type == KeyEventType.KeyDown && (event.key == Key.Enter || event.key == Key.NumPadEnter) &&
                         !event.isShiftPressed && field.composition == null
