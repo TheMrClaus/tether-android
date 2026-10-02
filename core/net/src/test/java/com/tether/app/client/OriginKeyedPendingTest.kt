@@ -70,7 +70,7 @@ class OriginKeyedPendingTest {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 allFrames += text
-                received.put(text)
+                if (text != READY_CATALOG_REQUEST) received.put(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -293,7 +293,8 @@ class OriginKeyedPendingTest {
 
         // Every frame B ever received: the hello and the barrier, nothing of A's.
         val types = b.allFrames.map { (TetherJson.parseToJsonElement(it) as JsonObject).type() }
-        assertEquals(listOf("hello", "pin"), types)
+        assertEquals(listOf("hello", "providers-snapshot", "pin"), // ta-2uq: B's own ready asks for B's catalog
+             types)
         for (text in b.allFrames) {
             assertTrue("A's session reached B: $text", !text.contains("s-a"))
             assertTrue("A's content reached B: $text", !text.contains("private"))
@@ -780,7 +781,8 @@ class OriginKeyedPendingTest {
         assertEquals(LoginResult.Success, result.get())
         handshake(b, bws)
         assertTrue(framesUntilBarrier(b).isEmpty())
-        assertEquals(listOf("hello", "pin"), b.allFrames.map { (TetherJson.parseToJsonElement(it) as JsonObject).type() })
+        assertEquals(listOf("hello", "providers-snapshot", "pin"), // ta-2uq: B's own ready asks for B's catalog
+             b.allFrames.map { (TetherJson.parseToJsonElement(it) as JsonObject).type() })
     }
 
     @Test

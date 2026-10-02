@@ -360,7 +360,7 @@ class InterruptKillTransmissionTest {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                received.put(text)
+                if (text != READY_CATALOG_REQUEST) received.put(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

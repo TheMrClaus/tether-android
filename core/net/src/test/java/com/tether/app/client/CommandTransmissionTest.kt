@@ -279,9 +279,9 @@ class CommandTransmissionTest {
     private fun withCatalog(ready: String = ready()): Pair<RealTetherClient, WebSocket> {
         val (client, ws) = connected(ready)
         assertTrue(client.requestProviderCatalog())
-        val asked = frames("providers-snapshot")
-        assertEquals(1, asked.size)
-        assertEquals(setOf("type"), asked[0].keys)
+        // ta-2uq: the ready asked once and this is the second; the harness records the bare request apart.
+        h.framesUntilBarrier()
+        assertEquals(2, h.catalogRequests.size)
         ws.send(catalogFrame)
         h.await(client.providerCatalog) { it.isNotEmpty() }
         return client to ws

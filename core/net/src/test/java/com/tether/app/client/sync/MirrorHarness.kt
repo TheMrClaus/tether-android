@@ -195,7 +195,7 @@ class MirrorHarness(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            received.put(text)
+            if (text != com.tether.app.client.READY_CATALOG_REQUEST) received.put(text)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

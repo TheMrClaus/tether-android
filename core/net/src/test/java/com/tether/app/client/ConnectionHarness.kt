@@ -118,7 +118,7 @@ class ConnectionHarness {
         override fun onMessage(webSocket: WebSocket, text: String) {
             log.add("${System.identityHashCode(webSocket)}:${text.take(40)}")
             onServerMessage?.invoke(text)
-            if (separateCatalogRequests && text == """{"type":"providers-snapshot"}""") catalogRequests.put(text) else received.put(text)
+            if (separateCatalogRequests && text == READY_CATALOG_REQUEST) catalogRequests.put(text) else received.put(text)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -242,6 +242,12 @@ class ConnectionHarness {
         server.shutdown()
     }
 }
+
+/**
+ * ta-2uq: the bare catalog request every `ready` now sends. The suites with their own server
+ * listeners leave it out of the frames they prove an exact order on (as [ConnectionHarness] does).
+ */
+const val READY_CATALOG_REQUEST = """{"type":"providers-snapshot"}"""
 
 fun JsonObject.type(): String? = this["type"]?.jsonPrimitive?.content
 

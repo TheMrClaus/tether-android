@@ -44,7 +44,7 @@ class RealTetherClientTest {
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            serverReceived.put(text)
+            if (text != READY_CATALOG_REQUEST) serverReceived.put(text)
         }
 
         // Complete the closing handshake. Without this the peer's close frame is
