@@ -272,6 +272,7 @@ class WorktreeIsolationTest {
             Row("origin, an empty default", source(false, ""), "", Gate.MAY, null),
             // not a repository, or an answer that cannot be taken at its word
             Row("not a repo", source(false, isRepo = false), "", Gate.MAY, null),
+            Row("not a repo, yet origin fields (inconsistent)", source(false).copy(isRepo = false), "", Gate.MAY, null),
             Row("hasSetup not a boolean", source(false).copy(setupKnown = false), "", Gate.MAY, null),
             Row("config read reported failed", source(false).copy(configKnown = false), "", Gate.MAY, null),
             Row("nothing inspected", null, "", Gate.MAY, null),
