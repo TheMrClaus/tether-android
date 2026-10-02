@@ -176,6 +176,22 @@ private val AUTH_SCHEME = Regex("[A-Za-z][A-Za-z0-9!#$%&'*+.^_`|~-]{0,31}")
 /** The first product of a `Server` header ("nginx/1.27.1"), short enough to show. */
 private val SERVER_PRODUCT = Regex("[A-Za-z][A-Za-z0-9._/-]{0,39}")
 
+internal const val PASSKEY_LOGIN_OPTIONS_PATH = "/api/auth/passkey/login/options"
+internal const val PASSKEY_LOGIN_VERIFY_PATH = "/api/auth/passkey/login/verify"
+
+/** The most a passkey route's answer may be: a challenge is a few hundred bytes. */
+private const val PASSKEY_BODY_CAP: Long = 64L * 1024L
+
+/** The app's words for a passkey sign-in that went wrong on the phone (the server's own are shown as they come). */
+object PasskeyLoginCopy {
+    const val WRONG_RP = "This server asked for a passkey for another address, so none was offered. Sign in with the address the console itself uses."
+    const val UNREADABLE = "The server sent an unusable passkey challenge."
+    const val UNREADABLE_ANSWER = "The passkey answer could not be read, so nothing was sent."
+    const val NO_CREDENTIAL = "This phone has no passkey for this console. Add one in Settings → Devices, or sign in another way."
+    const val UNSUPPORTED = "No passkey provider on this phone can sign in. Turn one on in Android Settings, or sign in another way."
+    const val FAILED = "Passkey sign-in failed."
+}
+
 private const val REDIRECT_MESSAGE =
     "The server redirected this request instead of answering it. Check the URL (https:// or http://). " +
         "If a sign-in gateway (SSO) is in front of Tether, pair this device with a code instead."
@@ -758,6 +774,123 @@ class RealTetherClient(
                 else -> return@withContext LoginResult.Unreachable("login returned HTTP ${response.code}")
             }
         }
+    }
+
+    /**
+     * T10.5 (use-login-flow.ts runPasskeyCeremony): three uncredentialed steps, each through [authHttp]
+     * (never a redirect) to the server typed here and nowhere else.
+     *  1. /healthz: the native window, as for a password.
+     *  2. `POST /api/auth/passkey/login/options {}` (JSON, no Origin: a native caller, so the server
+     *     issues the legacy cookie name the app reads) -> `{ challengeId, options }`. The options go to
+     *     the authenticator ONLY when their rpId is this server's host ([PasskeyRules.rpIdMatches]).
+     *  3. `POST /api/auth/passkey/login/verify {challengeId, response}` -> 200 + the session cookie,
+     *     adopted exactly like a password sign-in's (sealed by the store, sent with the console Origin).
+     * Nothing is retried: a challenge is single use, and a dismissed prompt sends nothing more.
+     */
+    override suspend fun passkeyLogin(baseUrl: String, passkeys: PasskeyAuthenticator): LoginResult = withContext(Dispatchers.IO) {
+        val normalized = normalizeBaseUrl(baseUrl)
+            ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
+        if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
+        if (!passkeys.available) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED)
+
+        val health = try {
+            probeHealth(normalized)
+        } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
+            return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
+        }
+        health.incompatibility()?.let { return@withContext LoginResult.VersionMismatch(it) }
+
+        // 2. The challenge.
+        val challenge = try {
+            authHttp.newCall(
+                Request.Builder()
+                    .url(normalized.resolve(PASSKEY_LOGIN_OPTIONS_PATH)!!)
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build(),
+            ).execute().use { response ->
+                when (response.code) {
+                    200 -> readCappedJson(response)?.let { PasskeyRules.challenge(it, PasskeyPurpose.Login) }
+                        ?: return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNREADABLE)
+                    else -> return@withContext passkeyRefusal(response)
+                }
+            }
+        } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
+            return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
+        }
+        // The anti-relay guard: only this server's own relying party is ever asked for.
+        if (!PasskeyRules.rpIdMatches(challenge.rpId, normalized)) {
+            return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.WRONG_RP)
+        }
+
+        // The ceremony (the authenticator moves to the main thread itself).
+        val answer = when (val ceremony = passkeys.authenticate(challenge.optionsJson())) {
+            is PasskeyCeremony.Done -> PasskeyRules.response(ceremony)
+                ?: return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNREADABLE_ANSWER)
+            PasskeyCeremony.Dismissed -> return@withContext LoginResult.PasskeyDismissed
+            PasskeyCeremony.NoCredential -> return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.NO_CREDENTIAL)
+            PasskeyCeremony.Unsupported -> return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED)
+            PasskeyCeremony.Duplicate, PasskeyCeremony.Failed -> return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.FAILED)
+        }
+
+        // 3. The signed answer.
+        val body = buildJsonObject {
+            put("challengeId", JsonPrimitive(challenge.challengeId))
+            put("response", answer)
+        }.toString()
+        try {
+            authHttp.newCall(
+                Request.Builder()
+                    .url(normalized.resolve(PASSKEY_LOGIN_VERIFY_PATH)!!)
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build(),
+            ).execute().use { response ->
+                if (response.code != 200) return@withContext passkeyRefusal(response)
+                val cookie = when (val issued = sessionCookieFrom(response.request.url, response.headers("set-cookie"))) {
+                    is SessionCookieResult.Found -> issued.cookie
+                    SessionCookieResult.Missing -> return@withContext LoginResult.Unreachable("The server did not return a session cookie.")
+                    SessionCookieResult.Ambiguous -> return@withContext LoginResult.Unreachable("The server returned conflicting session cookies.")
+                }
+                // ta-jt9 I-3, as for a password: a minted session is adopted whatever happens to the caller.
+                withContext(NonCancellable) { adoptCredential(normalized, cookie) }
+                LoginResult.Success
+            }
+        } catch (e: IOException) {
+            if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
+            LoginResult.Unreachable(e.message ?: "The server could not be reached.")
+        }
+    }
+
+    /**
+     * A passkey route that did not answer 200: Tether's own `{error}` (400 "No passkey is registered on
+     * this console." / needs HTTPS, 401 "That passkey could not be verified.", 429) as the web shows it;
+     * a 401/403 that is not Tether's is a gateway in front of it (T1.4's rule); a redirect is not followed.
+     */
+    private fun passkeyRefusal(response: Response): LoginResult {
+        if (response.code in 300..399) return LoginResult.Unreachable(REDIRECT_MESSAGE)
+        val obj = readCappedJson(response)
+        val error = obj.stringField("error")?.let { TextCut.cut(it, DeviceSecurityJson.MAX_ERROR) }?.takeIf { it.isNotBlank() }
+        return when {
+            (response.code == 401 || response.code == 403) && (error == null || response.header("WWW-Authenticate") != null) -> gatewayRefusal(response)
+            response.code == 429 -> LoginResult.RateLimited(error ?: "Too many attempts. Try again in a few minutes.")
+            error != null && response.code in 400..499 -> LoginResult.PasskeyFailed(error)
+            else -> LoginResult.Unreachable("passkey sign-in returned HTTP ${response.code}")
+        }
+    }
+
+    /** A JSON body read up to [PASSKEY_BODY_CAP] bytes (nothing past it is buffered) and no deeper than the frame cap; null otherwise. */
+    private fun readCappedJson(response: Response): JsonObject? = try {
+        val source = response.body.source()
+        if (response.body.contentLength() > PASSKEY_BODY_CAP || source.request(PASSKEY_BODY_CAP + 1)) {
+            null
+        } else {
+            val text = source.buffer.readUtf8()
+            if (ServerMessage.nestsDeeperThan(text, ServerMessage.MAX_FRAME_DEPTH)) null
+            else com.tether.app.protocol.TetherJson.parseToJsonElement(text) as? JsonObject
+        }
+    } catch (_: Exception) {
+        null
     }
 
     override suspend fun pair(baseUrl: String, code: String, label: String): PairResult = withContext(Dispatchers.IO) {
@@ -1841,7 +1974,7 @@ class RealTetherClient(
                 val method = (record["method"] as? JsonPrimitive)?.content
                 SignInSession(
                     id = id,
-                    method = if (method == "passkey" || method == "service") method else "password",
+                    method = if (method == "passkey" || method == "service" || method == "app-passkey") method else "password",
                     createdAt = num("createdAt"),
                     lastSeenAt = num("lastSeenAt"),
                     expiresAt = num("expiresAt"),

@@ -27,9 +27,11 @@ import okhttp3.OkHttpClient
 //   DELETE /api/auth/sessions/<id>         { ok, disconnected } | 404
 // The owner's 2026-10-02 decision (tether #236) makes these owner-grade for the app's sign-ins too;
 // until it is deployed a phone sign-in gets 403 "This needs an owner sign-in …" ([SecurityResult.OwnerSignInNeeded]).
-// `DELETE /api/devices` (revoke every device), `DELETE /api/devices/pairings` (cancel unclaimed
-// codes) and passkey registration (a WebAuthn ceremony, T10.5) have no path here: the web offers
-// none of them from this panel (registration needs the browser's authenticator).
+//   POST   /api/auth/passkeys/register/options {}                          { challengeId, options } | 400 | 409 { error }   (T10.5)
+//   POST   /api/auth/passkeys/register/verify  {challengeId,response,label} { passkey } | 400 | 409 { error }            (T10.5)
+// `DELETE /api/devices` (revoke every device) and `DELETE /api/devices/pairings` (cancel unclaimed
+// codes) have no path here: the web offers neither from this panel. Registration's ceremony itself
+// is Credential Manager's (Passkeys.kt); this source only carries the two calls around it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** How the app is signed in to the server a call went to: a paired-device bearer token, or a session cookie (a password or app-passkey sign-in). */
@@ -198,6 +200,15 @@ interface DeviceSecuritySource {
     suspend fun revokeSession(origin: String, sessionId: String): SecurityResult<Unit>
     suspend fun revokeOtherSessions(origin: String): SecurityResult<SessionsRevoked>
 
+    /** T10.5: a registration challenge (the web's registerPasskey, step 1). Nothing is sent by default. */
+    suspend fun passkeyRegistrationOptions(origin: String): SecurityResult<PasskeyChallenge> = SecurityResult.NotSent(origin)
+
+    /**
+     * T10.5: the authenticator's [response] to [challengeId], with the operator's [label] (step 3). The
+     * new passkey on success. Nothing is sent by default.
+     */
+    suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String): SecurityResult<Passkey> = SecurityResult.NotSent(origin)
+
     /**
      * r2 (security F2): Tether has shown that the credential behind [handle] is dead (this phone was
      * revoked, or a 401 right after revoking what may have been it). The client signs out at once if,
@@ -218,6 +229,8 @@ interface DeviceSecuritySource {
         override suspend fun sessions(origin: String): SecurityResult<List<SecuritySession>> = none()
         override suspend fun revokeSession(origin: String, sessionId: String): SecurityResult<Unit> = none()
         override suspend fun revokeOtherSessions(origin: String): SecurityResult<SessionsRevoked> = none()
+        override suspend fun passkeyRegistrationOptions(origin: String): SecurityResult<PasskeyChallenge> = none()
+        override suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String): SecurityResult<Passkey> = none()
     }
 
     companion object {
@@ -226,6 +239,8 @@ interface DeviceSecuritySource {
         const val PASSKEYS_PATH = "/api/auth/passkeys"
         const val POLICY_PATH = "/api/auth/passkeys/policy"
         const val SESSIONS_PATH = "/api/auth/sessions"
+        const val REGISTER_OPTIONS_PATH = "/api/auth/passkeys/register/options"
+        const val REGISTER_VERIFY_PATH = "/api/auth/passkeys/register/verify"
         fun devicePath(id: String) = "$DEVICES_PATH/$id"
         fun passkeyPath(id: String) = "$PASSKEYS_PATH/$id"
         fun sessionPath(id: String) = "$SESSIONS_PATH/$id"
@@ -283,6 +298,18 @@ class HttpDeviceSecurity(
 
     override suspend fun revokeOtherSessions(origin: String) =
         call(origin, FixedRouteHttp.Method.DELETE, DeviceSecuritySource.SESSIONS_PATH, null, DeviceSecurityJson::sessionsRevoked)
+
+    override suspend fun passkeyRegistrationOptions(origin: String) =
+        call(origin, FixedRouteHttp.Method.POST, DeviceSecuritySource.REGISTER_OPTIONS_PATH, JsonObject(emptyMap())) { o -> PasskeyRules.challenge(o, PasskeyPurpose.Register) }
+
+    override suspend fun registerPasskey(origin: String, challengeId: String, response: JsonObject, label: String): SecurityResult<Passkey> {
+        val body = buildJsonObject {
+            put("challengeId", challengeId)
+            put("response", response)
+            put("label", TextCut.cut(label, DeviceSecurityJson.MAX_LABEL_SENT))
+        }
+        return call(origin, FixedRouteHttp.Method.POST, DeviceSecuritySource.REGISTER_VERIFY_PATH, body) { o -> (o["passkey"] as? JsonObject)?.let(DeviceSecurityJson::passkey) }
+    }
 
     /** A server-supplied id goes in a path only in a plain token shape: it can never name another route. */
     private inline fun <T> withId(origin: String, id: String, send: () -> SecurityResult<T>): SecurityResult<T> =
@@ -419,13 +446,16 @@ object DeviceSecurityJson {
     fun passkeys(o: JsonObject): PasskeysView? {
         val list = o["passkeys"] as? JsonArray ?: return null
         return PasskeysView(
-            passkeys = rows(list) { r ->
-                val id = rowId(r["id"]) ?: return@rows null
-                Passkey(id.id, string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Passkey", time(r["createdAt"]), time(r["lastUsedAt"]), bool(r["backedUp"]) == true, id.actionable)
-            },
+            passkeys = rows(list, ::passkey),
             policy = policyOf(o),
             passkeysUsable = bool(o["passkeysUsable"]) == true,
         )
+    }
+
+    /** One `publicCredential` row (lib/passkeys.mjs): null without a non-empty string id. */
+    fun passkey(r: JsonObject): Passkey? {
+        val id = rowId(r["id"]) ?: return null
+        return Passkey(id.id, string(r["label"], MAX_TEXT)?.takeIf { it.isNotEmpty() } ?: "Passkey", time(r["createdAt"]), time(r["lastUsedAt"]), bool(r["backedUp"]) == true, id.actionable)
     }
 
     /** `{ passwordLoginEnabled, policySource }`: null without a boolean `passwordLoginEnabled`. */

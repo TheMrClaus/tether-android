@@ -30,6 +30,10 @@ robolectric = "4.17"
 conscrypt = "2.6.2"
 androidxTestCore = "1.7.0"
 androidxCore = "1.19.1"
+# T10.5: passkeys through Android Credential Manager. 1.6.0 is the latest stable on Google Maven as of
+# 2026-10-02. minSdk 34, so the framework provider backs it; credentials-play-services-auth (Android 13
+# and below only) is not needed.
+credentials = "1.6.0"
 # Roborazzi screenshot tests (JVM, Robolectric native graphics). 1.75.0 is the latest
 # stable on Maven Central as of 2026-09-27.
 roborazzi = "1.75.0"
@@ -40,6 +44,7 @@ ksp = "2.3.12"
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "androidxCore" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime" }

@@ -93,6 +93,16 @@ interface TetherClient {
     suspend fun login(baseUrl: String, password: String, username: String = ""): LoginResult
 
     /**
+     * T10.5: sign in with a passkey (use-login-flow.ts runPasskeyCeremony): /healthz, then the public
+     * `POST /api/auth/passkey/login/options`, the ceremony on [passkeys] (only for the rpId of
+     * [baseUrl]'s own host), then `POST /api/auth/passkey/login/verify`. The server answers an
+     * assertion from the app's origin with an "app-passkey" session cookie, kept and sent exactly like
+     * a password sign-in's. No credential goes out with any of the three calls.
+     */
+    suspend fun passkeyLogin(baseUrl: String, passkeys: PasskeyAuthenticator): LoginResult =
+        LoginResult.PasskeyFailed("Passkey sign-in is not available.")
+
+    /**
      * The unauthenticated sign-in probe (`GET /api/auth/session`, no credential
      * sent): what the login screen needs to choose its fields, like the web's
      * use-login-flow. Null when the server cannot be asked (bad URL, unreachable,
@@ -978,7 +988,7 @@ sealed interface LogoutResult {
 /** One owner sign-in session, as `GET /api/auth/sessions` lists it (hooks/use-sign-in-security.ts). */
 data class SignInSession(
     val id: String,
-    /** "password" | "passkey" | "service" (anything else reads as "password", as on the web). */
+    /** "password" | "passkey" | "service" | "app-passkey" (anything else reads as "password", as on the web). */
     val method: String,
     val createdAt: Long,
     val lastSeenAt: Long,
@@ -1027,6 +1037,15 @@ sealed interface LoginResult {
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
     data object LocalNetworkBlocked : LoginResult
+
+    /** T10.5: the operator closed the passkey prompt. Not an error (the web returns to ready with a notice). */
+    data object PasskeyDismissed : LoginResult
+
+    /**
+     * T10.5: the passkey path did not sign in: Tether's own sentence (a 400 from the options route, the
+     * 401 "That passkey could not be verified.") or the app's words for what happened on the phone.
+     */
+    data class PasskeyFailed(val message: String) : LoginResult
 }
 
 /** Outcome of [TetherClient.pair]. Sibling of [LoginResult]; see specs/protocol-spec.md §1.3. */

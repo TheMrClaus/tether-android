@@ -22,6 +22,8 @@ dependencies {
     api(libs.okhttp)
     api(libs.androidx.lifecycle.viewmodel)
     implementation(libs.kotlinx.coroutines.android)
+    // T10.5: passkey registration and sign-in (Credential Manager), behind the PasskeyAuthenticator seam.
+    implementation(libs.androidx.credentials)
 
     testImplementation(testFixtures(project(":core:reducer")))
     testImplementation(libs.junit)
