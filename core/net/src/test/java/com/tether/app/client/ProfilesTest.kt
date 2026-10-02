@@ -400,23 +400,34 @@ class ProfilesTest {
         assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 3, epoch = 1)))
     }
 
-    /** r3 (verify + security F1): a key that is not a plain variable name is never added; one the server holds is risky. */
-    @Test fun anEnvKeyThatIsNotAPlainNameIsNeverAddedAndIsRiskyIfPresent() {
-        val bad = ProvidersBuild.Refused(ProvidersRefusal.BadName)
-        // The verifier's probe: LD_PRELOAD set through the KEY (the child env is built as key=value).
-        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "LD_PRELOAD=/tmp/x.so:", SecretText("v"))))
+    /**
+     * ta-coik.4: an env key is any trimmed non-empty name, as the web's env editor takes it
+     * (settings-dialog.tsx:366-372; lib/providers-registry.mjs sanitizeEnv bounds only its length). A
+     * name that is not a plain variable name is still risky, so it goes through the confirmation (the
+     * confirmation itself is ta-coik.5's) and is then written; the retired BadName refusal is gone.
+     */
+    @Test fun anEnvKeyThatIsNotAPlainNameIsTakenAndIsRisky() {
+        val needs = ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
+        // Through the plain editor: risky, so it asks for the confirmation instead of refusing the name.
+        assertEquals(needs, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "LD_PRELOAD=/tmp/x.so:", SecretText("v"))))
+        assertEquals(needs, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "MY KEY", SecretText("v"))))
+        assertEquals(needs, ProvidersPatch.build(two, ProfileEdit.EnvKey("gemini", "MODE", "MODE=x")))
         for (k in listOf("A-B", "1ABC", "A B", "PATH\u0000", "A.B", "")) assertFalse(k, RiskyEnvKeys.validName(k))
-        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "MY KEY", SecretText("v"))))
-        assertEquals(bad, ProvidersPatch.build(two, ProfileEdit.EnvKey("gemini", "MODE", "MODE=x")))
-        assertEquals(bad, ProvidersPatch.confirmed(two, ProfileRunsEdit.Env("gemini", EnvChange.Add("LD_PRELOAD=/x", SecretText("v"))), RunsSnapshot.of(two.profile("gemini")!!)))
+        // Confirmed: written, with the key exactly as typed (trimmed), and the send rule lets it go.
+        val write = ProvidersPatch.confirmed(two, ProfileRunsEdit.Env("gemini", EnvChange.Add("LD_PRELOAD=/x", SecretText("v"))), RunsSnapshot.of(two.profile("gemini")!!)).writeOrNull
+        assertNotNull(write)
+        val env = write!!.profiles.first { (it["id"] as JsonPrimitive).content == "gemini" }["env"] as JsonObject
+        assertEquals(JsonPrimitive("v"), env["LD_PRELOAD=/x"])
+        assertNull(ProvidersPatch.refusal(write, two))
+        // Positive control: a plain, ordinary name saves at once.
+        assertTrue(ProvidersPatch.build(two, ProfileEdit.EnvAdd("work", "MY_KEY", SecretText("v"))) is ProvidersBuild.Ready)
         assertTrue(RiskyEnvKeys.risky("LD_PRELOAD=/tmp/x.so:"))
         assertTrue(RiskyEnvKeys.risky("A-B"))
-        // A forged write adding one is refused by the send rule.
+        // An unconfirmed write adding one is refused by the send rule (risky: the confirmation's, ta-coik.5).
         val forged = ProvidersWrite(listOf(json(gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"LD_PRELOAD=/tmp/x.so:\":\"v\"")), json(work)), two.generation, null)
         assertEquals(ProvidersRefusal.Unconfirmed, ProvidersPatch.refusal(forged, two))
         // One the server already holds: changing, renaming or removing it needs the confirmation.
         val held = list("[${gemini.replace("\"MODE\":\"x\"", "\"MODE\":\"x\",\"A-B\":\"v\"")},$work]")
-        val needs = ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
         assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvValue("gemini", "A-B", SecretText("w"))))
         assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvRemove("gemini", "A-B")))
         assertEquals(needs, ProvidersPatch.build(held, ProfileEdit.EnvKey("gemini", "A-B", "AB")))

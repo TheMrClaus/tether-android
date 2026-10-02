@@ -213,14 +213,15 @@ object ServerSettingsPatch {
 
     /**
      * ServerNumberRow's commit (settings-dialog.tsx:181-187), on the value an `<input type="number">`
-     * yields for [text]: the text when it is an HTML valid floating-point number ([NUMBER_INPUT]:
-     * "6e4", "-5", ".5", "1.5"), else "" (the browser's value sanitization). Then `text.trim()`, `""`
-     * → null, else `Number(text)`; sent when it is not `===` the server's number, as `JSON.stringify`
-     * writes it (a non-finite number is `null`). The server validates the value.
+     * yields for [text] (trimmed: the row's field never holds a space, see ServerNumberRow): the text
+     * when it is an HTML valid floating-point number ([NUMBER_INPUT]: "6e4", "-5", ".5", "1.5"), else
+     * "" (the browser's value sanitization). Then `""` → null, else `Number(text)`; sent when it is
+     * not `===` the server's number, as `JSON.stringify` writes it (a non-finite number is `null`).
+     * The server validates the value.
      */
     fun number(view: ServerSettingsView, setting: ServerSetting, text: String): JsonObject? {
         if (!unconfirmed(setting) || view.forced(setting)) return null
-        val value = jsTrim(text.takeIf { NUMBER_INPUT.matches(it) }.orEmpty())
+        val value = jsTrim(text).takeIf { NUMBER_INPUT.matches(it) }.orEmpty()
         val parsed: Double? = if (value.isEmpty()) null else value.toDouble()
         val shown = view.number(setting)
         val same = if (parsed == null || shown == null) parsed == null && shown == null else parsed.toDouble() == shown.toDouble()

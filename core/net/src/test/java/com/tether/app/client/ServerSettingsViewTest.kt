@@ -39,10 +39,10 @@ class ServerSettingsViewTest {
             .first { it["type"]!!.jsonPrimitive.content == "server-settings" }
         val v = ServerSettingsView.of(ServerMessage.parse(raw) as ServerMessage.ServerSettings)
         assertEquals("127.0.0.1", v.text(ServerSetting.Host))
-        assertEquals(0L, v.number(ServerSetting.Port))
+        assertEquals(0.0, v.number(ServerSetting.Port))
         assertEquals("verify-pass", v.secret(ServerSetting.Password).reveal())
         assertTrue(v.secret(ServerSetting.ProxyToken).isEmpty)
-        assertEquals(8L, v.number(ServerSetting.WarmMaxSessions))
+        assertEquals(8.0, v.number(ServerSetting.WarmMaxSessions))
         assertEquals("end", v.choice(ServerSetting.MessageInterruptMode))
         assertEquals("", v.choice(ServerSetting.DefaultSandboxPolicy))
         assertEquals(emptyList<String>(), v.paths(ServerSetting.AllowedRoots))
@@ -116,9 +116,40 @@ class ServerSettingsViewTest {
         assertEquals(json("""{"warmMaxSessions":null}"""), ServerSettingsPatch.number(v, ServerSetting.WarmMaxSessions, ""))
         assertNull(ServerSettingsPatch.number(v, ServerSetting.MaxConcurrentTurns, ""))
         assertEquals(json("""{"maxConcurrentTurns":0}"""), ServerSettingsPatch.number(v, ServerSetting.MaxConcurrentTurns, "0"))
-        // Not a whole number: nothing is sent.
-        assertNull(ServerSettingsPatch.number(v, ServerSetting.Port, "41.5"))
-        assertNull(ServerSettingsPatch.number(v, ServerSetting.Port, "99999999999999999999"))
+    }
+
+    /**
+     * ta-coik.4: the browser's number input and `Number(text)` (settings-dialog.tsx:181-187), not the
+     * retired "digits only" rule. Positive: exponent, sign, fraction and big numbers are sent as
+     * `JSON.stringify` writes them. Negative: text the number input does not keep is its "" (null),
+     * and an equal number (`===`, so -0 is 0) sends nothing.
+     */
+    @Test fun aNumberRowParsesAsTheBrowsersNumberInput() {
+        val v = view("""{"port":4173,"warmMaxSessions":8,"maxConcurrentTurns":null,"warmSweepMs":1.5}""")
+        assertEquals(json("""{"port":60000}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "6e4"))
+        assertEquals(json("""{"port":60000}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "6E+4"))
+        assertEquals(json("""{"port":-5}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "-5"))
+        assertEquals(json("""{"port":41.5}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "41.5"))
+        assertEquals(json("""{"port":0.5}"""), ServerSettingsPatch.number(v, ServerSetting.Port, ".5"))
+        assertEquals(json("""{"port":100000000000000000000}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "99999999999999999999"))
+        assertEquals(json("""{"port":1e+21}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "1e21"))
+        assertEquals("JSON.stringify(Infinity) is null", json("""{"port":null}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "1e400"))
+        assertEquals(json("""{"port":0}"""), ServerSettingsPatch.number(v, ServerSetting.Port, "-0"))
+        // Not a valid floating-point number: the input's value is "", so the setting is cleared.
+        for (bad in listOf("1e", "+5", "5.", "0x10", "1,5", "Infinity", "abc", "--1")) {
+            assertEquals(bad, json("""{"port":null}"""), ServerSettingsPatch.number(v, ServerSetting.Port, bad))
+            assertNull(bad, ServerSettingsPatch.number(v, ServerSetting.MaxConcurrentTurns, bad))
+        }
+        // `===`: the same number in another spelling sends nothing.
+        assertNull(ServerSettingsPatch.number(v, ServerSetting.Port, "4.173e3"))
+        assertNull(ServerSettingsPatch.number(v, ServerSetting.Port, "04173"))
+        assertNull(ServerSettingsPatch.number(v, ServerSetting.WarmSweepMs, "1.50"))
+        assertNull(ServerSettingsPatch.number(view("""{"port":0}"""), ServerSetting.Port, "-0"))
+        // The field shows the server's number as String(n).
+        assertEquals("1.5", v.numberText(ServerSetting.WarmSweepMs))
+        assertEquals("4173", v.numberText(ServerSetting.Port))
+        assertEquals("1e+21", view("""{"port":1e21}""").numberText(ServerSetting.Port))
+        assertEquals("", v.numberText(ServerSetting.MaxConcurrentTurns))
     }
 
     @Test fun aToggleSendsTheFlippedValue() {

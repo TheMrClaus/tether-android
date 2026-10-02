@@ -76,30 +76,28 @@ class ProviderRefreshTransmissionTest {
         assertEquals(200L, client.providerCatalog.value.first { it.key == "codex" }.fetchedAt)
     }
 
+    /**
+     * ta-coik.4: every tap sends, as the web's Refresh (model-browser.tsx:621-627, disabled only while
+     * the row is `loading`; use-tether.ts:1863 refreshProviders has no throttle). Negative control: a
+     * row this socket's catalog does not list is never named.
+     */
     @Test
-    fun retrySendsOnceWhileInFlightAndTapsAreDebounced() {
+    fun everyRetryTapSendsLikeTheWeb() {
         val (client, ws) = withCatalog()
         val epoch = client.linkEpoch.value
-        assertEquals(ProviderRefreshResult.Sent, client.refreshProviders("codex", epoch))
-        assertEquals(ProviderRefreshResult.Throttled, client.refreshProviders("codex", epoch))
-        assertEquals(ProviderRefreshResult.Throttled, client.refreshProviders("codex", epoch))
-        val sent = refreshes().single()
-        assertEquals(setOf("type", "providers"), sent.keys)
-        assertEquals(listOf("codex"), (sent["providers"] as JsonArray).map { (it as JsonPrimitive).content })
-        // Still in flight past the debounce while no push settles it.
-        h.now.addAndGet(5_000)
-        assertEquals(ProviderRefreshResult.Throttled, client.refreshProviders("codex", epoch))
-        // The server settles it (a new stamp): the next tap goes, once; an immediate second is debounced.
+        repeat(3) { assertEquals("tap $it", ProviderRefreshResult.Sent, client.refreshProviders("codex", epoch)) }
+        val sent = refreshes()
+        assertEquals("no 2 s debounce, no in-flight hold", 3, sent.size)
+        for (frame in sent) {
+            assertEquals(setOf("type", "providers"), frame.keys)
+            assertEquals(listOf("codex"), (frame["providers"] as JsonArray).map { (it as JsonPrimitive).content })
+        }
+        // After a push, still every tap.
         ws.send(catalog(300))
         h.await(client.providerCatalog) { list -> list.first { it.key == "codex" }.fetchedAt == 300L }
         assertEquals(ProviderRefreshResult.Sent, client.refreshProviders("codex", epoch))
-        ws.send(catalog(400))
-        h.await(client.providerCatalog) { list -> list.first { it.key == "codex" }.fetchedAt == 400L }
-        assertEquals(ProviderRefreshResult.Throttled, client.refreshProviders("codex", epoch))
-        h.now.addAndGet(ProviderRefreshThrottle.DEBOUNCE_MS)
         assertEquals(ProviderRefreshResult.Sent, client.refreshProviders("codex", epoch))
         assertEquals(2, refreshes().size)
-        // A row this socket's catalog does not list is never named.
         assertEquals(ProviderRefreshResult.NotOffered, client.refreshProviders("gemini", epoch))
         assertTrue(refreshes().isEmpty())
     }
@@ -119,7 +117,6 @@ class ProviderRefreshTransmissionTest {
         assertEquals(ProviderRefreshResult.NotOffered, client.refreshProviders("codex", now))
         next.send(catalog(100))
         h.await(client.providerCatalogLive) { it }
-        // The old flight does not block the new socket (same clock, same stamp).
         assertEquals(ProviderRefreshResult.Sent, client.refreshProviders("codex", now))
         assertEquals(1, refreshes().size)
     }

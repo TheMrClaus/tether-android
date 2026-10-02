@@ -23,8 +23,8 @@ import org.junit.Test
 /**
  * ta-2uq (T8.1 slice 3): the draft engine under the model browser: a pick sets the row (provider /
  * profile) and model together and only a pick made in this draft rides the create; custom model ids
- * are validated ([CustomModelId]), kept per server origin, dropped when a stored one is not valid,
- * and ride the create once picked; a model value past the server's bound is never picked.
+ * follow the web's rule ([CustomModelId]: trimmed, not empty), are kept per server origin and ride
+ * the create once picked. ta-coik.4: models are picked and sent as they are (the server validates).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DraftComposerBrowserTest {
@@ -94,34 +94,42 @@ class DraftComposerBrowserTest {
         assertNull(other.frames.single().model)
     }
 
+    /** ta-coik.4: a model past the retired 200-byte bound is picked and sent, as on the web (the server validates). */
     @Test
-    fun aModelPastTheServersBoundIsNeverPicked() = runTest {
+    fun aModelPastTheRetiredBoundIsPickedAndSent() = runTest {
         val long = "m" + "é".repeat(100) // 201 UTF-8 bytes
         val client = Client().apply { live(ProviderCatalogEntry("claude", "claude", "ready", models("m1") + SessionModelOption(long, "Long"))) }
         val model = engine(client)
         model.selectProviderAndModel("claude", long)
-        assertEquals("", model.form("key"))
-        model.selectProviderAndModel("claude", "m1")
-        model.selectModel(long)
+        assertEquals("claude", model.form("key"))
+        assertEquals(long, model.form("model"))
+        model.selectModel("m1")
         assertEquals("m1", model.form("model"))
+        model.selectModel(long)
+        assertEquals(long, model.form("model"))
+        model.setText("go")
+        assertEquals(DraftSubmitResult.Sent, model.submit(A))
+        assertEquals(long, client.frames.single().model)
     }
 
     @Test
-    fun customIdsAreValidatedKeptPerServerAndRideTheCreate() = runTest {
+    fun customIdsFollowTheWebsRuleKeptPerServerAndRideTheCreate() = runTest {
         val client = Client().apply { live(workRow, claudeRow) }
         val model = engine(client)
         assertTrue(model.addCustomModel("claude", "  my-model[1m]  "))
         runCurrent()
         assertEquals(mapOf("claude" to listOf("my-model[1m]")), model.state.value.customModels)
         assertTrue(model.state.value.entries.first { it.key == "claude" }.models.any { it.value == "my-model[1m]" })
-        // Refused: blank, two words, a bidi override, a zero-width space, 201 bytes, a model the row
-        // already offers, the same id again.
-        for (bad in listOf("   ", "a b", "x\u202Ey", "\u200Bx", "é".repeat(100) + "x", "m1", "my-model[1m]")) {
+        // Refused, as the web disables its +: blank, a model the row already offers, the same id again.
+        for (bad in listOf("   ", "m1", "my-model[1m]", " my-model[1m] ")) {
             assertFalse("refused: $bad", model.addCustomModel("claude", bad))
         }
         assertFalse("a row the browser does not list", model.addCustomModel("nope", "fine-id"))
-        assertTrue("exactly 200 bytes is kept", model.addCustomModel("claude", "é".repeat(100)))
-        model.removeCustomModel("claude", "é".repeat(100))
+        // ta-coik.4: taken, as on the web: two words, a bidi override, a zero-width space, 201 bytes.
+        for (ok in listOf("a b", "x\u202Ey", "\u200Bx", "é".repeat(100) + "x")) {
+            assertTrue("taken: $ok", model.addCustomModel("claude", ok))
+            model.removeCustomModel("claude", ok)
+        }
         assertEquals(listOf("my-model[1m]"), model.state.value.customModels["claude"])
         // Picked, it rides the create like any model.
         model.selectProviderAndModel("claude", "my-model[1m]")
@@ -139,22 +147,28 @@ class DraftComposerBrowserTest {
         assertEquals(mapOf("claude" to listOf("my-model[1m]")), model.state.value.customModels)
     }
 
+    /** ta-coik.4: stored ids read as the web reads them (strings, trimmed, empty and repeated skipped), no app filter. */
     @Test
-    fun aHostileStoredCustomIdIsNeverDrawnOrSent() = runTest {
+    fun storedCustomIdsAreReadAsTheWebReadsThem() = runTest {
         val store = InMemoryDraftStore()
         store.writeDraftPreferences(
             A,
             JsObj.of(
                 "customModels" to JsObj.of(
-                    "claude" to JsArr.of(JsStr("ok-1"), JsStr("bad\u202Eid"), JsStr("has space"), JsStr("x".repeat(300)), JsNum(5.0), JsStr("ok-1")),
-                    "k".repeat(300) to JsArr.of(JsStr("x1")),
+                    "claude" to JsArr.of(JsStr("ok-1"), JsStr("bad\u202Eid"), JsStr("has space"), JsStr("x".repeat(300)), JsNum(5.0), JsStr("ok-1"), JsStr("  ")),
                     "codex" to JsStr("not-a-list"),
                 ),
             ),
         )
         val client = Client().apply { live(claudeRow) }
         val model = engine(client, store)
-        assertEquals(mapOf("claude" to listOf("ok-1")), model.state.value.customModels)
-        assertEquals(listOf("m1", "ok-1"), model.state.value.entries.single().models.map { it.value })
+        val ids = listOf("ok-1", "bad\u202Eid", "has space", "x".repeat(300))
+        assertEquals(mapOf("claude" to ids), model.state.value.customModels)
+        assertEquals(listOf("m1") + ids, model.state.value.entries.single().models.map { it.value })
+        // Picked, the long one rides the create as it is.
+        model.selectProviderAndModel("claude", "x".repeat(300))
+        model.setText("go")
+        assertEquals(DraftSubmitResult.Sent, model.submit(A))
+        assertEquals("x".repeat(300), client.frames.single().model)
     }
 }

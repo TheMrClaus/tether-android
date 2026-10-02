@@ -240,8 +240,11 @@ class DraftWorktreeModelTest {
         assertEquals(READINESS_NEED_BRANCH, h.model.state.value.error)
         h.model.selectIsolation("checkout-pr")
         assertEquals(READINESS_NEED_PR, h.model.readiness())
+        // ta-coik.4: the web's Number.parseInt rule, no limit of the app's own (the server validates).
         h.model.setWorktreeField(WorktreeField.Pr, "12345678")
-        assertEquals(READINESS_PR_TOO_LARGE, h.model.readiness())
+        assertEquals("", h.model.readiness())
+        h.model.setWorktreeField(WorktreeField.Pr, "0")
+        assertEquals(READINESS_NEED_PR, h.model.readiness())
         h.model.setWorktreeField(WorktreeField.Pr, "42")
         assertEquals("", h.model.readiness())
         h.model.selectIsolation("branch-off")
@@ -255,9 +258,13 @@ class DraftWorktreeModelTest {
         h.model.selectIsolation("checkout-pr")
         assertTrue(h.model.setWorktreeField(WorktreeField.Pr, "#4 2x"))
         assertEquals("42", (h.model.state.value.form["worktreePr"] as com.tether.app.protocol.tree.JsStr).value)
+        assertTrue(h.model.setWorktreeField(WorktreeField.Pr, "1".repeat(40)))
+        assertEquals("no app cap on the digits", "1".repeat(40), (h.model.state.value.form["worktreePr"] as com.tether.app.protocol.tree.JsStr).value)
         assertTrue(h.model.setWorktreeField(WorktreeField.Branch, "feat/x"))
-        assertFalse("never cut to another name", h.model.setWorktreeField(WorktreeField.Branch, "b".repeat(WorktreeDraft.FIELD_MAX + 1)))
         assertEquals("feat/x", (h.model.state.value.form["worktreeBranch"] as com.tether.app.protocol.tree.JsStr).value)
+        // ta-coik.4: a ref past 256 characters is taken whole, as the web's input takes it (the server validates).
+        assertTrue(h.model.setWorktreeField(WorktreeField.Branch, "b".repeat(257)))
+        assertEquals("b".repeat(257), (h.model.state.value.form["worktreeBranch"] as com.tether.app.protocol.tree.JsStr).value)
         assertFalse(h.model.selectIsolation("bogus"))
     }
 

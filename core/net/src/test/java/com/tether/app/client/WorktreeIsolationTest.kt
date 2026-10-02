@@ -24,8 +24,7 @@ import org.junit.Test
  *
  * The web oracle for the `worktree` block is [DraftForm.buildWorktreeCreateRequest], the T2.2 port
  * of lib/draft-form.ts proven against the JS conformance corpus; the app's [WorktreeDraft.request]
- * must equal it key for key on every row except the one decided divergence: a pull request number
- * that is not a plain positive integer of at most 9,999,999 (coordinator 2026-10-02).
+ * equals it key for key on every row (ta-coik.4: the web's `Number.parseInt` rule, no app limit).
  */
 class WorktreeIsolationTest {
 
@@ -42,8 +41,11 @@ class WorktreeIsolationTest {
             "worktreePr" to JsStr(pr),
         )
 
-    /** The web's `Number.parseInt(x.trim(), 10)`, hand-evaluated, then `Number.isInteger(n) && n > 0`. */
-    private data class Pr(val raw: String, val jsParseInt: Double?, val app: Int?)
+    /**
+     * The web's `Number.parseInt(x.trim(), 10)`, hand-evaluated, then `Number.isInteger(n) && n > 0`.
+     * [retired] is what the retired ta-23f rule took (null: refused), the negative control.
+     */
+    private data class Pr(val raw: String, val jsParseInt: Double?, val retired: Int?)
 
     private val prRows = listOf(
         Pr("", null, null),
@@ -57,7 +59,8 @@ class WorktreeIsolationTest {
         Pr("000", 0.0, null),
         Pr("-3", -3.0, null),
         Pr("abc", null, null),
-        // Divergences: the web takes a leading number and ignores the rest; the server refuses past 9,999,999.
+        // The retired app rule refused these; the web takes a leading number and ignores the rest, and
+        // sends any size (the server validates).
         Pr("42abc", 42.0, null),
         Pr("+5", 5.0, null),
         Pr("1e3", 1.0, null),
@@ -70,38 +73,39 @@ class WorktreeIsolationTest {
     )
 
     @Test
-    fun prNumbersAreParsedLikeTheWebOnlyWhenPlainAndWithinTheServersLimit() {
+    fun prNumbersAreParsedExactlyLikeTheWeb() {
+        var widened = 0
         for (row in prRows) {
             // The oracle agrees with the hand-evaluated JS value (so the table itself is the web's).
             val web = DraftForm.buildWorktreeCreateRequest(form(true, "checkout-pr", "", "", "", row.raw))
             val webValid = row.jsParseInt != null && row.jsParseInt > 0 && row.jsParseInt == Math.floor(row.jsParseInt)
-            assertEquals("web oracle for '${row.raw}'", if (webValid) row.jsParseInt else null, (web?.get("prNumber") as? JsNum)?.value)
-            assertEquals("app for '${row.raw}'", row.app, WorktreeDraft.prNumber(row.raw))
-            // Where both take it, they take the same number.
-            if (row.app != null) assertEquals(row.jsParseInt!!, row.app.toDouble(), 0.0)
+            val expected = if (webValid) row.jsParseInt else null
+            assertEquals("web oracle for '${row.raw}'", expected, (web?.get("prNumber") as? JsNum)?.value)
+            val app = WorktreeDraft.request(form(true, "checkout-pr", "", "", "", row.raw))
+            assertEquals("app for '${row.raw}'", expected, (app?.get("prNumber") as? JsNum)?.value)
+            // Negative control: rows the retired rule refused are now taken.
+            if (webValid && row.retired == null) widened++
         }
+        assertEquals("42abc, +5, 1e3, 4 2, 12.5, 10000000, 123456789012", 7, widened)
     }
 
     @Test
-    fun aNumberPastTheLimitSaysSoAndOtherBadNumbersAskForTheNumber() {
+    fun anIncompletePrAsksForTheNumberWithTheWebsWords() {
         fun reason(pr: String) = WorktreeDraft.readiness(form(true, "checkout-pr", "", "", "", pr))
-        assertEquals(READINESS_PR_TOO_LARGE, reason("10000000"))
-        assertEquals(READINESS_PR_TOO_LARGE, reason("99999999999999999999"))
-        assertEquals(READINESS_PR_TOO_LARGE, reason("123456789012"))
-        assertEquals(READINESS_PR_TOO_LARGE, reason(" 000010000000 "))
+        for (taken in listOf("10000000", "99999999999999999999", "123456789012", " 000010000000 ", "42abc", "9999999")) assertEquals(taken, "", reason(taken))
         assertEquals(READINESS_NEED_PR, reason(""))
         assertEquals(READINESS_NEED_PR, reason("0"))
-        assertEquals(READINESS_NEED_PR, reason("42abc"))
-        assertEquals("", reason("9999999"))
+        assertEquals(READINESS_NEED_PR, reason("-3"))
+        assertEquals(READINESS_NEED_PR, reason("abc"))
         assertEquals(READINESS_NEED_BRANCH, WorktreeDraft.readiness(form(true, "checkout-branch", "", " ", "", "")))
         assertEquals("", WorktreeDraft.readiness(form(true, "branch-off", "", "", "", "")))
         assertEquals("", WorktreeDraft.readiness(form(false, "checkout-pr", "", "", "", "")))
     }
 
     @Test
-    fun theFieldInputRulesKeepDigitsAndNeverCutAName() {
+    fun thePrInputKeepsItsAsciiDigitsWithNoCap() {
         assertEquals("42", WorktreeDraft.prInput("4a2 "))
-        assertEquals("1234567890123456", WorktreeDraft.prInput("12345678901234567890"))
+        assertEquals("12345678901234567890", WorktreeDraft.prInput("12345678901234567890"))
         assertEquals("", WorktreeDraft.prInput("٤٢"))
     }
 
@@ -116,19 +120,12 @@ class WorktreeIsolationTest {
         val branches = listOf("", " ", "feat/x", " pr-branch ")
         val slugs = listOf("", "x", " y ")
         var rows = 0
-        var divergent = 0
         for (useWorktree in listOf(true, false)) for (mode in modes) for (base in bases) for (branch in branches) for (slug in slugs) for (pr in prRows) {
             val f = form(useWorktree, mode, base, branch, slug, pr.raw)
             val web = DraftForm.buildWorktreeCreateRequest(f)
             val app = WorktreeDraft.request(f)
             rows++
-            val prDiverges = useWorktree && mode == "checkout-pr" && web != null && pr.app == null
-            if (prDiverges) {
-                divergent++
-                assertNull("app refuses '${pr.raw}'", app)
-            } else {
-                assertEquals("row $useWorktree/$mode/'$base'/'$branch'/'$slug'/'${pr.raw}'", web, app)
-            }
+            assertEquals("row $useWorktree/$mode/'$base'/'$branch'/'$slug'/'${pr.raw}'", web, app)
             // Blank fields are omitted; a sent value is trimmed.
             app?.let { block ->
                 for (key in listOf("baseRef", "branch", "slug")) {
@@ -144,7 +141,6 @@ class WorktreeIsolationTest {
             if (useWorktree && app == null) assertNull("an incomplete isolated create is never built", resolved) else assertNotNull(resolved)
         }
         assertEquals(2 * 3 * 4 * 4 * 3 * prRows.size, rows)
-        assertTrue("the divergent rows exist and are all PR rows", divergent > 0)
     }
 
     @Test
@@ -152,6 +148,12 @@ class WorktreeIsolationTest {
         val f = form(true, "checkout-pr", "ignored", " pr-42 ", " review ", " 42 ")
         val json = CreateFrame.build(f, claude, DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
         assertEquals(Json.parseToJsonElement("""{"mode":"checkout-pr","slug":"review","prNumber":42,"branch":"pr-42"}"""), json["worktree"])
+        // ta-coik.4: a number past the retired 9,999,999 limit and a ref past 256 characters ride as typed.
+        val big = CreateFrame.build(form(true, "checkout-pr", "", "", "", "123456789012"), claude, DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+        assertEquals(Json.parseToJsonElement("""{"mode":"checkout-pr","prNumber":123456789012}"""), big["worktree"])
+        val long = "r".repeat(300)
+        val ref = CreateFrame.build(form(true, "branch-off", long, long, "", ""), claude, DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+        assertEquals(Json.parseToJsonElement("""{"mode":"branch-off","branch":"$long","baseRef":"$long"}"""), ref["worktree"])
         val off = CreateFrame.build(form(true, "branch-off", "", "", "", ""), claude, DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
         assertEquals(Json.parseToJsonElement("""{"mode":"branch-off"}"""), off["worktree"])
     }
@@ -175,7 +177,7 @@ class WorktreeIsolationTest {
         for (s in listOf(null, source(true), source(false))) {
             assertNull(WorktreeSetupGate.confirmationFor(form(false, "checkout-pr", "", "", "", "42"), s))
             assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", ""), s))
-            assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", "10000000"), s))
+            assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", "0"), s))
             assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-branch", "", "", "", ""), s))
         }
     }
@@ -186,6 +188,8 @@ class WorktreeIsolationTest {
             val pr = WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "origin/x", " pr-b ", "", " 0042 "), s)!!
             assertEquals(SetupConfirmation("checkout-pr", "Pull request", "#42", "pr-b", "/w", certain = false), pr)
             assertEquals(SETUP_BODY_MAY_PR, pr.body)
+            // ta-coik.4: a number past the retired limit is a complete request, shown as the web parses it.
+            assertEquals("#10000000", WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", "10000000"), s)!!.ref)
             val branch = WorktreeSetupGate.confirmationFor(form(true, "checkout-branch", "", " feat/x ", "", ""), s)!!
             assertEquals(SetupConfirmation("checkout-branch", "Branch", "feat/x", null, "/w", certain = false), branch)
             assertEquals(SETUP_BODY_MAY_BRANCH, branch.body)

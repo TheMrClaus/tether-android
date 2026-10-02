@@ -9,7 +9,6 @@ import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -43,7 +42,7 @@ class CreateFrameTest {
 
     /**
      * ta-xki: every row lists two models: `opus` with two reasoning-effort variants and `gpt-5` with
-     * one (an effort rides only when the selected model offers it).
+     * one (ta-coik.4: an effort the selected model does not list rides too, as on the web).
      */
     private val models = listOf(
         SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("low", "Low"), ModelVariantOption("high", "High"))),
@@ -252,68 +251,73 @@ class CreateFrameTest {
     )
 
     /**
-     * ta-xki: the rows where the app's frame differs from the web's ON PURPOSE (a stale, tampered or
-     * hand-built form): a mode the provider does not offer becomes its default, an effort the selected
-     * model does not offer is dropped. [web] is what the web would send; [expected] the app's frame.
+     * ta-coik.4 (owner rule: the app is as capable as the web): the rows ta-xki used to clamp (a mode
+     * the provider does not offer, an effort the selected model does not list). The app's frame is now
+     * the web's ([web]); [clamped] is what the retired clamp sent instead, kept as the negative control.
      */
-    private data class Clamp(val name: String, val entry: ProviderCatalogEntry, val form: JsObj, val modified: JsObj, val web: String, val expected: String)
+    private data class AsIs(val name: String, val entry: ProviderCatalogEntry, val form: JsObj, val modified: JsObj, val web: String, val clamped: String)
 
-    private val clamps = listOf(
-        Clamp(
-            // r2 (verifier F2, owner-delegated): a retired mode more restrictive than the default is Manual.
-            "claude retired dontAsk (Locked): Manual, never Auto",
+    private val asIs = listOf(
+        AsIs(
+            "claude retired dontAsk (Locked) rides as it is",
             entry("claude"), form("mode" to "dontAsk"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("claude", """"permissionMode":"dontAsk","""),
-            expected = frame("claude", """"permissionMode":"default","""),
+            clamped = frame("claude", """"permissionMode":"default","""),
         ),
-        Clamp(
+        AsIs(
             "claude garbage mode",
             entry("claude", profileId = "work"), form("mode" to "rm -rf /"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("claude", """"permissionMode":"rm -rf /","profileId":"work","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","profileId":"work","""),
+            clamped = frame("claude", """"permissionMode":"bypassPermissions","profileId":"work","""),
         ),
-        Clamp(
+        AsIs(
             "claude codex preset name",
             entry("claude"), form("mode" to "full-access"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("claude", """"permissionMode":"full-access","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
+            clamped = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
-        Clamp(
-            "opencode acceptEdits (not an opencode row): Build, no approval policy",
+        AsIs(
+            "opencode acceptEdits (not an opencode row)",
             entry("opencode"), form("mode" to "acceptEdits"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("opencode", """"permissionMode":"acceptEdits","""),
-            expected = frame("opencode", """"permissionMode":"bypassPermissions","""),
+            clamped = frame("opencode", """"permissionMode":"bypassPermissions","""),
         ),
-        Clamp(
+        AsIs(
             "opencode garbage mode",
             entry("opencode"), form("mode" to "yolo"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("opencode", """"permissionMode":"yolo","""),
-            expected = frame("opencode", """"permissionMode":"bypassPermissions","""),
+            clamped = frame("opencode", """"permissionMode":"bypassPermissions","""),
         ),
-        Clamp(
-            "an effort the model does not offer is dropped",
+        AsIs(
+            "an effort the model does not offer is sent",
             entry("claude"), form("mode" to "plan", "model" to "gpt-5", "reasoningEffort" to "low"), picked("model", "reasoningEffort"),
             web = frame("claude", """"permissionMode":"plan","model":"gpt-5","reasoningEffort":"low","""),
-            expected = frame("claude", """"permissionMode":"plan","model":"gpt-5","""),
+            clamped = frame("claude", """"permissionMode":"plan","model":"gpt-5","""),
         ),
-        Clamp(
-            "an effort for a hand-added model id (no variants) is dropped",
+        AsIs(
+            "an effort for a hand-added model id (no variants) is sent",
             entry("codex"), form("mode" to "default", "model" to "my-custom", "reasoningEffort" to "high"), picked("model", "reasoningEffort"),
             web = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","reasoningEffort":"high","""),
-            expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","""),
+            clamped = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","""),
         ),
-        Clamp(
-            "r2 (security F2): an effort past the server's 200-byte bound is never sent",
+        AsIs(
+            "an effort past 200 bytes is sent (the server validates)",
             ProviderCatalogEntry("claude", "claude", "ready", listOf(SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("x".repeat(201), "Huge"), ModelVariantOption("high", "High"))))),
             form("model" to "opus", "reasoningEffort" to "x".repeat(201)), picked("reasoningEffort"),
             web = frame("claude", """"permissionMode":"bypassPermissions","reasoningEffort":"${"x".repeat(201)}","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
+            clamped = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
-        Clamp(
-            "an effort on a row with no models is dropped",
+        AsIs(
+            "an effort on a row with no models is sent",
             ProviderCatalogEntry("claude", "claude", "ready", emptyList()), form("reasoningEffort" to "high"), picked("reasoningEffort"),
             web = frame("claude", """"permissionMode":"bypassPermissions","reasoningEffort":"high","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","""),
+            clamped = frame("claude", """"permissionMode":"bypassPermissions","""),
+        ),
+        AsIs(
+            "a model id past 200 bytes is sent (the server validates)",
+            entry("claude"), form("model" to "m".repeat(201)), picked("model"),
+            web = frame("claude", """"permissionMode":"bypassPermissions","model":"${"m".repeat(201)}","""),
+            clamped = frame("claude", """"permissionMode":"bypassPermissions","""),
         ),
     )
 
@@ -375,15 +379,17 @@ class CreateFrameTest {
         assertEquals(null, pi.sandboxPolicy)
     }
 
-    /** ta-xki: the clamps, each against the web's frame (they differ) and the app's (exactly). */
+    /**
+     * ta-coik.4: a mode or effort outside what the composer lists rides as it is, exactly the web's
+     * frame (positive), and never the value the retired ta-xki clamp put in its place (negative).
+     */
     @Test
-    fun aModeOrEffortOutsideTheKnownSetsNeverReachesTheFrame() {
-        for (c in clamps) {
+    fun aModeOrEffortOutsideTheListedSetsRidesAsTheWebSendsIt() {
+        for (c in asIs) {
             val built = CreateFrame.build(c.form, c.entry, c.modified, "r").toJsonObject()
-            assertEquals(c.name, Json.parseToJsonElement(c.expected).jsonObject, built)
-            // Negative control: the web's own frame for the row is different, so the clamp is live.
-            assertNotEquals(c.name + ": the web's frame", Json.parseToJsonElement(c.web).jsonObject, built)
-            assertEquals(c.name + ": the oracle agrees on the web side", Json.parseToJsonElement(c.web).jsonObject, webFrame(c.entry, c.form, c.modified))
+            assertEquals(c.name, Json.parseToJsonElement(c.web).jsonObject, built)
+            assertEquals(c.name + ": the oracle agrees", Json.parseToJsonElement(c.web).jsonObject, webFrame(c.entry, c.form, c.modified))
+            assertNotEquals(c.name + ": not the retired clamp", Json.parseToJsonElement(c.clamped).jsonObject, built)
         }
     }
 
@@ -429,58 +435,38 @@ class CreateFrameTest {
         }
     }
 
-    /** The values each key may ever take on the app's wire, per provider (the known sets). */
-    private fun assertWithinKnownSets(name: String, provider: String, frame: JsonObject, entry: ProviderCatalogEntry, model: String) {
-        fun v(k: String): String? = (frame[k] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
-        val permission = v("permissionMode")
-        when (provider) {
-            "claude" -> assertTrue("$name: $permission", permission in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
-            "opencode" -> assertTrue("$name: $permission", permission in setOf("default", "plan", "bypassPermissions"))
-            else -> assertEquals(name, "bypassPermissions", permission)
-        }
-        when (provider) {
-            "codex" -> assertTrue(name, v("sandboxPolicy") in setOf("workspace-write", "off"))
-            else -> assertEquals(name, null, v("sandboxPolicy"))
-        }
-        assertTrue(name, v("approvalPolicy") in setOf(null, "never"))
-        if (v("approvalPolicy") != null) assertTrue(name, provider == "codex" || provider == "opencode")
-        assertTrue(name, v("approvalsReviewer") in setOf(null, "auto_review"))
-        if (v("approvalsReviewer") != null) assertEquals(name, "codex", provider)
-        v("reasoningEffort")?.let { e -> assertTrue("$name: $e", DraftSessionOptionsModel.offeredEfforts(entry, model).any { it.value == e }) }
+    /** The mode values the composer lists per provider (Mode rows, opencode's Auto and cold ""); null: no Mode row. */
+    private fun listedModes(provider: String): Set<String>? = when (provider) {
+        "claude" -> setOf("default", "acceptEdits", "plan", "bypassPermissions")
+        "codex" -> setOf("default", "auto-review", "full-access")
+        "opencode" -> setOf("default", "plan", "bypassPermissions", "")
+        else -> null
     }
 
     @Test
-    fun theCrossProductMatchesTheWebForEveryOfferedValueAndStaysInsideTheKnownSets() {
-        var exact = 0
-        var clamped = 0
+    fun theCrossProductIsTheWebsFrameForEveryRow() {
+        var listed = 0
+        var unlisted = 0
         for (provider in providers) for (mode in modes) for ((model, effort) in modelEfforts) for (picks in pickedSets) for (profile in profiles) {
             val e = entry(provider, profileId = profile)
             val f = form("mode" to mode, "model" to model, "reasoningEffort" to effort)
             val mod = picked(*picks.toTypedArray())
             val name = "$provider/$mode/$model/$effort/$picks/$profile"
             val built = CreateFrame.build(f, e, mod, "r").toJsonObject()
-            assertWithinKnownSets(name, provider, built, e, model)
-            val known = DraftModes.known(provider)
-            val modeOffered = known == null || mode in known
-            val effortOffered = effort.isEmpty() || !mod.flag("reasoningEffort") || DraftSessionOptionsModel.offeredEfforts(e, model).any { it.value == effort }
-            // The web's frame for the same row (no app-only change: ta-93qs retired the last one).
             val web = webFrame(e, f, mod)
-            if (modeOffered && effortOffered) {
-                assertEquals("$name: keys", web.keys, built.keys)
-                assertEquals(name, web, built)
-                exact++
-            } else {
-                // Off the known sets the app's frame is the web's frame for the fallback values.
-                val fallback = f.put("mode", JsStr(DraftModes.normalize(provider, mode)))
-                    .put("reasoningEffort", JsStr(effort.takeIf { effortOffered }.orEmpty()))
-                val expected = webFrame(e, fallback, mod)
-                assertEquals("$name (fallback)", expected, built)
-                clamped++
+            assertEquals("$name: keys", web.keys, built.keys)
+            assertEquals(name, web, built)
+            val modeListed = listedModes(provider)?.let { mode in it } ?: true
+            val effortListed = effort.isEmpty() || !mod.flag("reasoningEffort") || DraftSessionOptionsModel.offeredEfforts(e, model).any { it.value == effort }
+            if (modeListed && effortListed) listed++ else unlisted++
+            // Positive control for the as-is rule: an unlisted Claude/opencode mode is on the wire verbatim.
+            if (!modeListed && (provider == "claude" || provider == "opencode") && mode.isNotEmpty()) {
+                assertEquals(name, JsonPrimitive(mode), built["permissionMode"])
             }
         }
-        // 6 providers x 10 modes x 8 model/effort x 5 pick sets x 2 profiles.
-        assertEquals(4800, exact + clamped)
-        assertTrue("both halves are exercised: $exact exact, $clamped clamped", exact > 1000 && clamped > 500)
+        // 6 providers x 10 modes x 8 model/effort x 5 pick sets x 2 profiles, every one the web's.
+        assertEquals(4800, listed + unlisted)
+        assertTrue("both halves are exercised: $listed listed, $unlisted unlisted", listed > 1000 && unlisted > 500)
     }
 
     private fun JsObj.flag(key: String) = this[key] == JsBool.TRUE

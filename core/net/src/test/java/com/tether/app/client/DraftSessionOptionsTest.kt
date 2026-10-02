@@ -78,24 +78,23 @@ class DraftSessionOptionsTest {
         assertFalse("Codex folds Auto into its presets", DraftModes.hasAutoChip("codex"))
     }
 
+    /**
+     * ta-coik.4: a mode no Mode row lists (a retired `dontAsk`, an older build's value) is shown as
+     * itself, as draft-composer.tsx:153 `modeDisplay` (its select draws the raw value), never turned
+     * into the provider's default (the retired ta-xki clamp, the negative control).
+     */
     @Test
-    fun aModeTheProviderDoesNotOfferIsItsDefault() {
-        // r2 (verifier F2): the retired, more restrictive Locked is Manual, never the Auto default.
-        assertEquals("default", DraftModes.normalize("claude", "dontAsk"))
-        assertEquals("bypassPermissions", DraftModes.normalize("claude", "rm -rf"))
-        assertEquals("bypassPermissions", DraftModes.normalize("claude", ""))
-        assertEquals("acceptEdits", DraftModes.normalize("claude", "acceptEdits"))
-        assertEquals("default", DraftModes.normalize("codex", "off"))
-        assertEquals("default", DraftModes.normalize("codex", "bypassPermissions"))
-        assertEquals("full-access", DraftModes.normalize("codex", "full-access"))
-        assertEquals("", DraftModes.normalize("opencode", "acceptEdits"))
-        assertEquals("bypassPermissions", DraftModes.normalize("opencode", "bypassPermissions"))
-        assertEquals("plan", DraftModes.normalize("opencode", "plan"))
-        assertEquals("a provider with no Mode row keeps it (its frame ignores it)", "anything", DraftModes.normalize("pi", "anything"))
-        assertFalse(DraftModes.selectable("claude", "dontAsk"))
-        assertFalse(DraftModes.selectable("opencode", ""))
-        assertFalse(DraftModes.selectable("pi", "default"))
-        assertTrue(DraftModes.selectable("opencode", "bypassPermissions"))
+    fun aModeNoRowListsIsShownAsItIs() {
+        val locked = options("claude", "opus", mode = "dontAsk")
+        assertEquals("dontAsk", locked.mode!!.value)
+        assertNull("no row is current", locked.mode!!.current)
+        assertEquals("dontAsk", locked.mode!!.label)
+        assertFalse(locked.modeDanger)
+        assertFalse("not the retired clamp's Manual", locked.mode!!.value == "default")
+        assertEquals("off", options("codex", "gpt-5", mode = "off").mode!!.value)
+        assertEquals("acceptEdits", options("opencode", "oc", mode = "acceptEdits").mode!!.value)
+        // Positive control: a listed mode is its row.
+        assertEquals("Plan", options("claude", "opus", mode = "plan").mode!!.current!!.label)
     }
 
     // --- the options model --------------------------------------------------------------------------------
@@ -286,26 +285,26 @@ class DraftSessionOptionsTest {
         assertNull("untouched: the engine's default", h.send().reasoningEffort)
     }
 
+    /**
+     * ta-coik.4: use-draft-composer.ts:227-245 selectEffort / selectMode take the value as it is and
+     * remember it; the create carries it (the server validates). The retired ta-xki rule refused them.
+     */
     @Test
-    fun aPickOutsideTheOfferedSetsChangesNothing() = runTest {
+    fun aPickIsTakenAsItIsAsOnTheWeb() = runTest {
         val h = harness()
-        assertFalse("no row picked", h.model.selectMode("plan", "claude"))
+        assertFalse("no row picked: no provider to send it to", h.model.selectMode("plan", "claude"))
         h.model.selectProviderAndModel("claude", "opus")
-        assertFalse(h.model.selectMode("dontAsk", "claude"))
-        assertFalse(h.model.selectMode("full-access", "claude"))
-        assertFalse(h.model.selectMode("", "claude"))
-        assertFalse(h.model.selectEffort("max"))
-        assertFalse(h.model.selectEffort(""))
-        assertEquals("bypassPermissions", h.mode())
-        assertEquals("", h.effort())
-        h.model.selectModel("haiku")
-        assertFalse("haiku offers no effort", h.model.selectEffort("high"))
-        h.model.selectProviderAndModel("pi", "pi-1")
-        assertFalse("pi has no Mode row", h.model.selectMode("plan", "pi"))
+        assertTrue(h.model.selectMode("dontAsk", "claude"))
+        assertTrue(h.model.selectEffort("max"))
+        assertEquals("dontAsk", h.mode())
+        assertEquals("max", h.effort())
+        val frame = h.send()
+        assertEquals("dontAsk", frame.permissionMode)
+        assertEquals("max", frame.reasoningEffort)
         runCurrent()
-        val claude = h.store.prefsOf(A, "claude") as? JsObj
-        assertNull("nothing refused was remembered", claude?.get("mode"))
-        assertNull(claude?.get("reasoningEffort"))
+        val claude = h.store.prefsOf(A, "claude") as JsObj
+        assertEquals(JsStr("dontAsk"), claude["mode"])
+        assertEquals(JsStr("max"), claude["reasoningEffort"])
     }
 
     @Test
@@ -338,24 +337,29 @@ class DraftSessionOptionsTest {
 
     private fun providerPrefs(vararg rows: Pair<String, JsValue>) = JsObj.of("providerPreferences" to JsObj.of(*rows))
 
+    /** ta-coik.4: a stored mode rides as lib/draft-form.ts resolveMode resolves it (it trusts the preference). */
     @Test
-    fun aStoredModeThatNoLongerExistsFallsBackToTheDefault() = runTest {
+    fun aStoredModeRidesAsTheReducerResolvesIt() = runTest {
         val h = seeded(
             providerPrefs(
-                "claude" to JsObj.of("mode" to JsStr("dontAsk")),
+                "claude" to JsObj.of("mode" to JsStr("dontAsk"), "autoMode" to JsBool.TRUE),
                 "codex" to JsObj.of("mode" to JsStr("off")),
                 "opencode" to JsObj.of("mode" to JsStr("acceptEdits")),
             ),
         )
         h.model.selectProviderAndModel("claude", "opus")
-        assertEquals("the retired Locked is Manual (r2, verifier F2)", "default", h.mode())
-        assertEquals("default", h.send().permissionMode)
+        assertEquals("the retired Locked as it is, not Manual", "dontAsk", h.mode())
+        assertEquals("dontAsk", h.send().permissionMode)
         h.client.createErrors.value = CreateErrorReply("no", 1, "req-1")
         h.model.onCreateError(h.client.createErrors.value!!)
         h.model.selectProvider("codex")
-        assertEquals("default", h.mode())
+        assertEquals("off", h.mode())
+        assertEquals("codexModePreset degrades it, as on the web", "workspace-write", h.send().sandboxPolicy)
+        h.client.createErrors.value = CreateErrorReply("no", 2, "req-2")
+        h.model.onCreateError(h.client.createErrors.value!!)
         h.model.selectProvider("opencode")
-        assertEquals("", h.mode())
+        assertEquals("acceptEdits", h.mode())
+        assertEquals("acceptEdits", h.send().permissionMode)
     }
 
     @Test
@@ -365,8 +369,9 @@ class DraftSessionOptionsTest {
         assertEquals("the work row's own default, not another row's choice", "bypassPermissions", h.mode())
     }
 
+    /** Garbage preferences never crash; the frame carries what the reducer resolved, as the web's would. */
     @Test
-    fun garbagePreferencesNeverProduceAFrameValueOutsideTheKnownSets() = runTest {
+    fun garbagePreferencesRideAsTheWebResolvesThem() = runTest {
         val garbage: List<JsObj> = listOf(
             providerPrefs("claude" to JsObj.of("mode" to JsNum(42.0), "reasoningEffort" to JsBool.TRUE, "model" to JsArr.EMPTY, "autoMode" to JsStr("yes"))),
             providerPrefs("claude" to JsStr("junk")),
@@ -379,18 +384,22 @@ class DraftSessionOptionsTest {
         for (prefs in garbage) {
             val h = seeded(prefs)
             h.model.selectProvider("claude")
-            val mode = h.mode()
-            assertTrue("$prefs -> $mode", mode in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
+            val mode = h.mode().orEmpty()
             val frame = h.send()
-            assertTrue("$prefs -> ${frame.permissionMode}", frame.permissionMode in setOf("default", "acceptEdits", "plan", "bypassPermissions"))
+            assertEquals("$prefs", mode.ifEmpty { "bypassPermissions" }, frame.permissionMode)
             assertNull(frame.sandboxPolicy)
-            assertTrue("$prefs -> ${frame.reasoningEffort}", frame.reasoningEffort == null || frame.reasoningEffort in setOf("low", "medium", "high"))
             assertNull(frame.approvalPolicy)
-            // A pick on top of the garbage is remembered without a crash, and is valid.
             assertTrue(h.model.selectMode("plan", "claude"))
             runCurrent()
             assertEquals(JsStr("plan"), (h.store.prefsOf(A, "claude") as JsObj)["mode"])
         }
+        // lib/draft-form.ts normalizeId: a non-string mode is "", so Claude's cold Auto; a string is trimmed, kept.
+        val number = seeded(providerPrefs("claude" to JsObj.of("mode" to JsNum(42.0))))
+        number.model.selectProvider("claude")
+        assertEquals("bypassPermissions", number.mode())
+        val odd = seeded(providerPrefs("claude" to JsObj.of("mode" to JsStr(" plan‮"))))
+        odd.model.selectProvider("claude")
+        assertEquals("plan‮", odd.mode())
     }
 
     // --- r2 ------------------------------------------------------------------------------------------
@@ -403,47 +412,35 @@ class DraftSessionOptionsTest {
     /** `work` re-extended to opencode (the operator edited the profile). */
     private val workAsOpencode = catalog.map { if (it.key == "work") ProviderCatalogEntry("work", "opencode", "ready", listOf(SessionModelOption("oc", "OC")), label = "Work", profileId = "work") else it }
 
+    /** ta-coik.4: a pick is stored as lib/draft-form.ts mergeDraftPreferences writes it (no app-side provider field). */
     @Test
-    fun aPickRecordsTheProviderItWasMadeFor() = runTest {
+    fun aPickIsStoredAsTheWebStoresIt() = runTest {
         val h = harness()
         h.model.selectProviderAndModel("work", "opus")
         assertTrue(h.model.selectMode("plan", "claude"))
         runCurrent()
         val row = h.store.prefsOf(A, "work") as JsObj
         assertEquals(JsStr("plan"), row["mode"])
-        assertEquals(JsStr("claude"), row[DraftComposerModel.PREF_PROVIDER])
+        assertEquals(setOf("model", "mode"), row.keys)
     }
 
-    /** r2 (security F1): a stored Auto made for Claude never becomes opencode's Auto chip. */
+    /** ta-coik.4: a stored mode follows the row key, as on the web (lib/draft-form.ts providerPreferences[key]). */
     @Test
-    fun aStoredModeFollowsTheProviderNotTheRowKey() = runTest {
-        val stored = providerPrefs("work" to JsObj.of("mode" to JsStr("bypassPermissions"), DraftComposerModel.PREF_PROVIDER to JsStr("claude")))
-        // Positive control: still Claude, the stored choice applies.
-        val same = seeded(providerPrefs("work" to JsObj.of("mode" to JsStr("plan"), DraftComposerModel.PREF_PROVIDER to JsStr("claude"))))
-        same.model.selectProvider("work")
-        assertEquals("plan", same.mode())
-        // The profile now extends opencode: its stored mode is absent, opencode's default applies.
-        val h = seeded(stored)
+    fun aStoredModeFollowsTheRowKeyAsOnTheWeb() = runTest {
+        // The profile now extends opencode: its stored Auto applies to the row, as the web's reducer does.
+        val h = seeded(providerPrefs("work" to JsObj.of("mode" to JsStr("bypassPermissions"), "provider" to JsStr("claude"))))
         h.push(workAsOpencode)
         h.model.selectProvider("work")
-        assertEquals("opencode's default (Build), not its Auto", "", h.mode())
+        assertEquals("bypassPermissions", h.mode())
         val frame = h.send()
         assertEquals("opencode", frame.provider)
-        assertNull("no approvalPolicy never", frame.approvalPolicy)
         assertEquals("bypassPermissions", frame.permissionMode)
-        // A record with no provider at all is absent too (none was ever written by a release).
-        val legacy = seeded(providerPrefs("work" to JsObj.of("mode" to JsStr("bypassPermissions"))))
-        legacy.push(workAsOpencode)
-        legacy.model.selectProvider("work")
-        assertEquals("", legacy.mode())
-    }
-
-    @Test
-    fun aRetiredRestrictiveModeWithNoProviderStillLandsOnManual() = runTest {
-        val h = seeded(providerPrefs("claude" to JsObj.of("mode" to JsStr("dontAsk"), "autoMode" to JsBool.TRUE)))
-        h.model.selectProvider("claude")
-        assertEquals("default", h.mode())
-        assertEquals("default", h.send().permissionMode)
+        assertEquals("use-draft-composer.ts:311,335: opencode's Auto", "never", frame.approvalPolicy?.value)
+        // Positive control: an untouched row starts on its provider's default.
+        val fresh = harness()
+        fresh.push(workAsOpencode)
+        fresh.model.selectProvider("work")
+        assertEquals("", fresh.mode())
     }
 
     /** r2 (security F1): a tap on rows drawn for Claude that lands after the row became opencode. */
@@ -467,51 +464,41 @@ class DraftSessionOptionsTest {
         assertEquals("never", h.send().approvalPolicy?.value)
     }
 
-    /** r2 (security F2): only efforts the server's bound admits, at most MAX_ITEMS of them. */
+    /** ta-coik.4: the Effort control lists every variant the catalog sends (draft-composer.tsx:119-125), and the frame sends the pick. */
     @Test
-    fun effortsAreHeldToTheServersBound() {
-        val edge = "é".repeat(100) // 200 bytes
+    fun effortsAreTheCatalogsVariantsAsTheWebListsThem() {
+        val over = "é".repeat(100) + "x" // 201 bytes
         val entry = ProviderCatalogEntry(
             "claude", "claude", "ready",
-            listOf(SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("", "Empty"), ModelVariantOption("x".repeat(201), "Huge"), ModelVariantOption(edge + "x", "Over"), ModelVariantOption(edge, "Edge"), ModelVariantOption("high", "High")))),
+            listOf(SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("", "Empty"), ModelVariantOption(over, "Over"), ModelVariantOption("high", "High")))),
         )
-        assertEquals(listOf(edge, "high"), DraftSessionOptionsModel.offeredEfforts(entry, "opus").map { it.value })
-        val o = DraftSessionOptionsModel.of(DraftComposerState(form = form("claude", "opus"), entries = listOf(entry)))
-        assertEquals(listOf(edge, "high"), o.effort!!.options.map { it.value })
-        val many = ProviderCatalogEntry("claude", "claude", "ready", listOf(SessionModelOption("opus", "Opus", variants = (1..100_000).map { ModelVariantOption("v$it", "V$it") })))
-        val offered = DraftSessionOptionsModel.offeredEfforts(many, "opus")
-        assertEquals(LabelText.MAX_ITEMS, offered.size)
-        assertEquals(LabelText.MAX_ITEMS, DraftSessionOptionsModel.of(DraftComposerState(form = form("claude", "opus"), entries = listOf(many))).effort!!.options.size)
-        // The frame refuses a value past the cap and an overlong one.
+        assertEquals(listOf("", over, "high"), DraftSessionOptionsModel.offeredEfforts(entry, "opus").map { it.value })
+        val many = ProviderCatalogEntry("claude", "claude", "ready", listOf(SessionModelOption("opus", "Opus", variants = (1..1_000).map { ModelVariantOption("v$it", "V$it") })))
+        assertEquals(1_000, DraftSessionOptionsModel.offeredEfforts(many, "opus").size)
         val picked = DraftForm.INITIAL_USER_MODIFIED.with("reasoningEffort" to JsBool.TRUE)
-        assertNull(CreateFrame.build(form("claude", "opus", effort = "v250").put("cwd", JsStr("/w")), many, picked, "r").reasoningEffort)
-        assertEquals("v200", CreateFrame.build(form("claude", "opus", effort = "v200").put("cwd", JsStr("/w")), many, picked, "r").reasoningEffort)
-        assertNull(CreateFrame.build(form("claude", "opus", effort = edge + "x").put("cwd", JsStr("/w")), entry, picked, "r").reasoningEffort)
+        assertEquals("v250", CreateFrame.build(form("claude", "opus", effort = "v250").put("cwd", JsStr("/w")), many, picked, "r").reasoningEffort)
+        assertEquals(over, CreateFrame.build(form("claude", "opus", effort = over).put("cwd", JsStr("/w")), entry, picked, "r").reasoningEffort)
     }
 
-    /** r2 (verifier F1): the picked model leaves the live catalog: Effort hides and nothing is dropped silently. */
+    /** The picked model leaves the live catalog: Effort falls back to the first row's variants (draft-composer.tsx:121-123). */
     @Test
-    fun anEffortThatCanBePickedIsAnEffortThatIsSent() = runTest {
+    fun aModelTheRowNoLongerListsShowsTheFirstRowsEfforts() = runTest {
         val h = harness()
         h.model.selectProviderAndModel("claude", "opus")
-        assertTrue(DraftSessionOptionsModel.of(h.model.state.value).effort != null)
-        // The server drops opus from the row (haiku has no variant, so the first-row fallback would show one).
         h.push(catalog.map { if (it.key == "claude") it.copy(models = listOf(SessionModelOption("sonnet", "Sonnet", variants = variants), SessionModelOption("haiku", "Haiku"))) else it })
         assertEquals("the pick is kept (userModified)", "opus", (h.model.state.value.form["model"] as JsStr).value)
-        assertNull("no Effort control for a model the row no longer lists", DraftSessionOptionsModel.of(h.model.state.value).effort)
-        assertFalse(h.model.selectEffort("high"))
-        assertNull(h.send().reasoningEffort)
+        assertEquals(listOf("low", "medium", "high"), DraftSessionOptionsModel.of(h.model.state.value).effort!!.options.map { it.value })
+        assertTrue(h.model.selectEffort("high"))
+        assertEquals("high", h.send().reasoningEffort)
     }
 
-    /** r2 (verifier F1), as a property: the Effort control lists exactly what the frame would send. */
+    /** ta-coik.4, as a property: a picked, non-empty effort is sent for every model, listed or not. */
     @Test
-    fun theEffortControlAndTheFrameAgreeForEveryModel() {
+    fun aPickedEffortIsSentForEveryModel() {
         val picked = DraftForm.INITIAL_USER_MODIFIED.with("reasoningEffort" to JsBool.TRUE)
         for (entry in catalog) for (model in listOf("", "opus", "haiku", "gpt-5", "oc", "pi-1", "gone", "custom")) for (effort in listOf("low", "medium", "high", "max")) {
             val f = form(entry.key, model, effort).put("cwd", JsStr("/w"))
-            val shown = DraftSessionOptionsModel.of(entry, f).effort?.options.orEmpty().map { it.value }
-            val sent = CreateFrame.build(f, entry, picked, "r").reasoningEffort
-            assertEquals("${entry.key}/$model/$effort", effort in shown, sent == effort)
+            assertEquals("${entry.key}/$model/$effort", effort, CreateFrame.build(f, entry, picked, "r").reasoningEffort)
         }
     }
 }
