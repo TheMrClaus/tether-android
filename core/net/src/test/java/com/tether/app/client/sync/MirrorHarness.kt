@@ -312,14 +312,20 @@ class MirrorHarness(
         }
     }
 
-    /** Every frame sent on [ws] before this one has been handled once the client shows the barrier. */
-    fun serverBarrier() {
+    /**
+     * Every frame sent on [ws] before this one has been handled once the client shows the barrier.
+     * The barrier's OWN handling may still be running (the client lists the session before it
+     * enqueues its mirror upsert); frames are handled one at a time, so a later barrier proves it
+     * done (ta-194). Returns the barrier's session id.
+     */
+    fun serverBarrier(): String {
         val id = "barrier-${System.nanoTime()}"
         ws.send(
             """{"type":"created","session":{"id":"$id","provider":"claude","name":"b","cwd":"/w","status":"ready",
                "startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}}""",
         )
         await(client.sessions) { list -> list.any { it.id == id } }
+        return id
     }
 
     fun <T> await(flow: StateFlow<T>, predicate: (T) -> Boolean): T =

@@ -3,6 +3,7 @@ package com.tether.app.ui.shell
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
@@ -72,7 +73,9 @@ class SettingsRotationTest {
         rule.waitForIdle()
         rule.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
         val tag = SettingsPanelTags.toggle(GeneralToggle.ConfirmBeforeEnd)
-        rule.waitUntil(5_000) { runCatching { rule.onNodeWithTag(tag).assertIsOn() }.isSuccess }
+        // ta-9j0x: the toggle reads On (the default) before the preferences load, but is enabled only
+        // once the draft is seeded from them; a tap before that is dropped.
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithTag(tag).assertIsOn().assertIsEnabled() }.isSuccess }
         rule.onNodeWithTag(tag).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(tag).assertIsOff()
