@@ -172,7 +172,7 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
         )
         PasskeyEmpty -> DevicesFixtures.seed().copy(passkeys = DevicesFixtures.NO_PASSKEYS)
         PasskeyAdding -> DevicesFixtures.seed().copy(securityBusy = DevicesAction.AddPasskey)
-        PasskeyDuplicate -> DevicesFixtures.seed().copy(securityLine = DevicesLine(DevicesCopy.PASSKEY_DUPLICATE, error = true))
+        PasskeyDuplicate -> DevicesFixtures.seed().copy(passkeys = DevicesFixtures.NO_PASSKEYS, securityLine = DevicesLine(DevicesCopy.PASSKEY_DUPLICATE, error = true))
         PasskeyAdded -> DevicesFixtures.seed().copy(
             passkeys = DevicesFixtures.PASSKEYS.copy(passkeys = listOf(PasskeyShapes.NEW_KEY) + DevicesFixtures.PASSKEYS.passkeys),
             securityLine = DevicesLine(DevicesCopy.PASSKEY_ADDED, error = false),

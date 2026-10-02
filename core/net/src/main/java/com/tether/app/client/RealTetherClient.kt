@@ -184,6 +184,8 @@ private const val PASSKEY_BODY_CAP: Long = 64L * 1024L
 
 /** The app's words for a passkey sign-in that went wrong on the phone (the server's own are shown as they come). */
 object PasskeyLoginCopy {
+    /** r2 (security F1): the app's phrase wherever a passkey is refused for an http address. */
+    const val NEEDS_HTTPS = "Passkeys need an https:// address."
     const val WRONG_RP = "This server asked for a passkey for another address, so none was offered. Sign in with the address the console itself uses."
     const val UNREADABLE = "The server sent an unusable passkey challenge."
     const val UNREADABLE_ANSWER = "The passkey answer could not be read, so nothing was sent."
@@ -779,6 +781,7 @@ class RealTetherClient(
     /**
      * T10.5 (use-login-flow.ts runPasskeyCeremony): three uncredentialed steps, each through [authHttp]
      * (never a redirect) to the server typed here and nowhere else.
+     *  0. r2 (security F1): an https server, or nothing is sent at all.
      *  1. /healthz: the native window, as for a password.
      *  2. `POST /api/auth/passkey/login/options {}` (JSON, no Origin: a native caller, so the server
      *     issues the legacy cookie name the app reads) -> `{ challengeId, options }`. The options go to
@@ -790,6 +793,8 @@ class RealTetherClient(
     override suspend fun passkeyLogin(baseUrl: String, passkeys: PasskeyAuthenticator): LoginResult = withContext(Dispatchers.IO) {
         val normalized = normalizeBaseUrl(baseUrl)
             ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
+        // r2 (security F1): https only, decided before anything is sent (see Passkeys.kt).
+        if (!PasskeyRules.ceremonyAllowed(normalized)) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.NEEDS_HTTPS)
         if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
         if (!passkeys.available) return@withContext LoginResult.PasskeyFailed(PasskeyLoginCopy.UNSUPPORTED)
 

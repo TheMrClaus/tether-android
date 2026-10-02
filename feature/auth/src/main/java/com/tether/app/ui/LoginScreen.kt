@@ -96,6 +96,7 @@ private const val PROBE_RETRY_MS = 400L
 object LoginTags {
     const val Passkey = "login-passkey"
     const val PasskeyOr = "login-passkey-or"
+    const val PasskeyNeedsHttps = "login-passkey-needs-https"
 }
 
 /**
@@ -126,6 +127,8 @@ class LoginUi(
     val onSubmit: () -> Unit,
     /** T10.5: use-login-flow.ts `passkeyReady` (see [passkeyReady]), on the password path. */
     val passkeyReady: Boolean = false,
+    /** r2 (security F1): a passkey would be ready but the address is http: none offered, and why. */
+    val passkeyNeedsHttps: Boolean = false,
     val onPasskey: () -> Unit = {},
 ) {
     val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
@@ -227,7 +230,9 @@ fun LoginScreen(
     var submitAgain: () -> Unit = {}
     var passkeyAgain: () -> Unit = {}
 
-    val passkeyOffered = mode == AuthMode.Password && hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
+    val passkeyPossible = mode == AuthMode.Password && hostnameOf(baseUrl).isNotEmpty() && passkeyReady(requirements, authenticator.available)
+    // r2 (security F1): never offered for an http address.
+    val passkeyOffered = passkeyPossible && passkeyAddressAllowed(baseUrl)
 
     /**
      * use-login-flow.ts signInWithPasskey: one ceremony, nothing retried. A dismissed prompt is the
@@ -379,6 +384,7 @@ fun LoginScreen(
         onCode = { code = it.uppercase().take(CODE_FIELD_MAX) },
         onSubmit = ::submit,
         passkeyReady = passkeyOffered,
+        passkeyNeedsHttps = passkeyPossible && !passkeyOffered,
         onPasskey = ::passkey,
     )
     when (surface) {
@@ -435,11 +441,11 @@ private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
 }
 
 @Composable
-private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope) {
+private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, description: String = "Dashboard password") {
     TetherInputWell(
         value = ui.password,
         onValueChange = ui.onPassword,
-        modifier = modifier.semantics { contentDescription = "Dashboard password" },
+        modifier = modifier.semantics { contentDescription = description },
         placeholder = "Password",
         singleLine = true,
         enabled = !ui.busy,
@@ -687,8 +693,12 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier) {
 /** studio-login.tsx's passkey key, above the password form, with its "or" separator (T10.5). */
 @Composable
 private fun StudioPasskey(ui: LoginUi) {
-    if (!ui.passkeyReady) return
     val t = LocalTetherTokens.current
+    if (ui.passkeyNeedsHttps) {
+        Text(PASSKEY_NEEDS_HTTPS, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp, modifier = Modifier.testTag(LoginTags.PasskeyNeedsHttps))
+        return
+    }
+    if (!ui.passkeyReady) return
     TetherKey(
         onClick = ui.onPasskey,
         modifier = Modifier.fillMaxWidth().testTag(LoginTags.Passkey),
@@ -763,6 +773,7 @@ private fun RetroLogin(ui: LoginUi) {
             RetroMenuItem("password", selected = ui.mode == AuthMode.Password, enabled = !ui.busy) { ui.onMode(AuthMode.Password) }
             RetroMenuItem("pairing code", selected = ui.mode == AuthMode.Pairing, enabled = !ui.busy) { ui.onMode(AuthMode.Pairing) }
         }
+        if (ui.passkeyNeedsHttps) MonoText("passkeys need an https:// address", t.faint, Modifier.testTag(LoginTags.PasskeyNeedsHttps), fontSize = 11.5.sp)
         if (ui.passkeyReady) {
             // retro-login.tsx's `retroMenuItem`: "›" then the line, 44dp like every key.
             TetherKey(
@@ -776,7 +787,7 @@ private fun RetroLogin(ui: LoginUi) {
         when (ui.mode) {
             AuthMode.Password -> if (ui.passwordEnabled) {
                 if (ui.usernameShown) LabeledRow("login:", 88) { UsernameField(ui, it, JetBrainsMono) }
-                LabeledRow("password:", 88) { mod -> RetroPromptWithEnter(mod, ui) { PasswordField(ui, it, JetBrainsMono) } }
+                LabeledRow("password:", 88) { mod -> RetroPromptWithEnter(mod, ui) { PasswordField(ui, it, JetBrainsMono, if (ui.passkeyReady) RETRO_PASSWORD_WITH_PASSKEY else "Dashboard password") } }
             }
             AuthMode.Pairing -> LabeledRow("code:", 88) { mod -> RetroPromptWithEnter(mod, ui) { CodeField(ui, it) } }
         }

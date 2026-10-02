@@ -74,6 +74,7 @@ object DevicesTags {
     const val AddPasskey = "passkeys-add"
     const val PasskeyLabel = "passkeys-label"
     const val PasskeyUnavailable = "passkeys-unavailable"
+    const val PasskeyNeedsHttps = "passkeys-needs-https"
     const val PasswordToggle = "passkeys-password"
     const val SessionsChecking = "sessions-checking"
     const val SignOutOthers = "sessions-sign-out-others"
@@ -171,7 +172,8 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         // once a passkey is added, as the web's does.
         var label by remember(c) { mutableStateOf("") }
         LaunchedEffect(c.passkeysAdded) { if (c.passkeysAdded > 0) label = "" }
-        val canAdd = view != null && view.passkeysUsable && c.authenticator.available && !busy
+        val https = c.origin?.let(com.tether.app.client.PasskeyRules::ceremonyAllowed) == true
+        val canAdd = view != null && view.passkeysUsable && c.authenticator.available && https && !busy
         val adding = c.securityBusy == DevicesAction.AddPasskey
         // The web's `settings-passkey-add`: stacked, the key full width, on a phone; one row when wide.
         val field: @Composable (Modifier) -> Unit = { m ->
@@ -199,6 +201,8 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
                 }
             }
             if (!c.authenticator.available) MutedLine(DevicesCopy.PASSKEY_UNAVAILABLE, DevicesTags.PasskeyUnavailable, rule = false)
+            // r2 (security F1): an http console is never asked for a passkey from the phone.
+            else if (!https) MutedLine(DevicesCopy.PASSKEY_NEEDS_HTTPS, DevicesTags.PasskeyNeedsHttps, rule = false)
         }
         if (view != null) {
             SettingsToggleRow(
@@ -328,7 +332,7 @@ private fun PasskeyLabelField(text: String, narrow: Boolean, enabled: Boolean, o
     val style = settingsText(LocalTetherTypography.current.ui, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     BasicTextField(
         value = text,
-        onValueChange = { if (it.length <= com.tether.app.client.DeviceSecurityJson.MAX_LABEL_SENT) onChange(it) },
+        onValueChange = { if (it.length <= DevicesCopy.PASSKEY_LABEL_MAX) onChange(it) },
         enabled = enabled,
         singleLine = true,
         textStyle = style.copy(color = t.ink),

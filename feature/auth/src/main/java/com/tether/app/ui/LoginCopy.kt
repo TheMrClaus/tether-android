@@ -1,6 +1,7 @@
 package com.tether.app.ui
 
 import com.tether.app.client.IncompatibleReason
+import com.tether.app.client.LabelText
 import com.tether.app.client.Incompatibility
 import com.tether.app.client.LoginResult
 import com.tether.app.client.PairResult
@@ -43,6 +44,29 @@ enum class LoginPhase { Ready, Checking, Verifying, VerifyingPasskey, Success, E
  */
 fun passkeyReady(requirements: SignInRequirements?, available: Boolean): Boolean =
     requirements != null && requirements.passkeyCount > 0 && requirements.passkeysUsable && available
+
+/**
+ * r2 (security F1): a passkey is offered only for an https address (the typed URL as the client
+ * normalises it: no scheme = https). An http one offers none and says [PASSKEY_NEEDS_HTTPS] instead.
+ */
+fun passkeyAddressAllowed(rawUrl: String): Boolean {
+    val trimmed = rawUrl.trim().trimEnd('/')
+    if (trimmed.isEmpty()) return false
+    val withScheme = if ("://" in trimmed) trimmed else "https://$trimmed"
+    return withScheme.toHttpUrlOrNull()?.isHttps == true
+}
+
+const val PASSKEY_NEEDS_HTTPS = com.tether.app.client.PasskeyLoginCopy.NEEDS_HTTPS
+
+/** r2: retro-login.tsx:213, the password line's accessible name while a passkey is ready. */
+const val RETRO_PASSWORD_WITH_PASSKEY = "Dashboard password — or press Enter alone to use a passkey"
+
+/**
+ * r2 (security F4): server-supplied text (a refusal's `{error}`, a transport message) as the login
+ * screen shows it: through the same cleanup the Devices panel uses (hidden and bidi characters dropped,
+ * whitespace folded, bounded at [LabelText.MAX_ERROR]); [fallback] when nothing visible is left.
+ */
+fun serverText(text: String?, fallback: String): String = LabelText.error(text).ifEmpty { fallback }
 
 /** The web's notice when the operator closes the passkey prompt (not an error: back to ready). */
 const val PASSKEY_DISMISSED_NOTICE = "Passkey prompt dismissed."
@@ -122,15 +146,15 @@ fun versionCopy(incompatibility: Incompatibility): String = when (incompatibilit
 fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? = when (result) {
     // A dismissed passkey prompt is a notice, not an error ([PASSKEY_DISMISSED_NOTICE]).
     is LoginResult.Success, is LoginResult.LocalNetworkBlocked, is LoginResult.PasskeyDismissed -> null
-    is LoginResult.PasskeyFailed -> result.message.ifBlank { "Passkey sign-in failed." }
-    is LoginResult.BadPassword -> result.message.ifBlank { "Those credentials are not correct." } +
+    is LoginResult.PasskeyFailed -> serverText(result.message, "Passkey sign-in failed.")
+    is LoginResult.BadPassword -> serverText(result.message, "Those credentials are not correct.") +
         if (usernameHint) " $USERNAME_MISSING_HINT" else ""
     is LoginResult.GatewayRefused -> gatewayRefusedCopy(result)
-    is LoginResult.RateLimited -> result.message.ifBlank { "Too many attempts. Try again in a few minutes." }
+    is LoginResult.RateLimited -> serverText(result.message, "Too many attempts. Try again in a few minutes.")
     is LoginResult.PasswordDisabled ->
-        result.message.ifBlank { "Password sign-in is turned off for this console." } +
+        serverText(result.message, "Password sign-in is turned off for this console.") +
             " Pair this device with a code instead."
-    is LoginResult.Unreachable -> result.message.ifBlank { "Could not reach the server." }
+    is LoginResult.Unreachable -> serverText(result.message, "Could not reach the server.")
     is LoginResult.VersionMismatch -> versionCopy(result.incompatibility)
 }
 
@@ -148,10 +172,10 @@ fun gatewayRefusedCopy(result: LoginResult.GatewayRefused): String =
 /** Error line for a pairing attempt; null = success or the local-network flow takes over. */
 fun pairErrorCopy(result: PairResult): String? = when (result) {
     is PairResult.Success, is PairResult.LocalNetworkBlocked -> null
-    is PairResult.Rejected -> result.message.ifBlank { "That pairing code is not valid or has expired." }
-    is PairResult.RateLimited -> result.message.ifBlank { "Too many pairing attempts. Try again in a few minutes." }
-    is PairResult.NotSupported -> result.message.ifBlank { "This server does not support device pairing." }
-    is PairResult.Unreachable -> result.message.ifBlank { "Could not reach the server." }
+    is PairResult.Rejected -> serverText(result.message, "That pairing code is not valid or has expired.")
+    is PairResult.RateLimited -> serverText(result.message, "Too many pairing attempts. Try again in a few minutes.")
+    is PairResult.NotSupported -> serverText(result.message, "This server does not support device pairing.")
+    is PairResult.Unreachable -> serverText(result.message, "Could not reach the server.")
     is PairResult.VersionMismatch -> versionCopy(result.incompatibility)
 }
 

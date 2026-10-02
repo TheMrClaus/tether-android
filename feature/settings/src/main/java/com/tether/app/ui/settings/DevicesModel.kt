@@ -141,6 +141,12 @@ object DevicesCopy {
     /** T10.5: the app's own words for what only a phone can meet. */
     const val PASSKEY_UNSUPPORTED = "No passkey provider on this phone can create one. Turn one on in Android Settings, then try again."
     const val PASSKEY_UNAVAILABLE = "This phone cannot create passkeys here."
+    /** r2 (security F1). */
+    const val PASSKEY_NEEDS_HTTPS = com.tether.app.client.PasskeyLoginCopy.NEEDS_HTTPS
+    /** r2 (security F5): the ceremony made a passkey the server never saved. */
+    const val PASSKEY_ORPHANED = "The passkey was created on this phone but not saved on the server; you can remove it from your passkey manager."
+    /** r2: the web's `passkey-label-input` maxLength (the server cuts at 64). */
+    const val PASSKEY_LABEL_MAX = 60
     const val PASSKEY_WRONG_RP = "This server asked for a passkey for another address, so none was created. Add it from the address the console itself uses."
     const val SIGN_OUT_OTHERS_BODY = "This phone stays signed in. Every other session closes immediately."
     const val SELF_SIGNS_OUT = "This is the phone you are using: it is signed out of this server, and you sign in again from the start screen."
@@ -469,6 +475,8 @@ class DevicesController(
      */
     fun addPasskey(label: String): Boolean {
         if (!authenticator.available || passkeys?.passkeysUsable != true) return false
+        // r2 (security F1): no ceremony and no call for an http server.
+        if (origin == null || !PasskeyRules.ceremonyAllowed(origin)) return false
         return write(DevicesArea.Security, DevicesAction.AddPasskey) { o ->
             val options = source.passkeyRegistrationOptions(o)
             if (!mine(options)) return@write
@@ -482,14 +490,23 @@ class DevicesController(
                 PasskeyCeremony.Unsupported, PasskeyCeremony.NoCredential -> return@write failLine(DevicesCopy.PASSKEY_UNSUPPORTED)
                 PasskeyCeremony.Failed -> return@write failLine(DevicesCopy.ADD_PASSKEY_FAILED)
             }
-            val r = source.registerPasskey(o, challenge.challengeId, answer, label.trim().ifEmpty { DevicesCopy.DEFAULT_PASSKEY_LABEL })
-            if (!mine(r)) return@write
-            if (r is SecurityResult.Ok) {
+            // r2 (security F5): from here a passkey exists on this phone. Unless the server confirms it
+            // saved it, the line says so (whatever else went wrong), so the operator can remove it.
+            val r = try {
+                source.registerPasskey(o, challenge.challengeId, answer, label.trim().ifEmpty { DevicesCopy.DEFAULT_PASSKEY_LABEL })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                return@write failLine(DevicesCopy.PASSKEY_ORPHANED)
+            }
+            if (r is SecurityResult.Ok && mine(r)) {
                 securityLine = DevicesLine(DevicesCopy.PASSKEY_ADDED, false)
                 passkeysAdded += 1
                 refreshSecurity()
             } else {
-                settle(r, DevicesArea.Security, DevicesCopy.ADD_PASSKEY_FAILED)
+                if (r is SecurityResult.OwnerSignInNeeded && mine(r)) securityOwnerNeeded = true
+                val why = (r as? SecurityResult.Refused)?.takeIf { mine(it) }?.let { DevicesRules.failure(it, DevicesCopy.ADD_PASSKEY_FAILED) }
+                failLine(listOfNotNull(why, DevicesCopy.PASSKEY_ORPHANED).joinToString(" "))
             }
         }
     }

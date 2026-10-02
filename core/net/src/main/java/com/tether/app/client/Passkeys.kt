@@ -28,6 +28,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.util.Locale
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T10.5: passkeys through Android Credential Manager, the app's side of the web's two WebAuthn
@@ -46,6 +47,11 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 // Tether server, so a server could hand the app options naming ANOTHER console's rpId and relay the
 // signed answer there. The app therefore asks Credential Manager only for the rpId of the server it
 // is talking to ([PasskeyRules.rpIdMatches]); anything else is refused before any prompt appears.
+// r2 (security F1): and only over https. Neither the rpId nor the android origin carries a scheme, so
+// over http an on-path attacker posing as the server could pass the real server's options through and
+// relay the answer to its https console. No ceremony starts and nothing is sent for an http server,
+// loopback included. (Residual: neither carries a port either, so any service on the same hostname,
+// on any port, could relay an app passkey the same way.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** What one passkey ceremony came to. */
@@ -132,12 +138,21 @@ object PasskeyRules {
         return PasskeyChallenge(id, options, rpId)
     }
 
+    /** r2 (security F1): a ceremony runs only against an https server (no loopback exception). */
+    fun ceremonyAllowed(server: HttpUrl): Boolean = server.isHttps
+
+    /** [ceremonyAllowed] for a canonical origin or a typed URL; false when it does not parse. */
+    fun ceremonyAllowed(origin: String): Boolean = origin.toHttpUrlOrNull()?.let(::ceremonyAllowed) == true
+
     /**
-     * The anti-relay guard (see the file header): the options must name exactly the host of the server
-     * the app is talking to. A browser also allows a parent domain; the app does not (fail closed).
+     * The anti-relay guard (see the file header): an https server, and options naming exactly its host.
+     * A browser also allows a parent domain; the app does not (fail closed). r2 (security F2): compared
+     * as ASCII only: OkHttp's host is already lower-case ASCII (an IDN as punycode), so a non-ASCII rpId
+     * is refused and the rest is compared after an ASCII-only lower-casing (`Locale.ROOT`), never by
+     * Unicode case folding (which would let a dotless ı, a long ſ or the Kelvin sign stand in for i, s, k).
      */
     fun rpIdMatches(rpId: String, server: HttpUrl): Boolean =
-        rpId.isNotEmpty() && rpId.equals(server.host, ignoreCase = true)
+        ceremonyAllowed(server) && rpId.isNotEmpty() && rpId.all { it.code < 0x80 } && rpId.lowercase(Locale.ROOT) == server.host
 
     /** [rpIdMatches] against a canonical origin (`https://host[:port]`). */
     fun rpIdMatches(rpId: String, origin: String): Boolean =
