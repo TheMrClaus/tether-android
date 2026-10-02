@@ -82,12 +82,47 @@ fun readyFrame(
     append(""""workspaceRoot":${if (workspaceRoot == null) "null" else "\"$workspaceRoot\""}}""")
 }
 
+/** [ConnectionHarness.frame]: no byte reached the server for this long = no frame is coming. */
+const val FRAME_IDLE_SECONDS = 20L
+
+/** [ConnectionHarness.frame]: a hang guard, whatever the progress. */
+const val FRAME_HARD_CAP_SECONDS = 180L
+
+/** A server socket factory whose accepted sockets add every byte read to [counter] (TLS wraps them unchanged). */
+class CountingServerSocketFactory(private val counter: AtomicLong) : javax.net.ServerSocketFactory() {
+    private inner class CountingSocket : java.net.Socket() {
+        private val counted: java.io.InputStream by lazy {
+            object : java.io.FilterInputStream(super@CountingSocket.getInputStream()) {
+                override fun read(): Int = super.read().also { if (it >= 0) counter.incrementAndGet() }
+                override fun read(b: ByteArray, off: Int, len: Int): Int =
+                    super.read(b, off, len).also { if (it > 0) counter.addAndGet(it.toLong()) }
+            }
+        }
+
+        override fun getInputStream(): java.io.InputStream = counted
+    }
+
+    private fun counting() = object : java.net.ServerSocket() {
+        override fun accept(): java.net.Socket = CountingSocket().also { implAccept(it) }
+    }
+
+    override fun createServerSocket(): java.net.ServerSocket = counting()
+    override fun createServerSocket(port: Int): java.net.ServerSocket = counting().apply { bind(java.net.InetSocketAddress(port)) }
+    override fun createServerSocket(port: Int, backlog: Int): java.net.ServerSocket =
+        counting().apply { bind(java.net.InetSocketAddress(port), backlog) }
+    override fun createServerSocket(port: Int, backlog: Int, address: java.net.InetAddress?): java.net.ServerSocket =
+        counting().apply { bind(java.net.InetSocketAddress(address, port), backlog) }
+}
+
 /**
  * A MockWebServer "Tether" plus a RealTetherClient on a [ManualScheduler] and a
  * manual clock. Frames the client sends land in [received] in wire order.
  */
 class ConnectionHarness {
-    val server = MockWebServer()
+    /** Bytes the server has read off its accepted sockets (ta-wvz: [frame]'s progress signal). */
+    val serverBytesRead = AtomicLong()
+
+    val server = MockWebServer().apply { serverSocketFactory = CountingServerSocketFactory(serverBytesRead) }
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val sockets = LinkedBlockingQueue<WebSocket>()
     val received = LinkedBlockingQueue<String>()
@@ -176,8 +211,21 @@ class ConnectionHarness {
         return ws!!
     }
 
+    /**
+     * ta-wvz: the next client frame. The bound is on IDLENESS, not on the frame's size: it fails once
+     * [FRAME_IDLE_SECONDS] pass with no byte reaching the server, and keeps waiting while a large
+     * frame (a near-limit attachment send is ~15 MiB) is still arriving on a loaded box.
+     */
     fun frame(): JsonObject {
-        val text = received.poll(20, TimeUnit.SECONDS)
+        val hardDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FRAME_HARD_CAP_SECONDS)
+        var text: String? = null
+        var seen = serverBytesRead.get()
+        while (text == null && System.nanoTime() < hardDeadline) {
+            text = received.poll(FRAME_IDLE_SECONDS, TimeUnit.SECONDS)
+            val now = serverBytesRead.get()
+            if (now == seen) break
+            seen = now
+        }
         assertNotNull(
             "expected a client frame; connection=${client.connection.value} " +
                 "pending=${scheduler.pending().map { it.delayMs }} requests=${server.requestCount} log=${log.toList()}",

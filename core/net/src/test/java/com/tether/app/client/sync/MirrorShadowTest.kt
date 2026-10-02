@@ -137,13 +137,16 @@ class MirrorShadowTest {
                 "sessions":[{"id":"a","provider":"claude","name":"Alpha","cwd":"/w","status":"ready","startedAt":1,"updatedAt":5,
                 "pinned":true,"runtimeArchived":false,"mode":"headless"}]}""",
         )
+        val created = h.serverBarrier()
+        // ta-194: the `created` frame's mirror upsert is enqueued just after the list shows it; a
+        // second barrier is handled only once that frame's handler has returned.
         h.serverBarrier()
         val index = runBlocking { h.mirror.flush(); h.mirror.bind(h.origin)!! }
         val a = index.sessions.single { it.sessionId == "a" }
         assertTrue(a.pinned)
         assertEquals("Alpha", MirrorLink.decodeSession(a.json)!!.name)
         // The barrier session arrived as `created`: an upsert.
-        assertTrue(index.sessions.any { it.sessionId.startsWith("barrier-") })
+        assertTrue(index.sessions.any { it.sessionId == created })
     }
 
     @Test
