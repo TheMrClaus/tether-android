@@ -22,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -512,21 +511,16 @@ private fun NodeField(value: String, onChange: (String) -> Unit, placeholder: St
 private fun CredentialField(value: String, onChange: (String) -> Unit, style: TextStyle, modifier: Modifier) {
     val t = LocalTetherTokens.current
     var focused by remember { mutableStateOf(false) }
-    // r2 (verifier L2): a Cut deletes nothing (slice 3's shared guard).
-    val cutGuard = remember { CutGuard() }
-    val latestValue by rememberUpdatedState(value)
-    NoCopyScope(true, onRefusedClip = { clip -> cutGuard.undo(clip)?.let(onChange) }) {
+    // r2 (verifier L2), ta-oqx: a Cut deletes nothing and copies nothing: closed at its source (slice 3's shared guard).
+    NoCopyScope(true) { guard ->
         BasicTextField(
             value = value,
-            onValueChange = { typed ->
-                cutGuard.edited(latestValue, typed)
-                onChange(typed)
-            },
+            onValueChange = onChange,
             singleLine = false,
             textStyle = style.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Default),
-            modifier = modifier.testTag(NodeTags.Credential).semantics { contentDescription = NodesCopy.CREDENTIAL_LABEL }.onFocusChanged { focused = it.isFocused },
+            modifier = guard.then(modifier).testTag(NodeTags.Credential).semantics { contentDescription = NodesCopy.CREDENTIAL_LABEL }.onFocusChanged { focused = it.isFocused },
             decorationBox = { inner ->
                 ServerFieldBox(true, focused, style, if (value.isEmpty()) AnnotatedString(NodesCopy.CREDENTIAL_PLACEHOLDER) else null, inner, alignTop = true)
             },

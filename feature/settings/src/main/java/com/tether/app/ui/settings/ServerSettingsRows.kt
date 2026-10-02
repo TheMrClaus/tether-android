@@ -17,6 +17,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuComponent
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
+import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,8 +39,15 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.AndroidClipboard
 import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -46,6 +56,8 @@ import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.copyText
+import androidx.compose.ui.semantics.cutText
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -154,8 +166,6 @@ internal fun CommitField(
     // The value last refused (or under review): a focus loss or leaving never retries it (only Done does).
     var refused by remember(shown) { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf(false) }
-    // T10.3 r2: a Cut on a no-copy (secret) field takes nothing away (see [CutGuard]).
-    val cutGuard = remember { CutGuard() }
     val commit: (Boolean) -> Unit = { retry ->
         if (text != shown && text != sent && (retry || text != refused)) {
             when (val outcome = onCommit(text)) {
@@ -184,13 +194,13 @@ internal fun CommitField(
     DisposableEffect(Unit) { onDispose { if (leaves && !recreating() && latestBlurCommits(latestText)) latestCommit(false) } }
     val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     Column(modifier) {
-        NoCopyScope(noCopy, onRefusedClip = { clip -> cutGuard.undo(clip)?.let { text = it } }) {
+        // ta-oqx: a no-copy (secret) field's copy and cut are closed at their source ([NoCopyScope]).
+        NoCopyScope(noCopy) { guard ->
             BasicTextField(
                 value = text,
                 onValueChange = {
                     if (accept(it)) {
                         if (it != text) note = null
-                        cutGuard.edited(text, it)
                         text = it
                     }
                 },
@@ -208,7 +218,7 @@ internal fun CommitField(
                     commit(true)
                     focusManager.clearFocus()
                 }),
-                modifier = Modifier
+                modifier = guard
                     .fillMaxWidth()
                     .testTag(tag)
                     .semantics { contentDescription = label }
@@ -311,84 +321,96 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 /**
- * r2: with [on], the field's copy and cut never reach the clipboard (its writes are dropped; paste
- * still reads it) and the text toolbar offers neither. (A cut asked for another way, an
- * accessibility action or a hardware key, then only deletes the selection.)
+ * A secret field's copy and cut, closed (ta-78a, ta-oqx). With [on], [content] gets the [guard]
+ * modifier to put FIRST on its text field, and runs under a clipboard that drops every write.
+ *
+ * Every way the text field (foundation 1.12, the String BasicTextField) copies or cuts is closed
+ * where it starts, before anything is written or deleted:
+ * - its text menu: the new context menu (on by default from 1.12, `ComposeFoundationFlags.
+ *   isNewContextMenuEnabled`; it never reads [LocalTextToolbar]) keeps only Paste, Select all and
+ *   Autofill ([NoCopyMenu]: Copy, Cut, Share-style process-text and smart-selection items are
+ *   dropped, and so is any item a later version adds); the old [TextToolbar] path offers neither
+ *   ([NoCopyToolbar]);
+ * - hardware keys and an IME's cut or copy (sent to the field as KEYCODE_CUT / KEYCODE_COPY):
+ *   consumed before the field sees them ([NoCopyKeys]);
+ * - the accessibility Copy and Cut actions: replaced with ones that do nothing.
+ * Behind them, fail closed: whatever clipboard the host provides, nothing the field writes reaches
+ * it ([noCopyClipboard]); reads (paste) pass.
+ *
+ * ta-oqx N1: with cut stopped at its source nothing is deleted, so nothing has to be put back (the
+ * old CutGuard, which restored text from what a refused write carried, is gone).
+ * Re-check on every Compose upgrade: NoCopyGuardTest's menu-path test fails when the field stops
+ * using the new context menu.
+ */
+@Composable
+internal fun NoCopyScope(on: Boolean, content: @Composable (guard: Modifier) -> Unit) {
+    if (!on) return content(Modifier)
+    val clipboard = LocalClipboard.current
+    val toolbar = LocalTextToolbar.current
+    val guarded = remember(clipboard) { noCopyClipboard(clipboard) }
+    val menu = remember(toolbar) { NoCopyToolbar(toolbar) }
+    CompositionLocalProvider(LocalClipboard provides guarded, LocalTextToolbar provides menu) { content(NoCopyGuard) }
+}
+
+/**
+ * The secret field's own guard ([NoCopyScope]). It must come before the field's other modifiers:
+ * the menu filter and the key handler work from an ancestor of the field's own nodes, and the
+ * outermost semantics win over the field's own Copy and Cut actions.
+ */
+internal val NoCopyGuard: Modifier = Modifier
+    .filterTextContextMenuComponents { NoCopyMenu.keeps(it) }
+    .onPreviewKeyEvent { NoCopyKeys.copiesOrCuts(it) }
+    .semantics {
+        copyText { false }
+        cutText { false }
+    }
+
+/** The new text menu's items a secret field keeps: none of them reads the text. */
+internal object NoCopyMenu {
+    private val kept = setOf(TextContextMenuKeys.PasteKey, TextContextMenuKeys.SelectAllKey, TextContextMenuKeys.AutofillKey)
+
+    fun keeps(component: TextContextMenuComponent): Boolean = component.key in kept
+}
+
+/**
+ * The keys the text field turns into COPY or CUT (foundation 1.12 KeyMapping: Ctrl+C, Ctrl+Insert,
+ * Ctrl+X, KEYCODE_COPY, KEYCODE_CUT; Meta taken as Ctrl too). Shift+Insert (paste) and Shift+Delete
+ * (a plain deletion there) stay.
+ */
+internal object NoCopyKeys {
+    fun copiesOrCuts(e: KeyEvent): Boolean {
+        val k = e.key
+        if (k == Key.Copy || k == Key.Cut) return true
+        val shortcut = e.isCtrlPressed || e.isMetaPressed
+        return shortcut && (k == Key.C || k == Key.X || k == Key.Insert || k == Key.NumPadInsert)
+    }
+}
+
+/**
+ * The clipboard of a secret field, whatever [delegate] is: reads pass (paste), every write is
+ * dropped. An [AndroidClipboard] stays one (the text field's paste check reads its platform manager;
+ * foundation never writes through it), any other clipboard still has its writes dropped.
  */
 // AndroidClipboard is marked @VisibleForTesting, but the text field requires it (a plain Clipboard
 // throws in its paste check), so the guard implements it.
 @SuppressLint("VisibleForTests")
-@Composable
-internal fun NoCopyScope(on: Boolean, onRefusedClip: (CharSequence?) -> Unit = {}, content: @Composable () -> Unit) {
-    if (!on) return content()
-    val clipboard = LocalClipboard.current
-    val toolbar = LocalTextToolbar.current
-    val refused by rememberUpdatedState(onRefusedClip)
-    // The text field reads the platform manager for paste (AndroidClipboard); only writes are dropped.
-    val guarded = remember(clipboard) { (clipboard as? AndroidClipboard)?.let { NoCopyClipboard(it) { refused } } ?: clipboard }
-    val menu = remember(toolbar) { NoCopyToolbar(toolbar) }
-    CompositionLocalProvider(LocalClipboard provides guarded, LocalTextToolbar provides menu, content = content)
-}
+internal fun noCopyClipboard(delegate: Clipboard): Clipboard =
+    if (delegate is AndroidClipboard) NoCopyAndroidClipboard(delegate) else NoCopyPlainClipboard(delegate)
 
-/**
- * The clipboard of a secret field: reads pass (paste), every write is dropped and reported to
- * [refused] with the text it would have put there (T10.3 r2: the field's [CutGuard] uses it).
- */
 @SuppressLint("VisibleForTests")
-private class NoCopyClipboard(private val delegate: AndroidClipboard, private val refused: () -> (CharSequence?) -> Unit) : AndroidClipboard {
+private class NoCopyAndroidClipboard(private val delegate: AndroidClipboard) : AndroidClipboard {
     override val clipboardManager: android.content.ClipboardManager get() = delegate.clipboardManager
     override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
-    override suspend fun setClipEntry(clipEntry: ClipEntry?) {
-        val data = clipEntry?.clipData
-        refused()(if (data != null && data.itemCount > 0) data.getItemAt(0).text else null)
-    }
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
 }
 
-/**
- * T10.3 r2 (verifier L2): a Cut on a secret field (an accessibility action or a hardware key; the
- * menu offers none) must delete nothing. The text field's cut DELETES the selection first (its
- * onValueChange) and only then writes the clipboard, so dropping the write is not enough: the
- * field records its last edit here, and when the refused write carries exactly the text that edit
- * removed (the cut's signature), the field takes back the text it had. A Backspace over a selection
- * writes no clipboard, so it still deletes. Never saved state; holds what the field already holds.
- */
-internal class CutGuard(private val nanos: () -> Long = System::nanoTime) {
-    private var before: String? = null
-    private var after: String? = null
-    private var at = 0L
-
-    fun edited(before: String, after: String) {
-        this.before = before
-        this.after = after
-        at = nanos()
-    }
-
-    /**
-     * The text to put back when [clip] is what the last edit removed, written right after it (a
-     * cut writes in the same call; a later Copy of the same words is not a cut), else null.
-     * Forgets the edit either way.
-     */
-    fun undo(clip: CharSequence?): String? {
-        val b = before ?: return null
-        val a = after ?: return null
-        before = null
-        after = null
-        if (nanos() - at > CUT_WINDOW_NANOS) return null
-        val c = clip?.toString() ?: return null
-        if (c.isEmpty() || b.length != a.length + c.length) return null
-        val prefix = b.commonPrefixWith(a).length.coerceAtMost(a.length)
-        // The removed run may sit anywhere inside a repeated stretch; any split that matches is the cut.
-        for (i in prefix downTo 0) {
-            if (b.regionMatches(i, c, 0, c.length) && b.regionMatches(i + c.length, a, i, a.length - i) && b.regionMatches(0, a, 0, i)) return b
-        }
-        return null
-    }
-
-    private companion object {
-        const val CUT_WINDOW_NANOS = 500_000_000L
-    }
+private class NoCopyPlainClipboard(private val delegate: Clipboard) : Clipboard {
+    override val nativeClipboard: android.content.ClipboardManager get() = delegate.nativeClipboard
+    override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
 }
 
+/** The old [TextToolbar] menu (the new context menu turned off) of a secret field: no Copy, no Cut. */
 internal class NoCopyToolbar(private val delegate: TextToolbar) : TextToolbar by delegate {
     override fun showMenu(
         rect: Rect,

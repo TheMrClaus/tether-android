@@ -1013,7 +1013,8 @@ private fun DraftField(
     val t = LocalTetherTokens.current
     var focused by remember { mutableStateOf(false) }
     val style = serverFieldStyle(narrow)
-    NoCopyScope(secret) {
+    // ta-oqx N4: a secret draft's copy and cut are closed at their source too (a cut deletes nothing).
+    NoCopyScope(secret) { guard ->
         BasicTextField(
             value = value,
             onValueChange = onChange,
@@ -1022,7 +1023,7 @@ private fun DraftField(
             cursorBrush = SolidColor(t.violet),
             keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else KeyboardType.Text, autoCorrectEnabled = false, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
-            modifier = modifier.testTag(tag).semantics { contentDescription = label }.onFocusChanged { focused = it.isFocused },
+            modifier = guard.then(modifier).testTag(tag).semantics { contentDescription = label }.onFocusChanged { focused = it.isFocused },
             decorationBox = { inner -> ServerFieldBox(true, focused, style, if (value.isEmpty()) AnnotatedString(placeholder) else null, inner) },
         )
     }
