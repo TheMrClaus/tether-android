@@ -56,7 +56,7 @@ data class DevicesList(val devices: List<PairedDevice>, val pairings: List<Outst
  * prints nothing of it. Only [reveal] reads it, and only the revealed pairing card and its Copy key
  * call that. Never logged, saved or persisted.
  */
-class PairingCode internal constructor(private val value: String) {
+class PairingCode(private val value: String) {
     /** The plaintext, for the revealed card and the Copy key only. */
     fun reveal(): String = value
 

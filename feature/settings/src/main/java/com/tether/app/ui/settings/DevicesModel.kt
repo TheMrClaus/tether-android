@@ -1,0 +1,573 @@
+package com.tether.app.ui.settings
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import com.tether.app.client.AppSignIn
+import com.tether.app.client.DeviceSecuritySource
+import com.tether.app.client.FreshPairingCode
+import com.tether.app.client.LabelText
+import com.tether.app.client.OutstandingPairing
+import com.tether.app.client.PairedDevice
+import com.tether.app.client.Passkey
+import com.tether.app.client.PasskeyPolicySource
+import com.tether.app.client.PasskeysView
+import com.tether.app.client.SecurityResult
+import com.tether.app.client.SecuritySession
+import com.tether.app.client.SessionMethod
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+
+/*
+ * T10.4: Settings -> Devices below Notifications (settings-dialog.tsx 887c222 :2101-2102):
+ * SignInSecuritySection (Passkeys, Signed-in sessions) then PairedDevicesSection, editable from the
+ * phone like the web (owner, 2026-10-02; tether #236). Until #236 is deployed the server answers a
+ * phone sign-in 403 "This needs an owner sign-in …": the panel says so once, keeps what it can show,
+ * and asks again only when the operator taps Check again (never by itself).
+ */
+
+/** The web's words (paired-devices.tsx, sign-in-security.tsx, the two hooks) and the app's own where the web has none. */
+object DevicesCopy {
+    // Paired devices (paired-devices.tsx).
+    const val DEVICES_TITLE = "Paired devices"
+    const val DEVICES_CAPTION = "Native clients that hold their own access token for this server."
+    const val CODE_LABEL = "Pairing code"
+    const val CODE_SHOWN_ONCE = "Shown once."
+    const val CODE_NOTE = " Tether stores only a hash of this code, so it cannot be displayed again — enter it in the app before it expires, or pair again for a new one."
+    const val COPY = "Copy code"
+    const val COPIED = "Copied"
+    const val EXPIRED = "Expired. Pair again for a new code."
+    fun expiresIn(label: String) = "Expires in $label"
+    fun pairedLine(paired: String, seen: String) = "paired $paired · last seen $seen"
+    fun revokeLabel(label: String) = "Revoke $label"
+    const val REVOKE = "Revoke"
+    const val DEVICES_EMPTY = "Pairing lets the Tether Android app sign in with a token of its own, which is how a phone connects when this server sits behind an SSO proxy it cannot log in to."
+    const val DEVICES_CHECKING = "Checking paired devices…"
+    const val PAIR = "Pair a device"
+    const val PAIRING = "Pairing…"
+    fun pairHint(others: Int) = when (others) {
+        0 -> "Creates a one-time code, good for five minutes and one device."
+        1 -> "Creates a one-time code. One earlier code is still unclaimed and cannot be shown again."
+        else -> "Creates a one-time code. $others earlier codes are still unclaimed and cannot be shown again."
+    }
+    const val REVOKE_TITLE = "Revoke this device?"
+    fun revokeBody(label: String) = "$label loses access immediately and its live connection is closed. It has to be paired again with a new code."
+    const val REVOKE_CONFIRM = "Revoke device"
+    fun revoked(disconnected: Int) =
+        if (disconnected > 0) "Device revoked. $disconnected live connection${if (disconnected == 1) "" else "s"} closed." else "Device revoked."
+    const val DEVICES_LOAD_FAILED = "Paired devices could not be loaded."
+    const val PAIR_FAILED = "A pairing code could not be created."
+    const val UNUSABLE_CODE = "The server returned an unusable pairing code."
+    const val REVOKE_FAILED = "That device could not be revoked."
+
+    // Passkeys and sessions (sign-in-security.tsx).
+    const val PASSKEYS_TITLE = "Passkeys"
+    const val PASSKEYS_CAPTION = "A passkey replaces the password with your device’s own screen lock or security key. It is phishing-resistant, and you can register one for each device you sign in from."
+    const val SYNCED = "Synced"
+    fun passkeyLine(added: String, used: String?) = "added $added · " + (used?.let { "last used $it" } ?: "never used")
+    fun renameLabel(label: String) = "Rename $label"
+    fun removeLabel(label: String) = "Remove $label"
+    const val REMOVE = "Remove"
+    const val PASSKEYS_EMPTY = "No passkeys yet. Add one to sign in without a password."
+    const val PASSKEYS_CHECKING = "Checking passkeys…"
+    const val PASSKEYS_NEED_HTTPS = "Passkeys need HTTPS (or localhost) to work — this console is neither right now."
+    const val ADD_PASSKEY = "Add a passkey"
+    const val PASSWORD_TITLE = "Password sign-in"
+    const val PASSWORD_ENV = "Set by TETHER_PASSKEY_REQUIRED in the environment"
+    const val PASSWORD_NEEDS_PASSKEY = "Add a passkey before turning off the password"
+    const val PASSWORD_ON = "Sign in with a password, in addition to any passkeys"
+    const val REMOVE_PASSKEY_TITLE = "Remove this passkey?"
+    fun removePasskeyBody(label: String) = "$label will no longer be able to sign in to Tether."
+    const val REMOVE_PASSKEY_CONFIRM = "Remove passkey"
+    const val SESSIONS_TITLE = "Signed-in sessions"
+    const val SESSIONS_CAPTION = "Every browser or device currently signed in to this console."
+    fun sessionLine(started: String, active: String) = "started $started · active $active"
+    const val UNKNOWN_DEVICE = "Unknown device"
+    const val SIGN_OUT = "Sign out"
+    const val SIGN_OUT_LABEL = "Sign out this session"
+    const val SESSIONS_CHECKING = "Checking sessions…"
+    const val SIGN_OUT_OTHERS = "Sign out everywhere else"
+    const val SIGN_OUT_OTHERS_TITLE = "Sign out every other session?"
+    const val PASSKEY_ADDED = "Passkey added."
+    const val PASSKEY_REMOVED = "Passkey removed."
+    const val SESSION_SIGNED_OUT = "Session signed out."
+    fun othersSignedOut(revoked: Int) =
+        if (revoked > 0) "Signed out $revoked other session${if (revoked == 1) "" else "s"}." else "No other sessions to sign out."
+    const val SECURITY_LOAD_FAILED = "Sign-in security could not be loaded."
+    const val RENAME_FAILED = "That passkey could not be renamed."
+    const val REMOVE_PASSKEY_FAILED = "That passkey could not be removed."
+    const val POLICY_FAILED = "That setting could not be changed."
+    const val SESSION_FAILED = "That session could not be signed out."
+    const val OTHERS_FAILED = "Other sessions could not be signed out."
+    fun method(method: SessionMethod) = when (method) {
+        SessionMethod.Passkey -> "Passkey"
+        SessionMethod.Service -> "Service window"
+        SessionMethod.AppPasskey -> "Android app (passkey)"
+        SessionMethod.Password -> "Password"
+    }
+
+    // The app's own.
+    /** The web's "This browser" tag: the app is a phone. */
+    const val THIS_DEVICE = "This device"
+    const val REVEAL_CODE = "Reveal pairing code"
+    const val HIDE_CODE = "Hide pairing code"
+    const val CODE_HIDDEN = "Pairing code, hidden"
+    fun codeSpoken(code: String) = "Pairing code " + code.toCharArray().joinToString(" ")
+    const val MASK = "•••• ••••"
+    const val ADD_PASSKEY_LATER = "Adding a passkey needs this phone’s passkey prompt, which comes in a later update. Add one from the web console for now; the ones you add are listed here."
+    const val SIGN_OUT_OTHERS_BODY = "This phone stays signed in. Every other session closes immediately."
+    const val REVOKE_ALL = "Revoke every device"
+    const val REVOKE_ALL_TITLE = "Revoke every paired device?"
+    const val REVOKE_ALL_BODY = "Every paired device loses access immediately and has to be paired again with a new code. Unclaimed pairing codes are cancelled, and Android app passkey sign-ins are signed out too."
+    const val REVOKE_ALL_CONFIRM = "Revoke every device"
+    fun revokedAll(revoked: Int, appSessions: Int) = buildString {
+        append("Revoked $revoked device${if (revoked == 1) "" else "s"}")
+        if (appSessions > 0) append(" and signed out $appSessions app passkey sign-in${if (appSessions == 1) "" else "s"}")
+        append(".")
+    }
+    const val REVOKE_ALL_FAILED = "The devices could not be revoked."
+    const val SELF_SIGNS_OUT = "This is the phone you are using: it is signed out of this server, and you sign in again from the start screen."
+    const val MAYBE_SELF = "If this is the phone you are using, it is signed out of this server too, and you sign in again from the start screen."
+    const val ALL_SIGNS_OUT_TOKEN = "This phone is signed out of this server too (it signed in as a paired device), and you sign in again from the start screen."
+    const val ALL_SIGNS_OUT_PASSKEY = "This phone is signed out of this server too (it signed in with a passkey from the app), and you sign in again from the start screen."
+    const val ALL_KEEPS_PASSWORD = "This phone stays signed in: it signed in with a password, not as a paired device."
+    const val ALL_MAYBE = "If this phone signed in with a passkey from the app, it is signed out of this server too."
+    const val SIGNED_OUT_HERE = "This phone was signed out of this server. Sign in again from the start screen."
+    const val OWNER_NEEDED = "This server has not been updated yet to let the app manage devices and sign-in security: it asks for an owner sign-in. Once the server is updated this works from the phone like the web; until then, use the web console."
+    const val CHECK_AGAIN = "Check again"
+    const val SIGNED_OUT = "This phone is not signed in to this server."
+    const val NOT_SENT = "Nothing was sent: the app is now signed in to another server."
+    const val LOCAL_NETWORK = "Local network access is blocked, so this server cannot be reached."
+    fun blocked(code: Int) = "A sign-in page answered instead of Tether (HTTP $code). Nothing was sent past it."
+}
+
+/** Which of the two web hooks a write belongs to (each has its own `busy`). */
+enum class DevicesArea { Devices, Security }
+
+enum class DevicesAction { Pair, Revoke, RevokeAll, Rename, RemovePasskey, Policy, SignOutSession, SignOutOthers }
+
+/** A line under a section: [error] true is the web's `role="alert"` warning, else its `role="status"` notice. */
+data class DevicesLine(val text: String, val error: Boolean)
+
+/**
+ * Whether a paired device is the one this phone is signed in with (no route says so for a device
+ * token: the list carries no `current`). A session-cookie sign-in holds no device token in force,
+ * so no device is this phone; a device token's own device is necessarily in the list, so when it is
+ * the only one it is this phone; otherwise it may be any of them.
+ */
+enum class SelfMatch { No, Yes, Maybe }
+
+/** What revoking every device does to this phone. */
+enum class RevokeAllEffect { SignsOutToken, SignsOutPasskey, KeepsPassword, Unknown }
+
+/** The pure decisions, tested on their own. */
+object DevicesRules {
+    fun selfMatch(signIn: AppSignIn?, devices: List<PairedDevice>, device: PairedDevice): SelfMatch = when (signIn) {
+        AppSignIn.SessionCookie -> SelfMatch.No
+        AppSignIn.DeviceToken -> if (devices.size == 1 && devices[0].id == device.id) SelfMatch.Yes else SelfMatch.Maybe
+        null -> SelfMatch.Maybe
+    }
+
+    fun revokeAllEffect(signIn: AppSignIn?, sessions: List<SecuritySession>?): RevokeAllEffect = when (signIn) {
+        AppSignIn.DeviceToken -> RevokeAllEffect.SignsOutToken
+        AppSignIn.SessionCookie -> when (sessions?.firstOrNull { it.current }?.method) {
+            SessionMethod.AppPasskey -> RevokeAllEffect.SignsOutPasskey
+            SessionMethod.Password, SessionMethod.Passkey -> RevokeAllEffect.KeepsPassword
+            else -> RevokeAllEffect.Unknown
+        }
+        null -> RevokeAllEffect.Unknown
+    }
+
+    fun revokeBody(label: String, self: SelfMatch): List<String> = listOfNotNull(
+        DevicesCopy.revokeBody(label),
+        when (self) {
+            SelfMatch.Yes -> DevicesCopy.SELF_SIGNS_OUT
+            SelfMatch.Maybe -> DevicesCopy.MAYBE_SELF
+            SelfMatch.No -> null
+        },
+    )
+
+    fun revokeAllBody(effect: RevokeAllEffect): List<String> = listOf(
+        DevicesCopy.REVOKE_ALL_BODY,
+        when (effect) {
+            RevokeAllEffect.SignsOutToken -> DevicesCopy.ALL_SIGNS_OUT_TOKEN
+            RevokeAllEffect.SignsOutPasskey -> DevicesCopy.ALL_SIGNS_OUT_PASSKEY
+            RevokeAllEffect.KeepsPassword -> DevicesCopy.ALL_KEEPS_PASSWORD
+            RevokeAllEffect.Unknown -> DevicesCopy.ALL_MAYBE
+        },
+    )
+
+    /** paired-devices.tsx `otherPairings`: unclaimed codes still live, the one on screen matched out by its expiry. */
+    fun otherPairings(pairings: List<OutstandingPairing>, now: Long, shownExpiresAt: Long?): Int =
+        pairings.count { it.expiresAt > now && it.expiresAt != shownExpiresAt }
+
+    /** Seconds left on a code (the web's `Math.round`), never below 0. */
+    fun secondsLeft(expiresAt: Long, now: Long): Long = maxOf(0L, Math.round((expiresAt - now) / 1000.0))
+
+    /** sign-in-security.tsx's toggle note and whether the switch may be used. */
+    fun passwordNote(view: PasskeysView): String = when {
+        view.policy.source == PasskeyPolicySource.Env -> DevicesCopy.PASSWORD_ENV
+        view.passkeys.isEmpty() -> DevicesCopy.PASSWORD_NEEDS_PASSKEY
+        else -> DevicesCopy.PASSWORD_ON
+    }
+
+    fun passwordToggleable(view: PasskeysView): Boolean = view.policy.source != PasskeyPolicySource.Env && view.passkeys.isNotEmpty()
+
+    /** `truncateUserAgent`, by the label rule (hidden characters dropped first). */
+    fun userAgent(ua: String): String {
+        val clean = LabelText.clean(ua, 400)
+        if (clean.isEmpty()) return DevicesCopy.UNKNOWN_DEVICE
+        return if (clean.length > 64) com.tether.app.client.TextCut.cut(clean, 61).trimEnd() + "…" else clean
+    }
+
+    /** A server label by the label rule; one that cleans to nothing falls back like the web's reader. */
+    fun label(text: String, fallback: String): String = LabelText.title(text, LabelText.MAX_LABEL).ifEmpty { fallback }
+
+    /**
+     * A failed call's line: Tether's own sentence cleaned by the label rule (the web shows it), or
+     * the app's words for what the web cannot meet; [fallback] the web's for anything else.
+     * OwnerSignInNeeded and SignedOut are panel states, not lines (null).
+     */
+    fun failure(result: SecurityResult<*>, fallback: String): String? = when (result) {
+        is SecurityResult.Ok -> null
+        is SecurityResult.OwnerSignInNeeded, is SecurityResult.SignedOut -> null
+        is SecurityResult.Refused -> LabelText.error(result.message).ifEmpty { fallback }
+        SecurityResult.LocalNetworkBlocked -> DevicesCopy.LOCAL_NETWORK
+        is SecurityResult.Blocked -> DevicesCopy.blocked(result.code)
+        is SecurityResult.NotSent -> DevicesCopy.NOT_SENT
+        is SecurityResult.Unavailable -> fallback
+    }
+}
+
+/**
+ * The fresh code on screen (the web's component state: the ONLY copy in existence). [code] is null
+ * once it has expired (the card then says so with nothing left to reveal or copy).
+ */
+class ShownCode(val code: FreshPairingCode?, val expiresAt: Long, internal val serial: Long) {
+    override fun toString(): String = "ShownCode(expiresAt=$expiresAt, live=${code != null})"
+}
+
+/** A state a seeded shot hands the controller (timing-free): nothing is fetched while it stands. */
+data class DevicesSeed(
+    val devices: List<PairedDevice>? = null,
+    val pairings: List<OutstandingPairing> = emptyList(),
+    val passkeys: PasskeysView? = null,
+    val sessions: List<SecuritySession>? = null,
+    val signIn: AppSignIn? = null,
+    val ownerNeeded: Boolean = false,
+    val devicesLine: DevicesLine? = null,
+    val securityLine: DevicesLine? = null,
+    /** A code already on screen (the goldens' FAKE one). */
+    val code: FreshPairingCode? = null,
+)
+
+/**
+ * The panel's state and calls for ONE server ([origin]), held by the dialog (not the tab): a tab
+ * change neither cancels a call nor loses its answer or the code on screen; closing Settings drops
+ * it all (the code with it, as the web's dialog close does). Never saved state: a rotation or a
+ * recreation starts with nothing and sends nothing but the opening reads.
+ *
+ * Writes follow the web's two hooks: one in flight per area ([busy] set in the tap's own frame, so
+ * a second tap starts nothing), each followed by a re-read; reads overlap safely (only the newest
+ * may write the lists). Every answer must be about [origin], or it is dropped. Nothing is retried.
+ */
+@Stable
+class DevicesController(
+    private val source: DeviceSecuritySource,
+    val origin: String?,
+    parent: CoroutineScope,
+    seed: DevicesSeed? = null,
+    private val clipboard: PairingClipboard = PairingClipboard.None,
+) {
+    private val job = SupervisorJob(parent.coroutineContext[Job])
+    private val scope = CoroutineScope(parent.coroutineContext + job)
+
+    var devices: List<PairedDevice>? by mutableStateOf(seed?.devices)
+        private set
+    var pairings: List<OutstandingPairing> by mutableStateOf(seed?.pairings.orEmpty())
+        private set
+    var passkeys: PasskeysView? by mutableStateOf(seed?.passkeys)
+        private set
+    var sessions: List<SecuritySession>? by mutableStateOf(seed?.sessions)
+        private set
+    var signIn: AppSignIn? by mutableStateOf(seed?.signIn)
+        private set
+    var ownerNeeded: Boolean by mutableStateOf(seed?.ownerNeeded == true)
+        private set
+    var signedOut: Boolean by mutableStateOf(false)
+        private set
+    var devicesLine: DevicesLine? by mutableStateOf(seed?.devicesLine)
+        private set
+    var securityLine: DevicesLine? by mutableStateOf(seed?.securityLine)
+        private set
+    var devicesBusy: DevicesAction? by mutableStateOf(null)
+        private set
+    var securityBusy: DevicesAction? by mutableStateOf(null)
+        private set
+    var shown: ShownCode? by mutableStateOf(seed?.code?.let { ShownCode(it, it.expiresAt, 0L) })
+        private set
+
+    private var opened = seed != null
+    private var devicesTicket = 0L
+    private var securityTicket = 0L
+    private var codeSerial = 0L
+
+    /** The Devices tab opened: read once per controller (a seed counts as read). */
+    fun open() {
+        if (opened) return
+        opened = true
+        refresh()
+    }
+
+    /** Both readers (the web's two `refresh()`s); Check again calls it too. */
+    fun refresh() {
+        if (origin == null) {
+            signedOut = true
+            return
+        }
+        refreshDevices()
+        refreshSecurity()
+    }
+
+    private fun refreshDevices(): Job? {
+        val o = origin ?: return null
+        val ticket = ++devicesTicket
+        return scope.launch {
+            val r = source.devices(o)
+            if (ticket != devicesTicket || !mine(r)) return@launch
+            when (r) {
+                is SecurityResult.Ok -> {
+                    devices = r.value.devices
+                    pairings = r.value.pairings
+                    signIn = r.signIn
+                    ownerNeeded = false
+                    if (devicesLine?.error == true) devicesLine = null
+                }
+                else -> settle(r, DevicesArea.Devices, DevicesCopy.DEVICES_LOAD_FAILED)
+            }
+        }
+    }
+
+    private fun refreshSecurity(): Job? {
+        val o = origin ?: return null
+        val ticket = ++securityTicket
+        return scope.launch {
+            val p = async { source.passkeys(o) }
+            val s = async { source.sessions(o) }
+            val pr = p.await()
+            val sr = s.await()
+            if (ticket != securityTicket || !mine(pr) || !mine(sr)) return@launch
+            if (pr is SecurityResult.Ok && sr is SecurityResult.Ok) {
+                passkeys = pr.value
+                sessions = sr.value
+                signIn = pr.signIn
+                ownerNeeded = false
+                if (securityLine?.error == true) securityLine = null
+            } else {
+                settle(if (pr !is SecurityResult.Ok) pr else sr, DevicesArea.Security, DevicesCopy.SECURITY_LOAD_FAILED)
+            }
+        }
+    }
+
+    /** "Pair a device": no confirmation (the web). The code lands here only, and only for this server. */
+    fun pair(): Boolean = write(DevicesArea.Devices, DevicesAction.Pair) { o ->
+        val r = source.pair(o)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) {
+            forgetCode()
+            shown = ShownCode(r.value, r.value.expiresAt, ++codeSerial)
+            signIn = r.signIn
+            refreshDevices()
+        } else {
+            settle(r, DevicesArea.Devices, if (r is SecurityResult.Unavailable && r.code in 200..299) DevicesCopy.UNUSABLE_CODE else DevicesCopy.PAIR_FAILED)
+        }
+    }
+
+    /** Revoke one device (asked first by the panel, as on the web). [self]: this phone, as far as known. */
+    fun revoke(device: PairedDevice, self: SelfMatch): Boolean = write(DevicesArea.Devices, DevicesAction.Revoke) { o ->
+        val r = source.revokeDevice(o, device.id)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) {
+            devicesLine = DevicesLine(DevicesCopy.revoked(r.value.disconnected), error = false)
+            if (self == SelfMatch.Yes) return@write signedOutHere()
+        } else {
+            settle(r, DevicesArea.Devices, DevicesCopy.REVOKE_FAILED)
+        }
+        // The web re-lists either way (a 404 means the list on screen is the stale thing).
+        refreshDevices()
+    }
+
+    /** Revoke every device (the app's own key, always asked first; see [RevokeAllEffect]). */
+    fun revokeAll(effect: RevokeAllEffect): Boolean = write(DevicesArea.Devices, DevicesAction.RevokeAll) { o ->
+        val r = source.revokeAllDevices(o)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) {
+            devicesLine = DevicesLine(DevicesCopy.revokedAll(r.value.revoked, r.value.appSessions), error = false)
+            forgetCode()
+            if (effect == RevokeAllEffect.SignsOutToken || effect == RevokeAllEffect.SignsOutPasskey) return@write signedOutHere()
+        } else {
+            settle(r, DevicesArea.Devices, DevicesCopy.REVOKE_ALL_FAILED)
+        }
+        refreshDevices()
+        refreshSecurity()
+    }
+
+    fun renamePasskey(passkey: Passkey, label: String): Boolean {
+        val next = label.trim()
+        if (next.isEmpty() || next == passkey.label) return false
+        return write(DevicesArea.Security, DevicesAction.Rename) { o ->
+            val r = source.renamePasskey(o, passkey.id, next)
+            if (!mine(r)) return@write
+            if (r !is SecurityResult.Ok) settle(r, DevicesArea.Security, DevicesCopy.RENAME_FAILED)
+            refreshSecurity()
+        }
+    }
+
+    fun removePasskey(passkey: Passkey): Boolean = write(DevicesArea.Security, DevicesAction.RemovePasskey) { o ->
+        val r = source.removePasskey(o, passkey.id)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) securityLine = DevicesLine(DevicesCopy.PASSKEY_REMOVED, false) else settle(r, DevicesArea.Security, DevicesCopy.REMOVE_PASSKEY_FAILED)
+        refreshSecurity()
+    }
+
+    /** The password switch: no confirmation (the web); the server's policy answer is shown as it says. */
+    fun setPasswordLogin(enabled: Boolean): Boolean = write(DevicesArea.Security, DevicesAction.Policy) { o ->
+        val r = source.setPasswordLogin(o, enabled)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) {
+            passkeys = passkeys?.copy(policy = r.value)
+        } else {
+            settle(r, DevicesArea.Security, DevicesCopy.POLICY_FAILED)
+        }
+    }
+
+    /** One session's Sign out: no confirmation (the web); the current session has no key. */
+    fun revokeSession(session: SecuritySession): Boolean {
+        if (session.current) return false
+        return write(DevicesArea.Security, DevicesAction.SignOutSession) { o ->
+            val r = source.revokeSession(o, session.id)
+            if (!mine(r)) return@write
+            if (r is SecurityResult.Ok) securityLine = DevicesLine(DevicesCopy.SESSION_SIGNED_OUT, false) else settle(r, DevicesArea.Security, DevicesCopy.SESSION_FAILED)
+            refreshSecurity()
+        }
+    }
+
+    /** "Sign out everywhere else" (asked first by the panel, as on the web). */
+    fun revokeOtherSessions(): Boolean = write(DevicesArea.Security, DevicesAction.SignOutOthers) { o ->
+        val r = source.revokeOtherSessions(o)
+        if (!mine(r)) return@write
+        if (r is SecurityResult.Ok) securityLine = DevicesLine(DevicesCopy.othersSignedOut(r.value.revoked), false) else settle(r, DevicesArea.Security, DevicesCopy.OTHERS_FAILED)
+        refreshSecurity()
+    }
+
+    /** The code on screen expired: the plaintext goes (the card still says it expired). */
+    fun expire(serial: Long) {
+        val s = shown ?: return
+        if (s.serial != serial || s.code == null) return
+        clipboard.clearIfHolds(s.code.code)
+        shown = ShownCode(null, s.expiresAt, s.serial)
+    }
+
+    /** Copy the code on screen: marked sensitive, cleared again shortly after (see [PairingClipboard]). */
+    fun copyCode(): Boolean {
+        val code = shown?.code ?: return false
+        return clipboard.copy(code.code)
+    }
+
+    /** Settings closed or another server: the code goes, and its copy with it; nothing in flight answers here any more. */
+    fun dispose() {
+        forgetCode()
+        job.cancel()
+    }
+
+    private fun forgetCode() {
+        shown?.code?.let { clipboard.clearIfHolds(it.code) }
+        shown = null
+    }
+
+    private fun signedOutHere() {
+        forgetCode()
+        devicesLine = DevicesLine(DevicesCopy.SIGNED_OUT_HERE, error = false)
+        signedOut = true
+    }
+
+    private fun mine(r: SecurityResult<*>): Boolean = origin != null && (r.origin == null || r.origin == origin)
+
+    private fun settle(r: SecurityResult<*>, area: DevicesArea, fallback: String) {
+        when (r) {
+            is SecurityResult.OwnerSignInNeeded -> ownerNeeded = true
+            is SecurityResult.SignedOut -> signedOut = true
+            else -> {
+                val line = DevicesLine(DevicesRules.failure(r, fallback) ?: fallback, error = true)
+                if (area == DevicesArea.Devices) devicesLine = line else securityLine = line
+            }
+        }
+    }
+
+    private fun write(area: DevicesArea, action: DevicesAction, call: suspend (String) -> Unit): Boolean {
+        val o = origin ?: return false
+        if (signedOut) return false
+        if ((if (area == DevicesArea.Devices) devicesBusy else securityBusy) != null) return false
+        if (area == DevicesArea.Devices) {
+            devicesBusy = action
+            devicesLine = null
+        } else {
+            securityBusy = action
+            securityLine = null
+        }
+        scope.launch {
+            try {
+                call(o)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Never silent: the web's generic failure for that area.
+                val line = DevicesLine(if (area == DevicesArea.Devices) DevicesCopy.DEVICES_LOAD_FAILED else DevicesCopy.SECURITY_LOAD_FAILED, true)
+                if (area == DevicesArea.Devices) devicesLine = line else securityLine = line
+            } finally {
+                if (area == DevicesArea.Devices) devicesBusy = null else securityBusy = null
+            }
+        }
+        return true
+    }
+}
+
+/**
+ * The controller for the dialog: one per (source, server), in plain `remember` (never saved), and
+ * disposed (the code and its clipboard copy dropped, its calls cancelled) when the dialog closes or
+ * the server changes.
+ */
+@Composable
+fun rememberDevicesController(
+    source: DeviceSecuritySource,
+    origin: String?,
+    seed: DevicesSeed? = null,
+    clipboard: PairingClipboard = PairingClipboard.None,
+): DevicesController {
+    val scope = rememberCoroutineScope()
+    val controller = remember(source, origin) { DevicesController(source, origin, scope, seed?.takeIf { origin != null }, clipboard) }
+    DisposableEffect(controller) { onDispose { controller.dispose() } }
+    return controller
+}
+
+/**
+ * What the Devices panel draws: [controller] for the server signed in to (its origin null when
+ * signed out), [now] the clock the countdown and the "last seen" lines read (a seam for the goldens).
+ */
+data class DevicesBinding(
+    val controller: DevicesController?,
+    val now: () -> Long = { System.currentTimeMillis() },
+) {
+    companion object {
+        val None = DevicesBinding(null)
+    }
+}

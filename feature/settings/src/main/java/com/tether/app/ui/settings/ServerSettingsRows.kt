@@ -879,7 +879,13 @@ val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
 
 /** The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed. */
 @Composable
-internal fun ArmedConfirmKey(label: String, tag: String, onConfirm: () -> Unit) {
+internal fun ArmedConfirmKey(
+    label: String,
+    tag: String,
+    onConfirm: () -> Unit,
+    // T10.4: the web's `button-primary button-danger` for a destructive confirmation.
+    classes: Set<com.tether.app.ui.components.KeyClass> = KeyClasses.ButtonPrimary,
+) {
     val ms = LocalConfirmArmMs.current
     var armed by remember { mutableStateOf(ms <= 0L) }
     LaunchedEffect(ms) {
@@ -888,7 +894,7 @@ internal fun ArmedConfirmKey(label: String, tag: String, onConfirm: () -> Unit) 
             armed = true
         }
     }
-    TetherKey(onClick = { if (armed) onConfirm() }, classes = KeyClasses.ButtonPrimary, label = label, modifier = Modifier.testTag(tag))
+    TetherKey(onClick = { if (armed) onConfirm() }, classes = classes, label = label, modifier = Modifier.testTag(tag))
 }
 
 /**

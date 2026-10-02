@@ -49,11 +49,14 @@ internal fun SettingsPanel(
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
     providers: ProvidersBinding = ProvidersBinding.None,
     nodes: NodesBinding = NodesBinding.None,
+    devices: DevicesBinding = DevicesBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
         SettingsTab.Appearance -> AppearancePanel(prefs, live, narrow)
-        SettingsTab.Devices -> DevicesPanel(prefs, narrow)
+        // T10.4: keyed on the server, so another server's panel starts from nothing (no pending
+        // confirmation, no rename half typed); the controller itself is one per server.
+        SettingsTab.Devices -> key(devices.controller?.origin) { DevicesPanel(prefs, narrow, devices) }
         // T10.3: keyed on the server, so another server's form starts empty (the credential masked
         // and dropped, nothing half-typed carried over); its requests are bound to their server.
         SettingsTab.Nodes -> key(nodes.origin) { NodesPanel(narrow, nodes) }
@@ -174,12 +177,12 @@ private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boo
 }
 
 /**
- * Devices (settings-dialog.tsx:2065-2114): Notifications hosts this app's push controls (T12.1,
- * FCM, effect-on-use like the web's Web Push row); the web's Passkeys / Signed-in sessions
- * (`SignInSecuritySection`) and `PairedDevicesSection` follow, as slots for T10.4.
+ * Devices (settings-dialog.tsx:2065-2103): Notifications hosts this app's push controls (T12.1,
+ * FCM, effect-on-use like the web's Web Push row); then the web's `SignInSecuritySection`
+ * (Passkeys, Signed-in sessions) and `PairedDevicesSection` (T10.4, DevicesSection.kt).
  */
 @Composable
-private fun DevicesPanel(prefs: UiPrefs, narrow: Boolean) {
+private fun DevicesPanel(prefs: UiPrefs, narrow: Boolean, devices: DevicesBinding) {
     Column {
         SettingsSection(
             "Notifications",
@@ -188,14 +191,7 @@ private fun DevicesPanel(prefs: UiPrefs, narrow: Boolean) {
         ) {
             PushNotificationsRow(prefs)
         }
-        // T10.4 slot: components/sign-in-security.tsx (Passkeys, Signed-in sessions).
-        SettingsSection("Sign-in security", AnnotatedString("Passkeys and the browsers and devices signed in to this console."), narrow) {
-            ComingSoonNote("Passkeys and signed-in sessions are coming to the app in a later update. Manage them from the web console for now.")
-        }
-        // T10.4 slot: components/paired-devices.tsx.
-        SettingsSection("Paired devices", AnnotatedString("Native clients that hold their own access token for this server."), narrow, last = true) {
-            ComingSoonNote("The paired-device list is coming to the app in a later update. Manage paired devices from the web console for now.")
-        }
+        DevicesSecuritySections(devices, narrow)
     }
 }
 

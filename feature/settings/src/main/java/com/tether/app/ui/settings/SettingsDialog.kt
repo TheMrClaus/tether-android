@@ -223,6 +223,12 @@ fun SettingsDialog(
         actions = nodeActions,
         consoleProtocol = consoleProtocol,
     )
+    // T10.4: one controller per server, held here (a tab change keeps a call and the code on
+    // screen; closing Settings drops them, the code's clipboard copy with it).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pairingClipboard = remember(context) { AndroidPairingClipboard(context) }
+    val devicesController = rememberDevicesController(client.deviceSecurity, origin, clipboard = pairingClipboard)
+    val devicesBinding = DevicesBinding(devicesController)
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
@@ -239,6 +245,7 @@ fun SettingsDialog(
             serverSettings = serverBinding,
             providers = providersBinding,
             nodes = nodesBinding,
+            devices = devicesBinding,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -277,6 +284,8 @@ fun SettingsFrame(
     providers: ProvidersBinding = ProvidersBinding.None,
     /** T10.3: the Nodes tab. */
     nodes: NodesBinding = NodesBinding.None,
+    /** T10.4: the Devices tab's sign-in security and paired devices. */
+    devices: DevicesBinding = DevicesBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -345,6 +354,7 @@ fun SettingsFrame(
                         serverSettings = serverSettings,
                         providers = providers,
                         nodes = nodes,
+                        devices = devices,
                     )
                 }
             }

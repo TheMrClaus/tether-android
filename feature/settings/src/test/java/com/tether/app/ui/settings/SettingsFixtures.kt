@@ -64,6 +64,7 @@ fun SettingsUnderTest(
     serverSettings: ServerSettingsBinding = ServerSettingsBinding.None,
     providers: ProvidersBinding = ProvidersBinding.None,
     nodes: NodesBinding = NodesBinding.None,
+    devices: DevicesBinding = DevicesBinding.None,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -79,6 +80,7 @@ fun SettingsUnderTest(
                 serverSettings = serverSettings,
                 providers = providers,
                 nodes = nodes,
+                devices = devices,
             )
         }
     }
