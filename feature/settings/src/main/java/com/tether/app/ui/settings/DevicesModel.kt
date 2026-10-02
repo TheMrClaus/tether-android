@@ -505,6 +505,8 @@ class DevicesController(
                 refreshSecurity()
             } else {
                 if (r is SecurityResult.OwnerSignInNeeded && mine(r)) securityOwnerNeeded = true
+                // r3: Tether's own 401 still signs the panel out, as settle() does; the unsaved line stays.
+                if (r is SecurityResult.SignedOut && mine(r)) signedOut = true
                 val why = (r as? SecurityResult.Refused)?.takeIf { mine(it) }?.let { DevicesRules.failure(it, DevicesCopy.ADD_PASSKEY_FAILED) }
                 failLine(listOfNotNull(why, DevicesCopy.PASSKEY_ORPHANED).joinToString(" "))
             }

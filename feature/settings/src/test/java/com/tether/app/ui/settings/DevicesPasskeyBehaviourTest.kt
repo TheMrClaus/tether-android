@@ -299,6 +299,20 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
         assertFalse("no re-read after an unsaved passkey", source.pending("passkeys"))
     }
 
+    /** r3: a 401 on verify after the passkey was made: the unsaved line AND the panel signed out (as settle() does). */
+    @Test fun aSignedOutVerifyAfterThePromptSaysUnsavedAndSignsThePanelOut() {
+        opened()
+        upToThePrompt()
+        waitFor { passkeys.pending() }
+        passkeys.answer(PasskeyCeremony.Done(PasskeyShapes.ANSWER))
+        waitFor { source.pending("registerVerify") }
+        source.answer("registerVerify", SecurityResult.SignedOut(ORIGIN))
+        waitText(DevicesCopy.PASSKEY_ORPHANED)
+        waitText(DevicesCopy.SIGNED_OUT)
+        assertFalse("signed out: no add row", exists(DevicesTags.AddPasskey))
+        assertFalse(texts().contains(DevicesCopy.PASSKEY_ADDED))
+    }
+
     @Test fun theLabelStopsAtTheWebsSixtyCharacters() {
         opened()
         label("L".repeat(70))

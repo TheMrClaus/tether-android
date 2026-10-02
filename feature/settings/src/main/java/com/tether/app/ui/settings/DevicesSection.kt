@@ -144,7 +144,11 @@ internal fun DevicesSecuritySections(binding: DevicesBinding, narrow: Boolean) {
 private fun PasskeysSection(controller: DevicesController?, binding: DevicesBinding, narrow: Boolean, onConfirm: (DevicesConfirm) -> Unit) {
     SettingsSection(DevicesCopy.PASSKEYS_TITLE, AnnotatedString(DevicesCopy.PASSKEYS_CAPTION), narrow, modifier = Modifier.testTag(DevicesTags.Passkeys)) {
         val c = controller ?: return@SettingsSection
-        if (c.signedOut) return@SettingsSection SignedOutLine()
+        if (c.signedOut) {
+            // r3: a line already given (a passkey created but not saved) stays above the signed-out line.
+            c.securityLine?.let { LineView(it, DevicesTags.line(DevicesArea.Security)) }
+            return@SettingsSection SignedOutLine()
+        }
         val ownerNeeded = c.ownerNeeded(DevicesArea.Security)
         if (ownerNeeded) OwnerNeeded(c, DevicesArea.Security)
         c.securityLine?.let { LineView(it, DevicesTags.line(DevicesArea.Security)) }
