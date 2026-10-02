@@ -242,10 +242,13 @@ class DraftSheetActions(
     val onSubmit: () -> Unit = {},
     /** ta-xki: an Effort pick (a variant value). */
     val onSelectEffort: (String) -> Unit = {},
-    /** ta-xki: a Mode pick (an elevated one too: an ordinary choice, no confirmation). */
-    val onSelectMode: (String) -> Unit = {},
-    /** ta-xki: opencode's Auto chip. */
-    val onToggleAuto: () -> Unit = {},
+    /**
+     * ta-xki: a Mode pick (an elevated one too: an ordinary choice, no confirmation), with the provider
+     * the control was drawn for (r2, security F1: a pick drawn for another provider changes nothing).
+     */
+    val onSelectMode: (mode: String, drawnFor: String) -> Unit = { _, _ -> },
+    /** ta-xki: opencode's Auto chip, with the provider it was drawn for. */
+    val onToggleAuto: (drawnFor: String) -> Unit = {},
     /** ta-xki: the phone's sliders chip (the settings sheet's hub). */
     val onOpenSettings: () -> Unit = {},
 )
@@ -341,8 +344,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         },
         onOpenSettings = { settings.openAt(DraftSettingsView.Root, draft.entries, draft.key()) },
         onSelectEffort = { composer.selectEffort(it) },
-        onSelectMode = { composer.selectMode(it) },
-        onToggleAuto = { composer.toggleAuto() },
+        onSelectMode = { mode, drawnFor -> composer.selectMode(mode, drawnFor) },
+        onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
         onPickFolder = composer::setCwd,
         onBrowse = {
             client.browse(draft.cwd().ifEmpty { root.orEmpty() }.ifEmpty { null })
@@ -394,8 +397,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
                 onRemoveModel = composer::removeCustomModel,
             ),
             onSelectEffort = { composer.selectEffort(it) },
-            onSelectMode = { composer.selectMode(it) },
-            onToggleAuto = { composer.toggleAuto() },
+            onSelectMode = { mode, drawnFor -> composer.selectMode(mode, drawnFor) },
+            onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
             onClose = settings::close,
         )
         Dialog(onDismissRequest = settings::close, properties = DraftDialogProperties) {

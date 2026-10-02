@@ -170,13 +170,14 @@ internal fun DraftLiveRow(inputs: DraftSheetInputs, actions: DraftSheetActions) 
                     name = options.modeAriaLabel,
                     enabled = true,
                     lockCopy = null,
-                    onSelect = actions.onSelectMode,
+                    // r2 (security F1): the provider these rows were drawn for rides the pick.
+                    onSelect = { actions.onSelectMode(it, options.provider) },
                     danger = options.modeDanger,
                     testTag = DraftOptionsTags.Mode,
                 )
             }
         }
-        options.auto?.let { auto -> DraftAutoChip(auto.on, actions.onToggleAuto, Modifier.align(Alignment.CenterVertically)) }
+        options.auto?.let { auto -> DraftAutoChip(auto.on, { actions.onToggleAuto(options.provider) }, Modifier.align(Alignment.CenterVertically)) }
     }
 }
 
@@ -338,8 +339,10 @@ class DraftSettingsState(
 class DraftSettingsActions(
     val browser: ModelBrowserActions = ModelBrowserActions(),
     val onSelectEffort: (String) -> Unit = {},
-    val onSelectMode: (String) -> Unit = {},
-    val onToggleAuto: () -> Unit = {},
+    /** A Mode pick with the provider the row was drawn for (r2, security F1). */
+    val onSelectMode: (mode: String, drawnFor: String) -> Unit = { _, _ -> },
+    /** opencode's Auto row, with the provider it was drawn for. */
+    val onToggleAuto: (drawnFor: String) -> Unit = {},
     val onClose: () -> Unit = {},
 )
 
@@ -456,13 +459,13 @@ fun DraftSettingsFrame(
                     options.mode?.let { mode ->
                         mode.options.forEach { option ->
                             ControlOptionRow(option, selected = !autoOn && option.value == mode.value, armedRow = false, divider = false) {
-                                if (autoOn || option.value != mode.value) actions.onSelectMode(option.value)
+                                if (autoOn || option.value != mode.value) actions.onSelectMode(option.value, options.provider)
                                 state.backToRoot()
                             }
                         }
                         options.auto?.let { auto ->
                             ControlOptionRow(ControlOption(AUTO_ROW_VALUE, AUTO_LABEL, AUTO_HINT, danger = true), selected = auto.on, armedRow = false, divider = false) {
-                                if (!auto.on) actions.onToggleAuto()
+                                if (!auto.on) actions.onToggleAuto(options.provider)
                                 state.backToRoot()
                             }
                         }

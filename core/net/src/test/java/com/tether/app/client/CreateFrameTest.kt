@@ -258,10 +258,11 @@ class CreateFrameTest {
 
     private val clamps = listOf(
         Clamp(
-            "claude retired dontAsk: the default (Auto)",
+            // r2 (verifier F2, owner-delegated): a retired mode more restrictive than the default is Manual.
+            "claude retired dontAsk (Locked): Manual, never Auto",
             entry("claude"), form("mode" to "dontAsk"), DraftForm.INITIAL_USER_MODIFIED,
             web = frame("claude", """"permissionMode":"dontAsk","sandboxPolicy":"off","""),
-            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
+            expected = frame("claude", """"permissionMode":"default","sandboxPolicy":"workspace-write","""),
         ),
         Clamp(
             "claude garbage mode",
@@ -298,6 +299,13 @@ class CreateFrameTest {
             entry("codex"), form("mode" to "default", "model" to "my-custom", "reasoningEffort" to "high"), picked("model", "reasoningEffort"),
             web = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","reasoningEffort":"high","""),
             expected = frame("codex", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","model":"my-custom","""),
+        ),
+        Clamp(
+            "r2 (security F2): an effort past the server's 200-byte bound is never sent",
+            ProviderCatalogEntry("claude", "claude", "ready", listOf(SessionModelOption("opus", "Opus", variants = listOf(ModelVariantOption("x".repeat(201), "Huge"), ModelVariantOption("high", "High"))))),
+            form("model" to "opus", "reasoningEffort" to "x".repeat(201)), picked("reasoningEffort"),
+            web = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"off","reasoningEffort":"${"x".repeat(201)}","""),
+            expected = frame("claude", """"permissionMode":"bypassPermissions","sandboxPolicy":"workspace-write","""),
         ),
         Clamp(
             "an effort on a row with no models is dropped",

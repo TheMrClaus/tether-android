@@ -138,11 +138,11 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
                 }
                 OptionsShot.Codex -> {
                     model.selectProviderAndModel("codex", "m1")
-                    check(model.selectMode("auto-review"))
+                    check(model.selectMode("auto-review", "codex"))
                 }
                 OptionsShot.Opencode -> {
                     model.selectProviderAndModel("opencode", "m1")
-                    check(model.toggleAuto())
+                    check(model.toggleAuto("opencode"))
                 }
             }
             model.setText(PROMPT)
@@ -192,7 +192,7 @@ private val failingActions = DraftSheetActions(
     onRemoveAttachment = { noSend("remove") },
     onSubmit = { noSend("send") },
     onSelectEffort = { noSend("pick an effort") },
-    onSelectMode = { noSend("pick a mode") },
+    onSelectMode = { _, _ -> noSend("pick a mode") },
     onToggleAuto = { noSend("toggle Auto") },
     onOpenSettings = { noSend("open the settings sheet") },
 )
@@ -206,7 +206,7 @@ private val failingSettingsActions = DraftSettingsActions(
         onClose = { noSend("close the browser") },
     ),
     onSelectEffort = { noSend("pick an effort") },
-    onSelectMode = { noSend("pick a mode") },
+    onSelectMode = { _, _ -> noSend("pick a mode") },
     onToggleAuto = { noSend("toggle Auto") },
     onClose = { noSend("close the sheet") },
 )
