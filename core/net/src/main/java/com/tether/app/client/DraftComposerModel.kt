@@ -116,9 +116,16 @@ enum class DraftSubmitResult {
  * - **No answer** (r2): after [CREATE_REPLY_TIMEOUT_MS] the draft unlocks, keeps its text and says
  *   the session may already exist; the create is never resent.
  * - **First message**: after the matched `created`, the prompt goes through the client's own send
- *   paths ([TetherClient.sendFirst], durable and bound to the create's server and socket; with attachments [TetherClient.sendAttachments], once the
- *   new session is live on the same socket). If it cannot go out, the prompt is saved as the new
- *   session's draft ([saveSessionDraft]) and is never resent (attachments are dropped, as on the web).
+ *   paths, both bound to the create's server and socket under the client's lock
+ *   ([TetherClient.sendFirst], durable; with attachments [TetherClient.sendAttachments] with the
+ *   create's epoch, once the new session is live on that socket). If it cannot go out, the prompt is
+ *   saved as the new session's draft ([saveSessionDraft]) and is never resent (attachments are
+ *   dropped, as on the web).
+ * - **Server switch** (ta-2ew): a create is the server's it went to. Once that server is no longer
+ *   the configured one ([TetherClient.isConfiguredOrigin]) the create is over, whatever arrives
+ *   next: a reply buffered from it, or its recorded answer, never completes it, and a reply stamped
+ *   with another server ([CreatedReply.origin]) never answers it. The session it made is opened only
+ *   through [TetherClient.attachIfConfigured] ([onSessionCreated] gets the create's origin).
  * - **Effort and Mode** (ta-xki, slice 4): [selectMode] / [selectEffort] / [toggleAuto] take only
  *   what the picked row offers ([DraftModes], [DraftSessionOptionsModel]); an elevated mode is an
  *   ordinary choice with no confirmation (owner 2026-10-02). After every reduce the form's mode is
@@ -153,8 +160,11 @@ class DraftComposerModel(
     private val firstSendLiveTimeoutMs: Long = FIRST_SEND_LIVE_TIMEOUT_MS,
     /** r2 (security F2): how long a create may wait for its own reply before the draft unlocks. */
     private val createReplyTimeoutMs: Long = CREATE_REPLY_TIMEOUT_MS,
-    /** The draft's own create made [sessionId] (whichever path completed it): the caller selects it. */
-    private val onSessionCreated: (sessionId: String) -> Unit = {},
+    /**
+     * The draft's own create made [sessionId] on [origin] (whichever path completed it): the caller
+     * selects it, only while [origin] is still the configured server (ta-2ew).
+     */
+    private val onSessionCreated: (sessionId: String, origin: String) -> Unit = { _, _ -> },
 ) {
     private val _state = MutableStateFlow(DraftComposerState())
     val state: StateFlow<DraftComposerState> = _state.asStateFlow()
@@ -768,12 +778,26 @@ class DraftComposerModel(
      * r2 (verifier P4): a reply belongs to [p] only when it echoes [p]'s requestId (the authoritative
      * gate), is newer than the submit (belt and braces), and came on the socket the create went out
      * on (a matching token on a later socket never completes it; a client that does not stamp its
-     * replies is held to its current socket).
+     * replies is held to its current socket). ta-2ew: and, when stamped, came from the server the
+     * create went to ([origin]).
      */
-    private fun answers(p: PendingCreate, requestId: String?, seq: Long, snapshot: Long, linkEpoch: Long?): Boolean {
+    private fun answers(p: PendingCreate, requestId: String?, seq: Long, snapshot: Long, linkEpoch: Long?, origin: String?): Boolean {
         if (!DraftForm.replyMatchesRequest(JsStr(p.requestId), requestId?.let(::JsStr))) return false
         if (!DraftForm.replyIsFresh(JsNum(snapshot.toDouble()), JsNum(seq.toDouble()))) return false
+        if (origin != null && origin != p.origin) return false
         return (linkEpoch ?: client.linkEpoch.value) == p.linkEpoch
+    }
+
+    /**
+     * ta-2ew (R1): the server [p] went to is no longer the configured one: [p] is over (settled, the
+     * draft unlocked with its text and told so), and nothing that arrives for it later completes it.
+     * True when it was.
+     */
+    private fun settleIfServerChanged(p: PendingCreate): Boolean {
+        if (client.isConfiguredOrigin(p.origin)) return false
+        settle(p)
+        _state.update { it.copy(creating = false, error = DRAFT_SERVER_CHANGED_COPY) }
+        return true
     }
 
     /**
@@ -784,7 +808,8 @@ class DraftComposerModel(
     fun onCreated(reply: CreatedReply): String? {
         val p = pending ?: return null
         if (!_state.value.creating) return null
-        if (!answers(p, reply.requestId, reply.seq, p.createdSnapshot, reply.linkEpoch)) return null
+        if (settleIfServerChanged(p)) return null
+        if (!answers(p, reply.requestId, reply.seq, p.createdSnapshot, reply.linkEpoch, reply.origin)) return null
         return complete(p, reply)
     }
 
@@ -810,13 +835,15 @@ class DraftComposerModel(
                         combine(client.liveSessions, client.linkEpoch) { ids, epoch -> sessionId in ids || epoch != p.linkEpoch }.first { it }
                         sessionId in client.liveSessions.value && client.linkEpoch.value == p.linkEpoch
                     } == true
-                    val sent = live && client.sendAttachments(sessionId, p.prompt, p.attachments, null, p.origin) == AttachmentSendResult.Sent
+                    // ta-2ew (R3): the live check above is outside the client's lock; the epoch is
+                    // checked again under it, with the send.
+                    val sent = live && client.sendAttachments(sessionId, p.prompt, p.attachments, null, p.origin, p.linkEpoch) == AttachmentSendResult.Sent
                     _state.update { it.copy(creating = false) }
                     if (sent) onFirstSent() else orphan(p, sessionId)
                 }
             }
         }
-        onSessionCreated(sessionId)
+        onSessionCreated(sessionId, p.origin)
         return sessionId
     }
 
@@ -849,7 +876,8 @@ class DraftComposerModel(
     fun onCreateError(reply: CreateErrorReply): Boolean {
         val p = pending ?: return false
         if (!_state.value.creating) return false
-        if (!answers(p, reply.requestId, reply.seq, p.errorSnapshot, reply.linkEpoch)) return false
+        if (settleIfServerChanged(p)) return false
+        if (!answers(p, reply.requestId, reply.seq, p.errorSnapshot, reply.linkEpoch, reply.origin)) return false
         fail(p, reply)
         return true
     }
@@ -867,11 +895,11 @@ class DraftComposerModel(
      */
     private fun settleFromRecord(p: PendingCreate): Boolean {
         when (val record = client.createReply(p.requestId)) {
-            is CreateReplyRecord.Created -> if (answers(p, record.reply.requestId, record.reply.seq, p.createdSnapshot, record.reply.linkEpoch)) {
+            is CreateReplyRecord.Created -> if (answers(p, record.reply.requestId, record.reply.seq, p.createdSnapshot, record.reply.linkEpoch, record.reply.origin)) {
                 complete(p, record.reply)
                 return true
             }
-            is CreateReplyRecord.Failed -> if (answers(p, record.reply.requestId, record.reply.seq, p.errorSnapshot, record.reply.linkEpoch)) {
+            is CreateReplyRecord.Failed -> if (answers(p, record.reply.requestId, record.reply.seq, p.errorSnapshot, record.reply.linkEpoch, record.reply.origin)) {
                 fail(p, record.reply)
                 return true
             }
@@ -892,6 +920,7 @@ class DraftComposerModel(
         sourceFor?.let { if (it.epoch != linkEpoch) dropSource() }
         openConfirm?.let { if (it.epoch != linkEpoch || connection != ConnectionState.Connected) closeConfirm(changed = true) }
         val p = pending ?: return
+        if (settleIfServerChanged(p)) return
         if (connection == ConnectionState.Connected && linkEpoch == p.linkEpoch) return
         if (settleFromRecord(p)) return
         settle(p)
@@ -901,6 +930,7 @@ class DraftComposerModel(
     /** r2 (security F2): no answer in time. Never resent; the session may exist (the operator checks). */
     private fun onReplyTimeout(p: PendingCreate) {
         if (pending !== p) return
+        if (settleIfServerChanged(p)) return
         if (settleFromRecord(p)) return
         settle(p)
         _state.update { it.copy(creating = false, error = DRAFT_REPLY_TIMEOUT_COPY) }
@@ -985,6 +1015,9 @@ const val DRAFT_LINK_DROPPED_COPY = "The secure link dropped before the session 
 
 /** ta-895: the draft was drawn for another server than the one now connected. */
 const val DRAFT_NOT_LIVE_COPY = "The server changed. Nothing was created; pick again."
+
+/** ta-2ew: the configured server changed while a create was in flight; it is not completed here. */
+const val DRAFT_SERVER_CHANGED_COPY = "The server changed while the session was being created, so it was not opened here and your message was not sent."
 
 /** ta-895: the live catalog no longer offers the row as drawn. */
 const val DRAFT_NOT_OFFERED_COPY = "This server no longer offers that choice. Nothing was created; pick again from the updated list."

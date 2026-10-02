@@ -63,7 +63,7 @@ class TetherViewModelAttachmentTest {
         override val connection: StateFlow<ConnectionState> get() = conn
         override val sessions: StateFlow<List<AgentSession>> get() = list
         override val configured: StateFlow<Boolean> get() = conf
-        override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
+        override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: DelegateMention?, expectedOrigin: String?, expectedEpoch: Long?): AttachmentSendResult {
             calls += Call(sessionId, text, attachments, mention, expectedOrigin)
             return answer
         }

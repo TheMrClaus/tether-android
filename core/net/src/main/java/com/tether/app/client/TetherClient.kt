@@ -203,6 +203,11 @@ interface TetherClient {
      * enqueued on that socket, once, under a fresh idempotency key. It is never recorded in the
      * durable outbox, retried, queued or persisted: offline it is refused, and if the link drops
      * before the server confirms the turn the operator is told it may not have arrived.
+     *
+     * ta-2ew: [expectedEpoch] (the draft composer's first message: the [linkEpoch] its create went
+     * out on) binds the send to that socket too, checked under the same lock: on any later socket it
+     * is refused ([AttachmentSendResult.NotConnected]), as [sendFirst] refuses. Null (the chat
+     * composer): any live socket of [expectedOrigin].
      */
     fun sendAttachments(
         sessionId: String,
@@ -210,6 +215,7 @@ interface TetherClient {
         attachments: List<Attachment>,
         mention: com.tether.app.protocol.DelegateMention?,
         expectedOrigin: String?,
+        expectedEpoch: Long? = null,
     ): AttachmentSendResult = AttachmentSendResult.NotConnected
 
     fun queueAdd(sessionId: String, text: String)
@@ -429,9 +435,31 @@ interface TetherClient {
      * ta-8cv r2 (security F2): the reply the server already sent to the create with [requestId] (a
      * `created` or an `error` echoing it), if it is one of the recent ones, else null. Recorded when
      * the frame is handled, before the socket it came on can be reported gone, so a create whose
-     * reply landed just before a drop is never taken for one that was not answered.
+     * reply landed just before a drop is never taken for one that was not answered. ta-2ew: only an
+     * answer from the server configured NOW (its [CreateReplyRecord.origin], read under the client's
+     * lock): one recorded on another server is never returned, even before a switch has emptied the
+     * record; a sign-out empties it too.
      */
     fun createReply(requestId: String): CreateReplyRecord? = null
+
+    /**
+     * ta-2ew: is [origin] the server configured right now? Read under the client's lock, so it never
+     * lags a sign-in switch the way [serverUrl] (published later) can. A client that does not stamp
+     * its replies ([CreatedReply.origin] null: test doubles) does not say: true.
+     */
+    fun isConfiguredOrigin(origin: String): Boolean = true
+
+    /**
+     * ta-2ew: [attach] a session a `created` reply named, only while [origin] (the reply's
+     * [CreatedReply.origin]) is still the configured server, checked in the same step under the
+     * client's lock that subscribes it, so a sign-in switch can never slip between the check and the
+     * subscription and attach one server's session id on another. False: nothing was done.
+     */
+    fun attachIfConfigured(sessionId: String, origin: String): Boolean {
+        if (!isConfiguredOrigin(origin)) return false
+        attach(sessionId)
+        return true
+    }
 
     /**
      * ta-8cv r2 (security F1): the draft composer's first message for the session its create just
@@ -870,20 +898,46 @@ private val NO_OVERVIEW: StateFlow<OverviewClientState> = MutableStateFlow(Overv
 private val NO_SEARCH_RESULTS: StateFlow<SearchResults> = MutableStateFlow(SearchResults())
 private val NO_GLOBAL_SEARCH_RESULTS: StateFlow<GlobalSearchResults> = MutableStateFlow(GlobalSearchResults())
 
-/** One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`). */
 /**
+ * One `created` reply (use-tether.ts:291 `{session, seq, requestId?}`).
+ *
  * ta-8cv r2: [linkEpoch] is the [TetherClient.linkEpoch] of the socket the reply came on (null: a
- * client that does not say).
+ * client that does not say). ta-2ew: [origin] is the canonical origin of the server that socket was
+ * opened for, stamped when the frame was handled (null: a client that does not say). [session]'s id
+ * is that server's: it is opened or attached only while [origin] is still the configured server
+ * ([TetherClient.attachIfConfigured]).
  */
-data class CreatedReply(val session: AgentSession, val seq: Long, val requestId: String? = null, val linkEpoch: Long? = null)
+data class CreatedReply(
+    val session: AgentSession,
+    val seq: Long,
+    val requestId: String? = null,
+    val linkEpoch: Long? = null,
+    val origin: String? = null,
+)
 
-/** ta-8cv: one `error` frame of the live socket ([TetherClient.createErrors]); [message] already cleaned. */
-data class CreateErrorReply(val message: String, val seq: Long, val requestId: String? = null, val linkEpoch: Long? = null)
+/**
+ * ta-8cv: one `error` frame of the live socket ([TetherClient.createErrors]); [message] already cleaned.
+ * ta-2ew: [origin] as [CreatedReply.origin].
+ */
+data class CreateErrorReply(
+    val message: String,
+    val seq: Long,
+    val requestId: String? = null,
+    val linkEpoch: Long? = null,
+    val origin: String? = null,
+)
 
 /** ta-8cv r2: the recorded answer to one create ([TetherClient.createReply]). */
 sealed interface CreateReplyRecord {
     data class Created(val reply: CreatedReply) : CreateReplyRecord
     data class Failed(val reply: CreateErrorReply) : CreateReplyRecord
+
+    /** ta-2ew: the server the answer came from ([CreatedReply.origin], [CreateErrorReply.origin]). */
+    val origin: String?
+        get() = when (this) {
+            is Created -> reply.origin
+            is Failed -> reply.origin
+        }
 }
 
 private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)

@@ -87,7 +87,7 @@ class DraftComposerModelTest {
 
         override fun createReply(requestId: String): CreateReplyRecord? = records[requestId]
 
-        override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
+        override fun sendAttachments(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?, expectedEpoch: Long?): AttachmentSendResult {
             attachmentSends += Triple(sessionId, text, attachments.size)
             return attachmentResult
         }
@@ -144,7 +144,7 @@ class DraftComposerModelTest {
                 saved += Saved(origin, sessionId, text)
             },
             newRequestId = { "req-${++n}".also { ids += it } },
-            onSessionCreated = { opened += it },
+            onSessionCreated = { id, _ -> opened += id },
         )
         model.onOrigin(A)
         runCurrent()

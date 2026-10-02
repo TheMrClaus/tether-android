@@ -634,7 +634,13 @@ class RealTetherClient(
     /** Guarded by [lock]; bounded (oldest dropped), emptied with the other per-server views. */
     private val createRepliesByRequest = LinkedHashMap<String, CreateReplyRecord>()
 
-    override fun createReply(requestId: String): CreateReplyRecord? = synchronized(lock) { createRepliesByRequest[requestId] }
+    // ta-2ew (R1): an answer recorded on another server is never returned, even in the window
+    // between a sign-in switch moving the URL and clearServerViews emptying the record.
+    override fun createReply(requestId: String): CreateReplyRecord? = synchronized(lock) {
+        createRepliesByRequest[requestId]?.takeIf { it.origin != null && it.origin == currentOriginLocked() }
+    }
+
+    override fun isConfiguredOrigin(origin: String): Boolean = synchronized(lock) { currentOriginLocked() == origin }
 
     /** Caller holds [lock]. */
     private fun recordCreateReplyLocked(requestId: String, record: CreateReplyRecord) {
@@ -1871,6 +1877,9 @@ class RealTetherClient(
             // re-sign-in in this process must still never send a decision twice (at most once).
             decidedState.value = emptySet()
             unconfirmedState.value = emptySet()
+            // ta-2ew (R2): no create answer outlives the sign-out (the URL stays, so the origin
+            // filter alone would still return it to the next sign-in to the same server).
+            createRepliesByRequest.clear()
         }
         ws?.close(1000, "logout")
         clearSignInViews()
@@ -2596,7 +2605,8 @@ class RealTetherClient(
             is ServerMessage.Created -> ifCurrent(webSocket) {
                 upsertSessionLocked(message.session)
                 createdSeq += 1
-                val reply = CreatedReply(message.session, createdSeq, message.requestId, epoch)
+                // ta-2ew (R1): stamped with the server this socket was opened for, now, with the frame.
+                val reply = CreatedReply(message.session, createdSeq, message.requestId, epoch, socketOrigin)
                 createdState.value = reply
                 createdRepliesFlow.tryEmit(reply)
                 message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Created(reply)) }
@@ -2649,7 +2659,7 @@ class RealTetherClient(
                 // composer acts only on the one that names its in-flight create.
                 ifCurrent(webSocket) {
                     createErrorSeq += 1
-                    val reply = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId, epoch)
+                    val reply = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId, epoch, socketOrigin)
                     createErrorsState.value = reply
                     createErrorRepliesFlow.tryEmit(reply)
                     message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Failed(reply)) }
@@ -3082,6 +3092,7 @@ class RealTetherClient(
         attachments: List<Attachment>,
         mention: com.tether.app.protocol.DelegateMention?,
         expectedOrigin: String?,
+        expectedEpoch: Long?,
     ): AttachmentSendResult {
         if (attachments.isEmpty()) return AttachmentSendResult.Empty
         if (sessionId.isEmpty()) return AttachmentSendResult.Locked
@@ -3103,6 +3114,8 @@ class RealTetherClient(
                 sessionLive = sessionId in liveThisEpoch,
             )
             attachmentLinkRefusal(link, expectedOrigin)?.let { return@synchronized it }
+            // ta-2ew (R3): a first message bound to its create's socket goes on that socket only.
+            if (expectedEpoch != null && expectedEpoch != epoch) return@synchronized AttachmentSendResult.NotConnected
             val ws = socket ?: return@synchronized AttachmentSendResult.NotConnected
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized AttachmentSendResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized AttachmentSendResult.Locked
@@ -3130,14 +3143,6 @@ class RealTetherClient(
     }
 
     /**
-     * T7.3: a delegated send (v103 `send.mention`), recorded like any send (use-tether.ts sendText with a
-     * mention is the same durable path). r2: in ONE step under the lock, the same one that records it:
-     * drawn for the server the outbox belongs to ([expectedOrigin] = [pendingOrigin], and the socket's,
-     * when there is one: a switch can never slip between the check and the record); the session listed
-     * and neither read-only, handed off nor archived; the mention one the catalog that server pushed
-     * offers it. Otherwise nothing is recorded.
-     */
-    /**
      * ta-8cv r2 (security F1): the draft composer's first message, recorded in the SAME step that
      * checks, under the lock, that the outbox, the live socket and [expectedOrigin] are one server and
      * the socket is still the create's ([expectedEpoch]); a sign-in switch (login / pair, on IO)
@@ -3157,6 +3162,14 @@ class RealTetherClient(
         return recorded
     }
 
+    /**
+     * T7.3: a delegated send (v103 `send.mention`), recorded like any send (use-tether.ts sendText with a
+     * mention is the same durable path). r2: in ONE step under the lock, the same one that records it:
+     * drawn for the server the outbox belongs to ([expectedOrigin] = [pendingOrigin], and the socket's,
+     * when there is one: a switch can never slip between the check and the record); the session listed
+     * and neither read-only, handed off nor archived; the mention one the catalog that server pushed
+     * offers it. Otherwise nothing is recorded.
+     */
     override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): MentionResult {
         // T7.4: a delegation that carries attachments is [sendAttachments]'s (never the outbox's).
         if (attachments.isNotEmpty()) {
@@ -3525,7 +3538,23 @@ class RealTetherClient(
      * the ready handler attaches it (after `hello`).
      */
     override fun attach(sessionId: String) {
+        attachNow(sessionId, expectedOrigin = null)
+    }
+
+    /**
+     * ta-2ew (R1): the check that [origin] is the server in force and the subscription are one step
+     * under the lock, and the `attach` frame goes on the socket of that step only ([sendFrameOn]): a
+     * sign-in switch either comes first (refused here) or after (its clear drops the subscription,
+     * and the frame is never handed to the next server's socket).
+     */
+    override fun attachIfConfigured(sessionId: String, origin: String): Boolean = attachNow(sessionId, expectedOrigin = origin)
+
+    /** [attach]; with [expectedOrigin], only while it is the configured server (false: nothing done). */
+    private fun attachNow(sessionId: String, expectedOrigin: String?): Boolean {
+        var on: WebSocket? = null
         val afterSeq = synchronized(lock) {
+            if (expectedOrigin != null && currentOriginLocked() != expectedOrigin) return false
+            on = socket
             subscribed.add(sessionId)
             // §3.1 rule 5: "most recently opened" orders the capped ready re-attach.
             mirrorOrigin?.let { origin ->
@@ -3541,8 +3570,12 @@ class RealTetherClient(
             }
         }
         requestHydration(sessionId)
-        if (afterSeq == null) return
-        sendFrame(ClientMessage.Attach(sessionId, afterSeq.first))
+        if (afterSeq == null) return true
+        val frame = ClientMessage.Attach(sessionId, afterSeq.first)
+        // The socket that was live in the step above, never a later one (a replacement re-attaches
+        // the subscription on its own ready).
+        if (expectedOrigin == null) sendFrame(frame) else on?.let { sendFrameOn(it, frame) }
+        return true
     }
 
     /**

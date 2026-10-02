@@ -351,7 +351,7 @@ class NewSessionTransmissionTest {
                 { "/w" },
                 saveSessionDraft = { _, sessionId, text -> saved += "$sessionId:$text" },
                 newRequestId = { "e2e-3" },
-                onSessionCreated = { opened += it },
+                onSessionCreated = { id, _ -> opened += id },
             )
             engine.refresh()
             engine.selectProvider("claude")

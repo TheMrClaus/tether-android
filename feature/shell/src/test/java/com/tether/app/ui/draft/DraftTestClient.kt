@@ -146,6 +146,7 @@ class DraftTestClient(
         attachments: List<Attachment>,
         mention: com.tether.app.protocol.DelegateMention?,
         expectedOrigin: String?,
+        expectedEpoch: Long?,
     ): AttachmentSendResult {
         refuseInGolden("attachments")
         attachmentSends += Triple(sessionId, text, attachments)

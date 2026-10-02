@@ -382,6 +382,7 @@ class FakeTetherClient : TetherClient {
         attachments: List<Attachment>,
         mention: com.tether.app.protocol.DelegateMention?,
         expectedOrigin: String?,
+        expectedEpoch: Long?,
     ): com.tether.app.client.AttachmentSendResult {
         if (attachments.isEmpty()) return com.tether.app.client.AttachmentSendResult.Empty
         if (expectedOrigin != DEMO_ORIGIN) return com.tether.app.client.AttachmentSendResult.NotLive

@@ -82,7 +82,7 @@ class TetherViewModel(
         scope = viewModelScope,
         currentWorkspace = { _currentWorkspace.value },
         saveSessionDraft = { origin, sessionId, text -> saveSessionDraft(origin, sessionId, text) },
-        onSessionCreated = { sessionId -> onOwnCreate(sessionId) },
+        onSessionCreated = { sessionId, origin -> onOwnCreate(sessionId, origin) },
     )
 
     /**
@@ -434,6 +434,12 @@ class TetherViewModel(
     }
 
     fun selectSession(id: String) {
+        showSelected(id)
+        client.attach(id)
+    }
+
+    /** [selectSession] without the attach (the caller attaches, or already has). */
+    private fun showSelected(id: String) {
         // dashboard.tsx:227 selectActiveId — every explicit selection retires the opening row.
         _openingHistoryId.value = null
         // ta-abm (dashboard.tsx selectSession): a selection closes the new-session sheet; the draft stays.
@@ -444,7 +450,6 @@ class TetherViewModel(
         if ((staged != null && staged.sessionId != id) || _selectedSessionId.value != id) stagedAttachments.clear()
         _selectedSessionId.value = id
         loadDraft(id)
-        client.attach(id)
     }
 
     private val _openRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -630,6 +635,9 @@ class TetherViewModel(
      * `created` (r2, verifier P3: also while a create is in flight). It cannot take that create's
      * place: the create completes only on its own reply, which then opens ITS session, so whichever
      * reply lands last is on screen, exactly as on the web.
+     *
+     * ta-2ew (R1): a reply is its server's ([CreatedReply.origin]); one handled after a switch to
+     * another server (still buffered here) opens nothing ([openCreated]).
      */
     private fun onCreated(reply: CreatedReply?, seenAtStart: Long) {
         if (reply == null || reply.seq <= maxOf(seenAtStart, followedCreatedSeq)) return
@@ -638,18 +646,25 @@ class TetherViewModel(
             draftComposer.onCreated(reply)
             return
         }
-        openCreated(reply.session.id)
+        openCreated(reply.session.id, reply.origin)
     }
 
     /** ta-8cv: the draft composer's own create made [sessionId] (from its reply, or from the record after a drop). */
-    private fun onOwnCreate(sessionId: String) = openCreated(sessionId)
+    private fun onOwnCreate(sessionId: String, origin: String) = openCreated(sessionId, origin)
 
-    private fun openCreated(sessionId: String) {
+    /**
+     * ta-2ew (R1): [origin] (the server the reply came from; null: a client that does not stamp its
+     * replies) must still be the configured server. The client checks it and subscribes the session
+     * in one step under its lock ([TetherClient.attachIfConfigured]), so a switch cannot slip between;
+     * refused, nothing here changes (no selection, the sheet stays).
+     */
+    private fun openCreated(sessionId: String, origin: String?) {
+        if (origin != null && !client.attachIfConfigured(sessionId, origin)) return
         _openingHistoryId.value = null
         // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
         hideDraft()
         if (_selectedSessionId.value == sessionId) return
-        selectSession(sessionId)
+        if (origin != null) showSelected(sessionId) else selectSession(sessionId)
     }
 
     // ------------------------------------------------------------------
