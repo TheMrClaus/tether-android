@@ -30,6 +30,21 @@ class EngineSettingsTest {
 
     private fun encoded(patch: JsonObject?) = ClientMessage.SetServerSettings(patch!!).encode()
 
+    /** A confirmed value built against the "Now" [v] itself holds (the confirmation showed the frame's own value). */
+    private fun engineValueAsShown(v: ServerSettingsView, s: ServerSetting, value: String) =
+        ServerSettingsPatch.engineValue(v, s, value, expectedNow = v.text(s))
+
+    /**
+     * ta-q9l r2 (security F1): a value confirmed against a "Now" the frame no longer holds builds
+     * nothing; the same value against the frame's own "Now" builds (the positive control).
+     */
+    @Test fun aConfirmedValueBuildsOnlyAgainstTheNowItWasConfirmedOn() {
+        val v = view("""{"codexCommand":"/opt/other"}""")
+        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.CodexCommand, "/opt/codex", expectedNow = "codex"))
+        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.CodexCommand, "/opt/codex", expectedNow = ""))
+        assertEquals(json("""{"codexCommand":"/opt/codex"}"""), ServerSettingsPatch.engineValue(v, ServerSetting.CodexCommand, "/opt/codex", expectedNow = "/opt/other")?.patch)
+    }
+
     // ---- the detection decode -------------------------------------------------------------------
 
     @Test fun theRecordedFrameReadsEachEnginesDetection() {
@@ -140,27 +155,27 @@ class EngineSettingsTest {
         val v = view("""{"claudeHome":"/home/op","claudeCommand":"claude","claudeLaunchCommand":"","codexHome":"/c","codexCommand":"codex"}""")
         assertEquals(
             """{"type":"set-server-settings","settings":{"claudeCommand":"/opt/claude/bin/claude"}}""",
-            encoded(ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeCommand, "/opt/claude/bin/claude")?.patch),
+            encoded(engineValueAsShown(v, ServerSetting.ClaudeCommand, "/opt/claude/bin/claude")?.patch),
         )
         // An emptied home or launch command is null (`value || null`); an emptied command is "".
-        assertEquals(json("""{"claudeHome":null}"""), ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeHome, "")?.patch)
-        assertEquals(json("""{"codexCommand":""}"""), ServerSettingsPatch.engineValue(v, ServerSetting.CodexCommand, "")?.patch)
-        assertEquals(json("""{"claudeLaunchCommand":"jean-claude run -- claude"}"""), ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeLaunchCommand, "jean-claude run -- claude")?.patch)
+        assertEquals(json("""{"claudeHome":null}"""), engineValueAsShown(v, ServerSetting.ClaudeHome, "")?.patch)
+        assertEquals(json("""{"codexCommand":""}"""), engineValueAsShown(v, ServerSetting.CodexCommand, "")?.patch)
+        assertEquals(json("""{"claudeLaunchCommand":"jean-claude run -- claude"}"""), engineValueAsShown(v, ServerSetting.ClaudeLaunchCommand, "jean-claude run -- claude")?.patch)
         // The server's value already: nothing.
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeHome, "/home/op")?.patch)
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeLaunchCommand, "")?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.ClaudeHome, "/home/op")?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.ClaudeLaunchCommand, "")?.patch)
         // The value is sent exactly as confirmed (the caller trims before the confirmation).
-        assertEquals(json("""{"codexHome":" /x "}"""), ServerSettingsPatch.engineValue(v, ServerSetting.CodexHome, " /x ")?.patch)
+        assertEquals(json("""{"codexHome":" /x "}"""), engineValueAsShown(v, ServerSetting.CodexHome, " /x ")?.patch)
     }
 
     @Test fun anEnvForcedOrOversizeValueIsNeverWritten() {
         val v = view("""{"claudeCommand":"claude","dshHome":"/d"}""", envForced = """{"claudeCommand":true}""")
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.ClaudeCommand, "other")?.patch)
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.DshCommand, "é".repeat(129))?.patch) // 258 bytes
-        assertEquals(json("""{"dshCommand":"${"é".repeat(128)}"}"""), ServerSettingsPatch.engineValue(v, ServerSetting.DshCommand, "é".repeat(128))?.patch)
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.DshHome, "/".repeat(4097))?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.ClaudeCommand, "other")?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.DshCommand, "é".repeat(129))?.patch) // 258 bytes
+        assertEquals(json("""{"dshCommand":"${"é".repeat(128)}"}"""), engineValueAsShown(v, ServerSetting.DshCommand, "é".repeat(128))?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.DshHome, "/".repeat(4097))?.patch)
         // Only a value that sets what the server runs goes through here.
-        assertNull(ServerSettingsPatch.engineValue(v, ServerSetting.Host, "x")?.patch)
+        assertNull(engineValueAsShown(v, ServerSetting.Host, "x")?.patch)
     }
 
     @Test fun everyUnconfirmedBuilderRefusesWhatTheServerRuns() {
@@ -175,13 +190,13 @@ class EngineSettingsTest {
             assertNull(s.key, ServerSettingsPatch.addPath(v, s, "/tmp/evil"))
             assertNull(s.key, ServerSettingsPatch.removePath(v, s, ""))
             // Only the confirmed write names it.
-            assertEquals(setOf(s.key), ServerSettingsPatch.engineValue(v, s, "/tmp/evil")!!.patch.keys)
+            assertEquals(setOf(s.key), engineValueAsShown(v, s, "/tmp/evil")!!.patch.keys)
         }
         assertEquals(runs.map { it.key }.toSet(), ServerSettingsPatch.runsKeys)
         assertTrue(ServerSettingsPatch.touchesWhatRuns(json("""{"host":"x","piHome":"/p"}""")))
         assertFalse(ServerSettingsPatch.touchesWhatRuns(json("""{"host":"x","headlessModes":"pi","shareHostConfig":true}""")))
         // A confirmed write prints its key only.
-        assertEquals("ConfirmedEngineWrite([codexHome])", ServerSettingsPatch.engineValue(v, ServerSetting.CodexHome, "/secret/path").toString())
+        assertEquals("ConfirmedEngineWrite([codexHome])", engineValueAsShown(v, ServerSetting.CodexHome, "/secret/path").toString())
     }
 
     @Test fun shareHostConfigFlipsLikeAnyToggleAndLocksWhenForced() {
@@ -233,7 +248,7 @@ class EngineSettingsTest {
         assertFalse(h.client.setServerSettings(json("""{"codexCommand":"/tmp/evil"}"""), origin))
         assertFalse(h.client.setServerSettings(json("""{"host":"h","claudeLaunchCommand":"x"}"""), origin))
         val v = view("""{"codexCommand":"codex"}""")
-        val write = ServerSettingsPatch.engineValue(v, ServerSetting.CodexCommand, "/opt/codex")!!
+        val write = engineValueAsShown(v, ServerSetting.CodexCommand, "/opt/codex")!!
         assertFalse("bound to its server", h.client.setConfirmedEngineValue(write, "https://elsewhere.example"))
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
         assertTrue(h.client.setConfirmedEngineValue(write, origin))

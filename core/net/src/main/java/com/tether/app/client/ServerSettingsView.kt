@@ -289,11 +289,15 @@ object ServerSettingsPatch {
      * r2: the ONLY producer of a [ConfirmedEngineWrite], the only form in which the client sends a
      * [SettingKind.Runs] key ([TetherClient.setServerSettings] refuses one in a plain patch).
      * ta-q9l: [EngineConfirmationOnly]: a caller must opt in, so the confirmation path (and the
-     * tests) are the only, greppable, places that mint one.
+     * tests) are the only, greppable, places that mint one. r2 (security F1): [expectedNow] is the
+     * current value the confirmation SHOWED ("Now"); when [view]'s differs (the server's value
+     * changed between the confirmation and the build), nothing is built: a write is never confirmed
+     * against a "Now" the user did not see.
      */
     @EngineConfirmationOnly
-    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String): ConfirmedEngineWrite? {
+    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String, expectedNow: String): ConfirmedEngineWrite? {
         if (setting.kind != SettingKind.Runs || view.forced(setting)) return null
+        if (view.text(setting) != expectedNow) return null
         if (value == view.text(setting) || !fits(setting, value)) return null
         val nullable = setting !in EngineCard.commandSettings
         return ConfirmedEngineWrite(patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value)))
@@ -315,7 +319,7 @@ object ServerSettingsPatch {
     message = "Only the engine confirmation may build a ConfirmedEngineWrite (ta-dh1 r2, ta-q9l).",
 )
 @Retention(AnnotationRetention.BINARY)
-@Target(AnnotationTarget.FUNCTION)
+@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CONSTRUCTOR)
 annotation class EngineConfirmationOnly
 
 /**
@@ -323,9 +327,10 @@ annotation class EngineConfirmationOnly
  * home, command or launch command), as confirmed by the user. Only [ServerSettingsPatch.engineValue]
  * makes one (the constructor is internal to this module), and the client sends such a key only in
  * this form: [TetherClient.setServerSettings] refuses a plain patch that names one. [toString]
- * names the key, never the value.
+ * names the key, never the value. ta-q9l r2 (security F4): the constructor is under
+ * [EngineConfirmationOnly] too, so code in this module cannot mint one without opting in either.
  */
-class ConfirmedEngineWrite internal constructor(val patch: JsonObject) {
+class ConfirmedEngineWrite @EngineConfirmationOnly internal constructor(val patch: JsonObject) {
     override fun toString(): String = "ConfirmedEngineWrite(${patch.keys.sorted()})"
     override fun equals(other: Any?): Boolean = other is ConfirmedEngineWrite && other.patch == patch
     override fun hashCode(): Int = patch.hashCode()

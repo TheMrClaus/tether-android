@@ -688,6 +688,65 @@ class EnginesBehaviourTest {
         assertEquals(frames("""{"codexCommand":"/opt/codex"}"""), writer.frames())
     }
 
+    /**
+     * ta-q9l r2 (security F1): the server's value changes in the same frame as the tap on Change
+     * (the tap runs the armed key's lambda of the frame before, so the key's re-arm cannot stop it):
+     * the write is built against the "Now" that confirmation showed, and the newest frame's differs,
+     * so nothing is sent.
+     */
+    @Test fun aNowChangedInTheSameFrameAsTheTapSendsNothing() {
+        val writer = RecordingWriter()
+        showWith(writer)
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        assertEquals("codex", SafeText.original(textOf(EngineTags.ConfirmNow)))
+        arm()
+        val action = tag(EngineTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            binding = binding.copy(settings = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "/opt/other")), envForced = forced))
+            action()
+            flushWrites()
+        }
+        compose.waitForIdle()
+        assertFalse(exists(EngineTags.ConfirmSheet))
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /**
+     * ta-q9l r2 (security F1): the client's newest frame holds another "Now" than the screen (the
+     * screen has not caught up) when Change is tapped: nothing is sent.
+     */
+    @Test fun aNowChangedInTheClientsNewestFrameBeforeTheSendSendsNothing() {
+        val writer = RecordingWriter()
+        val live = ServerFixtures.view(settings)
+        var clientFrame: com.tether.app.client.ServerSettingsView? = live
+        show(ServerFixtures.binding(view = live, writer = writer).copy(fresh = { clientFrame }))
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        arm()
+        clientFrame = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "/opt/other")))
+        tag(EngineTags.Confirm).performClick()
+        compose.waitForIdle()
+        assertFalse(exists(EngineTags.ConfirmSheet))
+        assertEquals(emptyList<Any>(), writer.patches)
+    }
+
+    /**
+     * ta-q9l r2: the positive control: the newest frame changed between arm and send, but not this
+     * key's "Now" (another key moved): the confirmed value is sent, once.
+     */
+    @Test fun anotherKeyChangedBeforeTheSendStillSends() {
+        val writer = RecordingWriter()
+        val live = ServerFixtures.view(settings)
+        var clientFrame: com.tether.app.client.ServerSettingsView? = live
+        show(ServerFixtures.binding(view = live, writer = writer).copy(fresh = { clientFrame }))
+        typeAndDone(ServerSetting.CodexCommand, "/opt/codex")
+        arm()
+        clientFrame = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("claudeCommand" to "/opt/claude")))
+        tag(EngineTags.Confirm).performClick()
+        waitForWrites(writer, 1)
+        assertEquals(frames("""{"codexCommand":"/opt/codex"}"""), writer.frames())
+        assertEquals(1, writer.confirmedWrites.size)
+    }
+
     /** r2 (F1): a no-break space is a visible token in the confirmation, and the value is sent exactly. */
     @Test fun aNoBreakSpaceIsShownAsATokenAndSentExactly() {
         val writer = answering()
@@ -735,7 +794,7 @@ class EnginesBehaviourTest {
             assertFalse(key, b.send(json("""{"host":"h","$key":null}""")))
         }
         assertTrue(b.send(json("""{"headlessModes":"claude"}""")))
-        assertTrue(b.sendConfirmed(com.tether.app.client.ServerSettingsPatch.engineValue(ServerFixtures.view(), ServerSetting.CodexCommand, "/opt/c")))
+        assertTrue(b.sendConfirmed(com.tether.app.client.ServerSettingsPatch.engineValue(ServerFixtures.view(), ServerSetting.CodexCommand, "/opt/c", expectedNow = ServerFixtures.view().text(ServerSetting.CodexCommand))))
         assertEquals(listOf(json("""{"headlessModes":"claude"}"""), json("""{"codexCommand":"/opt/c"}""")), writer.patches.map { it.first })
         assertEquals(1, writer.confirmedWrites.size)
     }

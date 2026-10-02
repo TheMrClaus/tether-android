@@ -333,7 +333,9 @@ private fun EngineValueRow(
  * frame after it ([SideEffect]), from that frame's binding and the client's newest frame
  * ([ServerSettingsBinding.latestSettings]), so an env lock that landed in the same frame as the
  * tap closes the confirmation and sends nothing. One confirmation is one write, a double tap
- * included.
+ * included. ta-q9l r2 (security F1): the tap records the "Now" its own dialog showed (the value its
+ * lambda captured, so a tap landing in the same frame as a change carries the one the user saw),
+ * and the build refuses when the newest frame's value differs: nothing is sent.
  */
 @OptIn(com.tether.app.client.EngineConfirmationOnly::class) // ta-q9l: the one place a confirmed write is built
 @Composable
@@ -342,24 +344,27 @@ private fun PendingEngineEdit(pending: EngineEdit?, binding: ServerSettingsBindi
     // The frame went away (signed out), or the environment now forces the key: the edit goes too.
     val view = binding.settings?.takeIf { binding.origin != null }
     if (view == null || view.forced(edit.setting)) return SideEffect { onDone() }
-    var asked by remember(edit) { mutableStateOf(false) }
+    // Null until Change is tapped; then the "Now" that confirmation showed.
+    var askedOn by remember(edit) { mutableStateOf<String?>(null) }
     val fired = remember(edit) { booleanArrayOf(false) }
-    if (asked) {
+    val confirmedNow = askedOn
+    if (confirmedNow != null) {
         SideEffect {
             if (!fired[0]) {
                 fired[0] = true
-                // Built NOW, from the newest frame: an env lock or the same value sends nothing.
+                // Built NOW, from the newest frame: an env lock, the same value or another "Now" sends nothing.
                 val latest = binding.latestSettings()
-                if (latest != null) binding.sendConfirmed(ServerSettingsPatch.engineValue(latest, edit.setting, edit.value))
+                if (latest != null) binding.sendConfirmed(ServerSettingsPatch.engineValue(latest, edit.setting, edit.value, expectedNow = confirmedNow))
             }
             onDone()
         }
         return
     }
+    val shownNow = view.text(edit.setting)
     EngineConfirmDialog(
         edit = edit,
-        now = view.text(edit.setting),
-        onConfirm = { asked = true },
+        now = shownNow,
+        onConfirm = { askedOn = shownNow },
         onCancel = onDone,
     )
 }
