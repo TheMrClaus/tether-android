@@ -218,11 +218,27 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
         compose.waitForIdle()
         assertTrue("no prompt", passkeys.requests.isEmpty())
         assertEquals(listOf("devices", "passkeys", "sessions", "registerOptions"), source.names())
-        // A parent domain is refused too (a browser would allow it; the app fails closed).
-        upToThePrompt(rpId = "example.test")
+        // ta-coik.1: a public suffix above the host is refused, as a browser refuses it.
+        upToThePrompt(rpId = "test")
         waitText(DevicesCopy.PASSKEY_WRONG_RP)
         compose.waitForIdle()
         assertTrue(passkeys.requests.isEmpty())
+    }
+
+    /**
+     * ta-coik.1: a registrable parent of the host is the browser's rule too (WebAuthn §5.1.3 step 8),
+     * so the prompt is asked for it, under the canonical spelling that was checked.
+     */
+    @Test fun aRegistrableParentIsAskedForAsABrowserWould() {
+        // The Public Suffix List is an OkHttp asset read through the application context (androidx-startup in the app).
+        okhttp3.OkHttp.initialize(org.robolectric.RuntimeEnvironment.getApplication())
+        opened()
+        upToThePrompt(rpId = "Example.TEST")
+        waitFor { passkeys.pending() }
+        val asked = obj(passkeys.requests.single())
+        assertEquals(kotlinx.serialization.json.JsonPrimitive("example.test"), (asked["rp"] as JsonObject)["id"])
+        passkeys.answer(PasskeyCeremony.Dismissed)
+        waitText(DevicesCopy.PASSKEY_DISMISSED)
     }
 
     @Test fun anAnswerAboutAnotherServerIsDropped() {
