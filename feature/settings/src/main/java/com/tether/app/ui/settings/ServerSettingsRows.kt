@@ -604,12 +604,16 @@ internal fun MaskedWell(
     }
 }
 
-/** ServerNumberRow (settings-dialog.tsx:164-211): digits only (the number keypad, and any other edit refused), committed like the text row. */
+/**
+ * ServerNumberRow (settings-dialog.tsx:164-211), committed like the text row: the field takes the
+ * characters a browser's number input takes (digits, `.`, `e`/`E`, `+`, `-`), and the commit reads
+ * it as that input's value ([ServerSettingsPatch.number]: "6e4" is 60000).
+ */
 @Composable
 internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
     val s = row.setting
     val forced = view.forced(s)
-    val shown = view.number(s)?.toString().orEmpty()
+    val shown = view.numberText(s)
     SettingsRow(
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
@@ -625,10 +629,8 @@ internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: 
                     enabled = !forced,
                     narrow = narrow,
                     placeholder = row.placeholder,
-                    keyboardType = KeyboardType.Number,
-                    // r2: an edit that is not all digits (a paste of "6e4" or "-5") is refused as a
-                    // whole, never rewritten into another number that would then be sent.
-                    accept = { typed -> typed.length <= MAX_DIGITS && typed.all { it in '0'..'9' } },
+                    keyboardType = KeyboardType.Decimal,
+                    accept = { typed -> typed.all { it in NUMBER_CHARS } },
                     onCommit = { serverCommit(ServerSettingsPatch.number(view, s, it), binding::send) },
                     modifier = Modifier.widthIn(max = 144.dp).fillMaxWidth(),
                 )
@@ -637,8 +639,8 @@ internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: 
     )
 }
 
-/** A safe integer's digits (JavaScript's `Number` is exact to 2^53). */
-private const val MAX_DIGITS = 15
+/** The characters an `<input type="number">` lets the operator type. */
+private const val NUMBER_CHARS = "0123456789.eE+-"
 
 /** ServerToggleRow (settings-dialog.tsx:213-239). */
 @Composable

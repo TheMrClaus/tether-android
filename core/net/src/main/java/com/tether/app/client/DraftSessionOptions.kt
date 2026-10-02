@@ -1,7 +1,6 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.helpers.CodexModePresets
-import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -87,47 +86,6 @@ object DraftModes {
     fun hasAutoChip(provider: String): Boolean = provider == "opencode"
 
     /**
-     * The mode values a [provider]'s create may carry from this draft: its Mode rows, plus opencode's
-     * Auto (`bypassPermissions`) and its untouched "" (the web's cold start: Build). Null = the provider
-     * has no Mode row, so its frame ignores the form's mode ([CreateFrame]).
-     */
-    fun known(provider: String): Set<String>? {
-        val rows = options(provider) ?: return null
-        val values = rows.mapTo(LinkedHashSet()) { it.value }
-        if (hasAutoChip(provider)) {
-            values += ModeVocabulary.AUTO
-            values += ""
-        }
-        return values
-    }
-
-    /**
-     * r2 (verifier F2, owner-delegated 2026-10-02): retired modes MORE restrictive than the provider's
-     * default, and the row they fall back to instead of it: Claude's `dontAsk` ("Locked", no longer
-     * offered since v100) is Manual, never Auto.
-     */
-    val RETIRED_RESTRICTIVE: Map<String, Map<String, String>> = mapOf("claude" to mapOf("dontAsk" to "default"))
-
-    /**
-     * ta-xki (prefs rule): a mode the provider does not offer (a stored preference from an older build,
-     * such as Codex's pre-v100 `off`, a hand-edited or garbage value) is the provider's default
-     * ([DraftForm.defaultModeFor]: Claude Auto, Codex "default", opencode ""). r2: a retired mode that
-     * was more restrictive than that default ([RETIRED_RESTRICTIVE]: Claude's `dontAsk`) is Manual
-     * instead. A provider with no Mode row keeps the value: its frame never reads it.
-     */
-    fun normalize(provider: String, mode: String): String {
-        val known = known(provider) ?: return mode
-        if (mode in known) return mode
-        return RETIRED_RESTRICTIVE[provider]?.get(mode) ?: DraftForm.defaultModeFor(JsStr(provider))
-    }
-
-    /** True when [mode] is one the [provider]'s Mode row (or opencode's Auto chip) can set. */
-    fun selectable(provider: String, mode: String): Boolean {
-        val known = known(provider) ?: return false
-        return mode.isNotEmpty() && mode in known
-    }
-
-    /**
      * draft-composer.tsx `modeDisplay`: opencode's Auto shows its Mode select on Build ("default"),
      * since Auto is its own chip there. App addition: opencode's untouched "" (Build on the wire) shows
      * as Build too, where the web's select draws an empty pill.
@@ -151,10 +109,9 @@ object DraftSessionOptionsModel {
         val provider = entry.provider
         val model = (form["model"] as? JsStr)?.value.orEmpty()
         val effort = (form["reasoningEffort"] as? JsStr)?.value.orEmpty()
-        val mode = DraftModes.normalize(provider, (form["mode"] as? JsStr)?.value.orEmpty())
+        // draft-composer.tsx:153: the form's mode as it is (a value no row lists draws as itself).
+        val mode = (form["mode"] as? JsStr)?.value.orEmpty()
 
-        // r2 (verifier F1): the SAME lookup the create frame uses, so an effort that can be picked is
-        // one that is sent; when it offers none the control is hidden.
         val variants = offeredEfforts(entry, model)
         val effortControl = if (variants.isEmpty()) {
             null
@@ -183,34 +140,17 @@ object DraftSessionOptionsModel {
     }
 
     /**
-     * The efforts [model] offers on [entry], for BOTH the Effort control and the create frame (r2,
-     * verifier F1: one lookup, so nothing shown is silently dropped). The model is lib/draft-form.ts
-     * modelDefinition's: the row whose value is [model], else the one whose resolvedModel is; for "" the
-     * CLI-default row, else the first. An id the row does not list (a hand-added custom id, or a model
-     * that has left the live catalog) offers none, so the control is hidden. (The web's
-     * draft-composer.tsx effortVariants falls back to the first row there and its create then drops
-     * the pick; the app hides it instead.)
-     *
-     * r2 (security F2): only values the server's bound admits (non-empty, at most
-     * [MAX_EFFORT_BYTES] UTF-8 bytes), at most [LabelText.MAX_ITEMS] of them.
+     * draft-composer.tsx:119-125 effortVariants: the variants of the model whose value is [model],
+     * else the CLI-default row ("" or "default"), else the first row; none when that row lists none
+     * (the Effort control is then hidden). Every variant as the catalog sends it.
      */
     fun offeredEfforts(entry: ProviderCatalogEntry, model: String): List<com.tether.app.protocol.ModelVariantOption> {
         val models = entry.models
         val row = models.firstOrNull { it.value == model }
-            ?: if (model.isEmpty()) {
-                models.firstOrNull { it.value == "" || it.value == "default" } ?: models.firstOrNull()
-            } else {
-                models.firstOrNull { it.resolvedModel == model }
-            }
+            ?: models.firstOrNull { it.value == "" || it.value == "default" }
+            ?: models.firstOrNull()
         return row?.variants.orEmpty()
-            .asSequence()
-            .filter { it.value.isNotEmpty() && it.value.toByteArray(Charsets.UTF_8).size <= MAX_EFFORT_BYTES }
-            .take(LabelText.MAX_ITEMS)
-            .toList()
     }
-
-    /** r2 (security F2): `create.reasoningEffort`'s bound, as SessionControlsGuard holds variants to it. */
-    const val MAX_EFFORT_BYTES = 200
 }
 
 /** issue #48's chip: "Auto" (draft-composer.tsx). */

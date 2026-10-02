@@ -164,7 +164,8 @@ object NewSessionGuard {
      * ([resolveEntry]). The frame is the web's, key for key ([CreateFrame.build]), on the row as the
      * live catalog has it (its engine and profile), never as the request claims them. ta-23f: null
      * too for an isolated create whose `worktree` block cannot be built (checkout-branch without a
-     * branch, checkout-pr without a plain number of at most 9,999,999): the server would otherwise
+     * branch, checkout-pr without a positive integer, as use-draft-composer.ts readiness refuses it):
+     * the server would otherwise
      * make a default new branch from the remote's default base, and run that base's setup.
      */
     fun resolve(request: NewSessionRequest, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): ClientMessage.Create? {

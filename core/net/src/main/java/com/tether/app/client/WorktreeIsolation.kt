@@ -1,8 +1,9 @@
 package com.tether.app.client
 
-import com.tether.app.protocol.fold.jsTrim
+import com.tether.app.protocol.fold.numberToString
 import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.tree.JsBool
+import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import kotlinx.serialization.json.JsonArray
@@ -181,67 +182,27 @@ data class WorktreeSourceInfo(
 data class WorktreeSourceReply(val info: WorktreeSourceInfo, val requestId: String?, val linkEpoch: Long)
 
 /**
- * The v98 isolation request the app sends: lib/draft-form.ts buildWorktreeCreateRequest, with ONE
- * stricter rule (coordinator 2026-10-02): a pull request number must be a plain positive integer
- * after the web's trim (ASCII digits only) and at most the server's [PR_MAX]. The web's
- * `Number.parseInt` takes "42abc" as 42, "+7" as 7, "1e3" as 1 and 10^20 as itself (which the server
- * then refuses); none of those builds here, so the readiness reason blocks Send instead.
+ * The v98 isolation request the app sends: lib/draft-form.ts:156-184 buildWorktreeCreateRequest as it
+ * is (ta-coik.4: the web's `Number.parseInt` rule for the pull request number, no limit of the app's
+ * own; the server validates).
  */
 object WorktreeDraft {
-    /** lib/protocol-validate.mjs validateWorktreeRequest / engines/worktree.mjs: `prNumber <= 9_999_999`. */
-    const val PR_MAX = 9_999_999
-
-    /** The PR field keeps at most this many digits (the web keeps any number; the server tops out at 7). */
-    const val PR_INPUT_MAX = 16
-
-    /** Each typed ref / branch / slug: a longer edit is refused whole (never cut, so never another name). */
-    const val FIELD_MAX = 256
-
-    /** The form's PR number, or null when it is not a plain positive integer within [PR_MAX]. */
-    fun prNumber(raw: String): Int? {
-        val text = jsTrim(raw)
-        if (text.isEmpty() || text.any { it !in '0'..'9' }) return null
-        val digits = text.trimStart('0')
-        if (digits.isEmpty() || digits.length > PR_MAX.toString().length) return null
-        val value = digits.toInt()
-        return if (value in 1..PR_MAX) value else null
-    }
-
-    /** True when [raw] is digits only (after the trim) but past [PR_MAX]: readiness says so in its own words. */
-    fun prTooLarge(raw: String): Boolean {
-        val text = jsTrim(raw)
-        if (text.isEmpty() || text.any { it !in '0'..'9' }) return false
-        val digits = text.trimStart('0')
-        return digits.length > PR_MAX.toString().length || (digits.isNotEmpty() && digits.toLong() > PR_MAX)
-    }
-
-    /** draft-composer.tsx: the PR input keeps digits only (`replace(/[^0-9]/g, "")`), here at most [PR_INPUT_MAX]. */
-    fun prInput(text: String): String = text.filter { it in '0'..'9' }.take(PR_INPUT_MAX)
+    /** draft-composer.tsx:756: the PR input keeps digits only (`replace(/[^0-9]/g, "")`). */
+    fun prInput(text: String): String = text.filter { it in '0'..'9' }
 
     /**
      * The create's `worktree` block for [form] (a lib/draft-form.ts tree), or null: isolation off, or
-     * the mode's required input missing (checkout-branch without a branch, checkout-pr without a valid
-     * number). Every other field is the web's builder's, key for key.
+     * the mode's required input missing (checkout-branch without a branch, checkout-pr without a
+     * positive integer).
      */
-    fun request(form: JsObj): JsObj? {
-        if (form["useWorktree"] != JsBool.TRUE) return null
-        if (form["worktreeMode"] == JsStr(WorktreeModes.CHECKOUT_PR) && prNumber((form["worktreePr"] as? JsStr)?.value.orEmpty()) == null) return null
-        return DraftForm.buildWorktreeCreateRequest(form)
-    }
+    fun request(form: JsObj): JsObj? = DraftForm.buildWorktreeCreateRequest(form)
 
-    /**
-     * use-draft-composer.ts readiness, the isolation reason ("" = complete): the web's two words, plus
-     * the app's own for a number past the server's limit.
-     */
+    /** use-draft-composer.ts:272-278 readiness, the isolation reason ("" = complete): the web's two words. */
     fun readiness(form: JsObj): String {
         if (form["useWorktree"] != JsBool.TRUE || request(form) != null) return ""
-        if (form["worktreeMode"] != JsStr(WorktreeModes.CHECKOUT_PR)) return READINESS_NEED_BRANCH
-        return if (prTooLarge((form["worktreePr"] as? JsStr)?.value.orEmpty())) READINESS_PR_TOO_LARGE else READINESS_NEED_PR
+        return if (form["worktreeMode"] == JsStr(WorktreeModes.CHECKOUT_PR)) READINESS_NEED_PR else READINESS_NEED_BRANCH
     }
 }
-
-/** ta-23f: a pull request number past the server's limit (the web would send it and be refused). */
-const val READINESS_PR_TOO_LARGE = "That pull request number is too large: Tether accepts numbers up to 9999999."
 
 /**
  * What the setup confirmation shows for one create: the isolation [mode] (and its words), what the
@@ -336,8 +297,8 @@ object WorktreeSetupGate {
         val base = (request["baseRef"] as? JsStr)?.value
         return when (val mode = (request["mode"] as? JsStr)?.value) {
             WorktreeModes.CHECKOUT_PR -> {
-                val number = WorktreeDraft.prNumber((form["worktreePr"] as? JsStr)?.value.orEmpty()) ?: return null
-                SetupConfirmation(WorktreeModes.CHECKOUT_PR, SETUP_FIELD_PR, "#$number", branch, cwd, certain = false)
+                val number = (request["prNumber"] as? JsNum)?.value ?: return null
+                SetupConfirmation(WorktreeModes.CHECKOUT_PR, SETUP_FIELD_PR, "#${numberToString(number)}", branch, cwd, certain = false)
             }
             WorktreeModes.CHECKOUT_BRANCH -> SetupConfirmation(WorktreeModes.CHECKOUT_BRANCH, SETUP_FIELD_BRANCH, branch, null, cwd, certain = false)
             WorktreeModes.BRANCH_OFF -> {

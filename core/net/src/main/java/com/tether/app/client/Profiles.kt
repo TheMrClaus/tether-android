@@ -164,8 +164,9 @@ class ProvidersList private constructor(
  * Linux names are case-sensitive, but a key is compared upper-cased here, so `path` or `Path`
  * cannot slip past as an ordinary key. r3 (verify + security F1): a key that is not a plain
  * variable name ([NAME]) counts as risky too: the child's environment is built as `key=value`, so
- * `LD_PRELOAD=/tmp/x.so:` set as a KEY sets LD_PRELOAD. Such a key is never added or renamed to
- * from the app ([validName]); one the server already holds is changed only through the confirmation.
+ * `LD_PRELOAD=/tmp/x.so:` set as a KEY sets LD_PRELOAD. ta-coik.4: such a key may be added or
+ * renamed to, as in the web's env editor (settings-dialog.tsx:366-372, any trimmed non-empty name;
+ * lib/providers-registry.mjs sanitizeEnv bounds only its length); it counts as risky here.
  */
 object RiskyEnvKeys {
     val NAMES: Set<String> = setOf(
@@ -185,7 +186,7 @@ object RiskyEnvKeys {
     /** LD_ subsumes LD_PRELOAD, LD_LIBRARY_PATH, LD_AUDIT and the rest of the loader's variables. */
     val PREFIXES: List<String> = listOf("LD_", "DYLD_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 
-    /** A plain environment variable name (POSIX portable): the only shape the app adds or renames to. */
+    /** A plain environment variable name (POSIX portable). */
     val NAME: Regex = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
 
     fun validName(key: String): Boolean = NAME.matches(key)
@@ -442,9 +443,6 @@ enum class ProvidersRefusal {
     /** An env rename or add onto a key the profile already has. */
     Collision,
 
-    /** r3: an env key added or renamed to that is not a plain variable name ([RiskyEnvKeys.validName]). */
-    BadName,
-
     /** The value passes the server's limits or rules. */
     Invalid,
 
@@ -659,8 +657,6 @@ object ProvidersPatch {
                 val target = base.firstOrNull { idOf(it) == profileId(edit) } ?: return gone()
                 val profile = list.profile(profileId(edit)) ?: return gone()
                 envChangeOf(edit)?.let { change ->
-                    // r3: a name the app would add or rename to must be a plain variable name.
-                    newName(change)?.let { if (it.isNotEmpty() && !RiskyEnvKeys.validName(it)) return ProvidersBuild.Refused(ProvidersRefusal.BadName) }
                     if (change.risky) return ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
                 }
                 val updated = when (val r = applyTo(profile, target, edit)) {
@@ -760,9 +756,6 @@ object ProvidersPatch {
                 else -> RunsSnapshot.NEW_PROFILE
             }
             if (RunsSnapshot.of(p) != expected) return ProvidersRefusal.Unconfirmed
-            // r3: no write puts a key that is not a plain variable name into a profile's env.
-            val had = (before?.get("env") as? JsonObject)?.keys.orEmpty()
-            if ((p["env"] as? JsonObject)?.keys.orEmpty().any { it !in had && !RiskyEnvKeys.validName(it) }) return ProvidersRefusal.BadName
         }
         return null
     }
@@ -844,7 +837,6 @@ object ProvidersPatch {
                 val value = env?.get(change.from) ?: return Applied.No(ProvidersRefusal.Gone)
                 if (change.to.isEmpty() || change.to == change.from) return Applied.Nothing
                 if (change.to.length > ProfileLimits.COMMAND_ENTRY) return Applied.No(ProvidersRefusal.Invalid)
-                if (!RiskyEnvKeys.validName(change.to)) return Applied.No(ProvidersRefusal.BadName)
                 if (change.to in env) return Applied.No(ProvidersRefusal.Collision)
                 val next = LinkedHashMap(env)
                 next.remove(change.from)
@@ -868,7 +860,6 @@ object ProvidersPatch {
             is EnvChange.Add -> {
                 if (change.key.isEmpty()) return Applied.Nothing
                 if (change.key.length > ProfileLimits.COMMAND_ENTRY || change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
-                if (!RiskyEnvKeys.validName(change.key)) return Applied.No(ProvidersRefusal.BadName)
                 if (env != null && change.key in env) return Applied.No(ProvidersRefusal.Collision)
                 if ((env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env ?: emptyMap())

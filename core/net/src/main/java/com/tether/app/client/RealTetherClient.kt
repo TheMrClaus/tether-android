@@ -473,8 +473,6 @@ class RealTetherClient(
     private var catalogOrigin: String? = null
     private val providerCatalogLiveState = MutableStateFlow(false)
 
-    /** ta-2uq: `refresh-providers` bookkeeping (one in flight per row and socket, taps debounced). Guarded by [lock]. */
-    private val refreshThrottle = ProviderRefreshThrottle()
     private val workspaceRootState = MutableStateFlow<String?>(null)
     private val hiddenAgentSessionCountState = MutableStateFlow<Int?>(null)
 
@@ -1220,7 +1218,6 @@ class RealTetherClient(
             catalogEpoch = -1L
             catalogOrigin = null
             providerCatalogLiveState.value = false
-            refreshThrottle.clear()
         }
         workspaceRootState.value = null
         hiddenAgentSessionCountState.value = null
@@ -2530,8 +2527,6 @@ class RealTetherClient(
                 linkEpochState.value = epoch
                 // ta-895: and no catalog of this socket is in yet.
                 providerCatalogLiveState.value = false
-                // ta-2uq: a refresh sent on the previous socket is dropped with it.
-                refreshThrottle.clear()
                 attachedThisEpoch.clear()
                 // T6.7: interrupts sent on the previous socket are answered there, if at all.
                 interruptsBound.clear()
@@ -2714,7 +2709,6 @@ class RealTetherClient(
                 catalogEpoch = epoch
                 catalogOrigin = socketOrigin
                 providerCatalogLiveState.value = socketOrigin != null
-                refreshThrottle.onCatalog(epoch, entries)
             }
             is ServerMessage.SessionControls -> ifCurrent(webSocket) {
                 sessionControlsState.value = sessionControlsState.value + (message.sessionId to message)
@@ -3902,8 +3896,7 @@ class RealTetherClient(
         if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ProviderRefreshResult.NotConnected
         if (expectedEpoch != epoch) return@synchronized ProviderRefreshResult.NotConnected
         if (key.isEmpty() || key.length > NewSessionGuard.KEY_MAX) return@synchronized ProviderRefreshResult.NotOffered
-        val entry = liveCatalogLocked()?.singleOrNull { it.key == key } ?: return@synchronized ProviderRefreshResult.NotOffered
-        if (!refreshThrottle.admit(key, epoch, clock(), entry)) return@synchronized ProviderRefreshResult.Throttled
+        liveCatalogLocked()?.singleOrNull { it.key == key } ?: return@synchronized ProviderRefreshResult.NotOffered
         if (!ws.send(ClientMessage.RefreshProviders(listOf(key)).encode())) return@synchronized ProviderRefreshResult.NotConnected
         ProviderRefreshResult.Sent
     }

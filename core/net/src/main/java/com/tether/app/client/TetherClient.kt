@@ -371,8 +371,8 @@ interface TetherClient {
      * `{type:"refresh-providers", providers:[key]}` (use-tether.ts refreshProviders) only from an
      * explicit tap, and only when, under the client's lock, the socket is live, handshaken and still
      * the one the browser was drawn on ([expectedEpoch] = [linkEpoch]), the row is in the catalog that
-     * socket delivered, and [ProviderRefreshThrottle] admits it (one in flight per row, taps
-     * debounced, dropped on a socket change). Never queued, never resent.
+     * socket delivered. Every tap sends, as the web's Refresh does (model-browser.tsx:621-627: it is
+     * disabled only while the row's status is `loading`). Never queued, never resent.
      */
     fun refreshProviders(key: String, expectedEpoch: Long): ProviderRefreshResult = ProviderRefreshResult.NotConnected
 

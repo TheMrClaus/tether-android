@@ -2,6 +2,9 @@ package com.tether.app.client
 
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.ServerMessage
+import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.tree.JsNum
+import com.tether.app.protocol.tree.JsNumberFormat
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -9,7 +12,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
 
 /**
  * ta-t7l: a value the server sends in PLAINTEXT that is a secret (`password`, `proxyToken`). It
@@ -139,14 +141,15 @@ class ServerSettingsView private constructor(
     /** The secret rows' value, the same coercion as [text], kept in a [SecretText]. */
     fun secret(setting: ServerSetting): SecretText = SecretText(stringOf(raw[setting.key]))
 
-    /** ServerNumberRow: the value when it is a number, else null (an integral value; a fraction is cut). */
-    fun number(setting: ServerSetting): Long? {
+    /** ServerNumberRow (settings-dialog.tsx:177-178): the value when it is a number (`typeof === "number"`), else null. */
+    fun number(setting: ServerSetting): Double? {
         val p = raw[setting.key] as? JsonPrimitive ?: return null
         if (p is JsonNull || p.isString) return null
-        p.longOrNull?.let { return it }
-        val d = p.doubleOrNull ?: return null
-        return if (d.isFinite()) d.toLong() else null
+        return p.doubleOrNull
     }
+
+    /** ServerNumberRow's `displayValue` (:179): `String(numericValue)`, or "" when there is none. */
+    fun numberText(setting: ServerSetting): String = number(setting)?.let(JsNumberFormat::toJsString).orEmpty()
 
     /** ServerToggleRow: `Boolean(settings[field])` (JavaScript truthiness). */
     fun toggle(setting: ServerSetting): Boolean = when (val v = raw[setting.key]) {
@@ -209,17 +212,24 @@ object ServerSettingsPatch {
     }
 
     /**
-     * ServerNumberRow's commit (:181-187): the trimmed text as a number, or null when empty, sent when
-     * it differs from the server's. Text that is not a whole number sends nothing (the browser's
-     * number input never yields one; the server would refuse it).
+     * ServerNumberRow's commit (settings-dialog.tsx:181-187), on the value an `<input type="number">`
+     * yields for [text]: the text when it is an HTML valid floating-point number ([NUMBER_INPUT]:
+     * "6e4", "-5", ".5", "1.5"), else "" (the browser's value sanitization). Then `text.trim()`, `""`
+     * → null, else `Number(text)`; sent when it is not `===` the server's number, as `JSON.stringify`
+     * writes it (a non-finite number is `null`). The server validates the value.
      */
     fun number(view: ServerSettingsView, setting: ServerSetting, text: String): JsonObject? {
         if (!unconfirmed(setting) || view.forced(setting)) return null
-        val trimmed = text.trim()
-        val parsed = if (trimmed.isEmpty()) null else (trimmed.toLongOrNull() ?: return null)
-        if (parsed == view.number(setting)) return null
-        return patch(setting, if (parsed == null) JsonNull else JsonPrimitive(parsed))
+        val value = jsTrim(text.takeIf { NUMBER_INPUT.matches(it) }.orEmpty())
+        val parsed: Double? = if (value.isEmpty()) null else value.toDouble()
+        val shown = view.number(setting)
+        val same = if (parsed == null || shown == null) parsed == null && shown == null else parsed.toDouble() == shown.toDouble()
+        if (same) return null
+        return patch(setting, if (parsed == null || !parsed.isFinite()) JsonNull else JsCodec.toJson(JsNum(parsed)))
     }
+
+    /** HTML "valid floating-point number" (the only text an `<input type="number">` keeps as its value). */
+    val NUMBER_INPUT: Regex = Regex("^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
 
     /** ServerToggleRow (:230): `{ [field]: !value }`. */
     fun toggle(view: ServerSettingsView, setting: ServerSetting): JsonObject? {

@@ -359,7 +359,6 @@ object ProfileRows {
     const val NOT_SAVED_CHANGED = "Not saved: the list changed. Try again."
     const val NOT_SAVED_IN_FLIGHT = "Not saved: the last change is still being saved. Try again in a moment."
     const val NOT_SAVED_COLLISION = "Not saved: this profile already has a variable with that name."
-    const val NOT_SAVED_BAD_NAME = "Not saved: use letters, digits and _ only (not starting with a digit)."
     const val NOT_SAVED_OFFLINE = "Not saved: not connected to the server. Try again."
     const val NOT_SAVED_INVALID = "Not saved: the server would refuse this value."
     const val CHANGED_WHILE_CONFIRMING = "Not saved: what this profile runs changed while you were confirming. Review it and try again."
@@ -369,7 +368,6 @@ object ProfileRows {
     fun notSaved(reason: ProvidersRefusal): String = when (reason) {
         ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT
         ProvidersRefusal.Collision -> NOT_SAVED_COLLISION
-        ProvidersRefusal.BadName -> NOT_SAVED_BAD_NAME
         ProvidersRefusal.NotConnected -> NOT_SAVED_OFFLINE
         ProvidersRefusal.Invalid -> NOT_SAVED_INVALID
         ProvidersRefusal.Changed -> CHANGED_WHILE_CONFIRMING

@@ -126,11 +126,11 @@ enum class DraftSubmitResult {
  *   next: a reply buffered from it, or its recorded answer, never completes it, and a reply stamped
  *   with another server ([CreatedReply.origin]) never answers it. The session it made is opened only
  *   through [TetherClient.attachIfConfigured] ([onSessionCreated] gets the create's origin).
- * - **Effort and Mode** (ta-xki, slice 4): [selectMode] / [selectEffort] / [toggleAuto] take only
- *   what the picked row offers ([DraftModes], [DraftSessionOptionsModel]); an elevated mode is an
- *   ordinary choice with no confirmation (owner 2026-10-02). After every reduce the form's mode is
- *   one the provider offers, so a stale or garbage stored preference falls back to the provider's
- *   default and what the composer shows is what the create carries.
+ * - **Effort and Mode** (ta-xki, slice 4; ta-coik.4): [selectMode] / [selectEffort] / [toggleAuto]
+ *   are use-draft-composer.ts's: the value is taken as it is and remembered for the row; an elevated
+ *   mode is an ordinary choice with no confirmation (owner 2026-10-02). A stored preference rides as
+ *   the reducer resolves it (lib/draft-form.ts resolveMode trusts it), as on the web; the server
+ *   validates.
  *
  * - **Worktree isolation** (ta-23f, slice 5): while isolation is on, [inspectWorktree] asks what the
  *   folder's repo offers (`worktree-inspect` with a fresh requestId, on the current socket); only the
@@ -252,8 +252,8 @@ class DraftComposerModel(
             if (prefsOrigin != origin) return@launch // the server changed while reading
             val picks = prefsPending.orEmpty()
             prefsPending = null
-            // ta-2uq: a stored custom model id that is not valid now is dropped: never drawn, never sent.
-            preferences = picks.fold(CustomModelId.cleanPreferences(stored)) { acc, pick -> pick(acc) }
+            // lib/draft-preferences.mjs readDraftPreferences: the stored object as it is.
+            preferences = picks.fold(stored) { acc, pick -> pick(acc) }
             if (picks.isNotEmpty()) prefsWrites.trySend(origin to preferences)
             refresh()
         }
@@ -285,23 +285,9 @@ class DraftComposerModel(
     private fun dispatch(action: JsObj) {
         _state.update { s ->
             val store = DraftForm.reduceDraftForm(JsObj.of("form" to s.form, "userModified" to s.modified), action) as JsObj
-            s.copy(form = knownMode(store["form"] as JsObj), modified = store["userModified"] as JsObj)
+            s.copy(form = store["form"] as JsObj, modified = store["userModified"] as JsObj)
         }
         reconcileWorktree()
-    }
-
-    /**
-     * ta-xki (prefs rule): the form's mode is always one the picked row's provider offers. A stored
-     * preference the reducer took as it is (lib/draft-form.ts resolveMode trusts it) but that names a
-     * mode the provider does not offer, or is not a string at all, becomes the provider's default
-     * ([DraftModes.normalize]), so what the composer shows is what the create carries.
-     */
-    private fun knownMode(form: JsObj): JsObj {
-        val key = (form["key"] as? JsStr)?.value.orEmpty()
-        if (key.isEmpty()) return form
-        val provider = entries.firstOrNull { it.key == key }?.provider ?: return form
-        val fixed = DraftModes.normalize(provider, (form["mode"] as? JsStr)?.value.orEmpty())
-        return if (form["mode"] == JsStr(fixed)) form else form.put("mode", JsStr(fixed))
     }
 
     private fun entriesJs(): JsArr =
@@ -325,7 +311,7 @@ class DraftComposerModel(
             JsObj.of(
                 "type" to JsStr("RESOLVE"),
                 "entries" to entriesJs(),
-                "preferences" to applicablePreferences(),
+                "preferences" to preferences,
                 "initial" to JsObj.of("cwd" to workspaceCwd()?.let(::JsStr)),
             ),
         )
@@ -380,36 +366,28 @@ class DraftComposerModel(
     fun selectProvider(key: String): Boolean {
         val entry = entryJs(key) ?: return false
         if ((entry as? JsObj)?.get("status") == JsStr("unavailable")) return false
-        dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_FROM_USER"), "entry" to entry, "preferences" to applicablePreferences()))
+        dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_FROM_USER"), "entry" to entry, "preferences" to preferences))
         return true
     }
 
-    /** use-draft-composer.ts selectModel. ta-2uq: a value past the server's bound is never picked (it could not be sent). */
+    /** use-draft-composer.ts selectModel. */
     fun selectModel(modelId: String) {
-        if (!modelSendable(modelId)) return
         val key = formKey()
         val entry = entryJs(key) ?: return
-        dispatch(JsObj.of("type" to JsStr("SET_MODEL_FROM_USER"), "modelId" to JsStr(modelId), "entry" to entry, "preferences" to applicablePreferences()))
+        dispatch(JsObj.of("type" to JsStr("SET_MODEL_FROM_USER"), "modelId" to JsStr(modelId), "entry" to entry, "preferences" to preferences))
         persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("model" to JsStr(modelId))) }
     }
 
     /** use-draft-composer.ts selectProviderAndModel (one atomic provider + model pick). */
     fun selectProviderAndModel(key: String, modelId: String) {
-        if (!modelSendable(modelId)) return
         val entry = entryJs(key) ?: return
         if ((entry as? JsObj)?.get("status") == JsStr("unavailable")) return
-        dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_AND_MODEL_FROM_USER"), "entry" to entry, "modelId" to JsStr(modelId), "preferences" to applicablePreferences()))
+        dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_AND_MODEL_FROM_USER"), "entry" to entry, "modelId" to JsStr(modelId), "preferences" to preferences))
         persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("model" to JsStr(modelId))) }
     }
 
-    /**
-     * use-draft-composer.ts selectEffort. ta-xki: only a variant the Effort select lists for the
-     * selected model is taken (and remembered for the row); anything else changes nothing. True when
-     * it was taken.
-     */
+    /** use-draft-composer.ts:227-235 selectEffort: taken as it is, and remembered for the row. True when it was taken. */
     fun selectEffort(effort: String): Boolean {
-        val offered = DraftSessionOptionsModel.of(_state.value).effort?.options.orEmpty()
-        if (offered.none { it.value == effort }) return false
         dispatch(JsObj.of("type" to JsStr("SET_REASONING_EFFORT_FROM_USER"), "effort" to JsStr(effort)))
         val key = formKey()
         if (key.isNotEmpty()) persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("reasoningEffort" to JsStr(effort))) }
@@ -417,38 +395,22 @@ class DraftComposerModel(
     }
 
     /**
-     * use-draft-composer.ts selectMode: an elevated mode is an ordinary choice (owner 2026-10-02), with
-     * no confirmation. ta-xki: only a mode the picked row's provider offers ([DraftModes.selectable]:
-     * its Mode rows, and opencode's Auto) is taken and remembered for the row; anything else, or no
-     * row picked, changes nothing. True when it was taken.
+     * use-draft-composer.ts:237-245 selectMode: the mode as it is, remembered for the row; an elevated
+     * mode is an ordinary choice (owner 2026-10-02), with no confirmation. True when it was taken.
      *
-     * r2 (security F1): [drawnFor] is the provider the tapped control was drawn for. A tap that lands
-     * after the row's provider changed (a profile re-extended, a catalog push) changes nothing, so an
-     * Auto row drawn for Claude never becomes opencode's Auto (`approvalPolicy: never`). The stored
-     * choice records its provider ([PREF_PROVIDER]), so it only ever seeds that provider's row.
+     * [drawnFor] is the provider the tapped control was drawn for: a tap that lands after the row's
+     * provider changed (a profile re-extended, a catalog push) is stale and changes nothing (the
+     * operator taps again on the control drawn now), so an Auto row drawn for Claude never becomes
+     * opencode's Auto (`approvalPolicy: never`).
      */
     fun selectMode(mode: String, drawnFor: String): Boolean {
         val provider = entryForKey(formKey())?.provider ?: return false
         if (provider != drawnFor) return false
-        if (!DraftModes.selectable(provider, mode)) return false
         dispatch(JsObj.of("type" to JsStr("SET_MODE_FROM_USER"), "mode" to JsStr(mode)))
         val key = formKey()
-        if (key.isNotEmpty()) persist { recordProvider(DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("mode" to JsStr(mode))), key, provider) }
+        if (key.isNotEmpty()) persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("mode" to JsStr(mode))) }
         return true
     }
-
-    /** r2 (security F1): [key]'s stored choice records the provider it was made for. */
-    private fun recordProvider(preferences: JsObj, key: String, provider: String): JsObj {
-        val rows = preferences["providerPreferences"] as? JsObj ?: return preferences
-        val row = rows[key] as? JsObj ?: return preferences
-        return preferences.put("providerPreferences", rows.put(key, row.put(PREF_PROVIDER, JsStr(provider))))
-    }
-
-    /**
-     * r2 (security F1): the preferences the reducer resolves against, with each row's stored mode kept
-     * only while the provider it recorded is that row's provider now ([modesForCurrentProviders]).
-     */
-    private fun applicablePreferences(): JsObj = modesForCurrentProviders(preferences, entries)
 
     /**
      * draft-composer.tsx toggleAuto (opencode's Auto chip): Auto on is `bypassPermissions` (Build +
@@ -497,14 +459,13 @@ class DraftComposerModel(
     }
 
     /**
-     * One WorktreeDetails field. A ref, branch or name longer than [WorktreeDraft.FIELD_MAX] is
-     * refused whole (never cut, which would name another branch); the pull request number keeps its
-     * digits only (the web's input rule). True when taken.
+     * One WorktreeDetails field, as draft-composer.tsx takes it: a ref, branch or name as typed (the
+     * server validates it), the pull request number with its digits only (:756). True when taken.
      */
     fun setWorktreeField(field: WorktreeField, value: String): Boolean {
         val next = when (field) {
             WorktreeField.Pr -> WorktreeDraft.prInput(value)
-            else -> value.takeIf { it.length <= WorktreeDraft.FIELD_MAX } ?: return false
+            else -> value
         }
         setWorktreeOptions(JsObj.of(field.key to JsStr(next)))
         return true
@@ -614,17 +575,16 @@ class DraftComposerModel(
     }
 
     /**
-     * use-draft-composer.ts addCustomModel (issue #45): a hand-typed id, client-only, kept in this
-     * server's preferences. ta-2uq: only a [CustomModelId]-valid id, on a row the browser lists, that
-     * the row does not already offer (model-browser.tsx `alreadyExists`), within the per-row bound.
-     * True when it was added.
+     * use-draft-composer.ts:184-190 addCustomModel (issue #45): a hand-typed id, client-only, kept in
+     * this server's preferences: the web's rule ([CustomModelId.problem]: trimmed, not empty), on a row
+     * the browser lists, that the row does not already offer (model-browser.tsx:530-532
+     * `alreadyExists`). True when it was added.
      */
     fun addCustomModel(entryKey: String, modelId: String): Boolean {
         if (CustomModelId.problem(modelId) != null) return false
         val id = CustomModelId.normalize(modelId)
         val entry = _state.value.entries.firstOrNull { it.key == entryKey } ?: return false
         if (entry.models.any { it.value == id }) return false
-        if (CustomModelId.asMap(preferences["customModels"])[entryKey].orEmpty().size >= CustomModelId.MAX_PER_ENTRY) return false
         persist { DraftForm.addCustomModelPref(it, JsStr(entryKey), JsStr(id)) as JsObj }
         refresh()
         return true
@@ -634,9 +594,6 @@ class DraftComposerModel(
         persist { DraftForm.removeCustomModelPref(it, JsStr(entryKey), JsStr(modelId)) as JsObj }
         refresh()
     }
-
-    /** "" (the engine default) or a value within `create.model`'s bound. */
-    private fun modelSendable(modelId: String): Boolean = modelId.toByteArray(Charsets.UTF_8).size <= CustomModelId.MAX_BYTES
 
     /** The picker shows its own words for a new opening (UI only; the web's error lives until the next submit). */
     fun clearError() = _state.update { it.copy(error = "") }
@@ -939,40 +896,6 @@ class DraftComposerModel(
     }
 
     companion object {
-        /**
-         * r2 (security F1): the app-side field beside a row's stored `mode` naming the provider it was
-         * chosen for (the web's reducer ignores unknown fields).
-         */
-        const val PREF_PROVIDER = "provider"
-
-        /**
-         * r2 (security F1): [preferences] with every row's stored `mode` (and `autoMode`) removed unless
-         * the provider it recorded ([PREF_PROVIDER]) is the provider of that row key in [entries] now. A
-         * stored mode follows the provider, not the key: a profile that re-extends another engine, a
-         * key reused by the server, or a record with no provider (none was ever written by a release)
-         * starts on its provider's default. One exception for a record with no provider: a retired mode
-         * more restrictive than that provider's default ([DraftModes.RETIRED_RESTRICTIVE], Claude's
-         * `dontAsk`) is kept, so it falls back to Manual (r2, verifier F2); it can only lower the
-         * posture. Rows not listed now are left alone (never resolved).
-         */
-        fun modesForCurrentProviders(preferences: JsObj, entries: List<ProviderCatalogEntry>): JsObj {
-            val rows = preferences["providerPreferences"] as? JsObj ?: return preferences
-            var next = rows
-            for ((key, value) in rows) {
-                val row = value as? JsObj ?: continue
-                val provider = entries.firstOrNull { it.key == key }?.provider ?: continue
-                val recorded = row[PREF_PROVIDER]
-                if (recorded == JsStr(provider)) continue
-                val retired = (row["mode"] as? JsStr)?.value?.let { DraftModes.RETIRED_RESTRICTIVE[provider]?.containsKey(it) } == true
-                if (recorded == null && retired) {
-                    next = next.put(key, row.remove("autoMode"))
-                    continue
-                }
-                next = next.put(key, row.remove("mode").remove("autoMode"))
-            }
-            return if (next === rows) preferences else preferences.put("providerPreferences", next)
-        }
-
         /**
          * lib/draft-form.ts mergeCustomModelsIntoEntries, on the typed rows: each row's custom ids it
          * does not already list are appended as models named by their id; untouched rows by identity.

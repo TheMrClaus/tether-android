@@ -29,18 +29,16 @@ import com.tether.app.protocol.tree.JsStr
  *   `"never"` when its mode is `bypassPermissions` (Build + Auto, issue #44); otherwise absent.
  * - `approvalsReviewer`: `"auto_review"` for Codex's Auto-review preset only.
  * - `useWorktree` always; `worktree` only when [DraftForm.buildWorktreeCreateRequest] makes one
- *   (ta-23f: through [WorktreeDraft.request], whose pull request number must be a plain positive
- *   integer of at most 9,999,999; [NewSessionGuard.resolve] then refuses an isolated create with no
- *   block at all, which the server would take for a default new branch).
+ *   ([WorktreeDraft.request]: the web's builder as it is; [NewSessionGuard.resolve] then refuses an
+ *   isolated create with no block at all, which the server would take for a default new branch).
  * - `profileId` only for a profile row.
  * - `model` / `reasoningEffort` only when the operator picked them in THIS draft (userModified) and
  *   they are non-empty: a display pre-selection is never pinned.
  *
- * ta-xki (slice 4): the frame never carries a value outside the known sets, whatever the form holds
- * (a stale or tampered preference, a form built by hand). A mode the provider does not offer is its
- * default ([DraftModes.normalize]; the web would send it raw), and an effort the selected model does
- * not offer is dropped ([DraftSessionOptionsModel.offeredEfforts] on the row as the live catalog has
- * it; the web would send it). For every offered mode and effort the frame is the web's, key for key.
+ * ta-coik.4 (owner rule: the app is as capable as the web): the form's mode, model and effort ride
+ * as they are, exactly as use-draft-composer.ts:311-353 sends them. A mode the provider does not
+ * offer (a retired `dontAsk`, an older build's value) and an effort the model does not list go out
+ * unchanged; the server validates.
  *
  * Pure: no I/O, no clock, no randomness (the caller mints [requestId]).
  */
@@ -54,12 +52,12 @@ object CreateFrame {
         val isClaude = provider == "claude"
         val isCodex = provider == "codex"
         val isOpencode = provider == "opencode"
-        // ta-xki: only a mode this provider offers (else its default) ever reaches the frame.
-        val mode = DraftModes.normalize(provider, form.s("mode"))
+        // use-draft-composer.ts:305-311: the form's mode as it is.
+        val mode = form.s("mode")
         // codexModePreset degrades any non-codex mode value to its "default" preset, harmlessly.
         val codexPreset = CodexModePresets.codexModePreset(JsStr(mode))
         val autoMode = !isCodex && mode == DEFAULT_PERMISSION_MODE
-        // ta-23f: the web's builder with the stricter PR number rule ([WorktreeDraft.request]).
+        // use-draft-composer.ts:312 buildWorktreeCreateRequest.
         val worktree = WorktreeDraft.request(form)?.let(::worktreeRequest)
         val approvalPolicy: String? = when {
             isCodex -> (codexPreset["approvalPolicy"] as? JsStr)?.value
@@ -68,8 +66,7 @@ object CreateFrame {
         }
         val approvalsReviewer = if (isCodex && (codexPreset["approvalsReviewer"] as? JsStr)?.value == "auto_review") "auto_review" else null
         val model = form.s("model")
-        // ta-xki: an effort rides only when the selected model (on this row) offers it.
-        val effort = form.s("reasoningEffort").takeIf { e -> DraftSessionOptionsModel.offeredEfforts(entry, model).any { it.value == e } }.orEmpty()
+        val effort = form.s("reasoningEffort")
         return ClientMessage.Create(
             provider = provider,
             cwd = form.s("cwd"),

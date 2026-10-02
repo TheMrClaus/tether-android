@@ -810,8 +810,6 @@ private fun EnvEditor(p: Profile, actions: ProfileActions, editable: Boolean, na
  * A); any other saves at once. A name already set on the profile is refused (r2, security F9).
  */
 private fun envCommit(p: Profile, change: EnvChange, actions: ProfileActions, edit: ProfileEdit, quiet: Boolean, afterSend: () -> Unit = {}): CommitOutcome {
-    // r3: a name added or renamed to is a plain variable name (a `=` in a key would set another variable).
-    ProvidersPatch.newName(change)?.let { if (it.isNotEmpty() && !RiskyEnvKeys.validName(it)) return CommitOutcome.Refused(ProfileRows.NOT_SAVED_BAD_NAME) }
     val collides = when (change) {
         is EnvChange.Rename -> change.to != change.from && change.to in p.envKeys
         is EnvChange.Add -> change.key in p.envKeys

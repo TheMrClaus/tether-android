@@ -705,8 +705,8 @@ private fun ColumnScope.ProviderSettingsPanel(
         ) {
             val trimmed = CustomModelId.normalize(state.addDraft)
             val alreadyExists = entry.models.any { it.value == trimmed }
-            val problem = CustomModelId.problem(state.addDraft)
-            val canAdd = trimmed.isNotEmpty() && !alreadyExists && problem == null
+            // model-browser.tsx:530-532: trimmed, not empty, not already offered.
+            val canAdd = trimmed.isNotEmpty() && !alreadyExists
             val add = {
                 if (canAdd && actions.onAddModel(entry.key, trimmed)) state.addDraft = ""
             }
@@ -724,11 +724,7 @@ private fun ColumnScope.ProviderSettingsPanel(
                 )
             }
             // App addition: why an id cannot be added (the web only disables +).
-            val why = when {
-                problem != null && problem != CustomModelId.Problem.Empty -> problem.copy
-                alreadyExists -> "This provider already offers that model."
-                else -> null
-            }
+            val why = if (alreadyExists) "This provider already offers that model." else null
             if (why != null) {
                 Text(
                     why,
