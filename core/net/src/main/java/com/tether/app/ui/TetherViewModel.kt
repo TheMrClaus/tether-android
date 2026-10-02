@@ -369,6 +369,10 @@ class TetherViewModel(
         viewModelScope.launch {
             client.createErrorReplies.collect { reply -> draftComposer.onCreateError(reply) }
         }
+        // ta-23f: the answers to the composer's own `worktree-inspect` (it keeps only its own).
+        viewModelScope.launch {
+            client.worktreeSources.collect { reply -> draftComposer.onWorktreeSource(reply) }
+        }
         viewModelScope.launch {
             combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }
         }

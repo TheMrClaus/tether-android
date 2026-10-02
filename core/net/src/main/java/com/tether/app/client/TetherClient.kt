@@ -379,6 +379,23 @@ interface TetherClient {
     fun createNewSession(request: NewSessionRequest, expectedOrigin: String?): NewSessionResult = NewSessionResult.NotConnected
 
     /**
+     * ta-23f (v98): ask what [cwd]'s repo offers an isolated session (`worktree-inspect`, a read; the
+     * server answers `worktree-source` echoing [requestId] and refreshes the repo's remote refs in
+     * the background). Sent only when, under the client's lock, the socket is live, handshaken and
+     * still the one the composer was drawn on ([expectedEpoch] = [linkEpoch]), with a non-empty
+     * [cwd] and a [requestId] of at most 64 characters (the server's bound). Never queued or resent.
+     * False when not sent.
+     */
+    fun inspectWorktree(cwd: String, requestId: String, expectedEpoch: Long): Boolean = false
+
+    /**
+     * ta-23f: every `worktree-source` of the live socket, stamped with that socket's [linkEpoch] and
+     * its echo, in order. The draft composer takes only the one answering its own inspect, for the
+     * folder it asked about, on the socket it asked on.
+     */
+    val worktreeSources: Flow<WorktreeSourceReply> get() = kotlinx.coroutines.flow.emptyFlow()
+
+    /**
      * ta-8cv: every `error` frame of the live socket, as the web's `createError` holds it
      * (use-tether.ts: `{message, seq, requestId?}`, seq monotonic): the draft composer acts only on
      * the one whose `requestId` echoes its in-flight create. The message is cleaned by the error

@@ -166,7 +166,12 @@ object NewSessionGuard {
      */
     fun resolve(request: NewSessionRequest, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): ClientMessage.Create? {
         val entry = resolveEntry(request.choice, liveCatalog, providers) ?: return null
-        return CreateFrame.build(request.form, entry, request.modified, request.requestId)
+        val frame = CreateFrame.build(request.form, entry, request.modified, request.requestId)
+        // ta-23f: an isolated create without its `worktree` block is never sent: the server would make a
+        // default new branch (and run that base's setup) instead of the checkout the operator asked for.
+        // The composer's readiness already refuses it; this is the last line.
+        if (frame.useWorktree == true && frame.worktree == null) return null
+        return frame
     }
 
     /** A base provider's implicit default row, standing in while no live catalog is in. */

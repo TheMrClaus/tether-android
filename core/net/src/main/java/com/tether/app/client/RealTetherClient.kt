@@ -105,6 +105,10 @@ private const val ATTACHMENTS_IN_FLIGHT_REMEMBERED = 16
 
 /** ta-8cv r2: create replies buffered for a slow collector, and create answers remembered by requestId. */
 private const val CREATE_REPLIES_BUFFERED = 64
+
+/** ta-23f: lib/protocol-validate.mjs `worktree-inspect.requestId`: a bounded non-empty string (<=64 chars). */
+private const val INSPECT_REQUEST_ID_MAX = 64
+
 private const val CREATE_REPLIES_REMEMBERED = 32
 
 /** T7.4: a message with attachments offered to the durable path (never used for them). */
@@ -602,6 +606,13 @@ class RealTetherClient(
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
     override val createErrorReplies: Flow<CreateErrorReply> = createErrorRepliesFlow
+
+    // ta-23f: every `worktree-source` of the live socket, stamped with its epoch (the composer matches its own).
+    private val worktreeSourcesFlow = MutableSharedFlow<WorktreeSourceReply>(
+        extraBufferCapacity = CREATE_REPLIES_BUFFERED,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    override val worktreeSources: Flow<WorktreeSourceReply> = worktreeSourcesFlow
     /** Guarded by [lock]; bounded (oldest dropped), emptied with the other per-server views. */
     private val createRepliesByRequest = LinkedHashMap<String, CreateReplyRecord>()
 
@@ -2509,6 +2520,11 @@ class RealTetherClient(
                 // checked and ended in one step under the lock, as onNodeResult does.
                 message.requestId?.let { completeNodeRequestOn(webSocket, it, NodeRequestOutcome.ServerError(message.message)) }
             }
+            // ta-23f (v98): use-tether.ts:916 setWorktreeSource, here stamped with this socket and its echo;
+            // the draft composer takes only the reply to its own inspect (DraftComposerModel.onWorktreeSource).
+            is ServerMessage.WorktreeSource -> ifCurrent(webSocket) {
+                worktreeSourcesFlow.tryEmit(WorktreeSourceReply(WorktreeSourceInfo.parse(message.info), message.requestId, epoch))
+            }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
             is ServerMessage.Nodes -> ifCurrent(webSocket) { nodesState.value = message.nodes }
             is ServerMessage.NodeResult -> onNodeResult(webSocket, message)
@@ -3744,6 +3760,22 @@ class RealTetherClient(
         }
         if (result == NewSessionResult.NotConnected) emitError("The secure link is reconnecting. The session was not created.")
         return result
+    }
+
+    /**
+     * ta-23f: `worktree-inspect` for the draft composer. Under the lock: a live, handshaken socket of a
+     * running client, still the one the composer asked on ([expectedEpoch]); a non-empty [cwd]; a
+     * [requestId] within the server's bound. A read: never queued, never resent.
+     */
+    override fun inspectWorktree(cwd: String, requestId: String, expectedEpoch: Long): Boolean {
+        if (cwd.isEmpty() || cwd.length > WorktreeSourceInfo.MAX_PATH) return false
+        if (requestId.isEmpty() || requestId.length > INSPECT_REQUEST_ID_MAX) return false
+        return synchronized(lock) {
+            val ws = socket
+            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            if (expectedEpoch != epoch) return@synchronized false
+            ws.send(ClientMessage.WorktreeInspect(cwd, requestId).encode())
+        }
     }
 
     /** ta-895: [providerCatalogState] when the CURRENT socket delivered it, else null. Caller holds [lock]. */

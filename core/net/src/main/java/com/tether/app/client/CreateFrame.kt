@@ -27,7 +27,10 @@ import com.tether.app.protocol.tree.JsStr
  * - `approvalPolicy`: Codex sends `"never"` when its preset says so (Full access); opencode sends
  *   `"never"` when its mode is `bypassPermissions` (Build + Auto, issue #44); otherwise absent.
  * - `approvalsReviewer`: `"auto_review"` for Codex's Auto-review preset only.
- * - `useWorktree` always; `worktree` only when [DraftForm.buildWorktreeCreateRequest] makes one.
+ * - `useWorktree` always; `worktree` only when [DraftForm.buildWorktreeCreateRequest] makes one
+ *   (ta-23f: through [WorktreeDraft.request], whose pull request number must be a plain positive
+ *   integer of at most 9,999,999; [NewSessionGuard.resolve] then refuses an isolated create with no
+ *   block at all, which the server would take for a default new branch).
  * - `profileId` only for a profile row.
  * - `model` / `reasoningEffort` only when the operator picked them in THIS draft (userModified) and
  *   they are non-empty: a display pre-selection is never pinned.
@@ -63,7 +66,8 @@ object CreateFrame {
         // codexModePreset degrades any non-codex mode value to its "default" preset, harmlessly.
         val codexPreset = CodexModePresets.codexModePreset(JsStr(mode))
         val autoMode = !isCodex && mode == DEFAULT_PERMISSION_MODE
-        val worktree = DraftForm.buildWorktreeCreateRequest(form)?.let(::worktreeRequest)
+        // ta-23f: the web's builder with the stricter PR number rule ([WorktreeDraft.request]).
+        val worktree = WorktreeDraft.request(form)?.let(::worktreeRequest)
         val approvalPolicy: String? = when {
             isCodex -> (codexPreset["approvalPolicy"] as? JsStr)?.value
             autoMode && isOpencode -> "never"
