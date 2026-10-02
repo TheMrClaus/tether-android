@@ -588,7 +588,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
 
     // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
     if (settingsOpen) ShellSettings(vm, prefs, workspaceRoot, onDismiss = { settingsOpen = false })
-    if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, onDismiss = { workspacePickerOpen = false })
+    if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, scope = scope, onDismiss = { workspacePickerOpen = false })
 
     if (showLogoutConfirm) {
         TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {
