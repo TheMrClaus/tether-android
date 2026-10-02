@@ -43,6 +43,7 @@ import com.tether.app.ui.settings.DevicesFixtures.TABLET
 import com.tether.app.ui.settings.DevicesFixtures.ok
 import com.tether.app.ui.settings.DevicesFixtures.signInHandle
 import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -84,7 +85,16 @@ class DevicesBehaviourTest {
     private val registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
     private val source = RecordingSecuritySource()
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-    private val clipboard = AndroidPairingClipboard(context)
+    private val systemPairingClipboard = AndroidPairingClipboard(context)
+
+    /** ta-x5e: the life each copy was handed (the clipboard stops retrying its clear past it). */
+    private val copiedLives = CopyOnWriteArrayList<Long>()
+    private val clipboard = object : PairingClipboard by systemPairingClipboard {
+        override fun copy(code: com.tether.app.client.PairingCode, lifeMs: Long): Boolean {
+            copiedLives += lifeMs
+            return systemPairingClipboard.copy(code, lifeMs)
+        }
+    }
     private val systemClipboard = context.getSystemService(ClipboardManager::class.java)
 
     private fun show() {
@@ -315,6 +325,7 @@ class DevicesBehaviourTest {
         tap(DevicesTags.CodeCopy)
         waitText(DevicesCopy.COPIED)
         assertEquals(SENTINEL, clipText())
+        assertEquals("the code's life left, on the controller's clock", listOf(299_000L), copiedLives.toList())
         val description = systemClipboard.primaryClipDescription!!
         assertEquals(PairingClipboard.CLIP_LABEL, description.label.toString())
         assertTrue("marked sensitive", description.extras!!.getBoolean(PairingClipboard.EXTRA_IS_SENSITIVE))
