@@ -112,7 +112,9 @@ class SettingsBehaviourTest {
         compose.waitForIdle()
         compose.onNodeWithText("Sessions opened on this phone").assertExists()
         compose.onNodeWithText("Paired devices").assertExists()
-        compose.onNodeWithText("Sign-in security").assertExists()
+        // T10.4: the web's SignInSecuritySection headings (the slot's "Sign-in security" is gone).
+        compose.onNodeWithText("Passkeys").assertExists()
+        compose.onNodeWithText("Signed-in sessions").assertExists()
     }
 
     /**
@@ -122,7 +124,7 @@ class SettingsBehaviourTest {
     @Test fun theLaterPanelsSayWhatIsComing() {
         show()
         // ta-t7l: Metadata and Advanced are drawn now (here, before any server reply, they wait for it).
-        mapOf(SettingsTab.Nodes to 0, SettingsTab.Engines to 0, SettingsTab.Metadata to 0, SettingsTab.Advanced to 0).forEach { (t, slots) ->
+        mapOf(SettingsTab.Devices to 0, SettingsTab.Nodes to 0, SettingsTab.Engines to 0, SettingsTab.Metadata to 0, SettingsTab.Advanced to 0).forEach { (t, slots) ->
             tab(t).performScrollTo().performClick()
             compose.waitForIdle()
             compose.onNodeWithTag(SettingsDialogTags.panel(t)).assertExists()
