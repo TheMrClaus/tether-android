@@ -188,7 +188,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var userNavigated by rememberSaveable { mutableStateOf(false) }
     val viewHistory = ViewHistory.decode(viewHistorySaved)
     val view = viewHistory.current
+    // T9.2: the Usage page (the web's `/usage` route, not a console view): shown over the views,
+    // never stored as the last view; any move to a view leaves it (the web navigates away).
+    var usageOpen by rememberSaveable { mutableStateOf(false) }
     val navigateTo: (DashboardView) -> Unit = { next ->
+        usageOpen = false
         viewHistorySaved = ViewHistory.decode(viewHistorySaved).navigate(next).encode()
     }
     val overviewOpen = view == DashboardView.Overview
@@ -196,7 +200,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val scheduledOpen = view == DashboardView.Scheduled
     // T15.2: the selected session is on screen only in Sessions (dashboard.tsx:725 `activeSession`);
     // elsewhere the shell gets none: no header, stage, chat or inspector, and nothing marks it seen.
-    val sessionsView = view == DashboardView.Sessions
+    val sessionsView = view == DashboardView.Sessions && !usageOpen
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     // ta-3e7: the Studio welcome's "Open workspace" (dashboard.tsx folderDialogRef), at shell level.
@@ -225,6 +229,23 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val staleReading = session?.let { shellFreshness.staleLabel(it.id) }
 
     var showLog by remember { mutableStateOf(false) }
+    // T9.2: the Accounts dialog (usage-accounts-dialog.tsx) and its two confirmations; the state
+    // outlives the dialog as the web's mounted `<dialog>` does. Each call goes to the server shown.
+    val usageScope = rememberCoroutineScope()
+    val usageOrigin: () -> String? = { com.tether.app.client.serverOrigin(vm.client.serverUrl.value) }
+    val accounts = remember(vm) { com.tether.app.ui.usage.UsageAccountsState(usageScope, { vm.client.usage }, usageOrigin) }
+    val codexReset = remember(vm) { com.tether.app.ui.usage.CodexResetState(usageScope, { vm.client.usage }, usageOrigin) }
+    val claudeReset = remember(vm) { com.tether.app.ui.usage.ClaudeResetState(usageScope, { vm.client.usage }, usageOrigin) }
+    // A rotation brings an open Accounts dialog back, refetching (its reading is not saved).
+    var accountsWasOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) { if (accountsWasOpen && !accounts.visible) accounts.open() }
+    SideEffect { accountsWasOpen = accounts.visible }
+    val sessionControls by vm.client.sessionControls.collectAsStateWithLifecycle()
+    val openUsagePage: () -> Unit = {
+        shell.closeDrawer()
+        userNavigated = true
+        usageOpen = true
+    }
     // The web's <dialog> stays mounted, so its filters and last stats survive a close and reopen.
     val logState = remember { LogDialogState() }
     val eventLog by vm.client.eventLog.collectAsStateWithLifecycle()
@@ -338,9 +359,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
                 onOpenFiles = { fileBrowser.open() },
-                // Hosts not built yet (Accounts and the Usage page, T9.2): shown unavailable.
-                onOpenUsage = null,
-                onOpenUsageAnalytics = null,
+                // T9.2: Accounts opens the usage accounts dialog (topbar.tsx onOpenUsage); Usage opens
+                // the Usage page (the web's `/usage`).
+                onOpenUsage = { accounts.open() },
+                onOpenUsageAnalytics = openUsagePage,
                 onOpenSettings = { settingsOpen = true },
                 // dashboard.tsx:1351 navigateTo. Sessions comes back to the conversation still
                 // selected (or the empty workspace).
@@ -425,7 +447,20 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     }
                 },
                 // T9.1: the full inspector, in the phone's telemetry sheet and the expanded column alike.
-                inspector = { session?.let { InspectorHost(vm, it, sessionView) } },
+                inspector = { session?.let { InspectorHost(vm, it, sessionView, onUseCodexReset = codexReset::open) } },
+                // T9.2 (workspace-header.tsx:113, dashboard.tsx:1615): the DeepSeek peak badge reads the
+                // session's harness and its live model (the pick, else the default the harness applied).
+                headerBadge = { s ->
+                    com.tether.app.ui.usage.DeepSeekPeakBadge(
+                        provider = s.provider,
+                        model = com.tether.app.protocol.helpers.DeepseekPeak.deepSeekLiveModel(
+                            com.tether.app.protocol.tree.JsStr(s.provider),
+                            s.model?.let { com.tether.app.protocol.tree.JsStr(it) },
+                            sessionControls[s.id]?.defaultModel?.let { com.tether.app.protocol.tree.JsStr(it) },
+                        ),
+                        variant = com.tether.app.ui.usage.DeepSeekPeakVariant.Full,
+                    )
+                },
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
                 gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
@@ -456,6 +491,15 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 },
                 overview = if (draftLaunching) {
                     null
+                } else if (usageOpen) {
+                    {
+                        com.tether.app.ui.usage.UsagePage(
+                            source = vm.client.usage,
+                            origin = com.tether.app.client.serverOrigin(configuredServer),
+                            // The empty range's "Open console" (usage-dashboard.tsx:155, a link to "/").
+                            onOpenConsole = { usageOpen = false },
+                        )
+                    }
                 } else if (view == null) {
                     // Boot: no view-specific content yet (the web's "boot" view paints none).
                     { Box(Modifier.fillMaxSize()) }
@@ -500,8 +544,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                                     refreshStats()
                                 },
                             ),
-                            // T15.3: the Host & usage tile (polls only while shown and started; no Usage screen yet, T9.2).
-                            hostUsage = { com.tether.app.ui.overview.HostUsageHost(vm.client) },
+                            // T15.3: the Host & usage tile (polls only while shown and started); T9.2: its
+                            // "View usage" opens the Usage page (overview-host.tsx:143).
+                            hostUsage = { com.tether.app.ui.overview.HostUsageHost(vm.client, onViewUsage = openUsagePage) },
                         )
                     }
                 },
@@ -517,14 +562,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             userNavigated = true
             viewHistorySaved = ViewHistory.decode(viewHistorySaved).back().encode()
         }
-        val current = view?.let(TopBarDestination::of)
+        // T9.2: Back on the Usage page returns to the console view under it (the browser's Back).
+        androidx.activity.compose.BackHandler(enabled = usageOpen) { usageOpen = false }
+        val current = if (usageOpen) TopBarDestination.Usage else view?.let(TopBarDestination::of)
         val link = when (connection) {
             ConnectionState.Connected -> LinkReadout.Connected
             ConnectionState.Connecting -> LinkReadout.Connecting
             else -> LinkReadout.Reconnecting
         }
         // dashboard.tsx:1446: the rail belongs to Sessions (and Scheduled); the Overview is full width.
-        val showRail = view == DashboardView.Sessions || view == DashboardView.Scheduled
+        val showRail = (view == DashboardView.Sessions || view == DashboardView.Scheduled) && !usageOpen
         CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
@@ -594,6 +641,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     WorkspaceFileBrowser(fileBrowser)
+
+    // T9.2: the Accounts dialog and the reset confirmations (the inspector's Codex one too).
+    com.tether.app.ui.usage.UsageAccountsDialog(accounts, codexReset, claudeReset)
 
     // T5.3: the cross-harness global search modal (dashboard.tsx:1701-1711).
     GlobalSearchHost(vm = vm, prefs = prefs, sessions = sessions, workspaceRoot = workspaceRoot, onCloseDrawer = shell::closeDrawer)

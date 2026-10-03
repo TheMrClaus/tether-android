@@ -28,7 +28,13 @@ import kotlin.math.max
  * the web's reset-grant countdown.
  */
 @Composable
-fun ColumnScope.InspectorHost(vm: TetherViewModel, session: AgentSession, view: SessionView?) {
+fun ColumnScope.InspectorHost(
+    vm: TetherViewModel,
+    session: AgentSession,
+    view: SessionView?,
+    /** T9.2: the shared Codex confirmation (inspector.tsx:761-766 `resetCreditDialogRef.open`). */
+    onUseCodexReset: ((com.tether.app.ui.usage.CodexResetRequest) -> Unit)? = null,
+) {
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val diffs by vm.client.worktreeDiffs.collectAsStateWithLifecycle()
     val fileDiffs by vm.client.gitFileDiffs.collectAsStateWithLifecycle()
@@ -56,6 +62,27 @@ fun ColumnScope.InspectorHost(vm: TetherViewModel, session: AgentSession, view: 
         fileDiffs = fileDiffs[session.id],
         onRequestFileDiff = { path -> vm.client.requestGitFileDiff(session.id, path) },
         serviceOpen = vm.client.serviceOpen,
+        onUseCodexReset = onUseCodexReset?.let { open -> codexResetRequest(session)?.let { request -> { open(request) } } },
+    )
+}
+
+/**
+ * inspector.tsx:761-766: this Codex session's banked resets as the confirmation's request — its
+ * own id (a hint for its warm engine), the count and credits, and its 5-hour / weekly readings.
+ * Null when it has none to spend (the row is not shown then either).
+ */
+internal fun codexResetRequest(session: AgentSession): com.tether.app.ui.usage.CodexResetRequest? {
+    if (session.provider != "codex") return null
+    val metrics = session.metrics ?: return null
+    val credits = (metrics.codexResetCredits as? kotlinx.serialization.json.JsonObject)?.let(com.tether.app.client.UsageJson::resetCredits) ?: return null
+    if (credits.availableCount <= 0) return null
+    val telemetry = com.tether.app.ui.statusline.TelemetryMetrics.from(metrics)
+    fun window(w: com.tether.app.ui.statusline.TelemetryWindow?) = w?.let { com.tether.app.client.AccountWindow(it.usedPercent, 0.0, it.resetsAt) }
+    return com.tether.app.ui.usage.CodexResetRequest(
+        availableCount = credits.availableCount,
+        credits = credits.credits,
+        windows = com.tether.app.client.AccountWindows(window(telemetry?.fiveHour), window(telemetry?.weekly), null, emptyList()),
+        sessionId = session.id,
     )
 }
 

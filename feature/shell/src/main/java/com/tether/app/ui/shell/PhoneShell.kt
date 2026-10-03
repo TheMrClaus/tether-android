@@ -109,6 +109,11 @@ class PhoneShellSlots(
      * stage (the host passes no session meanwhile).
      */
     val launching: (@Composable () -> Unit)? = null,
+    /**
+     * T9.2 (workspace-header.tsx:108-113): what the session header shows after the status pill —
+     * the DeepSeek peak-hours badge, which renders nothing for a session the DeepSeek API does not bill.
+     */
+    val headerBadge: (@Composable (AgentSession) -> Unit)? = null,
 )
 
 /**
@@ -179,6 +184,7 @@ fun PhoneShell(
                         onToggleLinks = state::toggleLinks,
                         actions = header,
                         gauge = slots.gauge,
+                        badge = slots.headerBadge?.let { badge -> { badge(session) } },
                     )
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         val collapsed = state.telemetryOpen

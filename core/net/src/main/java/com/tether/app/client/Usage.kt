@@ -440,21 +440,22 @@ object UsageJson {
                     throttledByGuard = truthy(g["throttledByGuard"]),
                 )
             },
-            resetCredits = (o["resetCredits"] as? JsonObject)?.let { c ->
-                CodexResetCredits(
-                    availableCount = num(c["availableCount"]),
-                    credits = (c["credits"] as? JsonArray)?.take(MAX_ROWS)?.mapNotNull { e ->
-                        val credit = e as? JsonObject ?: return@mapNotNull null
-                        CodexResetCredit(
-                            id = text(credit["id"], MAX_TEXT) ?: return@mapNotNull null,
-                            title = text(credit["title"], MAX_TEXT),
-                            expiresAt = finite(credit["expiresAt"]),
-                        )
-                    },
-                )
-            },
+            resetCredits = (o["resetCredits"] as? JsonObject)?.let(::resetCredits),
         )
     }
+
+    /** `CodexResetCreditsSummary` (the accounts entry's `resetCredits`, a Codex session's `metrics.codexResetCredits`). */
+    fun resetCredits(c: JsonObject): CodexResetCredits = CodexResetCredits(
+        availableCount = num(c["availableCount"]),
+        credits = (c["credits"] as? JsonArray)?.take(MAX_ROWS)?.mapNotNull { e ->
+            val credit = e as? JsonObject ?: return@mapNotNull null
+            CodexResetCredit(
+                id = text(credit["id"], MAX_TEXT) ?: return@mapNotNull null,
+                title = text(credit["title"], MAX_TEXT),
+                expiresAt = finite(credit["expiresAt"]),
+            )
+        },
+    )
 
     private fun window(element: JsonElement?): AccountWindow? {
         val o = element as? JsonObject ?: return null

@@ -113,11 +113,12 @@ import kotlinx.coroutines.launch
  * telemetry-panel.css 338-353): Android is always a coarse pointer, on a phone and a tablet alike.
  *
  * Display only: no key here sends anything but the reads the web's panel makes (a file's diff
- * hunks) and a service's links. The web's "Use reset" key belongs to T9.2 (the reset dialogs).
+ * hunks) and a service's links; the Limits band's "Use reset" opens T9.2's shared Codex confirmation.
  */
 
 object InspectorTags {
     const val Root = "inspector"
+    const val UseCodexReset = "inspector-codex-reset-use"
     const val Identity = "inspector-identity"
     const val Header = "inspector-header"
     const val Attention = "inspector-attention"
@@ -183,12 +184,14 @@ fun ColumnScope.Inspector(
     serviceOpener: LinkOpener = CustomTabLinkOpener,
     /** ta-coik.2: asks the console's worktree-open route with the app's sign-in (the client's). */
     serviceOpen: ServiceOpenSource = ServiceOpenSource.Unavailable,
+    /** T9.2 (inspector.tsx:759-769): the banked resets row's "Use reset" opens the shared Codex confirmation. */
+    onUseCodexReset: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth().testTag(InspectorTags.Root)) {
         HeaderBlock(model.identity, model.header)
         if (model.attention.any) AttentionStrip(model.attention)
         ContextBandView(model.context)
-        model.limits?.let { LimitsBand(it) }
+        model.limits?.let { LimitsBand(it, onUseCodexReset) }
         model.subagents?.let { SubagentsBandView(it, onSelectRun) }
         model.runUsage?.let { RunUsageBand(it) { onSelectRun(null) } }
         if (model.sessionDivider) SessionDivider()
@@ -609,12 +612,27 @@ private fun ContextBandView(band: ContextBand) {
 }
 
 @Composable
-private fun LimitsBand(limits: LimitsSection) {
+private fun LimitsBand(limits: LimitsSection, onUseCodexReset: (() -> Unit)?) {
     Band("Limits", "This account", Modifier.testTag(InspectorTags.Limits), description = "Account limits") {
         limits.gauges.forEach { Gauge(it) }
         limits.resetGrants?.let { (headline, note) -> TiRow("Limit resets", headline, note) }
-        // The web's "Use reset" key (a consuming POST behind a dialog) is T9.2's: the count only here.
-        limits.bankedResets?.let { TiRow("Banked resets", it, null) }
+        // `.ti-row.codex-reset-credit-row-inline` (inspector.tsx:755-770): the count, then "Use reset",
+        // which opens the shared Codex confirmation with this session's id, as the web's does.
+        limits.bankedResets?.let { count ->
+            if (onUseCodexReset == null) {
+                TiRow("Banked resets", count, null)
+            } else {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Ti.gap)) {
+                    Box(Modifier.weight(1f)) { TiRow("Banked resets", count, null) }
+                    com.tether.app.ui.components.TetherKey(
+                        onClick = onUseCodexReset,
+                        classes = com.tether.app.ui.components.KeyClasses.ButtonSecondary,
+                        label = "Use reset",
+                        modifier = Modifier.testTag(InspectorTags.UseCodexReset),
+                    )
+                }
+            }
+        }
         if (limits.noReading) TiNote("No current 5-hour or weekly reading for this account.")
     }
 }

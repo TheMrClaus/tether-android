@@ -284,6 +284,7 @@ private fun WorkspaceColumn(
                     expanded = true,
                     gaugeIsHandle = !columnLayout,
                     dial = slots.dial,
+                    badge = slots.headerBadge?.let { badge -> { badge(session) } },
                 )
                 val left = 0.dp
                 val edge = 0.dp

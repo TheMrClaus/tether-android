@@ -141,6 +141,8 @@ fun WorkspaceHeader(
     /** Expanded only: whether the gauge is the panel's handle (false where the inspector column shows). */
     gaugeIsHandle: Boolean = true,
     dial: DialSlot? = null,
+    /** T9.2 (workspace-header.tsx:113): the DeepSeek peak badge after the status pill (nothing when it does not apply). */
+    badge: (@Composable () -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -195,6 +197,10 @@ fun WorkspaceHeader(
             // freshness chip's, under the row: here it would crowd out the name at a large font.
             val (pillLabel, pillTone) = FreshnessCopy.statusPill(session.status, freshness.listLive, null, freshness.now)
             TetherStatusPill(label = pillLabel, tone = pillTone, modifier = Modifier.testTag(ShellTags.StatusPill))
+            if (badge != null) {
+                Spacer(Modifier.width(titleGap))
+                Box(Modifier.weight(1f, fill = false)) { badge() }
+            }
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
