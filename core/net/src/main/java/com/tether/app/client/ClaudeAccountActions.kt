@@ -56,14 +56,21 @@ enum class ClaudeLoginStatus { Idle, PendingUrl, AwaitingCode, Success, Error, U
 /**
  * The browser link `claude auth login` printed (lib/claude-accounts.mjs `parseLoginUrl` relays
  * `https://\S+`). r3 (owner rule): kept whenever the web's `<a href target="_blank">` would open it,
- * that is any http or https URL with a host, user info, escaped characters and length included. Only a
- * non-web scheme (intent:, javascript:, content:, file:, an app's own) is refused: handed to
- * ACTION_VIEW on a phone it would reach an app rather than a browser, which a browser's link never
- * does. [url] is the parsed URL's canonical spelling (what is opened is what was read); [host] is
- * its canonical host (ASCII, punycode), drawn beside the Open key so the operator sees where it
- * really goes whatever user info or hidden characters the link carries.
+ * that is any http or https URL with a host, user info, escaped characters and length included.
+ * ta-coik.17: the web renders ANY url the server sends as that link (settings-dialog.tsx 90fbb9f
+ * :1763-1768, no scheme check), and a phone's browser hands another scheme to the app that takes it
+ * (intent:, market:, an app's own); so is it here. Kept out only what the browser itself never opens
+ * from a page ([NOT_OPENED]: React blocks `javascript:`, Chrome blocks a page opening `data:`,
+ * `file:` and `content:`) and what is not a URL at all (no scheme, or http(s) with no host).
+ * [url] is the parsed URL's canonical spelling for http(s) (what is opened is what was read), else
+ * the link as the URL parser reads it (its scheme lowercased); [host] is the http(s) canonical host
+ * (ASCII, punycode), drawn beside the Open key so the operator sees where it really goes whatever
+ * user info or hidden characters the link carries, and empty for another scheme ([web] false).
  */
 class ClaudeLoginLink private constructor(val url: String, val host: String) {
+    /** An http(s) address with a host (opened in the browser); false: another scheme, handed to the app that takes it. */
+    val web: Boolean get() = host.isNotEmpty()
+
     override fun toString(): String = "ClaudeLoginLink($host)"
     override fun equals(other: Any?): Boolean = other is ClaudeLoginLink && other.url == url
     override fun hashCode(): Int = url.hashCode()
@@ -92,14 +99,24 @@ class ClaudeLoginLink private constructor(val url: String, val host: String) {
          */
         val ANTHROPIC_HOSTS: Set<String> = setOf("claude.ai", "claude.com", "console.anthropic.com", "platform.claude.com")
 
-        /** A web address (http or https, with a host), as a browser reads it; any other scheme is null. */
+        /** The schemes a browser never opens from a page's link (see the class). */
+        val NOT_OPENED: Set<String> = setOf("javascript", "data", "file", "content")
+
+        private val SCHEME = Regex("^([A-Za-z][A-Za-z0-9+.\\-]*):")
+
+        /** The link a browser's `<a href>` opens for [raw] (see the class); null when it opens nothing. */
         fun parse(raw: String?): ClaudeLoginLink? {
             if (raw.isNullOrBlank()) return null
-            // OkHttp's parser reads only http and https (every other scheme is null) the way a browser's
-            // URL parser does: surrounding whitespace dropped, the rest percent-encoded.
-            val parsed = raw.toHttpUrlOrNull() ?: return null
-            if ((parsed.scheme != "https" && parsed.scheme != "http") || parsed.host.isEmpty()) return null
-            return ClaudeLoginLink(parsed.toString(), parsed.host)
+            // OkHttp's parser reads only http and https the way a browser's URL parser does:
+            // surrounding whitespace dropped, the rest percent-encoded.
+            raw.toHttpUrlOrNull()?.let { parsed ->
+                return if (parsed.host.isEmpty()) null else ClaudeLoginLink(parsed.toString(), parsed.host)
+            }
+            // The URL parser's first steps: leading and trailing C0 controls and spaces go, as do tabs and newlines.
+            val cleaned = raw.trim { it <= ' ' }.filterNot { it == '\t' || it == '\n' || it == '\r' }
+            val scheme = SCHEME.find(cleaned)?.groupValues?.get(1)?.lowercase(java.util.Locale.ROOT) ?: return null
+            if (scheme == "http" || scheme == "https" || scheme in NOT_OPENED) return null
+            return ClaudeLoginLink(scheme + cleaned.substring(scheme.length), "")
         }
     }
 }

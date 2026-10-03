@@ -42,11 +42,10 @@ class ProfilesTest {
 
     // ---- the read ----------------------------------------------------------------------------------
 
-    @Test fun theRecordedListReadsAndIsWritable() {
+    @Test fun theRecordedListReads() {
         val wire = File(System.getProperty("parity.corpus") ?: "../../parity-corpus", "wire/settings.jsonl")
         val last = wire.readLines().filter { it.contains("\"type\":\"providers\",\"profiles\":[{") }.last()
         val l = ProvidersList.of(ServerMessage.parse(json(last)["frame"]!!.jsonObject) as ServerMessage.Providers, 1)
-        assertTrue(l.writable)
         val p = l.profiles.single()
         assertEquals(listOf("parity-claude", "claude", "Parity Claude", true), listOf(p.id, p.extends, p.label, p.enabled))
     }
@@ -62,7 +61,6 @@ class ProfilesTest {
         assertEquals("0.43.0", p.verifiedThrough)
         val w = two.profile("work")!!
         assertEquals(listOf(ProfileModel("opus", null, true), ProfileModel("sonnet", "Sonnet", false)), w.models)
-        assertTrue(two.writable)
     }
 
     @Test fun nothingPrintsAnEnvValue() {
@@ -75,9 +73,10 @@ class ProfilesTest {
         assertTrue(p.toString().contains("GEMINI_API_KEY"))
     }
 
-    @Test fun aHostileListIsReadCappedAndNeverWritable() {
+    @Test fun aHostileListIsReadCappedAndStillWrittenBackWhole() {
         // Wrong types everywhere: read as absent, the frame and its other entries survive.
-        val odd = list("""[{"id":7,"extends":"nope","label":["x"],"command":"gemini","homeDir":{},"env":["$sentinel"],"dropEnv":"A","models":[1,{"id":2}],"enabled":"yes","order":"3"}]""")
+        val oddEntry = """{"id":7,"extends":"nope","label":["x"],"command":"gemini","homeDir":{},"env":["$sentinel"],"dropEnv":"A","models":[1,{"id":2}],"enabled":"yes","order":"3"}"""
+        val odd = list("[$oddEntry]")
         val p = odd.profiles.single()
         assertEquals(listOf("", "", "", false), listOf(p.id, p.extends, p.label, p.enabled))
         assertNull(p.command)
@@ -85,29 +84,31 @@ class ProfilesTest {
         assertEquals(emptyList<String>(), p.envKeys)
         assertEquals(emptyList<ProfileModel>(), p.models)
         assertNull(p.order)
-        assertFalse(odd.writable)
-        assertNull("nothing is written from it", ProvidersPatch.write(odd, ProfileEdit.Add))
+        // ta-coik.17: written back as it came, with the edit, as the web's `[...profiles, entry]` is (the server judges it).
+        assertEquals(profiles(oddEntry, """{"id":"profile","extends":"claude","label":"profile","enabled":true}"""), sent(ProvidersPatch.write(odd, ProfileEdit.Add)))
         // Past the server's limits: a 5000-unit label, 100 env keys, 40 command parts, 20000 profiles.
-        val long = list("""[{"id":"a","extends":"codex","label":"${"x".repeat(5000)}","enabled":true}]""")
+        val longLabel = """{"id":"a","extends":"codex","label":"${"x".repeat(5000)}","enabled":true}"""
+        val long = list("[$longLabel]")
         assertEquals("", long.profiles.single().label)
-        assertFalse(long.writable)
+        assertEquals(profiles(longLabel.replace("\"enabled\":true", "\"enabled\":false")), sent(ProvidersPatch.write(long, ProfileEdit.Enabled("a", false))))
         val env = (1..100).joinToString(",") { "\"K$it\":\"v\"" }
         val many = list("""[{"id":"a","extends":"codex","label":"A","enabled":true,"env":{$env},"command":[${(1..40).joinToString(",") { "\"p\"" }}]}]""")
         assertEquals(ProfileLimits.ENV_KEYS, many.profiles.single().envKeys.size)
         assertEquals(ProfileLimits.COMMAND, many.profiles.single().command!!.size)
-        assertFalse(many.writable)
+        val manySent = (sent(ProvidersPatch.write(many, ProfileEdit.Label("a", "B")))["profiles"] as JsonArray)[0].jsonObject
+        assertEquals(100, (manySent["env"] as JsonObject).size)
+        assertEquals(40, (manySent["command"] as JsonArray).size)
         val huge = (1..20_000).joinToString(",", "[", "]") { """{"id":"p$it","extends":"codex","label":"P","enabled":true}""" }
         val started = System.nanoTime()
         val h = list(huge)
         assertEquals(ProfileLimits.PROFILES, h.profiles.size)
-        assertFalse(h.writable)
         assertTrue("read in bounded time", System.nanoTime() - started < 5_000_000_000L)
+        assertEquals("every entry goes back", 20_001, (sent(ProvidersPatch.write(h, ProfileEdit.Add))["profiles"] as JsonArray).size)
     }
 
-    @Test fun aListTheValidatorWouldRefuseIsNeverWritable() {
+    /** ta-coik.17: a list the server's validator would refuse is edited all the same, as on the web (the server answers). */
+    @Test fun aListTheValidatorWouldRefuseIsStillEdited() {
         for (bad in listOf(
-            """[{"id":"Bad_ID","extends":"codex","label":"A","enabled":true}]""",
-            """[{"id":"a","extends":"codex","label":"A","enabled":true},{"id":"a","extends":"pi","label":"B","enabled":true}]""",
             """[{"id":"a","extends":"codex","label":"A","enabled":true,"env":{"K":5}}]""",
             """[{"id":"a","extends":"codex","label":"A","enabled":true,"models":[{"id":"model"}]}]""",
             """[{"id":"a","extends":"codex","label":"A","enabled":true,"models":[{"id":"x","isDefault":true},{"id":"y","isDefault":true}]}]""",
@@ -116,13 +117,28 @@ class ProfilesTest {
             """[{"id":"a","extends":"codex","label":"A","enabled":true,"verifiedThrough":"  "}]""",
             """[{"id":"a","extends":"codex","label":"A","enabled":true,"command":[]}]""",
         )) {
-            assertFalse(bad, list(bad).writable)
+            val l = list(bad)
+            val write = ProvidersPatch.write(l, ProfileEdit.Label("a", "B"))
+            assertNotNull(bad, write)
+            assertNull(bad, ProvidersPatch.refusal(write!!, l))
         }
-        // A frame that was not the whole registry (a non-object entry dropped).
-        assertFalse(ProvidersList.of(frame("""{"type":"providers","profiles":[$work,1]}"""), 1).writable)
-        assertFalse(ProvidersList.of(frame("""{"type":"providers"}"""), 1).writable)
-        // A model named "model" WITH a label is valid (lib/providers-registry.mjs:138).
-        assertTrue(list("""[{"id":"a","extends":"acp","label":"A","enabled":true,"models":[{"id":"model","label":"Model"}]}]""").writable)
+        val badId = list("""[{"id":"Bad_ID","extends":"codex","label":"A","enabled":true}]""")
+        assertNull(ProvidersPatch.refusal(ProvidersPatch.write(badId, ProfileEdit.Add)!!, badId))
+    }
+
+    /** settings-dialog.tsx :634-636: `update(id, patch)` and `remove(id)` act on EVERY entry with the id. */
+    @Test fun twoEntriesWithOneIdAreBothEditedAsTheWebsMapIs() {
+        val dup = list("""[{"id":"a","extends":"codex","label":"A","enabled":true},{"id":"a","extends":"pi","label":"B","enabled":false,"x":1}]""")
+        assertEquals(
+            profiles("""{"id":"a","extends":"codex","label":"C","enabled":true}""", """{"id":"a","extends":"pi","label":"C","enabled":false,"x":1}"""),
+            sent(ProvidersPatch.write(dup, ProfileEdit.Label("a", "C"))),
+        )
+        assertEquals(profiles(), sent(ProvidersPatch.write(dup, ProfileEdit.Remove("a"))))
+        val home = list("""[{"id":"a","extends":"codex","label":"A","homeDir":"/h","enabled":true},{"id":"a","extends":"pi","label":"B","homeDir":"/g","enabled":false}]""")
+        assertEquals(
+            profiles("""{"id":"a","extends":"codex","label":"A","enabled":true}""", """{"id":"a","extends":"pi","label":"B","enabled":false}"""),
+            sent(ProvidersPatch.write(home, ProfileEdit.Home("a", ""))),
+        )
     }
 
     // ---- each edit, as the exact list the web sends -------------------------------------------------
@@ -145,7 +161,8 @@ class ProfilesTest {
         // ta-coik.5: Extends is sent at once, as the web's select does (:696).
         assertEquals(profiles(gemini, work.replace("\"extends\":\"claude\"", "\"extends\":\"pi\"")), sent(ProvidersPatch.write(two, ProfileEdit.Extends("work", "pi"))))
         assertEquals(ProvidersBuild.NoChange, ProvidersPatch.build(two, ProfileEdit.Extends("work", "claude")))
-        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.Invalid), ProvidersPatch.build(two, ProfileEdit.Extends("work", "gemini")))
+        // ta-coik.17: any value is sent; the server says if it refuses it.
+        assertEquals(profiles(gemini, work.replace("\"extends\":\"claude\"", "\"extends\":\"gemini\"")), sent(ProvidersPatch.write(two, ProfileEdit.Extends("work", "gemini"))))
     }
 
     @Test fun theEnvEditorsEditsKeepEveryOtherValueAsItCame() {
@@ -176,7 +193,15 @@ class ProfilesTest {
         assertEquals(profiles(gemini, work.replace(",\"enabled\":false", ",\"enabled\":false,\"disallowedTools\":[\"WebSearch\",\"Task\"]")), sent(ProvidersPatch.write(two, ProfileEdit.DisallowedTools("work", "WebSearch, Task"))))
         assertEquals(profiles(gemini.replace("\"order\":2", "\"order\":10"), work), sent(ProvidersPatch.write(two, ProfileEdit.Order("gemini", "10"))))
         assertEquals(profiles(gemini.replace(",\"order\":2", ""), work), sent(ProvidersPatch.write(two, ProfileEdit.Order("gemini", ""))))
-        for (bad in listOf("2", "6e4", "-5", "1.5", "1000001")) assertNull(bad, ProvidersPatch.write(two, ProfileEdit.Order("gemini", bad)))
+        // :806-811 `Number(raw)` of the number input's value: any integer but the profile's is written (the server judges it).
+        for ((typed, n) in listOf("6e4" to "60000", "-5" to "-5", "1000001" to "1000001", "2.0" to null, "1.5" to null, "2" to null)) {
+            val w = ProvidersPatch.write(two, ProfileEdit.Order("gemini", typed))
+            if (n == null) assertNull(typed, w) else assertEquals(typed, profiles(gemini.replace("\"order\":2", "\"order\":$n"), work), sent(w))
+        }
+        // Not a number the input keeps (its value is then ""): the order is cleared, as on the web.
+        for (typed in listOf("1-2", "e", "+5", "0x10")) assertEquals(typed, profiles(gemini.replace(",\"order\":2", ""), work), sent(ProvidersPatch.write(two, ProfileEdit.Order("gemini", typed))))
+        assertNull(ProvidersPatch.write(list("[$work]"), ProfileEdit.Order("work", "1-2")))
+        assertEquals(profiles(gemini.replace("0.43.0", "v".repeat(100)), work), sent(ProvidersPatch.write(two, ProfileEdit.VerifiedThrough("gemini", "v".repeat(100)))))
         assertEquals(profiles(gemini.replace("0.43.0", "0.44.1"), work), sent(ProvidersPatch.write(two, ProfileEdit.VerifiedThrough("gemini", " 0.44.1 "))))
         assertEquals(profiles(gemini.replace(",\"verifiedThrough\":\"0.43.0\"", ""), work), sent(ProvidersPatch.write(two, ProfileEdit.VerifiedThrough("gemini", ""))))
     }
@@ -190,12 +215,13 @@ class ProfilesTest {
         assertEquals(with("""[{"id":"opus"},{"id":"sonnet","label":"Sonnet","isDefault":true}]"""), sent(model(ModelOp.SetDefault(1, "sonnet"))))
         assertEquals(with("""[{"id":"sonnet","label":"Sonnet"}]"""), sent(model(ModelOp.Remove(0, "opus"))))
         assertEquals(with("""[{"id":"opus","isDefault":true},{"id":"sonnet","label":"Sonnet"},{"id":"haiku","label":"Haiku"}]"""), sent(model(ModelOp.Add("model", "haiku", "Haiku"))))
-        // #107: an untouched placeholder, an empty id, or a placeholder-shaped id without a label is never committed.
+        // #107: an untouched placeholder or an empty id is never committed (:491-497); any other id is, as on the web.
         assertNull(model(ModelOp.Add("model", "model", "")))
         assertNull(model(ModelOp.Add("model", "  ", "x")))
-        assertNull(model(ModelOp.Add("model", "model-2", "")))
-        assertNotNull("a placeholder-shaped id WITH a label is a real one", model(ModelOp.Add("model", "model-2", "Two")))
-        assertNull(model(ModelOp.SetId(0, "opus", "model")))
+        assertEquals(with("""[{"id":"opus","isDefault":true},{"id":"sonnet","label":"Sonnet"},{"id":"model-2"}]"""), sent(model(ModelOp.Add("model", "model-2", ""))))
+        assertEquals(with("""[{"id":"model","isDefault":true},{"id":"sonnet","label":"Sonnet"}]"""), sent(model(ModelOp.SetId(0, "opus", "model"))))
+        val longLabel = "l".repeat(300)
+        assertEquals(with("""[{"id":"opus","isDefault":true},{"id":"sonnet","label":"$longLabel"}]"""), sent(model(ModelOp.SetLabel(1, "sonnet", longLabel))))
         // A row named by an index whose id no longer matches (the list changed meanwhile) takes nothing.
         assertNull(model(ModelOp.SetId(0, "sonnet", "x")))
         assertEquals("model", ProvidersPatch.draftModelId(emptyList()))
@@ -224,8 +250,6 @@ class ProfilesTest {
         assertEquals(emptyList<String>(), ProvidersPatch.commandParts(" \u3000 "))
         assertEquals(listOf("a", "b"), ProvidersPatch.commandParts("a\u00A0b"))
         assertEquals(listOf("a\u200Bb"), ProvidersPatch.commandParts("a\u200Bb"))
-        assertFalse(ProvidersPatch.commandFits(List(33) { "p" }))
-        assertFalse(ProvidersPatch.commandFits(listOf("x".repeat(257))))
     }
 
     @Test fun theCommandAndHomeAreSentAtOnceAsTheWebsBlurSendsThem() {
@@ -237,7 +261,13 @@ class ProfilesTest {
         assertEquals("the same words", ProvidersBuild.NoChange, ProvidersPatch.build(two, ProfileEdit.Command("gemini", "gemini   --acp")))
         assertEquals("the same home", ProvidersBuild.NoChange, ProvidersPatch.build(two, ProfileEdit.Home("work", "/srv/homes/work ")))
         assertEquals("a gone profile", ProvidersBuild.Refused(ProvidersRefusal.Gone), ProvidersPatch.build(two, ProfileEdit.Home("gone", "/x")))
-        assertEquals("past the server's limit", ProvidersBuild.Refused(ProvidersRefusal.Invalid), ProvidersPatch.build(two, ProfileEdit.Command("gemini", List(33) { "p" }.joinToString(" "))))
+        // ta-coik.17: past the server's limits is sent all the same, as the web sends it (the server refuses it; its error is shown).
+        assertEquals(profiles(gemini.replace("[\"gemini\",\"--acp\"]", List(33) { "\"p\"" }.joinToString(",", "[", "]")), work),
+            sent(ProvidersPatch.write(two, ProfileEdit.Command("gemini", List(33) { "p" }.joinToString(" ")))))
+        assertEquals(profiles(gemini, work.replace("/srv/homes/work", "h".repeat(5000))), sent(ProvidersPatch.write(two, ProfileEdit.Home("work", "h".repeat(5000)))))
+        val keys = list("[${gemini.replace("\"MODE\":\"x\"", (1..63).joinToString(",") { "\"K$it\":\"v\"" })},$work]")
+        val added = (sent(ProvidersPatch.write(keys, ProfileEdit.EnvAdd("gemini", "NEW", SecretText("v".repeat(5000)))))["profiles"] as JsonArray)[0].jsonObject
+        assertEquals("a 65th env key, a 5000-unit value", 65, (added["env"] as JsonObject).size)
     }
 
     /** ta-coik.5: the send rule checks only that the write is built from the newest list (what runs is the web's to change, as it is the browser's). */
@@ -278,12 +308,13 @@ class ProfilesTest {
         assertTrue(sent(rebuilt).toString().contains("/opt/new"))
     }
 
-    @Test fun anUnwritableListIsNeverWrittenTo() {
+    /** ta-coik.17: a frame the app read only in part is edited from what it holds; only no list at all stops a write. */
+    @Test fun onlyNoListStopsAWrite() {
         val odd = ProvidersList.of(frame("""{"type":"providers","profiles":[$work,1]}"""), 1)
-        assertNull(ProvidersPatch.write(odd, ProfileEdit.Label("work", "W")))
-        assertNull(ProvidersPatch.write(odd, ProfileEdit.Home("work", "/x")))
-        assertEquals(ProvidersRefusal.NotWritable, ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, odd))
-        assertEquals(ProvidersRefusal.NotWritable, ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, null))
+        assertEquals(profiles(work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), sent(ProvidersPatch.write(odd, ProfileEdit.Label("work", "W"))))
+        assertNull(ProvidersPatch.refusal(ProvidersPatch.write(odd, ProfileEdit.Add)!!, odd))
+        assertEquals(ProvidersBuild.Refused(ProvidersRefusal.NoList), ProvidersPatch.build(null, ProfileEdit.Add))
+        assertEquals(ProvidersRefusal.NoList, ProvidersPatch.refusal(ProvidersPatch.write(two, ProfileEdit.Add)!!, null))
     }
 
     // ---- ta-coik.5: the env editor as the web's -------------------------------------------------
@@ -539,6 +570,6 @@ class ProfilesTest {
     @Test fun nothingIsSentWithoutAHandshakenSocket() {
         h.newClient(configured = false)
         assertFalse(h.client.requestProviders())
-        assertEquals(ProvidersRefusal.NotWritable, h.client.setProviders(ProvidersPatch.write(two, ProfileEdit.Add)!!, "http://localhost"))
+        assertEquals(ProvidersRefusal.NoList, h.client.setProviders(ProvidersPatch.write(two, ProfileEdit.Add)!!, "http://localhost"))
     }
 }

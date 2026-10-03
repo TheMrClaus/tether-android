@@ -75,8 +75,14 @@ object ClaudeAccountsCopy {
 
     /** The login link opens in the phone's browser (the web opens it in a new tab). */
     fun openCaption(host: String) = "Complete sign-in in your browser ($host), then come back here and paste the code."
-    const val LINK_REFUSED = "The server sent a sign-in link that is not a web address (http or https), so the phone will not open it. Finish this login from the web console."
+
+    /** settings-dialog.tsx :1765 the web's caption, said for a link that is not an http(s) address (no host to name). */
+    const val OPEN_CAPTION_WEB = "Complete sign-in in your browser, then come back here."
+
+    /** ta-coik.17: a link a browser never opens from a page either ([com.tether.app.client.ClaudeLoginLink.NOT_OPENED], or not a URL). */
+    const val LINK_REFUSED = "The server sent a sign-in link that a browser will not open (a javascript:, data:, file: or content: address, or not an address at all)."
     const val LINK_UNOPENED = "No browser on this phone could open the link."
+    const val LINK_UNOPENED_APP = "No app on this phone could open the link."
     /** r2 (security P3-1). */
     const val NOT_ANTHROPIC = "This is not an Anthropic sign-in address. Open it only if you expected this server to send you there."
     const val LOGIN_GONE = "This login is no longer running on the server. Start it again."
@@ -127,15 +133,14 @@ fun interface LoginLinkOpener {
         val None = LoginLinkOpener { false }
 
         /**
-         * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the web address read ([ClaudeLoginLink]): the
-         * phone's browser, no app credential with it (the T15.7 / CompatibilityBanner pattern).
-         * Uri.parse, not core-ktx's toUri: this module does not depend on androidx.core (ExternalLinks' rule).
+         * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the link read ([ClaudeLoginLink]): an http(s) one in
+         * the phone's browser, no app credential with it (the T15.7 / CompatibilityBanner pattern);
+         * ta-coik.17: another scheme to the app that takes it, as a phone's browser hands a page's
+         * link on ([intentFor]). Uri.parse, not core-ktx's toUri: this module does not depend on
+         * androidx.core (ExternalLinks' rule).
          */
-        @SuppressLint("UseKtx")
         fun browser(context: Context) = LoginLinkOpener { link ->
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.url))
-                .addCategory(Intent.CATEGORY_BROWSABLE)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = intentFor(link)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return@LoginLinkOpener false
             try {
                 context.startActivity(intent)
                 true
@@ -145,6 +150,33 @@ fun interface LoginLinkOpener {
                 false
             }
         }
+
+        /**
+         * The intent a phone's browser starts for a page's link to [link]: `ACTION_VIEW` +
+         * `CATEGORY_BROWSABLE`; an `intent:` link is read as Chrome reads it (`Intent.parseUri`),
+         * then made browsable with no named component or selector and no URI grant, as Chrome
+         * does. Null: an `intent:` link that does not parse.
+         */
+        @SuppressLint("UseKtx")
+        fun intentFor(link: ClaudeLoginLink): Intent? {
+            if (!link.web && link.url.startsWith("intent:")) {
+                val intent = try {
+                    Intent.parseUri(link.url, Intent.URI_INTENT_SCHEME)
+                } catch (_: java.net.URISyntaxException) {
+                    return null
+                }
+                intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                intent.component = null
+                intent.selector = null
+                intent.flags = intent.flags and URI_GRANTS.inv()
+                return intent
+            }
+            return Intent(Intent.ACTION_VIEW, Uri.parse(link.url)).addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+
+        private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+
     }
 }
 

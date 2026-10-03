@@ -361,19 +361,37 @@ class ClaudeAccountActionsHttpTest {
         assertFalse(ClaudeLoginLink.parse("https://claude.ai/oauth?state=S")!!.toString().contains("state"))
     }
 
-    /** The one native rule: a scheme a browser's link never hands to an app is not handed to the phone. */
-    @Test fun onlyANonWebSchemeOrNoHostIsRefused() {
-        // The control: a web link is kept.
-        assertNotNull(ClaudeLoginLink.parse("https://claude.ai/oauth/authorize"))
+    /**
+     * ta-coik.17: the web renders any url as `<a href target="_blank">` (settings-dialog.tsx :1763-1768),
+     * and a phone's browser hands another scheme to the app that takes it: kept, as read. Only what the
+     * browser never opens from a page (React's `javascript:` block; Chrome's `data:`, `file:`,
+     * `content:`) and what is not a URL is refused.
+     */
+    @Test fun everyLinkABrowserOpensIsKeptAndOnlyWhatItNeverOpensIsRefused() {
+        for ((raw, url) in listOf(
+            "intent://claude.ai#Intent;scheme=https;end" to "intent://claude.ai#Intent;scheme=https;end",
+            "market://details?id=x" to "market://details?id=x",
+            "Claude://oauth/callback" to "claude://oauth/callback",
+            "ftp://claude.ai/x" to "ftp://claude.ai/x",
+            " mailto:a@b.example\n" to "mailto:a@b.example",
+        )) {
+            val link = ClaudeLoginLink.parse(raw)
+            assertNotNull(raw, link)
+            assertEquals(raw, url, link!!.url)
+            assertFalse(raw, link.web)
+            assertFalse(raw, link.anthropic)
+            assertEquals(raw, "", link.host)
+        }
+        assertTrue(ClaudeLoginLink.parse("https://claude.ai/oauth/authorize")!!.web)
         for (bad in listOf(
             "javascript:alert(1)",
-            "intent://claude.ai#Intent;scheme=https;end",
+            " JavaScript:alert(1)",
+            "java\tscript:alert(1)",
             "file:///sdcard/x",
             "content://com.example.provider/x",
-            "market://details?id=x",
-            "claude://oauth/callback",
             "data:text/html,hi",
-            "ftp://claude.ai/x",
+            "DATA:text/html,hi",
+            "/relative/path",
             "https://",
             "",
             "   ",
@@ -426,7 +444,7 @@ class ClaudeAccountActionsHttpTest {
     }
 
     @Test fun aLinkTheClientWillNotOpenIsFlaggedNotKept() = runBlocking<Unit> {
-        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code","url":"intent://evil.test#Intent;end"}"""))
+        server.enqueue(reply(200, """{"ok":true,"status":"awaiting-code","url":"javascript:alert(1)"}"""))
         val state = (actions.pollLogin(origin, "claude-work") as SecurityResult.Ok).value
         assertNull(state.link)
         assertTrue(state.linkRefused)

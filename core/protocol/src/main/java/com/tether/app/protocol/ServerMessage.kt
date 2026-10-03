@@ -272,7 +272,7 @@ sealed interface ServerMessage {
      * [profiles] is ProfileEntry[], raw, every key as it came. ta-q6p: decoded tolerantly, so the
      * frame never lands in [Unknown.raw] with its secrets: a missing or non-array `profiles` reads
      * as an empty list and a non-object entry is dropped, and either makes [intact] false (the list
-     * is not the server's whole registry, so nothing may be written back from it). Each profile's
+     * is not the array as sent; the server's own store never sends one). Each profile's
      * `env` VALUES are secrets the server sends in plaintext: [toString] prints the count only.
      */
     data class Providers(val profiles: List<JsonObject>, val intact: Boolean = true) : ServerMessage {

@@ -386,6 +386,39 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         tag(ClaudeAccountsTags.loginOpen("claude-work")).assertDoesNotExist()
     }
 
+    /** ta-coik.17: a link of another scheme is offered and opened as the web's `<a href>` is (settings-dialog.tsx :1763-1768), with the web's caption; no web-console pointer anywhere. */
+    @Test fun aLinkOfAnotherSchemeIsOfferedAndOpenedLikeTheWebs() {
+        val actions = FakeAccountActions()
+        val opener = RecordingOpener()
+        show(binding(FakeAccounts(), actions, opener))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        val app = ClaudeLoginLink.parse("claude://oauth/callback?x=1")!!
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, app, false, null), ORIGIN, null))
+        waitFor(ClaudeAccountsCopy.OPEN_CAPTION_WEB)
+        tap(ClaudeAccountsTags.loginOpen("claude-work"))
+        assertEquals(listOf(app), opener.opened.toList())
+        assertFalse(everything().any { it.contains("web console") })
+        tag(ClaudeAccountsTags.loginLinkRefused("claude-work")).assertDoesNotExist()
+    }
+
+    /** The intent a phone's browser starts: browsable; an `intent:` link parsed as Chrome parses it, with no named component, selector or URI grant. */
+    @Test fun theOpenerStartsWhatAPhonesBrowserStarts() {
+        val web = LoginLinkOpener.intentFor(link)!!
+        assertEquals(android.content.Intent.ACTION_VIEW, web.action)
+        assertTrue(web.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+        assertEquals(link.url, web.dataString)
+        val market = LoginLinkOpener.intentFor(ClaudeLoginLink.parse("market://details?id=x")!!)!!
+        assertEquals("market://details?id=x", market.dataString)
+        assertTrue(market.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+        val intent = LoginLinkOpener.intentFor(ClaudeLoginLink.parse("intent://claude.ai/x#Intent;scheme=https;component=com.example/.Secret;launchFlags=0x3;end")!!)!!
+        assertEquals("https://claude.ai/x", intent.dataString)
+        assertTrue(intent.hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+        assertNull(intent.component)
+        assertNull(intent.selector)
+        assertEquals(0, intent.flags and (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+    }
+
     @Test fun aLoginAlreadyRunningElsewhereIsSaid() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))

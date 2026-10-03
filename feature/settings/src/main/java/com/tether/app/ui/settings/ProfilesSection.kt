@@ -84,7 +84,6 @@ object ProfileTags {
     const val Section = "profiles-section"
     const val Loading = "profiles-loading"
     const val Empty = "profiles-empty"
-    const val ReadOnly = "profiles-read-only"
     const val Add = "profiles-add"
     fun card(id: String) = "profile-card:$id"
     fun switch(id: String) = "profile-switch:$id"
@@ -153,6 +152,9 @@ internal class ProfileActions(
  * - every field writes as the web's blur does (Done, a focus loss, leaving the screen; never a
  *   configuration change): the command, home and engine included; the env editor's names and
  *   values are plain fields as on the web (a copy of a value is marked sensitive);
+ * - ta-coik.17: any list is editable and every field takes what the web's takes (no read-only
+ *   list, no length cap): a value the server refuses comes back as its error, shown as every
+ *   server error is (the app's toast, the web's setError);
  * - r2 (security F4): a write that is refused says so (on the field, or on the card), and one the
  *   server never confirms within [com.tether.app.client.ProvidersInFlight.TIMEOUT_MS] says so too.
  */
@@ -219,8 +221,6 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             )
             return@SettingsSection
         }
-        val editable = list.writable
-        if (!editable) ComingSoonNote(ProfileRows.READ_ONLY, modifier = Modifier.padding(bottom = 16.dp).testTag(ProfileTags.ReadOnly))
         notices[""]?.let { NoticeLine(it, ProfileTags.Notice, Modifier.padding(bottom = 16.dp)) }
         if (list.profiles.isEmpty()) {
             // `.telemetry-empty`: the muted line.
@@ -232,18 +232,16 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             )
         }
         list.profiles.forEachIndexed { index, profile ->
-            key(index, profile.id) { ProfileCard(profile, actions, editable, narrow, notices[profile.id]) }
+            key(index, profile.id) { ProfileCard(profile, actions, narrow, notices[profile.id]) }
         }
-        if (editable) {
-            TetherKey(
-                onClick = { actions.send("", ProfileEdit.Add) },
-                classes = KeyClasses.ButtonSecondary,
-                label = ProfileRows.ADD,
-                icon = TetherIcons.Plus,
-                iconSize = 14.dp,
-                modifier = Modifier.testTag(ProfileTags.Add),
-            )
-        }
+        TetherKey(
+            onClick = { actions.send("", ProfileEdit.Add) },
+            classes = KeyClasses.ButtonSecondary,
+            label = ProfileRows.ADD,
+            icon = TetherIcons.Plus,
+            iconSize = 14.dp,
+            modifier = Modifier.testTag(ProfileTags.Add),
+        )
     }
 }
 
@@ -267,7 +265,7 @@ private fun NoticeLine(text: String, tag: String, modifier: Modifier = Modifier)
 
 /** `.engine-card` (:642-834): the head (glyph, name, engine and command, the switch), then the body's rows. */
 @Composable
-private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, narrow: Boolean, notice: String?) {
+private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, notice: String?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val latest by rememberUpdatedState(actions)
@@ -298,10 +296,8 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
             Box(
                 Modifier
                     .testTag(ProfileTags.switch(p.id))
-                    .alpha(if (editable) 1f else 0.45f)
                     .toggleable(
                         value = p.enabled,
-                        enabled = editable,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         role = Role.Switch,
@@ -319,10 +315,10 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
         Spacer(Modifier.height(t.css.spaceSm + 12.dp))
         RowRule()
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
-            ProfileTextRow(p, ProfileTags.LABEL, ProfileRows.LABEL, AnnotatedString(ProfileRows.LABEL_CAPTION), p.label, editable, narrow, first = true) {
+            ProfileTextRow(p, ProfileTags.LABEL, ProfileRows.LABEL, AnnotatedString(ProfileRows.LABEL_CAPTION), p.label, true, narrow, first = true) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Label(p.id, it), quiet = true))
             }
-            ProfileTextRow(p, ProfileTags.ID, ProfileRows.ID, AnnotatedString(ProfileRows.ID_CAPTION), p.id, editable, narrow) {
+            ProfileTextRow(p, ProfileTags.ID, ProfileRows.ID, AnnotatedString(ProfileRows.ID_CAPTION), p.id, true, narrow) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Rename(p.id, it), quiet = true))
             }
             SettingsRow(
@@ -336,7 +332,6 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
                             selectedValue = p.extends,
                             // :696: another engine is written at once.
                             onSelect = { choice -> latest.send(p.id, ProfileEdit.Extends(p.id, choice.value)) },
-                            enabled = editable,
                             placeholder = LabelText.visibleValue(p.extends),
                             contentDescription = ProfileRows.field(p, ProfileTags.EXTENDS),
                             modifier = (if (narrow) Modifier.fillMaxWidth(0.52f) else Modifier).testTag(ProfileTags.field(p.id, ProfileTags.EXTENDS)),
@@ -350,11 +345,8 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
                     withStyle(SpanStyle(fontFamily = type.mono)) { append(ProfileRows.COMMAND_EXAMPLE) }
                     append(ProfileRows.COMMAND_CAPTION_2)
                 }
-                // :713-717: split at whitespace; never past the server's limits (it would refuse the whole list).
-                ProfileTextRow(
-                    p, ProfileTags.COMMAND, ProfileRows.COMMAND, caption, ProfileRows.commandText(p), editable, narrow, placeholder = ProfileRows.COMMAND_EXAMPLE,
-                    accept = { ProvidersPatch.commandFits(ProvidersPatch.commandParts(it)) },
-                ) {
+                // :713-717: split at whitespace.
+                ProfileTextRow(p, ProfileTags.COMMAND, ProfileRows.COMMAND, caption, ProfileRows.commandText(p), true, narrow, placeholder = ProfileRows.COMMAND_EXAMPLE) {
                     ProfileRows.outcome(latest.send(p.id, ProfileEdit.Command(p.id, it), quiet = true))
                 }
             }
@@ -363,33 +355,30 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
                 !p.homeDir.isNullOrEmpty() -> codeLabel(p.homeDir!!)
                 else -> AnnotatedString(ProfileRows.HOME_OPTIONAL)
             }
-            ProfileTextRow(
-                p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), editable, narrow, placeholder = ProfileRows.HOME_PLACEHOLDER,
-                accept = { it.length <= ProfileLimits.HOME },
-            ) {
+            ProfileTextRow(p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), true, narrow, placeholder = ProfileRows.HOME_PLACEHOLDER) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Home(p.id, it), quiet = true))
             }
             SettingsRow(
                 narrow = true,
                 modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.ENV)),
                 text = { m -> SettingsRowText(ProfileRows.ENV, AnnotatedString(ProfileRows.ENV_CAPTION), m) },
-                control = { m -> EnvEditor(p, actions, editable, narrow, m) },
+                control = { m -> EnvEditor(p, actions, narrow, m) },
             )
             val dropCaption = buildAnnotatedString {
                 append(ProfileRows.DROP_ENV_CAPTION_1)
                 withStyle(SpanStyle(fontFamily = type.mono)) { append(ProfileRows.DROP_ENV_EXAMPLE) }
                 append(ProfileRows.DROP_ENV_CAPTION_2)
             }
-            ProfileTextRow(p, ProfileTags.DROP_ENV, ProfileRows.DROP_ENV, dropCaption, p.dropEnv.joinToString(","), editable, narrow, placeholder = ProfileRows.DROP_ENV_EXAMPLE, label = "drop env prefixes") {
+            ProfileTextRow(p, ProfileTags.DROP_ENV, ProfileRows.DROP_ENV, dropCaption, p.dropEnv.joinToString(","), true, narrow, placeholder = ProfileRows.DROP_ENV_EXAMPLE, label = "drop env prefixes") {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.DropEnv(p.id, it), quiet = true))
             }
             ProfileTextRow(
                 p, ProfileTags.TOOLS, ProfileRows.TOOLS, AnnotatedString(ProfileRows.toolsCaption(p.extends)), p.disallowedTools.joinToString(","),
-                editable && p.extends == "claude", narrow, placeholder = ProfileRows.TOOLS_PLACEHOLDER, label = "disallowed tools",
+                p.extends == "claude", narrow, placeholder = ProfileRows.TOOLS_PLACEHOLDER, label = "disallowed tools",
             ) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.DisallowedTools(p.id, it), quiet = true))
             }
-            ProfileTextRow(p, ProfileTags.ORDER, ProfileRows.ORDER, AnnotatedString(ProfileRows.ORDER_CAPTION), p.order?.toString().orEmpty(), editable, narrow, digits = true) {
+            ProfileTextRow(p, ProfileTags.ORDER, ProfileRows.ORDER, AnnotatedString(ProfileRows.ORDER_CAPTION), p.order?.toString().orEmpty(), true, narrow, digits = true) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Order(p.id, it), quiet = true))
             }
             if (p.extends == "acp") {
@@ -398,7 +387,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
                     withStyle(SpanStyle(fontFamily = type.mono)) { append(ProfileRows.VERIFIED_CAPTION_CODE) }
                     append(ProfileRows.VERIFIED_CAPTION_2)
                 }
-                ProfileTextRow(p, ProfileTags.VERIFIED, ProfileRows.VERIFIED, verified, p.verifiedThrough.orEmpty(), editable, narrow, placeholder = ProfileRows.VERIFIED_PLACEHOLDER, label = "verified through") {
+                ProfileTextRow(p, ProfileTags.VERIFIED, ProfileRows.VERIFIED, verified, p.verifiedThrough.orEmpty(), true, narrow, placeholder = ProfileRows.VERIFIED_PLACEHOLDER, label = "verified through") {
                     ProfileRows.outcome(latest.send(p.id, ProfileEdit.VerifiedThrough(p.id, it), quiet = true))
                 }
             }
@@ -410,18 +399,16 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
                         val (title, caption) = if (list == ModelList.Models) ProfileRows.MODELS to ProfileRows.MODELS_CAPTION else ProfileRows.ADDITIONAL to ProfileRows.ADDITIONAL_CAPTION
                         SettingsRowText(title, AnnotatedString(caption), m)
                     },
-                    control = { m -> ModelListEditor(p, list, actions, editable, narrow, m) },
+                    control = { m -> ModelListEditor(p, list, actions, narrow, m) },
                 )
             }
-            if (editable) {
-                TetherKey(
-                    onClick = { latest.send(p.id, ProfileEdit.Remove(p.id)) },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = ProfileRows.REMOVE,
-                    contentDescription = "${ProfileRows.REMOVE} ${ProfileRows.name(p)}",
-                    modifier = Modifier.padding(top = 12.dp).testTag(ProfileTags.remove(p.id)),
-                )
-            }
+            TetherKey(
+                onClick = { latest.send(p.id, ProfileEdit.Remove(p.id)) },
+                classes = KeyClasses.ButtonSecondary,
+                label = ProfileRows.REMOVE,
+                contentDescription = "${ProfileRows.REMOVE} ${ProfileRows.name(p)}",
+                modifier = Modifier.padding(top = 12.dp).testTag(ProfileTags.remove(p.id)),
+            )
         }
     }
 }
@@ -430,7 +417,8 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, editable: Boolean, 
  * One text row of a card: the field holds the server's value cleaned of hidden characters (the
  * edit-field rule) and is refilled when that value changes; it commits as the web's blur does
  * (Done, a focus loss, leaving the screen), never on a configuration change ([CommitField]).
- * [digits]: the order field (whole numbers only; any other edit leaves the field unchanged).
+ * [digits]: the order field, a number field as the web's `type="number"` (only what a browser's
+ * number input lets you type: digits, `+ - . e E`); what it sends is [ProvidersPatch.orderNumber]'s.
  */
 @Composable
 private fun ProfileTextRow(
@@ -445,7 +433,6 @@ private fun ProfileTextRow(
     placeholder: String = "",
     label: String = what,
     digits: Boolean = false,
-    accept: (String) -> Boolean = { true },
     onCommit: (String) -> CommitOutcome,
 ) {
     val shown = remember(value) { LabelText.withoutHidden(value) }
@@ -463,7 +450,7 @@ private fun ProfileTextRow(
                 narrow = narrow,
                 placeholder = placeholder,
                 keyboardType = if (digits) KeyboardType.Number else KeyboardType.Text,
-                accept = if (digits) { typed -> typed.length <= 7 && typed.all { it in '0'..'9' } } else accept,
+                accept = if (digits) { typed -> typed.all { it in NUMBER_KEYS } } else { _ -> true },
                 onCommit = onCommit,
                 modifier = m.serverFieldWidth(narrow),
             )
@@ -471,14 +458,17 @@ private fun ProfileTextRow(
     )
 }
 
+/** What a browser's number input accepts typed (the order field). */
+private const val NUMBER_KEYS = "0123456789+-.eE"
+
 // ---- the env editor (:349-440) ---------------------------------------------------------------------
 
 /** EnvEditor: one entry per key (its name, its value and remove), then the add row. */
 @Composable
-private fun EnvEditor(p: Profile, actions: ProfileActions, editable: Boolean, narrow: Boolean, modifier: Modifier) {
+private fun EnvEditor(p: Profile, actions: ProfileActions, narrow: Boolean, modifier: Modifier) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        p.envKeys.forEach { envKey -> key(envKey) { EnvEntry(p, envKey, actions, editable, narrow) } }
-        if (editable) EnvAddRow(p, actions, narrow)
+        p.envKeys.forEach { envKey -> key(envKey) { EnvEntry(p, envKey, actions, narrow) } }
+        EnvAddRow(p, actions, narrow)
     }
 }
 
@@ -488,7 +478,7 @@ private fun EnvEditor(p: Profile, actions: ProfileActions, editable: Boolean, na
  * writes it, and the key removes it, all at once. A copy of the value is marked sensitive.
  */
 @Composable
-private fun EnvEntry(p: Profile, envKey: String, actions: ProfileActions, editable: Boolean, narrow: Boolean) {
+private fun EnvEntry(p: Profile, envKey: String, actions: ProfileActions, narrow: Boolean) {
     val latest by rememberUpdatedState(actions)
     val valueLabel = ProfileRows.valueLabel(envKey)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -498,22 +488,20 @@ private fun EnvEntry(p: Profile, envKey: String, actions: ProfileActions, editab
                 shown = shownKey,
                 label = ProfileRows.ENV_NAME,
                 tag = ProfileTags.envKey(p.id, envKey),
-                enabled = editable,
+                enabled = true,
                 narrow = narrow,
                 placeholder = "",
                 onCommit = { typed -> ProfileRows.outcome(latest.send(p.id, ProfileEdit.EnvKey(p.id, envKey, typed), quiet = true)) },
                 modifier = Modifier.weight(1f),
             )
-            if (editable) {
-                TetherKey(
-                    onClick = { latest.send(p.id, ProfileEdit.EnvRemove(p.id, envKey)) },
-                    classes = KeyClasses.IconButton,
-                    icon = TetherIcons.X,
-                    iconSize = 14.dp,
-                    contentDescription = ProfileRows.removeLabel(envKey),
-                    modifier = Modifier.testTag(ProfileTags.envRemove(p.id, envKey)),
-                )
-            }
+            TetherKey(
+                onClick = { latest.send(p.id, ProfileEdit.EnvRemove(p.id, envKey)) },
+                classes = KeyClasses.IconButton,
+                icon = TetherIcons.X,
+                iconSize = 14.dp,
+                contentDescription = ProfileRows.removeLabel(envKey),
+                modifier = Modifier.testTag(ProfileTags.envRemove(p.id, envKey)),
+            )
         }
         // The web's `defaultValue={value}`: the value as it is.
         val shown = p.envValue(envKey)?.reveal().orEmpty()
@@ -521,11 +509,10 @@ private fun EnvEntry(p: Profile, envKey: String, actions: ProfileActions, editab
             shown = shown,
             label = valueLabel,
             tag = ProfileTags.envInput(p.id, envKey),
-            enabled = editable,
+            enabled = true,
             narrow = narrow,
             placeholder = "",
             keyboardType = KeyboardType.Password,
-            accept = { it.length <= ProfileLimits.ENV_VALUE },
             sensitive = true,
             onCommit = { v -> ProfileRows.outcome(latest.send(p.id, ProfileEdit.EnvValue(p.id, envKey, SecretText(v)), quiet = true)) },
             modifier = Modifier.fillMaxWidth(),
@@ -561,7 +548,7 @@ private fun EnvAddRow(p: Profile, actions: ProfileActions, narrow: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         DraftField(name, { name = it; note = null }, ProfileRows.ENV_NEW_NAME, ProfileTags.envNewName(p.id), ProfileRows.ENV_NAME_PLACEHOLDER, narrow, onDone = add, modifier = Modifier.fillMaxWidth())
         DraftField(
-            value, { if (it.length <= ProfileLimits.ENV_VALUE) value = it }, ProfileRows.ENV_NEW_VALUE, ProfileTags.envNewInput(p.id), ProfileRows.ENV_VALUE_PLACEHOLDER, narrow,
+            value, { value = it }, ProfileRows.ENV_NEW_VALUE, ProfileTags.envNewInput(p.id), ProfileRows.ENV_VALUE_PLACEHOLDER, narrow,
             onDone = add, secret = true, modifier = Modifier.fillMaxWidth(),
         )
         note?.let {
@@ -626,7 +613,7 @@ private data class ModelDraft(val initialId: String, val id: TextFieldValue, val
  * configuration change.
  */
 @Composable
-private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions, editable: Boolean, narrow: Boolean, modifier: Modifier) {
+private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions, narrow: Boolean, modifier: Modifier) {
     val latest by rememberUpdatedState(actions)
     val rows = p.models(list)
     var draft by remember { mutableStateOf<ModelDraft?>(null) }
@@ -641,7 +628,7 @@ private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions
     val defaultRow = rows.indexOfFirst { it.isDefault }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         rows.forEachIndexed { index, row ->
-            key(index, row.id) { ModelRowView(p, list, index, row, index == defaultRow, actions, editable, narrow) }
+            key(index, row.id) { ModelRowView(p, list, index, row, index == defaultRow, actions, narrow) }
         }
         draft?.let { d ->
             DraftModelRow(
@@ -652,21 +639,19 @@ private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions
                 onLeave = { if (activity?.isChangingConfigurations != true) finalize() },
             )
         }
-        if (editable) {
-            TetherKey(
-                onClick = { if (draft == null) draft = ProvidersPatch.draftModelId(rows).let { ModelDraft(it, TextFieldValue(it, TextRange(0, it.length)), "") } },
-                classes = KeyClasses.ButtonSecondary,
-                label = ProfileRows.ADD_MODEL,
-                icon = TetherIcons.Plus,
-                iconSize = 14.dp,
-                modifier = Modifier.testTag(ProfileTags.modelAdd(p.id, list)),
-            )
-        }
+        TetherKey(
+            onClick = { if (draft == null) draft = ProvidersPatch.draftModelId(rows).let { ModelDraft(it, TextFieldValue(it, TextRange(0, it.length)), "") } },
+            classes = KeyClasses.ButtonSecondary,
+            label = ProfileRows.ADD_MODEL,
+            icon = TetherIcons.Plus,
+            iconSize = 14.dp,
+            modifier = Modifier.testTag(ProfileTags.modelAdd(p.id, list)),
+        )
     }
 }
 
 @Composable
-private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileModel, isDefault: Boolean, actions: ProfileActions, editable: Boolean, narrow: Boolean) {
+private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileModel, isDefault: Boolean, actions: ProfileActions, narrow: Boolean) {
     val latest by rememberUpdatedState(actions)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -675,22 +660,20 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
                 shown = shownId,
                 label = ProfileRows.MODEL_ID,
                 tag = ProfileTags.modelId(p.id, list, index),
-                enabled = editable,
+                enabled = true,
                 narrow = narrow,
                 placeholder = "",
                 onCommit = { ProfileRows.outcome(latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetId(index, row.id, it)), quiet = true)) },
                 modifier = Modifier.weight(1f),
             )
-            if (editable) {
-                TetherKey(
-                    onClick = { latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.Remove(index, row.id))) },
-                    classes = KeyClasses.IconButton,
-                    icon = TetherIcons.X,
-                    iconSize = 14.dp,
-                    contentDescription = ProfileRows.removeLabel(row.id),
-                    modifier = Modifier.testTag(ProfileTags.modelRemove(p.id, list, index)),
-                )
-            }
+            TetherKey(
+                onClick = { latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.Remove(index, row.id))) },
+                classes = KeyClasses.IconButton,
+                icon = TetherIcons.X,
+                iconSize = 14.dp,
+                contentDescription = ProfileRows.removeLabel(row.id),
+                modifier = Modifier.testTag(ProfileTags.modelRemove(p.id, list, index)),
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val shownLabel = remember(row.label) { LabelText.withoutHidden(row.label.orEmpty()) }
@@ -698,7 +681,7 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
                 shown = shownLabel,
                 label = ProfileRows.labelFor(row.id),
                 tag = ProfileTags.modelLabel(p.id, list, index),
-                enabled = editable,
+                enabled = true,
                 narrow = narrow,
                 placeholder = ProfileRows.MODEL_LABEL_PLACEHOLDER,
                 onCommit = { ProfileRows.outcome(latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetLabel(index, row.id, it)), quiet = true)) },
@@ -706,7 +689,7 @@ private fun ModelRowView(p: Profile, list: ModelList, index: Int, row: ProfileMo
             )
             DefaultRadio(
                 selected = isDefault,
-                enabled = editable,
+                enabled = true,
                 description = ProfileRows.defaultLabel(row.id),
                 tag = ProfileTags.modelDefault(p.id, list, index),
                 onSelect = { latest.send(p.id, ProfileEdit.Model(p.id, list, ModelOp.SetDefault(index, row.id))) },
@@ -746,7 +729,7 @@ private fun DraftModelRow(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicTextField(
                 value = d.id,
-                onValueChange = { if (it.text.length <= ProfileLimits.MODEL_ID) onChange(d.copy(id = it)) },
+                onValueChange = { onChange(d.copy(id = it)) },
                 singleLine = true,
                 textStyle = style.copy(color = t.ink),
                 cursorBrush = SolidColor(t.violet),
@@ -772,7 +755,7 @@ private fun DraftModelRow(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicTextField(
                 value = d.label,
-                onValueChange = { if (it.length <= ProfileLimits.MODEL_LABEL) onChange(d.copy(label = it)) },
+                onValueChange = { onChange(d.copy(label = it)) },
                 singleLine = true,
                 textStyle = style.copy(color = t.ink),
                 cursorBrush = SolidColor(t.violet),

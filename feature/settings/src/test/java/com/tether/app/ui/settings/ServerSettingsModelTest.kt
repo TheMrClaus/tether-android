@@ -51,6 +51,22 @@ class ServerSettingsModelTest {
         assertEquals("2.1.0‮x", ClaudeCliCopy.options(adv).last().value)
     }
 
+    /**
+     * ta-coik.17 (ta-coik.5 verifier F4): the Default sandbox tier row's words are the web's, byte for
+     * byte (tether 90fbb9f components/settings-dialog.tsx:2355, its label, description and tooltip).
+     */
+    @Test fun theDefaultSandboxTierRowSaysWhatTheWebSays() {
+        val web = ServerRow(
+            ServerSetting.DefaultSandboxPolicy,
+            "Default sandbox tier",
+            "Preselected sandbox for new sessions",
+            "The sandbox tier a fresh session starts under when the create dialog omits it, and the tier a resumed Claude conversation opens " +
+                "under ('Provider default' resumes it as workspace-write). 'Provider default' keeps each engine's own default for new sessions. " +
+                "In containers, 'Full access' is recommended — nested sandboxing fail-closes. Requires restart.",
+        )
+        assertEquals(web, AdvancedRows.defaultSandboxPolicy)
+    }
+
     @Test fun aBindingWithoutAServerSendsNothing() {
         val writer = RecordingWriter()
         assertFalse(ServerFixtures.binding(origin = null, writer = writer).send(ServerFixtures.json("""{"host":"x"}""")))

@@ -22,9 +22,11 @@ import kotlinx.serialization.json.longOrNull
  *   built at the moment of the write, never from a list the editor captured earlier;
  * - each profile is kept as the JSON object the server sent ([Profile.raw]) and an edit changes
  *   only its own key, so a key this app does not model goes back exactly as it came;
- * - a list the app cannot read faithfully (the frame was not the whole registry, an entry the
- *   server's validator would refuse, a part past the server's limits) is shown but never written
- *   back ([ProvidersList.writable]): a whole-list write from it would rewrite what it lost.
+ * - ta-coik.17 (owner rule): any list the server sent is edited and written back, as the web's
+ *   ProfilesEditor does (settings-dialog.tsx 90fbb9f :621-638, `profiles.map`/`filter` by id over
+ *   the whole array), with no app-side check of the server's limits or validator: a write the
+ *   server refuses comes back as its `error` frame (server.mjs :9425-9432), shown as the web's
+ *   setError is ([TetherClient.serverErrors]).
  *
  * Each profile's `env` VALUES are secrets the server sends in plaintext: they are [SecretText]
  * here, and no `toString` in this file prints one.
@@ -34,7 +36,9 @@ import kotlinx.serialization.json.longOrNull
  * rename onto a name the profile already has overwrites it, as the web's object spread does.
  */
 object ProfileLimits {
-    // lib/providers-registry.mjs 887c222 :28-45.
+    // lib/providers-registry.mjs 887c222 :28-45: here only the bounds of what the editor DRAWS of a
+    // profile (a part past one reads as absent). ta-coik.17: no write is checked against them; the
+    // server is the one that refuses.
     const val PROFILES = 64
     const val ID = 64
     const val LABEL = 80
@@ -42,7 +46,6 @@ object ProfileLimits {
     const val COMMAND = 32
     const val HOME = 4096
     const val ENV_KEYS = 64
-    const val ENV_VALUE = 4096
     const val DROP_ENV = 32
     const val DROP_ENV_PREFIX = 64
     const val VERSION = 64
@@ -51,19 +54,9 @@ object ProfileLimits {
     const val MODEL_LABEL = 200
     const val TOOLS = 64
     const val TOOL_NAME = 200
-    const val ORDER = 1_000_000L
 
     /** :49-57 `EXTENDS_PROVIDERS`, the closed engine set (the web's `EXTENDS_OPTIONS` order). */
     val EXTENDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp")
-
-    /** :64 `ID_PATTERN`. */
-    val ID_PATTERN = Regex("^[a-z][a-z0-9-]*$")
-
-    /** :116 issue #107: the editor's auto-assigned placeholder model ids ("model", "model-2", …). */
-    val MODEL_PLACEHOLDER = Regex("^model(?:-\\d+)?$")
-
-    /** :103 a drop-env entry is a variable-name prefix. */
-    val DROP_ENV_PATTERN = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
 }
 
 /** One `{ id, label?, isDefault? }` model row (lib/protocol.ts :1578 `ProfileModelEntry`). */
@@ -74,7 +67,7 @@ enum class ModelList(val key: String) { Models("models"), Additional("additional
 
 /**
  * One profile as the server sent it ([raw], kept whole) and as the editor reads it. A part of
- * another type, or past the server's limit, reads as absent here and makes [valid] false.
+ * another type, or past the server's limit, reads as absent here (the raw goes back as it came).
  * [toString] prints the id and the env KEYS (never a value).
  */
 class Profile internal constructor(internal val raw: JsonObject) {
@@ -103,9 +96,6 @@ class Profile internal constructor(internal val raw: JsonObject) {
 
     fun models(list: ModelList): List<ProfileModel> = if (list == ModelList.Models) models else additionalModels
 
-    /** Whether the server's validator would accept this entry as it is (lib/providers-registry.mjs :171-237). */
-    val valid: Boolean by lazy { ProfileShape.valid(raw) }
-
     override fun toString(): String = "Profile(id=$id, keys=${raw.keys.sorted()}, env=$envKeys)"
 
     private companion object {
@@ -126,102 +116,24 @@ class Profile internal constructor(internal val raw: JsonObject) {
  * One `providers` frame, as the editor draws it. [generation] counts the frames the client has
  * had (a write built from an older one is refused); [epoch] is the socket that delivered it
  * (r2, security F1: a list from before a reconnect is never written back, since the server may
- * have changed while the link was down). [writable]: the frame was the server's whole registry,
- * within its limits, every entry one its validator accepts and every id distinct.
+ * have changed while the link was down). [profiles] are the first [ProfileLimits.PROFILES] entries
+ * (what the editor draws); a write carries every entry the frame had ([raws]).
  */
 class ProvidersList private constructor(
     val profiles: List<Profile>,
-    val writable: Boolean,
+    internal val raws: List<JsonObject>,
     val generation: Long,
     val epoch: Long,
 ) {
     fun profile(id: String): Profile? = profiles.firstOrNull { it.id == id }
 
-    internal val raws: List<JsonObject> get() = profiles.map { it.raw }
-
-    override fun toString(): String = "ProvidersList(ids=${profiles.map { it.id }}, writable=$writable, generation=$generation, epoch=$epoch)"
+    override fun toString(): String = "ProvidersList(ids=${profiles.map { it.id }}, generation=$generation, epoch=$epoch)"
 
     companion object {
         fun of(frame: ServerMessage.Providers, generation: Long, epoch: Long = 0L): ProvidersList {
             val profiles = frame.profiles.take(ProfileLimits.PROFILES).map(::Profile)
-            val writable = frame.intact && frame.profiles.size <= ProfileLimits.PROFILES &&
-                profiles.all { it.valid } && profiles.map { it.id }.toSet().size == profiles.size
-            return ProvidersList(profiles, writable, generation, epoch)
+            return ProvidersList(profiles, frame.profiles, generation, epoch)
         }
-    }
-}
-
-/** A Kotlin mirror of lib/providers-registry.mjs 887c222 `normalizeProfileEntry` (shape only). */
-internal object ProfileShape {
-    private fun bounded(e: JsonElement?, max: Int): Boolean =
-        e is JsonPrimitive && e.isString && e.content.isNotEmpty() && e.content.length <= max
-
-    private fun absent(e: JsonElement?) = e == null || e is JsonNull
-
-    private fun bool(e: JsonElement?) = e is JsonPrimitive && !e.isString && e.booleanOrNull != null
-
-    fun valid(o: JsonObject): Boolean {
-        if (!bounded(o["id"], ProfileLimits.ID) || !ProfileLimits.ID_PATTERN.matches((o["id"] as JsonPrimitive).content)) return false
-        if (!bounded(o["label"], ProfileLimits.LABEL)) return false
-        val ext = o["extends"]
-        if (!(ext is JsonPrimitive && ext.isString && ext.content in ProfileLimits.EXTENDS)) return false
-        if (!bool(o["enabled"])) return false
-        o["command"].let { c ->
-            if (!absent(c)) {
-                if (c !is JsonArray || c.isEmpty() || c.size > ProfileLimits.COMMAND) return false
-                if (!c.all { bounded(it, ProfileLimits.COMMAND_ENTRY) }) return false
-            }
-        }
-        if (!absent(o["homeDir"]) && !bounded(o["homeDir"], ProfileLimits.HOME)) return false
-        o["env"].let { env ->
-            if (!absent(env)) {
-                if (env !is JsonObject || env.size > ProfileLimits.ENV_KEYS) return false
-                for ((k, v) in env) {
-                    if (k.isEmpty() || k.length > ProfileLimits.COMMAND_ENTRY) return false
-                    if (!(v is JsonPrimitive && v.isString && v.content.length <= ProfileLimits.ENV_VALUE)) return false
-                }
-            }
-        }
-        o["dropEnv"].let { d ->
-            if (!absent(d)) {
-                if (d !is JsonArray || d.size > ProfileLimits.DROP_ENV) return false
-                if (!d.all { bounded(it, ProfileLimits.DROP_ENV_PREFIX) && ProfileLimits.DROP_ENV_PATTERN.matches((it as JsonPrimitive).content) }) return false
-            }
-        }
-        for (list in ModelList.entries) if (!modelsValid(o[list.key])) return false
-        o["disallowedTools"].let { d ->
-            if (!absent(d)) {
-                if (d !is JsonArray || d.size > ProfileLimits.TOOLS) return false
-                if (!d.all { bounded(it, ProfileLimits.TOOL_NAME) }) return false
-            }
-        }
-        o["order"].let { n ->
-            if (!absent(n)) {
-                if (n !is JsonPrimitive || n.isString) return false
-                val v = n.longOrNull ?: n.doubleOrNull?.takeIf { it == Math.floor(it) && it.isFinite() }?.toLong() ?: return false
-                if (v < 0 || v > ProfileLimits.ORDER) return false
-            }
-        }
-        o["verifiedThrough"].let { v ->
-            if (!absent(v) && (!bounded(v, ProfileLimits.VERSION) || jsTrim((v as JsonPrimitive).content).isEmpty())) return false
-        }
-        return true
-    }
-
-    private fun modelsValid(e: JsonElement?): Boolean {
-        if (absent(e)) return true
-        if (e !is JsonArray || e.size > ProfileLimits.MODELS) return false
-        var defaults = 0
-        for (row in e) {
-            if (row !is JsonObject) return false
-            if (!bounded(row["id"], ProfileLimits.MODEL_ID)) return false
-            val labelOk = bounded(row["label"], ProfileLimits.MODEL_LABEL)
-            if (ProfileLimits.MODEL_PLACEHOLDER.matches((row["id"] as JsonPrimitive).content) && !labelOk) return false
-            val d = row["isDefault"]
-            if (d != null && !bool(d)) return false
-            if ((d as? JsonPrimitive)?.booleanOrNull == true) defaults++
-        }
-        return defaults <= 1
     }
 }
 
@@ -297,8 +209,8 @@ sealed interface ModelOp {
 
     /**
      * The draft row's commit (:491-497, issue #107): only when the typed id is a REAL one (non-empty,
-     * not the placeholder the draft started at). r1 (the server's rule, :138): a placeholder-shaped
-     * id without a label is never committed either, as the server would refuse the whole list.
+     * not the placeholder the draft started at), as on the web: any other id is sent, and the
+     * server says if it refuses it (ta-coik.17).
      */
     data class Add(val initialId: String, val typedId: String, val typedLabel: String) : ModelOp
 }
@@ -323,8 +235,8 @@ sealed interface EnvChange {
 
 /** Why a write was not built or not sent. */
 enum class ProvidersRefusal {
-    /** No list, or one the app cannot write back. */
-    NotWritable,
+    /** No list yet (the server has not replied). */
+    NoList,
 
     /** The edit's profile (or row) is not in the newest list any more. */
     Gone,
@@ -334,9 +246,6 @@ enum class ProvidersRefusal {
 
     /** A write is still waiting for its broadcast: one built now would undo it. */
     InFlight,
-
-    /** The value passes the server's limits or rules. */
-    Invalid,
 
     /** No live socket for the list's server. */
     NotConnected,
@@ -498,15 +407,26 @@ object ProvidersPatch {
         return parts
     }
 
-    /** Whether [parts] fit the server's command limits (:181-186): at most 32 parts of at most 256 units. */
-    fun commandFits(parts: List<String>): Boolean = parts.size <= ProfileLimits.COMMAND && parts.all { it.length <= ProfileLimits.COMMAND_ENTRY }
+    /**
+     * The order field (:801-813, `<input type="number">`): what the browser's number input yields
+     * for [typed] (its value is "" unless the text is a valid floating-point number, HTML's rule),
+     * then `Number(raw)`. Null: empty (clears the order); NaN never results.
+     */
+    fun orderNumber(typed: String): Double? {
+        val raw = jsTrim(typed)
+        if (!NUMBER_INPUT.matches(raw)) return null
+        return raw.toDouble()
+    }
+
+    /** HTML's valid floating-point number: what a number input keeps as its value. */
+    private val NUMBER_INPUT = Regex("^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
 
     /** A plain edit applied to [list]; null when nothing is to be sent (see [build] for why). */
     fun write(list: ProvidersList?, edit: ProfileEdit): ProvidersWrite? = build(list, edit).writeOrNull
 
     /** A plain edit applied to [list]: the write, nothing to send, or why not. */
     fun build(list: ProvidersList?, edit: ProfileEdit): ProvidersBuild {
-        if (list == null || !list.writable) return ProvidersBuild.Refused(ProvidersRefusal.NotWritable)
+        if (list == null) return ProvidersBuild.Refused(ProvidersRefusal.NoList)
         val base = list.raws
         val next: List<JsonObject> = when (edit) {
             is ProfileEdit.Add -> {
@@ -534,7 +454,10 @@ object ProvidersPatch {
                     is Applied.No -> return ProvidersBuild.Refused(r.reason)
                 }
                 if (updated == target) return ProvidersBuild.NoChange
-                base.map { if (it === target) updated else it }
+                // :634-636 `update(id, patch)`: every entry with the id takes the patch (`{ ...profile, ...patch }`).
+                val patch = updated.filter { (k, v) -> target[k] != v }
+                val dropped = target.keys - updated.keys
+                base.map { if (idOf(it) == profileId(edit)) JsonObject(LinkedHashMap(it).apply { dropped.forEach(::remove); putAll(patch) }) else it }
             }
         }
         if (next == base) return ProvidersBuild.NoChange
@@ -560,12 +483,12 @@ object ProvidersPatch {
     /**
      * Why [write] must NOT be sent against [newest] (the client's newest list), or null when it may.
      * Every send path applies it, the client's under the same lock as its frames:
-     * - no newest list, or one that cannot be written back;
+     * - no newest list;
      * - [write] was built from another list than [newest] (a broadcast landed since, or the socket
      *   changed: sending it would undo what the server holds now).
      */
     fun refusal(write: ProvidersWrite, newest: ProvidersList?): ProvidersRefusal? {
-        if (newest == null || !newest.writable) return ProvidersRefusal.NotWritable
+        if (newest == null) return ProvidersRefusal.NoList
         if (write.generation != newest.generation || write.epoch != newest.epoch) return ProvidersRefusal.Stale
         return null
     }
@@ -573,8 +496,6 @@ object ProvidersPatch {
     // ---- the web's handlers --------------------------------------------------------------------
 
     private fun gone() = ProvidersBuild.Refused(ProvidersRefusal.Gone)
-
-    private fun invalid() = ProvidersBuild.Refused(ProvidersRefusal.Invalid)
 
     private sealed interface Applied {
         data class To(val raw: JsonObject) : Applied
@@ -607,17 +528,12 @@ object ProvidersPatch {
     private fun applyTo(profile: Profile, raw: JsonObject, edit: ProfileEdit): Applied = when (edit) {
         is ProfileEdit.Enabled -> applied(if (edit.enabled == profile.enabled) null else with(raw, "enabled", JsonPrimitive(edit.enabled)))
         is ProfileEdit.Label -> applied(jsTrim(edit.typed).takeIf { it.isNotEmpty() && it != profile.label }?.let { with(raw, "label", JsonPrimitive(it)) })
-        is ProfileEdit.Extends -> when {
-            edit.value !in ProfileLimits.EXTENDS -> Applied.No(ProvidersRefusal.Invalid)
-            edit.value == profile.extends -> Applied.Nothing
-            else -> Applied.To(with(raw, "extends", JsonPrimitive(edit.value)))
-        }
+        is ProfileEdit.Extends -> applied(if (edit.value == profile.extends) null else with(raw, "extends", JsonPrimitive(edit.value)))
         is ProfileEdit.Command -> {
             val parts = commandParts(edit.typed)
             when {
                 // :716 compares the joined text: the same words with other spacing are no change.
                 parts.joinToString(" ") == (profile.command ?: emptyList()).joinToString(" ") -> Applied.Nothing
-                !commandFits(parts) -> Applied.No(ProvidersRefusal.Invalid)
                 parts.isEmpty() -> Applied.To(without(raw, "command"))
                 else -> Applied.To(with(raw, "command", JsonArray(parts.map(::JsonPrimitive))))
             }
@@ -626,7 +542,6 @@ object ProvidersPatch {
             val value = jsTrim(edit.typed)
             when {
                 value == (profile.homeDir ?: "") -> Applied.Nothing
-                value.length > ProfileLimits.HOME -> Applied.No(ProvidersRefusal.Invalid)
                 value.isEmpty() -> Applied.To(without(raw, "homeDir"))
                 else -> Applied.To(with(raw, "homeDir", JsonPrimitive(value)))
             }
@@ -635,16 +550,15 @@ object ProvidersPatch {
         is ProfileEdit.DropEnv -> applied(splitList(raw, "dropEnv", edit.typed, profile.dropEnv))
         is ProfileEdit.DisallowedTools -> applied(splitList(raw, "disallowedTools", edit.typed, profile.disallowedTools))
         is ProfileEdit.Order -> {
-            val trimmed = jsTrim(edit.typed)
+            // :808-811: an integer other than the profile's is written; empty clears it; any other number does nothing.
+            val n = orderNumber(edit.typed)
+            val now = raw["order"]
             applied(
                 when {
-                    trimmed.isEmpty() -> if (profile.order != null) without(raw, "order") else null
-                    trimmed.all { it in '0'..'9' } && trimmed.length <= 7 -> {
-                        val n = trimmed.toLong()
-                        if (n > ProfileLimits.ORDER || n == profile.order) null else with(raw, "order", JsonPrimitive(n))
-                    }
-                    // Not a whole number: nothing (the browser's number input never yields one).
-                    else -> null
+                    n == null -> if (now != null) without(raw, "order") else null
+                    !n.isFinite() || n != Math.floor(n) -> null
+                    (now as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull == n -> null
+                    else -> with(raw, "order", JsonPrimitive(java.math.BigDecimal(n).toBigInteger()))
                 },
             )
         }
@@ -654,7 +568,6 @@ object ProvidersPatch {
                 when {
                     value == (profile.verifiedThrough ?: "") -> null
                     value.isEmpty() -> without(raw, "verifiedThrough")
-                    value.length > ProfileLimits.VERSION -> null
                     else -> with(raw, "verifiedThrough", JsonPrimitive(value))
                 },
             )
@@ -674,7 +587,6 @@ object ProvidersPatch {
             is EnvChange.Rename -> {
                 val value = env?.get(change.from) ?: return Applied.No(ProvidersRefusal.Gone)
                 if (change.to.isEmpty() || change.to == change.from) return Applied.Nothing
-                if (change.to.length > ProfileLimits.COMMAND_ENTRY) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env)
                 next.remove(change.from)
                 next[change.to] = value
@@ -683,7 +595,6 @@ object ProvidersPatch {
             is EnvChange.Change -> {
                 val now = env?.get(change.key) ?: return Applied.No(ProvidersRefusal.Gone)
                 if ((now as? JsonPrimitive)?.content == change.value.reveal()) return Applied.Nothing
-                if (change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env)
                 next[change.key] = JsonPrimitive(change.value.reveal())
                 Applied.To(withEnv(raw, next))
@@ -696,8 +607,6 @@ object ProvidersPatch {
             }
             is EnvChange.Add -> {
                 if (change.key.isEmpty()) return Applied.Nothing
-                if (change.key.length > ProfileLimits.COMMAND_ENTRY || change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
-                if ((env == null || change.key !in env) && (env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env ?: emptyMap())
                 next[change.key] = JsonPrimitive(change.value.reveal())
                 Applied.To(withEnv(raw, next))
@@ -719,17 +628,15 @@ object ProvidersPatch {
         fun label(o: JsonObject) = (o["label"] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
         val next: List<JsonObject> = when (op) {
             is ModelOp.SetId -> {
-                val r = row(op.index, op.rowId) ?: return null
+                row(op.index, op.rowId) ?: return null
                 val value = jsTrim(op.typed)
-                if (value.isEmpty() || value == op.rowId || value.length > ProfileLimits.MODEL_ID) return null
-                if (ProfileLimits.MODEL_PLACEHOLDER.matches(value) && label(r).isEmpty()) return null
+                if (value.isEmpty() || value == op.rowId) return null
                 rows.mapIndexed { i, o -> if (i == op.index) with(o, "id", JsonPrimitive(value)) else o }
             }
             is ModelOp.SetLabel -> {
                 val r = row(op.index, op.rowId) ?: return null
                 val value = jsTrim(op.typed)
-                if (value == label(r) || value.length > ProfileLimits.MODEL_LABEL) return null
-                if (value.isEmpty() && ProfileLimits.MODEL_PLACEHOLDER.matches(op.rowId)) return null
+                if (value == label(r)) return null
                 rows.mapIndexed { i, o -> if (i == op.index) (if (value.isEmpty()) without(o, "label") else with(o, "label", JsonPrimitive(value))) else o }
             }
             is ModelOp.SetDefault -> {
@@ -743,9 +650,7 @@ object ProvidersPatch {
             is ModelOp.Add -> {
                 val id = jsTrim(op.typedId)
                 val label = jsTrim(op.typedLabel)
-                if (id.isEmpty() || id == op.initialId || id.length > ProfileLimits.MODEL_ID || label.length > ProfileLimits.MODEL_LABEL) return null
-                if (ProfileLimits.MODEL_PLACEHOLDER.matches(id) && label.isEmpty()) return null
-                if (rows.size >= ProfileLimits.MODELS) return null
+                if (id.isEmpty() || id == op.initialId) return null
                 rows + JsonObject(if (label.isEmpty()) linkedMapOf("id" to JsonPrimitive(id)) else linkedMapOf("id" to JsonPrimitive(id), "label" to JsonPrimitive(label)))
             }
         }

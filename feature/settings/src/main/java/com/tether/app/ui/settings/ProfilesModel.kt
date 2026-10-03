@@ -100,9 +100,6 @@ object ProfileRows {
     const val REMOVE = "Remove"
     const val LOADING = "Loading the custom providers…"
 
-    /** A list the app cannot read exactly is shown, never written back (a whole-list write would rewrite what it lost). */
-    const val READ_ONLY = "This list has an entry the app can't read exactly, so it can't be edited here. Edit custom providers from the web console."
-
     const val LABEL = "Label"
     const val LABEL_CAPTION = "Display name"
     const val ID = "ID"
@@ -177,15 +174,13 @@ object ProfileRows {
     const val NOT_SAVED_CHANGED = "Not saved: the list changed. Try again."
     const val NOT_SAVED_IN_FLIGHT = "Not saved: the last change is still being saved. Try again in a moment."
     const val NOT_SAVED_OFFLINE = "Not saved: not connected to the server. Try again."
-    const val NOT_SAVED_INVALID = "Not saved: the server would refuse this value."
     const val UNCONFIRMED = "The server hasn't confirmed the last change. Check the list before you edit again."
     const val LAST_NOT_SAVED = "The last change wasn't saved: the server didn't take it. Check the list and try again."
 
     fun notSaved(reason: ProvidersRefusal): String = when (reason) {
         ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT
         ProvidersRefusal.NotConnected -> NOT_SAVED_OFFLINE
-        ProvidersRefusal.Invalid -> NOT_SAVED_INVALID
-        ProvidersRefusal.NotWritable, ProvidersRefusal.Gone, ProvidersRefusal.Stale -> NOT_SAVED_CHANGED
+        ProvidersRefusal.NoList, ProvidersRefusal.Gone, ProvidersRefusal.Stale -> NOT_SAVED_CHANGED
     }
 
     /** A field's outcome for an editor action. */

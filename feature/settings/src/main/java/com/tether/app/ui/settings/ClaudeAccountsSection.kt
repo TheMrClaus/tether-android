@@ -462,7 +462,8 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
             TetherKey(onClick = { c.cancelLogin(id) }, classes = KeyClasses.ButtonSecondary, label = ClaudeAccountsCopy.CANCEL, contentDescription = "Cancel login for ${card.title}", modifier = Modifier.testTag(ClaudeAccountsTags.loginCancel(id)))
         }
         login.link?.let { link ->
-            CardRow(narrow = narrow, title = ClaudeAccountsCopy.OPEN_TITLE, caption = AnnotatedString(ClaudeAccountsCopy.openCaption(link.shownHost)), captionTag = ClaudeAccountsTags.loginHost(id)) {
+            val caption = if (link.web) ClaudeAccountsCopy.openCaption(link.shownHost) else ClaudeAccountsCopy.OPEN_CAPTION_WEB
+            CardRow(narrow = narrow, title = ClaudeAccountsCopy.OPEN_TITLE, caption = AnnotatedString(caption), captionTag = ClaudeAccountsTags.loginHost(id)) {
                 TetherKey(
                     onClick = { unopened = !opener.open(link) },
                     classes = KeyClasses.ButtonSecondary,
@@ -475,7 +476,7 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
             }
             // r2 (security P3-1): a host that is not Anthropic's own is said, quietly (a warning, not a refusal).
             if (!link.anthropic) NoteLine(AccountsLine(ClaudeAccountsCopy.NOT_ANTHROPIC, error = true), ClaudeAccountsTags.loginNotAnthropic(id))
-            if (unopened) NoteLine(AccountsLine(ClaudeAccountsCopy.LINK_UNOPENED, error = true), ClaudeAccountsTags.loginOpen(id) + ":unopened")
+            if (unopened) NoteLine(AccountsLine(if (link.web) ClaudeAccountsCopy.LINK_UNOPENED else ClaudeAccountsCopy.LINK_UNOPENED_APP, error = true), ClaudeAccountsTags.loginOpen(id) + ":unopened")
         }
         if (login.link == null && login.linkRefused) {
             NoteLine(AccountsLine(ClaudeAccountsCopy.LINK_REFUSED, error = true), ClaudeAccountsTags.loginLinkRefused(id))

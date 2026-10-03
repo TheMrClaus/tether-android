@@ -301,19 +301,23 @@ class ProfilesBehaviourTest {
         assertEquals(3, w.writes.size)
     }
 
-    @Test fun theOrderFieldTakesOnlyWholeNumbers() {
-        val w = recording()
+    /** :801-813 `<input type="number">`: what a browser's number input takes (digits, `+ - . e E`), then `Number(raw)`; ta-coik.17: no cap. */
+    @Test fun theOrderFieldTakesWhatTheWebsNumberInputTakes() {
+        val w = answering()
         show(writer = w)
         val order = field("gemini", ProfileTags.ORDER)
-        tag(order).performScrollTo().performTextReplacement("6e4")
+        tag(order).performScrollTo().performTextReplacement("1a")
         compose.waitForIdle()
-        assertEquals("1", editable(order))
-        tag(order).performTextReplacement("-5")
-        compose.waitForIdle()
-        assertEquals("1", editable(order))
-        typeAndDone(order, "12")
+        assertEquals("not a number key", "1", editable(order))
+        typeAndDone(order, "6e4")
         waitForWrites(w, 1)
-        assertEquals(frame(gemini().replace("\"order\":1", "\"order\":12"), WORK, zai()), w.frames().single())
+        assertEquals(frame(gemini().replace("\"order\":1", "\"order\":60000"), WORK, zai()), w.frames()[0])
+        typeAndDone(order, "-5")
+        waitForWrites(w, 2)
+        assertEquals(frame(gemini().replace("\"order\":1", "\"order\":-5"), WORK, zai()), w.frames()[1])
+        typeAndDone(order, "12345678")
+        waitForWrites(w, 3)
+        assertEquals(frame(gemini().replace("\"order\":1", "\"order\":12345678"), WORK, zai()), w.frames()[2])
     }
 
     @Test fun anEditLeftInAFieldIsSentWhenSettingsClosesLikeTheWebsBlur() {
@@ -441,15 +445,17 @@ class ProfilesBehaviourTest {
         assertEquals(frame(gemini(command = """["/srv/\u202Egnp.exe\u200B/gemini","--x","y"]"""), WORK, zai()), w.frames().single())
     }
 
-    @Test fun aCommandPastTheServersLimitCannotBeTyped() {
-        show()
+    /** ta-coik.17: a command past the server's limits is typed and sent as on the web (the server refuses it; its error is shown). */
+    @Test fun aCommandPastTheServersLimitIsSentAsTheWebSendsIt() {
+        val w = answering()
+        show(writer = w)
         val command = field("gemini", ProfileTags.COMMAND)
-        tag(command).performScrollTo().performTextReplacement(List(33) { "p" }.joinToString(" "))
-        compose.waitForIdle()
-        assertEquals("gemini --experimental-acp", editable(command))
-        tag(command).performTextReplacement("x".repeat(257))
-        compose.waitForIdle()
-        assertEquals("gemini --experimental-acp", editable(command))
+        typeAndDone(command, List(33) { "p" }.joinToString(" "))
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(command = List(33) { "\"p\"" }.joinToString(",", "[", "]")), WORK, zai()), w.frames()[0])
+        typeAndDone(field("gemini", ProfileTags.HOME), "h".repeat(5000))
+        waitForWrites(w, 2)
+        assertEquals(5000, ((w.frames()[1]["profiles"] as JsonArray)[0] as kotlinx.serialization.json.JsonObject)["homeDir"]!!.let { (it as JsonPrimitive).content.length })
     }
 
     /** ta-coik.5: every edit, what the profile runs included, is a plain whole-list write (no confirmed-only path). */
@@ -607,16 +613,18 @@ class ProfilesBehaviourTest {
         tag(ProfileTags.draftId("claude-work", ModelList.Additional)).performImeAction()
         compose.waitForIdle()
         assertFalse(exists(ProfileTags.draftId("claude-work", ModelList.Additional)))
-        // A placeholder-shaped id without a label is not a real one either.
-        tap(ProfileTags.modelAdd("claude-work", ModelList.Additional))
-        typeAndDone(ProfileTags.draftId("claude-work", ModelList.Additional), "model-7")
-        compose.waitForIdle()
         // Discard sends nothing.
         tap(ProfileTags.modelAdd("claude-work", ModelList.Additional))
         tag(ProfileTags.draftId("claude-work", ModelList.Additional)).performTextReplacement("real-id")
         tap(ProfileTags.draftDiscard("claude-work", ModelList.Additional))
         assertFalse(exists(ProfileTags.draftId("claude-work", ModelList.Additional)))
         assertEquals(emptyList<Any>(), w.writes)
+        // ta-coik.17: any id other than the draft's own placeholder is committed, as the web's finalizeDraft
+        // does (:491-497), a placeholder-shaped one without a label included (the server judges it).
+        tap(ProfileTags.modelAdd("claude-work", ModelList.Additional))
+        typeAndDone(ProfileTags.draftId("claude-work", ModelList.Additional), "model-7")
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(), WORK.replace(",\"enabled\":true", ",\"enabled\":true,\"additionalModels\":[{\"id\":\"model-7\"}]"), zai()), w.frames().single())
     }
 
     @Test fun aNamedModelDraftJoinsTheListAndTheRowsEditAsTheWebs() {
@@ -640,19 +648,22 @@ class ProfilesBehaviourTest {
         assertEquals(frame(gemini(), WORK.replace(rows, """[{"id":"claude-sonnet-4","label":"Sonnet"},{"id":"claude-haiku-4","label":"Haiku","isDefault":true}]"""), zai()), w.frames()[2])
     }
 
-    // ---- a list the app cannot read exactly -------------------------------------------------------
+    // ---- ta-coik.17: any list is edited, as on the web ---------------------------------------------
 
-    @Test fun anUnreadableListIsShownButNeverWritten() {
+    /** A list the server's validator would refuse is edited all the same (no read-only state, no web-console pointer): the write carries every entry as it came. */
+    @Test fun aListTheAppCannotFullyReadIsEditedLikeTheWebs() {
         val w = recording()
-        show(ProfileFixtures.list("""[${gemini()},{"id":"Bad_ID","extends":"codex","label":"Odd","enabled":true}]"""), w)
-        tag(ProfileTags.ReadOnly).assertExists()
-        assertFalse(exists(ProfileTags.Add))
-        assertFalse(exists(ProfileTags.remove("gemini")))
-        tag(field("gemini", ProfileTags.LABEL)).assertIsNotEnabled()
-        tag(ProfileTags.switch("gemini")).assertIsNotEnabled()
-        // The values can still be read, but nothing can be written.
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).assertIsNotEnabled()
-        assertEquals(emptyList<Any>(), w.writes)
+        val odd = """{"id":"Bad_ID","extends":"codex","label":"Odd","enabled":true}"""
+        show(ProfileFixtures.list("""[${gemini()},$odd]"""), w)
+        assertFalse(exists("profiles-read-only"))
+        assertFalse(texts().any { it.contains("web console") })
+        tag(ProfileTags.Add).assertExists()
+        tag(ProfileTags.remove("gemini")).assertExists()
+        tag(ProfileTags.switch("gemini")).assertIsEnabled()
+        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).assertIsEnabled()
+        typeAndDone(field("gemini", ProfileTags.LABEL), "G")
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini().replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), odd), w.frames()[0])
     }
 
     @Test fun serverTextIsDrawnSafely() {
