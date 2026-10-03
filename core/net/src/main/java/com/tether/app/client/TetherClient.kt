@@ -683,7 +683,7 @@ interface TetherClient {
     /** `git-diff-file` (use-tether.ts:1478): ask for one path's hunks. False when not sent. */
     fun requestGitFileDiff(sessionId: String, path: String): Boolean = false
 
-    /** `worktree-diff`: ask for the session's diff summary (the host panel is T8.3's). False when not sent. */
+    /** `worktree-diff`: ask for the session's diff summary (the inspector's Repository band shows it). False when not sent. */
     fun requestWorktreeDiff(sessionId: String): Boolean = false
 
     /**
@@ -702,8 +702,31 @@ interface TetherClient {
     /** `worktree-scripts` (use-tether.ts:1496): ask for the session's scripts snapshot. False when not sent. */
     fun requestWorktreeScripts(sessionId: String): Boolean = false
 
-    /** `change-request` (use-tether.ts:1508), a read; [refresh] asks the server to look again. False when not sent. */
+    /**
+     * `change-request` (use-tether.ts:1508), a read; [refresh] asks the server to look again (the
+     * inspector's "Refresh pull request status", dashboard.tsx:1457). False when not sent; a refresh
+     * not sent says so in [errors], as the web's `send` does.
+     */
     fun requestChangeRequest(sessionId: String, refresh: Boolean = false): Boolean = false
+
+    /**
+     * ta-coik.14 (use-tether.ts:922-926): the latest `worktree-logs` reply per session, whichever
+     * script it names (the web keeps one per session). Emptied with the other server views.
+     */
+    val worktreeLogs: StateFlow<Map<String, WorktreeLogsReading>> get() = NO_WORKTREE_LOGS
+
+    /**
+     * ta-coik.14: `worktree-script` (use-tether.ts:1497-1501): run, stop or restart one declared
+     * script; [action] is "start" | "stop" | "restart". The server answers with a fresh
+     * `worktree-scripts` snapshot (or an `error`). False when not sent, said in [errors] as the web does.
+     */
+    fun controlWorktreeScript(sessionId: String, name: String, action: String): Boolean = false
+
+    /**
+     * ta-coik.14: `worktree-logs` (use-tether.ts:1502-1505): ask for one script's recent output; the
+     * reply lands in [worktreeLogs]. False when not sent, said in [errors] as the web does.
+     */
+    fun requestWorktreeLogs(sessionId: String, name: String): Boolean = false
 
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
@@ -1027,9 +1050,13 @@ private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.G
 private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_SCRIPTS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject>> = MutableStateFlow(emptyMap())
 private val NO_CHANGE_REQUESTS: StateFlow<Map<String, ChangeRequestReading>> = MutableStateFlow(emptyMap())
+private val NO_WORKTREE_LOGS: StateFlow<Map<String, WorktreeLogsReading>> = MutableStateFlow(emptyMap())
 
 /** One `change-request` reply: the raw `ChangeRequestState | null`, and whether the lookup failed. */
 data class ChangeRequestReading(val changeRequest: kotlinx.serialization.json.JsonObject?, val unknown: Boolean)
+
+/** One `worktree-logs` reply: the script it names, its recent output lines and how many were dropped. */
+data class WorktreeLogsReading(val name: String, val lines: List<String>, val dropped: Int)
 
 sealed interface ConnectionState {
     data object Disconnected : ConnectionState

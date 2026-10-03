@@ -1,10 +1,15 @@
 package com.tether.app.client
 
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -138,5 +143,67 @@ class InspectorReadsClientTest {
 
         assertEquals(setOf("open1"), h.client.worktreeScripts.value.keys)
         assertEquals(setOf("open1"), h.client.changeRequests.value.keys)
+    }
+
+    private fun web(json: String) = Json.parseToJsonElement(json).jsonObject
+
+    /**
+     * ta-coik.14: the inspector's actions go out as the web's (use-tether.ts:1497-1508, at tether
+     * 90fbb9f), key for key and value for value: Run/Stop/Restart, "Output of", and the refresh.
+     */
+    @Test fun theActionsGoOutAsTheWebSendsThem() {
+        h.enqueueConnect()
+        h.newClient()
+        h.client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws)
+
+        for (action in listOf("start", "stop", "restart")) {
+            assertEquals(true, h.client.controlWorktreeScript("s1", "dev", action))
+            // send({ type: "worktree-script", sessionId, name, action })
+            assertEquals(web("""{"type":"worktree-script","sessionId":"s1","name":"dev","action":"$action"}"""), h.expectFrame("worktree-script"))
+        }
+        assertEquals(true, h.client.requestWorktreeLogs("s1", "dev"))
+        // send({ type: "worktree-logs", sessionId, name })
+        assertEquals(web("""{"type":"worktree-logs","sessionId":"s1","name":"dev"}"""), h.expectFrame("worktree-logs"))
+        assertEquals(true, h.client.requestChangeRequest("s1", refresh = true))
+        // send({ type: "change-request", sessionId, ...(refresh ? { refresh: true } : {}) })
+        assertEquals(web("""{"type":"change-request","sessionId":"s1","refresh":true}"""), h.expectFrame("change-request"))
+    }
+
+    /** ta-coik.14: use-tether.ts:922-926, the last `worktree-logs` reply per session, for a known session only. */
+    @Test fun logsFoldPerSession() {
+        h.enqueueConnect()
+        h.newClient()
+        h.client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws)
+        created(ws, "s1")
+
+        ws.send("""{"type":"worktree-logs","sessionId":"ghost","name":"dev","lines":["x"],"dropped":0}""")
+        ws.send("""{"type":"worktree-logs","sessionId":"s1","name":"dev","lines":["ready on :5173","GET /"],"dropped":3}""")
+        val logs = await(h.client.worktreeLogs) { "s1" in it }
+        assertEquals(WorktreeLogsReading("dev", listOf("ready on :5173", "GET /"), 3), logs["s1"])
+        // Another script's reply replaces it (the web keeps one per session).
+        ws.send("""{"type":"worktree-logs","sessionId":"s1","name":"test","lines":[],"dropped":0}""")
+        await(h.client.worktreeLogs) { it["s1"]?.name == "test" }
+        h.serverBarrier(ws)
+        assertEquals(setOf("s1"), h.client.worktreeLogs.value.keys)
+    }
+
+    /** ta-coik.14: an action the link could not carry says so, in the web's words (use-tether.ts:337-341). */
+    @Test fun anActionNotSentSaysSo() {
+        h.newClient()
+        val errors = CopyOnWriteArrayList<String>()
+        val job = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        try {
+            assertEquals(false, h.client.controlWorktreeScript("s1", "dev", "start"))
+            assertEquals(false, h.client.requestWorktreeLogs("s1", "dev"))
+            assertEquals(false, h.client.requestChangeRequest("s1", refresh = true))
+            runBlocking { withTimeout(20_000) { while (errors.size < 3) kotlinx.coroutines.delay(10) } }
+            assertEquals(List(3) { "The secure link is reconnecting. Your input was not sent." }, errors.toList())
+        } finally {
+            job.cancel()
+        }
     }
 }

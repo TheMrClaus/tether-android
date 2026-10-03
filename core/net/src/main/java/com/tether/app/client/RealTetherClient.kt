@@ -96,6 +96,13 @@ internal enum class RacePoint {
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
 private const val MAX_CONTROL_MESSAGE = 500
 
+/** use-tether.ts:339, the web's word for any frame its `send` could not put on the link. */
+private const val LINK_RECONNECTING = "The secure link is reconnecting. Your input was not sent."
+
+/** lib/worktree-scripts.mjs:35-36: the server keeps at most this much of a script's output. */
+private const val MAX_WORKTREE_LOG_LINES = 200
+private const val MAX_WORKTREE_LOG_LINE_CHARS = 500
+
 /** protocol-validate.mjs "dismiss-notice": `isNonEmptyString(dismissKey, 512)`. */
 private const val DISMISS_KEY_MAX = 512
 
@@ -515,6 +522,8 @@ class RealTetherClient(
     // T9.1: worktree-scripts snapshots and change-request replies, per session (the inspector reads both).
     private val worktreeScriptsState = MutableStateFlow<Map<String, JsonObject>>(emptyMap())
     private val changeRequestsState = MutableStateFlow<Map<String, ChangeRequestReading>>(emptyMap())
+    // ta-coik.14: the latest worktree-logs reply per session (use-tether.ts:922-926).
+    private val worktreeLogsState = MutableStateFlow<Map<String, WorktreeLogsReading>>(emptyMap())
     // L5: the (sessionId, path) pairs this client asked for; a git-diff-file reply for anything
     // else is dropped (a server cannot fill the card with hunks nobody requested).
     private val requestedGitFileDiffs = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
@@ -560,6 +569,7 @@ class RealTetherClient(
     override val worktreeDiffs: StateFlow<Map<String, JsonObject?>> = worktreeDiffsState
     override val worktreeScripts: StateFlow<Map<String, JsonObject>> = worktreeScriptsState
     override val changeRequests: StateFlow<Map<String, ChangeRequestReading>> = changeRequestsState
+    override val worktreeLogs: StateFlow<Map<String, WorktreeLogsReading>> = worktreeLogsState
     override val errors: SharedFlow<String> = errorsFlow
     override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
 
@@ -1427,6 +1437,7 @@ class RealTetherClient(
         worktreeDiffsState.value = emptyMap()
         worktreeScriptsState.value = emptyMap()
         changeRequestsState.value = emptyMap()
+        worktreeLogsState.value = emptyMap()
         failedInterruptsState.value = emptyMap()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
@@ -1859,7 +1870,7 @@ class RealTetherClient(
 
     /**
      * ta-dl4: a session the server listed or this client subscribed to (an open session is both);
-     * the per-session inspector replies ([worktreeScripts], [changeRequests]) keep only these, so a
+     * the per-session inspector replies ([worktreeScripts], [changeRequests], [worktreeLogs]) keep only these, so a
      * flood of server-sent ids cannot grow them. Caller holds [lock].
      */
     private fun knownSessionLocked(sessionId: String): Boolean = sessionId in listedSessionIds || sessionId in subscribed
@@ -2967,6 +2978,14 @@ class RealTetherClient(
                     changeRequestsState.value = changeRequestsState.value + (message.sessionId to ChangeRequestReading(message.changeRequest, message.unknown))
                 }
             }
+            // ta-coik.14: use-tether.ts:922-926, one reply per session (the last one wins); ta-dl4's rule.
+            is ServerMessage.WorktreeLogs -> ifCurrent(webSocket) {
+                if (knownSessionLocked(message.sessionId)) {
+                    val lines = message.lines.takeLast(MAX_WORKTREE_LOG_LINES).map { it.take(MAX_WORKTREE_LOG_LINE_CHARS) }
+                    worktreeLogsState.value = worktreeLogsState.value +
+                        (message.sessionId to WorktreeLogsReading(message.name, lines, message.dropped))
+                }
+            }
             is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
                 if (!requestedGitFileDiffs.remove(message.sessionId to message.path)) return@ifCurrent
                 val current = gitFileDiffsState.value
@@ -3007,6 +3026,7 @@ class RealTetherClient(
             // drops its inspector replies.
             worktreeScriptsState.value = worktreeScriptsState.value.filterKeys(::knownSessionLocked)
             changeRequestsState.value = changeRequestsState.value.filterKeys(::knownSessionLocked)
+            worktreeLogsState.value = worktreeLogsState.value.filterKeys(::knownSessionLocked)
             mirrorOriginLocked()?.let { mirrorLink?.sessions(it, message.sessions, full = true) }
             providersState.value = message.providers
             workspaceRootState.value = message.workspaceRoot
@@ -4309,7 +4329,16 @@ class RealTetherClient(
         sendFrame(ClientMessage.WorktreeScriptsRequest(sessionId))
 
     override fun requestChangeRequest(sessionId: String, refresh: Boolean): Boolean =
-        sendFrame(ClientMessage.ChangeRequestFetch(sessionId, refresh.takeIf { it }))
+        sendFrame(ClientMessage.ChangeRequestFetch(sessionId, refresh.takeIf { it })).also { sent ->
+            if (!sent && refresh) emitError(LINK_RECONNECTING)
+        }
+
+    // ta-coik.14: use-tether.ts:1497-1505; a frame not sent says so, as the web's `send` does (337-341).
+    override fun controlWorktreeScript(sessionId: String, name: String, action: String): Boolean =
+        sendFrame(ClientMessage.WorktreeScript(sessionId, name, action)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    override fun requestWorktreeLogs(sessionId: String, name: String): Boolean =
+        sendFrame(ClientMessage.WorktreeLogsRequest(sessionId, name)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
 
     override fun requestSessionControls(sessionId: String) {
         sendFrame(ClientMessage.SessionControlsRequest(sessionId))
