@@ -862,7 +862,8 @@ interface TetherClient {
      * ta-q6p: v84 the custom-providers registry, the last `providers` frame (the reply to
      * [requestProviders] and the broadcast after every `set-providers`, from any client), null
      * until one arrives on this server. Dropped on a server switch, a sign-out and an auth-required
-     * state: each profile's env values are plaintext secrets.
+     * state: each profile's env values are plaintext secrets. ta-coik.17 r2: as the editor shows it,
+     * with the write in flight and every edit queued behind it applied.
      */
     val providerProfiles: StateFlow<ProvidersList?> get() = NO_PROVIDER_PROFILES
 
@@ -874,11 +875,12 @@ interface TetherClient {
 
     /**
      * ta-q6p: v84 `set-providers`, the WHOLE registry ([ProvidersWrite], made only by
-     * [ProvidersPatch]), sent only when the live socket was opened for [origin] AND, at the moment
-     * of the send, the write passes [ProvidersPatch.refusal] against the newest list, that list came
-     * on THIS socket (r2: never one from before a reconnect), and no earlier write is still waiting
-     * for its broadcast ([ProvidersInFlight]). The only way the app sends `set-providers`.
-     * Returns null when it was sent, else why not.
+     * [ProvidersPatch]), only on a live socket opened for [origin], with a list from the server.
+     * ta-coik.17 r2: one write at a time; while one waits for its answer ([ProvidersInFlight]), or
+     * when this was built from a list a broadcast or a reconnect replaced, its edits are queued and
+     * sent rebuilt on the server's newest list (of THIS socket) as one write once the last is
+     * answered ([ProvidersOutbox]): never refused or dropped for it. The only way the app sends
+     * `set-providers`. Returns null when it was sent or queued, else why not (no list, not connected).
      */
     fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? = ProvidersRefusal.NotConnected
 

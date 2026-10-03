@@ -24,7 +24,7 @@ import kotlinx.serialization.json.buildJsonObject
  *    built from an older list is refused). It carries each profile's env values in plaintext, so
  *    it is dropped with the settings frames ([clearSettings], [clear]).
  */
-internal class SidebarSync {
+internal class SidebarSync(now: () -> Long = { System.nanoTime() / 1_000_000 }) {
     val historiesByCwd = MutableStateFlow<Map<String, List<HistorySession>>>(emptyMap())
     val sessionOrders = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val remoteSeen = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -34,8 +34,25 @@ internal class SidebarSync {
     /** ta-dh1: every `server-settings` frame counted, an unchanged one too ("Scan again" waits for the next). */
     val serverSettingsReplies = MutableStateFlow(0L)
 
-    /** ta-q6p: the last `providers` frame, as the editor reads it (null until one arrives on this server). */
+    /** ta-q6p: the last `providers` frame, the server's (null until one arrives on this server). */
+    val serverProviderProfiles = MutableStateFlow<ProvidersList?>(null)
+
+    /** ta-coik.17 r2: what the editor shows: the server's list with the write in flight and the queued edits applied ([ProvidersOutbox.shown]). */
     val providerProfiles = MutableStateFlow<ProvidersList?>(null)
+
+    /** ta-coik.17 r2: the one write in flight and the edits queued behind it. */
+    val providersOutbox = ProvidersOutbox(ProvidersInFlight(now = now))
+
+    /** Re-draws [providerProfiles] from the server's list and the outbox. */
+    fun reshowProviders() {
+        providerProfiles.value = providersOutbox.shown(serverProviderProfiles.value)
+    }
+
+    private fun clearProviders() {
+        providersOutbox.reset()
+        serverProviderProfiles.value = null
+        providerProfiles.value = null
+    }
 
     // ta-q6p: every `providers` frame gets the next number, across clears too, so a list from
     // before a clear can never pass for the one after it.
@@ -63,7 +80,8 @@ internal class SidebarSync {
 
     /** ta-q6p r2: a `providers` frame, stamped with the socket [epoch] that delivered it (security F1). */
     fun onProviders(message: ServerMessage.Providers, epoch: Long) {
-        providerProfiles.value = ProvidersList.of(message, ++providersGeneration, epoch)
+        serverProviderProfiles.value = ProvidersList.of(message, ++providersGeneration, epoch)
+        reshowProviders()
     }
 
     /** use-tether.ts:1512 — optimistic after a successful send; the server's broadcast follows. */
@@ -75,7 +93,7 @@ internal class SidebarSync {
     fun clearSettings() {
         serverSettings.value = null
         advancedSettings.value = null
-        providerProfiles.value = null
+        clearProviders()
     }
 
     /** Another server's sidebar must never show: dropped with the other per-server views. */
@@ -85,7 +103,7 @@ internal class SidebarSync {
         remoteSeen.value = emptyMap()
         serverSettings.value = null
         advancedSettings.value = null
-        providerProfiles.value = null
+        clearProviders()
     }
 
     companion object {

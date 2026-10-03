@@ -40,8 +40,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-q6p r2, through the semantics tree: a write while another waits for its broadcast is refused
- * (verifier F1), a refused write is never silent (security F4), the switch sends the value asked
+ * ta-q6p r2, through the semantics tree: ta-coik.17 r2, a write while another waits for its answer is
+ * queued and sent after it, built on the server's list (verifier F1: never two in flight, never
+ * refused, never dropped), a refused write is never silent (security F4), the switch sends the value asked
  * for (F8). ta-coik.5: as on the web (settings-dialog.tsx 90fbb9f :359-437, :696), every env key
  * (whatever its name) and the engine are written at once, with no confirmation, and an env name the
  * profile already has is overwritten. Every write is waited for on the writer and asserted as the
@@ -177,27 +178,35 @@ class ProfilesSafetyTest {
         assertFalse("no confirmation", texts().contains("Change the Gemini CLI engine?"))
     }
 
-    // ---- verifier F1: a write in flight ----------------------------------------------------------------
+    // ---- ta-coik.17 r2: a write in flight queues the next edit (never refused) -----------------------
 
-    /** The verifier's probe: a write before the last write's broadcast would put the old command back. */
-    @Test fun aSecondWriteBeforeTheBroadcastIsRefusedAndSaysSo() {
+    private fun noRefusalText() = assertFalse(texts().toString(), texts().any { it.startsWith("Not saved") })
+
+    /**
+     * Two quick edits: two sequential writes, never two in flight: the second waits for the first's
+     * broadcast and goes out built on it, carrying both. Nothing is refused, nothing says "Not saved".
+     */
+    @Test fun twoQuickEditsAreTwoSequentialWritesTheSecondCarryingBoth() {
         val w = recording()
         show(writer = w)
         typeAndDone(ProfileTags.field("gemini", ProfileTags.COMMAND), "/opt/g")
         waitForWrites(w, 1)
-        compose.waitForIdle()
         typeAndDone(ProfileTags.field("claude-work", ProfileTags.LABEL), "Work")
-        assertEquals(1, w.writes.size)
-        tag(CommitFieldTags.note(ProfileTags.field("claude-work", ProfileTags.LABEL))).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
-        // Once the broadcast lands, Done sends it, built on the new command.
+        compose.waitForIdle()
+        assertEquals("one write in flight", 1, w.writes.size)
+        assertFalse(exists(CommitFieldTags.note(ProfileTags.field("claude-work", ProfileTags.LABEL))))
+        assertEquals("Work", editable(ProfileTags.field("claude-work", ProfileTags.LABEL)))
+        noRefusalText()
+        // The first write's broadcast: the queued edit goes out on it, by itself (no second Done).
         broadcast(profiles(gemini(command = """["/opt/g"]""", extraEnv = ""","PATH":"/usr/bin""""), WORK, zai()))
-        tag(ProfileTags.field("claude-work", ProfileTags.LABEL)).performImeAction()
+        w.landed()
         waitForWrites(w, 2)
         assertEquals(frame(gemini(command = """["/opt/g"]""", extraEnv = ""","PATH":"/usr/bin""""), WORK.replace("Claude Code (work)", "Work"), zai()), w.frames()[1])
+        noRefusalText()
+        assertEquals(emptyList<Any>(), w.refused)
     }
 
-    /** The verifier's probe: two edits in one frame never undo each other. */
+    /** The verifier's probe: two edits in one frame never undo each other: the second is queued and sent on top of the first. */
     @Test fun twoEditsInOneFrameNeverUndoEachOther() {
         val w = recording()
         show(writer = w)
@@ -210,7 +219,12 @@ class ProfilesSafetyTest {
         }
         compose.waitForIdle()
         assertEquals(1, w.writes.size)
-        tag(ProfileTags.notice("gemini")).assertExists()
+        assertFalse(exists(ProfileTags.notice("gemini")))
+        noRefusalText()
+        broadcast(profiles(withPath, WORK, zai().replace("\"enabled\":false", "\"enabled\":true")))
+        w.landed()
+        waitForWrites(w, 2)
+        assertEquals(frame(withPath.replace("\"enabled\":true", "\"enabled\":false"), WORK, zai().replace("\"enabled\":false", "\"enabled\":true")), w.frames()[1])
     }
 
     @Test fun anUnconfirmedWriteSaysSoAfterTheTimeout() {
@@ -229,11 +243,11 @@ class ProfilesSafetyTest {
 
     @Test fun aRefusedWriteIsNeverSilent() {
         val w = recording()
-        w.refuseWith = ProvidersRefusal.Stale
+        w.refuseWith = ProvidersRefusal.NotConnected
         show(writer = w)
         tap(ProfileTags.switch("zai"))
         tag(ProfileTags.notice("zai")).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_CHANGED))
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_OFFLINE))
         // A field keeps the text, says why, and Done tries again.
         typeAndDone(ProfileTags.field("zai", ProfileTags.LABEL), "GLM")
         assertEquals("GLM", editable(ProfileTags.field("zai", ProfileTags.LABEL)))
@@ -245,10 +259,10 @@ class ProfilesSafetyTest {
         compose.waitForIdle()
         assertFalse(exists(ProfileTags.notice("zai")))
         // A refused command says so too, under its field.
-        w.refuseWith = ProvidersRefusal.InFlight
+        w.refuseWith = ProvidersRefusal.NoList
         typeAndDone(ProfileTags.field("gemini", ProfileTags.COMMAND), "/opt/g")
         tag(CommitFieldTags.note(ProfileTags.field("gemini", ProfileTags.COMMAND))).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
+        assertTrue(texts().contains(ProfileRows.NOT_SAVED_CHANGED))
     }
 
     /** F8: the switch sends the value the user flipped to (here off), whatever the newest list says. */
@@ -324,20 +338,22 @@ class ProfilesSafetyTest {
         assertEquals(frame(gemini(), WORK, zai()), w.frames().single())
     }
 
-    /** Item 3 (the verifier's probe): another client's list landing before ours keeps the guard up. */
-    @Test fun anotherClientsListDoesNotLiftTheGuard() {
+    /** Item 3 (the verifier's probe): another client's list landing before ours does not answer our write; the queued edit goes out on top of both. */
+    @Test fun anotherClientsListDoesNotAnswerOurWrite() {
         val w = recording()
         show(writer = w)
         tap(ProfileTags.switch("zai"))
         assertEquals(1, w.writes.size)
         // Theirs: built before ours, it lacks our switch.
         broadcast(profiles(withPath, WORK.replace("Claude Code (work)", "Theirs"), zai()))
+        w.landed()
         typeAndDone(ProfileTags.field("gemini", ProfileTags.LABEL), "G")
+        w.landed()
         assertEquals(1, w.writes.size)
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
-        // Ours lands: Done sends, on top of both.
+        noRefusalText()
+        // Ours lands: the queued edit goes out, on top of both.
         broadcast(profiles(withPath, WORK.replace("Claude Code (work)", "Theirs"), zai().replace("\"enabled\":false", "\"enabled\":true")))
-        tag(ProfileTags.field("gemini", ProfileTags.LABEL)).performImeAction()
+        w.landed()
         waitForWrites(w, 2)
         assertEquals(
             frame(withPath.replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), WORK.replace("Claude Code (work)", "Theirs"), zai().replace("\"enabled\":false", "\"enabled\":true")),
@@ -345,17 +361,17 @@ class ProfilesSafetyTest {
         )
     }
 
-    // ---- r4: one in-flight guard, and it recovers from a refused write ------------------------------
+    // ---- r4: the server refuses a write; the next edit still goes out --------------------------------
 
-    /** The server refuses W1 (an error, no broadcast): after the timeout and the re-request's reply, the next edit IS sent, and the notice says W1 was not saved. */
-    @Test fun aRefusedWriteRecoversAfterTheTimeoutAndSaysItWasNotSaved() {
+    /** A refusal then an edit: the server refuses W1 (an error, no broadcast); after the timeout and the re-request's reply, the queued edit IS sent, on the server's list. */
+    @Test fun aRefusalThenAnEditTheEditGoesOut() {
         val w = recording()
         show(writer = w)
         tap(ProfileTags.switch("zai"))
         assertEquals(1, w.writes.size)
         typeAndDone(ProfileTags.field("gemini", ProfileTags.LABEL), "G")
         assertEquals(1, w.writes.size)
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
+        noRefusalText()
         // The timeout passes: the client asks for the registry again; the section says it is unconfirmed.
         w.now += ProvidersInFlight.TIMEOUT_MS
         w.tick()
@@ -363,17 +379,16 @@ class ProfilesSafetyTest {
         compose.mainClock.advanceTimeBy(ProvidersInFlight.TIMEOUT_MS + 100)
         compose.waitForIdle()
         assertTrue(texts().contains(ProfileRows.UNCONFIRMED))
-        // The reply: the registry as it was (the server did not take W1).
+        // The reply: the registry as it was (the server did not take W1). The queued edit goes out on it, by itself.
         broadcast(profiles(withPath, WORK, zai()))
-        assertTrue(texts().contains(ProfileRows.LAST_NOT_SAVED))
-        // The next edit is sent.
-        tag(ProfileTags.field("gemini", ProfileTags.LABEL)).performImeAction()
+        w.landed()
         waitForWrites(w, 2)
         assertEquals(frame(withPath.replace("\"label\":\"Gemini CLI\"", "\"label\":\"G\""), WORK, zai()), w.frames()[1])
+        noRefusalText()
     }
 
-    /** The app's editor has no guard of its own: the client's refusal is the only one (a fresh binding never refuses by itself). */
-    @Test fun theEditorDefersToTheClientsGuard() {
+    /** The app's editor has no guard of its own: the client decides (a fresh binding never refuses by itself). */
+    @Test fun theEditorDefersToTheClient() {
         var clientSays: ProvidersRefusal? = null
         val list = ProfileFixtures.list(profiles(withPath, WORK, zai()))
         val client = object : ProvidersWriter {
@@ -384,8 +399,8 @@ class ProfilesSafetyTest {
         assertEquals(ProvidersSend.Sent, b.send(com.tether.app.client.ProfileEdit.Label("zai", "A")))
         // A second write from the same (not yet updated) list: the editor sends it on; only the client decides.
         assertEquals(ProvidersSend.Sent, b.send(com.tether.app.client.ProfileEdit.Label("zai", "B")))
-        clientSays = ProvidersRefusal.InFlight
-        assertEquals(ProvidersSend.Refused(ProvidersRefusal.InFlight), b.send(com.tether.app.client.ProfileEdit.Label("zai", "C")))
+        clientSays = ProvidersRefusal.NotConnected
+        assertEquals(ProvidersSend.Refused(ProvidersRefusal.NotConnected), b.send(com.tether.app.client.ProfileEdit.Label("zai", "C")))
         assertEquals(2, client.sent.size)
     }
 }

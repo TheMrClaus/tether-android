@@ -146,8 +146,9 @@ internal class ProfileActions(
  * - every write is the WHOLE list (`set-providers` replaces it), built when it is sent from the
  *   client's newest list with one edit applied ([ProvidersBinding.send]). Each field is filled from
  *   its own server value and refilled when that value changes (the web's `key={value}` remount),
- *   so a concurrent edit elsewhere is shown, and never undone by a write from here. r2: a write
- *   while the last one still waits for its broadcast is refused, and a list from before a
+ *   so a concurrent edit elsewhere is shown, and never undone by a write from here. ta-coik.17 r2:
+ *   a write while the last one still waits for its answer is queued by the client and sent, on
+ *   the server's newest list, once that one is answered (never refused), and a list from before a
  *   reconnect is never written back;
  * - every field writes as the web's blur does (Done, a focus loss, leaving the screen; never a
  *   configuration change): the command, home and engine included; the env editor's names and

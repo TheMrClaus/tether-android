@@ -13,8 +13,8 @@ import com.tether.app.client.ProvidersRefusal
 /**
  * ta-q6p: where the Custom providers editor sends its writes. The app's is the client
  * ([com.tether.app.client.TetherClient.setProviders]), which sends a write only on a socket opened
- * for [origin], built from a list that came on that socket, with no other write in flight, and
- * only when it passes [ProvidersPatch.refusal] against its newest list. Null: sent.
+ * for [origin]; ta-coik.17 r2: one write at a time, an edit made meanwhile queued and sent once the
+ * last is answered ([com.tether.app.client.ProvidersOutbox]). Null: sent or queued.
  */
 interface ProvidersWriter {
     fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal?
@@ -47,9 +47,9 @@ sealed interface ProvidersSend {
  *
  * Every write is built when it is sent, from [latest]: the client's NEWEST list ([fresh]), not the
  * composed one (which may be a frame behind), so an edit made while another client's broadcast
- * landed applies to that broadcast and never undoes it. r4: a write while the last one still waits
- * for its broadcast is refused by the client alone ([ProvidersWriter.status] says what became of
- * it), so there is one in-flight guard and it recovers from a refused write.
+ * landed applies to that broadcast and never undoes it. ta-coik.17 r2: a write while the last one
+ * still waits for its answer is queued by the client (shown at once in its list, sent after), never
+ * refused ([ProvidersWriter.status] says what became of the last one).
  */
 data class ProvidersBinding(
     val list: ProvidersList?,
@@ -172,15 +172,13 @@ object ProfileRows {
     // ---- r2 (security F4): refused writes are never silent --------------------------------------
 
     const val NOT_SAVED_CHANGED = "Not saved: the list changed. Try again."
-    const val NOT_SAVED_IN_FLIGHT = "Not saved: the last change is still being saved. Try again in a moment."
     const val NOT_SAVED_OFFLINE = "Not saved: not connected to the server. Try again."
     const val UNCONFIRMED = "The server hasn't confirmed the last change. Check the list before you edit again."
     const val LAST_NOT_SAVED = "The last change wasn't saved: the server didn't take it. Check the list and try again."
 
     fun notSaved(reason: ProvidersRefusal): String = when (reason) {
-        ProvidersRefusal.InFlight -> NOT_SAVED_IN_FLIGHT
         ProvidersRefusal.NotConnected -> NOT_SAVED_OFFLINE
-        ProvidersRefusal.NoList, ProvidersRefusal.Gone, ProvidersRefusal.Stale -> NOT_SAVED_CHANGED
+        ProvidersRefusal.NoList, ProvidersRefusal.Gone -> NOT_SAVED_CHANGED
     }
 
     /** A field's outcome for an editor action. */

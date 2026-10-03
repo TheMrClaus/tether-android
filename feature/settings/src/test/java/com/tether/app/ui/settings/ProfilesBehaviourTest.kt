@@ -36,7 +36,6 @@ import com.tether.app.client.ModelList
 import com.tether.app.client.ProfileEdit
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ProvidersPatch
-import com.tether.app.client.ProvidersRefusal
 import com.tether.app.client.SecretText
 import com.tether.app.ui.settings.ProfileFixtures.FAKE_KEY
 import com.tether.app.ui.settings.ProfileFixtures.ORIGIN
@@ -365,21 +364,20 @@ class ProfilesBehaviourTest {
         assertEquals(emptyList<Any>(), w.writes)
     }
 
-    /** The client refuses a write built from a list older than its newest one (the race the binding cannot see). */
-    @Test fun aWriteFromAnOlderListIsRefused() {
+    /** ta-coik.17 r2: the client rebuilds a write built from a list older than its newest one (the race the binding cannot see) on the newest; never refused. */
+    @Test fun aWriteFromAnOlderListIsRebuiltOnTheNewest() {
         var clientNewest = ProfileFixtures.list(generation = 1)
         val w = RecordingProvidersWriter(newest = { clientNewest })
         show(ProfileFixtures.list(generation = 1), w)
         // The client already holds generation 2 (a broadcast the composition has not drawn yet), and
-        // the binding reads the composed list (no fresh hook): the write is refused, nothing sent.
+        // the binding reads the composed list (no fresh hook): the edit goes out on generation 2, keeping its switch.
         clientNewest = ProfileFixtures.list(profiles(gemini(), WORK, zai().replace("\"enabled\":false", "\"enabled\":true")), generation = 2)
         typeAndDone(field("claude-work", ProfileTags.LABEL), "Work")
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        assertEquals(listOf(ProvidersRefusal.Stale), w.refused)
-        // ... and it is not silent.
-        tag(CommitFieldTags.note(field("claude-work", ProfileTags.LABEL))).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_CHANGED))
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(), WORK.replace("Claude Code (work)", "Work"), zai().replace("\"enabled\":false", "\"enabled\":true")), w.frames().single())
+        assertEquals(emptyList<Any>(), w.refused)
+        assertFalse(exists(CommitFieldTags.note(field("claude-work", ProfileTags.LABEL))))
+        assertFalse(texts().any { it.startsWith("Not saved") })
     }
 
     // ---- what a profile runs: written as the web's blur writes it (ta-coik.5) ----------------------
@@ -476,10 +474,11 @@ class ProfilesBehaviourTest {
         }
         val command = ProvidersPatch.write(list, ProfileEdit.Command("gemini", "/opt/g --x"))!!
         assertEquals(JsonArray(listOf(JsonPrimitive("/opt/g"), JsonPrimitive("--x"))), command.profiles.first { (it["id"] as JsonPrimitive).content == "gemini" }["command"])
-        // A write built from an older list is refused by the client's rule.
+        // ta-coik.17 r2: a write built from an older list is rebuilt on the client's newest, not refused.
         val w = RecordingProvidersWriter(newest = { list })
         val stale = ProvidersPatch.write(ProfileFixtures.list(generation = 0), ProfileEdit.Command("gemini", "/opt/ok"))!!
-        assertEquals(ProvidersRefusal.Stale, w.setProviders(stale, ORIGIN))
+        assertEquals(null, w.setProviders(stale, ORIGIN))
+        assertEquals(1, w.writes.size)
     }
 
     // ---- the env values: the web's plain fields (ta-coik.5) --------------------------------------

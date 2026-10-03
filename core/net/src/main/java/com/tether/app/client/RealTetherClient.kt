@@ -607,7 +607,7 @@ class RealTetherClient(
     }
 
     // T5.1 sidebar sync (SidebarSync.kt).
-    private val sidebarSync = SidebarSync()
+    private val sidebarSync = SidebarSync(now = { clock() })
     override val historiesByCwd: StateFlow<Map<String, List<HistorySession>>> = sidebarSync.historiesByCwd
     override val sessionOrders: StateFlow<Map<String, List<String>>> = sidebarSync.sessionOrders
     override val remoteSeen: StateFlow<Map<String, Long>> = sidebarSync.remoteSeen
@@ -2843,7 +2843,10 @@ class RealTetherClient(
             is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
             // r2 (security F1): stamped with this socket's epoch: a list from before a reconnect is never written back.
-            is ServerMessage.Providers -> ifCurrent(webSocket) { sidebarSync.onProviders(message, epoch) }
+            is ServerMessage.Providers -> ifCurrent(webSocket) {
+                sidebarSync.onProviders(message, epoch)
+                flushProvidersLocked(webSocket)
+            }
             // ta-q6p: v74 `acp-agents` is retired server-side (887c222 never sends it): decoded, routed nowhere.
             is ServerMessage.AcpAgents -> Unit
             is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
@@ -4414,42 +4417,59 @@ class RealTetherClient(
         return sendFrame(ClientMessage.ProvidersRequest)
     }
 
-    // ta-q6p: the choke point for set-providers. The check reads the newest list under the same
-    // lock the frames are folded under, so no broadcast can land between the check and the send.
-    // r2: the list must have come on THIS socket (epoch), and no earlier write may still be
-    // waiting for its broadcast (in flight, bounded).
+    // ta-q6p: the choke point for set-providers, under the lock the frames are folded under, so no
+    // broadcast lands between the check and the send. ta-coik.17 r2: one write in flight; an edit
+    // made meanwhile (or built from a list a broadcast or a reconnect replaced) is never refused:
+    // it is queued, shown at once, and sent rebuilt on the server's newest list once the write in
+    // flight is answered ([ProvidersOutbox], [flushProvidersLocked]).
     override fun setProviders(write: ProvidersWrite, origin: String): ProvidersRefusal? {
-        val text = write.message.encode()
         synchronized(lock) {
-            val newest = sidebarSync.providerProfiles.value
-            ProvidersPatch.refusal(write, newest)?.let { return it }
-            if (newest == null || newest.epoch != epoch) return ProvidersRefusal.Stale
+            val newest = sidebarSync.serverProviderProfiles.value ?: return ProvidersRefusal.NoList
             val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return ProvidersRefusal.NotConnected
-            if (providersInFlight.overdue(newest)) ws.send(ClientMessage.ProvidersRequest.encode())
-            providersInFlight.refusal(newest)?.let { return it }
-            if (!ws.send(text)) return ProvidersRefusal.NotConnected
-            providersInFlight.sent(write, newest)
-            // r3: if no list containing it comes in time, ask for the list (the reply lifts the guard).
-            scheduler.schedule(providersInFlight.timeoutMs) { askForOverdueProviders() }
+            val outbox = sidebarSync.providersOutbox
+            if (outbox.inFlight.overdue(newest)) ws.send(ClientMessage.ProvidersRequest.encode())
+            when (val step = outbox.submit(write, newest, epoch)) {
+                is ProvidersOutbox.Step.Send -> sendProvidersLocked(ws, step.write, newest)
+                is ProvidersOutbox.Step.Refused -> return step.reason
+                ProvidersOutbox.Step.Queued, ProvidersOutbox.Step.NoChange -> Unit
+            }
+            sidebarSync.reshowProviders()
             return null
         }
     }
 
-    override fun providersWriteStatus(): ProvidersWriteStatus = synchronized(lock) { providersInFlight.status(sidebarSync.providerProfiles.value) }
+    /** Sends [write] on [ws] as the one write in flight; one the socket will not take goes back to the queue. Under [lock]. */
+    private fun sendProvidersLocked(ws: WebSocket, write: ProvidersWrite, base: ProvidersList) {
+        val outbox = sidebarSync.providersOutbox
+        if (!ws.send(write.message.encode())) {
+            outbox.unsent(write)
+            return
+        }
+        outbox.sent(write, base)
+        // r3: if no list containing it comes in time, ask for the list (the reply answers it).
+        scheduler.schedule(outbox.inFlight.timeoutMs) { askForOverdueProviders() }
+    }
 
-    /** r3: the sent write is overdue: ask this socket for the registry; the reply lifts the in-flight guard. */
+    /** ta-coik.17 r2: after a `providers` frame: the write in flight answered, the queued edits go out as one write. Under [lock]. */
+    private fun flushProvidersLocked(ws: WebSocket) {
+        val newest = sidebarSync.serverProviderProfiles.value ?: return
+        sidebarSync.providersOutbox.next(newest, epoch)?.let { sendProvidersLocked(ws, it, newest) }
+        sidebarSync.reshowProviders()
+    }
+
+    override fun providersWriteStatus(): ProvidersWriteStatus =
+        synchronized(lock) { sidebarSync.providersOutbox.inFlight.status(sidebarSync.serverProviderProfiles.value) }
+
+    /** r3: the sent write is overdue: ask this socket for the registry; the reply answers it. */
     private fun askForOverdueProviders() {
         synchronized(lock) {
             val ws = (if (socketOpen && handshakeDone) socket else null) ?: return
-            if (providersInFlight.overdue(sidebarSync.providerProfiles.value)) ws.send(ClientMessage.ProvidersRequest.encode())
+            if (sidebarSync.providersOutbox.inFlight.overdue(sidebarSync.serverProviderProfiles.value)) ws.send(ClientMessage.ProvidersRequest.encode())
         }
     }
 
     // ta-q6p r2: Settings asked for the registry in this sign-in: every handshake asks again. Guarded by [lock].
     private var providersWanted = false
-
-    // ta-q6p r2 (verifier F1): the sent write waiting for its broadcast (on the client's clock).
-    private val providersInFlight = ProvidersInFlight(now = { clock() })
 
     // T5.3 search (SearchSync.kt).
     override fun search(cwd: String, query: String): Boolean = searchSync.search(cwd, query)

@@ -114,7 +114,7 @@ class Profile internal constructor(internal val raw: JsonObject) {
 
 /**
  * One `providers` frame, as the editor draws it. [generation] counts the frames the client has
- * had (a write built from an older one is refused); [epoch] is the socket that delivered it
+ * had (a write built from an older one is rebuilt on the newest, [ProvidersOutbox]); [epoch] is the socket that delivered it
  * (r2, security F1: a list from before a reconnect is never written back, since the server may
  * have changed while the link was down). [profiles] are the first [ProfileLimits.PROFILES] entries
  * (what the editor draws); a write carries every entry the frame had ([raws]).
@@ -128,6 +128,10 @@ class ProvidersList private constructor(
     fun profile(id: String): Profile? = profiles.firstOrNull { it.id == id }
 
     override fun toString(): String = "ProvidersList(ids=${profiles.map { it.id }}, generation=$generation, epoch=$epoch)"
+
+    /** This list's generation and socket, holding [entries] instead (a write's list, or the queued edits applied). */
+    internal fun withRaws(entries: List<JsonObject>): ProvidersList =
+        ProvidersList(entries.take(ProfileLimits.PROFILES).map(::Profile), entries, generation, epoch)
 
     companion object {
         fun of(frame: ServerMessage.Providers, generation: Long, epoch: Long = 0L): ProvidersList {
@@ -241,12 +245,6 @@ enum class ProvidersRefusal {
     /** The edit's profile (or row) is not in the newest list any more. */
     Gone,
 
-    /** Built from an older list (a broadcast landed since) or from before a reconnect. */
-    Stale,
-
-    /** A write is still waiting for its broadcast: one built now would undo it. */
-    InFlight,
-
     /** No live socket for the list's server. */
     NotConnected,
 }
@@ -270,6 +268,8 @@ class ProvidersWrite internal constructor(
     val profiles: List<JsonObject>,
     val generation: Long,
     val epoch: Long = 0L,
+    /** ta-coik.17 r2: the edits it carries, in order, so it can be rebuilt on a newer list ([ProvidersOutbox]). */
+    internal val edits: List<ProfileEdit> = emptyList(),
 ) {
     val message: ClientMessage.SetProviders get() = ClientMessage.SetProviders(profiles)
 
@@ -340,9 +340,6 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
         return outcome?.let { ProvidersWriteStatus.Done(it) } ?: ProvidersWriteStatus.Idle
     }
 
-    @Synchronized
-    fun refusal(newest: ProvidersList?): ProvidersRefusal? = if (newest != null && waiting(newest)) ProvidersRefusal.InFlight else null
-
     /**
      * True once, when the waiting write passes [timeoutMs]: the caller asks the server for the list
      * (the client does), and the next list folded after [newest] lifts the guard.
@@ -358,6 +355,87 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
 
     companion object {
         const val TIMEOUT_MS = 10_000L
+    }
+}
+
+/**
+ * ta-coik.17 r2 (coordinator decision): one `set-providers` write at a time, and no edit ever
+ * refused or dropped for it. An edit made while a write waits for its answer ([ProvidersInFlight]:
+ * its broadcast, the overdue re-request's reply, or a new socket) is queued and shown at once
+ * ([shown]); once the write is answered, every queued edit is rebuilt on the server's newest list
+ * (taken or not) and sent as ONE whole-list write ([next]), as the web builds its next edit on the
+ * list it holds then. A write built from a list a broadcast replaced is rebuilt on the newest the
+ * same way, so it never undoes that broadcast. Guarded by its own lock; the client calls it under
+ * its frame lock.
+ */
+class ProvidersOutbox(val inFlight: ProvidersInFlight = ProvidersInFlight()) {
+    private val queued = mutableListOf<ProfileEdit>()
+
+    /** The whole list of the write in flight (what the server will hold once it takes it). */
+    private var sentProfiles: List<JsonObject>? = null
+
+    /** What a submitted write became. */
+    sealed interface Step {
+        data class Send(val write: ProvidersWrite) : Step
+        data object Queued : Step
+        data object NoChange : Step
+        data class Refused(val reason: ProvidersRefusal) : Step
+    }
+
+    /** [write], made against [newest] (the server's) on socket [epoch]: sent now, or queued until the write in flight is answered. */
+    @Synchronized
+    fun submit(write: ProvidersWrite, newest: ProvidersList?, epoch: Long): Step {
+        if (newest == null) return Step.Refused(ProvidersRefusal.NoList)
+        if (queued.isEmpty() && newest.epoch == epoch && !inFlight.waiting(newest) &&
+            write.generation == newest.generation && write.epoch == newest.epoch
+        ) {
+            return Step.Send(write)
+        }
+        queued += write.edits
+        next(newest, epoch)?.let { return Step.Send(it) }
+        return if (queued.isEmpty()) Step.NoChange else Step.Queued
+    }
+
+    /** The queued edits as one write on [newest], once nothing is in flight and the list is this socket's; they leave the queue. */
+    @Synchronized
+    fun next(newest: ProvidersList?, epoch: Long): ProvidersWrite? {
+        if (queued.isEmpty() || newest == null || newest.epoch != epoch || inFlight.waiting(newest)) return null
+        val write = ProvidersPatch.rebuild(newest, queued.toList())
+        queued.clear()
+        return write
+    }
+
+    /** [write] went out, built on [base]. */
+    @Synchronized
+    fun sent(write: ProvidersWrite, base: ProvidersList?) {
+        inFlight.sent(write, base)
+        sentProfiles = write.profiles
+    }
+
+    /** [write] could not go out (the socket closed under it): its edits wait for the next list. */
+    @Synchronized
+    fun unsent(write: ProvidersWrite) {
+        queued.addAll(0, write.edits)
+    }
+
+    /** What the editor shows on [newest]: the write in flight, then every queued edit, applied. */
+    @Synchronized
+    fun shown(newest: ProvidersList?): ProvidersList? {
+        newest ?: return null
+        val sent = sentProfiles
+        val base = if (sent != null && inFlight.waiting(newest)) newest.withRaws(sent) else newest
+        return if (queued.isEmpty()) base else ProvidersPatch.apply(base, queued.toList())
+    }
+
+    /** Whether an edit waits in the queue. */
+    @get:Synchronized
+    val hasQueued: Boolean get() = queued.isNotEmpty()
+
+    /** Another server, a sign-out: nothing queued for the last one is ever sent. */
+    @Synchronized
+    fun reset() {
+        queued.clear()
+        sentProfiles = null
     }
 }
 
@@ -461,7 +539,7 @@ object ProvidersPatch {
             }
         }
         if (next == base) return ProvidersBuild.NoChange
-        return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, epoch = list.epoch))
+        return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, epoch = list.epoch, edits = listOf(edit)))
     }
 
     /** The name an env change adds or renames to (null for a value change or a remove). */
@@ -481,16 +559,30 @@ object ProvidersPatch {
     }
 
     /**
-     * Why [write] must NOT be sent against [newest] (the client's newest list), or null when it may.
-     * Every send path applies it, the client's under the same lock as its frames:
-     * - no newest list;
-     * - [write] was built from another list than [newest] (a broadcast landed since, or the socket
-     *   changed: sending it would undo what the server holds now).
+     * Why [write] cannot be sent against [newest] (the client's newest list), or null when it can:
+     * only when there is no list yet. ta-coik.17 r2: a write built from a list a broadcast or a
+     * reconnect replaced is not refused; the client rebuilds its edits on the newest list
+     * ([ProvidersOutbox]), so it never undoes what the server holds now.
      */
-    fun refusal(write: ProvidersWrite, newest: ProvidersList?): ProvidersRefusal? {
-        if (newest == null) return ProvidersRefusal.NoList
-        if (write.generation != newest.generation || write.epoch != newest.epoch) return ProvidersRefusal.Stale
-        return null
+    @Suppress("UNUSED_PARAMETER")
+    fun refusal(write: ProvidersWrite, newest: ProvidersList?): ProvidersRefusal? = if (newest == null) ProvidersRefusal.NoList else null
+
+    /**
+     * ta-coik.17 r2: [edits] applied in order to [list], each as its handler applies it to the list
+     * the one before it left (an edit that changes nothing there, or whose profile or row is gone,
+     * changes nothing, as the web's `profiles.map` over a list without it does).
+     */
+    fun apply(list: ProvidersList, edits: List<ProfileEdit>): ProvidersList {
+        var current = list
+        for (edit in edits) build(current, edit).writeOrNull?.let { current = current.withRaws(it.profiles) }
+        return current
+    }
+
+    /** [apply] as ONE write of the whole list (null: nothing changed), built on [list]. */
+    fun rebuild(list: ProvidersList, edits: List<ProfileEdit>): ProvidersWrite? {
+        val next = apply(list, edits)
+        if (next.raws == list.raws) return null
+        return ProvidersWrite(next.raws, list.generation, epoch = list.epoch, edits = edits)
     }
 
     // ---- the web's handlers --------------------------------------------------------------------

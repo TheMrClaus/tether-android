@@ -291,21 +291,61 @@ class ProfilesTest {
 
     // ---- concurrent edits ------------------------------------------------------------------------
 
-    @Test fun aWriteIsBuiltFromTheNewestListAndAnOlderOneIsRefused() {
+    /** ta-coik.17 r2: a write built from a list a broadcast replaced is not refused; its edit is rebuilt on the newest, so it keeps the broadcast. */
+    @Test fun aWriteFromAnOlderListIsRebuiltOnTheNewest() {
         val mine = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
         // Another client toggles gemini meanwhile: the broadcast is the newest list.
         val broadcast = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},$work]", generation = 2)
-        assertEquals(ProvidersRefusal.Stale, ProvidersPatch.refusal(mine, broadcast))
-        // Rebuilt from the broadcast, the same edit keeps the other client's change.
-        val again = ProvidersPatch.write(broadcast, ProfileEdit.Label("work", "W"))!!
-        assertNull(ProvidersPatch.refusal(again, broadcast))
-        assertEquals(profiles(gemini.replace("\"enabled\":true", "\"enabled\":false"), work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), sent(again))
-        // A command changed elsewhere is never undone by a write built before it (Stale), and is kept by one built after.
+        assertNull(ProvidersPatch.refusal(mine, broadcast))
+        val outbox = ProvidersOutbox()
+        val step = outbox.submit(mine, broadcast, epoch = 0) as ProvidersOutbox.Step.Send
+        assertEquals(profiles(gemini.replace("\"enabled\":true", "\"enabled\":false"), work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), sent(step.write))
+        // A command changed elsewhere is never undone by a write built before it.
         val moved = list("[${gemini.replace("[\"gemini\",\"--acp\"]", "[\"/opt/new\"]")},$work]", generation = 3)
-        assertEquals(ProvidersRefusal.Stale, ProvidersPatch.refusal(again, moved))
-        val rebuilt = ProvidersPatch.write(moved, ProfileEdit.Label("work", "W"))!!
-        assertNull(ProvidersPatch.refusal(rebuilt, moved))
-        assertTrue(sent(rebuilt).toString().contains("/opt/new"))
+        assertTrue(sent((ProvidersOutbox().submit(mine, moved, 0) as ProvidersOutbox.Step.Send).write).toString().contains("/opt/new"))
+    }
+
+    /** ta-coik.17 r2: while a write waits, edits queue (shown at once); its answer sends them as ONE write on the server's list. */
+    @Test fun editsWhileAWriteWaitsQueueAndGoOutTogetherOnceItIsAnswered() {
+        var now = 1_000L
+        val outbox = ProvidersOutbox(ProvidersInFlight(now = { now }))
+        val first = (outbox.submit(ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!, two, 0) as ProvidersOutbox.Step.Send).write
+        outbox.sent(first, two)
+        // Two more edits, built on what the editor shows: queued, never refused, both shown.
+        val shown1 = outbox.shown(two)!!
+        assertEquals("W", shown1.profile("work")!!.label)
+        assertEquals(ProvidersOutbox.Step.Queued, outbox.submit(ProvidersPatch.write(shown1, ProfileEdit.Enabled("gemini", false))!!, two, 0))
+        val shown2 = outbox.shown(two)!!
+        assertEquals(ProvidersOutbox.Step.Queued, outbox.submit(ProvidersPatch.write(shown2, ProfileEdit.Home("work", "/h2"))!!, two, 0))
+        val shown3 = outbox.shown(two)!!
+        assertEquals(listOf("W", "/h2", "false"), listOf(shown3.profile("work")!!.label, shown3.profile("work")!!.homeDir, shown3.profile("gemini")!!.enabled.toString()))
+        assertNull("nothing while the first waits", outbox.next(two, 0))
+        // Another client's broadcast without ours does not answer it.
+        val theirs = list("[${gemini.replace("\"order\":2", "\"order\":5")},$work]", generation = 2)
+        assertNull(outbox.next(theirs, 0))
+        // Ours lands (with theirs): the queued edits go out as one write on that list.
+        val ours = list("[${gemini.replace("\"order\":2", "\"order\":5")},${work.replace("\"label\":\"Work\"", "\"label\":\"W\"")}]", generation = 3)
+        val second = outbox.next(ours, 0)!!
+        assertEquals(
+            profiles(gemini.replace("\"order\":2", "\"order\":5").replace("\"enabled\":true", "\"enabled\":false"), work.replace("\"label\":\"Work\"", "\"label\":\"W\"").replace("/srv/homes/work", "/h2")),
+            sent(second),
+        )
+        assertNull("the queue is empty", outbox.next(ours, 0))
+    }
+
+    /** ta-coik.17 r2: the server refuses the write (no broadcast): at the timeout's reply the queued edit goes out on the server's list. */
+    @Test fun aRefusedWriteStillLetsTheQueuedEditGoOut() {
+        var now = 1_000L
+        val outbox = ProvidersOutbox(ProvidersInFlight(now = { now }))
+        val first = ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!
+        outbox.sent(first, two)
+        assertEquals(ProvidersOutbox.Step.Queued, outbox.submit(ProvidersPatch.write(outbox.shown(two)!!, ProfileEdit.Label("work", "X"))!!, two, 0))
+        now += ProvidersInFlight.TIMEOUT_MS
+        assertTrue(outbox.inFlight.overdue(two))
+        // The reply: the registry as it was. The queued edit is built on it (gemini kept), as the web would build it.
+        val reply = list("[$gemini,$work]", generation = 2)
+        assertEquals(profiles(gemini, work.replace("\"label\":\"Work\"", "\"label\":\"X\"")), sent(outbox.next(reply, 0)))
+        assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.NotSaved), outbox.inFlight.status(reply))
     }
 
     /** ta-coik.17: a frame the app read only in part is edited from what it holds; only no list at all stops a write. */
@@ -352,25 +392,25 @@ class ProfilesTest {
         assertEquals(profiles(gemini.replace("\"enabled\":true", "\"enabled\":false"), work), sent(ProvidersPatch.write(two, ProfileEdit.Enabled("gemini", false))))
     }
 
-    @Test fun aWriteInFlightBlocksTheNextUntilAListContainsIt() {
+    @Test fun aWriteInFlightIsWaitingUntilAListContainsIt() {
         var now = 1_000L
         val inFlight = ProvidersInFlight(now = { now })
         val first = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
-        assertNull(inFlight.refusal(two))
+        assertFalse(inFlight.waiting(two))
         inFlight.sent(first, two)
-        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
+        assertTrue(inFlight.waiting(two))
         // r3 (verifier probe FINDING_anotherClientsBroadcastLiftsTheGuardBeforeOursLands): another
-        // client's broadcast (a newer list without our write) does NOT lift it.
+        // client's broadcast (a newer list without our write) does NOT answer it.
         val theirs = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},$work]", generation = 2)
-        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(theirs))
+        assertTrue(inFlight.waiting(theirs))
         assertEquals(ProvidersWriteStatus.Waiting(overdue = false), inFlight.status(theirs))
         // The list that holds our write does (the canonical key order may differ).
         val ours = list("[${gemini.replace("\"enabled\":true", "\"enabled\":false")},${work.replace("\"label\":\"Work\",", "").replace("\"enabled\":false", "\"enabled\":false,\"label\":\"W\"")}]", generation = 3)
-        assertNull(inFlight.refusal(ours))
+        assertFalse(inFlight.waiting(ours))
         assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.Saved), inFlight.status(ours))
     }
 
-    @Test fun anOverdueWriteIsAskedForAndTheReplyLiftsIt() {
+    @Test fun anOverdueWriteIsAskedForAndTheReplyAnswersIt() {
         var now = 1_000L
         val inFlight = ProvidersInFlight(now = { now })
         inFlight.sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two)
@@ -378,15 +418,15 @@ class ProfilesTest {
         now += ProvidersInFlight.TIMEOUT_MS
         assertTrue("overdue: ask the server once", inFlight.overdue(two))
         assertFalse(inFlight.overdue(two))
-        // Still refused until the reply (the next list folded) lands, whatever it says.
-        assertEquals(ProvidersRefusal.InFlight, inFlight.refusal(two))
+        // Still waiting until the reply (the next list folded) lands, whatever it says.
+        assertTrue(inFlight.waiting(two))
         assertEquals(ProvidersWriteStatus.Waiting(overdue = true), inFlight.status(two))
         // r4: the reply does not hold the write: the server did not take it.
-        assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 2)))
+        assertFalse(inFlight.waiting(list("[$gemini,$work]", generation = 2)))
         assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.NotSaved), inFlight.status(list("[$gemini,$work]", generation = 2)))
-        // A new socket lifts it as well.
+        // A new socket answers it as well.
         inFlight.sent(ProvidersPatch.write(two, ProfileEdit.Remove("gemini"))!!, two)
-        assertNull(inFlight.refusal(list("[$gemini,$work]", generation = 3, epoch = 1)))
+        assertFalse(inFlight.waiting(list("[$gemini,$work]", generation = 3, epoch = 1)))
     }
 
     /**
@@ -437,7 +477,7 @@ class ProfilesTest {
         assertEquals(listOf("work"), h.client.providerProfiles.value!!.profiles.map { it.id })
     }
 
-    @Test fun theClientSendsOnlyAWriteBuiltFromItsNewestListToItsOwnServer() {
+    @Test fun theClientSendsToItsOwnServerAndRebuildsAWriteFromAnOlderList() {
         val ws = holdingProviders()
         val newest = h.client.providerProfiles.value!!
         val write = ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!
@@ -445,11 +485,13 @@ class ProfilesTest {
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
         assertNull(h.client.setProviders(write, origin()))
         assertEquals(sent(write), h.expectFrame("set-providers"))
-        // A broadcast lands: the write built before it is refused, nothing goes out.
-        ws.send("""{"type":"providers","profiles":[$gemini,${work.replace("\"enabled\":false", "\"enabled\":true")}]}""")
+        // Our write's broadcast, with another client's switch on gemini.
+        val theirs = "${gemini.replace("\"enabled\":true", "\"enabled\":false")},${work.replace("\"label\":\"Work\"", "\"label\":\"W\"")}"
+        ws.send("""{"type":"providers","profiles":[$theirs]}""")
         h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
-        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(write, origin()))
-        assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
+        // ta-coik.17 r2: an edit built on the old list is rebuilt on the newest, never refused, never undoing the switch.
+        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Home("work", "/h2"))!!, origin()))
+        assertEquals(sent(ProvidersPatch.write(list("[$theirs]"), ProfileEdit.Home("work", "/h2"))), h.expectFrame("set-providers"))
     }
 
     /** ta-coik.5: the client sends a command change built from its newest list at once, as the web does. */
@@ -461,7 +503,7 @@ class ProfilesTest {
         assertEquals(sent(write), h.expectFrame("set-providers"))
     }
 
-    /** r2 (security F1): a list from before a reconnect is never written back, and the client asks for the list again on the new socket. */
+    /** r2 (security F1): a list from before a reconnect is never written back; the edit waits for the new socket's list and goes out on it. */
     @Test fun aListFromBeforeAReconnectIsNeverWrittenBackAndIsAskedForAgain() {
         val ws = holdingProviders()
         assertTrue(h.client.requestProviders())
@@ -476,54 +518,48 @@ class ProfilesTest {
         h.handshake(ws2)
         // Asked for again on the new socket, before any edit could be built from it.
         assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
-        // Before the reply: the list held is the old socket's, and nothing built from it is sent.
-        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(stale, origin()))
-        assertEquals(ProvidersRefusal.Stale, h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
+        // Before the reply: the edit is queued (not refused), and nothing built from the old list is sent.
+        assertNull(h.client.setProviders(stale, origin()))
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
-        // The new socket's list is written to.
-        ws2.send("""{"type":"providers","profiles":[$gemini,$work]}""")
-        h.await(h.client.providerProfiles) { it != null && it.epoch != old.epoch }
-        assertNull(h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
+        // The new socket's list arrives (changed meanwhile): the edit goes out on it.
+        ws2.send("""{"type":"providers","profiles":[$work]}""")
+        assertEquals(profiles(work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), h.expectFrame("set-providers"))
     }
 
-    /** r2 (verifier F1): a second write before the first's broadcast would undo it: refused until the broadcast. */
-    @Test fun aSecondWriteBeforeTheBroadcastIsRefused() {
+    /** ta-coik.17 r2: two quick edits: two sequential writes, the second sent after the first's broadcast and carrying both. */
+    @Test fun twoQuickEditsAreTwoSequentialWritesTheSecondCarryingBoth() {
         val ws = holdingProviders()
         val newest = h.client.providerProfiles.value!!
-        val command = ProvidersPatch.write(newest, ProfileEdit.Command("gemini", "/opt/gemini"))!!
-        assertNull(h.client.setProviders(command, origin()))
-        h.expectFrame("set-providers")
-        // Built from the same (not yet updated) list, it would put the old command back.
-        assertEquals(ProvidersRefusal.InFlight, h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!, origin()))
+        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Command("gemini", "/opt/gemini"))!!, origin()))
+        val first = h.expectFrame("set-providers")
+        // Built on what the editor shows (the command already in it): queued, nothing more goes out yet.
+        val shown = h.client.providerProfiles.value!!
+        assertEquals(listOf("/opt/gemini"), shown.profile("gemini")!!.command)
+        assertNull(h.client.setProviders(ProvidersPatch.write(shown, ProfileEdit.Label("work", "W"))!!, origin()))
+        assertEquals("W", h.client.providerProfiles.value!!.profile("work")!!.label)
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
-        ws.send("""{"type":"providers","profiles":[${gemini.replace("[\"gemini\",\"--acp\"]", "[\"/opt/gemini\"]")},$work]}""")
-        h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
-        val next = ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "W"))!!
-        assertNull(h.client.setProviders(next, origin()))
-        assertTrue(h.expectFrame("set-providers").toString().contains("/opt/gemini"))
+        // The first write's broadcast: the queued edit goes out, built on it.
+        ws.send(first.toString().replace("\"set-providers\"", "\"providers\""))
+        val second = h.expectFrame("set-providers")
+        assertEquals(profiles(gemini.replace("[\"gemini\",\"--acp\"]", "[\"/opt/gemini\"]"), work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), second)
     }
 
-    /** r3: an overdue write makes the client ask for the list; the reply lifts the guard. */
-    @Test fun anOverdueWriteIsAskedForAgain() {
+    /** r3/r4 + ta-coik.17 r2: the server refuses a write; at the timeout the client asks again, and the reply sends the queued edit on the server's list. */
+    @Test fun aRefusedWriteThenAnEditTheEditGoesOut() {
         val ws = holdingProviders()
         val newest = h.client.providerProfiles.value!!
-        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "W"))!!, origin()))
+        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Remove("gemini"))!!, origin()))
         h.expectFrame("set-providers")
         ws.send("""{"type":"error","message":"each profile entry needs a valid id"}""")
-        // r4: the server REFUSES it (an error, no broadcast); at the timeout the client asks for the registry.
+        assertNull("queued, not refused", h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!, origin()))
         h.now.addAndGet(ProvidersInFlight.TIMEOUT_MS)
         h.scheduler.await { it == ProvidersInFlight.TIMEOUT_MS }.fire()
         assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
-        assertEquals(ProvidersRefusal.InFlight, h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Label("work", "X"))!!, origin()))
         assertEquals(ProvidersWriteStatus.Waiting(overdue = true), h.client.providersWriteStatus())
-        // The reply (the server refused the write: the list is as it was) lifts it, and says it was not saved.
+        // The reply (the server refused the remove: the list is as it was): the label goes out on it, gemini kept.
         ws.send("""{"type":"providers","profiles":[$gemini,$work]}""")
-        h.await(h.client.providerProfiles) { it != null && it.generation > newest.generation }
-        assertEquals(ProvidersWriteStatus.Done(ProvidersWriteStatus.Outcome.NotSaved), h.client.providersWriteStatus())
-        // The next edit IS sent.
-        val next = ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "X"))!!
-        assertNull(h.client.setProviders(next, origin()))
-        assertEquals(sent(next), h.expectFrame("set-providers"))
+        assertEquals(profiles(gemini, work.replace("\"label\":\"Work\"", "\"label\":\"X\"")), h.expectFrame("set-providers"))
+        assertEquals(ProvidersWriteStatus.Waiting(overdue = false), h.client.providersWriteStatus())
     }
 
     @Test fun aSignOutDropsTheList() {
