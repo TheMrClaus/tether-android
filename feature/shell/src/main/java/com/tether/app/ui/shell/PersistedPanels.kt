@@ -5,7 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.ui.prefs.UiPrefs
-import kotlinx.coroutines.launch
+import com.tether.app.ui.prefs.launchPreferenceWrite
 
 /** The expanded shell's persisted column state and the callback that saves a change. */
 class PersistedPanels(val panels: PanelPrefs, val onChange: (PanelPrefs) -> Unit)
@@ -21,5 +21,5 @@ fun rememberPersistedPanels(prefs: UiPrefs): PersistedPanels {
     val scope = rememberCoroutineScope()
     val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = null)
     val panels = preferences?.let(PanelPrefs::from) ?: PanelPrefs()
-    return PersistedPanels(panels) { next -> scope.launch { prefs.updatePreferences { next.applyTo(it) } } }
+    return PersistedPanels(panels) { next -> scope.launchPreferenceWrite { prefs.updatePreferences { next.applyTo(it) } } }
 }

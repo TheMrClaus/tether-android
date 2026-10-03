@@ -21,6 +21,7 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.ui.prefs.DraftStore
 import com.tether.app.ui.prefs.InMemoryDraftStore
+import com.tether.app.ui.prefs.bestEffortPreferenceWrite
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -327,7 +328,7 @@ class TetherViewModel(
                     val next = draftWrites.tryReceive().getOrNull() ?: break
                     latest[next.origin to next.sessionId] = next.text
                 }
-                for ((key, text) in latest) draftStore.write(key.first, key.second, text)
+                for ((key, text) in latest) bestEffortPreferenceWrite { draftStore.write(key.first, key.second, text) }
             }
         }
         viewModelScope.launch {

@@ -18,10 +18,10 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.ThemeMode
-import kotlinx.coroutines.launch
 
 /** Tags of the panels' controls. */
 object SettingsPanelTags {
@@ -146,7 +146,7 @@ private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boo
                         label = mode.label,
                         hint = mode.hint,
                         selected = live.themeMode == mode,
-                        onClick = { scope.launch { prefs.setThemeMode(mode) } },
+                        onClick = { scope.launchPreferenceWrite { prefs.setThemeMode(mode) } },
                         narrow = narrow,
                         modifier = Modifier.testTag(SettingsPanelTags.themeMode(mode)),
                     )
@@ -166,7 +166,7 @@ private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boo
                         label = choice.label,
                         hint = choice.hint,
                         selected = live.loginVariant == choice.value,
-                        onClick = { scope.launch { prefs.setLoginVariant(choice.value) } },
+                        onClick = { scope.launchPreferenceWrite { prefs.setLoginVariant(choice.value) } },
                         narrow = narrow,
                         modifier = Modifier.testTag(SettingsPanelTags.loginVariant(choice.value.id)),
                     )

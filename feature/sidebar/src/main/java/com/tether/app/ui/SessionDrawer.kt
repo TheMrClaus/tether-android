@@ -16,6 +16,7 @@ import com.tether.app.client.ConnectionState
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.settings.SettingsDialog
 import com.tether.app.ui.sidebar.SessionSidebar
 import com.tether.app.ui.sidebar.SidebarController
@@ -24,7 +25,6 @@ import com.tether.app.ui.sidebar.SidebarState
 import com.tether.app.ui.sidebar.sidebarCollator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 /**
  * T5.1: the session list the shell hosts — the phone drawer's content (T4.1's `drawer` slot) and
@@ -82,7 +82,7 @@ fun SessionDrawer(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launch { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }
@@ -268,7 +268,7 @@ fun WorkspacePickerHost(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launch { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }

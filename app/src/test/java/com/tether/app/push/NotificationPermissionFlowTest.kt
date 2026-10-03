@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.app.ActivityOptionsCompat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,7 +41,7 @@ class NotificationPermissionFlowTest {
         }
     }
 
-    private val store = MemoryStore()
+    private var store: NotificationPermissionAskedStore = MemoryStore()
 
     /** Answers every launch with [granted] and records what was requested. */
     private class AnsweringOwner(private val granted: Boolean) : ActivityResultRegistryOwner {
@@ -82,7 +83,7 @@ class NotificationPermissionFlowTest {
         idle()
 
         assertEquals(listOf<Any?>(Manifest.permission.POST_NOTIFICATIONS), owner.requested)
-        assertTrue("the answer must be remembered, or the app asks again", store.state.value)
+        assertTrue("the answer must be remembered, or the app asks again", (store as MemoryStore).state.value)
     }
 
     @Test
@@ -91,10 +92,41 @@ class NotificationPermissionFlowTest {
         val prompt = render(owner)
         prompt().autoRequestIfDue(signedIn = true, pushEnabled = true)
         idle()
-        assertTrue(store.state.value)
+        assertTrue((store as MemoryStore).state.value)
         prompt().autoRequestIfDue(signedIn = true, pushEnabled = true)
         idle()
 
         assertEquals(1, owner.requested.size)
+    }
+
+    /**
+     * ta-8yn9: the answer is remembered even when the disk refuses the write (in memory, like the
+     * web's best-effort localStorage save), so the app does not ask again, and nothing crashes.
+     */
+    @Test
+    fun aRefusedWriteStillRemembersTheAnswer() {
+        val prefs = com.tether.app.ui.prefs.UiPrefs.on(RefusingPrefsStore())
+        store = NotificationPermissionAskedStore.of(prefs)
+        val owner = AnsweringOwner(granted = false)
+        val prompt = render(owner)
+        prompt().autoRequestIfDue(signedIn = true, pushEnabled = true)
+        idle()
+        assertTrue(kotlinx.coroutines.runBlocking { prefs.pushPermissionAsked.first() })
+        prompt().autoRequestIfDue(signedIn = true, pushEnabled = true)
+        idle()
+
+        assertEquals(1, owner.requested.size)
+    }
+
+    /** A preferences store whose disk refuses every write (the edit itself still runs). */
+    private class RefusingPrefsStore : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+        private val disk = MutableStateFlow(androidx.datastore.preferences.core.emptyPreferences())
+        override val data: Flow<androidx.datastore.preferences.core.Preferences> = disk
+        override suspend fun updateData(
+            transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+        ): androidx.datastore.preferences.core.Preferences {
+            transform(disk.value)
+            throw java.io.IOException("No space left on device")
+        }
     }
 }

@@ -41,6 +41,7 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
@@ -117,7 +118,7 @@ fun rememberLocalNetworkPrompt(prefs: UiPrefs): LocalNetworkPrompt {
             (!asked || activity?.shouldShowRequestPermissionRationale(AndroidLocalNetworkAccess.PERMISSION) == true)
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        scope.launch { prefs.setLocalNetworkPermissionAsked(true) }
+        scope.launchPreferenceWrite { prefs.setLocalNetworkPermissionAsked(true) }
         val again = activity?.shouldShowRequestPermissionRationale(AndroidLocalNetworkAccess.PERMISSION) == true
         model.onPermissionResult(granted, canRequest = again)
     }

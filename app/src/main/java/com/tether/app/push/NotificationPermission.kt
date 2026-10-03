@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -142,7 +143,7 @@ fun rememberNotificationPermission(store: NotificationPermissionAskedStore): Not
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         // Remembered, so a denial is never asked again automatically.
-        scope.launch { store.markAsked() }
+        scope.launchPreferenceWrite { store.markAsked() }
         refresh++
     }
     LifecycleResumeEffect(Unit) {

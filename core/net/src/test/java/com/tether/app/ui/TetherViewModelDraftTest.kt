@@ -187,6 +187,35 @@ class TetherViewModelDraftTest {
         assertEquals(emptyList<String>(), writes)
     }
 
+    /**
+     * ta-8yn9: a draft write the disk refuses is lost silently (the web's localStorage draft is
+     * best effort): the text stays in the composer, nothing crashes, and the writer lives on, so
+     * the next keystroke is stored once the disk takes writes again.
+     */
+    @Test
+    fun aRefusedDraftWriteKeepsTheTextAndTheWriter() = runTest(dispatcher) {
+        val backing = InMemoryDraftStore()
+        var refuse = true
+        val store = object : DraftStore by backing {
+            override suspend fun write(origin: String, sessionId: String, text: String) {
+                if (refuse) throw java.io.IOException("No space left on device")
+                backing.write(origin, sessionId, text)
+            }
+        }
+        val vm = vm(store)
+        vm.selectSession("a")
+        vm.awaitDraft("a")
+        vm.setDraft("a", "lost")
+        advanceUntilIdle()
+        assertEquals("lost", vm.drafts.value["a"])
+        assertEquals("", backing.read(A, "a"))
+
+        refuse = false
+        vm.setDraft("a", "kept")
+        advanceUntilIdle()
+        assertEquals("kept", backing.read(A, "a"))
+    }
+
     private companion object {
         const val URL_A = "https://tether-a.example"
         const val URL_B = "http://192.168.1.20:4173/"

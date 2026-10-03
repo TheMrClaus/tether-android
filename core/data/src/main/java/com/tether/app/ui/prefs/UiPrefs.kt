@@ -5,12 +5,15 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.tether.app.ui.theme.ThemeMode
+import java.util.WeakHashMap
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -23,6 +26,36 @@ private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesData
  */
 class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     constructor(context: Context) : this(context.applicationContext.tetherUiDataStore)
+
+    /**
+     * What a write the disk refused would have stored (null: the disk copy is current), shared by
+     * every [UiPrefs] on [store]: the web's module-level `memoryCache` while `persistenceBroken`
+     * (hooks/use-preferences.ts), so a failed save does not silently revert this process.
+     */
+    private val kept: MutableStateFlow<Preferences?> = synchronized(keptByStore) {
+        keptByStore.getOrPut(store) { MutableStateFlow(null) }
+    }
+
+    /** The stored preferences, or what a refused write kept in memory. */
+    private val data: Flow<Preferences> = combine(store.data, kept) { stored, memory -> memory ?: stored }
+
+    /**
+     * Every write: an atomic edit on top of what [data] shows. A write the disk refuses still
+     * throws, but its result is [kept] and served until a later write lands (the web's
+     * `localStorage.setItem` failing under its in-memory value).
+     */
+    private suspend fun save(change: (MutablePreferences) -> Unit) {
+        var next: Preferences? = null
+        try {
+            store.updateData { stored -> (kept.value ?: stored).toMutablePreferences().apply(change).toPreferences().also { next = it } }
+            kept.value = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            next?.let { kept.value = it }
+            throw e
+        }
+    }
 
     private object Keys {
         val theme = stringPreferencesKey(PreferenceKeys.LEGACY_THEME)
@@ -67,11 +100,11 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
      * The whole web preference model, parsed fail-soft per field ([TetherPreferences.parse]):
      * a wrongly-typed or junk stored value reads as that field's default, never a crash.
      */
-    val preferences: Flow<TetherPreferences> = store.data.map(::parse).distinctUntilChanged()
+    val preferences: Flow<TetherPreferences> = data.map(::parse).distinctUntilChanged()
 
     /** Atomic read-modify-write of the model (the web's `update(next)` with a fresh read). */
     suspend fun updatePreferences(transform: (TetherPreferences) -> TetherPreferences) {
-        store.edit { prefs -> write(prefs, transform(parse(prefs))) }
+        save { prefs -> write(prefs, transform(parse(prefs))) }
     }
 
     private fun <T> field(select: (TetherPreferences) -> T): Flow<T> = preferences.map(select).distinctUntilChanged()
@@ -112,6 +145,8 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     companion object {
         /** T15.4: preferences on a store of the caller's own (a shell test's, so its boot view's inputs are its own). */
         fun on(store: DataStore<Preferences>): UiPrefs = UiPrefs(store)
+
+        private val keptByStore = WeakHashMap<DataStore<Preferences>, MutableStateFlow<Preferences?>>()
 
         private fun parse(prefs: Preferences): TetherPreferences =
             TetherPreferences.parse(prefs.asMap().entries.associate { (key, value) -> key.name to value })
@@ -160,7 +195,7 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
      * install, like the web's blocked localStorage.
      */
     suspend fun viewBoot(): ViewBoot = runCatching {
-        val stored = store.data.first()
+        val stored = data.first()
         ViewBoot(
             storedView = stored[Keys.lastView],
             hasExistingPreferences = Keys.themeMode in stored || Keys.themeFamily in stored || Keys.theme in stored,
@@ -169,32 +204,32 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
     /** Remember the top-level view on screen (dashboard.tsx `writeStoredView`). */
     suspend fun setLastView(view: String) {
-        runCatching { store.edit { it[Keys.lastView] = view } }
+        runCatching { save { it[Keys.lastView] = view } }
     }
 
     // ── Push notifications ────────────────────────────────────────────────
 
     /** Master toggle. Default ON: the first-launch UX prompts for permission. */
-    val pushEnabled: Flow<Boolean> = store.data.map { it[Keys.pushEnabled] ?: true }
+    val pushEnabled: Flow<Boolean> = data.map { it[Keys.pushEnabled] ?: true }
 
     suspend fun setPushEnabled(value: Boolean) {
-        store.edit { it[Keys.pushEnabled] = value }
+        save { it[Keys.pushEnabled] = value }
     }
 
     /** Per-device push scope (independent of the theme). Default: All events. */
-    val pushScope: Flow<com.tether.app.push.PushScope> = store.data.map {
+    val pushScope: Flow<com.tether.app.push.PushScope> = data.map {
         com.tether.app.push.PushScope.fromWire(it[Keys.pushScope]) ?: com.tether.app.push.PushScope.All
     }
 
     suspend fun setPushScope(scope: com.tether.app.push.PushScope) {
-        store.edit { it[Keys.pushScope] = scope.wire }
+        save { it[Keys.pushScope] = scope.wire }
     }
 
     /** "Have we already asked for POST_NOTIFICATIONS?" — prompt at most once per user action. */
-    val pushPermissionAsked: Flow<Boolean> = store.data.map { it[Keys.pushPermissionAsked] ?: false }
+    val pushPermissionAsked: Flow<Boolean> = data.map { it[Keys.pushPermissionAsked] ?: false }
 
     suspend fun setPushPermissionAsked(value: Boolean) {
-        store.edit { it[Keys.pushPermissionAsked] = value }
+        save { it[Keys.pushPermissionAsked] = value }
     }
 
     /**
@@ -203,28 +238,28 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
      * shouldShowRequestPermissionRationale == false, but only the second one needs
      * the app-settings deep link.
      */
-    val localNetworkPermissionAsked: Flow<Boolean> = store.data.map { it[Keys.localNetworkPermissionAsked] ?: false }
+    val localNetworkPermissionAsked: Flow<Boolean> = data.map { it[Keys.localNetworkPermissionAsked] ?: false }
 
     suspend fun setLocalNetworkPermissionAsked(value: Boolean) {
-        store.edit { it[Keys.localNetworkPermissionAsked] = value }
+        save { it[Keys.localNetworkPermissionAsked] = value }
     }
 
     /** Session ids the device has attached to (drives the `attached` scope). */
-    val attachedSessions: Flow<List<String>> = store.data.map {
+    val attachedSessions: Flow<List<String>> = data.map {
         it[Keys.pushAttachedSessions]?.split('\n')?.filter(String::isNotBlank) ?: emptyList()
     }
 
     suspend fun setAttachedSessions(ids: Collection<String>) {
-        store.edit { it[Keys.pushAttachedSessions] = ids.sorted().distinct().joinToString("\n") }
+        save { it[Keys.pushAttachedSessions] = ids.sorted().distinct().joinToString("\n") }
     }
 
     /** Session ids the device has pinned (drives the `pinned` scope). */
-    val pinnedSessions: Flow<List<String>> = store.data.map {
+    val pinnedSessions: Flow<List<String>> = data.map {
         it[Keys.pushPinnedSessions]?.split('\n')?.filter(String::isNotBlank) ?: emptyList()
     }
 
     suspend fun setPinnedSessions(ids: Collection<String>) {
-        store.edit { it[Keys.pushPinnedSessions] = ids.sorted().distinct().joinToString("\n") }
+        save { it[Keys.pushPinnedSessions] = ids.sorted().distinct().joinToString("\n") }
     }
 }
 

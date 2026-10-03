@@ -14,10 +14,10 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.sidebar.SidebarController
 import com.tether.app.ui.sidebar.SidebarModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * T5.3: the dashboard's half of the global search (dashboard.tsx:1157-1194, 1701-1711), hosted
@@ -50,7 +50,7 @@ fun GlobalSearchHost(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launch { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }

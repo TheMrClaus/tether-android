@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.push.PushScope
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
@@ -51,7 +52,7 @@ internal fun PushNotificationsRow(prefs: UiPrefs) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        scope.launch {
+        scope.launchPreferenceWrite {
             if (!granted) prefs.setPushEnabled(false)
             prefs.setPushPermissionAsked(true)
         }
@@ -67,10 +68,10 @@ internal fun PushNotificationsRow(prefs: UiPrefs) {
                         if (!pushPermissionAsked) {
                             permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                         } else {
-                            scope.launch { prefs.setPushEnabled(true) }
+                            scope.launchPreferenceWrite { prefs.setPushEnabled(true) }
                         }
                     } else {
-                        scope.launch { prefs.setPushEnabled(false) }
+                        scope.launchPreferenceWrite { prefs.setPushEnabled(false) }
                     }
                 }
                 .heightIn(min = TetherDimens.touchTargetDp),
@@ -110,7 +111,7 @@ internal fun PushNotificationsRow(prefs: UiPrefs) {
                             RoundedCornerShape(TetherDimens.radiusSm),
                         )
                         .clickable(enabled = pushEnabled) {
-                            scope.launch { prefs.setPushScope(choice) }
+                            scope.launchPreferenceWrite { prefs.setPushScope(choice) }
                         }
                         .heightIn(min = TetherDimens.touchTargetDp)
                         .padding(horizontal = 12.dp),

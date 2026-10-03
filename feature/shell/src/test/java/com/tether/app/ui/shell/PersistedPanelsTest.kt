@@ -19,6 +19,7 @@ import com.tether.app.ui.theme.TetherSkin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -128,6 +129,48 @@ class PersistedPanelsColumnTest : PersistedPanelsBase() {
         awaitStored(PanelPrefs(inspectorWidth = 336))
         recompose()
         awaitWidth(ShellTags.InspectorColumn, 336f)
+    }
+}
+
+/**
+ * ta-8yn9: a disk that refuses the write. The resize still holds (in memory, as on the web, whose
+ * localStorage save is best effort), across a new composition too, and nothing crashes.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class PersistedPanelsRefusedWriteTest : PersistedPanelsBase() {
+    private val disk = RefusingPrefsStore()
+
+    @Before fun refuseWrites() {
+        prefs = UiPrefs.on(disk)
+    }
+
+    @Test fun aRefusedSaveKeepsTheResizeAndNeverCrashes() {
+        show()
+        awaitWidth(ShellTags.Sidebar, 272f)
+        rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
+            down(center)
+            moveBy(Offset(dpPx(60f), 0f))
+            up()
+        }
+        awaitStored(PanelPrefs(sidebarWidth = 332))
+        assertTrue("the save was attempted, and refused", disk.attempts > 0)
+        recompose()
+        awaitWidth(ShellTags.Sidebar, 332f)
+    }
+}
+
+/** A preferences store whose disk refuses every write (the edit itself still runs). */
+internal class RefusingPrefsStore : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+    private val disk = kotlinx.coroutines.flow.MutableStateFlow(androidx.datastore.preferences.core.emptyPreferences())
+    @Volatile var attempts = 0
+    override val data: kotlinx.coroutines.flow.Flow<androidx.datastore.preferences.core.Preferences> = disk
+    override suspend fun updateData(
+        transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+    ): androidx.datastore.preferences.core.Preferences {
+        attempts++
+        transform(disk.value)
+        throw java.io.IOException("No space left on device")
     }
 }
 
