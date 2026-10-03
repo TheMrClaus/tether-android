@@ -25,6 +25,7 @@ import com.tether.app.client.UsageFailure
 import com.tether.app.client.UsageSource
 import com.tether.app.protocol.model.SessionMetrics
 import com.tether.app.protocol.model.UsageWindow
+import com.tether.app.ui.inspector.Inspector
 import com.tether.app.ui.inspector.InspectorBoards
 import com.tether.app.ui.inspector.codexResetRequest
 import com.tether.app.ui.shell.LinkReadout
@@ -364,6 +365,22 @@ abstract class UsageBehaviourBase {
         assertEquals(20.0, request.windows!!.fiveHour!!.usedPercent)
         assertNull(codexResetRequest(InspectorBoards.session(provider = "claude", metrics = metrics)))
         assertNull(codexResetRequest(InspectorBoards.session(provider = "codex", metrics = metrics.copy(codexResetCredits = JsonPrimitive(0)))))
+    }
+
+    @Test fun theLimitsBandsUseResetOpensTheConfirmation() {
+        val metrics = SessionMetrics(
+            codexResetCredits = FixedRouteHttp.parseObject("""{"availableCount":1,"credits":[{"id":"cr_9","status":"available","resetType":"codexRateLimits"}]}"""),
+        )
+        val model = com.tether.app.ui.inspector.InspectorBoards.model(InspectorBoards.session(provider = "codex", metrics = metrics))
+        var opened = 0
+        setUp {
+            androidx.compose.foundation.layout.Column {
+                Inspector(model, null, onSelectRun = {}, fileDiffs = null, onRequestFileDiff = {}, onUseCodexReset = { opened++ })
+            }
+        }
+        rule.onNodeWithTag(com.tether.app.ui.inspector.InspectorTags.UseCodexReset).performClick()
+        advance(50)
+        assertEquals("one tap opens it, as on the web", 1, opened)
     }
 
     @Test fun theDeepSeekBadgeShowsOnlyForASessionTheApiBills() {

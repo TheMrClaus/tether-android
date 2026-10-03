@@ -24,6 +24,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -430,9 +431,16 @@ fun ClaudeResetDialog(state: ClaudeResetState) {
 
 // ── The shared confirm chrome ────────────────────────────────────────────────
 
+/** True draws both confirmations in place (no window), as the goldens shoot them over the Accounts frame. */
+internal val LocalResetDialogsInline = staticCompositionLocalOf { false }
+
 /** A modal window with the skin's scrim; Back closes it only through [onBack] (which refuses while pending). */
 @Composable
 private fun ResetDialogHost(onBack: () -> Unit, width: Dp, tag: String, content: @Composable ColumnScope.(compact: Boolean) -> Unit) {
+    if (LocalResetDialogsInline.current) {
+        ResetDialogFrame(width = width, tag = tag, content = content)
+        return
+    }
     Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }

@@ -352,7 +352,7 @@ class MainShellPhoneNavigationTest : NavigationBase(1082, 2402) {
         assertFalse("no rail, so no drawer key on the Overview", exists(ShellTags.MenuKey))
         rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
         assertTrue(selected(ShellTags.menuNav(TopBarDestination.Overview)))
-        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Usage)).assertIsNotEnabled()
+        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Usage)).assertIsEnabled() // T9.2: live, as on the web
         rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Sessions)).performClick()
         awaitTag(ShellTags.MenuKey)
         assertFalse("an item closes the menu", exists(ShellTags.ToolsMenu))
