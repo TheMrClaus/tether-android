@@ -143,7 +143,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | checkpoint: net source edc4c24d; UI wip in feature/shell ui/usage (UsageDashboard, UsageAccountsDialog, ResetDialogs, DeepSeekPeak) compile… |
-| T9.3 | Scheduled actions | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | checkpoint d47008df (branch T9.3, wt ~/git/tether-android-wt/T9.3): done: ScheduledActionInput.extra (unknown fields round-trip), core/net … |
+| T9.3 | Scheduled actions | DONE | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
 
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
