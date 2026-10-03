@@ -42,6 +42,9 @@ class SessionLinkOpenerTest {
         val links = listOf(
             "https://evil.example/?session=s1",
             "https://user@tether.example.com/?session=s1",
+            // ta-coik.12: chat opens every href the web links, so these reach the opener too.
+            "https://tether.example.com@evil.example/?session=s1",
+            "https://tether.example.com\u202E/?session=s1",
             "https://tether.example.com/usage",
             "https://tether.example.com/",
             "https://tether.example.com/?session=..%2Fx",

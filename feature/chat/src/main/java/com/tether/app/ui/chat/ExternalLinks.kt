@@ -34,7 +34,8 @@ object CustomTabLinkOpener : LinkOpener {
     // Uri.parse, not core-ktx's toUri: this module does not depend on androidx.core.
     @SuppressLint("UseKtx")
     fun intentFor(href: String, toolbarColor: Color): Intent? {
-        // markdown.tsx SAFE_HREF (never javascript:/data:/intent:), as ta-fz3's full-string check.
+        // markdown.tsx SAFE_HREF (never javascript:/data:/intent:). A service link reaches here
+        // already pinned by ServiceOpenLink (ta-coik.2, the full-string SafeHref check).
         if (!isSafeHref(href)) return null
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(href))
         // r2: only activities that declare they may be opened from a link (a browser, a mail app),
@@ -64,24 +65,38 @@ val LocalLinkOpener = staticCompositionLocalOf<LinkOpener> { CustomTabLinkOpener
 
 /**
  * ta-coik.8: a tapped chat link, like the web's `<a href target="_blank">` (markdown.tsx): it opens
- * at once, whatever its label, with no confirmation. Only what the web's renderer and a browser
- * also enforce stays: an href outside the renderer's `http://` / `https://` / `mailto:` allowlist,
- * or one [SafeHref] refuses, is never a link (the parser draws its label as inert text) and opens
- * nothing here either. An http(s) link opens in its ASCII form ([SafeHref.Target.display]: the host
- * in punycode, non-ASCII after it percent-encoded, as a browser's URL parser sends it). A `mailto:`
- * link opens with its query (subject, body) as written, as a browser hands it to the mail app.
+ * at once, whatever its label, with no confirmation. Only the web renderer's own rule stays: an
+ * href outside its `http://` / `https://` / `mailto:` allowlist ([isSafeHref]) is never a link (the
+ * parser draws its label as inert text) and opens nothing here either. ta-coik.12: every href the
+ * web renders as a link opens:
+ * - one the full-string [SafeHref] check passes opens in its ASCII form ([SafeHref.Target.display]:
+ *   the host in punycode, non-ASCII after it percent-encoded, as a browser's URL parser sends it);
+ *   a `mailto:` link with its query (subject, body) as written, as a browser hands it on;
+ * - any other (user-info, bidi or invisible characters, an unusual mailto address, a fragment)
+ *   opens exactly as written, its scheme lowercased: the browser or mail app parses it, as it does
+ *   the web's `<a href>`, and Android matches an intent's scheme case-sensitively.
  * Whether the link opens in the app (a session on the paired server) or outside is [opener]'s call.
  *
  * Returns whether anything was opened.
  */
 fun openChatLink(context: Context, opener: LinkOpener, href: String, toolbarColor: Color): Boolean {
-    val target = SafeHref.target(href) ?: return false
-    val opens = if (target.scheme == SafeHref.Scheme.Mailto) {
-        val query = href.substringAfter('?', missingDelimiterValue = "")
-        if (query.isEmpty()) target.display else "${target.display}?$query"
-    } else {
-        target.display
-    }
-    opener.open(context, opens, toolbarColor)
+    opener.open(context, chatLinkTarget(href) ?: return false, toolbarColor)
     return true
+}
+
+/** What a tapped chat link with [href] opens (see [openChatLink]), or null when it is not a link. */
+internal fun chatLinkTarget(href: String): String? {
+    if (!isSafeHref(href)) return null
+    val target = SafeHref.target(href)
+    return when {
+        target == null -> {
+            val scheme = WEB_HREF_SCHEMES.first { href.startsWithAsciiIgnoreCase(it) }
+            scheme + href.substring(scheme.length)
+        }
+        target.scheme == SafeHref.Scheme.Mailto -> {
+            val query = href.substringAfter('?', missingDelimiterValue = "")
+            if (query.isEmpty()) target.display else "${target.display}?$query"
+        }
+        else -> target.display
+    }
 }

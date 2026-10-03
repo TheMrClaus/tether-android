@@ -281,6 +281,43 @@ class MarkdownParserTest {
         assertEquals(t("[a](http://x y)"), parseInline("[a](http://x y)"))
     }
 
+    /**
+     * ta-coik.12: link EXTENTS as the web's inline rule finds them (markdown.tsx:162-170,
+     * `/\[([^\]\n]+)\]\(([^)\s]+)\)/`, earliest match wins, ties to the earlier rule). The web runs
+     * no react-markdown / remark-gfm, so there are no autolinks: a bare URL or `<url>` is text, and
+     * trailing punctuation is never part of a link because the link ends at its `)`.
+     */
+    @Test fun linkExtentsAreTheWebRegexes() {
+        val x = "https://x.test/b"
+        val cases = listOf(
+            "[a]($x)." to listOf(Link(x, t("a")), Text(".")),
+            "see [a]($x), ok" to listOf(Text("see "), Link(x, t("a")), Text(", ok")),
+            "([a]($x))" to listOf(Text("("), Link(x, t("a")), Text(")")),
+            "[a](https://x.test/(b))" to listOf(Link("https://x.test/(b", t("a")), Text(")")),
+            "[a]($x?c=1#d)!?" to listOf(Link("$x?c=1#d", t("a")), Text("!?")),
+            "[a](mailto:a@example.test#frag)." to listOf(Link("mailto:a@example.test#frag", t("a")), Text(".")),
+            "[a](https://good.example@evil.example/);" to listOf(Link("https://good.example@evil.example/", t("a")), Text(";")),
+            "[a](https://x.test/\u200Bb)" to listOf(Link("https://x.test/\u200Bb", t("a"))), // ZWSP is not JS \s
+            "[a](https://x.test/\u00A0b)" to t("[a](https://x.test/\u00A0b)"), // NBSP is JS \s
+            "[a](https://x.test/\uFEFFb)" to t("[a](https://x.test/\uFEFFb)"), // BOM is JS \s
+            "[a](https://x.test/\u2028b)" to t("[a](https://x.test/\u2028b)"),
+            "[a]( $x)" to t("[a]( $x)"),
+            "[a] ($x)" to t("[a] ($x)"),
+            "[a\nb]($x)" to t("[a\nb]($x)"),
+            "[a][b]($x)" to listOf(Text("[a]"), Link(x, t("b"))),
+            "[[a]]($x)" to listOf(Text("[[a]]($x)")),
+            "**[a]($x)**" to listOf(Strong(listOf(Link(x, t("a"))))),
+            "_[a]($x)_" to listOf(Em(listOf(Link(x, t("a"))))),
+            "[a](https://x.test/a_b_c)" to listOf(Link("https://x.test/a_b_c", t("a"))),
+            "`[a]($x)`" to listOf(Code("[a]($x)")),
+            "$x." to t("$x."), // no bare-URL autolink on the web
+            "<$x>" to t("<$x>"),
+            "mailto:a@example.test" to t("mailto:a@example.test"),
+            "[a]($x)[b](mailto:a@example.test)" to listOf(Link(x, t("a")), Link("mailto:a@example.test", t("b"))),
+        )
+        for ((md, expected) in cases) assertEquals(md, expected, parseInline(md))
+    }
+
     @Test fun strikethroughIsNotMarkdownHere() {
         // markdown.tsx has no `~~` rule: the tildes render as typed (web reference screenshot).
         assertEquals(t("~~a retired idea~~"), parseInline("~~a retired idea~~"))

@@ -125,19 +125,24 @@ const val INLINE_SCAN_LIMIT: Int = 20_000
 /** markdown.tsx:204 — at most this many inline tokens per scan. */
 private const val INLINE_GUARD: Int = 5000
 
+/** markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i`: the web renderer's scheme prefixes. */
+internal val WEB_HREF_SCHEMES: List<String> = listOf("http://", "https://", "mailto:")
+
 /**
- * Is [href] an allowed link target? markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i` is the
- * scheme allowlist (`http://`, `https://`, `mailto:`, ASCII case only); ta-fz3 makes it a
- * FULL-STRING check ([SafeHref]): a bidi, invisible, control or look-alike code point anywhere,
- * user-info, a backslash or a host that is not a clean DNS name refuses the link, so its label
- * stays inert text.
+ * Is [href] a chat link? Exactly markdown.tsx:31 `SAFE_HREF = /^(https?:\/\/|mailto:)/i`: the href
+ * starts with `http://`, `https://` or `mailto:` (ASCII case only), and nothing after the scheme is
+ * checked (ta-coik.12: user-info, bidi or invisible characters, any mailto address or a fragment
+ * are links on the web, so they are links here; the browser or mail app reads them as it would
+ * from the web's `<a>`). The stricter full-string [SafeHref] check stays the SERVICE-link pin
+ * (ta-coik.2, ServiceOpenLink in feature/shell); a chat link uses it only to pick the ASCII form
+ * it opens in (see [openChatLink]).
  *
  * The scheme fold is NOT a Kotlin `Regex(…, IGNORE_CASE)`: on the JVM that flag also sets
  * UNICODE_CASE, so `ſ` (U+017F) matches `s` and `ı` / `İ` (U+0131 / U+0130) match `i` — `httpſ://x`
  * and `maılto:x` would pass the allowlist and become intents. JS `/i` without the `u` flag folds
  * ASCII only.
  */
-fun isSafeHref(href: String): Boolean = SafeHref.isSafe(href)
+fun isSafeHref(href: String): Boolean = WEB_HREF_SCHEMES.any { href.startsWithAsciiIgnoreCase(it) }
 
 /**
  * JS `/^prefix/i` (no `u` flag): only `A`-`Z` fold to `a`-`z`; every other char must equal the

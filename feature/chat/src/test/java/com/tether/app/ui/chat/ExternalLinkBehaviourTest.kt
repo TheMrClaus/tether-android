@@ -216,21 +216,106 @@ class ExternalLinkBehaviourTest {
         assertFalse("mailto goes to the mail app, not a tab", started.hasExtra(CustomTabLinkOpener.EXTRA_SESSION))
     }
 
+    // ---- ta-coik.12: every href the web links is a link that opens ------------------------------
+
+    /**
+     * Hrefs the full-string SafeHref check refuses (so they were inert text before ta-coik.12) but
+     * markdown.tsx:31 SAFE_HREF (scheme only) renders as `<a href>` -> what a tap opens: the href as
+     * written, its scheme lowercased.
+     */
+    private val webOnlyLinks = listOf(
+        "https://good.example@evil.example/" to "https://good.example@evil.example/", // user-info
+        "HTTPS://good.example@evil.example/" to "https://good.example@evil.example/",
+        "https://user:pw@example.test/" to "https://user:pw@example.test/",
+        "https://exa\u202Emple.com/" to "https://exa\u202Emple.com/", // RLO in the host
+        "https://example.com/\u202Egpj.exe" to "https://example.com/\u202Egpj.exe", // RLO in the path
+        "https://goo\u200Dgle.com/" to "https://goo\u200Dgle.com/", // ZWJ
+        "https://example.com/\u200B" to "https://example.com/\u200B", // ZWSP (not JS \s)
+        "https://example.com/a\u00ADb" to "https://example.com/a\u00ADb", // soft hyphen
+        "https://example.com/\u0007" to "https://example.com/\u0007", // C0 (BEL): not JS \s
+        "https://example.com/a\\b" to "https://example.com/a\\b", // backslash
+        "https://\uFF21.example/" to "https://\uFF21.example/", // fullwidth A
+        "https://ex_ample.test/" to "https://ex_ample.test/",
+        "https://stra\u00DFe.example/" to "https://stra\u00DFe.example/",
+        "https://0x7f.1/" to "https://0x7f.1/",
+        "https://example.test:0/" to "https://example.test:0/",
+        "http:///x" to "http:///x",
+        "http://" to "http://",
+        "mailto:a@example.test#frag" to "mailto:a@example.test#frag",
+        "MAILTO:a@example.test#frag" to "mailto:a@example.test#frag",
+        "mailto:" to "mailto:",
+        "mailto:ops" to "mailto:ops",
+        "mailto:a@b@example.test" to "mailto:a@b@example.test",
+        "mailto:odd%20person@example.test" to "mailto:odd%20person@example.test",
+        "mailto:a/b@example.test" to "mailto:a/b@example.test",
+        "mailto://bank.example/support@evil.example" to "mailto://bank.example/support@evil.example",
+        "mailto:a@[192.0.2.1]" to "mailto:a@[192.0.2.1]",
+        "mailto:\u00FC@example.test?subject=hi" to "mailto:\u00FC@example.test?subject=hi",
+    )
+
+    @Test fun everyHrefTheWebLinksIsALinkThatOpensAsWritten() {
+        for ((href, expected) in webOnlyLinks) {
+            assertTrue("$href: the web renders it as a link", webSafeHref.matcher(href).find())
+            assertEquals(href, listOf(MdInline.Link(href, listOf(MdInline.Text("label")))), parseInline("[label]($href)"))
+            opened.clear()
+            assertTrue(href, openChatLink(rule.activity, recorder, href, Color.Black))
+            assertEquals(href, listOf(expected), opened)
+            val intent = checkNotNull(CustomTabLinkOpener.intentFor(expected, Color.Black)) { href }
+            assertEquals(href, expected, intent.dataString)
+            assertEquals(href, Intent.ACTION_VIEW, intent.action)
+            assertTrue(href, intent.hasCategory(Intent.CATEGORY_BROWSABLE))
+            assertNull(href, intent.component)
+        }
+        // Drawn and tapped: each is one link annotation, opened at once with no sheet.
+        var md by mutableStateOf("Thinking about it")
+        host { Body(md) }
+        for ((href, expected) in webOnlyLinks) {
+            opened.clear()
+            md = "See [label]($href) now."
+            rule.waitForIdle()
+            assertEquals(href, 1, linkCount())
+            tapLink()
+            assertEquals(href, listOf(expected), opened)
+            assertNoSheet(href)
+        }
+    }
+
+    private fun assertStartsAsWritten(markdown: String, expected: String) {
+        host(opener = CustomTabLinkOpener) { Body(markdown) }
+        tapLink()
+        val started = checkNotNull(shadowOf(rule.activity).nextStartedActivity) { markdown }
+        assertEquals(markdown, expected, started.dataString)
+        assertEquals(markdown, Intent.ACTION_VIEW, started.action)
+        assertTrue(markdown, started.hasCategory(Intent.CATEGORY_BROWSABLE))
+        assertNull(markdown, started.component)
+        assertEquals("only http(s) opens in a tab", !expected.startsWith("mailto:"), started.hasExtra(CustomTabLinkOpener.EXTRA_SESSION))
+        assertNoSheet(markdown)
+    }
+
+    @Test fun aMailtoWithAFragmentStartsTheViewIntentAsWritten() =
+        assertStartsAsWritten("[write](MAILTO:a@example.test#frag)", "mailto:a@example.test#frag")
+
+    @Test fun aUserInfoLinkStartsTheViewIntentAsWritten() =
+        assertStartsAsWritten("[docs](https://good.example@evil.example/)", "https://good.example@evil.example/")
+
     // ---- refused hrefs are inert ---------------------------------------------------------------
 
+    /** Hrefs markdown.tsx's SAFE_HREF refuses too (the web draws a `<span>` of the label). */
     private val hostileHrefs = listOf(
-        "https://exa\u202Emple.com/", // RLO in the host
-        "https://example.com/\u202Egpj.exe", // RLO in the path
-        "https://goo\u200Dgle.com/", // ZWJ
-        "https://example.com/\u0007", // C0 (BEL)
-        "https://good.com@evil.com/", // user-info
         "javascript:alert(1)",
         "data:text/html,x",
         "intent://x#Intent;end",
+        "file:///etc/passwd",
+        "//example.test/",
+        "http\u017F://example.test/",
+        "ma\u0131lto:a@example.test",
+        "\u202Ehttps://example.test/", // a bidi control before the scheme
+        "\u200Bmailto:a@example.test",
     )
 
     @Test fun refusedHrefsNeverBecomeLinksAndNeverOpen() {
         for (href in hostileHrefs) {
+            assertFalse(href, webSafeHref.matcher(href).find())
             assertEquals(href, emptyList<MdInline.Link>(), parseInline("[label]($href)").filterIsInstance<MdInline.Link>())
             assertFalse(href, openChatLink(rule.activity, recorder, href, Color.Black))
             assertNull(href, CustomTabLinkOpener.intentFor(href, Color.Black))
