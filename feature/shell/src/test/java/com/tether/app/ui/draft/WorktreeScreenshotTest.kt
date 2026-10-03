@@ -9,14 +9,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.tether.app.client.DraftComposerModel
 import com.tether.app.client.DraftComposerState
 import com.tether.app.client.DraftSessionOptionsModel
-import com.tether.app.client.SetupConfirmation
 import com.tether.app.client.WorktreeDeclaredScript
 import com.tether.app.client.WorktreeField
-import com.tether.app.client.WorktreeSetupGate
 import com.tether.app.client.WorktreeSourceInfo
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.prefs.InMemoryDraftStore
@@ -47,24 +44,19 @@ import org.robolectric.annotation.Config
  * - `branch-off`: New branch, the repo's default base as the placeholder, the setup + scripts note;
  * - `existing-branch`: Existing branch with a branch typed (Send ready);
  * - `pr`: Pull request #42 with a name, and a config warning from the repo's tether.json;
- * - `not-repo`: the folder is not a Git repository (the note alone);
- * - `confirm-will`: the setup confirmation for a new branch from the default base with setup;
- * - `confirm-may`: the confirmation for an existing branch whose name hides an RLO and a ZWSP (tokens);
- * - `confirm-may-default` (r2): a new branch from the default base of a repo whose only remote is
- *   `upstream`: may run, and the base named neutrally (the create resolves origin's default or HEAD).
+ * - `not-repo`: the folder is not a Git repository (the note alone).
+ *
+ * ta-coik.11: no setup confirmation goldens; the web shows the note (in `branch-off`) and sends.
  *
  * Every state is seeded synchronously through the real engine on an unconfined scope (the source is
  * placed on the drawn state, never asked for), the clock is driven by hand, and the client throws on
  * any send (a golden that sends anything fails).
  */
-enum class WorktreeShot(val id: String, val confirm: Boolean = false) {
+enum class WorktreeShot(val id: String) {
     BranchOff("draft-worktree-branch-off"),
     ExistingBranch("draft-worktree-existing-branch"),
     PullRequest("draft-worktree-pr"),
     NotRepo("draft-worktree-not-repo"),
-    ConfirmWill("draft-setup-confirm-will", confirm = true),
-    ConfirmMay("draft-setup-confirm-may", confirm = true),
-    ConfirmMayDefault("draft-setup-confirm-may-default", confirm = true),
 }
 
 private val exactCompare = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -101,7 +93,6 @@ private class WorktreeSeed(shot: WorktreeShot) {
     )
     val state: DraftComposerState
     val readiness: String
-    val confirmation: SetupConfirmation?
 
     private fun repo(hasSetup: Boolean, scripts: Int = 0, warnings: List<String> = emptyList()) = WorktreeSourceInfo(
         cwd = DraftFixtures.ROOT,
@@ -121,22 +112,13 @@ private class WorktreeSeed(shot: WorktreeShot) {
         model.selectProviderAndModel("work", "m1")
         model.setText(WORKTREE_PROMPT)
         val source: WorktreeSourceInfo = when (shot) {
-            WorktreeShot.ConfirmMayDefault -> {
-                check(model.selectIsolation("branch-off"))
-                repo(hasSetup = true, scripts = 2).copy(remote = "upstream", defaultBaseRef = "upstream/main", branches = listOf("upstream/main", "main"))
-            }
-            WorktreeShot.BranchOff, WorktreeShot.ConfirmWill -> {
+            WorktreeShot.BranchOff -> {
                 check(model.selectIsolation("branch-off"))
                 repo(hasSetup = true, scripts = 2)
             }
             WorktreeShot.ExistingBranch -> {
                 check(model.selectIsolation("checkout-branch"))
                 check(model.setWorktreeField(WorktreeField.Branch, "feat/sidebar"))
-                repo(hasSetup = false)
-            }
-            WorktreeShot.ConfirmMay -> {
-                check(model.selectIsolation("checkout-branch"))
-                check(model.setWorktreeField(WorktreeField.Branch, "feat/\u202Eevil\u200Bx"))
                 repo(hasSetup = false)
             }
             WorktreeShot.PullRequest -> {
@@ -152,8 +134,6 @@ private class WorktreeSeed(shot: WorktreeShot) {
         }
         readiness = model.readiness()
         state = model.state.value.copy(worktreeSource = source)
-        confirmation = if (shot.confirm) WorktreeSetupGate.confirmationFor(state.form, source) else null
-        if (shot.confirm) checkNotNull(confirmation)
     }
 
     fun inputs() = DraftSheetInputs(
@@ -180,7 +160,6 @@ fun ComposeContentTestRule.snapWorktree(shot: WorktreeShot, skin: TetherSkin, ph
             TetherTheme(choiceFor(skin)) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     DraftComposerFrame(seed.inputs(), failingWorktreeActions, layout = layout)
-                    seed.confirmation?.let { c -> WorktreeSetupConfirmDialog(c, onConfirm = { noSend("confirm") }, onCancel = { noSend("cancel") }) }
                 }
             }
         }
@@ -188,8 +167,7 @@ fun ComposeContentTestRule.snapWorktree(shot: WorktreeShot, skin: TetherSkin, ph
     mainClock.advanceTimeBy(700)
     waitForIdle()
     val path = "src/test/screenshots/$name/${skin.id}-${if (phone) "phone" else "tablet"}.png"
-    // The confirmation is its own window: the screen is captured, so it shows over the sheet.
-    if (shot.confirm) captureScreenRoboImage(path, roborazziOptions = exactCompare) else onRoot().captureRoboImage(path, roborazziOptions = exactCompare)
+    onRoot().captureRoboImage(path, roborazziOptions = exactCompare)
     seed.close()
 }
 
@@ -223,7 +201,7 @@ class WorktreeExpandedScreenshotTest(private val shot: WorktreeShot, private val
     }
 }
 
-/** PLAN §4: 1.3× font scale on a phone: the new-branch row with its notes, and the hostile confirmation. */
+/** PLAN §4: 1.3× font scale on a phone: the new-branch row with its notes. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class WorktreeFontScaleScreenshotTest(private val shot: WorktreeShot, private val skin: TetherSkin) {
@@ -234,6 +212,6 @@ class WorktreeFontScaleScreenshotTest(private val shot: WorktreeShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(WorktreeShot.BranchOff, WorktreeShot.ConfirmMay).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(WorktreeShot.BranchOff).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

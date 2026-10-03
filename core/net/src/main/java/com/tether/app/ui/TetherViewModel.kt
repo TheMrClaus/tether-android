@@ -106,14 +106,9 @@ class TetherViewModel(
         hideDraft()
     }
 
-    /**
-     * Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out).
-     * ta-23f r2: an open setup confirmation goes with it, unsent, so reopening the sheet never shows
-     * a confirmation that was opened before it closed (Send has to be pressed again).
-     */
+    /** Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out). */
     private fun hideDraft() {
         _draftOpen.value = false
-        draftComposer.cancelSetup()
     }
 
     /**

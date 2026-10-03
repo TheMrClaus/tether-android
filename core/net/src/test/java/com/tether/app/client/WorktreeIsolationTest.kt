@@ -20,7 +20,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ta-23f (T8.1 slice 5): the isolation request, its readiness, the setup gate and the inspect reply.
+ * ta-23f (T8.1 slice 5): the isolation request, its readiness, the inspect reply and its notes
+ * (ta-coik.11: no setup gate; the web shows a note only).
  *
  * The web oracle for the `worktree` block is [DraftForm.buildWorktreeCreateRequest], the T2.2 port
  * of lib/draft-form.ts proven against the JS conformance corpus; the app's [WorktreeDraft.request]
@@ -158,206 +159,6 @@ class WorktreeIsolationTest {
         assertEquals(Json.parseToJsonElement("""{"mode":"branch-off"}"""), off["worktree"])
     }
 
-    // --- the setup gate (option A) ------------------------------------------------------------------
-
-    /** An answer as 887c222 shapes it: origin is the repo's remote unless [remote] says otherwise. */
-    private fun source(hasSetup: Boolean, defaultBaseRef: String = "origin/main", isRepo: Boolean = true, remote: String? = "origin") =
-        WorktreeSourceInfo(
-            cwd = "/w",
-            isRepo = isRepo,
-            remote = if (isRepo) remote else null,
-            remotes = listOfNotNull(if (isRepo) remote else null),
-            defaultBaseRef = if (isRepo) defaultBaseRef else "",
-            configPresent = hasSetup,
-            hasSetup = hasSetup,
-        )
-
-    @Test
-    fun localAndIncompleteRequestsNeverConfirm() {
-        for (s in listOf(null, source(true), source(false))) {
-            assertNull(WorktreeSetupGate.confirmationFor(form(false, "checkout-pr", "", "", "", "42"), s))
-            assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", ""), s))
-            assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", "0"), s))
-            assertNull(WorktreeSetupGate.confirmationFor(form(true, "checkout-branch", "", "", "", ""), s))
-        }
-    }
-
-    @Test
-    fun aPullRequestAndAnExistingBranchAlwaysConfirmAsMayRun() {
-        for (s in listOf(null, source(true), source(false), source(false, isRepo = false))) {
-            val pr = WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "origin/x", " pr-b ", "", " 0042 "), s)!!
-            assertEquals(SetupConfirmation("checkout-pr", "Pull request", "#42", "pr-b", "/w", certain = false), pr)
-            assertEquals(SETUP_BODY_MAY_PR, pr.body)
-            // ta-coik.4: a number past the retired limit is a complete request, shown as the web parses it.
-            assertEquals("#10000000", WorktreeSetupGate.confirmationFor(form(true, "checkout-pr", "", "", "", "10000000"), s)!!.ref)
-            val branch = WorktreeSetupGate.confirmationFor(form(true, "checkout-branch", "", " feat/x ", "", ""), s)!!
-            assertEquals(SetupConfirmation("checkout-branch", "Branch", "feat/x", null, "/w", certain = false), branch)
-            assertEquals(SETUP_BODY_MAY_BRANCH, branch.body)
-            assertEquals(SETUP_TITLE_MAY, branch.title)
-        }
-    }
-
-    @Test
-    fun aNewBranchConfirmsUnlessItIsFromTheInspectedDefaultBaseWithoutSetup() {
-        fun gate(base: String, s: WorktreeSourceInfo?) = WorktreeSetupGate.confirmationFor(form(true, "branch-off", base, "", "", ""), s)
-        // The default base: setup declared -> will run; none declared -> no confirmation.
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/main", null, "/w", certain = true), gate("", source(true)))
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/main", null, "/w", certain = true), gate(" origin/main ", source(true)))
-        assertNull(gate("", source(false)))
-        assertNull(gate("origin/main", source(false)))
-        // Another base: its committed config is not the inspected one -> may run, whatever hasSetup says.
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/dev", null, "/w", certain = false), gate("origin/dev", source(false)))
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/dev", null, "/w", certain = false), gate("origin/dev", source(true)))
-        // Nothing inspected (no answer for this folder on this socket): fail closed.
-        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), gate("", null))
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/main", null, "/w", certain = false), gate("origin/main", null))
-        // r2: not a repository: the answer says nothing about what a create would read -> may run.
-        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), gate("", source(false, isRepo = false)))
-        assertEquals(SETUP_BODY_WILL, gate("", source(true))!!.body)
-        assertEquals(SETUP_TITLE_WILL, gate("", source(true))!!.title)
-    }
-
-    /** The gate's whole input space: a confirmation is skipped ONLY for Local, an incomplete request, or the default base with no setup. */
-    @Test
-    fun noConfirmationOnlyWhereNothingCanRun() {
-        val sources = listOf(
-            null, source(true), source(false), source(true, ""), source(false, ""), source(false, isRepo = false),
-            source(false, "HEAD"), source(true, "HEAD"), source(false, "upstream/main", remote = "upstream"),
-            source(true, "upstream/main", remote = "upstream"), source(false, "HEAD", remote = null), source(false, "origin/main", remote = null),
-        )
-        for (useWorktree in listOf(true, false)) for (mode in listOf("branch-off", "checkout-branch", "checkout-pr")) for (base in listOf("", "origin/main", "origin/dev")) for (branch in listOf("", "b")) for (pr in listOf("", "7", "10000000")) for (s in sources) {
-            val f = form(useWorktree, mode, base, branch, "", pr)
-            val c = WorktreeSetupGate.confirmationFor(f, s)
-            val incomplete = WorktreeDraft.request(f) == null
-            // r2: the default base is predicted only for a repo on origin with an origin/… default.
-            val predicted = s != null && s.isRepo && s.remote == "origin" && s.defaultBaseRef.startsWith("origin/")
-            val fromDefault = base.isEmpty() || base == s?.defaultBaseRef?.takeIf { it.isNotEmpty() }
-            val defaultBaseNoSetup = mode == "branch-off" && predicted && !s.hasSetup && fromDefault
-            val expectNone = !useWorktree || incomplete || defaultBaseNoSetup
-            assertEquals("$useWorktree/$mode/'$base'/'$branch'/'$pr'/$s", expectNone, c == null)
-            if (c != null) assertEquals(mode == "branch-off" && predicted && s.hasSetup && fromDefault, c.certain)
-        }
-    }
-
-    // --- r2: the default base the answer can vouch for ---------------------------------------------
-
-    private enum class Gate { NONE, MAY, WILL }
-
-    private fun outcome(c: SetupConfirmation?) = when { c == null -> Gate.NONE; c.certain -> Gate.WILL; else -> Gate.MAY }
-
-    /** One row: what a New branch with [base] typed shows for [s], and the ref the dialog names. */
-    private data class Row(val name: String, val s: WorktreeSourceInfo?, val base: String, val gate: Gate, val ref: String?)
-
-    /**
-     * The coordinator's rule, row by row: a New branch from the default base skips the confirmation
-     * ONLY for a repo on remote origin whose default is an origin/… ref and whose hasSetup is a JSON
-     * false; everything else confirms as may-run and, unless the base was typed, names no ref.
-     */
-    @Test
-    fun theDefaultBaseIsTrustedOnlyOnOriginWithAnOriginDefault() {
-        val rows = listOf(
-            // positive controls
-            Row("origin, origin/main, no setup", source(false), "", Gate.NONE, null),
-            Row("origin, origin/main typed, no setup", source(false), "origin/main", Gate.NONE, null),
-            Row("origin, origin/main, setup", source(true), "", Gate.WILL, "origin/main"),
-            // a non-origin remote: the create resolves origin (or HEAD), not upstream/main
-            Row("upstream only, no setup", source(false, "upstream/main", remote = "upstream"), "", Gate.MAY, null),
-            Row("upstream only, setup", source(true, "upstream/main", remote = "upstream"), "", Gate.MAY, null),
-            Row("upstream only, its default typed", source(false, "upstream/main", remote = "upstream"), "upstream/main", Gate.MAY, "upstream/main"),
-            // no remote at all: the default is HEAD
-            Row("no remote, HEAD, no setup", source(false, "HEAD", remote = null), "", Gate.MAY, null),
-            Row("no remote, HEAD, setup", source(true, "HEAD", remote = null), "", Gate.MAY, null),
-            Row("no remote, an origin/main default (inconsistent)", source(false, "origin/main", remote = null), "", Gate.MAY, null),
-            // origin without a recorded default: HEAD moves with a local branch switch
-            Row("origin, HEAD, no setup", source(false, "HEAD"), "", Gate.MAY, null),
-            Row("origin, HEAD, setup", source(true, "HEAD"), "", Gate.MAY, null),
-            Row("origin, HEAD typed", source(false, "HEAD"), "HEAD", Gate.MAY, "HEAD"),
-            Row("origin, a default on another remote (inconsistent)", source(false, "upstream/main"), "", Gate.MAY, null),
-            Row("origin, an empty default", source(false, ""), "", Gate.MAY, null),
-            // not a repository, or an answer that cannot be taken at its word
-            Row("not a repo", source(false, isRepo = false), "", Gate.MAY, null),
-            Row("not a repo, yet origin fields (inconsistent)", source(false).copy(isRepo = false), "", Gate.MAY, null),
-            Row("hasSetup not a boolean", source(false).copy(setupKnown = false), "", Gate.MAY, null),
-            Row("config read reported failed", source(false).copy(configKnown = false), "", Gate.MAY, null),
-            Row("nothing inspected", null, "", Gate.MAY, null),
-        )
-        for (r in rows) {
-            val c = WorktreeSetupGate.confirmationFor(form(true, "branch-off", r.base, "", "", ""), r.s)
-            assertEquals(r.name, r.gate, outcome(c))
-            if (c != null) {
-                assertEquals(r.name, r.ref, c.ref)
-                assertEquals(r.name, "branch-off", c.mode)
-                if (c.certain) assertEquals(r.name, SETUP_BODY_WILL, c.body)
-                else assertEquals(r.name, if (r.ref == null) SETUP_BODY_MAY_DEFAULT else SETUP_BODY_MAY_BRANCH, c.body)
-            }
-            assertEquals(r.name, r.gate != Gate.MAY, WorktreeSetupGate.predictsDefaultBase(r.s))
-        }
-    }
-
-    /** The verifier's scenario, as the 887c222 server words the reply (worktreeSourceInfo, server.mjs ~6105). */
-    @Test
-    fun theVerifiersUpstreamOnlyReplyConfirms() {
-        fun reply(remote: String, def: String) = WorktreeSourceInfo.parse(Json.parseToJsonElement("""
-            {"cwd":"/w","isRepo":true,"repoRoot":"/w","remote":"$remote","remotes":["$remote"],"currentBranch":"main",
-             "defaultBaseRef":"$def","branches":["main","$def"],"configPresent":false,"configWarnings":[],
-             "hasSetup":false,"hasTeardown":false,"declaredScripts":[]}
-        """).jsonObject)
-        val upstream = reply("upstream", "upstream/main")
-        assertTrue(upstream.setupKnown && upstream.configKnown)
-        val c = WorktreeSetupGate.confirmationFor(form(true, "branch-off", "", "", "", ""), upstream)
-        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), c)
-        assertEquals(SETUP_TITLE_MAY, c!!.title)
-        assertEquals(SETUP_BODY_MAY_DEFAULT, c.body)
-        // The control the verifier ran: the same repo on origin creates from origin/main, setup none.
-        assertNull(WorktreeSetupGate.confirmationFor(form(true, "branch-off", "", "", "", ""), reply("origin", "origin/main")))
-        // And the frame stays the web's: no remote is added.
-        assertEquals(Json.parseToJsonElement("""{"mode":"branch-off"}"""),
-            CreateFrame.build(form(true, "branch-off", "", "", "", ""), claude, DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()["worktree"])
-    }
-
-    /**
-     * 887c222 readProjectConfig answers `present: false, warnings: []` both for "no tether.json" and
-     * for a `git show` that failed, so the wire cannot tell them apart: that reply stays unconfirmed.
-     * A reply that reports a failed read (not present, yet warnings) or a non-boolean configPresent
-     * is not taken at its word. A file that is present but unusable (warnings, no setup) is what the
-     * create reads too, so it needs no confirmation.
-     */
-    @Test
-    fun aConfigReadReportedAsFailedIsUnknown() {
-        fun parsed(present: String, warnings: String, hasSetup: String = "false") = WorktreeSourceInfo.parse(Json.parseToJsonElement(
-            """{"cwd":"/w","isRepo":true,"remote":"origin","defaultBaseRef":"origin/main","configPresent":$present,"configWarnings":$warnings,"hasSetup":$hasSetup}""",
-        ).jsonObject)
-        val f = form(true, "branch-off", "", "", "", "")
-        val noFile = parsed("false", "[]")
-        assertTrue(noFile.configKnown)
-        assertNull("the legitimate no-config reply: no confirmation", WorktreeSetupGate.confirmationFor(f, noFile))
-        assertNull("no warnings key at all: the same", WorktreeSetupGate.confirmationFor(f, WorktreeSourceInfo.parse(Json.parseToJsonElement(
-            """{"cwd":"/w","isRepo":true,"remote":"origin","defaultBaseRef":"origin/main","configPresent":false,"hasSetup":false}""").jsonObject)))
-        val invalid = parsed("true", """["tether.json is not valid JSON and was ignored."]""")
-        assertTrue(invalid.configKnown)
-        assertNull("a present but unusable file declares nothing the create would run", WorktreeSetupGate.confirmationFor(f, invalid))
-        for ((present, warnings) in listOf("false" to """["could not read tether.json"]""", "false" to """[""]""", "\"false\"" to "[]", "null" to "[]", "0" to "[]")) {
-            val s = parsed(present, warnings)
-            assertFalse("$present/$warnings", s.configKnown)
-            assertEquals("$present/$warnings", Gate.MAY, outcome(WorktreeSetupGate.confirmationFor(f, s)))
-        }
-        assertFalse(WorktreeSourceInfo.parse(Json.parseToJsonElement("""{"isRepo":true}""").jsonObject).configKnown)
-    }
-
-    /** A mode the app does not offer (the builder copies the form's) confirms as may-run, never drawn raw. */
-    @Test
-    fun anUnknownModeConfirmsAsMayRun() {
-        for (mode in listOf("squash", "", "LOCAL", "branch_off", "\u202Ebranch-off")) for (s in listOf(null, source(false), source(true))) {
-            val f = form(true, mode, "", "", "", "")
-            assertNotNull("the web's builder builds a block for '$mode'", DraftForm.buildWorktreeCreateRequest(f))
-            val c = WorktreeSetupGate.confirmationFor(f, s)
-            assertNotNull("'$mode'/$s", c)
-            assertFalse(c!!.certain)
-            assertEquals(SETUP_MODE_UNKNOWN, c.modeLabel)
-            assertEquals(SETUP_TITLE_MAY, c.title)
-        }
-    }
-
     // --- the inspect reply --------------------------------------------------------------------------
 
     @Test
@@ -393,12 +194,7 @@ class WorktreeIsolationTest {
         assertFalse("only a JSON true declares setup", g.hasSetup)
         assertEquals(emptyList<String>(), g.branches)
         assertEquals("", g.defaultBaseRef)
-        assertFalse("a reply that does not say whether setup runs is not known", g.setupKnown)
-        assertTrue(s.setupKnown)
-        assertEquals(WorktreeSourceInfo(setupKnown = false, configKnown = false), WorktreeSourceInfo.parse(JsonObject(emptyMap())))
-        // The gate fails closed on it: a new branch from the default base confirms (may run).
-        val f = form(true, "branch-off", "", "", "", "")
-        assertEquals(false, WorktreeSetupGate.confirmationFor(f, g.copy(isRepo = true, remote = "origin", defaultBaseRef = "origin/main", configKnown = true))?.certain)
+        assertEquals(WorktreeSourceInfo(), WorktreeSourceInfo.parse(JsonObject(emptyMap())))
     }
 
     @Test
@@ -415,6 +211,37 @@ class WorktreeIsolationTest {
         assertEquals("This project declares 2 scripts you can run in the session.", note(true, false, 2))
         assertEquals("/srv/app is not a Git repository, so it cannot host an isolated session.", WorktreeCopy.notARepo("/srv/app"))
         assertEquals("That folder is not a Git repository, so it cannot host an isolated session.", WorktreeCopy.notARepo(""))
+    }
+
+    /**
+     * ta-coik.11: the note is drawn exactly when the web draws it. The oracle is draft-composer.tsx
+     * 90fbb9f:789-795 transcribed: `source?.configPresent && (source.hasSetup ||
+     * source.declaredScripts.length > 0)`, then the sentence assembled as the JSX does.
+     */
+    @Test
+    fun theSetupNoteShowsExactlyWhenTheWebShowsIt() {
+        fun web(s: WorktreeSourceInfo): String? {
+            if (!(s.configPresent && (s.hasSetup || s.declaredScripts.isNotEmpty()))) return null
+            val n = s.declaredScripts.size
+            return (if (s.hasSetup) "Runs this project's setup before the first turn" else "This project declares") +
+                (if (n > 0) "${if (s.hasSetup) "; " else " "}$n script${if (n == 1) "" else "s"} you can run in the session" else "") + "."
+        }
+        var shown = 0
+        var rows = 0
+        for (repo in listOf(true, false)) for (present in listOf(true, false)) for (setup in listOf(true, false)) for (n in 0..3)
+            for (remote in listOf("origin", "upstream", null)) for (def in listOf("origin/main", "HEAD", "")) {
+                val s = WorktreeSourceInfo(
+                    cwd = "/w", isRepo = repo, remote = remote, defaultBaseRef = def, configPresent = present, hasSetup = setup,
+                    declaredScripts = List(n) { WorktreeDeclaredScript("s$it", "script", null) },
+                )
+                val expected = web(s)
+                assertEquals("$s", expected, WorktreeCopy.setupNote(s))
+                rows++
+                if (expected != null) shown++
+            }
+        assertEquals(2 * 2 * 2 * 4 * 3 * 3, rows)
+        // Both outcomes are reached (the oracle is not vacuous).
+        assertEquals(2 * 7 * 3 * 3, shown)
     }
 
     @Test

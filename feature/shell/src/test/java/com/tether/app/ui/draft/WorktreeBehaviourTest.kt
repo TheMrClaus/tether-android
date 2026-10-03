@@ -18,12 +18,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.tether.app.client.READINESS_NEED_BRANCH
 import com.tether.app.client.READINESS_NEED_PR
-import com.tether.app.client.SETUP_BODY_MAY_DEFAULT
-import com.tether.app.client.SETUP_BODY_MAY_PR
-import com.tether.app.client.SETUP_CHANGED_COPY
-import com.tether.app.client.SETUP_DEFAULT_BASE
-import com.tether.app.client.SETUP_TITLE_MAY
-import com.tether.app.client.SETUP_TITLE_WILL
 import com.tether.app.client.WorktreeDeclaredScript
 import com.tether.app.client.WorktreeField
 import com.tether.app.client.WorktreeSourceInfo
@@ -32,7 +26,6 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.MainShell
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.UiPrefs
-import com.tether.app.ui.settings.CONFIRM_ARM_MS
 import com.tether.app.ui.theme.TetherTheme
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +52,9 @@ private const val BREAK = "\u2060\u200B"
  * model and draft engine, with a client that resolves the create as the real one does and records
  * every `worktree-inspect`. Every tap is a semantics action; every read after one waits on the model
  * or the drawn screen (v2 compose rule; never a single read).
+ *
+ * ta-coik.11: Send creates at once whatever the repo's setup, as the deployed web does (90fbb9f
+ * draft-composer.tsx:789-795 shows a note, no confirmation).
  */
 abstract class WorktreeHarness(private val width: Int, private val height: Int) {
     @get:Rule val rule = createComposeRule()
@@ -168,59 +164,102 @@ abstract class WorktreeHarness(private val width: Int, private val height: Int) 
         until("the engine took the answer") { composer.state.value.worktreeSource == info }
     }
 
-    // --- r2: run on the phone and the tablet ---------------------------------------------------------
+    // --- run on the phone and the tablet -------------------------------------------------------------
 
-    /**
-     * r2 (the verifier's reproduction): the repo's only remote is `upstream` and its default has no
-     * setup, but the create resolves origin (none) and cuts from HEAD. Send asks first, and the
-     * dialog names the base neutrally, never the inspected upstream/main.
-     */
+    /** The words of the retired ta-23f confirmation: none of them may ever be drawn. */
+    private val retired = listOf("This project's setup will run", "Setup may run on this host", "it can't be checked beforehand")
+
+    protected fun noConfirmationDrawn() {
+        for (words in retired) {
+            assertTrue("no confirmation: '$words'", rule.onAllNodesWithText(words, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    /** One tap on Send: one create, at once, nothing in between. */
+    protected fun sendOnce(): com.tether.app.protocol.ClientMessage.Create {
+        until("Send enabled") { sendEnabled() }
+        tap(DraftComposerTags.Send)
+        until("the create went out") { client.creates.size == 1 }
+        rule.waitForIdle()
+        noConfirmationDrawn()
+        assertEquals(1, client.creates.size)
+        assertEquals("no error", "", composer.state.value.error)
+        return client.creates.single()
+    }
+
     @Test
-    fun anUpstreamOnlyRepoConfirmsAndNamesNoInspectedBase() {
+    fun withSetupSendCreatesAtOnceAndTheNoteSaysSo() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        answer(repo(hasSetup = true))
+        until("the web's note") { shown(WorktreeTags.SetupNote) == "Runs this project's setup before the first turn." }
+        val frame = sendOnce()
+        assertEquals(true, frame.useWorktree)
+        assertEquals("branch-off", frame.worktree?.mode)
+        assertNull("the frame is the web's", frame.worktree?.baseRef)
+    }
+
+    /** The case ta-23f r2 confirmed (only an upstream remote): sent at once too, frame unchanged. */
+    @Test
+    fun anUpstreamOnlyRepoSendsAtOnce() {
         openSheet()
         ready()
         isolate("branch-off")
         answer(repo(hasSetup = false).copy(remote = "upstream", remotes = listOf("upstream"), defaultBaseRef = "upstream/main"))
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        assertTrue("nothing sent before the confirmation", client.creates.isEmpty())
-        assertEquals(SETUP_TITLE_MAY, composer.state.value.setupConfirm?.title)
-        assertEquals(SETUP_BODY_MAY_DEFAULT, composer.state.value.setupConfirm?.body)
-        assertEquals(SETUP_DEFAULT_BASE, shown(WorktreeTags.confirmField("Base")))
-        rule.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
-        tap(WorktreeTags.ConfirmKey)
-        until("the create went out") { client.creates.size == 1 }
-        val block = client.creates.single().worktree!!
+        val block = sendOnce().worktree!!
         assertEquals("branch-off", block.mode)
         assertNull("the frame stays the web's", block.baseRef)
     }
 
-    /** r2 (P4): closing the sheet cancels the confirmation; reopening it shows none and sends nothing. */
+    /** No answer yet (ta-23f failed closed here): sent at once. */
     @Test
-    fun closingTheSheetCancelsTheConfirmation() {
+    fun aPullRequestWithNoAnswerSendsAtOnce() {
         openSheet()
         ready()
         isolate("checkout-pr")
         type(WorktreeField.Pr, "42")
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        rule.runOnUiThread { vm.closeDraft() }
-        awaitGone(DraftComposerTags.Sheet)
-        until("the confirmation went with it") { composer.state.value.setupConfirm == null }
-        rule.runOnUiThread { vm.openDraft() }
-        awaitTag(DraftComposerTags.Sheet)
-        rule.mainClock.advanceTimeBy(1_000)
-        rule.waitForIdle()
-        assertFalse("reopened with no confirmation", exists(WorktreeTags.Confirm))
-        assertNull(composer.state.value.setupConfirm)
-        assertTrue(client.creates.isEmpty())
-        assertEquals("Review this", composer.state.value.text)
-        // Send asks again.
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        assertTrue(client.creates.isEmpty())
+        assertNull(composer.state.value.worktreeSource)
+        assertEquals(42L, sendOnce().worktree?.prNumber)
+    }
+
+    /**
+     * The note is drawn exactly when the web draws it (draft-composer.tsx 90fbb9f:789-795): inside
+     * WorktreeDetails, only for a repository, when the committed config is present and declares setup
+     * or scripts; after the Name field, before the config warnings.
+     */
+    @Test
+    fun theSetupNoteShowsExactlyWhenTheWebShowsIt() {
+        openSheet()
+        isolate("branch-off")
+        until("the sheet asked") { client.inspects.isNotEmpty() }
+        val rows = listOf(
+            repo(hasSetup = true) to "Runs this project's setup before the first turn.",
+            repo(hasSetup = true, scripts = 1) to "Runs this project's setup before the first turn; 1 script you can run in the session.",
+            repo(hasSetup = false, scripts = 2) to "This project declares 2 scripts you can run in the session.",
+            repo(hasSetup = false) to null,
+            repo(hasSetup = false, warnings = listOf("bad config")) to null,
+            repo(hasSetup = true).copy(configPresent = false) to null,
+            repo(hasSetup = true, scripts = 2).copy(isRepo = false) to null,
+        )
+        for ((info, note) in rows) {
+            client.answerInspect(info)
+            until("the engine took $info") { composer.state.value.worktreeSource == info }
+            rule.waitForIdle()
+            if (note == null) {
+                until("no note for $info") { !exists(WorktreeTags.SetupNote) }
+            } else {
+                until("the note for $info") { shown(WorktreeTags.SetupNote) == note }
+                // Its place: after the Name field (the web's order), in the details row.
+                val name = rule.onNodeWithTag(WorktreeTags.field(WorktreeField.Slug), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val drawn = rule.onNodeWithTag(WorktreeTags.SetupNote, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertTrue("the note follows the Name field: $name / $drawn", drawn.top >= name.bottom || (drawn.top >= name.top && drawn.left >= name.right))
+            }
+        }
+        // Local: no details, no note.
+        isolate("local")
+        awaitGone(WorktreeTags.Details)
+        assertFalse(exists(WorktreeTags.SetupNote))
     }
 
     /** Verifier F3: the New branch placeholder is the web's `tether/<name>` (U+003C / U+003E), drawn as is. */
@@ -303,7 +342,7 @@ class WorktreePhoneBehaviourTest : WorktreeHarness(412, 915) {
     }
 
     @Test
-    fun withoutSetupANewBranchSendsWithNoConfirmation() {
+    fun withoutSetupANewBranchSendsAtOnce() {
         openSheet()
         ready()
         isolate("branch-off")
@@ -312,134 +351,10 @@ class WorktreePhoneBehaviourTest : WorktreeHarness(412, 915) {
         until("Send enabled") { sendEnabled() }
         tap(DraftComposerTags.Send)
         until("the create went out") { client.creates.size == 1 }
-        assertFalse(exists(WorktreeTags.Confirm))
+        noConfirmationDrawn()
         val frame = client.creates.single()
         assertEquals(true, frame.useWorktree)
         assertEquals("branch-off", frame.worktree?.mode)
-    }
-
-    @Test
-    fun withSetupSendAsksFirstAndConfirmSendsOnce() {
-        openSheet()
-        ready()
-        isolate("branch-off")
-        answer(repo(hasSetup = true))
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        assertTrue("nothing sent before the confirmation", client.creates.isEmpty())
-        assertTrue(exists(WorktreeTags.ConfirmKey))
-        assertEquals(SETUP_TITLE_WILL, composer.state.value.setupConfirm?.title)
-        assertEquals("origin/main", shown(WorktreeTags.confirmField("Base")))
-        assertEquals(DraftFixtures.ROOT, shown(WorktreeTags.confirmField("Folder")))
-        rule.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
-        // A double tap on the armed key: one create.
-        rule.onNodeWithTag(WorktreeTags.ConfirmKey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        runCatching { rule.onNodeWithTag(WorktreeTags.ConfirmKey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick) }
-        until("the create went out") { client.creates.size == 1 }
-        awaitGone(WorktreeTags.Confirm)
-        rule.waitForIdle()
-        assertEquals(1, client.creates.size)
-        assertEquals("branch-off", client.creates.single().worktree?.mode)
-    }
-
-    @Test
-    fun aTapBeforeTheConfirmationArmsSendsNothing() {
-        openSheet()
-        ready()
-        isolate("checkout-pr")
-        type(WorktreeField.Pr, "42")
-        until("Send enabled") { sendEnabled() }
-        rule.mainClock.autoAdvance = false
-        rule.onNodeWithTag(DraftComposerTags.Send, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        rule.mainClock.advanceTimeByFrame()
-        rule.mainClock.advanceTimeByFrame()
-        awaitTag(WorktreeTags.ConfirmKey)
-        rule.mainClock.advanceTimeBy(CONFIRM_ARM_MS - 150)
-        rule.onNodeWithTag(WorktreeTags.ConfirmKey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        rule.mainClock.advanceTimeByFrame()
-        assertTrue("a tap inside the window sends nothing", client.creates.isEmpty())
-        assertTrue(exists(WorktreeTags.Confirm))
-        rule.mainClock.advanceTimeBy(200)
-        rule.onNodeWithTag(WorktreeTags.ConfirmKey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        rule.mainClock.autoAdvance = true
-        until("armed now: the same tap sends") { client.creates.size == 1 }
-        assertEquals(42L, client.creates.single().worktree?.prNumber)
-    }
-
-    @Test
-    fun cancelSendsNothingAndKeepsTheDraft() {
-        openSheet()
-        ready()
-        isolate("checkout-pr")
-        type(WorktreeField.Pr, "42")
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        assertEquals(SETUP_BODY_MAY_PR, composer.state.value.setupConfirm?.body)
-        assertEquals("#42", shown(WorktreeTags.confirmField("Pull request")))
-        tap(WorktreeTags.Cancel)
-        awaitGone(WorktreeTags.Confirm)
-        rule.mainClock.advanceTimeBy(1_000)
-        rule.waitForIdle()
-        assertTrue(client.creates.isEmpty())
-        assertEquals("Review this", composer.state.value.text)
-        assertTrue("the sheet stays", exists(DraftComposerTags.Sheet))
-        assertNull(composer.state.value.setupConfirm)
-    }
-
-    @Test
-    fun aNewAnswerWhileTheConfirmationIsOpenClosesItUnsent() {
-        openSheet()
-        ready()
-        isolate("branch-off")
-        answer(repo(hasSetup = true))
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        val id = composer.state.value.setupConfirmId
-        // The server answers the same inspect again (its background refresh landed): what was shown may not hold.
-        client.answerInspect(repo(hasSetup = false))
-        awaitGone(WorktreeTags.Confirm)
-        until("the sheet says why") { shown(DraftComposerTags.Error) == SETUP_CHANGED_COPY }
-        rule.runOnUiThread { assertEquals(com.tether.app.client.DraftSubmitResult.Stale, composer.confirmSetup(id, DraftFixtures.ORIGIN)) }
-        assertTrue(client.creates.isEmpty())
-        // Sent again: now without setup on the default base, no confirmation at all.
-        tap(DraftComposerTags.Send)
-        until("the create went out") { client.creates.size == 1 }
-    }
-
-    @Test
-    fun aSocketChangeWhileTheConfirmationIsOpenClosesItUnsent() {
-        openSheet()
-        ready()
-        isolate("checkout-branch")
-        type(WorktreeField.Branch, "feat/x")
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        rule.runOnUiThread { client.newSocket() }
-        awaitGone(WorktreeTags.Confirm)
-        rule.waitForIdle()
-        assertTrue(client.creates.isEmpty())
-    }
-
-    @Test
-    fun aHostileBranchNameIsShownAsTokens() {
-        openSheet()
-        ready()
-        isolate("checkout-branch")
-        val hostile = "feat/\u202Eevil\u200Bx"
-        type(WorktreeField.Branch, hostile)
-        until("the field holds it as typed") { formStr("worktreeBranch") == hostile }
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        val drawn = shown(WorktreeTags.confirmField("Branch"))
-        assertTrue("RLO is a token: $drawn", drawn.contains("⟨U+202E⟩"))
-        assertTrue("ZWSP is a token: $drawn", drawn.contains("⟨U+200B⟩"))
-        assertFalse("no raw RLO is drawn", drawn.contains('\u202E'))
-        assertEquals("the value confirmed is the value that would be sent", hostile, composer.state.value.setupConfirm?.ref)
     }
 
     @Test
@@ -459,25 +374,20 @@ class WorktreePhoneBehaviourTest : WorktreeHarness(412, 915) {
     }
 }
 
-/** ta-23f: the tablet's centred sheet carries the same controls and confirmation. */
+/** ta-23f: the tablet's centred sheet carries the same controls; ta-coik.11: Send sends at once there too. */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
 class WorktreeTabletBehaviourTest : WorktreeHarness(1280, 800) {
 
     @Test
-    fun thePullRequestPathConfirmsAndSendsTheBlock() {
+    fun thePullRequestPathSendsTheBlockAtOnce() {
         openSheet()
         ready()
         isolate("checkout-pr")
+        answer(repo(hasSetup = true))
         type(WorktreeField.Pr, " 0042 ")
         type(WorktreeField.Slug, "review")
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        awaitTag(WorktreeTags.Confirm)
-        rule.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
-        tap(WorktreeTags.ConfirmKey)
-        until("the create went out") { client.creates.size == 1 }
-        val block = client.creates.single().worktree!!
+        val block = sendOnce().worktree!!
         assertEquals("checkout-pr", block.mode)
         assertEquals(42L, block.prNumber)
         assertEquals("review", block.slug)

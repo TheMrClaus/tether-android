@@ -332,40 +332,22 @@ class TetherViewModelResumeTest {
     }
 
     /**
-     * ta-23f r2 (P4): closing the sheet cancels an open setup confirmation, unsent, so reopening it
-     * shows no confirmation (Send has to be pressed again); so does every other way the sheet goes.
+     * ta-coik.11: Send on an isolated draft creates at once, as the web does (no setup confirmation),
+     * even with no inspect answer yet; the sheet's closing paths have nothing to cancel.
      */
-    @Test fun closingTheSheetCancelsAnOpenSetupConfirmation() = runTest(dispatcher) {
+    @Test fun anIsolatedSendCreatesAtOnce() = runTest(dispatcher) {
         val client = ResumeClient()
         val vm = vm(client)
-        client.sessions.value = listOf(session("s1"))
         runCurrent()
         vm.draftComposer.refresh()
         vm.draftComposer.selectProvider("claude")
         vm.draftComposer.setText("first words")
         assertTrue(vm.draftComposer.selectIsolation("branch-off"))
-        val closes = listOf<Pair<String, () -> Unit>>(
-            "close" to vm::closeDraft,
-            "a selection" to { vm.selectSession("s1") },
-            "a resume" to { vm.resumeHistory(history("h1")) },
-        )
-        for ((how, close) in closes) {
-            vm.openDraft()
-            // No inspect answer: a new branch from the default base confirms (fail closed).
-            assertEquals(how, com.tether.app.client.DraftSubmitResult.NeedsConfirmation, vm.draftComposer.submit("https://a.example:443"))
-            val id = vm.draftComposer.state.value.setupConfirmId
-            assertTrue(how, vm.draftComposer.state.value.setupConfirm != null)
-            close()
-            runCurrent()
-            assertFalse(how, vm.draftOpen.value)
-            assertNull("$how: the confirmation went with the sheet", vm.draftComposer.state.value.setupConfirm)
-            vm.openDraft()
-            assertNull("$how: reopening shows none", vm.draftComposer.state.value.setupConfirm)
-            assertEquals("$how: its confirm sends nothing", com.tether.app.client.DraftSubmitResult.Stale, vm.draftComposer.confirmSetup(id, "https://a.example:443"))
-            assertEquals("$how: closing is not an error", "", vm.draftComposer.state.value.error)
-            assertEquals("first words", vm.draftComposer.state.value.text)
-        }
-        assertTrue("nothing was created", client.requests.isEmpty())
+        vm.openDraft()
+        assertEquals(com.tether.app.client.DraftSubmitResult.Sent, vm.draftComposer.submit("https://a.example:443"))
+        assertEquals(1, client.requests.size)
+        assertEquals(com.tether.app.protocol.tree.JsBool.TRUE, client.requests.single().form["useWorktree"])
+        assertEquals("", vm.draftComposer.state.value.error)
     }
 
     /** ta-abm r2 (F2, T7.4 r2 L4b): a sign-out drops the draft's attachments and any pick still being read. */

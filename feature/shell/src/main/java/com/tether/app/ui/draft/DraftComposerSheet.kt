@@ -153,8 +153,8 @@ import kotlinx.coroutines.launch
  *
  * ta-23f (slice 5): the worktree select beside the folder chip and its detail row under the project
  * row ([WorktreeSelect], [WorktreeDetails]); while isolation is on the sheet asks the server what the
- * folder's repo offers (the engine's matched `worktree-inspect`), and a Send that may run the
- * project's setup opens the setup confirmation ([WorktreeSetupConfirmDialog]) instead of sending.
+ * folder's repo offers (the engine's matched `worktree-inspect`) for the web's setup note. A Send that
+ * may run the project's setup sends at once, as on the web (ta-coik.11).
  *
  * Left for a later slice (nothing is drawn for it, so nothing looks like a control that is not
  * there): the GitHub issues / PRs dialog (T8.4).
@@ -436,12 +436,6 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             title = "Choose a working folder",
         )
     }
-    // ta-23f: the setup confirmation, one per opening (a new one re-arms its confirm key).
-    draft.setupConfirm?.let { confirmation ->
-        androidx.compose.runtime.key(draft.setupConfirmId) {
-            SetupConfirmHost(confirmation, draft.setupConfirmId, onConfirm = { id -> composer.confirmSetup(id, origin) }, onCancel = composer::cancelSetup)
-        }
-    }
     if (attachOpen) {
         AttachSheet(
             onDismiss = { attachOpen = false },
@@ -450,26 +444,6 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             onPickFiles = pickers.pickFiles,
         )
     }
-}
-
-/**
- * ta-23f: the open setup confirmation. Its confirm goes to the engine once (a double tap included):
- * the engine closes the confirmation first and builds the create from its newest state, sending
- * only if what was shown still holds.
- */
-@Composable
-private fun SetupConfirmHost(confirmation: com.tether.app.client.SetupConfirmation, id: Long, onConfirm: (Long) -> Unit, onCancel: (Long) -> Unit) {
-    val fired = remember(id) { booleanArrayOf(false) }
-    WorktreeSetupConfirmDialog(
-        confirmation = confirmation,
-        onConfirm = {
-            if (!fired[0]) {
-                fired[0] = true
-                onConfirm(id)
-            }
-        },
-        onCancel = { onCancel(id) },
-    )
 }
 
 /**

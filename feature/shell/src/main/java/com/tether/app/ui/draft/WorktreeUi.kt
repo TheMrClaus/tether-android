@@ -1,6 +1,5 @@
 package com.tether.app.ui.draft
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -57,12 +56,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import com.tether.app.client.SETUP_CONFIRM_ACTION
-import com.tether.app.client.SETUP_DEFAULT_BASE
-import com.tether.app.client.SETUP_FIELD_FOLDER
-import com.tether.app.client.SETUP_FIELD_ISOLATION
-import com.tether.app.client.SETUP_FIELD_NEW_BRANCH
-import com.tether.app.client.SetupConfirmation
 import com.tether.app.client.WorktreeCopy
 import com.tether.app.client.WorktreeField
 import com.tether.app.client.WorktreeModes
@@ -72,13 +65,8 @@ import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.chat.ControlSelect
 import com.tether.app.ui.components.CssBorder
-import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.TetherDialog
-import com.tether.app.ui.components.TetherDialogText
-import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.settings.ArmedConfirmKey
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeDirection
 import com.tether.app.ui.text.codeLabel
@@ -91,8 +79,8 @@ import com.tether.app.ui.theme.LocalTetherTypography
 /*
  * ta-23f (T8.1 slice 5): the composer's worktree isolation — components/draft-composer.tsx
  * WorktreeSelect (887c222 ~631-679, in the project row beside the folder chip) and WorktreeDetails
- * (~687-809, its own row under the project row) — and the setup confirmation (owner 2026-10-02;
- * coordinator option A), drawn from [com.tether.app.client.DraftComposerModel].
+ * (~687-809, its own row under the project row), drawn from [com.tether.app.client.DraftComposerModel].
+ * ta-coik.11: no setup confirmation; the web's setup note (90fbb9f:789-795) is all it shows.
  *
  * Every branch, ref and path here comes from the repo or the server: suggestions, the base
  * placeholder, the confirmation's ref / branch / folder are drawn by the exact rule (every bidi
@@ -100,20 +88,16 @@ import com.tether.app.ui.theme.LocalTetherTypography
  * confirmed is what is sent. Picking a suggestion only fills the field (nothing is sent).
  */
 
-/** Test tags of the worktree controls and the setup confirmation. */
+/** Test tags of the worktree controls and notes. */
 object WorktreeTags {
     const val Select = "draft-worktree"
     const val Details = "draft-worktree-row"
     const val NotRepo = "draft-worktree-not-repo"
     const val SetupNote = "draft-worktree-setup-note"
     const val Suggestions = "draft-worktree-suggestions"
-    const val Confirm = "draft-setup-confirm"
-    const val ConfirmKey = "draft-setup-confirm-key"
-    const val Cancel = "draft-setup-cancel"
     fun warning(index: Int) = "draft-worktree-warning-$index"
     fun field(field: WorktreeField) = "draft-worktree-field-${field.key}"
     fun suggestion(value: String) = "draft-worktree-suggestion:$value"
-    fun confirmField(name: String) = "draft-setup-field:$name"
 }
 
 /** The most suggestions one field lists at a time (the datalist's own list scrolls; so does this). */
@@ -352,56 +336,5 @@ private fun exactText(text: String): AnnotatedString {
                 append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(text)), tokenStyle(t)))
             }
         }.toAnnotatedString()
-    }
-}
-
-/**
- * The setup confirmation (owner 2026-10-02; coordinator option A): what the checkout is made from
- * and whether the project's setup WILL run or MAY run (it cannot be checked beforehand), shown over
- * the sheet when Send is pressed. Cancel (or Back, or the scrim) closes it and nothing is sent;
- * "Create session" ignores taps for the arming window after it appears ([ArmedConfirmKey]), so a
- * double tap on Send cannot confirm unread. The ref, the new branch and the folder are drawn by the
- * exact rule, so a name hiding a bidi control or a zero-width character shows it as a token.
- */
-@Composable
-fun WorktreeSetupConfirmDialog(confirmation: SetupConfirmation, onConfirm: () -> Unit, onCancel: () -> Unit) {
-    TetherDialog(
-        onDismiss = onCancel,
-        title = confirmation.title,
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(WorktreeTags.Cancel))
-            // ta-q9l: the host already keys the dialog on the confirmation's id; keyed here too, so
-            // a confirmation replaced under any host re-arms.
-            ArmedConfirmKey(SETUP_CONFIRM_ACTION, WorktreeTags.ConfirmKey, onConfirm, shown = confirmation)
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().testTag(WorktreeTags.Confirm), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TetherDialogText(confirmation.body)
-            ConfirmField(SETUP_FIELD_ISOLATION, AnnotatedString(confirmation.modeLabel), muted = false)
-            val ref = confirmation.ref
-            ConfirmField(confirmation.refLabel, if (ref == null) AnnotatedString(SETUP_DEFAULT_BASE) else exactText(ref), muted = ref == null)
-            confirmation.newBranch?.let { ConfirmField(SETUP_FIELD_NEW_BRANCH, exactText(it), muted = false) }
-            ConfirmField(SETUP_FIELD_FOLDER, exactText(confirmation.cwd), muted = false)
-        }
-    }
-}
-
-/** A confirmation's value well: the name over the value (mono, on the mineral well). */
-@Composable
-private fun ConfirmField(label: String, value: AnnotatedString, muted: Boolean) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = t.muted, style = type.ui.let { androidx.compose.ui.text.TextStyle(fontFamily = it, fontSize = 12.sp, fontWeight = FontWeight(600), lineHeight = 1.5.em) })
-        Text(
-            value,
-            color = if (muted) t.muted else t.ink,
-            style = androidx.compose.ui.text.TextStyle(fontFamily = type.mono, fontSize = 13.sp, lineHeight = 1.5.em),
-            modifier = Modifier
-                .testTag(WorktreeTags.confirmField(label))
-                .fillMaxWidth()
-                .background(t.mineral, RoundedCornerShape(8.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        )
     }
 }

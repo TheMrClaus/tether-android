@@ -925,7 +925,6 @@ val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
 
 /**
  * The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed.
- * ta-23f: public, so the new-session composer's setup confirmation (feature/shell) arms the same way.
  *
  * ta-q9l: [shown] is what the confirmation shows (its edit, its "Now"): when it changes while the
  * dialog is open, the key disarms and the window runs again, so a value replaced under the user's
@@ -933,7 +932,7 @@ val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
  * same thing is shown); null keys on nothing (the key arms once per composition).
  */
 @Composable
-fun ArmedConfirmKey(
+internal fun ArmedConfirmKey(
     label: String,
     tag: String,
     onConfirm: () -> Unit,

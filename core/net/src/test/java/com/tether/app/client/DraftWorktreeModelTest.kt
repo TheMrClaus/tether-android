@@ -24,9 +24,9 @@ import org.junit.Test
  *   per folder per socket, while isolation is on; only the `worktree-source` echoing it, for that
  *   folder, on that socket, is taken (a stale folder's, request's or socket's answer is ignored).
  * - Readiness: an incomplete isolation request blocks Send with the web's words, in the web's order.
- * - The setup confirmation (owner 2026-10-02; coordinator option A): Send opens it instead of sending
- *   when setup will or may run; confirm sends once, from the newest state; cancel sends nothing; any
- *   change to what it showed (a new answer, the folder, the socket, a field) closes it unsent.
+ * - ta-coik.11: Send creates at once whatever the inspected config says, as the deployed web does
+ *   (90fbb9f draft-composer.tsx:789-795 shows a note only); the frame is the one the same form makes
+ *   with no answer at all.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DraftWorktreeModelTest {
@@ -268,22 +268,77 @@ class DraftWorktreeModelTest {
         assertFalse(h.model.selectIsolation("bogus"))
     }
 
-    // --- the setup confirmation ---------------------------------------------------------------------
+    // --- ta-coik.11: Send sends at once (the web shows a note, no confirmation) -------------------
 
-    @Test
-    fun withoutSetupANewBranchFromTheDefaultBaseSendsAtOnce() = runTest {
+    /** Every isolation mode with its required input, as the user would fill it. */
+    private fun Harness.fill(mode: String) {
+        assertTrue(model.selectIsolation(mode))
+        when (mode) {
+            "checkout-pr" -> model.setWorktreeField(WorktreeField.Pr, "42")
+            "checkout-branch" -> model.setWorktreeField(WorktreeField.Branch, "feat/x")
+        }
+    }
+
+    /** The answers ta-23f confirmed on (setup will run, may run, cannot be vouched for) and their controls. */
+    private val answers: List<WorktreeSourceInfo?> = listOf(
+        null,
+        repo(hasSetup = true),
+        repo(hasSetup = true, scripts = 3),
+        repo(hasSetup = false),
+        repo(hasSetup = false, scripts = 2),
+        repo(hasSetup = false, defaultBaseRef = "upstream/main", remote = "upstream"),
+        repo(hasSetup = true, defaultBaseRef = "HEAD", remote = null),
+        notARepo,
+    )
+
+    /** The frame [mode] makes with no inspect at all (requestId blanked: the inspect draws tokens too). */
+    private fun TestScope.baseline(mode: String, base: String? = null): ClientMessage.Create {
         val h = harness()
-        h.isolate("branch-off", repo(hasSetup = false, scripts = 2))
+        h.fill(mode)
+        base?.let { h.model.setWorktreeField(WorktreeField.BaseRef, it) }
         assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
-        assertNull(h.model.state.value.setupConfirm)
-        val frame = h.client.frames.single()
-        assertEquals(true, frame.useWorktree)
-        assertEquals("branch-off", frame.worktree?.mode)
-        assertNull(frame.worktree?.baseRef)
+        return h.client.frames.single().copy(requestId = "")
     }
 
     @Test
-    fun localNeverConfirms() = runTest {
+    fun sendCreatesAtOnceEvenWithSetupPresent() = runTest {
+        for (mode in listOf("branch-off", "checkout-branch", "checkout-pr")) {
+            for (base in if (mode == "branch-off") listOf(null, "origin/main", "origin/dev") else listOf(null)) {
+                val expected = baseline(mode, base)
+                for (info in answers) {
+                    val h = harness()
+                    h.fill(mode)
+                    base?.let { h.model.setWorktreeField(WorktreeField.BaseRef, it) }
+                    assertTrue(h.model.inspectWorktree())
+                    if (info != null) assertTrue(h.model.onWorktreeSource(h.client.source(info)))
+                    val label = "$mode base=$base $info"
+                    assertEquals(label, DraftSubmitResult.Sent, h.model.submit(A))
+                    assertEquals("$label: one frame, at once", 1, h.client.frames.size)
+                    assertTrue(label, h.model.state.value.creating)
+                    assertEquals("$label: no error", "", h.model.state.value.error)
+                    assertEquals("$label: the frame is the one the form makes with no answer", expected, h.client.frames.single().copy(requestId = ""))
+                }
+            }
+        }
+    }
+
+    /** Positive control for the baseline: the block is the web's builder output, never empty. */
+    @Test
+    fun theBaselineFramesCarryTheWebsBlock() = runTest {
+        val pr = baseline("checkout-pr")
+        assertEquals(true, pr.useWorktree)
+        assertEquals("checkout-pr", pr.worktree?.mode)
+        assertEquals(42L, pr.worktree?.prNumber)
+        val branch = baseline("checkout-branch")
+        assertEquals("feat/x", branch.worktree?.branch)
+        val off = baseline("branch-off")
+        assertEquals("branch-off", off.worktree?.mode)
+        assertNull(off.worktree?.baseRef)
+        assertEquals("origin/dev", baseline("branch-off", "origin/dev").worktree?.baseRef)
+    }
+
+    @Test
+    fun localSendsAtOnceWithNoBlock() = runTest {
         val h = harness()
         assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
         assertEquals(false, h.client.frames.single().useWorktree)
@@ -291,254 +346,33 @@ class DraftWorktreeModelTest {
     }
 
     @Test
-    fun withSetupSendOpensTheConfirmationAndConfirmSendsOnce() = runTest {
-        val h = harness()
-        h.isolate("branch-off", repo(hasSetup = true))
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        assertTrue("nothing sent yet", h.client.frames.isEmpty())
-        val shown = h.model.state.value.setupConfirm!!
-        assertEquals(SetupConfirmation("branch-off", "Base", "origin/main", null, "/w", certain = true), shown)
-        val id = h.model.state.value.setupConfirmId
-        assertEquals(DraftSubmitResult.Sent, h.model.confirmSetup(id, A))
-        assertEquals("a double tap: the second finds nothing open", DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        assertEquals(1, h.client.frames.size)
-        assertEquals("branch-off", h.client.frames.single().worktree?.mode)
-        assertNull(h.model.state.value.setupConfirm)
-        assertTrue(h.model.state.value.creating)
-    }
-
-    @Test
-    fun cancelSendsNothing() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", repo(hasSetup = false))
-        h.model.setWorktreeField(WorktreeField.Pr, "42")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        val id = h.model.state.value.setupConfirmId
-        h.model.cancelSetup(id)
-        assertNull(h.model.state.value.setupConfirm)
-        assertEquals("a confirm after cancel sends nothing", DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        assertTrue(h.client.frames.isEmpty())
-        assertFalse(h.model.state.value.creating)
-        assertEquals("cancel is not an error", "", h.model.state.value.error)
-        assertEquals("hello", h.model.state.value.text)
-    }
-
-    @Test
-    fun aPullRequestAnExistingBranchAndAnotherBaseAlwaysConfirm() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", repo(hasSetup = false))
-        h.model.setWorktreeField(WorktreeField.Pr, "7")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        assertEquals(SetupConfirmation("checkout-pr", "Pull request", "#7", null, "/w", certain = false), h.model.state.value.setupConfirm)
-        h.model.cancelSetup()
-        h.model.selectIsolation("checkout-branch")
-        h.model.setWorktreeField(WorktreeField.Branch, "feat/x")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        assertEquals("feat/x", h.model.state.value.setupConfirm?.ref)
-        h.model.cancelSetup()
-        h.model.selectIsolation("branch-off")
-        h.model.setWorktreeField(WorktreeField.Branch, "")
-        h.model.setWorktreeField(WorktreeField.BaseRef, "origin/dev")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        assertEquals(false, h.model.state.value.setupConfirm?.certain)
-        h.model.cancelSetup()
-        h.model.setWorktreeField(WorktreeField.BaseRef, "origin/main")
-        assertEquals("the inspected default base without setup sends at once", DraftSubmitResult.Sent, h.model.submit(A))
-        assertEquals("origin/main", h.client.frames.single().worktree?.baseRef)
-    }
-
-    @Test
-    fun withNoAnswerYetANewBranchConfirmsFailingClosed() = runTest {
-        val h = harness()
-        h.isolate("branch-off", null)
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), h.model.state.value.setupConfirm)
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun aNewAnswerWhileOpenClosesItUnsent() = runTest {
-        val h = harness()
-        h.isolate("branch-off", repo(hasSetup = true))
-        h.model.submit(A)
-        val id = h.model.state.value.setupConfirmId
-        // The same request answered again (the same content even): what was shown may not hold.
-        assertTrue(h.model.onWorktreeSource(h.client.source(repo(hasSetup = true))))
-        assertNull(h.model.state.value.setupConfirm)
-        assertEquals(SETUP_CHANGED_COPY, h.model.state.value.error)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        assertTrue(h.client.frames.isEmpty())
-        // Send again: a fresh confirmation, and only its own id confirms.
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        val next = h.model.state.value.setupConfirmId
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        assertNotNull("an old id does not even close the new one", h.model.state.value.setupConfirm)
-        assertEquals(DraftSubmitResult.Sent, h.model.confirmSetup(next, A))
-        assertEquals(1, h.client.frames.size)
-    }
-
-    @Test
-    fun aFolderOrFieldChangeWhileOpenClosesItUnsent() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", repo(hasSetup = false))
-        h.model.setWorktreeField(WorktreeField.Pr, "42")
-        h.model.submit(A)
-        var id = h.model.state.value.setupConfirmId
-        h.model.setWorktreeField(WorktreeField.Pr, "43")
-        assertNull(h.model.state.value.setupConfirm)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        h.model.submit(A)
-        id = h.model.state.value.setupConfirmId
-        h.model.setCwd("/elsewhere")
-        assertNull(h.model.state.value.setupConfirm)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun aSocketChangeWhileOpenClosesItUnsent() = runTest {
-        val h = harness()
-        h.isolate("checkout-branch", repo(hasSetup = false))
-        h.model.setWorktreeField(WorktreeField.Branch, "feat/x")
-        h.model.submit(A)
-        val id = h.model.state.value.setupConfirmId
-        h.client.newSocket()
-        h.link()
-        assertNull(h.model.state.value.setupConfirm)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        // A socket that moved without the link collector having run yet: confirm still refuses.
-        h.model.submit(A)
-        val again = h.model.state.value.setupConfirmId
-        h.client.newSocket()
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(again, A))
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun aSocketChangeClosesAConfirmationOpenedWithNoAnswer() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", null)
-        h.model.setWorktreeField(WorktreeField.Pr, "42")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        val id = h.model.state.value.setupConfirmId
-        h.client.newSocket()
-        h.link()
-        assertNull("closed with its socket, not only refused on confirm", h.model.state.value.setupConfirm)
-        assertEquals(SETUP_CHANGED_COPY, h.model.state.value.error)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(id, A))
-        // A dropped link (same socket number, not connected) closes it too.
-        h.model.submit(A)
-        h.client.connection.value = ConnectionState.Disconnected
-        h.link()
-        assertNull(h.model.state.value.setupConfirm)
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun aConfirmDrawnForAnotherServerSendsNothing() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", null)
-        h.model.setWorktreeField(WorktreeField.Pr, "42")
-        h.model.submit(A)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(h.model.state.value.setupConfirmId, "https://b.example:443"))
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun theConfirmedCreateIsBuiltFromTheNewestState() = runTest {
+    fun theInterimPickerSendsAnIsolatedCreateAtOnce() = runTest {
         val h = harness()
         h.isolate("checkout-pr", repo(hasSetup = true))
         h.model.setWorktreeField(WorktreeField.Pr, "42")
-        h.model.setWorktreeField(WorktreeField.Slug, "review")
-        h.model.submit(A)
-        // The prompt is not part of what the confirmation shows; edited while it is open, the newest rides.
-        h.model.setText("the newest words")
-        assertNotNull(h.model.state.value.setupConfirm)
-        assertEquals(DraftSubmitResult.Sent, h.model.confirmSetup(h.model.state.value.setupConfirmId, A))
-        val frame = h.client.frames.single()
-        assertEquals(42L, frame.worktree?.prNumber)
-        assertEquals("review", frame.worktree?.slug)
-        h.client.createdSessions.value = CreatedReply(
-            com.tether.app.protocol.model.AgentSession(id = "s1", provider = "claude", name = "s1", cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1),
-            1,
-            frame.requestId,
-            1,
-        )
-        h.model.onCreated(h.client.createdSessions.value!!)
-        assertEquals(listOf("s1" to "the newest words"), h.client.sends)
+        assertEquals(DraftSubmitResult.Sent, h.model.submitChoice(NewSessionChoice("claude", "claude", null), A))
+        assertEquals(42L, h.client.frames.single().worktree?.prNumber)
     }
 
     @Test
-    fun theInterimPickerNeverSendsAnIsolatedCreateUnconfirmed() = runTest {
-        val h = harness()
-        h.isolate("checkout-pr", repo(hasSetup = false))
-        h.model.setWorktreeField(WorktreeField.Pr, "42")
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submitChoice(NewSessionChoice("claude", "claude", null), A))
-        assertTrue(h.client.frames.isEmpty())
-    }
-
-    @Test
-    fun aServerSwitchDropsTheQuestionTheAnswerAndTheConfirmation() = runTest {
+    fun aNewAnswerAfterSendChangesNothing() = runTest {
         val h = harness()
         h.isolate("branch-off", repo(hasSetup = true))
-        h.model.submit(A)
+        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertTrue(h.model.onWorktreeSource(h.client.source(repo(hasSetup = false))))
+        assertEquals("", h.model.state.value.error)
+        assertTrue(h.model.state.value.creating)
+        assertEquals(1, h.client.frames.size)
+    }
+
+    @Test
+    fun aServerSwitchDropsTheQuestionAndTheAnswer() = runTest {
+        val h = harness()
+        h.isolate("branch-off", repo(hasSetup = true))
+        assertNotNull(h.model.state.value.worktreeSource)
         h.model.onOrigin("https://b.example:443")
         runCurrent()
-        assertNull(h.model.state.value.setupConfirm)
         assertNull(h.model.state.value.worktreeSource)
-        assertEquals(DraftSubmitResult.Stale, h.model.confirmSetup(1, A))
         assertTrue(h.client.frames.isEmpty())
-    }
-    // --- r2: a default base the answer cannot vouch for --------------------------------------------
-
-    /**
-     * The verifier's reproduction against the 887c222 engine: the repo's only remote is `upstream`,
-     * inspect reads `hasSetup` at upstream/main (false) while the create, with no `remote` in the
-     * frame, resolves remote origin, finds none and cuts from HEAD, whose committed setup runs. Send
-     * must open the may-run confirmation, naming no inspected base.
-     */
-    @Test
-    fun onlyAnUpstreamRemoteWithNoSetupAndNoBaseConfirms() = runTest {
-        val h = harness()
-        h.isolate("branch-off", repo(hasSetup = false, defaultBaseRef = "upstream/main", remote = "upstream"))
-        assertEquals(DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-        val shown = h.model.state.value.setupConfirm!!
-        assertEquals(SetupConfirmation("branch-off", "Base", null, null, "/w", certain = false), shown)
-        assertEquals(SETUP_BODY_MAY_DEFAULT, shown.body)
-        assertTrue("nothing sent before the confirm", h.client.frames.isEmpty())
-        assertEquals(DraftSubmitResult.Sent, h.model.confirmSetup(h.model.state.value.setupConfirmId, A))
-        val block = h.client.frames.single().worktree!!
-        assertEquals("the frame stays the web's: no remote, no base", "branch-off", block.mode)
-        assertNull(block.baseRef)
-    }
-
-    @Test
-    fun aNullRemoteAHeadDefaultOrNotARepoConfirms() = runTest {
-        for (info in listOf(
-            repo(hasSetup = false, defaultBaseRef = "HEAD", remote = null),
-            repo(hasSetup = false, defaultBaseRef = "HEAD"),
-            repo(hasSetup = true, defaultBaseRef = "HEAD"),
-            repo(hasSetup = true, defaultBaseRef = "upstream/main", remote = "upstream"),
-            notARepo,
-            repo(hasSetup = false).copy(configKnown = false),
-        )) {
-            val h = harness()
-            h.isolate("branch-off", info)
-            assertEquals("$info", DraftSubmitResult.NeedsConfirmation, h.model.submit(A))
-            val shown = h.model.state.value.setupConfirm!!
-            assertFalse("$info: may run, never will", shown.certain)
-            assertNull("$info: the dialog names no inspected base", shown.ref)
-            assertTrue(h.client.frames.isEmpty())
-        }
-    }
-
-    /** Positive control: origin, an origin/… default, no setup -> no dialog, the web's frame at once. */
-    @Test
-    fun originWithANonHeadDefaultAndNoSetupStillSendsAtOnce() = runTest {
-        val h = harness()
-        h.isolate("branch-off", repo(hasSetup = false, defaultBaseRef = "origin/trunk"))
-        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
-        assertNull(h.model.state.value.setupConfirm)
-        assertNull(h.client.frames.single().worktree?.baseRef)
     }
 }

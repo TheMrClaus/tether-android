@@ -54,10 +54,6 @@ data class DraftComposerState(
      * folder and socket all matched), else null (isolation off, not asked yet, or no answer yet).
      */
     val worktreeSource: WorktreeSourceInfo? = null,
-    /** ta-23f: the setup confirmation open over the sheet (null: none); nothing is sent until it is confirmed. */
-    val setupConfirm: SetupConfirmation? = null,
-    /** ta-23f: which confirmation is open (a confirm drawn for an earlier one confirms nothing). */
-    val setupConfirmId: Long = 0,
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -82,11 +78,6 @@ enum class DraftSubmitResult {
     /** A create is already in flight; nothing was sent (the web ignores the second submit). */
     Busy,
 
-    /** ta-23f: the setup confirmation opened ([DraftComposerState.setupConfirm]); nothing was sent. */
-    NeedsConfirmation,
-
-    /** ta-23f: the confirmation tapped is not the one open, or what it showed changed; nothing was sent. */
-    Stale,
     NotConnected,
     NotLive,
     NotOffered,
@@ -136,9 +127,9 @@ enum class DraftSubmitResult {
  *   folder's repo offers (`worktree-inspect` with a fresh requestId, on the current socket); only the
  *   `worktree-source` echoing that requestId, for that folder, on that socket, is taken
  *   ([onWorktreeSource]); a folder change, isolation off or a new socket drops the question and its
- *   answer. Before a create that may run the project's setup ([WorktreeSetupGate]), [submit] opens
- *   the setup confirmation instead of sending; [confirmSetup] sends once, built from the newest
- *   state, and only while what it showed still holds; any change to it closes it unsent.
+ *   answer. The answer only feeds the web's notes ([WorktreeCopy.setupNote]); a create that may run
+ *   the project's setup is sent at once, as on the web (ta-coik.11: draft-composer.tsx 90fbb9f:789-795
+ *   shows a note, no confirmation).
  *
  * Room left for later slices: the handoff / takeover create (T8.5, issue #144: the first action
  * becomes `handoff`) and the GitHub work dialog's prefill (T8.4: [setText], [setCwd]).
@@ -191,19 +182,6 @@ class DraftComposerModel(
 
     /** ta-23f: the inspect [DraftComposerState.worktreeSource] answers (null: no source). */
     private var sourceFor: InspectRequest? = null
-
-    /** ta-23f: the open setup confirmation and what it was opened on. */
-    private class OpenConfirm(
-        val id: Long,
-        val confirmation: SetupConfirmation,
-        val source: InspectRequest?,
-        val epoch: Long,
-        val origin: String,
-        val requirePrompt: Boolean,
-    )
-
-    private var openConfirm: OpenConfirm? = null
-    private var confirmSerial = 0L
 
     private class PendingCreate(
         val requestId: String,
@@ -264,7 +242,6 @@ class DraftComposerModel(
         submitting = false
         inspect = null
         sourceFor = null
-        openConfirm = null
         _state.update { s -> dropAttachments(s).let { DraftComposerState(completed = it.completed) } }
     }
 
@@ -495,7 +472,7 @@ class DraftComposerModel(
      * A `worktree-source` frame. Taken only when it echoes the inspect in force, came on the socket
      * that inspect went out on (the live one), and the folder asked about is still the draft's, with
      * isolation on; any other (an old folder's, an old request's, an old socket's, one with no echo)
-     * changes nothing. A taken answer closes an open confirmation (what it showed may have changed).
+     * changes nothing.
      */
     fun onWorktreeSource(reply: WorktreeSourceReply): Boolean {
         val request = inspect ?: return false
@@ -504,7 +481,6 @@ class DraftComposerModel(
         if (_state.value.form["useWorktree"] != JsBool.TRUE || formStr("cwd") != request.cwd) return false
         sourceFor = request
         _state.update { it.copy(worktreeSource = reply.info) }
-        closeConfirm(changed = true)
         return true
     }
 
@@ -513,65 +489,14 @@ class DraftComposerModel(
         if (sourceFor == null && _state.value.worktreeSource == null) return
         sourceFor = null
         _state.update { it.copy(worktreeSource = null) }
-        closeConfirm(changed = true)
     }
 
-    /**
-     * After every form change: a question or answer about another folder (or with isolation off) is
-     * dropped, and an open confirmation that no longer shows what the create would carry closes.
-     */
+    /** After every form change: a question or answer about another folder (or with isolation off) is dropped. */
     private fun reconcileWorktree() {
         val on = _state.value.form["useWorktree"] == JsBool.TRUE
         val cwd = formStr("cwd")
         inspect?.let { if (!on || it.cwd != cwd) inspect = null }
         sourceFor?.let { if (!on || it.cwd != cwd) dropSource() }
-        val open = openConfirm ?: return
-        val now = WorktreeSetupGate.confirmationFor(_state.value.form, _state.value.worktreeSource)
-        if (now != open.confirmation || sourceFor !== open.source) closeConfirm(changed = true)
-    }
-
-    private fun closeConfirm(changed: Boolean) {
-        if (openConfirm == null) return
-        openConfirm = null
-        _state.update { it.copy(setupConfirm = null, error = if (changed) SETUP_CHANGED_COPY else it.error) }
-    }
-
-    /**
-     * The confirmation's confirm key ([id]: the confirmation it was drawn for). Closes the confirmation
-     * first (one confirmation, at most one send), then sends only when it is still the same server,
-     * socket and answer it was opened on, the draft is still ready, and the confirmation built from
-     * the NEWEST state is exactly the one shown; the create is built from that state. Otherwise
-     * nothing is sent ([DraftSubmitResult.Stale] says what was shown no longer holds).
-     */
-    fun confirmSetup(id: Long, expectedOrigin: String?): DraftSubmitResult {
-        val open = openConfirm ?: return DraftSubmitResult.Stale
-        if (open.id != id) return DraftSubmitResult.Stale
-        if (_state.value.creating || submitting) return DraftSubmitResult.Busy
-        openConfirm = null
-        _state.update { it.copy(setupConfirm = null) }
-        if (expectedOrigin != open.origin || client.linkEpoch.value != open.epoch || sourceFor !== open.source) {
-            _state.update { it.copy(error = SETUP_CHANGED_COPY) }
-            return DraftSubmitResult.Stale
-        }
-        val reason = readiness(open.requirePrompt)
-        if (reason.isNotEmpty()) {
-            _state.update { it.copy(error = reason) }
-            return DraftSubmitResult.NotReady
-        }
-        val entry = entryForKey(formKey()) ?: return DraftSubmitResult.NotReady
-        val s = _state.value
-        if (WorktreeSetupGate.confirmationFor(s.form, s.worktreeSource) != open.confirmation) {
-            _state.update { it.copy(error = SETUP_CHANGED_COPY) }
-            return DraftSubmitResult.Stale
-        }
-        return send(open.origin, entry)
-    }
-
-    /** The confirmation's Cancel (or Back, or the scrim): it closes and nothing is sent. [id] null: whichever is open. */
-    fun cancelSetup(id: Long? = null) {
-        val open = openConfirm ?: return
-        if (id != null && open.id != id) return
-        closeConfirm(changed = false)
     }
 
     /**
@@ -639,14 +564,7 @@ class DraftComposerModel(
             _state.update { it.copy(error = DRAFT_NOT_LIVE_COPY) }
             return DraftSubmitResult.NotLive
         }
-        // ta-23f (owner 2026-10-02): a create that may run the project's setup is confirmed first.
-        val s0 = _state.value
-        WorktreeSetupGate.confirmationFor(s0.form, s0.worktreeSource)?.let { confirmation ->
-            val id = ++confirmSerial
-            openConfirm = OpenConfirm(id, confirmation, sourceFor, client.linkEpoch.value, expectedOrigin, requirePrompt)
-            _state.update { it.copy(setupConfirm = confirmation, setupConfirmId = id, error = "") }
-            return DraftSubmitResult.NeedsConfirmation
-        }
+        // ta-coik.11: a create that may run the project's setup goes at once, as on the web (a note only).
         return send(expectedOrigin, entry)
     }
 
@@ -874,10 +792,9 @@ class DraftComposerModel(
      * session is never reported as not created; its first message is then the new session's draft).
      */
     fun onLink(connection: ConnectionState, linkEpoch: Long) {
-        // ta-23f: a question or answer from another socket no longer stands; neither does a confirmation.
+        // ta-23f: a question or answer from another socket no longer stands.
         inspect?.let { if (it.epoch != linkEpoch) inspect = null }
         sourceFor?.let { if (it.epoch != linkEpoch) dropSource() }
-        openConfirm?.let { if (it.epoch != linkEpoch || connection != ConnectionState.Connected) closeConfirm(changed = true) }
         val p = pending ?: return
         if (settleIfServerChanged(p)) return
         if (connection == ConnectionState.Connected && linkEpoch == p.linkEpoch) return
@@ -953,9 +870,6 @@ const val DRAFT_NOT_OFFERED_COPY = "This server no longer offers that choice. No
 /** ta-8cv r2: no reply to the create in time; the session may exist all the same. */
 const val DRAFT_REPLY_TIMEOUT_COPY =
     "The server has not answered yet, so the session may already exist. Check the session list before you try again."
-
-/** ta-23f: a setup confirmation closed because what it showed changed (or the link did); nothing was sent. */
-const val SETUP_CHANGED_COPY = "The worktree details changed before you confirmed, so nothing was sent. Check them and press Send again."
 
 /** ta-23f: the WorktreeDetails fields (lib/draft-form.ts DraftWorktreeOptions keys). */
 enum class WorktreeField(val key: String) {
