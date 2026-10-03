@@ -134,6 +134,11 @@ class ProfilesTest {
             sent(ProvidersPatch.write(dup, ProfileEdit.Label("a", "C"))),
         )
         assertEquals(profiles(), sent(ProvidersPatch.write(dup, ProfileEdit.Remove("a"))))
+        // r3 (verifier gap): the ID field's rename maps every entry with the id (:675 `profiles.map`).
+        assertEquals(
+            profiles("""{"id":"b","extends":"codex","label":"A","enabled":true}""", """{"id":"b","extends":"pi","label":"B","enabled":false,"x":1}"""),
+            sent(ProvidersPatch.write(dup, ProfileEdit.Rename("a", "b"))),
+        )
         val home = list("""[{"id":"a","extends":"codex","label":"A","homeDir":"/h","enabled":true},{"id":"a","extends":"pi","label":"B","homeDir":"/g","enabled":false}]""")
         assertEquals(
             profiles("""{"id":"a","extends":"codex","label":"A","enabled":true}""", """{"id":"a","extends":"pi","label":"B","enabled":false}"""),
@@ -392,6 +397,37 @@ class ProfilesTest {
         assertEquals(profiles(gemini.replace("\"enabled\":true", "\"enabled\":false"), work), sent(ProvidersPatch.write(two, ProfileEdit.Enabled("gemini", false))))
     }
 
+    /** ta-coik.17 r3 (security F3): queued edits are sent only to the server they were made for; for another, they are dropped. */
+    @Test fun queuedEditsNeverGoToAnotherServer() {
+        val outbox = ProvidersOutbox()
+        outbox.sent(ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!, two)
+        assertEquals(ProvidersOutbox.Step.Queued, outbox.submit(ProvidersPatch.write(two, ProfileEdit.Label("gemini", "G"))!!, two, 0, "https://a.example"))
+        // The write is answered on a socket of ANOTHER server: nothing goes out, and the queue is gone.
+        val answered = list("[$gemini,${work.replace("\"label\":\"Work\"", "\"label\":\"W\"")}]", generation = 2)
+        assertNull(outbox.next(answered, 0, "https://b.example"))
+        assertFalse(outbox.hasQueued)
+        assertNull(outbox.next(answered, 0, "https://a.example"))
+        // Its own server: sent.
+        val again = ProvidersOutbox()
+        again.sent(ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!, two)
+        again.submit(ProvidersPatch.write(two, ProfileEdit.Label("gemini", "G"))!!, two, 0, "https://a.example")
+        assertNotNull(again.next(answered, 0, "https://a.example"))
+    }
+
+    /** ta-coik.17 r3 (security F4): a reset leaves nothing of the last server's write (its expected list holds env values). */
+    @Test fun aResetClearsTheWriteInFlight() {
+        val outbox = ProvidersOutbox()
+        outbox.sent(ProvidersPatch.write(two, ProfileEdit.EnvValue("gemini", "MODE", SecretText(sentinel)))!!, two)
+        outbox.submit(ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!, two, 0)
+        assertTrue(outbox.inFlight.waiting(two))
+        outbox.reset()
+        assertFalse(outbox.inFlight.waiting(two))
+        assertEquals(ProvidersWriteStatus.Idle, outbox.inFlight.status(two))
+        assertFalse(outbox.hasQueued)
+        assertEquals(two.profiles.map { it.id }, outbox.shown(two)!!.profiles.map { it.id })
+        assertEquals("Work", outbox.shown(two)!!.profile("work")!!.label)
+    }
+
     @Test fun aWriteInFlightIsWaitingUntilAListContainsIt() {
         var now = 1_000L
         val inFlight = ProvidersInFlight(now = { now })
@@ -560,6 +596,30 @@ class ProfilesTest {
         ws.send("""{"type":"providers","profiles":[$gemini,$work]}""")
         assertEquals(profiles(gemini, work.replace("\"label\":\"Work\"", "\"label\":\"X\"")), h.expectFrame("set-providers"))
         assertEquals(ProvidersWriteStatus.Waiting(overdue = false), h.client.providersWriteStatus())
+    }
+
+    /** ta-coik.17 r3 (verifier gap): a write in flight and an edit queued behind it across a reconnect: the edit goes out once, on the new socket's list. */
+    @Test fun aQueuedEditSurvivesAReconnectWithAWriteInFlight() {
+        val ws = holdingProviders()
+        assertTrue(h.client.requestProviders())
+        h.expectFrame("providers")
+        val newest = h.client.providerProfiles.value!!
+        assertNull(h.client.setProviders(ProvidersPatch.write(newest, ProfileEdit.Remove("gemini"))!!, origin()))
+        h.expectFrame("set-providers")
+        assertNull(h.client.setProviders(ProvidersPatch.write(h.client.providerProfiles.value, ProfileEdit.Label("work", "W"))!!, origin()))
+        ws.close(1001, null)
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        h.enqueueConnect()
+        // The write's overdue timer (10 s) is pending too: fire the reconnect, not it.
+        h.scheduler.await { isReconnectDelay(it) && it != ProvidersInFlight.TIMEOUT_MS }.fire()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2)
+        assertEquals(json("""{"type":"providers"}"""), h.expectFrame("providers"))
+        assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
+        // The new socket's list (the remove never landed): the queued label goes out on it, gemini kept.
+        ws2.send("""{"type":"providers","profiles":[$gemini,$work]}""")
+        assertEquals(profiles(gemini, work.replace("\"label\":\"Work\"", "\"label\":\"W\"")), h.expectFrame("set-providers"))
+        assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
     }
 
     @Test fun aSignOutDropsTheList() {

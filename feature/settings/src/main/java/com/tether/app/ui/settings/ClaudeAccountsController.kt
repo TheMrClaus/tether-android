@@ -148,14 +148,19 @@ fun interface LoginLinkOpener {
                 false
             } catch (_: SecurityException) {
                 false
+            } catch (_: RuntimeException) {
+                // r3 (security F1): FileUriExposedException and the like: nothing opens, nothing crashes.
+                false
             }
         }
 
         /**
          * The intent a phone's browser starts for a page's link to [link]: `ACTION_VIEW` +
          * `CATEGORY_BROWSABLE`; an `intent:` link is read as Chrome reads it (`Intent.parseUri`),
-         * then made browsable with no named component or selector and no URI grant, as Chrome
-         * does. Null: an `intent:` link that does not parse.
+         * then made browsable with no named component or selector, its flags limited to Chrome's
+         * ALLOWED_INTENT_FLAGS (no URI grant, no CLEAR_TASK), as Chrome does. Null: an `intent:`
+         * link that does not parse, or whose data is a scheme a browser never opens
+         * ([ClaudeLoginLink.NOT_OPENED], r3 security F1: Chrome's file/content checks).
          */
         @SuppressLint("UseKtx")
         fun intentFor(link: ClaudeLoginLink): Intent? {
@@ -165,17 +170,22 @@ fun interface LoginLinkOpener {
                 } catch (_: java.net.URISyntaxException) {
                     return null
                 }
+                if (intent.scheme?.lowercase(java.util.Locale.ROOT) in ClaudeLoginLink.NOT_OPENED) return null
                 intent.addCategory(Intent.CATEGORY_BROWSABLE)
                 intent.component = null
                 intent.selector = null
-                intent.flags = intent.flags and URI_GRANTS.inv()
+                intent.flags = intent.flags and ALLOWED_INTENT_FLAGS
                 return intent
             }
             return Intent(Intent.ACTION_VIEW, Uri.parse(link.url)).addCategory(Intent.CATEGORY_BROWSABLE)
         }
 
-        private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+        /** r3 (security F2): Chrome's ExternalNavigationHandler ALLOWED_INTENT_FLAGS; every other flag of a parsed `intent:` link is dropped. */
+        @SuppressLint("InlinedApi")
+        const val ALLOWED_INTENT_FLAGS = Intent.FLAG_EXCLUDE_STOPPED_PACKAGES or Intent.FLAG_ACTIVITY_CLEAR_TOP or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_MATCH_EXTERNAL or Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_RETAIN_IN_RECENTS or
+            Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
 
     }
 }

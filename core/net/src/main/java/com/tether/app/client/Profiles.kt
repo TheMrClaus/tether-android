@@ -330,6 +330,13 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
         return false
     }
 
+    /** ta-coik.17 r3 (security F4): another server or a sign-out: nothing of the last write (its expected list holds env values) stays. */
+    @Synchronized
+    fun clear() {
+        pending = null
+        outcome = null
+    }
+
     /** r4: the write's state against [newest] (lifting the guard if it can): waiting (and whether overdue), or how it ended. */
     @Synchronized
     fun status(newest: ProvidersList?): ProvidersWriteStatus {
@@ -371,6 +378,9 @@ class ProvidersInFlight(private val now: () -> Long = { System.nanoTime() / 1_00
 class ProvidersOutbox(val inFlight: ProvidersInFlight = ProvidersInFlight()) {
     private val queued = mutableListOf<ProfileEdit>()
 
+    /** ta-coik.17 r3 (security F3): the server origin the queued edits were made for; they are sent only to it. */
+    private var queuedOrigin: String? = null
+
     /** The whole list of the write in flight (what the server will hold once it takes it). */
     private var sentProfiles: List<JsonObject>? = null
 
@@ -382,23 +392,37 @@ class ProvidersOutbox(val inFlight: ProvidersInFlight = ProvidersInFlight()) {
         data class Refused(val reason: ProvidersRefusal) : Step
     }
 
-    /** [write], made against [newest] (the server's) on socket [epoch]: sent now, or queued until the write in flight is answered. */
+    /**
+     * [write], made against [newest] (the server's) on socket [epoch] of server [origin]: sent now, or
+     * queued until the write in flight is answered.
+     */
     @Synchronized
-    fun submit(write: ProvidersWrite, newest: ProvidersList?, epoch: Long): Step {
+    fun submit(write: ProvidersWrite, newest: ProvidersList?, epoch: Long, origin: String? = null): Step {
         if (newest == null) return Step.Refused(ProvidersRefusal.NoList)
         if (queued.isEmpty() && newest.epoch == epoch && !inFlight.waiting(newest) &&
             write.generation == newest.generation && write.epoch == newest.epoch
         ) {
             return Step.Send(write)
         }
+        if (queuedOrigin != origin) queued.clear()
+        queuedOrigin = origin
         queued += write.edits
-        next(newest, epoch)?.let { return Step.Send(it) }
+        next(newest, epoch, origin)?.let { return Step.Send(it) }
         return if (queued.isEmpty()) Step.NoChange else Step.Queued
     }
 
-    /** The queued edits as one write on [newest], once nothing is in flight and the list is this socket's; they leave the queue. */
+    /**
+     * The queued edits as one write on [newest], once nothing is in flight and the list is this
+     * socket's; they leave the queue. r3 (security F3): only to the server [origin] they were made
+     * for; queued for another, they are dropped, never sent.
+     */
     @Synchronized
-    fun next(newest: ProvidersList?, epoch: Long): ProvidersWrite? {
+    fun next(newest: ProvidersList?, epoch: Long, origin: String? = null): ProvidersWrite? {
+        if (queued.isNotEmpty() && queuedOrigin != origin) {
+            queued.clear()
+            queuedOrigin = null
+            return null
+        }
         if (queued.isEmpty() || newest == null || newest.epoch != epoch || inFlight.waiting(newest)) return null
         val write = ProvidersPatch.rebuild(newest, queued.toList())
         queued.clear()
@@ -431,11 +455,13 @@ class ProvidersOutbox(val inFlight: ProvidersInFlight = ProvidersInFlight()) {
     @get:Synchronized
     val hasQueued: Boolean get() = queued.isNotEmpty()
 
-    /** Another server, a sign-out: nothing queued for the last one is ever sent. */
+    /** Another server, a sign-out: nothing queued for the last one is ever sent, and nothing of its write stays (r3, security F4). */
     @Synchronized
     fun reset() {
         queued.clear()
+        queuedOrigin = null
         sentProfiles = null
+        inFlight.clear()
     }
 }
 

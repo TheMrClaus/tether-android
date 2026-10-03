@@ -1201,6 +1201,9 @@ class RealTetherClient(
             // set aside / cleared HERE, in the same critical section that
             // moves the URL, so no connection to the new server can see them.
             switch = followServerLocked(fallbackOwner = serverOrigin(configuredBefore), adoptUnbound = false)
+            // ta-coik.17 r3 (security F3): a sign-in drops the providers queue and write in flight
+            // here, in the section that moves the URL, not later with the sign-in views.
+            sidebarSync.providersOutbox.reset()
             false
         }
         if (signedOutMeanwhile) {
@@ -4428,7 +4431,7 @@ class RealTetherClient(
             val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return ProvidersRefusal.NotConnected
             val outbox = sidebarSync.providersOutbox
             if (outbox.inFlight.overdue(newest)) ws.send(ClientMessage.ProvidersRequest.encode())
-            when (val step = outbox.submit(write, newest, epoch)) {
+            when (val step = outbox.submit(write, newest, epoch, socketOrigin)) {
                 is ProvidersOutbox.Step.Send -> sendProvidersLocked(ws, step.write, newest)
                 is ProvidersOutbox.Step.Refused -> return step.reason
                 ProvidersOutbox.Step.Queued, ProvidersOutbox.Step.NoChange -> Unit
@@ -4453,7 +4456,7 @@ class RealTetherClient(
     /** ta-coik.17 r2: after a `providers` frame: the write in flight answered, the queued edits go out as one write. Under [lock]. */
     private fun flushProvidersLocked(ws: WebSocket) {
         val newest = sidebarSync.serverProviderProfiles.value ?: return
-        sidebarSync.providersOutbox.next(newest, epoch)?.let { sendProvidersLocked(ws, it, newest) }
+        sidebarSync.providersOutbox.next(newest, epoch, socketOrigin)?.let { sendProvidersLocked(ws, it, newest) }
         sidebarSync.reshowProviders()
     }
 

@@ -419,6 +419,31 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals(0, intent.flags and (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
     }
 
+    /** r3 (security F1): an `intent:` link whose data is a scheme a browser never opens is refused, and opening it crashes nothing. */
+    @Test fun anIntentLinkToAFileContentJavascriptOrDataAddressOpensNothing() {
+        for (scheme in listOf("file", "content", "javascript", "data", "FILE")) {
+            val l = ClaudeLoginLink.parse("intent://x/y#Intent;scheme=$scheme;end")!!
+            assertNull(scheme, LoginLinkOpener.intentFor(l))
+            assertFalse(scheme, LoginLinkOpener.browser(androidx.test.core.app.ApplicationProvider.getApplicationContext()).open(l))
+        }
+        // An exception the platform throws at the start (a file:// URI exposed) is caught: false, no crash.
+        val throwing = object : android.content.ContextWrapper(androidx.test.core.app.ApplicationProvider.getApplicationContext()) {
+            override fun startActivity(intent: android.content.Intent?) = throw android.os.FileUriExposedException("file:///sdcard/x exposed")
+        }
+        assertFalse(LoginLinkOpener.browser(throwing).open(link))
+    }
+
+    /** r3 (security F2): a parsed `intent:` link keeps only Chrome's ALLOWED_INTENT_FLAGS: CLEAR_TASK and the grants are stripped. */
+    @Test fun anIntentLinksFlagsAreLimitedToChromesAllowedFlags() {
+        val clearTask = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or
+            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+        val intent = LoginLinkOpener.intentFor(ClaudeLoginLink.parse("intent://claude.ai/x#Intent;scheme=https;launchFlags=0x${Integer.toHexString(clearTask)};end")!!)!!
+        assertEquals(0, intent.flags and android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        assertEquals(0, intent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        assertEquals(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP, intent.flags)
+        assertEquals(0, intent.flags and LoginLinkOpener.ALLOWED_INTENT_FLAGS.inv())
+    }
+
     @Test fun aLoginAlreadyRunningElsewhereIsSaid() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
