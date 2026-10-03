@@ -9,6 +9,7 @@ import com.tether.app.protocol.tree.JsCodec
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.launch
 import okhttp3.WebSocket
 import okhttp3.mockwebserver.MockResponse
@@ -25,8 +26,10 @@ import java.util.concurrent.TimeUnit
  * MockWebServer socket). The web sends attachments inline, as base64 on the `send` frame (there is
  * no upload route); so does the app, as an operator control: only a call (an explicit Send) produces
  * one; it goes out once, on a live, handshaken socket of the server the composer was drawn for, for
- * a live, idle session that may be driven, within the frame bound, and it is never filed in the
- * durable outbox, queued, retried or persisted.
+ * a live, idle session that may be driven, within the frame bound. ta-coik.3: like the web's
+ * (use-tether.ts filePending :643-695) it is then kept in memory only, never persisted, and resent
+ * under its same key after the session is reconciled on a new connection, in order with the other
+ * sends to that session, until the web's MAX_TRIES / MAX_AGE_MS; offline it is refused (rolled back).
  */
 class AttachmentTransmissionTest {
 
@@ -182,23 +185,22 @@ class AttachmentTransmissionTest {
         assertTrue(frames("send").isEmpty())
     }
 
+    /**
+     * ta-coik.3: no app-only refusal while an earlier message to the session waits (the web's
+     * filePending files it and drains); on the wire the earlier one stays ahead.
+     */
     @Test
-    fun anEarlierMessageStillWaitingGoesFirst() {
-        val (client, ws) = connected()
+    fun anEarlierMessageStillWaitingNoLongerBlocksAndStaysAhead() {
+        val (client, _) = connected()
         val origin = client.consentOrigin.value
         client.send("s1", "first")
-        // ta-9dpl: wait for the frame itself, not a barrier. The snapshot's handler ends with a drain on
-        // the socket's reader thread; if that drain takes the new record first, it sends it after its
-        // lock, so under load this thread's barrier could reach the server ahead of it.
         val first = h.expectFrame("send")
-        assertEquals(AttachmentSendResult.PendingAhead, client.sendAttachments("s1", "second", listOf(picture), null, origin))
-        assertTrue(frames("send").isEmpty())
-        // Acknowledged (its turn started, then ended): now the attachments may go.
-        ws.send(turnStartedEvent("s1", "t1", 6, first.str("idempotencyKey")))
-        ws.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_end","turnId":"t1","outcome":"ok","seq":7,"ts":7}}""")
-        h.await(client.projectionTrees) { trees -> trees["s1"].toString().let { it.contains("\"done\"") && !it.contains("\"activeTurnId\":\"t1\"") } }
+        assertEquals("first", first.str("text"))
+        // "first" is in flight, unconfirmed: the attachments go too, after it.
         assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "second", listOf(picture), null, origin))
-        assertEquals(1, frames("send").size)
+        val second = frames("send").single()
+        assertEquals("second", second.str("text"))
+        assertTrue(second.containsKey("attachments"))
     }
 
     @Test
@@ -296,23 +298,196 @@ class AttachmentTransmissionTest {
         assertTrue("an offline attachment went out: $after", after.none { it.type() == "send" })
     }
 
-    @Test
-    fun aLinkThatDropsBeforeTheTurnIsConfirmedSaysSoAndNeverResends() {
-        val (client, ws) = connected()
-        collectErrors(client)
-        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
-        assertEquals(1, frames("send").size)
+    // --- redelivery (ta-coik.3: use-tether.ts filePending / drainPending, pending-input.mjs) -----
+
+    /** Drop [ws], reconnect, handshake; the session is re-attached and NOT yet reconciled. */
+    private fun reconnect(client: RealTetherClient, ws: WebSocket): WebSocket {
+        h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
-        awaitError { it.startsWith("The connection dropped before the server confirmed your message with attachments.") }
+        client.reconnectIfIdle()
+        val next = h.nextSocket()
+        h.handshake(next, ready())
+        h.expectFrame("attach")
+        return next
+    }
+
+    /** The idle snapshot that reconciles s1 on [ws] (it holds none of our keys), then every send after it. */
+    private fun reconcile(ws: WebSocket): List<JsonObject> {
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.serverBarrier(ws)
+        return frames("send")
+    }
+
+    @Test
+    fun aSentAttachmentIsResentOnceUnderItsSameKeyOnlyAfterTheReconnectReconciles() {
+        val (client, ws) = connected()
+        collectErrors(client)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "look", listOf(picture, notes), null, client.consentOrigin.value))
+        val original = frames("send").single()
+        val ws2 = reconnect(client, ws)
+        // The exactly-once gate: nothing before the session's snapshot on this connection.
+        h.serverBarrier(ws2)
+        assertTrue("resent before the reconcile", frames("send").isEmpty())
+        val resent = reconcile(ws2).single()
+        assertEquals("the SAME key (server dedupe)", original.str("idempotencyKey"), resent.str("idempotencyKey"))
+        assertEquals(original, resent)
+        // Once per try: a later snapshot on the same connection does not send it again.
+        ws2.send(snapshotFrame("s1", 5, idleState()))
+        h.serverBarrier(ws2)
+        assertTrue(frames("send").isEmpty())
+        assertTrue("no lost-message notice: it is being delivered", errors.none { it.contains("could not be delivered") })
+    }
+
+    @Test
+    fun aResendKeepsItsOrderWithTheOtherSendsToTheSession() {
+        val (client, ws) = connected()
+        val origin = client.consentOrigin.value
+        client.send("s1", "first")
+        h.expectFrame("send")
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "second", listOf(picture), null, origin))
+        frames("send")
+        client.send("s1", "third")
+        h.expectFrame("send")
+        val ws2 = reconnect(client, ws)
+        assertEquals(listOf("first", "second", "third"), reconcile(ws2).map { it.str("text") })
+    }
+
+    @Test
+    fun anAcceptedAttachmentIsNeverResent() {
+        val (client, ws) = connected()
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
+        val key = frames("send").single().str("idempotencyKey")
+        val ws2 = reconnect(client, ws)
+        // The snapshot's turns hold its key: the durable acknowledgement, nothing goes out.
+        val accepted = JsCodec.toJson(foldTree(freshTree(), ev("turn_started", "t1", seq = 1, ts = 1) { put("idempotencyKey", key) })).toString()
+        ws2.send(snapshotFrame("s1", 5, accepted))
+        h.serverBarrier(ws2)
+        assertTrue(frames("send").isEmpty())
+    }
+
+    /**
+     * The web's rollback (use-tether.ts filePending :675-692): a record with attachments the socket
+     * did not take (here: closing, after the server's close was answered, before the client saw the
+     * socket go) is withdrawn and refused, so the composer keeps it; it never goes out later.
+     */
+    @Test
+    fun anAttachmentTheSocketDidNotTakeIsRolledBackAndNeverSentLater() {
+        val (client, ws) = connected()
+        val origin = client.consentOrigin.value
+        val answer = java.util.concurrent.atomic.AtomicReference<AttachmentSendResult>()
+        client.raceHook = { point, _ ->
+            if (point == RacePoint.SocketClosing && answer.get() == null) {
+                answer.set(client.sendAttachments("s1", "into a closing socket", listOf(picture), null, origin))
+            }
+        }
+        h.enqueueConnect()
+        ws.close(1000, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        client.raceHook = null
+        assertEquals(AttachmentSendResult.NotConnected, answer.get())
+        client.reconnectIfIdle()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, ready())
+        h.expectFrame("attach")
+        val after = reconcile(ws2)
+        assertTrue("a rolled-back attachment went out: $after", after.isEmpty())
+    }
+
+    /** The gate alone (no sweeper): the web's MAX_TRIES attempts, then never again. */
+    @Test
+    fun itGoesOutAtMostTheWebsFiveTimes() {
+        val (client, first) = connected()
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "five tries", listOf(picture), null, client.consentOrigin.value))
+        val key = frames("send").single().str("idempotencyKey")
+        var ws = first
+        repeat(com.tether.app.protocol.helpers.PendingInput.MAX_TRIES - 1) {
+            ws = reconnect(client, ws)
+            assertEquals(listOf(key), reconcile(ws).map { it.str("idempotencyKey") })
+        }
+        ws = reconnect(client, ws)
+        assertTrue("a sixth try went out", reconcile(ws).isEmpty())
+    }
+
+    @Test
+    fun itIsGivenUpAfterTheWebsFiveTriesWithANotice() {
+        val client = h.newClient(sweepIntervalMs = 50)
+        h.enqueueConnect()
+        client.start()
+        var ws = h.nextSocket()
+        h.handshake(ws, ready())
+        client.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.await(client.liveSessions) { "s1" in it }
+        collectErrors(client)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "five tries", listOf(picture), null, client.consentOrigin.value))
+        val key = frames("send").single().str("idempotencyKey")
+        var tries = 1
+        repeat(com.tether.app.protocol.helpers.PendingInput.MAX_TRIES - 1) {
+            ws = reconnect(client, ws)
+            val sent = reconcile(ws)
+            assertEquals(listOf(key), sent.map { it.str("idempotencyKey") })
+            tries++
+        }
+        assertEquals(com.tether.app.protocol.helpers.PendingInput.MAX_TRIES, tries)
+        ws = reconnect(client, ws)
+        assertTrue("a sixth try went out", reconcile(ws).isEmpty())
+        awaitError { it.startsWith("This message and its 1 attachment could not be delivered and were not sent") }
+        ws = reconnect(client, ws)
+        assertTrue(reconcile(ws).isEmpty())
+    }
+
+    @Test
+    fun itIsGivenUpAfterTheWebsTenMinutesWithANotice() {
+        val client = h.newClient(sweepIntervalMs = 50)
+        h.enqueueConnect()
+        client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws, ready())
+        client.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.await(client.liveSessions) { "s1" in it }
+        collectErrors(client)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "aged", listOf(picture, notes), null, client.consentOrigin.value))
+        frames("send")
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        h.now.addAndGet(com.tether.app.protocol.helpers.PendingInput.MAX_AGE_MS.toLong())
+        awaitError { it.startsWith("This message and its 2 attachments could not be delivered and were not sent: \"aged\"") }
         h.enqueueConnect()
         client.reconnectIfIdle()
         val ws2 = h.nextSocket()
         h.handshake(ws2, ready())
         h.expectFrame("attach")
-        ws2.send(snapshotFrame("s1", 5, idleState()))
-        h.serverBarrier(ws2)
-        assertTrue("an attachment was resent", h.framesUntilBarrier().none { it.type() == "send" })
+        assertTrue("an expired attachment went out", reconcile(ws2).isEmpty())
+    }
+
+    @Test
+    fun aRecordWithAttachmentsIsNeverWrittenToDisk() {
+        val (client, ws) = connected()
+        val origin = serverOrigin(h.server.url("/").toString())!!
+        val marker = Attachment("secret.bin", "application/octet-stream", "U0VDUkVUTUFSS0VS")
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "with bytes", listOf(marker), null, client.consentOrigin.value))
+        frames("send")
+        // A text record filed after it IS persisted: wait for that write, which carries the store as it
+        // is (the attachment record included, in memory), then read the slot.
+        client.send("s1", "plain words")
+        h.expectFrame("send")
+        val deadline = System.currentTimeMillis() + 20_000
+        var raw: String? = null
+        while (System.currentTimeMillis() < deadline) {
+            raw = kotlinx.coroutines.runBlocking { h.settings.readPendingInput(origin) }
+            if (raw?.contains("plain words") == true) break
+            Thread.sleep(10)
+        }
+        assertTrue("the text record was persisted: $raw", raw!!.contains("plain words"))
+        assertTrue("attachment bytes reached the disk: $raw", !raw.contains("U0VDUkVUTUFSS0VS") && !raw.contains("secret.bin") && !raw.contains("with bytes"))
+        assertEquals(listOf("plain words"), PendingInput.fromPersisted(raw).records.map { it.text })
+        // And it is still held in memory: a reconnect resends it, ahead of the text.
+        val ws2 = reconnect(client, ws)
+        assertEquals(listOf("with bytes", "plain words"), reconcile(ws2).map { it.str("text") })
     }
 
     /**
@@ -347,7 +522,7 @@ class AttachmentTransmissionTest {
     }
 
     @Test
-    fun aConfirmedTurnLeavesNothingToWarnAbout() {
+    fun aConfirmedTurnLeavesNothingToWarnAboutOrResend() {
         val (client, ws) = connected()
         collectErrors(client)
         assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
@@ -357,7 +532,14 @@ class AttachmentTransmissionTest {
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
         Thread.sleep(100)
-        assertTrue(errors.none { it.contains("with attachments") })
+        assertTrue(errors.none { it.contains("with attachments") || it.contains("could not be delivered") })
+        // Acknowledged live (turn_started carried its key): nothing to resend on the next connection.
+        h.enqueueConnect()
+        client.reconnectIfIdle()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, ready())
+        h.expectFrame("attach")
+        assertTrue(reconcile(ws2).isEmpty())
     }
 
     // --- origin binding of the link the frame rides ---------------------------------------------

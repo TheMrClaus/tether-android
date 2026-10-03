@@ -163,7 +163,6 @@ internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when
     AttachmentSendResult.NotLive -> "Catching up — the message and its attachments were not sent. Try again in a moment."
     AttachmentSendResult.Locked -> "This session can’t take messages from here — the attachments were not sent."
     AttachmentSendResult.Busy -> "Wait for the current turn to finish before sending attachments."
-    AttachmentSendResult.PendingAhead -> "Your previous message is still being delivered — send the attachments once it arrives."
     AttachmentSendResult.TooLarge -> "This message is too large to send in one piece (at most ${AttachmentCopy.size(com.tether.app.client.AttachmentFrame.MAX_SEND_FRAME_BYTES)} encoded). Remove an attachment and try again."
     AttachmentSendResult.LinkBusy -> "Still sending your previous attachments — try again when that finishes."
     AttachmentSendResult.NotOffered -> "That agent isn’t offered for this session any more — nothing was sent."

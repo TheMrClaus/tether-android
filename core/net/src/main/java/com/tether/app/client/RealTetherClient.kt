@@ -91,6 +91,9 @@ internal enum class RacePoint {
 
     /** ta-2ew: a sign-in moved the URL to another origin; its views (the create answers too) are not cleared yet. */
     ServerMoved,
+
+    /** ta-coik.3: the server's close was answered; the socket refuses sends but is still the bound one. */
+    SocketClosing,
 }
 
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
@@ -112,9 +115,6 @@ private const val DISMISSALS_REMEMBERED = 200
 /** T6.7: how many sent interrupts per session a socket remembers the turns of. */
 private const val INTERRUPTS_REMEMBERED = 8
 
-/** T7.4: how many unconfirmed messages with attachments a socket remembers (each is megabytes: few). */
-private const val ATTACHMENTS_IN_FLIGHT_REMEMBERED = 16
-
 /** ta-8cv r2: create replies buffered for a slow collector, and create answers remembered by requestId. */
 private const val CREATE_REPLIES_BUFFERED = 64
 
@@ -125,25 +125,6 @@ private const val CREATE_REPLIES_REMEMBERED = 32
 
 /** T7.4: a message with attachments offered to the durable path (never used for them). */
 internal const val ATTACHMENTS_NOT_SENT_COPY = "Not connected — the message and its attachments were not sent."
-
-/** T7.4: the link went before the server confirmed [count] message(s) with attachments. */
-internal fun attachmentsUnconfirmedCopy(count: Int): String =
-    if (count == 1) {
-        "The connection dropped before the server confirmed your message with attachments. It was not resent: check the conversation and send it again if it is missing."
-    } else {
-        "The connection dropped before the server confirmed $count messages with attachments. They were not resent: check the conversation and send them again if they are missing."
-    }
-
-/** T7.4: every `idempotencyKey` a projection's turns carry (the durable acknowledgement). */
-internal fun turnKeysOf(tree: JsObj): Set<String> {
-    val turns = tree["turnsById"] as? JsObj ?: return emptySet()
-    val keys = HashSet<String>()
-    for ((_, turn) in turns.entries) {
-        val key = (turn as? JsObj)?.get("idempotencyKey") as? JsStr ?: continue
-        keys.add(key.value)
-    }
-    return keys
-}
 
 /** use-tether.ts:1169: a failed `interrupt_result` without the server's own words. */
 internal const val INTERRUPT_NOT_DELIVERED = "The interrupt request could not be delivered."
@@ -480,9 +461,6 @@ class RealTetherClient(
     // T6.3: sessions a snapshot confirmed on the CURRENT socket (SYNC_DESIGN §4.1 "Live"); a
     // decision is transmitted only for one of them. Emptied with the socket, the epoch, the server.
     private val liveThisEpoch = HashSet<String>()
-    // T7.4: messages with attachments handed to the CURRENT socket and not yet confirmed (their
-    // idempotencyKey -> session). Never resent: if the socket goes first the operator is told.
-    private val attachmentsInFlight = LinkedHashMap<String, String>()
     // T6.3: every (origin, session, request) this process decided, so none is ever sent twice.
     private val consentLedger = ConsentLedger()
 
@@ -2427,13 +2405,6 @@ class RealTetherClient(
         consentOriginState.value = null
         pingTask?.cancel()
         pingTask = null
-        // T7.4: a message with attachments this socket never confirmed is not resent anywhere: say
-        // it may not have arrived, so the operator can look and send it again deliberately.
-        if (attachmentsInFlight.isNotEmpty()) {
-            val lost = attachmentsInFlight.size
-            attachmentsInFlight.clear()
-            emitError(attachmentsUnconfirmedCopy(lost))
-        }
         // Replies to node requests can only come on the socket that carried them:
         // every waiter ends now instead of at its timeout. Safe under the lock,
         // because a waiter resumes on Dispatchers.Default (nodeRequest), never
@@ -2773,6 +2744,7 @@ class RealTetherClient(
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             synchronized(lock) { bindLocked(webSocket) }
             webSocket.close(1000, null)
+            raceHook?.invoke(RacePoint.SocketClosing, webSocket)
             if (code == CLOSE_DEVICE_REVOKED || code == CLOSE_SESSION_REVOKED) handleRevokedClose(webSocket, code)
         }
 
@@ -3160,11 +3132,6 @@ class RealTetherClient(
             val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, tree)
             pendingStore = result.store
             forgetLocked(result.cleared)
-            // T7.4: a state that holds the turn confirms a message with attachments as well.
-            if (attachmentsInFlight.containsValue(message.sessionId)) {
-                val keys = turnKeysOf(tree)
-                attachmentsInFlight.entries.removeAll { (key, session) -> session == message.sessionId && key in keys }
-            }
             // Only now is redelivery for this session safe on this connection.
             reconciledSessions.add(message.sessionId)
             // use-tether.ts:975 — never redeliver a key already cleared (tombstoned).
@@ -3231,7 +3198,6 @@ class RealTetherClient(
             // outcome later (completed, interrupted, outcome_unknown) it is never re-sent.
             val removed = synchronized(lock) {
                 if (socket !== webSocket) return
-                attachmentsInFlight.remove(ackedKey)
                 val result = PendingInput.ackKey(pendingStore, ackedKey)
                 pendingStore = result.store
                 if (result.removed) forgetLocked(listOf(ackedKey))
@@ -3326,8 +3292,8 @@ class RealTetherClient(
     // ------------------------------------------------------------------
 
     override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
-        // T7.4: attachments never enter the durable outbox (no redelivery, no queue, no persistence):
-        // they go through [sendAttachments] alone, which sends them once on the live socket.
+        // T7.4: a message with attachments goes through [sendAttachments] alone (its gates, the
+        // frame bound, and the web's rollback when it does not reach the wire).
         if (attachments.isNotEmpty()) {
             emitError(ATTACHMENTS_NOT_SENT_COPY)
             return
@@ -3351,6 +3317,7 @@ class RealTetherClient(
         val frame = ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
         val frameBytes = AttachmentFrame.utf8Length(frame)
         if (frameBytes > AttachmentFrame.MAX_SEND_FRAME_BYTES) return AttachmentSendResult.TooLarge
+        var evicted: List<PendingRecord> = emptyList()
         val result = synchronized(lock) {
             val link = AttachmentLink(
                 socketBound = socket != null,
@@ -3370,17 +3337,42 @@ class RealTetherClient(
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized AttachmentSendResult.Locked
             val tree = sessionStore.tree(sessionId) ?: return@synchronized AttachmentSendResult.NotLive
             if (tree["activeTurnId"] is JsStr) return@synchronized AttachmentSendResult.Busy
-            if (pendingStore.records.any { it.sessionId == sessionId }) return@synchronized AttachmentSendResult.PendingAhead
             if (mention != null && !CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized AttachmentSendResult.NotOffered
-            // OkHttp closes the socket rather than queue past its bound: a frame that would pass it
-            // now is not handed over. Frames sent outside this lock can still grow the queue before
-            // the send below (rare): OkHttp then refuses it, closing the socket; nothing is sent.
-            attachmentQueueRefusal(ws.queueSize(), frameBytes)?.let { return@synchronized it }
-            if (!ws.send(frame)) return@synchronized AttachmentSendResult.NotConnected
-            attachmentsInFlight[key] = sessionId
-            while (attachmentsInFlight.size > ATTACHMENTS_IN_FLIGHT_REMEMBERED) attachmentsInFlight.remove(attachmentsInFlight.keys.first())
+            // ta-coik.3 (use-tether.ts filePending :643-695): filed in the pending store under the key
+            // the frame carries, then ONE drain puts every sendable record on the wire oldest-first, so
+            // an earlier message to this session that may go now goes ahead of it (no app-only
+            // refusal while one waits). The record keeps its attachments in memory only
+            // (toPersistable leaves out every record that carries them, as the web's does), and it is
+            // redelivered like any record: after its session's snapshot is reconciled on a new
+            // connection, under the same key, until MAX_TRIES / MAX_AGE_MS (expireRecords).
+            val added = PendingInput.addRecord(pendingStore, key, PendingInput.KIND_SEND, sessionId, text, clock(), attachments, mention)
+            val drain = PendingInput.sendableRecords(added.store, reconciledSessions).map { record ->
+                record.key to if (record.key == key) frame else recordFrame(record).encode()
+            }
+            // OkHttp closes the socket rather than queue past its bound: frames that would pass it
+            // now are not handed over, and nothing is filed. Frames sent outside this lock can still
+            // grow the queue before the sends below (rare): OkHttp then refuses, closing the socket.
+            attachmentQueueRefusal(ws.queueSize(), drain.sumOf { AttachmentFrame.utf8Length(it.second) })?.let { return@synchronized it }
+            pendingStore = added.store
+            forgetLocked(added.evicted.map { it.key })
+            evicted = added.evicted
+            val sent = ArrayList<String>()
+            for ((recordKey, encoded) in drain) {
+                if (!ws.send(encoded)) break
+                sent += recordKey
+            }
+            pendingStore = PendingInput.markSent(pendingStore, sent, clock())
+            if (key !in sent) {
+                // The web's rollback: a record with attachments that did not reach the wire is
+                // withdrawn (the composer keeps the text and the files), never left to deliver later.
+                pendingStore = PendingInput.discardKey(pendingStore, key).store
+                forgetLocked(listOf(key))
+                return@synchronized AttachmentSendResult.NotConnected
+            }
             AttachmentSendResult.Sent
         }
+        if (evicted.isNotEmpty()) emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
+        if (result == AttachmentSendResult.Sent || result == AttachmentSendResult.NotConnected) persistPending()
         // Web #135: an attachment frame is large and never persisted, so a half-open socket
         // swallowing it is the worst case — probe right away.
         if (result == AttachmentSendResult.Sent) probeLink()
@@ -3518,18 +3510,20 @@ class RealTetherClient(
             val sendable = PendingInput.sendableRecords(pendingStore, reconciledSessions)
             if (sendable.isEmpty()) return
             pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
-            frames = sendable.map { record ->
-                if (record.kind == PendingInput.KIND_SEND) {
-                    ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments, record.mention)
-                } else {
-                    ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
-                }
-            }
+            frames = sendable.map(::recordFrame)
         }
         raceHook?.invoke(RacePoint.DrainComputed, frames)
         for (frame in frames) sendFrameOn(ws, frame)
         persistPending()
     }
+
+    /** The frame a pending record goes out as, under its own key (a redelivery is the SAME key). */
+    private fun recordFrame(record: PendingRecord): ClientMessage =
+        if (record.kind == PendingInput.KIND_SEND) {
+            ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments, record.mention)
+        } else {
+            ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
+        }
 
     private suspend fun sweeperLoop() {
         while (scope.isActive) {
@@ -3567,6 +3561,13 @@ class RealTetherClient(
     private fun undeliveredMessage(unsent: List<PendingRecord>): String {
         val first = unsent.first()
         val preview = if (first.text.length > 120) first.text.take(120) + "…" else first.text
+        // ta-coik.3: a message given up on with its attachments says so (the web's failed bubble
+        // carries the attachment count, use-tether.ts recordFailed).
+        val files = first.attachments?.size ?: 0
+        if (unsent.size == 1 && files > 0) {
+            val noun = if (files == 1) "1 attachment" else "$files attachments"
+            return "This message and its $noun could not be delivered and were not sent: \"$preview\""
+        }
         return if (unsent.size == 1) {
             "This message could not be delivered and was not sent: \"$preview\""
         } else {

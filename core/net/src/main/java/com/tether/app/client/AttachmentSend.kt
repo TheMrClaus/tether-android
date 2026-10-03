@@ -19,8 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * other frames (the resync `attach`, pings, the durable outbox's sends) are handed to the socket
  * outside that lock, so in a rare race one of them can grow the queue between the check and the
  * send. OkHttp's own check then refuses the frame: it closes the socket (1001) and nothing of the
- * frame is sent; the send reports [AttachmentSendResult.NotConnected] and is never retried (the
- * operator sends it again deliberately). The server's own frame bound (protocol-validate
+ * frame is sent; the send reports [AttachmentSendResult.NotConnected] and is withdrawn (the web's
+ * rollback: the composer keeps the message and its files). The server's own frame bound (protocol-validate
  * LIMITS.WS_FRAME_BYTES, 32 MiB, its `maxPayload`) is not announced to the client; the app's bound
  * is below it, so it is never the one that decides.
  *
@@ -120,9 +120,6 @@ enum class AttachmentSendResult {
 
     /** A turn is running: attachments ride an idle send only (the server never queues them). */
     Busy,
-
-    /** An earlier message to this session is still waiting to be confirmed: it goes first. */
-    PendingAhead,
 
     /** The encoded frame is over [AttachmentFrame.MAX_SEND_FRAME_BYTES]. */
     TooLarge,

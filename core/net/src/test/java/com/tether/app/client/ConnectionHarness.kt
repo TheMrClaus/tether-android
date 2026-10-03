@@ -193,6 +193,7 @@ class ConnectionHarness {
         backoff: Backoff = testBackoff(),
         configured: Boolean = true,
         deviceToken: String? = null,
+        sweepIntervalMs: Long = 3_600_000,
     ): RealTetherClient {
         server.start()
         settings = if (deviceToken != null) {
@@ -208,8 +209,8 @@ class ConnectionHarness {
             scope = scope,
             clock = { now.get() },
             backoff = backoff,
-            // The sweeper is not under test here; keep it out of the way.
-            sweepIntervalMs = 3_600_000,
+            // The sweeper is not under test here (unless a test asks for it); keep it out of the way.
+            sweepIntervalMs = sweepIntervalMs,
             scheduler = scheduler,
         )
         return client

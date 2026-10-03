@@ -213,12 +213,15 @@ interface TetherClient {
      * in answer to anything received. Under the lock, in order: a live, handshaken socket of a running
      * client; the composer drawn for THIS server ([expectedOrigin] = the socket's origin and the
      * outbox's); the session confirmed live on it; listed, and neither read-only, handed off nor
-     * archived; idle (no active turn); nothing of this session still waiting in the outbox; the
-     * mention, if any, offered by the current catalog; the encoded frame within
-     * [AttachmentFrame.MAX_SEND_FRAME_BYTES] and within what the socket's queue can take now; then
-     * enqueued on that socket, once, under a fresh idempotency key. It is never recorded in the
-     * durable outbox, retried, queued or persisted: offline it is refused, and if the link drops
-     * before the server confirms the turn the operator is told it may not have arrived.
+     * archived; idle (no active turn); the mention, if any, offered by the current catalog; the
+     * encoded frame within [AttachmentFrame.MAX_SEND_FRAME_BYTES] and within what the socket's queue
+     * can take now. Then (ta-coik.3, use-tether.ts filePending) it is filed in the pending store under
+     * a fresh idempotency key and one drain puts every sendable record on that socket oldest-first,
+     * so an earlier message to the session goes ahead of it. If it did not reach the wire it is
+     * withdrawn and refused (offline included): the composer keeps it. Once out, it is kept IN MEMORY
+     * only (never persisted) and redelivered under the same key after the session's snapshot is
+     * reconciled on a new connection, up to the web's MAX_TRIES / MAX_AGE_MS, then given up on with
+     * a notice.
      *
      * ta-2ew: [expectedEpoch] (the draft composer's first message: the [linkEpoch] its create went
      * out on) binds the send to that socket too, checked under the same lock: on any later socket it
