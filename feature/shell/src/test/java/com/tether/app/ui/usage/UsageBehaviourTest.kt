@@ -14,7 +14,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import com.tether.app.client.ClaudeClaimAnswer
 import com.tether.app.client.CodexConsumeAnswer
 import com.tether.app.client.FixedRouteHttp
@@ -27,7 +29,7 @@ import com.tether.app.ui.inspector.InspectorBoards
 import com.tether.app.ui.inspector.codexResetRequest
 import com.tether.app.ui.shell.LinkReadout
 import com.tether.app.ui.shell.ShellTags
-import com.tether.app.ui.shell.TetherTopbar
+import com.tether.app.ui.shell.TopbarMenu
 import com.tether.app.ui.shell.TopBarDestination
 import com.tether.app.ui.shell.TopbarActions
 import com.tether.app.ui.shell.TopbarState
@@ -69,6 +71,34 @@ abstract class UsageBehaviourBase {
     private fun advance(ms: Long) {
         rule.mainClock.advanceTimeBy(ms)
         rule.waitForIdle()
+    }
+
+    /**
+     * Brings the node into its nearest scrolling ancestor's viewport on the paused clock. The
+     * library's performScrollTo awaits the suspending scroll, whose animation needs frames that a
+     * paused clock never produces, so it blocks forever; the plain ScrollBy action only launches
+     * the scroll, and the frames are then driven here.
+     */
+    private fun SemanticsNodeInteraction.scrollIntoView(): SemanticsNodeInteraction {
+        repeat(4) {
+            val node = fetchSemanticsNode()
+            var container = node.parent
+            while (container != null && SemanticsActions.ScrollBy !in container.config) container = container.parent
+            checkNotNull(container) { "no scrolling ancestor" }
+            val viewport = container.boundsInRoot
+            // boundsInRoot is clipped by the scrolling ancestors; the unclipped box is what must come into view.
+            val bounds = androidx.compose.ui.geometry.Rect(node.positionInRoot, node.size.toSize())
+            val delta = when {
+                bounds.top < viewport.top -> bounds.top - viewport.top
+                bounds.bottom > viewport.bottom -> minOf(bounds.bottom - viewport.bottom, bounds.top - viewport.top)
+                else -> return this
+            }
+            val scroll = container.config[SemanticsActions.ScrollBy].action!!
+            rule.runOnUiThread { scroll(0f, delta) }
+            advance(1_000)
+        }
+        val node = fetchSemanticsNode()
+        error("still outside its viewport after scrolling: ${node.boundsInRoot}")
     }
 
     // ── The Usage page ───────────────────────────────────────────────────────
@@ -122,14 +152,18 @@ abstract class UsageBehaviourBase {
 
     @Test fun aLongBreakdownShowsEightUntilShowAll() {
         setUp { UsagePage(FakeUsageSource(), ORIGIN, onOpenConsole = {}) }
-        val more = rule.onNodeWithTag(UsageTags.showMore("Most-used tools"))
-        more.performScrollTo()
-        rule.onNodeWithText("Show all 9").assertExists()
-        rule.onAllNodesWithContentDescriptionPrefix("TodoWrite").assertCountEquals(0)
+        // usage-dashboard.tsx:291: past eight rows a breakdown folds; tools are sliced to eight first (:206), so never fold.
+        rule.onAllNodesWithTag(UsageTags.showMore("Most-used tools")).assertCountEquals(0)
+        val more = rule.onNodeWithTag(UsageTags.showMore("Tokens by model"))
+        more.scrollIntoView()
+        rule.onNodeWithText("Show all 10").assertExists()
+        rule.onAllNodesWithContentDescriptionPrefix("kimi-k2").assertCountEquals(0)
         more.performClick()
+        // On the paused clock the press lands in the first step and the page recomposes in the second.
+        advance(50)
         advance(50)
         rule.onNodeWithText("Show fewer").assertExists()
-        rule.onAllNodesWithContentDescriptionPrefix("TodoWrite").assertCountEquals(1)
+        rule.onAllNodesWithContentDescriptionPrefix("kimi-k2").assertCountEquals(1)
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithContentDescriptionPrefix(prefix: String) =
@@ -166,11 +200,11 @@ abstract class UsageBehaviourBase {
         assertEquals(listOf<String?>(null), source.of("accounts").map { it.a })
         rule.onNodeWithText("Host default").assertExists()
         rule.onNodeWithText("Claude accounts").assertExists()
-        rule.onNodeWithText("Limit resets: none — not offered on this plan.").performScrollTo()
+        rule.onNodeWithText("Limit resets: none — not offered on this plan.").scrollIntoView()
         rule.onNodeWithTag(AccountsTags.Refresh).performClick()
         advance(100)
         assertEquals("all", source.of("accounts").last().a)
-        rule.onNodeWithContentDescription("Update Work").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Update Work").scrollIntoView().performClick()
         advance(100)
         assertEquals("claude-work", source.of("accounts").last().a)
         rule.onNodeWithTag(AccountsTags.Done).performClick()
@@ -195,7 +229,7 @@ abstract class UsageBehaviourBase {
     @Test fun aBankedResetIsRedeemedThroughItsConfirmation() {
         val source = FakeUsageSource().apply { consumeAnswers += UsageCall.Ok(CodexConsumeAnswer("reset"), ORIGIN) }
         accountsDialog(source)
-        rule.onNodeWithTag(AccountsTags.UseCredit).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.UseCredit).scrollIntoView().performClick()
         advance(100)
         rule.onNodeWithText("Use a banked reset?").assertExists()
         rule.onNodeWithText("Redeeming instantly restores your weekly rate-limit window. This cannot be undone.").assertExists()
@@ -215,7 +249,7 @@ abstract class UsageBehaviourBase {
     @Test fun aRefusedRedeemShowsTheServersSentenceAndRefreshesNothing() {
         val source = FakeUsageSource().apply { consumeAnswers += UsageCall.Failed(UsageFailure.Http(400, "Codex is not enabled on this server.")) }
         accountsDialog(source)
-        rule.onNodeWithTag(AccountsTags.UseCredit).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.UseCredit).scrollIntoView().performClick()
         advance(100)
         val reads = source.of("accounts").size
         rule.onNodeWithTag(ResetTags.Confirm).performClick()
@@ -232,7 +266,7 @@ abstract class UsageBehaviourBase {
         )
         val source = FakeUsageSource().apply { claimAnswers += UsageCall.Ok(answer, ORIGIN) }
         accountsDialog(source)
-        rule.onNodeWithTag(AccountsTags.useGrant("g_1")).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.useGrant("g_1")).scrollIntoView().performClick()
         advance(100)
         rule.onNodeWithText("Use a limit reset on Host default?").assertExists()
         rule.onNodeWithText("At the limit now (weekly).").assertExists()
@@ -250,7 +284,7 @@ abstract class UsageBehaviourBase {
         val source = FakeUsageSource().apply { claimAnswers += UsageCall.Ok(answer, ORIGIN) }
         accountsDialog(source)
         rule.onAllNodesWithTag(AccountsTags.useGrant("g_0")).assertCountEquals(0)
-        rule.onNodeWithTag(AccountsTags.useGrant("g_1")).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.useGrant("g_1")).scrollIntoView().performClick()
         advance(100)
         rule.onNodeWithTag(ResetTags.Confirm).performClick()
         advance(100)
@@ -264,7 +298,7 @@ abstract class UsageBehaviourBase {
             override suspend fun consumeResetCredit(origin: String?, creditId: String?, sessionId: String?) = gate.await()
         }
         val h = accountsDialog(source)
-        rule.onNodeWithTag(AccountsTags.UseCredit).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.UseCredit).scrollIntoView().performClick()
         advance(100)
         rule.onNodeWithTag(ResetTags.Confirm).performClick()
         advance(100)
@@ -284,7 +318,7 @@ abstract class UsageBehaviourBase {
             override suspend fun consumeResetCredit(origin: String?, creditId: String?, sessionId: String?) = gate.await()
         }
         val h = accountsDialog(source)
-        rule.onNodeWithTag(AccountsTags.UseCredit).performScrollTo().performClick()
+        rule.onNodeWithTag(AccountsTags.UseCredit).scrollIntoView().performClick()
         advance(100)
         rule.onNodeWithTag(ResetTags.Confirm).performClick()
         advance(100)
@@ -293,7 +327,9 @@ abstract class UsageBehaviourBase {
         gate.complete(UsageCall.Ok(CodexConsumeAnswer("reset"), ORIGIN))
         advance(100)
         assertNull(h.codex.outcome)
-        rule.onNodeWithText("Use reset").assertExists()
+        // The confirmation is back at its first stage: its key reads "Use reset" (the row's key behind it too).
+        rule.onNodeWithTag(ResetTags.Confirm).assertIsEnabled()
+        rule.onAllNodesWithText("Use reset").assertCountEquals(2)
     }
 
     // ── The top bar, the inspector, the header badge ──────────────────────────
@@ -301,12 +337,17 @@ abstract class UsageBehaviourBase {
     @Test fun theTopBarsUsageAndAccountsAreLive() {
         var usage = 0
         var accounts = 0
-        val actions = TopbarActions(onOpenDrawer = {}, onLogout = {}, onOpenUsage = { accounts++ }, onOpenUsageAnalytics = { usage++ }, onNavigate = {})
+        val actions = TopbarActions(
+            onOpenDrawer = {}, onLogout = {}, onOpenUsage = { accounts++ }, onOpenUsageAnalytics = { usage++ }, onOpenLog = {}, onNavigate = {},
+            views = setOf(com.tether.app.ui.shell.DashboardView.Overview, com.tether.app.ui.shell.DashboardView.Sessions, com.tether.app.ui.shell.DashboardView.Scheduled),
+        )
+        // The phone bar folds both into its menu (topbar.tsx narrow): each item is live, with no "not available" reason.
         setUp {
-            TetherTopbar(actions, TopbarState(current = TopBarDestination.Usage, link = LinkReadout.Connected, wide = true, viewportWidth = 1680), onToggleMenu = {})
+            TopbarMenu(actions, TopbarState(current = TopBarDestination.Usage, link = LinkReadout.Connected, wide = false, menuOpen = true), onDismiss = {})
         }
-        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Usage)).performClick()
-        rule.onNodeWithTag(ShellTags.AccountsKey).performClick()
+        rule.onAllNodesWithText(com.tether.app.ui.shell.TopbarReasons.NOT_YET).assertCountEquals(0)
+        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Usage)).performClick()
+        rule.onNodeWithTag(ShellTags.MenuAccounts).performClick()
         assertEquals(1, usage)
         assertEquals(1, accounts)
     }
@@ -333,7 +374,8 @@ abstract class UsageBehaviourBase {
                 DeepSeekPeakBadge("opencode", "openrouter/deepseek-v4-pro", DeepSeekPeakVariant.Full)
             }
         }
-        rule.onAllNodesWithTag(DeepSeekTags.Badge).assertCountEquals(1)
+        // The tooltip anchor merges its content (long press shows the rates), so the pill's tag sits in the unmerged tree.
+        rule.onAllNodesWithTag(DeepSeekTags.Badge, useUnmergedTree = true).assertCountEquals(1)
         rule.onNodeWithContentDescription("DeepSeek API rate: Peak, 2× rate, Off-peak in 3h 0m").assertExists()
     }
 }

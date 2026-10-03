@@ -304,13 +304,13 @@ private fun RangeGroup(current: UsageRange, layout: UsageLayout, onSelect: (Usag
                     .cssSurface(RoundedCornerShape(6.dp), if (active) t.graphite else Color.Transparent)
                     .clickable(interaction, indication = null, role = Role.Button) { onSelect(r) }
                     .focusRing(focused, RoundedCornerShape(6.dp), t.violetStrong)
+                    .testTag(UsageTags.range(r))
                     .clearAndSetSemantics {
                         contentDescription = r.description
                         selected = active
                         stateDescription = if (active) "Selected" else "Not selected"
                     }
-                    .padding(horizontal = if (layout.compact) 10.dp else 14.dp)
-                    .testTag(UsageTags.range(r)),
+                    .padding(horizontal = if (layout.compact) 10.dp else 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -377,8 +377,8 @@ private fun Skeleton(layout: UsageLayout) {
             .cssSurface(RoundedCornerShape(12.dp), Color.Transparent, CssBorder(1.dp, t.line))
             .padding(1.dp)
             .clip(RoundedCornerShape(11.dp))
-            .clearAndSetSemantics { }
-            .testTag(UsageTags.Skeleton),
+            .testTag(UsageTags.Skeleton)
+            .clearAndSetSemantics { },
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         (0 until 4).chunked(columns).forEach { row ->

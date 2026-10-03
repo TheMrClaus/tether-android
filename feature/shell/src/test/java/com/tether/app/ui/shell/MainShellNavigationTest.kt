@@ -7,6 +7,7 @@ import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -208,16 +209,13 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         assertTrue(backLeavesTheApp)
     }
 
-    @Test fun usageIsShownUnavailableWithItsReason() {
+    @Test fun usageAndAccountsAreLiveAndFilesNeedsASession() {
         launch()
         onOverview()
-        for (destination in listOf(TopBarDestination.Usage)) {
-            val node = rule.onNodeWithTag(ShellTags.nav(destination))
-            node.assertIsNotEnabled()
-            assertEquals(TopbarReasons.NOT_YET, node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription))
-        }
-        // Accounts (T9.2) likewise; Files needs a session.
-        rule.onNodeWithTag(ShellTags.AccountsKey).assertIsNotEnabled()
+        // T9.2: Usage and Accounts are live, as on the web (T9.3's Scheduled too); Files needs a session.
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Scheduled)).assertIsEnabled()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Usage)).assertIsEnabled()
+        rule.onNodeWithTag(ShellTags.AccountsKey).assertIsEnabled()
         rule.onNodeWithTag(ShellTags.FilesKey).assertIsNotEnabled()
         assertTrue(selected(ShellTags.nav(TopBarDestination.Overview)))
     }

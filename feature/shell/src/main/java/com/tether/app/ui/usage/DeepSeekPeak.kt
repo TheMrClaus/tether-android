@@ -192,8 +192,8 @@ fun DeepSeekPeakBadge(provider: String?, model: String?, variant: DeepSeekPeakVa
                 .cssSurface(RoundedCornerShape(percent = 50), Color.Transparent, CssBorder(1.dp, if (copy.peak) t.warning else t.line))
                 .padding(1.dp)
                 .padding(horizontal = (if (compact) 0.36f else 0.44f).times(16).dp, vertical = (if (compact) 0.02f else 0.06f).times(16).dp)
-                .clearAndSetSemantics { contentDescription = "DeepSeek API rate: " + (listOf(label) + rest).joinToString(", ") }
-                .testTag(DeepSeekTags.Badge),
+                .testTag(DeepSeekTags.Badge)
+                .clearAndSetSemantics { contentDescription = "DeepSeek API rate: " + (listOf(label) + rest).joinToString(", ") },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy((if (compact) 0.26f else 0.3f).times(16).dp),
         ) {
