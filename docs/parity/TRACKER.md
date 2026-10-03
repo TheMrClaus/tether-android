@@ -142,7 +142,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
-| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | checkpoint: net source edc4c24d; UI wip in feature/shell ui/usage (UsageDashboard, UsageAccountsDialog, ResetDialogs, DeepSeekPeak) compile… |
+| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | checkpoint 2 (new maker): performScrollTo hang fixed (it awaits the suspending scroll, whose animation needs frames a paused clock never gi… |
 | T9.3 | Scheduled actions | VERIFIED | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
 
 ### Phase 10 — Settings & first run
