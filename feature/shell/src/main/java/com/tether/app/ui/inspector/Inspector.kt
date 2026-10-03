@@ -355,11 +355,9 @@ private fun IdentityBox(header: Header) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(line))
             IdentityCell("Account", Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RuledText(listOf(account), cssText(type.mono, 0.74f, 400), t.white, Modifier.weight(1f, fill = false), maxLines = 1)
-                    header.organization?.let {
-                        Spacer(Modifier.weight(1f))
-                        RuledText(listOf(it), cssText(type.ui, 0.7f, 620), t.ink, maxLines = 1)
-                    }
+                    // The email takes the row; the organisation keeps its own width at the end.
+                    RuledText(listOf(account), cssText(type.mono, 0.74f, 400), t.white, Modifier.weight(1f), maxLines = 1)
+                    header.organization?.let { RuledText(listOf(it), cssText(type.ui, 0.7f, 620), t.ink, maxLines = 1) }
                 }
             }
         }

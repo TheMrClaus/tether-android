@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.inspector.InspectorBoards.Reference.Variant
 import com.tether.app.ui.shell.TelemetrySheet
@@ -32,11 +34,11 @@ import org.robolectric.annotation.Config
  * is drawn tall enough to hold the whole body (the device scrolls it).
  */
 enum class TelemetryPanelShot(val id: String, val variant: Variant, val phoneHeight: Int, val tabletHeight: Int, val open: Boolean = false) {
-    Full("full", Variant.Full, 1_420, 1_480),
-    Open("open", Variant.Full, 3_000, 3_260, open = true),
-    Empty("empty", Variant.Empty, 560, 600),
-    Attention("attention", Variant.Attention, 1_540, 1_640),
-    Selected("selected", Variant.Selected, 1_780, 1_880),
+    Full("full", Variant.Full, 1_640, 1_700),
+    Open("open", Variant.Full, 2_900, 3_200, open = true),
+    Empty("empty", Variant.Empty, 640, 660),
+    Attention("attention", Variant.Attention, 1_760, 1_840),
+    Selected("selected", Variant.Selected, 2_060, 2_140),
 }
 
 internal fun ComposeContentTestRule.snapTelemetryPanel(shot: TelemetryPanelShot, skin: TetherSkin, size: ScreenSize, board: String) {
@@ -50,11 +52,16 @@ internal fun ComposeContentTestRule.snapTelemetryPanel(shot: TelemetryPanelShot,
         reducedMotion = true,
         beforeCapture = {
             if (shot.open) {
-                for (summary in listOf("Show 4 more", "By model, last turn", "RUNTIME", "Names")) {
-                    onNodeWithText(summary).performClick()
+                // Let each opened disclosure compose before the next lookup.
+                mainClock.autoAdvance = true
+                for (summary in listOf("Show 4 more", "By model, last turn", "RUNTIME")) {
+                    onNodeWithText(summary).performSemanticsAction(SemanticsActions.OnClick)
                     mainClock.advanceTimeBy(400)
                     waitForIdle()
                 }
+                onNodeWithTag(InspectorTags.Names, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
+                waitForIdle()
+                mainClock.autoAdvance = false
             }
         },
     ) {
@@ -66,7 +73,7 @@ internal fun ComposeContentTestRule.snapTelemetryPanel(shot: TelemetryPanelShot,
     }
 }
 
-private fun params(skins: List<TetherSkin> = listOf(TetherSkin.Studio, TetherSkin.StudioDark), shots: List<TelemetryPanelShot> = TelemetryPanelShot.entries): List<Array<Any>> =
+private fun panelParams(skins: List<TetherSkin> = listOf(TetherSkin.Studio, TetherSkin.StudioDark), shots: List<TelemetryPanelShot> = TelemetryPanelShot.entries): List<Array<Any>> =
     shots.flatMap { s -> skins.map { arrayOf<Any>(s, it) } }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
@@ -79,7 +86,7 @@ class TelemetryPanelPhoneScreenshotTest(private val shot: TelemetryPanelShot, pr
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = params()
+        fun params(): List<Array<Any>> = panelParams()
     }
 }
 
@@ -93,7 +100,7 @@ class TelemetryPanelTabletScreenshotTest(private val shot: TelemetryPanelShot, p
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = params()
+        fun params(): List<Array<Any>> = panelParams()
     }
 }
 
@@ -108,6 +115,6 @@ class TelemetryPanelFontScaleScreenshotTest(private val shot: TelemetryPanelShot
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = params(shots = listOf(TelemetryPanelShot.Full, TelemetryPanelShot.Attention, TelemetryPanelShot.Selected))
+        fun params(): List<Array<Any>> = panelParams(shots = listOf(TelemetryPanelShot.Full, TelemetryPanelShot.Attention, TelemetryPanelShot.Selected))
     }
 }
