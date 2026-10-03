@@ -222,7 +222,9 @@ class FileBrowserSafeTextTest {
         }
         rule.waitForIdle()
         rule.onNodeWithText("accessLevel", substring = true, useUnmergedTree = true).performTouchInput { longClick(center) }
-        rule.waitForIdle()
+        // ta-9dpl: wait for the menu itself (as NoCopyProbe.longPressForMenu does): an idle frame after
+        // the long press is not always enough on a loaded machine, and the press then finds no menu.
+        rule.waitUntil(20_000) { menu.shown != null }
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
         rule.waitForIdle()
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
@@ -261,7 +263,9 @@ class FileBrowserSafeTextTest {
         // The tab still draws at two columns.
         assertEquals("alpha  one", layoutOf("alpha").first.replace(PreviewCopy.TAB, "  "))
         rule.onNodeWithText("alpha", substring = true, useUnmergedTree = true).performTouchInput { longClick(centerLeft + androidx.compose.ui.geometry.Offset(6f, 0f)) }
-        rule.waitForIdle()
+        // ta-9dpl: wait for the menu itself (as NoCopyProbe.longPressForMenu does): an idle frame after
+        // the long press is not always enough on a loaded machine, and the press then finds no menu.
+        rule.waitUntil(20_000) { menu.shown != null }
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
         rule.waitForIdle()
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)

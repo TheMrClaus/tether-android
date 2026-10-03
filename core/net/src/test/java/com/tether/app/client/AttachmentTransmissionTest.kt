@@ -187,7 +187,10 @@ class AttachmentTransmissionTest {
         val (client, ws) = connected()
         val origin = client.consentOrigin.value
         client.send("s1", "first")
-        val first = frames("send").single()
+        // ta-9dpl: wait for the frame itself, not a barrier. The snapshot's handler ends with a drain on
+        // the socket's reader thread; if that drain takes the new record first, it sends it after its
+        // lock, so under load this thread's barrier could reach the server ahead of it.
+        val first = h.expectFrame("send")
         assertEquals(AttachmentSendResult.PendingAhead, client.sendAttachments("s1", "second", listOf(picture), null, origin))
         assertTrue(frames("send").isEmpty())
         // Acknowledged (its turn started, then ended): now the attachments may go.

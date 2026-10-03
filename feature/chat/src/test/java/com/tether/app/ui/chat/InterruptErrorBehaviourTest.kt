@@ -483,7 +483,9 @@ class InterruptErrorBehaviourTest {
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasContentDescription("Turn changes"))
         rule.onAllNodesWithTag(DIFF_MARKER_TAG, useUnmergedTree = true).onFirst().assertExists()
         rule.onNodeWithText("export const config = { retries: 5 };", substring = true, useUnmergedTree = true).performTouchInput { longClick(center) }
-        rule.waitForIdle()
+        // ta-9dpl: wait for the menu itself (as NoCopyProbe.longPressForMenu does): an idle frame after
+        // the long press is not always enough on a loaded machine, and the press then finds no menu.
+        rule.waitUntil(20_000) { menu.shown != null }
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
         rule.waitForIdle()
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)

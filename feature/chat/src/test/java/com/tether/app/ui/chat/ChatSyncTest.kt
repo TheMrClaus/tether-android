@@ -10,7 +10,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -46,7 +46,9 @@ import kotlinx.serialization.json.put
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ChatSyncTest {
-    @get:Rule val rule = createComposeRule()
+    // ta-9dpl: the v2 rule, as for every test whose screen reads IO-fed preferences (ta-b72): under v1
+    // the stored "Confirm before ending" was written to Compose state off the main thread and could be missed.
+    val rule = createComposeRule()
 
     private val session = chatSession("s1", historyId = null)
 
@@ -340,7 +342,10 @@ class ChatSyncTest {
         assertEquals(listOf("s1@https://other.example:true"), client.killCalls)
     }
 
-    @get:Rule val tmp = org.junit.rules.TemporaryFolder()
+    // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
+    // write still on the disk at the end can no longer fail (and fail the test) under a live screen.
+    val tmp = org.junit.rules.TemporaryFolder()
+    @get:Rule val chain: org.junit.rules.RuleChain = org.junit.rules.RuleChain.outerRule(tmp).around(rule)
     private val storeJob = kotlinx.coroutines.Job()
 
     @org.junit.After fun closeStore() = storeJob.cancel()

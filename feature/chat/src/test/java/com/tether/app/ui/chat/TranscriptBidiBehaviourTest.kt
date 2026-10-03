@@ -174,7 +174,9 @@ class TranscriptBidiBehaviourTest {
 
     private fun selectAllAndCopy(menu: MenuSpy, text: String) {
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).performTouchInput { longClick(center) }
-        rule.waitForIdle()
+        // ta-9dpl: wait for the menu itself (as NoCopyProbe.longPressForMenu does): an idle frame after
+        // the long press is not always enough on a loaded machine, and the press then finds no menu.
+        rule.waitUntil(20_000) { menu.shown != null }
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
         rule.waitForIdle()
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)

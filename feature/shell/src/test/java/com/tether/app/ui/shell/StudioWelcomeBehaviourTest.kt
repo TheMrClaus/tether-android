@@ -40,6 +40,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -51,8 +52,11 @@ import org.robolectric.annotation.Config
  * compose rule; the preferences are IO-fed).
  */
 abstract class StudioWelcomeBase(private val width: Int, private val height: Int) {
-    @get:Rule val rule = createComposeRule()
-    @get:Rule val tmp = TemporaryFolder()
+    // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
+    // write still on the disk at the end can no longer fail (and fail the test) under a live screen.
+    val tmp = TemporaryFolder()
+    val rule = createComposeRule()
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(rule)
 
     private val job = Job()
     protected val prefs: UiPrefs by lazy {

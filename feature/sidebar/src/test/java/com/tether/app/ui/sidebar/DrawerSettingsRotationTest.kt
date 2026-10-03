@@ -4,7 +4,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.StateRestorationTester
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -36,8 +37,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class DrawerSettingsRotationTest {
-    @get:Rule val rule = createComposeRule()
-    @get:Rule val tmp = TemporaryFolder()
+    // ta-9dpl: the v2 rule (StandardTestDispatcher), as for every test reading IO-fed state (ta-b72):
+    // under v1 the draft seed's DataStore read resumed the effect on the IO worker, which wrote the
+    // draft off the main thread, and the recomposer could miss it for good (General stayed disabled).
+    // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
+    // write still on the disk at the end can no longer fail (and fail the test) under a live screen.
+    val tmp = TemporaryFolder()
+    val rule = createComposeRule()
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(rule)
 
     private val storeJob = Job()
 
@@ -61,7 +68,7 @@ class DrawerSettingsRotationTest {
         val tag = SettingsPanelTags.toggle(GeneralToggle.ConfirmBeforeEnd)
         // ta-9j0x: the toggle reads On (the default) before the preferences load, but is enabled only
         // once the draft is seeded from them; a tap before that is dropped.
-        rule.waitUntil(5_000) { runCatching { rule.onNodeWithTag(tag).assertIsOn().assertIsEnabled() }.isSuccess }
+        rule.waitUntil(20_000) { runCatching { rule.onNodeWithTag(tag).assertIsOn().assertIsEnabled() }.isSuccess }
         rule.onNodeWithTag(tag).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(tag).assertIsOff()

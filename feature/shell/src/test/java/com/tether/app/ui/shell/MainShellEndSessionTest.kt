@@ -5,7 +5,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -32,6 +32,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -45,7 +46,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w600dp-h1000dp-mdpi")
 class MainShellEndSessionTest {
-    @get:Rule val rule = createComposeRule()
+    // ta-9dpl: the v2 rule, as for every test whose screen reads IO-fed preferences (ta-b72): under v1
+    // the stored "Confirm before ending" was written to Compose state off the main thread and could be missed.
+    val rule = createComposeRule()
 
     private val window = object : WindowInfo {
         override val isWindowFocused: Boolean get() = true
@@ -161,7 +164,10 @@ class MainShellEndSessionTest {
         assertEquals(listOf("s1@$OTHER_ORIGIN:true"), client.killCalls)
     }
 
-    @get:Rule val tmp = TemporaryFolder()
+    // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
+    // write still on the disk at the end can no longer fail (and fail the test) under a live screen.
+    val tmp = TemporaryFolder()
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(rule)
 
     /** A preference store of this test's own, with Settings → General's "Confirm before ending" set. */
     private fun prefsConfirming(confirm: Boolean): UiPrefs {
