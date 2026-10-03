@@ -290,33 +290,22 @@ class DevicesBehaviourTest {
 
     // ---- the pairing code: secret rules -------------------------------------------------------
 
-    @Test fun aMintedCodeIsMaskedAndInNoSemanticsLogPreferenceSavedStateOrClipboard() {
+    /** paired-devices.tsx 90fbb9f :110: the fresh code is drawn at once (ta-coik.5: no app-only mask), read letter by letter. */
+    @Test fun aMintedCodeIsShownAtOnceAndInNoLogPreferenceOrSavedState() {
         ShadowLog.clear()
         opened()
         mint()
         // Pair a device has no confirmation (the web), and goes once.
         assertEquals(1, source.writes.size)
-        assertEquals(DevicesCopy.CODE_HIDDEN, description(DevicesTags.CodeMasked))
-        assertFalse(exists(DevicesTags.CodeRevealed))
-        assertNowhere(SENTINEL)
+        assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
+        assertFalse(texts().any { it == "Reveal pairing code" || it == "Pairing code, hidden" })
+        assertFalse("saved state holds the code", savedState().contains(SENTINEL))
+        assertFalse("a log line holds the code", ShadowLog.getLogs().any { "${it.tag} ${it.msg} ${it.throwable}".contains(SENTINEL) })
+        assertFalse("the preference store holds the code", store.stored().toString().contains(SENTINEL))
         assertTrue(texts().any { it.startsWith("Expires in 4m 59s") })
         // Its re-read of the list followed; the shown code is matched out of the unclaimed count.
         waitCalls(5)
         assertEquals("devices", source.calls.last().name)
-    }
-
-    @Test fun revealDrawsTheCodeReadLetterByLetterAndHideMasksItAgain() {
-        opened()
-        mint()
-        tap(DevicesTags.CodeReveal)
-        waitFor(DevicesTags.CodeRevealed)
-        // Control: once revealed the probe finds it (so its absence elsewhere means something).
-        assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeRevealed))
-        assertTrue(allSemantics().contains(SENTINEL.toCharArray().joinToString(" ")))
-        assertFalse(savedState().contains(SENTINEL))
-        tap(DevicesTags.CodeReveal)
-        waitFor(DevicesTags.CodeMasked)
-        assertNowhere(SENTINEL)
     }
 
     @Test fun copyPutsASensitiveClipThatIsClearedShortlyAfter() {
@@ -329,8 +318,6 @@ class DevicesBehaviourTest {
         val description = systemClipboard.primaryClipDescription!!
         assertEquals(PairingClipboard.CLIP_LABEL, description.label.toString())
         assertTrue("marked sensitive", description.extras!!.getBoolean(PairingClipboard.EXTRA_IS_SENSITIVE))
-        // Still masked on screen: copying is not revealing.
-        assertFalse(allSemantics().contains(SENTINEL))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(PairingClipboard.CLEAR_AFTER_MS + 1_000))
         assertFalse("cleared after the delay", clipText()?.contains(SENTINEL) == true)
     }
@@ -362,40 +349,14 @@ class DevicesBehaviourTest {
         assertNowhere(SENTINEL)
     }
 
-    @Test fun aTabChangeKeepsTheCodeButMasksIt() {
+    @Test fun aTabChangeKeepsTheCode() {
         opened()
         mint()
-        tap(DevicesTags.CodeReveal)
-        waitFor(DevicesTags.CodeRevealed)
         state.tab = SettingsTab.Advanced
         compose.waitForIdle()
         state.tab = SettingsTab.Devices
-        waitFor(DevicesTags.CodeMasked)
-        assertFalse(allSemantics().contains(SENTINEL))
-    }
-
-    /** The app going to the background (ON_STOP) masks the code again: no Recents snapshot or glance holds it. Kept for when the operator comes back. */
-    @Test fun stoppingTheAppMasksTheCode() {
-        val owner = TestOwner()
-        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
-        compose.setContent {
-            CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner, LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
-            }
-        }
-        waitCalls(3)
-        source.answerReads()
-        mint()
-        tap(DevicesTags.CodeReveal)
-        waitFor(DevicesTags.CodeRevealed)
-        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
-        waitFor(DevicesTags.CodeMasked)
-        assertFalse(allSemantics().contains(SENTINEL))
-        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
-        compose.waitForIdle()
-        assertEquals(DevicesCopy.CODE_HIDDEN, description(DevicesTags.CodeMasked))
-        assertTrue(exists(DevicesTags.CodeCopy))
+        waitFor(DevicesTags.CodeShown)
+        assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
     }
 
     @Test fun anExpiredCodeIsDroppedAndItsCopyCleared() {
@@ -418,7 +379,7 @@ class DevicesBehaviourTest {
         clock = NOW + 6_000
         compose.mainClock.advanceTimeBy(6_000)
         waitText(DevicesCopy.EXPIRED)
-        assertFalse(exists(DevicesTags.CodeReveal))
+        assertFalse(exists(DevicesTags.CodeShown))
         assertFalse(exists(DevicesTags.CodeCopy))
         assertFalse(clipText()?.contains(SENTINEL) == true)
     }
@@ -495,8 +456,7 @@ class DevicesBehaviourTest {
         waitFor(DevicesTags.ConfirmSheet)
         assertTrue(texts().contains(DevicesCopy.REVOKE_TITLE))
         assertTrue(texts().contains(DevicesCopy.revokeBody("Galaxy Tab")))
-        // A cookie sign-in: revoking a device never signs this phone out, so the dialog does not say it does.
-        assertFalse(texts().any { it == DevicesCopy.SELF_SIGNS_OUT || it == DevicesCopy.MAYBE_SELF })
+        assertFalse(texts().any { it.contains("signed out of this server") })
         tapInDialog(DevicesTags.ConfirmCancel)
         waitGone(DevicesTags.ConfirmSheet)
         assertTrue(source.writes.isEmpty())
@@ -512,13 +472,15 @@ class DevicesBehaviourTest {
         assertEquals("devices", source.calls.last().name)
     }
 
-    @Test fun revokingThisPhoneSaysItSignsOutAndTheSignOutIsHandledCleanly() {
+    /** ta-coik.5: the web's confirmation, its words only (no app-only line for this phone); the sign-out is handled cleanly. */
+    @Test fun revokingThisPhoneAsksAsTheWebAndTheSignOutIsHandledCleanly() {
         // Signed in with a device token, the only paired device: it is this phone.
         opened(AppSignIn.DeviceToken, devices = listOf(PHONE))
         waitFor(DevicesTags.deviceSelf(PHONE.id))
         tap(DevicesTags.revoke(PHONE.id))
         waitFor(DevicesTags.ConfirmSheet)
-        assertTrue(texts().contains(DevicesCopy.SELF_SIGNS_OUT))
+        assertTrue(texts().contains(DevicesCopy.revokeBody(DevicesRules.label(PHONE.label, "Paired device"))))
+        assertFalse(texts().any { it.contains("signed out of this server") })
         tapInDialog(DevicesTags.ConfirmGo)
         waitCalls(4)
         val handle = signInHandle()
@@ -539,12 +501,13 @@ class DevicesBehaviourTest {
         assertEquals(4, source.calls.size)
     }
 
-    @Test fun amongSeveralDevicesATokenSignInIsToldItMayBeThisPhone() {
+    @Test fun amongSeveralDevicesATokenSignInGetsTheWebsConfirmation() {
         opened(AppSignIn.DeviceToken)
         assertFalse(exists(DevicesTags.deviceSelf(PHONE.id)))
         tap(DevicesTags.revoke(PHONE.id))
         waitFor(DevicesTags.ConfirmSheet)
-        assertTrue(texts().contains(DevicesCopy.MAYBE_SELF))
+        assertTrue(texts().contains(DevicesCopy.revokeBody(DevicesRules.label(PHONE.label, "Paired device"))))
+        assertFalse(texts().any { it.contains("signed out of this server") })
     }
 
     /** Settings closed after a cancelled confirmation and opened again: nothing pending survives, the panel reads afresh, nothing is sent. */
@@ -602,14 +565,6 @@ class DevicesBehaviourTest {
         opened(AppSignIn.DeviceToken, devices = listOf(PHONE.copy(current = true), TABLET))
         waitFor(DevicesTags.deviceSelf(PHONE.id))
         assertFalse(exists(DevicesTags.deviceSelf(TABLET.id)))
-        tap(DevicesTags.revoke(TABLET.id))
-        waitFor(DevicesTags.ConfirmSheet)
-        assertFalse("the other device is known not to be this phone", texts().any { it == DevicesCopy.SELF_SIGNS_OUT || it == DevicesCopy.MAYBE_SELF })
-        tapInDialog(DevicesTags.ConfirmCancel)
-        waitGone(DevicesTags.ConfirmSheet)
-        tap(DevicesTags.revoke(PHONE.id))
-        waitFor(DevicesTags.ConfirmSheet)
-        assertTrue(texts().contains(DevicesCopy.SELF_SIGNS_OUT))
     }
 
     // ---- ids the server sent that no route may name (r2, verifier F1/F2) -------------------------
@@ -682,25 +637,24 @@ class DevicesBehaviourTest {
         assertFalse(enabled(DevicesTags.Pair))
     }
 
-    // ---- the password switch from a device token (r2, security F6) -----------------------------
+    // ---- the password switch from a device token (ta-coik.5: as on the web) --------------------
 
-    @Test fun aDeviceTokenSignInIsNotOfferedTurningThePasswordOff() {
-        var captured: DevicesController? = null
-        compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
-                captured = controller
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
-            }
-        }
-        waitCalls(3)
-        source.answerReads(AppSignIn.DeviceToken)
+    /**
+     * sign-in-security.tsx 90fbb9f :90 `toggleDisabled = env || zeroPasskeys`: a device-token sign-in
+     * may turn the password off too; the server decides, and its 409 is shown in its own words.
+     */
+    @Test fun aDeviceTokenSignInCanTurnThePasswordOffAndTheServerDecides() {
+        opened(AppSignIn.DeviceToken)
         waitFor(DevicesTags.PasswordToggle)
-        compose.waitUntil(5_000) { texts().contains(DevicesCopy.PASSWORD_NEEDS_PASSKEY_SIGN_IN) }
-        assertFalse(enabled(DevicesTags.PasswordToggle))
-        compose.runOnIdle { assertFalse(captured!!.setPasswordLogin(false)) }
-        compose.waitForIdle()
-        assertTrue(source.writes.isEmpty())
+        assertTrue(texts().contains(DevicesCopy.PASSWORD_ON))
+        assertTrue(enabled(DevicesTags.PasswordToggle))
+        tap(DevicesTags.PasswordToggle)
+        waitCalls(4)
+        assertEquals("policy", source.calls.last().name)
+        assertEquals("false", source.calls.last().arg)
+        assertFalse(exists(DevicesTags.ConfirmSheet))
+        source.answer("policy", SecurityResult.Refused(409, "Sign in with a passkey first, then turn password sign-in off.", ORIGIN))
+        waitText("Sign in with a passkey first, then turn password sign-in off.")
     }
 
     @Test fun removingAPasskeyAsksAndRenamingDoesNot() {
@@ -790,7 +744,7 @@ class DevicesBehaviourTest {
     }
 }
 
-/** T10.4: a rotation drops the code and the reveal, saves nothing of it, and sends no write. */
+/** T10.4: a rotation drops the code, saves nothing of it, and sends no write. */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class DevicesRotationTest {
@@ -818,9 +772,7 @@ class DevicesRotationTest {
         compose.onNodeWithTag(DevicesTags.Pair, useUnmergedTree = true).performScrollTo().performClick()
         compose.waitUntil(5_000) { source.pending("pair") }
         source.answer("pair", ok(DevicesFixtures.code()))
-        compose.waitUntil(5_000) { exists(DevicesTags.CodeReveal) }
-        compose.onNodeWithTag(DevicesTags.CodeReveal, useUnmergedTree = true).performScrollTo().performClick()
-        compose.waitUntil(5_000) { exists(DevicesTags.CodeRevealed) }
+        compose.waitUntil(5_000) { exists(DevicesTags.CodeShown) }
         val writes = source.writes.size
         restoration.emulateSavedInstanceStateRestore()
         compose.waitUntil(5_000) { exists(DevicesTags.Paired) }

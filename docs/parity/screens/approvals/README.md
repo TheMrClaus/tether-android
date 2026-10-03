@@ -19,10 +19,10 @@ choices, permission grants or denials), so these are built from the reducer corp
   the reason, `Working directory · …` and `Network · https://…` lines, the input as pretty JSON.
 - `approval-grants`: the T6.3 permission paths. The "Requested permission expansion" fieldset, a checkbox per
   requested read and write path and for network access (all ticked at first, editable only when a `subset`
-  choice exists), the warning-coloured "Confirm these permissions: …" box (round 4: it names what is ticked), Allow all
-  (exact, disabled until confirmed), Allow selected (subset: disabled with nothing ticked, and, with every box
-  ticked, until confirmed, see below), Deny. Round 2 re-recorded these 8 goldens: with everything ticked at
-  first, Allow selected now renders disabled.
+  choice exists), the web's warning-coloured "Confirm the complete permission expansion shown above." box (only
+  when an `exact` choice exists), Allow all (exact, disabled until that box is ticked), Allow selected (subset:
+  disabled only with nothing ticked), Deny. ta-coik.5 re-recorded the grant goldens: Allow selected renders
+  enabled with everything ticked, as on the web.
 - `approval-locked`: a saved copy (not connected): the card renders, every key is disabled, and the reason is
   in words, "Connect to answer. This is a saved copy." (SYNC_DESIGN §4.2).
 - `approval-sent`: after the operator's tap: keys disabled and "Decision sent. Waiting for the agent."
@@ -54,14 +54,12 @@ Divergences from the web, on purpose:
   adds space around the link.
 - Provider and agent text on a card is cut at 4,000 characters for display (the answer keys keep the full
   question text). The web does not cut.
-- Every permission-granting choice needs a confirmation (coordinator decision, round 4; the web asks only
-  for "exact"): the box reads "Confirm these permissions: read …; write …; network access." and names exactly
-  what is ticked. It is never saved and clears whenever the card is re-created or anything is ticked or
-  unticked, so it is always made on the card on screen, after the last change. "Allow all" also needs every
-  box ticked (it grants the full request, so the confirmation has to have named all of it). A path listed
-  twice in a request is one permission (unticking either row unticks it). The confirmation is bound to the
-  exact state it was made in, and a grant key re-reads the ticks at the moment of the tap, so an untick
-  landing in the same instant as the tap (two fingers) sends nothing.
+- The grant confirmation is the web's (chat-view.tsx 90fbb9f :1173, :1191-1205, :1270-1289; ta-coik.5): one
+  box, drawn only for an `exact` choice, "Confirm the complete permission expansion shown above."; Allow all
+  sends the request as it came once it is ticked, whatever the path boxes say, and a path box changing leaves
+  it ticked; Allow selected sends exactly the ticked paths with no confirmation. It is never saved. A path
+  listed twice in a request is one permission (unticking either row unticks it), and a grant key re-reads
+  the ticks at the moment of the tap.
 - Paths on a grant card are shown quoted; cut in the middle (the first 60 and the last 99 characters stay, so
   a trailing `/../..` that decides the scope is always visible); and with every character that could hide,
   reorder, fake a space or fake the quotes written out as `\uXXXX`. That covers the control, format,

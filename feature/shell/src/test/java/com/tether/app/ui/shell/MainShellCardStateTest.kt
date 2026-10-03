@@ -123,12 +123,10 @@ class MainShellCardStateTest {
         rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
         rule.onAllNodesWithTag("grant-read")[1].assertIsOn()
 
-        // The grant needs the unsaved confirmation made on this card, after the last change.
+        // chat-view.tsx 90fbb9f :1191-1205 (ta-coik.5): "subset" grants the ticked paths with no confirmation.
         scrollTo("grant-confirm")
-        val selected = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true)
-        selected.assertIsNotEnabled()
-        rule.onNodeWithTag("grant-confirm").assertIsOff().performClick()
-        selected.assertIsEnabled().performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(
             listOf("approval:s1:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),
@@ -158,10 +156,10 @@ class MainShellCardStateTest {
         rule.waitForIdle()
         arm()
         scrollTo("grant-confirm")
-        // A new card instance: the confirmation was made on the old one and is not carried over.
+        // A new card instance: the "exact" confirmation was made on the old one and is not carried over.
         rule.onNodeWithTag("grant-confirm").assertIsOff()
         rule.onNodeWithTag("grant-network").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
         assertTrue(client.consentCalls.isEmpty())
     }
 

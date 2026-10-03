@@ -40,11 +40,9 @@ internal fun cutCodePoints(s: String, max: Int): String = ConsentGuard.cutCodePo
  * and bound to the configured server (round 5, I-2), keyed by that identity; ChatScreen falls back to
  * its own only when nobody provides one. Only indices and the operator's own
  * "Other" text are saved, never server text (a huge question cannot overflow the Bundle). What is NOT
- * stored: the "Confirm these permissions" tick and the send latch (see ApprovalCard).
+ * stored: the web's "exact" confirmation tick and the send latch (see ApprovalCard).
  *
- * Every grant needs that unsaved confirmation (round 4), bound to the record's generation at the
- * moment it was ticked, and the card re-reads the store at tap time (round 5, F1): a lost, evicted,
- * created or changed record, even one changed in the same frame as the tap, never sends.
+ * A grant key re-reads the store at tap time (round 5, F1), so it sends the ticks as they are then.
  */
 
 /**

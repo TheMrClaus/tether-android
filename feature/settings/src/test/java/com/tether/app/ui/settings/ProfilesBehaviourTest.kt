@@ -66,10 +66,9 @@ import org.robolectric.shadows.ShadowLog
  * ta-q6p: Settings > Engines > Custom providers (settings-dialog.tsx 887c222 `ProfilesEditor`)
  * through the semantics tree: the web's order and words; every write the exact whole list, waited
  * for on the writer; a write built from the newest list (a concurrent broadcast mid-edit is never
- * overwritten); the owner's rules: a command or home only through a confirmation that shows it, and
- * env values masked, revealed per row, never in the semantics tree, a log, the preference store or
- * saved state while masked, re-masked on close, tab change, server switch, rotation and ON_STOP,
- * no copy or cut, sent only on Done.
+ * overwritten). ta-coik.5, as on the web (90fbb9f :359-437, :696-740): the command, home and engine
+ * write at once, as every other field's blur does; env names and values are plain fields (a copy
+ * marked sensitive), never in a log, the preference store or saved state.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -185,19 +184,8 @@ class ProfilesBehaviourTest {
 
     private fun flushWrites() = androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
 
-    private fun arm() {
-        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
-        compose.waitForIdle()
-    }
-
-    private fun confirm() {
-        arm()
-        tag(ProfileTags.Confirm).performClick()
-    }
-
     private fun waitForWrites(w: RecordingProvidersWriter, n: Int) = compose.waitUntil(5_000) { w.writes.size >= n }
 
-    private fun parts(t: String) = SafeText.original(textOf(t)).split('\n')
 
     // ---- order and words -------------------------------------------------------------------------
 
@@ -289,9 +277,7 @@ class ProfilesBehaviourTest {
         compose.waitForIdle()
         compose.onNodeWithContentDescription("codex").performClick()
         compose.waitForIdle()
-        // r2 (owner decision B): another engine is confirmed first.
-        assertEquals(2, w.writes.size)
-        confirm()
+        // :696: another engine is written at once.
         waitForWrites(w, 3)
         assertEquals(frame(gemini(), zai().replace("\"enabled\":false", "\"enabled\":true").replace("\"extends\":\"claude\"", "\"extends\":\"codex\"")), w.frames()[2])
     }
@@ -392,43 +378,28 @@ class ProfilesBehaviourTest {
         assertTrue(texts().contains(ProfileRows.NOT_SAVED_CHANGED))
     }
 
-    // ---- what a profile runs: confirmed, never sent otherwise -------------------------------------
+    // ---- what a profile runs: written as the web's blur writes it (ta-coik.5) ----------------------
 
-    @Test fun aCommandIsSentOnlyAfterItsConfirmation() {
+    /** :713-717: split at whitespace, written on Done (the web's Enter blurs). */
+    @Test fun aCommandIsWrittenOnDoneAtOnceLikeTheWeb() {
         val w = answering()
         show(writer = w)
         typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/gemini/bin/gemini   --experimental-acp -v")
-        assertEquals("Done only asks", emptyList<Any>(), w.writes)
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        assertTrue(texts().contains("Change the Gemini CLI command?"))
-        assertEquals(listOf("/opt/gemini/bin/gemini", "--experimental-acp", "-v"), parts(ProfileTags.ConfirmNew))
-        assertEquals(listOf("gemini", "--experimental-acp"), parts(ProfileTags.ConfirmNow))
-        // The double space was read as one break: disclosed.
-        tag(ProfileTags.ConfirmNote).assertExists()
-        assertTrue(texts().contains(ProfileRows.SPLIT))
-        confirm()
         waitForWrites(w, 1)
         compose.waitForIdle()
         assertEquals(frame(gemini(command = """["/opt/gemini/bin/gemini","--experimental-acp","-v"]"""), WORK, zai()), w.frames().single())
-        assertTrue(w.writes.single().first.isConfirmed)
-        assertFalse(exists(ProfileTags.ConfirmSheet))
+        assertFalse("no confirmation", texts().any { it.startsWith("Change the ") })
         assertEquals("/opt/gemini/bin/gemini --experimental-acp -v", editable(field("gemini", ProfileTags.COMMAND)))
     }
 
-    @Test fun aHomeIsConfirmedTooAndAnEmptiedOneIsDropped() {
+    @Test fun aHomeIsWrittenAtOnceAndAnEmptiedOneIsDropped() {
         val w = answering()
         show(writer = w)
         typeAndDone(field("claude-work", ProfileTags.HOME), "")
-        assertTrue(texts().contains("Change the Claude Code (work) home?"))
-        assertEquals("Empty \u2014 the engine's dedicated home", textOf(ProfileTags.ConfirmNew))
-        assertEquals("/srv/homes/claude-work", SafeText.original(textOf(ProfileTags.ConfirmNow)))
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(), WORK.replace(",\"homeDir\":\"/srv/homes/claude-work\"", ""), zai()), w.frames().single())
+        compose.waitForIdle()
         typeAndDone(field("zai", ProfileTags.HOME), "  /srv/homes/zai ")
-        tag(ProfileTags.ConfirmNote).assertExists()
-        assertEquals(listOf("/srv/homes/zai"), parts(ProfileTags.ConfirmNew))
-        confirm()
         waitForWrites(w, 2)
         assertEquals(
             frame(gemini(), WORK.replace(",\"homeDir\":\"/srv/homes/claude-work\"", ""), zai().replace(",\"enabled\":false", ",\"enabled\":false,\"homeDir\":\"/srv/homes/zai\"")),
@@ -436,156 +407,36 @@ class ProfilesBehaviourTest {
         )
     }
 
-    @Test fun cancelBackAndATapOutsideSendNothing() {
-        val w = recording()
-        show(writer = w)
-        val command = field("gemini", ProfileTags.COMMAND)
-        typeAndDone(command, "/tmp/other")
-        tag(ProfileTags.Cancel).performClick()
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        assertEquals("/tmp/other", editable(command))
-        tag(ProfileTags.unsaved("gemini", ProfileTags.COMMAND)).assertExists()
-        tag(command).performImeAction()
-        compose.waitForIdle()
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        Espresso.pressBack()
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(command).performImeAction()
-        compose.waitForIdle()
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        compose.onAllNodes(isRoot())[1].performTouchInput { click(Offset(4f, 4f)) }
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        shown = false
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    @Test fun aTapBeforeTheConfirmationArmsSendsNothing() {
-        val w = answering()
-        show(writer = w)
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/g")
-        compose.mainClock.autoAdvance = false
-        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS - 150)
-        tag(ProfileTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
-        compose.runOnUiThread { flushWrites() }
-        compose.mainClock.advanceTimeBy(32)
-        assertEquals(emptyList<Any>(), w.writes)
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        compose.mainClock.advanceTimeBy(200)
-        tag(ProfileTags.Confirm).performSemanticsAction(SemanticsActions.OnClick)
-        compose.runOnUiThread { flushWrites() }
-        compose.mainClock.autoAdvance = true
-        waitForWrites(w, 1)
-        assertEquals(frame(gemini(command = """["/opt/g"]"""), WORK, zai()), w.frames().single())
-    }
-
-    @Test fun aDoubleTapOnChangeSendsOnce() {
-        val w = recording()
-        show(writer = w)
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/g")
-        arm()
-        val action = tag(ProfileTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        compose.runOnUiThread {
-            action()
-            action()
-            flushWrites()
-        }
-        waitForWrites(w, 1)
-        compose.waitForIdle()
-        assertEquals(1, w.writes.size)
-    }
-
-    /** Another client changes the profile's env mid-confirmation: the confirmed write keeps it. */
-    @Test fun anEnvChangeMidConfirmationIsKeptByTheConfirmedWrite() {
-        val w = recording()
-        show(writer = w)
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/g")
-        broadcast(profiles(gemini(env = "FAKE-rotated-key"), WORK, zai()))
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        confirm()
-        waitForWrites(w, 1)
-        assertEquals(frame(gemini(env = "FAKE-rotated-key", command = """["/opt/g"]"""), WORK, zai()), w.frames().single())
-    }
-
-    /** Another client changes the very command mid-confirmation: the confirmation goes, nothing is sent. */
-    @Test fun aCommandChangedElsewhereMidConfirmationSendsNothing() {
-        val w = recording()
-        show(writer = w)
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/g")
-        broadcast(profiles(gemini(command = """["/usr/bin/gemini"]"""), WORK, zai()))
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        // ... and in the same frame as the tap: still nothing.
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/opt/h")
-        arm()
-        val action = tag(ProfileTags.Confirm).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        compose.runOnUiThread {
-            val next = (providers.list?.generation ?: 0) + 1
-            providers = providers.copy(list = ProfileFixtures.list(profiles(gemini(command = """["/usr/bin/other"]"""), WORK, zai()), next))
-            action()
-            flushWrites()
-        }
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    @Test fun theConfirmationGoesWithTheListOrTheServer() {
-        val w = recording()
-        show(writer = w)
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/tmp/a")
-        providers = providers.copy(list = null)
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        providers = ProfileFixtures.binding(writer = w)
-        compose.waitForIdle()
-        typeAndDone(field("gemini", ProfileTags.COMMAND), "/tmp/b")
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        providers = ProfileFixtures.binding(origin = ServerFixtures.OTHER_ORIGIN, writer = w)
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        assertEquals("gemini --experimental-acp", editable(field("gemini", ProfileTags.COMMAND)))
-        assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    @Test fun aCommandOrHomeIsNeverSentOnAFocusLossATabChangeOrAClose() {
+    /** :706-710 `onBlur`: focus moving away writes the command. */
+    @Test fun aCommandIsSentOnAFocusLossLikeTheWebsBlur() {
         val w = recording()
         show(writer = w)
         val command = tag(field("gemini", ProfileTags.COMMAND)).performScrollTo()
         command.performClick()
-        command.performTextReplacement("/tmp/half")
-        tag(field("gemini", ProfileTags.HOME)).performScrollTo().performClick()
-        tag(field("gemini", ProfileTags.HOME)).performTextReplacement("/tmp/home")
+        command.performTextReplacement("/tmp/next")
         tag(field("gemini", ProfileTags.LABEL)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        state.tab = SettingsTab.General
-        compose.waitForIdle()
-        state.tab = SettingsTab.Engines
-        compose.waitForIdle()
-        assertEquals("gemini --experimental-acp", editable(field("gemini", ProfileTags.COMMAND)))
-        tag(field("gemini", ProfileTags.COMMAND)).performScrollTo().performTextReplacement("/tmp/again")
-        shown = false
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(command = """["/tmp/next"]"""), WORK, zai()), w.frames().single())
     }
 
-    @Test fun aSpoofedCommandIsShownVisiblyAndSentExactly() {
+    @Test fun aHomeLeftInItsFieldIsSentWhenSettingsCloses() {
+        val w = recording()
+        show(writer = w)
+        tag(field("gemini", ProfileTags.HOME)).performScrollTo().performTextReplacement("/tmp/home")
+        compose.waitForIdle()
+        assertEquals(0, w.writes.size)
+        shown = false
+        compose.waitForIdle()
+        assertEquals(frame(gemini().replace("/srv/homes/gemini", "/tmp/home"), WORK, zai()), w.frames().single())
+    }
+
+    @Test fun aSpoofedCommandIsSentExactly() {
         val w = answering()
         show(writer = w)
-        // A bidi override and a zero-width space are not JavaScript whitespace: they stay in their part,
-        // shown as tokens. A no-break space IS (the web's `/\s+/`): it splits, and the note says so.
+        // A bidi override and a zero-width space are not JavaScript whitespace: they stay in their part.
+        // A no-break space IS (the web's `/\s+/`): it splits.
         val typed = "/srv/\u202Egnp.exe\u200B/gemini --x\u00A0y"
         typeAndDone(field("gemini", ProfileTags.COMMAND), typed)
-        val next = textOf(ProfileTags.ConfirmNew)
-        assertFalse(next.contains('\u202E'))
-        assertTrue(next.contains("\u27E8U+202E\u27E9"))
-        assertTrue(next.contains("\u27E8U+200B\u27E9"))
-        assertEquals(listOf("/srv/\u202Egnp.exe\u200B/gemini", "--x", "y"), parts(ProfileTags.ConfirmNew))
-        tag(ProfileTags.ConfirmNote).assertExists()
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(command = """["/srv/\u202Egnp.exe\u200B/gemini","--x","y"]"""), WORK, zai()), w.frames().single())
     }
@@ -601,250 +452,123 @@ class ProfilesBehaviourTest {
         assertEquals("gemini --experimental-acp", editable(command))
     }
 
-    /** The choke point (r2 of slice 4, here): no plain edit can change what a profile runs, and the binding refuses a write that would. */
-    @Test fun noPlainEditChangesWhatAProfileRuns() {
+    /** ta-coik.5: every edit, what the profile runs included, is a plain whole-list write (no confirmed-only path). */
+    @Test fun everyEditIsAPlainWholeListWrite() {
         val list = ProfileFixtures.list()
         val edits = listOf(
             ProfileEdit.Enabled("gemini", false), ProfileEdit.Label("gemini", "G"), ProfileEdit.Rename("gemini", "g2"),
-            ProfileEdit.EnvKey("gemini", "GEMINI_API_KEY", "K"), ProfileEdit.EnvValue("gemini", "GEMINI_API_KEY", SecretText("v")),
-            ProfileEdit.EnvRemove("gemini", "GEMINI_API_KEY"), ProfileEdit.EnvAdd("gemini", "N", SecretText("v")), ProfileEdit.DropEnv("gemini", "X"),
+            ProfileEdit.Extends("gemini", "claude"), ProfileEdit.Command("gemini", "/opt/g --x"), ProfileEdit.Home("gemini", "/tmp/h"),
+            ProfileEdit.EnvKey("gemini", "GEMINI_API_KEY", "PATH"), ProfileEdit.EnvValue("gemini", "GEMINI_API_KEY", SecretText("v")),
+            ProfileEdit.EnvRemove("gemini", "GEMINI_API_KEY"), ProfileEdit.EnvAdd("gemini", "LD_PRELOAD", SecretText("/tmp/x.so")), ProfileEdit.DropEnv("gemini", "X"),
             ProfileEdit.DisallowedTools("claude-work", "Task"), ProfileEdit.Order("gemini", "3"), ProfileEdit.VerifiedThrough("gemini", "1.0"),
             ProfileEdit.Model("claude-work", ModelList.Models, com.tether.app.client.ModelOp.Remove(0, "claude-opus-4")), ProfileEdit.Add, ProfileEdit.Remove("zai"),
         )
         for (edit in edits) {
-            val write = ProvidersPatch.write(list, edit)!!
-            assertFalse("$edit", write.isConfirmed)
-            assertEquals("$edit", null, ProvidersPatch.refusal(write, list))
-            for (p in write.profiles) {
-                val id = (p["id"] as JsonPrimitive).content
-                val before = list.profile(if (edit is ProfileEdit.Rename && id == "g2") "gemini" else id)
-                assertEquals("$edit", before?.command?.let { c -> JsonArray(c.map(::JsonPrimitive)) }, p["command"])
-                assertEquals("$edit", before?.homeDir?.let(::JsonPrimitive), p["homeDir"])
-            }
+            val write = ProvidersPatch.write(list, edit)
+            assertTrue("$edit", write != null)
+            assertEquals("$edit", null, ProvidersPatch.refusal(write!!, list))
         }
-        // A forged write reaching the binding's writer is refused there (the client applies the same rule).
+        val command = ProvidersPatch.write(list, ProfileEdit.Command("gemini", "/opt/g --x"))!!
+        assertEquals(JsonArray(listOf(JsonPrimitive("/opt/g"), JsonPrimitive("--x"))), command.profiles.first { (it["id"] as JsonPrimitive).content == "gemini" }["command"])
+        // A write built from an older list is refused by the client's rule.
         val w = RecordingProvidersWriter(newest = { list })
-        val now = com.tether.app.client.RunsSnapshot.of(list.profile("gemini")!!)
-        val ok = ProvidersPatch.confirmed(list, com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")), now).writeOrNull!!
-        assertEquals(null, w.setProviders(ok, ORIGIN))
-        val older = ProfileFixtures.list(generation = 0)
-        val stale = ProvidersPatch.confirmed(older, com.tether.app.client.ProfileRunsEdit.Command("gemini", listOf("/opt/ok")), now).writeOrNull!!
+        val stale = ProvidersPatch.write(ProfileFixtures.list(generation = 0), ProfileEdit.Command("gemini", "/opt/ok"))!!
         assertEquals(ProvidersRefusal.Stale, w.setProviders(stale, ORIGIN))
-        // The editor's risky changes are not plain edits.
-        assertEquals(com.tether.app.client.ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation), ProvidersPatch.build(list, ProfileEdit.EnvAdd("gemini", "PATH", SecretText("/tmp"))))
     }
 
-    // ---- the env values (secrets) ----------------------------------------------------------------
+    // ---- the env values: the web's plain fields (ta-coik.5) --------------------------------------
 
     private fun secretList() = ProfileFixtures.list(profiles(gemini(env = SENTINEL), WORK, zai(token = SENTINEL_2)))
 
-    @Test fun envValuesAreMaskedByDefaultAndInNoSemanticsLogPreferenceOrSavedState() {
-        ShadowLog.clear()
-        show(secretList())
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).performScrollTo().assertExists()
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).assertDoesNotExist()
-        assertTrue(texts().contains("Value for GEMINI_API_KEY, hidden"))
-        assertTrue(texts().contains("Reveal Value for GEMINI_API_KEY"))
-        // Keys are not secret: drawn in their own fields.
-        assertEquals("GEMINI_API_KEY", editable(ProfileTags.envKey("gemini", "GEMINI_API_KEY")))
-        assertNowhere(SENTINEL, SENTINEL_2)
-        assertFalse(allSemantics().contains("•".repeat(SENTINEL.length)))
-    }
+    private fun systemClipboard() = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        .getSystemService(android.content.ClipboardManager::class.java)
 
-    @Test fun revealShowsOnlyThatValueAndHideMasksItAgain() {
+    /** :393-397: the value is drawn as it is (`defaultValue={value}`), and goes to no log, preference or saved state. */
+    @Test fun envValuesAreShownAsTheWebsAndInNoLogPreferenceOrSavedState() {
         ShadowLog.clear()
         show(secretList())
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
+        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo()
         assertEquals(SENTINEL, editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
-        assertTrue(allSemantics().contains(SENTINEL))
-        assertFalse(allSemantics().contains(SENTINEL_2))
-        assertFalse(savedState().contains(SENTINEL))
-        assertFalse(store.stored().toString().contains(SENTINEL))
-        assertFalse(ShadowLog.getLogs().any { "${it.tag} ${it.msg}".contains(SENTINEL) })
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).assertExists()
-        assertNowhere(SENTINEL, SENTINEL_2)
+        assertFalse(texts().any { it.startsWith("Reveal ") || it.endsWith(", hidden") })
+        assertEquals("GEMINI_API_KEY", editable(ProfileTags.envKey("gemini", "GEMINI_API_KEY")))
+        val logs = ShadowLog.getLogs().joinToString("\n") { "${it.tag} ${it.msg} ${it.throwable}" }
+        for (leak in listOf(SENTINEL, SENTINEL_2)) {
+            assertFalse(savedState().contains(leak))
+            assertFalse(logs.contains(leak))
+            assertFalse(store.stored().toString().contains(leak))
+        }
     }
 
-    @Test fun aRevealedValueIsSentOnlyByDone() {
-        val w = recording()
+    /** :398-402: a value's blur writes it exactly (not trimmed); Done too. */
+    @Test fun aValueIsSentOnBlurAndOnDoneExactly() {
+        val w = answering()
         show(secretList(), w)
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        val input = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"))
+        val input = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo()
         input.performClick()
         input.performTextReplacement("FAKE-half")
-        // Focus moves away: nothing.
         tag(field("gemini", ProfileTags.LABEL)).performScrollTo().performClick()
+        waitForWrites(w, 1)
+        assertEquals(frame(gemini(env = "FAKE-half"), WORK, zai(token = SENTINEL_2)), w.frames()[0])
         compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        // Done sends the value exactly (not trimmed), and only that value changes.
         tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo().performTextReplacement(" FAKE-new ")
         tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performImeAction()
-        waitForWrites(w, 1)
-        assertEquals(frame(gemini(env = " FAKE-new "), WORK, zai(token = SENTINEL_2)), w.frames().single())
+        waitForWrites(w, 2)
+        assertEquals(frame(gemini(env = " FAKE-new "), WORK, zai(token = SENTINEL_2)), w.frames()[1])
     }
 
-    @Test fun aHalfTypedValueIsNotSentWhenSettingsCloses() {
+    @Test fun aValueLeftInItsFieldIsSentWhenSettingsCloses() {
         val w = recording()
         show(secretList(), w)
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performClick()
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performTextReplacement("FAKE-ha")
-        compose.waitForIdle()
-        shown = false
+        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo().performTextReplacement("FAKE-ha")
         compose.waitForIdle()
         assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    @Test fun closingLeavingTheTabOrSwitchingServerMasksAgain() {
-        show(secretList())
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
         shown = false
         compose.waitForIdle()
-        shown = true
-        compose.waitForIdle()
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).assertExists()
-        assertNowhere(SENTINEL, SENTINEL_2)
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        state.tab = SettingsTab.General
-        compose.waitForIdle()
-        state.tab = SettingsTab.Engines
-        compose.waitForIdle()
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).assertExists()
-        assertNowhere(SENTINEL, SENTINEL_2)
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        providers = providers.copy(origin = ServerFixtures.OTHER_ORIGIN)
-        compose.waitForIdle()
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).assertExists()
-        assertFalse(allSemantics().contains(SENTINEL))
+        assertEquals(frame(gemini(env = "FAKE-ha"), WORK, zai(token = SENTINEL_2)), w.frames().single())
     }
 
-    @Test fun stoppingTheAppMasksAgain() {
-        val owner = TestOwner()
-        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
-        providers = ProfileFixtures.binding(secretList())
-        compose.setContent {
-            CompositionLocalProvider(androidx.lifecycle.compose.LocalLifecycleOwner provides owner) {
-                SettingsUnderTest(store.prefs, state, providers = providers)
-            }
-        }
-        compose.waitUntil(5_000) { state.draft != null }
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).assertExists()
-        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
-        compose.waitForIdle()
-        tag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY")).assertExists()
-        assertFalse(allSemantics().contains(SENTINEL))
-    }
-
-    @Test fun aRevealedValueCannotBeCopiedOrCut() {
+    /** As the web's plain input: copy and cut work; the clip is marked `EXTRA_IS_SENSITIVE`. */
+    @Test fun anEnvValueIsCopiedAndCutOntoASensitiveClip() {
         show(secretList())
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        val f = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"))
+        val f = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo()
         f.performClick()
+        NoCopyProbe.seed()
         f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        assertTrue("the field offers copy", f.fetchSemanticsNode().config.contains(SemanticsActions.CopyText))
         f.performSemanticsAction(SemanticsActions.CopyText)
         compose.waitForIdle()
+        assertEquals("the copy reached the clipboard", SENTINEL, NoCopyProbe.clip())
+        assertTrue("marked sensitive", systemClipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
+        NoCopyProbe.seed()
         f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        assertTrue("the field offers cut", f.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
         f.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
-        // ta-oqx N4: the cut took nothing away either.
-        assertEquals("the cut deleted the value", SENTINEL, editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
-        val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
-            .getSystemService(android.content.ClipboardManager::class.java)
-        val clip = clipboard.primaryClip
-        assertFalse("the clipboard holds the value", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
+        assertEquals("the cut reached the clipboard", SENTINEL, NoCopyProbe.clip())
+        assertEquals("", editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
     }
 
-    /**
-     * ta-oqx N4: the Add row's revealed value (a draft, never sent until Add) cannot be copied, and a
-     * cut (the accessibility action, Ctrl+X, KEYCODE_CUT) deletes nothing: the text survives. ta-78a:
-     * the copy keys put nothing on the clipboard.
-     */
-    @Config(shadows = [DeviceKeyCharacterMap::class])
-    @Test fun aNewValueCannotBeCopiedAndACutTakesNothingAway() {
-        show(secretList())
-        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("ANTHROPIC_API_KEY")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        val f = tag(ProfileTags.envNewInput("claude-work"))
+    /** The Add row's value (:427-434, a plain input): copyable onto a sensitive clip, sent only by Add. */
+    @Test fun aNewValueIsAPlainFieldCopiedOntoASensitiveClipAndSentOnlyByAdd() {
+        ShadowLog.clear()
+        val w = recording()
+        show(secretList(), w)
+        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("  ANTHROPIC_API_KEY ")
+        val f = tag(ProfileTags.envNewInput("claude-work")).performScrollTo()
         f.performTextReplacement(SENTINEL)
         f.performClick()
         compose.waitForIdle()
+        assertEquals(emptyList<Any>(), w.writes)
+        assertEquals(SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
         NoCopyProbe.seed()
         f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
         f.performSemanticsAction(SemanticsActions.CopyText)
         compose.waitForIdle()
-        f.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-        compose.waitForIdle()
-        assertTrue("the field offers cut", f.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
-        f.performSemanticsAction(SemanticsActions.CutText)
-        compose.waitForIdle()
-        assertEquals("the accessibility cut deleted the draft", SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
-        for (keys in ClipKeys.entries) {
-            f.selectAllAndPress(keys)
-            compose.waitForIdle()
-            assertEquals("$keys deleted the draft", SENTINEL, editable(ProfileTags.envNewInput("claude-work")))
-        }
-        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
-        f.assertCtrlVPastesTheClipboard(compose, "Add-row value")
-    }
-
-    /** ta-78a r2: the hardware copy and cut keys write nothing and delete nothing from a revealed env value; Ctrl+V still pastes. */
-    @Config(shadows = [DeviceKeyCharacterMap::class])
-    @Test fun aRevealedEnvValueSurvivesTheCopyAndCutKeys() {
-        show(secretList())
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        val f = tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"))
-        f.performClick()
-        compose.waitForIdle()
-        NoCopyProbe.seed()
-        for (keys in ClipKeys.entries) {
-            f.selectAllAndPress(keys)
-            compose.waitForIdle()
-            assertEquals("$keys changed the value", SENTINEL, editable(ProfileTags.envInput("gemini", "GEMINI_API_KEY")))
-        }
-        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
-        f.assertCtrlVPastesTheClipboard(compose, "env value")
-    }
-
-    /**
-     * ta-78a r2: the real menus (long press, right click) of a revealed env value and of the Add
-     * row's revealed value offer nothing that reads them; the Add row's NAME field is the control.
-     */
-    @Config(shadows = [NoMagnifier::class])
-    @Test fun theRevealedEnvValuesRealMenusOfferNothingThatReadsThem() {
-        val menus = MenuSpies()
-        show(secretList(), menus = menus)
-        val name = tag(ProfileTags.envNewName("claude-work"))
-        name.performScrollTo().performTextReplacement("ANTHROPIC_API_KEY")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement(SENTINEL)
-        compose.waitForIdle()
-        assertSecretMenus(compose, menus, name, tag(ProfileTags.envNewInput("claude-work")), "Add-row value")
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
-        assertSecretMenus(compose, menus, name, tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")), "env value")
-    }
-
-    @Test fun aNewValueIsMaskedUntilRevealedAndSentOnlyByAdd() {
-        ShadowLog.clear()
-        val w = recording()
-        show(secretList(), w)
-        tag(ProfileTags.envNewMasked("claude-work")).performScrollTo().assertExists()
-        tag(ProfileTags.envNewName("claude-work")).performTextReplacement("  ANTHROPIC_API_KEY ")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement(SENTINEL)
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        // Masked again with the draft in it: the draft is not in the semantics tree.
-        tap(ProfileTags.envNewReveal("claude-work"))
-        assertTrue(texts().contains("New environment variable value, hidden"))
-        assertFalse(allSemantics().contains(SENTINEL))
+        assertEquals(SENTINEL, NoCopyProbe.clip())
+        assertTrue(systemClipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
         assertFalse(savedState().contains(SENTINEL))
+        assertEquals(emptyList<Any>(), w.writes)
         tap(ProfileTags.envAdd("claude-work"))
         waitForWrites(w, 1)
         assertEquals(frame(gemini(env = SENTINEL), WORK.replace(",\"enabled\":true", ",\"enabled\":true,\"env\":{\"ANTHROPIC_API_KEY\":\"$SENTINEL\"}"), zai(token = SENTINEL_2)), w.frames().single())
@@ -926,8 +650,7 @@ class ProfilesBehaviourTest {
         assertFalse(exists(ProfileTags.remove("gemini")))
         tag(field("gemini", ProfileTags.LABEL)).assertIsNotEnabled()
         tag(ProfileTags.switch("gemini")).assertIsNotEnabled()
-        // The values can still be read (revealed), but nothing can be written.
-        tap(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"))
+        // The values can still be read, but nothing can be written.
         tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).assertIsNotEnabled()
         assertEquals(emptyList<Any>(), w.writes)
     }
@@ -941,7 +664,7 @@ class ProfilesBehaviourTest {
 
 /**
  * ta-q6p: a real activity recreation (a configuration change) commits nothing: not a half-typed
- * label, not a revealed env value typed but not Done, not a command waiting in its confirmation.
+ * label, env value or command still focused.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -972,13 +695,17 @@ class ProfilesRecreationTest {
         assertEquals(emptyList<Any>(), writer.writes)
     }
 
-    /** A revealed env value typed but not Done, and a label half typed and still focused. */
-    @Test fun aHalfTypedValueOrLabelIsNotSent() {
+    /** An env value half typed and still focused. */
+    @Test fun aHalfTypedValueIsNotSent() {
         showIt()
-        tag(ProfileTags.envReveal("gemini", "GEMINI_API_KEY")).performScrollTo().performClick()
-        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performClick()
+        tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performScrollTo().performClick()
         tag(ProfileTags.envInput("gemini", "GEMINI_API_KEY")).performTextReplacement("FAKE-ha")
-        // Focus moves to the label (the secret's blur sends nothing), which is half typed and keeps focus.
+        recreate()
+    }
+
+    /** A label half typed and still focused. */
+    @Test fun aHalfTypedLabelIsNotSent() {
+        showIt()
         tag(ProfileTags.field("zai", ProfileTags.LABEL)).performScrollTo().performClick()
         tag(ProfileTags.field("zai", ProfileTags.LABEL)).performTextReplacement("Hal")
         recreate()
@@ -993,18 +720,16 @@ class ProfilesRecreationTest {
         recreate()
     }
 
-    /** A command waiting in its confirmation. */
-    @Test fun aCommandWaitingForItsConfirmationIsNotSent() {
+    /** A command half typed and still focused. */
+    @Test fun aHalfTypedCommandIsNotSent() {
         showIt()
-        tag(ProfileTags.field("gemini", ProfileTags.COMMAND)).performScrollTo().performTextReplacement("/tmp/x")
-        tag(ProfileTags.field("gemini", ProfileTags.COMMAND)).performImeAction()
-        compose.waitForIdle()
-        tag(ProfileTags.ConfirmSheet).assertExists()
+        tag(ProfileTags.field("gemini", ProfileTags.COMMAND)).performScrollTo().performClick()
+        tag(ProfileTags.field("gemini", ProfileTags.COMMAND)).performTextReplacement("/tmp/x")
         recreate()
     }
 }
 
-/** A rotation (saved-instance-state restore) masks a revealed env value: the reveal is never saved state. */
+/** A rotation (saved-instance-state restore) keeps the tab and draws the server's value again; nothing is saved of it. */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class ProfilesRotationTest {
@@ -1014,7 +739,7 @@ class ProfilesRotationTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    @Test fun aRotationMasksTheValue() {
+    @Test fun aRotationDrawsTheServersValueAgain() {
         val restoration = StateRestorationTester(compose)
         val binding = ProfileFixtures.binding(ProfileFixtures.list(profiles(gemini(env = SENTINEL), WORK, zai())))
         restoration.setContent {
@@ -1022,13 +747,9 @@ class ProfilesRotationTest {
             SettingsUnderTest(store.prefs, state, providers = binding)
         }
         compose.waitForIdle()
-        compose.onNodeWithTag(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).performScrollTo().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).assertExists()
         restoration.emulateSavedInstanceStateRestore()
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsDialogTags.panel(SettingsTab.Engines), useUnmergedTree = true).assertExists()
-        compose.onNodeWithTag(ProfileTags.envMasked("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).assertExists()
-        compose.onNodeWithTag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(SENTINEL, compose.onNodeWithTag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
     }
 }

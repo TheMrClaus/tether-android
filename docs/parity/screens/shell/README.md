@@ -71,9 +71,6 @@ query, so a 768-839dp window gets the phone layout.
   minimum touch target. `PhoneShellBehaviourTest.everyShellControlHasA44dpTouchTarget` asserts a
   touch area of at least 44dp on every shell control, and `renamePencilAcceptsATouchOutsideItsDrawnBounds`
   proves the extension works. Neighbouring tool keys share the 2px gap between them.
-- **Lock asks first.** The web's Lock logs out at once. The app keeps its existing
-  "Sign out of this server?" confirmation, because on a phone signing out forgets the paired
-  credential. Only the owner can decide whether to change that.
 - **Lock has a name.** The web's Lock word is `display: none` on phones, which leaves the button
   without an accessible name. The app names it "Lock".
 - **The closed drawer is hidden from TalkBack.** The web's off-canvas sidebar stays in the

@@ -37,11 +37,11 @@ class DevicesModelTest {
         assertEquals(SelfMatch.No, DevicesRules.selfMatch(AppSignIn.SessionCookie, list, mine))
     }
 
-    @Test fun theConfirmationsSayWhenThePhoneSignsOut() {
-        assertEquals(listOf(DevicesCopy.revokeBody("Pixel 8")), DevicesRules.revokeBody("Pixel 8", SelfMatch.No))
-        assertEquals(DevicesCopy.SELF_SIGNS_OUT, DevicesRules.revokeBody("Pixel 8", SelfMatch.Yes).last())
-        assertEquals(DevicesCopy.MAYBE_SELF, DevicesRules.revokeBody("Pixel 8", SelfMatch.Maybe).last())
-        assertTrue(DevicesCopy.SELF_SIGNS_OUT.contains("signed out of this server"))
+    /** paired-devices.tsx 90fbb9f :201-206: the web's words, the same for this phone as for any device (ta-coik.5). */
+    @Test fun theRevokeConfirmationSaysWhatTheWebSays() {
+        val web = listOf("Pixel 8 loses access immediately and its live connection is closed. It has to be paired again with a new code.")
+        assertEquals(web, DevicesRules.revokeBody("Pixel 8"))
+        assertEquals(listOf(DevicesCopy.revokeBody("Pixel 8")), DevicesRules.revokeBody("Pixel 8"))
     }
 
     @Test fun theWebsCountsAndClock() {
@@ -64,25 +64,18 @@ class DevicesModelTest {
         assertEquals("No other sessions to sign out.", DevicesCopy.othersSignedOut(0))
     }
 
+    /** sign-in-security.tsx 90fbb9f :89-95: `toggleDisabled = env || zeroPasskeys`, and its note. */
     @Test fun thePasswordSwitchFollowsTheWeb() {
-        val cookie = AppSignIn.SessionCookie
         val env = DevicesFixtures.PASSKEYS.copy(policy = PasswordPolicy(true, PasskeyPolicySource.Env))
-        assertEquals(DevicesCopy.PASSWORD_ENV, DevicesRules.passwordNote(env, cookie))
-        assertFalse(DevicesRules.passwordToggleable(env, cookie))
-        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY, DevicesRules.passwordNote(DevicesFixtures.NO_PASSKEYS, cookie))
-        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.NO_PASSKEYS, cookie))
-        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS, cookie))
-        assertTrue(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS, cookie))
-    }
-
-    /** r2 (security F6): a device token proves no passkey, so the server always refuses turning the password off from it. */
-    @Test fun aDeviceTokenCannotTurnThePasswordOffButCanTurnItOn() {
-        val token = AppSignIn.DeviceToken
-        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS, token))
-        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY_SIGN_IN, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS, token))
+        assertEquals(DevicesCopy.PASSWORD_ENV, DevicesRules.passwordNote(env))
+        assertFalse(DevicesRules.passwordToggleable(env))
+        assertEquals(DevicesCopy.PASSWORD_NEEDS_PASSKEY, DevicesRules.passwordNote(DevicesFixtures.NO_PASSKEYS))
+        assertFalse(DevicesRules.passwordToggleable(DevicesFixtures.NO_PASSKEYS))
+        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(DevicesFixtures.PASSKEYS))
+        assertTrue(DevicesRules.passwordToggleable(DevicesFixtures.PASSKEYS))
         val off = DevicesFixtures.PASSKEYS.copy(policy = PasswordPolicy(false, PasskeyPolicySource.Stored))
-        assertTrue("turning it back on is allowed", DevicesRules.passwordToggleable(off, token))
-        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(off, token))
+        assertTrue(DevicesRules.passwordToggleable(off))
+        assertEquals(DevicesCopy.PASSWORD_ON, DevicesRules.passwordNote(off))
     }
 
     @Test fun serverTextIsDrawnByTheLabelRule() {

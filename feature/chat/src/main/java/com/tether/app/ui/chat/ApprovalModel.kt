@@ -86,8 +86,8 @@ internal data class ApprovalView(
 ) {
     val hasExact: Boolean get() = choices.any { it.permissionGrant == "exact" }
 
-    /** The confirmation box shows for any permission-granting choice (the web: only "exact"; I5). */
-    val needsConfirm: Boolean get() = choices.any { it.permissionGrant == "exact" || it.permissionGrant == "subset" }
+    /** chat-view.tsx 90fbb9f :1270: the confirmation box shows only for an "exact" choice (ta-coik.5: as on the web). */
+    val needsConfirm: Boolean get() = hasExact
     val allowsSubset: Boolean get() = choices.any { it.permissionGrant == "subset" }
 }
 
@@ -140,14 +140,6 @@ internal fun subsetGrant(read: Collection<String>, write: Collection<String>, ne
         hasFileSystem = read.isNotEmpty() || write.isNotEmpty(),
         networkEnabled = if (network) true else null,
     )
-}
-
-/** I5: [grant] ticks every requested path and the requested network (compared as sets, whatever the tick order). */
-internal fun isFullGrant(grant: GrantedPermissions, requested: RequestedPermissionsView?): Boolean {
-    if (requested == null) return false
-    return grant.fileSystemRead.orEmpty().toSet() == requested.read.toSet() &&
-        grant.fileSystemWrite.orEmpty().toSet() == requested.write.toSet() &&
-        (grant.networkEnabled == true) == requested.network
 }
 
 /** L-3 / L-B: a shown path keeps its first [DISPLAY_PATH_HEAD] and last [DISPLAY_PATH_TAIL] code points. */
@@ -406,26 +398,16 @@ private fun pickGrant(
     confirmed: Boolean,
     subset: GrantedPermissions?,
 ): ApprovalPick? = when (choice.permissionGrant) {
-    // Round 4 (coordinator decision, stricter than the web): EVERY permission-granting choice needs
-    // the confirmation, and the confirmation names what is ticked, so "Allow all" also needs every
-    // box ticked (what it grants is what was confirmed).
-    "exact" -> view.requested?.exact?.takeIf { confirmed && subset != null && isFullGrant(subset, view.requested) }?.let { ApprovalPick(choice.choiceId, it) }
-    "subset" -> subset?.takeIf { confirmed }?.let { ApprovalPick(choice.choiceId, it) }
+    // chat-view.tsx 90fbb9f :1191-1205, 1286-1289 (ta-coik.5: the web's rule): "exact" grants the
+    // complete request once its box is ticked, whatever the path boxes say; "subset" grants the
+    // ticked paths, with no confirmation, and is disabled with nothing ticked.
+    "exact" -> view.requested?.exact?.takeIf { confirmed }?.let { ApprovalPick(choice.choiceId, it) }
+    "subset" -> subset?.let { ApprovalPick(choice.choiceId, it) }
     else -> ApprovalPick(choice.choiceId, null)
 }
 
-/**
- * The confirmation's words: what a grant of the ticked [read] / [write] paths and [network] gives
- * (never colour alone; read aloud as the checkbox's label).
- */
-internal fun grantSummary(read: List<String>, write: List<String>, network: Boolean, shown: Map<String, String> = emptyMap()): String {
-    val parts = buildList {
-        if (read.isNotEmpty()) add("read ${read.joinToString(", ") { shown[it] ?: displayPath(it) }}")
-        if (write.isNotEmpty()) add("write ${write.joinToString(", ") { shown[it] ?: displayPath(it) }}")
-        if (network) add("network access")
-    }
-    return if (parts.isEmpty()) "Confirm these permissions: none selected." else "Confirm these permissions: ${parts.joinToString("; ")}."
-}
+/** chat-view.tsx 90fbb9f :1278, the confirmation's words. */
+internal const val EXACT_CONFIRM_COPY = "Confirm the complete permission expansion shown above."
 
 // --- Questions --------------------------------------------------------------------------------------
 

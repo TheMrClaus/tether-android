@@ -119,22 +119,19 @@ class ApprovalModelTest {
         val full = subsetGrant(linkedSetOf("/srv/schema.sql", "/srv/fixtures"), setOf("/w/report"), true)!!
         val subset = subsetGrant(setOf("/srv/schema.sql"), emptySet(), true)
         assertEquals(GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = null, networkEnabled = true), subset)
-        // Round 4: EVERY grant needs the confirmation, full or partial.
+        // chat-view.tsx 90fbb9f :1191-1205 (ta-coik.5): "exact" needs its confirmation and grants the request
+        // as it came; "subset" grants what is ticked, with no confirmation.
         assertNull(pickFor(view, all, confirmed = false, subset = full))
-        assertNull(pickFor(view, some, confirmed = false, subset = full))
-        assertNull(pickFor(view, some, confirmed = false, subset = subset))
-        assertEquals(ApprovalPick("some", subset), pickFor(view, some, confirmed = true, subset = subset))
-        assertEquals(ApprovalPick("some", full), pickFor(view, some, confirmed = true, subset = full))
-        // "Allow all" grants what was confirmed only when everything is ticked.
+        assertEquals(ApprovalPick("some", subset), pickFor(view, some, confirmed = false, subset = subset))
+        assertEquals(ApprovalPick("some", full), pickFor(view, some, confirmed = false, subset = full))
         assertEquals(ApprovalPick("all", requested.exact), pickFor(view, all, confirmed = true, subset = full))
-        assertNull(pickFor(view, all, confirmed = true, subset = subset))
+        assertEquals("whatever is ticked", ApprovalPick("all", requested.exact), pickFor(view, all, confirmed = true, subset = subset))
         assertNull("a subset needs something ticked", pickFor(view, some, confirmed = true, subset = subsetGrant(emptySet(), emptySet(), false)))
         assertEquals(ApprovalPick("deny", null), pickFor(view, deny, confirmed = false, subset = subset))
-        assertEquals(
-            "Confirm these permissions: read ${iso("“/srv/schema.sql”")}; network access.",
-            grantSummary(listOf("/srv/schema.sql"), emptyList(), true),
-        )
-        assertTrue(view.needsConfirm)
+        assertEquals("Confirm the complete permission expansion shown above.", EXACT_CONFIRM_COPY)
+        assertTrue("the box is drawn for an exact choice", view.needsConfirm)
+        val subsetOnly = view.copy(choices = view.choices.filter { it.permissionGrant != "exact" })
+        assertFalse("no box without an exact choice (:1270)", subsetOnly.needsConfirm)
     }
 
     @Test fun approvalViewReadsTheWebsFields() {
@@ -290,8 +287,7 @@ class ApprovalModelTest {
 
     @Test fun eachPathIsItsOwnBidiIsland() {
         // RTL letters inside a path cannot reorder the separators around it.
-        val shown = grantSummary(listOf("/\u05D0\u05D1/x", "/y"), emptyList(), true)
-        assertEquals("Confirm these permissions: read ${iso("“/\u05D0\u05D1/x”")}, ${iso("“/y”")}; network access.", shown)
+        assertEquals(iso("“/\u05D0\u05D1/x”"), displayPath("/\u05D0\u05D1/x"))
         assertEquals(iso("host\\u202E.example"), displayText("host\u202E.example"))
     }
 

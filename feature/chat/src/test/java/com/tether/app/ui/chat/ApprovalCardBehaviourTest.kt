@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -276,14 +277,15 @@ class ApprovalCardBehaviourTest {
         assertEquals(listOf("approval:req-2:deny", "approval:req-w:allow"), calls)
     }
 
+    /** chat-view.tsx 90fbb9f :1191-1205, 1270-1289 (ta-coik.5): "exact" needs its box; "subset" needs only a tick. */
     @Test fun anExactGrantNeedsTheConfirmationAndASubsetNeedsATick() {
         show(ApprovalFixtures.grants)
         scrollTo("approval-choice")
         val all = rule.onNodeWithText("ALLOW ALL", ignoreCase = true)
         val some = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true)
         all.assertIsNotEnabled()
-        // Everything requested starts ticked, which IS the full expansion: it needs the confirmation (I5).
-        some.assertIsNotEnabled()
+        // Everything requested starts ticked: Allow selected works at once, as on the web.
+        some.assertIsEnabled()
         rule.onAllNodesWithTag("grant-read")[0].assertIsOn().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
         // Untick everything: a subset of nothing is not a grant.
         rule.onAllNodesWithTag("grant-read")[0].performClick()
@@ -293,11 +295,8 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-network").assertIsOff()
         some.assertIsNotEnabled()
         rule.onAllNodesWithTag("grant-read")[1].performClick()
-        // Round 4: every grant needs the confirmation, made after the last change.
-        some.assertIsNotEnabled()
-        scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        some.performClick()
+        // One tick: the first tap on Allow selected sends it, no confirmation.
+        some.assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql")).toJsonObject()), calls)
     }
@@ -414,11 +413,9 @@ class ApprovalCardBehaviourTest {
 
     private val narrowed = "approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()
 
-    /** Round 4: tick "Confirm these permissions" (after the last change), then Allow selected. */
+    /** ta-coik.5: Allow selected on the first tap (no confirmation, as on the web). */
     private fun confirmAndAllowSelected() {
-        scrollTo("grant-confirm")
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithTag("grant-confirm").performClick()
+        scrollTo("approval-choice")
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled().performClick()
         rule.waitForIdle()
     }
@@ -635,8 +632,6 @@ class ApprovalCardBehaviourTest {
         rule.onAllNodesWithTag("grant-write")[1].assertIsOn()
         rule.onAllNodesWithTag("grant-read")[0].assertIsOn()
         rule.onNodeWithTag("grant-network").assertIsOn()
-        // Everything ticked is the full expansion: Allow selected needs the confirmation too.
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
     }
 
     @Test fun aWiderReRaiseWhileTheCardIsOffScreenStartsFromScratch() {
@@ -701,23 +696,18 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-confirm").assertIsOff()
     }
 
-    @Test fun aLostRecordFallsBackToTheFullGrantThatNeedsTheConfirmation() {
-        // L1: whatever drops a card's record (the store's bound), the card comes back fully ticked,
-        // which is the full expansion, so neither grant key works without the confirmation (I5).
+    @Test fun aLostRecordFallsBackToTheFullRequest() {
+        // L1: whatever drops a card's record (the store's bound), the card comes back fully ticked.
         show(ApprovalFixtures.grants)
         narrowTheGrant()
-        scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
         rule.runOnIdle { store.clear() }
         rule.waitForIdle()
         rule.onNodeWithTag("grant-network").assertIsOn()
-        // L3: the lost record took the confirmation with it.
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
-        assertTrue(calls.isEmpty())
+        confirmAndAllowSelected()
+        assertEquals(
+            listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report"), networkEnabled = true).toJsonObject()),
+            calls,
+        )
     }
 
     /** The question fixture with q-1 re-raised under the same id, a third option on page 1. */
@@ -854,7 +844,8 @@ class ApprovalCardBehaviourTest {
 
     @Test fun unTickingOneRowOfADuplicatedPathUnTicksThePath() {
         show(duplicatePaths)
-        scrollTo("grant-confirm")
+        // A subset-only card: no confirmation box (chat-view.tsx :1270, only for "exact").
+        scrollTo("grant-read")
         rule.onAllNodesWithTag("grant-read")[2].performClick() // the second "/a" row
         // Both "/a" rows are one permission: both off.
         rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
@@ -864,42 +855,40 @@ class ApprovalCardBehaviourTest {
         assertEquals(listOf("approval:req-d:some:" + GrantedPermissions(fileSystemRead = listOf("/b")).toJsonObject()), calls)
     }
 
-    @Test fun anyChangeAfterTheConfirmationClearsIt() {
+    /** The web's box is about the complete expansion, so a path box changing leaves it ticked. */
+    @Test fun aTickChangeLeavesTheConfirmation() {
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
         rule.onNodeWithTag("grant-confirm").performClick()
         rule.onNodeWithTag("grant-confirm").assertIsOn()
-        rule.onNodeWithTag("grant-network").performClick() // the selection changes
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        // The label names what the confirmation would now grant.
-        rule.onNodeWithText(grantSummary(listOf("/srv/fixtures", "/srv/schema.sql"), listOf("/w/report"), false)).assertExists()
+        rule.onNodeWithTag("grant-network").performClick()
+        rule.onNodeWithTag("grant-confirm").assertIsOn()
+        rule.onNodeWithText("Confirm the complete permission expansion shown above.").assertExists()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled()
         assertTrue(calls.isEmpty())
     }
 
-    @Test fun allowAllNeedsEveryBoxTickedAsWellAsTheConfirmation() {
+    /** chat-view.tsx :1193-1195: "exact" sends the requested expansion as it came, whatever the boxes say. */
+    @Test fun allowAllGrantsTheCompleteRequestWhateverIsTicked() {
         show(ApprovalFixtures.grants)
         narrowTheGrant()
         scrollTo("grant-confirm")
         rule.onNodeWithTag("grant-confirm").performClick()
-        // What would be confirmed is the narrowed set; "Allow all" would grant more: disabled.
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(
+            listOf("""approval:req-g:all:{"fileSystem":{"read":["/srv/fixtures","/srv/schema.sql"],"write":["/w/report"]},"network":{"enabled":true}}"""),
+            calls,
+        )
     }
 
-    @Test fun aRecordEvictedWhileOnScreenTakesTheConfirmationWithIt() {
+    @Test fun aRecordEvictedWhileOnScreenFallsBackToTheFullRequest() {
         // L3: the store keeps the newest MAX_RECORDS; others' writes evict this card's record.
         show(ApprovalFixtures.grants)
         narrowTheGrant()
-        scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithTag("grant-confirm").assertIsOn()
         rule.runOnIdle { repeat(CardStateStore.MAX_RECORDS) { store.setGrant("other-$it", GrantSelection(networkOff = true)) } }
         rule.waitForIdle()
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
         rule.onNodeWithTag("grant-network").assertIsOn() // back to the full request
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
         assertTrue(calls.isEmpty())
     }
 
@@ -960,18 +949,16 @@ class ApprovalCardBehaviourTest {
     }
     // ---- round 5: the tap reads the store (F1) -------------------------------------------------
 
-    private fun armedAndConfirmed() {
+    private fun armed() {
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithTag("grant-confirm").assertIsOn()
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
     }
 
-    @Test fun anUntickAndAGrantTapInTheSameGestureSendNothing() {
+    @Test fun anUntickAndAGrantTapInTheSameGestureSendTheLiveSet() {
         // The verifier's repro: finger 0 lands on Network access, finger 1 on Allow selected, both
-        // lift before any frame. The untick moves the record; the tap must not send the old set.
-        armedAndConfirmed()
+        // lift before any frame. The grant is read from the store at the tap: never the pre-untick set.
+        armed()
         val net = rule.onNodeWithTag("grant-network").fetchSemanticsNode().boundsInRoot
         val sel = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().boundsInRoot
         rule.onNodeWithTag("grant-network").performTouchInput {
@@ -981,13 +968,12 @@ class ApprovalCardBehaviourTest {
             up(1)
         }
         rule.waitForIdle()
-        assertTrue("a grant left with the pre-untick set: $calls", calls.isEmpty())
         rule.onNodeWithTag("grant-network").assertIsOff()
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
+        assertTrue("never the pre-untick set: $calls", calls.none { it.contains("network") })
     }
 
-    @Test fun anUntickAndAGrantClickQueuedInOneFrameSendNothing() {
-        armedAndConfirmed()
+    @Test fun anUntickAndAGrantClickQueuedInOneFrameSendTheLiveSet() {
+        armed()
         val untick = rule.onNodeWithTag("grant-network").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         rule.runOnUiThread {
@@ -995,30 +981,27 @@ class ApprovalCardBehaviourTest {
             allow()
         }
         rule.waitForIdle()
-        assertTrue("a grant left with the pre-untick set: $calls", calls.isEmpty())
+        assertEquals(
+            listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),
+            calls,
+        )
     }
 
-    @Test fun anUntickAConfirmationAndATapInOneFrameSendNothing() {
-        // Untick, confirm and both grant keys in ONE frame, before any redraw: the keys were drawn
-        // unconfirmed (disabled), so nothing goes out; a confirmation only counts once it is drawn.
+    @Test fun anUntickAConfirmationAndBothGrantKeysInOneFrameSendOneDecision() {
+        // One card, one decision: the first key that sends wins, the other sends nothing.
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
         val untick = rule.onNodeWithTag("grant-network").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val all = rule.onNodeWithText("ALLOW ALL", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        val all = rule.onNodeWithText("ALLOW ALL", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         rule.runOnUiThread {
             untick()
-            confirm()
-            all() // not every box is ticked NOW: "Allow all" sends nothing
             allow()
+            all()
         }
         rule.waitForIdle()
-        assertTrue("sent $calls", calls.isEmpty())
-        // Redrawn: the untick moved the record, so the confirmation made in that frame is dropped too;
-        // the operator confirms the new set on screen.
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-        rule.onNodeWithTag("grant-network").assertIsOff()
+        assertEquals(1, calls.size)
+        assertTrue(calls.single(), calls.single().startsWith("approval:req-g:some:") && !calls.single().contains("network"))
     }
 
     @Test fun anUnpickAndNextInOneFrameStayOnThePage() {
@@ -1036,23 +1019,12 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
     }
 
-    @Test fun aConfirmationMadeOnAnExistingRecordDiesWithTheNextChange() {
-        // The record exists first (one untick), THEN the operator confirms, then changes a tick: the
-        // confirmation belonged to the earlier state (kills "generation bumped only on creation").
+    @Test fun allowSelectedSendsWhatIsTickedNow() {
         show(ApprovalFixtures.grants)
         scrollTo("grant-confirm")
         rule.onAllNodesWithTag("grant-read")[0].performClick()
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithTag("grant-confirm").assertIsOn()
         rule.onNodeWithTag("grant-network").performClick()
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true)
-        allow.assertIsNotEnabled()
-        allow.performClick()
-        assertTrue(calls.isEmpty())
-        // Confirmed again, the grant is what is ticked NOW.
-        rule.onNodeWithTag("grant-confirm").performClick()
-        allow.performClick()
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()), calls)
     }
@@ -1145,7 +1117,7 @@ class ApprovalCardBehaviourTest {
         }
         rule.waitForIdle()
         rule.onNodeWithTag("grant-confirm").assertIsOff()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
     }
 
     @Test fun anOptionAndASubmitUnderTwoFingersSendNothing() {
@@ -1218,74 +1190,22 @@ class ApprovalCardBehaviourTest {
 
     @Test fun pathsAreShownEscapedCutAndQuoted() {
         show(trickyPaths)
-        scrollTo("grant-confirm")
-        val label = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+        scrollTo("grant-read")
+        val label = listOf("grant-read", "grant-write").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
+            .joinToString(" | ") { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } }
+            // The break-anywhere joiners between characters are layout, not text.
+            .filterNot { it == '\u2060' || it == '\u200B' }
         assertTrue(label, label.contains("“/x\\u000A/etc/shadow”"))
         assertTrue(label, label.contains("“/safe\\u202Etxt.exe”"))
         assertTrue(label, label.contains("“/x; no network access”"))
         assertTrue(label, label.contains("…d"))
         assertTrue("no raw control reaches the screen", label.none { it == '\n' || it == '\u202E' })
-        assertTrue(label, label.endsWith("; network access."))
     }
     // ---- round 7: a confirmation refers to the words that were on screen -----------------------
 
-    /** Frame 0: confirmed (drawn, so Allow selected is enabled). Frame 1: tick + Confirm + Allow selected at once. */
-    private fun tickConfirmAllowInOneFrame(tickTag: String, index: Int = 0) {
-        show(ApprovalFixtures.grants)
-        scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
-        val tick = rule.onAllNodesWithTag(tickTag)[index].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        rule.runOnUiThread {
-            tick()
-            confirm()
-            allow()
-        }
-        rule.waitForIdle()
-    }
 
-    @Test fun anUntickAConfirmAndAGrantInOneFrameSendNothing() {
-        tickConfirmAllowInOneFrame("grant-network")
-        assertTrue("sent $calls", calls.isEmpty())
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-    }
 
-    @Test fun aTickAConfirmAndAGrantInOneFrameSendNothing() {
-        // First untick /srv/fixtures and confirm (both drawn), then: re-tick it + Confirm + grant in one frame.
-        show(ApprovalFixtures.grants)
-        scrollTo("grant-confirm")
-        rule.onAllNodesWithTag("grant-read")[0].performClick()
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled()
-        val tick = rule.onAllNodesWithTag("grant-read")[0].fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val confirm = rule.onNodeWithTag("grant-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val allow = rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        rule.runOnUiThread {
-            tick()
-            confirm()
-            allow()
-        }
-        rule.waitForIdle()
-        assertTrue("sent $calls", calls.isEmpty())
-        rule.onNodeWithTag("grant-confirm").assertIsOff()
-    }
 
-    @Test fun afterTheRedrawAConfirmationSendsExactlyTheDrawnSet() {
-        tickConfirmAllowInOneFrame("grant-network")
-        assertTrue(calls.isEmpty())
-        // Frame 2: the summary now names the narrowed set; confirming it grants exactly that.
-        rule.onNodeWithText(grantSummary(listOf("/srv/fixtures", "/srv/schema.sql"), listOf("/w/report"), false)).assertExists()
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
-        rule.waitForIdle()
-        assertEquals(
-            listOf("approval:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),
-            calls,
-        )
-    }
 
     @Test fun contextLinesAreEscapedAndIsolated() {
         val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
@@ -1658,9 +1578,8 @@ class ApprovalScreenBehaviourTest {
         scrollTo("grant-network")
         rule.onAllNodesWithTag("grant-read")[0].performClick() // /srv/fixtures off
         scrollTo("grant-confirm")
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performClick()
+        // ta-coik.5: Allow selected sends on the first tap (no confirmation, as on the web).
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(
             listOf("approval:s1:req-g:some:" + GrantedPermissions(fileSystemRead = listOf("/srv/schema.sql"), fileSystemWrite = listOf("/w/report")).toJsonObject()),

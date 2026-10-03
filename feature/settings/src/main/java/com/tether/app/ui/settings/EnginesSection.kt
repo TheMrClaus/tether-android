@@ -13,13 +13,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,19 +24,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.EngineCard
@@ -50,18 +40,12 @@ import com.tether.app.client.ServerSettingsPatch
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.TetherDialog
-import com.tether.app.ui.components.TetherDialogText
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.text.SafeText
-import com.tether.app.ui.text.codeDirection
 import com.tether.app.ui.text.codeLabel
-import com.tether.app.ui.text.styledDisplay
-import com.tether.app.ui.text.tokenStyle
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import kotlinx.coroutines.delay
@@ -75,29 +59,19 @@ object EngineTags {
     fun status(e: EngineCard) = "engine-status:${e.id}"
     fun switch(e: EngineCard) = "engine-switch:${e.id}"
     fun useDetected(e: EngineCard) = "engine-use-detected:${e.id}"
-    fun unsaved(s: ServerSetting) = "engine-unsaved:${s.key}"
-    const val ConfirmSheet = "engine-confirm"
-    const val ConfirmNow = "engine-confirm-now"
-    const val ConfirmNew = "engine-confirm-new"
-    const val ConfirmTrimmed = "engine-confirm-trimmed"
-    const val Confirm = "engine-confirm-change"
-    const val Cancel = "engine-confirm-cancel"
 }
 
 /**
- * The Engines section and the engine cards (settings-dialog.tsx 887c222 :2107-2236), for ONE server
+ * The Engines section and the engine cards (settings-dialog.tsx 90fbb9f :2107-2236), for ONE server
  * (the panel keys this on [ServerSettingsBinding.origin], so another server's cards start from
- * nothing: no half-typed field, no pending confirmation).
+ * nothing: no half-typed field).
  *
- * Writes, per the owner's rules (2026-10-01):
- * - an engine's switch (`headlessModes`) writes at once, as on the web;
- * - its home, command and launch command set what the server RUNS: a field never writes on its
- *   own (not on a focus loss, a close, a tab change or a recreation). Done (or "Use detected") only
- *   opens [EngineConfirmDialog], which shows the current and the new value by the code rule (every
- *   hidden or reordering character a visible token); its Change key builds the write at that moment
- *   from the latest frame, so a key the environment forced meanwhile sends nothing. Cancel, Back
- *   and a tap outside send nothing; the confirmation goes when the frame, the server or the key's
- *   freedom does. Nothing here is saved state, so a recreation drops every edit.
+ * Writes as on the web (ta-coik.5, owner rule 2026-10-03: no app-only confirmation):
+ * - an engine's switch (`headlessModes`) writes at once;
+ * - its home, command and launch command write as the web's field does on blur (:2174, :2209,
+ *   :2226): on Done, when the field loses focus, and when it leaves the screen with an edit in it
+ *   ([CommitField]); never on a configuration change;
+ * - "Use detected" (:2191-2194) writes the detected home at once.
  */
 @Composable
 internal fun EngineCards(binding: ServerSettingsBinding, narrow: Boolean) {
@@ -107,14 +81,12 @@ internal fun EngineCards(binding: ServerSettingsBinding, narrow: Boolean) {
         SettingsSection(EngineRows.TITLE, AnnotatedString(EngineRows.CAPTION), narrow, modifier = Modifier.testTag(EngineTags.Section)) { ServerSettingsLoading() }
         return
     }
-    var pending by remember { mutableStateOf<EngineEdit?>(null) }
     SettingsSection(EngineRows.TITLE, AnnotatedString(EngineRows.CAPTION), narrow, modifier = Modifier.testTag(EngineTags.Section)) {
         ScanAgain(binding, view)
     }
     EngineCard.entries.forEach { engine ->
-        EngineCardView(engine, view, binding, narrow, onReview = { pending = it })
+        EngineCardView(engine, view, binding, narrow)
     }
-    PendingEngineEdit(pending, binding) { pending = null }
 }
 
 /**
@@ -154,7 +126,7 @@ private fun ScanAgain(binding: ServerSettingsBinding, view: ServerSettingsView) 
 
 /** `.engine-card` (globals.css 3118-3134, studio.css 638-645, 984): the head, then the body's rows. */
 @Composable
-private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean, onReview: (EngineEdit) -> Unit) {
+private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val latest by rememberUpdatedState(binding)
@@ -215,23 +187,24 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
         RowRule()
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
             EngineValueRow(
-                engine, engine.home, view, narrow, onReview,
+                engine, engine.home, view, binding, narrow,
                 title = EngineRows.HOME,
                 caption = AnnotatedString(EngineRows.homeCaption(view, engine)),
                 placeholder = det?.configDir ?: EngineRows.HOME_PLACEHOLDER,
                 first = true,
             )
-            val detected = EngineRows.useDetected(view, engine)
+            // :2191 `noHome && det?.configDir`: env-forced or not, as on the web.
+            val detected = ServerSettingsPatch.detectedHome(view, engine)
             if (detected != null) {
                 SettingsRow(
                     narrow = narrow,
                     text = { m ->
-                        val caption = buildAnnotatedString { withStyle(SpanStyle(color = t.running)) { append(codeLabel(detected.value)) } }
+                        val caption = buildAnnotatedString { withStyle(SpanStyle(color = t.running)) { append(codeLabel(detected)) } }
                         SettingsRowText(EngineRows.DETECTED_HOME, caption, m)
                     },
                     control = { m ->
                         TetherKey(
-                            onClick = { latest.settings?.takeIf { latest.origin != null }?.let { EngineRows.useDetected(it, engine) }?.let(onReview) },
+                            onClick = { latest.settings?.takeIf { latest.origin != null }?.let { latest.send(ServerSettingsPatch.useDetected(it, engine)) } },
                             classes = KeyClasses.ButtonSecondary,
                             label = EngineRows.USE_DETECTED,
                             modifier = m.testTag(EngineTags.useDetected(engine)),
@@ -240,7 +213,7 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
                 )
             }
             EngineValueRow(
-                engine, engine.command, view, narrow, onReview,
+                engine, engine.command, view, binding, narrow,
                 title = EngineRows.COMMAND,
                 caption = AnnotatedString(EngineRows.commandCaption(view, engine)),
                 placeholder = det?.binPath ?: engine.id,
@@ -256,7 +229,7 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
                         append(". Applies to every spawned session.")
                     }
                 }
-                EngineValueRow(engine, launch, view, narrow, onReview, title = EngineRows.LAUNCH, caption = caption, placeholder = EngineRows.LAUNCH_EXAMPLE)
+                EngineValueRow(engine, launch, view, binding, narrow, title = EngineRows.LAUNCH, caption = caption, placeholder = EngineRows.LAUNCH_EXAMPLE)
             }
         }
     }
@@ -264,191 +237,47 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
 
 /**
  * One home / command / launch command row: the field holds the server's value cleaned of hidden
- * characters (the edit-field rule, as slice 3's text rows) and is filled again when the server's
- * value changes (the web's `key={value}` remount). Its text is plain `remember`, never saved state.
- * Done hands [EngineRows.review]'s edit to [onReview] (the confirmation); nothing else sends.
- * While the field holds an edit not yet confirmed, its caption says so.
+ * characters (the edit-field rule) and is filled again when the server's value changes (the web's
+ * `key={value}` remount). It writes as the web's blur does ([CommitField]:
+ * [ServerSettingsPatch.engineValue]); a refused send says so under the field.
  */
 @Composable
 private fun EngineValueRow(
     engine: EngineCard,
     setting: ServerSetting,
     view: ServerSettingsView,
+    binding: ServerSettingsBinding,
     narrow: Boolean,
-    onReview: (EngineEdit) -> Unit,
     title: String,
     caption: AnnotatedString,
     placeholder: String,
     first: Boolean = false,
 ) {
-    val t = LocalTetherTokens.current
     val forced = view.forced(setting)
     val raw = view.text(setting)
     val shown = remember(raw) { LabelText.withoutHidden(raw) }
-    var text by remember(shown) { mutableStateOf(shown) }
-    val latestView by rememberUpdatedState(view)
-    val focusManager = LocalFocusManager.current
-    var focused by remember { mutableStateOf(false) }
-    // r2: the hint only when Done would open a review (not after spaces typed around the value).
-    val edited = !forced && EngineRows.review(view, engine, setting, text, shown) != null
     SettingsRow(
         narrow = narrow,
         rule = !first,
         modifier = Modifier.testTag(ServerSettingsTags.row(setting)),
-        text = { m ->
-            val shownCaption = if (edited) AnnotatedString(EngineRows.UNSAVED) else caption
-            SettingsRowText(title, shownCaption, m.then(if (edited) Modifier.testTag(EngineTags.unsaved(setting)) else Modifier), locked = forced)
-        },
+        text = { m -> SettingsRowText(title, caption, m, locked = forced) },
         control = { m ->
-            val style = serverFieldStyle(narrow)
-            BasicTextField(
-                value = text,
-                // Never past the server's limit (it would refuse the write).
-                onValueChange = { if (ServerSettingsPatch.fits(setting, it)) text = it },
+            CommitField(
+                shown = shown,
+                label = EngineRows.fieldLabel(engine, setting),
+                tag = ServerSettingsTags.input(setting),
                 enabled = !forced,
-                singleLine = true,
-                textStyle = style.copy(color = t.ink),
-                cursorBrush = SolidColor(t.violet),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    EngineRows.review(latestView, engine, setting, text, shown)?.let(onReview)
-                    focusManager.clearFocus()
-                }),
-                modifier = m
-                    .serverFieldWidth(narrow)
-                    .testTag(ServerSettingsTags.input(setting))
-                    .semantics { contentDescription = EngineRows.fieldLabel(engine, setting) }
-                    .onFocusChanged { focused = it.isFocused },
-                decorationBox = { inner ->
-                    // The placeholder is server text (a detected path): drawn by the code rule.
-                    ServerFieldBox(!forced, focused, style, if (text.isEmpty()) codeLabel(placeholder) else null, inner)
-                },
+                narrow = narrow,
+                placeholder = "",
+                // The placeholder is server text (a detected path): drawn by the code rule.
+                styledPlaceholder = codeLabel(placeholder),
+                // Never past the server's limit (it would refuse the write).
+                accept = { ServerSettingsPatch.fits(setting, it) },
+                onCommit = { serverCommit(ServerSettingsPatch.engineValue(view, setting, it, shown), binding::send) },
+                modifier = m.serverFieldWidth(narrow),
             )
         },
     )
-}
-
-/**
- * The pending edit, confirmed or dropped. r2: a tap on Change only ASKS; the write is built in the
- * frame after it ([SideEffect]), from that frame's binding and the client's newest frame
- * ([ServerSettingsBinding.latestSettings]), so an env lock that landed in the same frame as the
- * tap closes the confirmation and sends nothing. One confirmation is one write, a double tap
- * included. ta-q9l r2 (security F1): the tap records the "Now" its own dialog showed (the value its
- * lambda captured, so a tap landing in the same frame as a change carries the one the user saw),
- * and the build refuses when the newest frame's value differs: nothing is sent.
- */
-@OptIn(com.tether.app.client.EngineConfirmationOnly::class) // ta-q9l: the one place a confirmed write is built
-@Composable
-private fun PendingEngineEdit(pending: EngineEdit?, binding: ServerSettingsBinding, onDone: () -> Unit) {
-    val edit = pending ?: return
-    // The frame went away (signed out), or the environment now forces the key: the edit goes too.
-    val view = binding.settings?.takeIf { binding.origin != null }
-    if (view == null || view.forced(edit.setting)) return SideEffect { onDone() }
-    // Null until Change is tapped; then the "Now" that confirmation showed.
-    var askedOn by remember(edit) { mutableStateOf<String?>(null) }
-    val fired = remember(edit) { booleanArrayOf(false) }
-    val confirmedNow = askedOn
-    if (confirmedNow != null) {
-        SideEffect {
-            if (!fired[0]) {
-                fired[0] = true
-                // Built NOW, from the newest frame: an env lock, the same value or another "Now" sends nothing.
-                val latest = binding.latestSettings()
-                if (latest != null) binding.sendConfirmed(ServerSettingsPatch.engineValue(latest, edit.setting, edit.value, expectedNow = confirmedNow))
-            }
-            onDone()
-        }
-        return
-    }
-    val shownNow = view.text(edit.setting)
-    EngineConfirmDialog(
-        edit = edit,
-        now = shownNow,
-        onConfirm = { askedOn = shownNow },
-        onCancel = onDone,
-    )
-}
-
-/**
- * The confirmation for what the server runs: the value that will be sent, then the current one,
- * each drawn by the exact rule ([SafeText.exact]: every bidi control, invisible character and
- * non-ASCII space a visible ⟨U+…⟩ token, an LTR paragraph, wrapped anywhere but inside a token), so
- * what is confirmed is what is sent. r2: Change ignores taps for [CONFIRM_ARM_MS] after the dialog
- * appears ([ArmedConfirmKey]), so a double tap on Done cannot confirm unread.
- */
-@Composable
-internal fun EngineConfirmDialog(edit: EngineEdit, now: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    TetherDialog(
-        onDismiss = onCancel,
-        title = EngineRows.confirmTitle(edit),
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(EngineTags.Cancel))
-            // ta-q9l: a replaced edit, or a "Now" that changed meanwhile, re-arms the key.
-            ArmedConfirmKey(EngineRows.confirmAction(edit), EngineTags.Confirm, onConfirm, shown = edit to now)
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().testTag(EngineTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TetherDialogText(EngineRows.confirmBody(edit))
-            // r2: the new value first, so a long current one can never push it out of view; the trim
-            // note right under it (it is about the new value).
-            EngineValueField(EngineRows.CONFIRM_NEW, edit.value, EngineRows.emptyValue(edit.engine, edit.setting), EngineTags.ConfirmNew)
-            if (edit.trimmed) {
-                Text(
-                    EngineRows.TRIMMED,
-                    color = t.muted,
-                    style = settingsText(type.ui, 12f, 400, lineHeight = 1.5f),
-                    modifier = Modifier.testTag(EngineTags.ConfirmTrimmed),
-                )
-            }
-            EngineValueField(EngineRows.CONFIRM_NOW, now, EngineRows.emptyValue(edit.engine, edit.setting), EngineTags.ConfirmNow)
-        }
-    }
-}
-
-@Composable
-private fun EngineValueField(label: String, value: String, empty: String, tag: String) =
-    ConfirmValueField(label, if (value.isEmpty()) emptyList() else listOf(value), empty, tag)
-
-/**
- * A confirmation's value well (ta-dh1; ta-q6p shares it): [label] over the value, each of [parts]
- * on its own line (a profile command's binary and arguments; an engine value is one part), every
- * part drawn by the exact rule, so what is confirmed is what is sent. No parts: [empty], muted.
- */
-@Composable
-internal fun ConfirmValueField(label: String, parts: List<String>, empty: String, tag: String) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
-        val shown = if (parts.isEmpty()) {
-            AnnotatedString(empty)
-        } else {
-            remember(parts, t) {
-                AnnotatedString.Builder(parts.sumOf { it.length + 1 }).apply {
-                    withStyle(ParagraphStyle(textDirection = codeDirection)) {
-                        parts.forEachIndexed { i, part ->
-                            // A break between parts is the only raw line break (a part never holds one: it is a token there).
-                            if (i > 0) append('\n')
-                            // r2: the exact rule: a no-break or other odd space is a token too.
-                            append(styledDisplay(SafeText.breakAnywhere(SafeText.exact(part)), tokenStyle(t)))
-                        }
-                    }
-                }.toAnnotatedString()
-            }
-        }
-        Text(
-            shown,
-            color = if (parts.isEmpty()) t.muted else t.ink,
-            style = settingsText(type.mono, 13f, 400, lineHeight = 1.5f),
-            modifier = Modifier
-                .testTag(tag)
-                .fillMaxWidth()
-                .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        )
-    }
 }
 
 /**

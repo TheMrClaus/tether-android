@@ -98,8 +98,6 @@ object DevicesCopy {
     const val PASSWORD_ENV = "Set by TETHER_PASSKEY_REQUIRED in the environment"
     const val PASSWORD_NEEDS_PASSKEY = "Add a passkey before turning off the password"
     const val PASSWORD_ON = "Sign in with a password, in addition to any passkeys"
-    /** r2 (security F6): the app's own words for why a device-token sign-in cannot turn the password off. */
-    const val PASSWORD_NEEDS_PASSKEY_SIGN_IN = "Turning the password off needs a passkey sign-in, which proves the passkey works first. This phone signed in as a paired device, so turn it off from a passkey sign-in."
     const val REMOVE_PASSKEY_TITLE = "Remove this passkey?"
     fun removePasskeyBody(label: String) = "$label will no longer be able to sign in to Tether."
     const val REMOVE_PASSKEY_CONFIRM = "Remove passkey"
@@ -133,11 +131,8 @@ object DevicesCopy {
     // The app's own.
     /** The web's "This browser" tag: the app is a phone. */
     const val THIS_DEVICE = "This device"
-    const val REVEAL_CODE = "Reveal pairing code"
-    const val HIDE_CODE = "Hide pairing code"
-    const val CODE_HIDDEN = "Pairing code, hidden"
+    /** paired-devices.tsx's `aria-label={`Pairing code ${code.split("").join(" ")}`}`. */
     fun codeSpoken(code: String) = "Pairing code " + code.toCharArray().joinToString(" ")
-    const val MASK = "•••• ••••"
     /** T10.5: the app's own words for what only a phone can meet. */
     const val PASSKEY_UNSUPPORTED = "No passkey provider on this phone can create one. Turn one on in Android Settings, then try again."
     const val PASSKEY_UNAVAILABLE = "This phone cannot create passkeys here."
@@ -149,10 +144,8 @@ object DevicesCopy {
     const val PASSKEY_LABEL_MAX = 60
     const val PASSKEY_WRONG_RP = "This server asked for a passkey for another address, so none was created. Add it from the address the console itself uses."
     const val SIGN_OUT_OTHERS_BODY = "This phone stays signed in. Every other session closes immediately."
-    const val SELF_SIGNS_OUT = "This is the phone you are using: it is signed out of this server, and you sign in again from the start screen."
-    const val MAYBE_SELF = "If this is the phone you are using, it is signed out of this server too, and you sign in again from the start screen."
     const val SIGNED_OUT_HERE = "This phone was signed out of this server. Sign in again from the start screen."
-    const val OWNER_NEEDED = "This server has not been updated yet to let the app manage devices and sign-in security: it asks for an owner sign-in. Once the server is updated this works from the phone like the web; until then, use the web console."
+    const val OWNER_NEEDED = "This server is older than the app's owner sign-ins (tether #236), so it asks for an owner sign-in here. Update the server, then check again."
     const val CHECK_AGAIN = "Check again"
     const val SIGNED_OUT = "This phone is not signed in to this server."
     const val NOT_SENT = "Nothing was sent: the app is now signed in to another server."
@@ -189,14 +182,8 @@ object DevicesRules {
         null -> SelfMatch.Maybe
     }
 
-    fun revokeBody(label: String, self: SelfMatch): List<String> = listOfNotNull(
-        DevicesCopy.revokeBody(label),
-        when (self) {
-            SelfMatch.Yes -> DevicesCopy.SELF_SIGNS_OUT
-            SelfMatch.Maybe -> DevicesCopy.MAYBE_SELF
-            SelfMatch.No -> null
-        },
-    )
+    /** paired-devices.tsx's revoke confirmation, exactly the web's (ta-coik.5: no app-only lines for this phone). */
+    fun revokeBody(label: String): List<String> = listOf(DevicesCopy.revokeBody(label))
 
     /** paired-devices.tsx `otherPairings`: unclaimed codes still live, the one on screen matched out by its expiry. */
     fun otherPairings(pairings: List<OutstandingPairing>, now: Long, shownExpiresAt: Long?): Int =
@@ -206,23 +193,18 @@ object DevicesRules {
     fun secondsLeft(expiresAt: Long, now: Long): Long = maxOf(0L, Math.round((expiresAt - now) / 1000.0))
 
     /**
-     * sign-in-security.tsx's toggle note and whether the switch may be used. r2 (security F6): the
-     * server refuses turning the password OFF from a sign-in that proved no passkey (a device token
-     * always gets 409), so from a device token the off direction is not offered and the note says why;
-     * turning it back ON stays possible.
+     * sign-in-security.tsx 90fbb9f's toggle note and `toggleDisabled` (`policySource === "env" ||
+     * zeroPasskeys`), whatever this phone signed in with (ta-coik.5): the server decides, and its
+     * answer (a 409 for a sign-in that proved no passkey) is shown as it says.
      */
-    fun passwordNote(view: PasskeysView, signIn: AppSignIn?): String = when {
+    fun passwordNote(view: PasskeysView): String = when {
         view.policy.source == PasskeyPolicySource.Env -> DevicesCopy.PASSWORD_ENV
         view.passkeys.isEmpty() -> DevicesCopy.PASSWORD_NEEDS_PASSKEY
-        view.policy.passwordLoginEnabled && signIn == AppSignIn.DeviceToken -> DevicesCopy.PASSWORD_NEEDS_PASSKEY_SIGN_IN
         else -> DevicesCopy.PASSWORD_ON
     }
 
-    fun passwordToggleable(view: PasskeysView, signIn: AppSignIn?): Boolean = when {
-        view.policy.source == PasskeyPolicySource.Env -> false
-        !view.policy.passwordLoginEnabled -> true
-        else -> view.passkeys.isNotEmpty() && signIn != AppSignIn.DeviceToken
-    }
+    fun passwordToggleable(view: PasskeysView): Boolean =
+        view.policy.source != PasskeyPolicySource.Env && view.passkeys.isNotEmpty()
 
     /** `truncateUserAgent`, by the label rule (hidden characters dropped first). */
     fun userAgent(ua: String): String {
@@ -530,10 +512,11 @@ class DevicesController(
     }
 
     /**
-     * The password switch: no confirmation (the web); the server's policy answer is shown as it says.
-     * r2 (security F6): never OFF from a device-token sign-in (the server always refuses it).
+     * The password switch: no confirmation (the web); sent from any sign-in, as the web sends it
+     * (ta-coik.5), and the server's answer is shown as it says (its 409 for a sign-in that proved no
+     * passkey included).
      */
-    fun setPasswordLogin(enabled: Boolean): Boolean = if (!enabled && signIn == AppSignIn.DeviceToken) false else write(DevicesArea.Security, DevicesAction.Policy) { o ->
+    fun setPasswordLogin(enabled: Boolean): Boolean = write(DevicesArea.Security, DevicesAction.Policy) { o ->
         val r = source.setPasswordLogin(o, enabled)
         if (!mine(r)) return@write
         if (r is SecurityResult.Ok) {

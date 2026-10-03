@@ -3,11 +3,12 @@ package com.tether.app.ui.settings
 import com.tether.app.client.EngineCard
 import com.tether.app.client.EngineDetection
 import com.tether.app.client.ServerSetting
+import com.tether.app.client.ServerSettingsPatch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** ta-dh1: the Engines tab's words and its pure rules (what Done asks to confirm, "Use detected"). */
+/** ta-dh1: the Engines tab's words and its pure rules (what a field writes, "Use detected"; ta-coik.5: no confirmation). */
 class EnginesModelTest {
     private val view = ServerFixtures.view()
 
@@ -20,48 +21,45 @@ class EnginesModelTest {
         assertEquals("2\\u{202E}0 · host install", EngineRows.status(EngineDetection(true, "2\u202E0", "host install", null, null)))
     }
 
-    @Test fun doneAsksOnlyForAnEditThatChangesTheServersValue() {
+    /** settings-dialog.tsx 90fbb9f :2209 (the command's blur): the trimmed value, when it differs; no confirmation. */
+    @Test fun aFieldWritesWhatItsBlurWouldOnTheWeb() {
         val s = ServerSetting.CodexCommand
-        // Untouched, or only spaces around the server's value: nothing to confirm.
-        assertNull(EngineRows.review(view, EngineCard.Codex, s, "codex", "codex"))
-        assertNull(EngineRows.review(view, EngineCard.Codex, s, "  codex ", "codex"))
-        assertEquals(EngineEdit(EngineCard.Codex, s, "/opt/codex", trimmed = false), EngineRows.review(view, EngineCard.Codex, s, "/opt/codex", "codex"))
-        assertEquals(EngineEdit(EngineCard.Codex, s, "/opt/codex", trimmed = true), EngineRows.review(view, EngineCard.Codex, s, " /opt/codex\t", "codex"))
-        // Emptied: confirmed as empty.
-        assertEquals(EngineEdit(EngineCard.Codex, s, "", trimmed = false), EngineRows.review(view, EngineCard.Codex, s, "", "codex"))
-        // Forced by the environment, or past the server's limit: nothing.
+        // Untouched, or only spaces around the server's value: nothing to send.
+        assertNull(ServerSettingsPatch.engineValue(view, s, "codex", "codex"))
+        assertNull(ServerSettingsPatch.engineValue(view, s, "  codex ", "codex"))
+        assertEquals(ServerFixtures.json("""{"codexCommand":"/opt/codex"}"""), ServerSettingsPatch.engineValue(view, s, "/opt/codex", "codex"))
+        assertEquals(ServerFixtures.json("""{"codexCommand":"/opt/codex"}"""), ServerSettingsPatch.engineValue(view, s, " /opt/codex\t", "codex"))
+        // A command emptied is sent empty (the server runs the engine's own name); a home or launch command as null.
+        assertEquals(ServerFixtures.json("""{"codexCommand":""}"""), ServerSettingsPatch.engineValue(view, s, "", "codex"))
+        // Forced by the environment (the web's field is disabled), or past the server's limit: nothing.
         val forced = ServerFixtures.view(envForced = mapOf("codexCommand" to true))
-        assertNull(EngineRows.review(forced, EngineCard.Codex, s, "/opt/codex", "codex"))
-        assertNull(EngineRows.review(view, EngineCard.Codex, s, "x".repeat(257), "codex"))
+        assertNull(ServerSettingsPatch.engineValue(forced, s, "/opt/codex", "codex"))
+        assertNull(ServerSettingsPatch.engineValue(view, s, "x".repeat(257), "codex"))
     }
 
     @Test fun aServerValueWithHiddenCharactersIsReplacedOnlyByAnEdit() {
         val spoofed = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("codexCommand" to "co\u202Edex")))
-        // The field shows "codex" (hidden characters dropped); untouched, Done asks nothing.
-        assertNull(EngineRows.review(spoofed, EngineCard.Codex, ServerSetting.CodexCommand, "codex", "codex"))
-        // Edited, the clean value is offered (the confirmation shows the server's with its token).
-        assertEquals("codex2", EngineRows.review(spoofed, EngineCard.Codex, ServerSetting.CodexCommand, "codex2", "codex")!!.value)
+        // The field shows "codex" (hidden characters dropped); untouched, nothing is sent.
+        assertNull(ServerSettingsPatch.engineValue(spoofed, ServerSetting.CodexCommand, "codex", "codex"))
+        assertEquals(ServerFixtures.json("""{"codexCommand":"codex2"}"""), ServerSettingsPatch.engineValue(spoofed, ServerSetting.CodexCommand, "codex2", "codex"))
     }
 
-    @Test fun useDetectedIsOfferedOnlyForAMissingFreeHome() {
-        assertEquals(EngineEdit(EngineCard.Opencode, ServerSetting.OpencodeHome, "/home/op/.config/opencode", trimmed = false), EngineRows.useDetected(view, EngineCard.Opencode))
+    /** :2191 `noHome && det?.configDir` (ta-coik.5: with no env check, as on the web). */
+    @Test fun useDetectedIsOfferedWhereTheWebOffersIt() {
+        assertEquals("/home/op/.config/opencode", ServerSettingsPatch.detectedHome(view, EngineCard.Opencode))
+        assertEquals(ServerFixtures.json("""{"opencodeHome":"/home/op/.config/opencode"}"""), ServerSettingsPatch.useDetected(view, EngineCard.Opencode))
         // Claude's empty home is optional (issue #86): nothing to fill in.
-        assertNull(EngineRows.useDetected(view, EngineCard.Claude))
+        assertNull(ServerSettingsPatch.detectedHome(view, EngineCard.Claude))
         // Codex has a home; DeepSeek Harness has no detection.
-        assertNull(EngineRows.useDetected(view, EngineCard.Codex))
-        assertNull(EngineRows.useDetected(view, EngineCard.Dsh))
-        assertNull(EngineRows.useDetected(ServerFixtures.view(envForced = mapOf("opencodeHome" to true)), EngineCard.Opencode))
+        assertNull(ServerSettingsPatch.detectedHome(view, EngineCard.Codex))
+        assertNull(ServerSettingsPatch.detectedHome(view, EngineCard.Dsh))
+        // Env-forced: still offered, as on the web (the server decides).
+        val forced = ServerFixtures.view(envForced = mapOf("opencodeHome" to true))
+        assertEquals("/home/op/.config/opencode", ServerSettingsPatch.detectedHome(forced, EngineCard.Opencode))
+        assertEquals(ServerFixtures.json("""{"opencodeHome":"/home/op/.config/opencode"}"""), ServerSettingsPatch.useDetected(forced, EngineCard.Opencode))
     }
 
-    @Test fun theConfirmationNamesWhatChangesAndWhatEmptyMeans() {
-        val edit = EngineEdit(EngineCard.Claude, ServerSetting.ClaudeLaunchCommand, "w -- claude", trimmed = false)
-        assertEquals("Change the Claude Code launch command?", EngineRows.confirmTitle(edit))
-        assertEquals("Change launch command", EngineRows.confirmAction(edit))
-        assertEquals("Change the Codex home?", EngineRows.confirmTitle(EngineEdit(EngineCard.Codex, ServerSetting.CodexHome, "", false)))
-        assertEquals("Empty — your real HOME", EngineRows.emptyValue(EngineCard.Claude, ServerSetting.ClaudeHome))
-        assertEquals("Empty — not set", EngineRows.emptyValue(EngineCard.Pi, ServerSetting.PiHome))
-        assertEquals("Empty — runs “pi”", EngineRows.emptyValue(EngineCard.Pi, ServerSetting.PiCommand))
-        assertEquals("Empty — no wrapper", EngineRows.emptyValue(EngineCard.Claude, ServerSetting.ClaudeLaunchCommand))
+    @Test fun aFieldIsNamedForWhatItSets() {
         assertEquals("Claude Code launch command", EngineRows.fieldLabel(EngineCard.Claude, ServerSetting.ClaudeLaunchCommand))
     }
 

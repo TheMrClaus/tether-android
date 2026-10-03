@@ -23,7 +23,6 @@ import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMe
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +54,6 @@ import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.copyText
 import androidx.compose.ui.semantics.cutText
@@ -66,12 +64,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import android.content.ClipDescription
+import android.os.PersistableBundle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import kotlinx.serialization.json.JsonObject
@@ -81,8 +80,6 @@ import com.tether.app.client.ServerSettingsPatch
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.TetherDialog
-import com.tether.app.ui.components.TetherDialogText
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
@@ -97,7 +94,6 @@ import kotlinx.coroutines.delay
 object ServerSettingsTags {
     fun row(s: ServerSetting) = "server-setting:${s.key}"
     fun input(s: ServerSetting) = "server-setting-input:${s.key}"
-    fun masked(s: ServerSetting) = "server-setting-masked:${s.key}"
     fun reveal(s: ServerSetting) = "server-setting-reveal:${s.key}"
     fun add(s: ServerSetting) = "server-setting-add:${s.key}"
     fun entry(s: ServerSetting, path: String) = "server-setting-entry:${s.key}:$path"
@@ -108,11 +104,6 @@ object ServerSettingsTags {
     const val CliWarning = "claude-cli-warning"
     const val CliPicker = "claude-cli-picker"
     const val CliForced = "claude-cli-forced"
-    const val CliConfirmSheet = "claude-cli-confirm"
-    const val CliConfirmNow = "claude-cli-confirm-now"
-    const val CliConfirmNew = "claude-cli-confirm-new"
-    const val CliConfirm = "claude-cli-confirm-switch"
-    const val CliCancel = "claude-cli-confirm-cancel"
 }
 
 /** A row's caption: "Set by environment" when forced (settings-dialog.tsx:145), else its description. */
@@ -130,12 +121,16 @@ private fun caption(forced: Boolean, description: String) = AnnotatedString(if (
  * or a blur: while the activity [isChangingConfigurations][android.app.Activity.isChangingConfigurations]
  * neither the focus loss nor the disposal it causes commits anything, so a half-typed value is
  * never sent. [accept]: an edit that fails it leaves the field as it was (nothing is rewritten).
-* [noCopy]: copy and cut put nothing on the clipboard and are not offered (a revealed secret).
+ *
+ * ta-coik.5, a secret as the web's `<input type="password">` holds it: [masked] draws each
+ * character as a dot (typing into it works, as in the browser) and, as the browser does for a
+ * password field, offers no copy or cut then ([NoCopyScope]); revealed, it is a plain field whose
+ * copy and cut work. [sensitive]: whatever it puts on the clipboard is marked
+ * `ClipDescription.EXTRA_IS_SENSITIVE`, so Android keeps it out of clipboard previews.
  *
  * ta-q6p r2 (security F4): [onCommit] says what became of the value ([CommitOutcome]). A refused
  * send is never silent: the field keeps the text, Done can send it again, and a short note under
- * the field says why. [blurCommits]: whether a focus loss or leaving commits THIS text (false: the
- * field keeps it and says Done reviews it, the env rows' risky names).
+ * the field says why.
  */
 @Composable
 internal fun CommitField(
@@ -151,8 +146,10 @@ internal fun CommitField(
     accept: (String) -> Boolean = { true },
     commitOnBlur: Boolean = true,
     commitOnLeave: Boolean = true,
-    noCopy: Boolean = false,
-    blurCommits: (String) -> Boolean = { true },
+    masked: Boolean = false,
+    sensitive: Boolean = false,
+    /** A placeholder drawn as given (server text by the code rule); else [placeholder]. */
+    styledPlaceholder: AnnotatedString? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -164,7 +161,7 @@ internal fun CommitField(
     // causes is one write, not two. r2: a refused value is not "sent", so Done can try again.
     var sent by remember(shown) { mutableStateOf<String?>(null) }
     var note by remember(shown) { mutableStateOf<String?>(null) }
-    // The value last refused (or under review): a focus loss or leaving never retries it (only Done does).
+    // The value last refused: a focus loss or leaving never retries it (only Done does).
     var refused by remember(shown) { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf(false) }
     val commit: (Boolean) -> Unit = { retry ->
@@ -173,11 +170,6 @@ internal fun CommitField(
                 CommitOutcome.Sent, CommitOutcome.Nothing -> {
                     sent = text
                     refused = null
-                    note = null
-                }
-                // A review opened (a confirmation): nothing sent yet; Done may open it again, a blur does not.
-                CommitOutcome.Reviewing -> {
-                    refused = text
                     note = null
                 }
                 is CommitOutcome.Refused -> {
@@ -190,13 +182,13 @@ internal fun CommitField(
     }
     val latestCommit by rememberUpdatedState(commit)
     val leaves by rememberUpdatedState(commitOnLeave)
-    val latestBlurCommits by rememberUpdatedState(blurCommits)
-    val latestText by rememberUpdatedState(text)
-    DisposableEffect(Unit) { onDispose { if (leaves && !recreating() && latestBlurCommits(latestText)) latestCommit(false) } }
+    DisposableEffect(Unit) { onDispose { if (leaves && !recreating()) latestCommit(false) } }
     val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
     Column(modifier) {
-        // ta-oqx: a no-copy (secret) field's copy and cut are closed at their source ([NoCopyScope]).
-        NoCopyScope(noCopy) { guard ->
+        // ta-oqx: a masked secret's copy and cut are closed at their source ([NoCopyScope]), as a
+        // browser closes them on a password field; ta-coik.5: a revealed one copies, marked sensitive.
+        SensitiveClipScope(sensitive) {
+        NoCopyScope(masked) { guard ->
             BasicTextField(
                 value = text,
                 onValueChange = {
@@ -209,6 +201,7 @@ internal fun CommitField(
                 singleLine = true,
                 textStyle = style.copy(color = t.ink),
                 cursorBrush = SolidColor(t.violet),
+                visualTransformation = if (masked) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = keyboardType,
                     // A secret or a path is never learned or corrected by the keyboard.
@@ -224,15 +217,15 @@ internal fun CommitField(
                     .testTag(tag)
                     .semantics { contentDescription = label }
                     .onFocusChanged { f ->
-                        if (focused && !f.isFocused && commitOnBlur && !recreating()) {
-                            if (blurCommits(text)) commit(false) else if (text != shown && text != sent && text != refused) note = CommitOutcome.REVIEW_ON_DONE
-                        }
+                        if (focused && !f.isFocused && commitOnBlur && !recreating()) commit(false)
                         focused = f.isFocused
                     },
                 decorationBox = { inner ->
-                    ServerFieldBox(enabled, focused, style, if (text.isEmpty() && placeholder.isNotEmpty()) AnnotatedString(placeholder) else null, inner)
+                    val hint = styledPlaceholder ?: placeholder.takeIf { it.isNotEmpty() }?.let(::AnnotatedString)
+                    ServerFieldBox(enabled, focused, style, if (text.isEmpty()) hint else null, inner)
                 },
             )
+        }
         }
         note?.let { n ->
             Text(
@@ -256,15 +249,11 @@ sealed interface CommitOutcome {
     /** Nothing to send for it (the server's value already, or not a value the row writes). */
     data object Nothing : CommitOutcome
 
-    /** A confirmation opened for it: nothing is sent until it is confirmed. */
-    data object Reviewing : CommitOutcome
-
     /** Not sent, and why (shown under the field). */
     data class Refused(val message: String) : CommitOutcome
 
     companion object {
         const val NOT_CONNECTED = "Not saved: not connected to the server. Try again."
-        const val REVIEW_ON_DONE = "Not saved yet — press Done to review this change."
     }
 }
 
@@ -355,6 +344,47 @@ internal fun NoCopyScope(on: Boolean, content: @Composable (guard: Modifier) -> 
     val guarded = remember(clipboard) { noCopyClipboard(clipboard) }
     val menu = remember(toolbar) { NoCopyToolbar(toolbar) }
     CompositionLocalProvider(LocalClipboard provides guarded, LocalTextToolbar provides menu) { content(NoCopyGuard) }
+}
+
+/**
+ * ta-coik.5: a secret field whose copy works (the web's revealed input, a plain one holding a
+ * credential): with [on], [content] runs under a clipboard that marks every clip it writes
+ * `ClipDescription.EXTRA_IS_SENSITIVE` (Android then keeps it out of the clipboard preview and
+ * overlay). Not a gate: the copy happens, on the first tap, as in the browser.
+ */
+@Composable
+internal fun SensitiveClipScope(on: Boolean, content: @Composable () -> Unit) {
+    if (!on) return content()
+    val clipboard = LocalClipboard.current
+    val marked = remember(clipboard) { sensitiveClipboard(clipboard) }
+    CompositionLocalProvider(LocalClipboard provides marked) { content() }
+}
+
+/** [delegate], every written clip marked sensitive (an [AndroidClipboard] stays one: the field's paste check reads its manager). */
+@SuppressLint("VisibleForTests")
+internal fun sensitiveClipboard(delegate: Clipboard): Clipboard =
+    if (delegate is AndroidClipboard) SensitiveAndroidClipboard(delegate) else SensitivePlainClipboard(delegate)
+
+/** Marks [entry]'s clip sensitive (the platform key; minSdk has it). */
+internal fun markSensitive(entry: ClipEntry?): ClipEntry? {
+    val data = entry?.clipData ?: return entry
+    val extras = data.description.extras ?: PersistableBundle()
+    extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+    data.description.extras = extras
+    return entry
+}
+
+@SuppressLint("VisibleForTests")
+private class SensitiveAndroidClipboard(private val delegate: AndroidClipboard) : AndroidClipboard {
+    override val clipboardManager: android.content.ClipboardManager get() = delegate.clipboardManager
+    override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = delegate.setClipEntry(markSensitive(clipEntry))
+}
+
+private class SensitivePlainClipboard(private val delegate: Clipboard) : Clipboard {
+    override val nativeClipboard: android.content.ClipboardManager get() = delegate.nativeClipboard
+    override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = delegate.setClipEntry(markSensitive(clipEntry))
 }
 
 /**
@@ -481,27 +511,24 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
 }
 
 /**
- * ServerTextRow with `password` (settings-dialog.tsx:144-158) for `password` / `proxyToken`, which
- * the server sends in plaintext. ta-t7l:
- * - masked by default: the value is NOT in the composition then. The masked well draws a fixed
- *   mask (never the length) and is one node named "<label>, hidden" (or "not set"), so the semantics
- *   tree holds no part of the secret;
- * - Reveal swaps in the editable field (plain text, the web's `type="text"` on reveal); to change
- *   the secret on the phone, reveal it first (the web lets a masked field be typed into);
- * - the reveal flag is plain `remember`: never saved state, so a rotation, closing Settings or
- *   leaving the tab masks it again; the panel is keyed on the server's origin, so another server
- *   starts masked; r2: the app going to the background (ON_STOP) masks it too, so the Recents
- *   snapshot never holds it (the dialog's window is also FLAG_SECURE);
- * - r2: a secret is sent ONLY by Done on the keyboard: never on a focus loss, a close, a tab change
- *   or a recreation, so a half-typed password is never applied. Copy and cut are off.
- * - forced by env: masked, no Reveal (the web hides its eye then).
+ * ServerTextRow with `password` (settings-dialog.tsx 90fbb9f :114-160) for `password` /
+ * `proxyToken`, which the server sends in plaintext. ta-coik.5, the web's behaviour:
+ * - masked by default (`type="password"`): each character a dot, typed into directly; as in the
+ *   browser, a masked field offers no copy or cut;
+ * - Reveal (the web's eye, `aria-label` "Reveal" / "Hide") shows it as plain text; copy and cut
+ *   work then, and a copy is marked sensitive ([SensitiveClipScope]);
+ * - committed as the web's text row does: Done, a focus loss, or leaving with an edit in it (never
+ *   on a configuration change);
+ * - forced by env: the field is disabled and masked, with no Reveal (the web hides its eye then).
+ * The reveal flag is plain `remember` (the panel is keyed on the server: another server starts
+ * masked); the dialog's window is FLAG_SECURE.
  */
 @Composable
 internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
     val s = row.setting
     val forced = view.forced(s)
     val secret = view.secret(s)
-    var revealed by rememberMaskedReveal()
+    var revealed by remember { mutableStateOf(false) }
     val open = revealed && !forced
     SettingsRow(
         narrow = narrow,
@@ -509,34 +536,21 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
         text = { m -> SettingsRowText(row.label, caption(forced, row.description), m, tip = row.tip, locked = forced) },
         control = { m ->
             Row(m.serverInputWidth(narrow), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (open) {
-                    // Only here is the plaintext read: the revealed field, filled with it as it is.
-                    val shown = secret.reveal()
-                    CommitField(
-                        shown = shown,
-                        label = row.label,
-                        tag = ServerSettingsTags.input(s),
-                        enabled = true,
-                        narrow = narrow,
-                        placeholder = row.placeholder,
-                        keyboardType = KeyboardType.Password,
-                        commitOnBlur = false,
-                        commitOnLeave = false,
-                        noCopy = true,
-                        onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    MaskedWell(
-                        tag = ServerSettingsTags.masked(s),
-                        description = ServerRowCopy.maskedDescription(row.label, secret.isEmpty),
-                        hasValue = !secret.isEmpty,
-                        placeholder = row.placeholder,
-                        narrow = narrow,
-                        dimmed = forced,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                // The field is filled with the server's value as it is (the web's `defaultValue`).
+                val shown = secret.reveal()
+                CommitField(
+                    shown = shown,
+                    label = row.label,
+                    tag = ServerSettingsTags.input(s),
+                    enabled = !forced,
+                    narrow = narrow,
+                    placeholder = row.placeholder,
+                    keyboardType = KeyboardType.Password,
+                    masked = !open,
+                    sensitive = true,
+                    onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
+                    modifier = Modifier.weight(1f),
+                )
                 if (!forced) {
                     TetherKey(
                         onClick = { revealed = !revealed },
@@ -550,58 +564,6 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
             }
         },
     )
-}
-
-/**
- * ta-q6p (slice 3's reveal, shared): whether a secret is revealed. Plain `remember` (never saved
- * state, so a rotation, a close or leaving the tab masks it again), and the app going to the
- * background (ON_STOP) masks it too, so the Recents snapshot never holds it.
- */
-@Composable
-internal fun rememberMaskedReveal(): androidx.compose.runtime.MutableState<Boolean> {
-    val revealed = remember { mutableStateOf(false) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) revealed.value = false }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-    return revealed
-}
-
-/**
- * ta-q6p (slice 3's masked well, shared): a secret while masked. The value is NOT in the
- * composition: the well draws a fixed mask (never the length) when [hasValue], else the
- * [placeholder], and is one node named [description], so the semantics tree holds no part of it.
- */
-@Composable
-internal fun MaskedWell(
-    tag: String,
-    description: String,
-    hasValue: Boolean,
-    placeholder: String,
-    narrow: Boolean,
-    modifier: Modifier = Modifier,
-    dimmed: Boolean = false,
-) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val style = settingsText(type.mono, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
-    Box(
-        modifier
-            .testTag(tag)
-            .clearAndSetSemantics { contentDescription = description }
-            .alpha(if (dimmed) 0.55f else 1f)
-            .heightIn(min = 44.dp)
-            .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        when {
-            hasValue -> Text(ServerRowCopy.MASK, style = style, color = t.ink, maxLines = 1)
-            placeholder.isNotEmpty() -> Text(placeholder, style = style, color = t.faint, maxLines = 1)
-        }
-    }
 }
 
 /**
@@ -803,19 +765,14 @@ private fun AddPathField(value: String, onChange: (String) -> Unit, label: Strin
 /**
  * The Claude CLI section (settings-dialog.tsx:2426-2449): `.settings-warning` (Studio: the attention
  * wash, studio.css 612), then the env-forced row, or the version picker (disabled until the server's
- * `advanced-settings` reply). Its writes are `set-advanced-settings`.
- *
- * r2: the picker chooses which Claude binary the server RUNS, so (owner decision, 2026-10-01) a
- * pick only opens [ClaudeCliConfirmDialog], which shows the current and the new CLI; Switch sends
- * the write, built at that moment from the latest frame (an env override that landed meanwhile
- * still sends nothing). Cancel, Back or a tap outside sends nothing.
+ * `advanced-settings` reply). Its writes are `set-advanced-settings`: a pick is sent at once, as
+ * the web's `onSetCliVersion` does (:2437; ta-coik.5: no app-only confirmation).
  */
 @Composable
 internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val advanced = binding.advanced
-    var pending by remember { mutableStateOf<ServerChoice?>(null) }
     SettingsSection(ClaudeCliCopy.TITLE, null, narrow, modifier = Modifier.testTag(ServerSettingsTags.section("cli")), last = true) {
         val warning = buildAnnotatedString {
             val strong = SpanStyle(fontWeight = FontWeight(630), color = t.ink)
@@ -862,12 +819,7 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
                         TetherSelect(
                             options = ClaudeCliCopy.options(advanced).map { TetherSelectOption(it.value, it.label) },
                             selectedValue = advanced?.claudeCliVersion.orEmpty(),
-                            onSelect = { choice ->
-                                val a = advanced
-                                if (a != null && ServerSettingsPatch.cliVersion(a, choice.value) != null) {
-                                    pending = ClaudeCliCopy.options(a).firstOrNull { it.value == choice.value }
-                                }
-                            },
+                            onSelect = { choice -> advanced?.let { binding.sendCli(ServerSettingsPatch.cliVersion(it, choice.value)) } },
                             enabled = advanced != null,
                             placeholder = LabelText.visibleValue(advanced?.claudeCliVersion),
                             contentDescription = ClaudeCliCopy.PICKER_TITLE,
@@ -878,46 +830,13 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
             )
         }
     }
-    PendingCliPick(pending, binding) { pending = null }
 }
 
 /**
- * The section's pending pick, confirmed or dropped. ta-dh1 r2: as the engine confirmation, a tap
- * on Switch only asks; the write is built in the next frame from that frame's binding (an env
- * override that landed with the tap sends nothing), once per confirmation.
- */
-@Composable
-private fun PendingCliPick(pending: ServerChoice?, binding: ServerSettingsBinding, onDone: () -> Unit) {
-    val choice = pending ?: return
-    // The frame went away (signed out, another server): the pick goes with it.
-    val advanced = binding.advanced ?: return SideEffect { onDone() }
-    var asked by remember(choice) { mutableStateOf(false) }
-    val fired = remember(choice) { booleanArrayOf(false) }
-    if (asked) {
-        SideEffect {
-            if (!fired[0]) {
-                fired[0] = true
-                binding.sendCli(ServerSettingsPatch.cliVersion(advanced, choice.value))
-            }
-            onDone()
-        }
-        return
-    }
-    val current = ClaudeCliCopy.options(advanced).firstOrNull { it.value == advanced.claudeCliVersion.orEmpty() }?.label
-        ?: LabelText.visibleValue(advanced.claudeCliVersion)
-    ClaudeCliConfirmDialog(
-        current = current,
-        next = choice.label,
-        onConfirm = { asked = true },
-        onCancel = onDone,
-    )
-}
-
-/**
- * ta-dh1 r2 (security F2): how long a confirmation's confirm key ignores taps after it appears
- * (longer than its fade-in), so a double tap on what opened it cannot confirm a change unread. The
- * wait runs on the composition's clock (a test's or golden's hand-driven one); [LocalConfirmArmMs]
- * sets it.
+ * ta-dh1 r2 (security F2): how long [ArmedConfirmKey] ignores taps after it appears. ta-coik.5:
+ * Settings no longer uses it (the web's confirmations have no arm delay); its last caller is the
+ * new-session composer's setup confirmation (feature/shell WorktreeUi.kt), which ta-coik.11 removes:
+ * delete this then. The wait runs on the composition's clock; [LocalConfirmArmMs] sets it.
  */
 const val CONFIRM_ARM_MS: Long = 450L
 
@@ -949,47 +868,6 @@ internal fun ArmedConfirmKey(
         }
     }
     TetherKey(onClick = { if (armed) onConfirm() }, classes = classes, label = label, modifier = Modifier.testTag(tag))
-}
-
-/**
- * r2: the Claude CLI switch's confirmation: what runs now and what will run (the picker's own
- * labels, so Auto names what it resolves to), the web's warning in short, Cancel and Switch.
- */
-@Composable
-internal fun ClaudeCliConfirmDialog(current: String, next: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
-    TetherDialog(
-        onDismiss = onCancel,
-        title = ClaudeCliCopy.CONFIRM_TITLE,
-        footer = {
-            TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(ServerSettingsTags.CliCancel))
-            ArmedConfirmKey(ClaudeCliCopy.CONFIRM_ACTION, ServerSettingsTags.CliConfirm, onConfirm, shown = current to next)
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().testTag(ServerSettingsTags.CliConfirmSheet), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TetherDialogText(ClaudeCliCopy.CONFIRM_BODY)
-            CliField(ClaudeCliCopy.CONFIRM_NOW, current, ServerSettingsTags.CliConfirmNow)
-            CliField(ClaudeCliCopy.CONFIRM_NEW, next, ServerSettingsTags.CliConfirmNew)
-        }
-    }
-}
-
-@Composable
-private fun CliField(label: String, value: String, tag: String) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = t.muted, style = settingsText(type.ui, 12f, 600, lineHeight = 1.5f))
-        Text(
-            value,
-            color = t.ink,
-            style = settingsText(type.mono, 13f, 400, lineHeight = 1.5f),
-            modifier = Modifier
-                .testTag(tag)
-                .fillMaxWidth()
-                .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        )
-    }
 }
 
 /** Before the first `server-settings` reply (the web draws nothing then; the app says it is waiting). */

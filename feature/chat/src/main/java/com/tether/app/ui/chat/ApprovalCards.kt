@@ -278,7 +278,6 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val cfp = view.contentFp
     val store = rememberCardStates()
     val selection = store.grant(cfp)
-    val generation = store.grantGeneration(cfp)
     // M1: a path's state is its CANONICAL index (its first occurrence): a path listed twice is one
     // permission, ticked or not as one.
     val readList = requested?.read.orEmpty()
@@ -290,14 +289,9 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     // full, or a row left out, makes the card Deny-only (grants fail closed in [pickFor]).
     val rows = remember(view.request) { requested?.let(::grantRows) }
     val grantable = rows?.grantable ?: true
-    // The "Confirm these permissions" tick, required by EVERY grant (round 4). Never saved. Round 5
-    // (F1): it records the store generation it was made at; it counts only while the record is still
-    // at that generation, and the key re-checks that against the store AT TAP TIME, so an untick in
-    // the same frame as the tap (two fingers, two queued clicks) can never send the old set.
-    var confirmedAt by remember(store, cfp, generation) { mutableStateOf<Long?>(null) }
-    val confirmed = confirmedAt != null && confirmedAt == generation
-    // The generation the summary on screen was drawn at.
-    val drawnGeneration = generation
+    // The web's "exact" confirmation (chat-view.tsx 90fbb9f :1173, :1270-1279; ta-coik.5): a tick that
+    // stands for the complete request, so a path box changing does not clear it. Never saved.
+    var confirmed by remember(store, cfp) { mutableStateOf(false) }
     val fp = remember(view.request, view.activeTurnId, consent.origin) { wireFingerprint(consent.origin, view.activeTurnId, view.request) }
     // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
     // never saved (after process death the ledger is gone, so the operator may tap again).
@@ -320,18 +314,16 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
 
     /**
      * F1: a provider choice, decided from the store AS IT IS NOW (never the values captured when the
-     * key was drawn). A permission-granting choice needs the confirmation, made at the store's current
-     * generation, and grants exactly the ticks the store holds at this moment.
+     * key was drawn): "exact" needs its tick (the web's), "subset" grants exactly the ticks the store
+     * holds at this moment.
      */
     fun choose(choice: ApprovalChoiceView) {
         if (choice.permissionGrant == null) return send(choice.choiceId, null, null)
-        val liveGeneration = store.grantGeneration(cfp)
-        if (confirmedAt == null || confirmedAt != liveGeneration) return
         val live = store.grant(cfp)
         val liveRead = readList.filter { readList.indexOf(it) !in live.offRead }.distinct()
         val liveWrite = writeList.filter { writeList.indexOf(it) !in live.offWrite }.distinct()
         val liveNetwork = requested?.network == true && !live.networkOff
-        val pick = pickFor(view, choice, confirmed = true, subset = subsetGrant(liveRead, liveWrite, liveNetwork), grantable = grantable) ?: return
+        val pick = pickFor(view, choice, confirmed = confirmed, subset = subsetGrant(liveRead, liveWrite, liveNetwork), grantable = grantable) ?: return
         send(pick.choiceId, null, pick.granted)
     }
 
@@ -438,18 +430,12 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         GrantCheckbox(
                             checked = confirmed,
                             enabled = !frozen,
-                            // I-A: toggled against the LIVE generation (never the drawn `confirmed`).
-                            // Round 7: and only when the live generation is still the DRAWN one, so a
-                            // confirmation always refers to the words that were on screen when it was made.
-                            onChange = {
-                                val g = store.grantGeneration(cfp)
-                                confirmedAt = if (confirmedAt == g || g != drawnGeneration) null else g
-                            },
+                            onChange = { confirmed = !confirmed },
                             tag = "grant-confirm",
                             onBlocked = blocked,
                         ) {
                             Text(
-                                grantSummary(readPaths, writePaths, network, rows.shown),
+                                EXACT_CONFIRM_COPY,
                                 style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
                                 color = t.warning,
                             )

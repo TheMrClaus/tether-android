@@ -63,7 +63,6 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
-import com.tether.app.client.ConfirmedEngineWrite
 import com.tether.app.client.ProvidersList
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.client.TetherClient
@@ -186,7 +185,6 @@ fun SettingsDialog(
     val advanced by client.advancedSettings.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestAdvancedSettings() }
     val writer = remember(client) { ClientSettingsWriter(client) }
-    val freshSettings: () -> ServerSettingsView? = remember(client) { { client.serverSettings.value?.let(ServerSettingsView::of) } }
     val origin = if (configured) serverOrigin(server) else null
     val replies by client.serverSettingsReplies.collectAsStateWithLifecycle()
     // ta-dh1 (ta-cc5, the engines part): the frame is read once per frame, not per recomposition.
@@ -199,8 +197,6 @@ fun SettingsDialog(
         origin = origin,
         writer = writer,
         replies = replies,
-        // r2: a confirmed write is built from the client's newest frame, never a composed one behind it.
-        fresh = freshSettings,
     )
     // ta-q6p: the custom-providers registry, asked for on open (the web asks on connect); every
     // write goes through the client's set-providers check, built from its newest list.
@@ -585,5 +581,4 @@ private class ClientSettingsWriter(private val client: TetherClient) : ServerSet
     override fun patch(patch: JsonObject, origin: String) = client.setServerSettings(patch, origin)
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
     override fun detectEngines(origin: String) = client.detectEngines(origin)
-    override fun confirmed(write: ConfirmedEngineWrite, origin: String) = client.setConfirmedEngineValue(write, origin)
 }

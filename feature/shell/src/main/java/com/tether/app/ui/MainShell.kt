@@ -257,7 +257,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         fileBrowser.cwd = session?.cwd.orEmpty()
         fileBrowser.sessionName = session?.name.orEmpty()
     }
-    var showLogoutConfirm by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<AgentSession?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
@@ -378,7 +377,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     showLog = true
                     refreshStats()
                 },
-                onLogout = { showLogoutConfirm = true },
+                // topbar.tsx 90fbb9f :257: Lock signs out at once (ta-coik.5: no app-only confirmation).
+                onLogout = { vm.logout() },
             )
         val headerActions = WorkspaceHeaderActions(
                 onRename = { renaming = session },
@@ -661,33 +661,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
     if (settingsOpen) ShellSettings(vm, prefs, workspaceRoot, onDismiss = { settingsOpen = false })
     if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, scope = scope, onDismiss = { workspacePickerOpen = false })
-
-    if (showLogoutConfirm) {
-        TetherDialog(onDismiss = { showLogoutConfirm = false }, title = "Sign out") {
-            Text(
-                // The server URL is kept to prefill the sign-in screen; the
-                // credential is forgotten (and a cookie session revoked).
-                "Sign out of this server?",
-                color = t.ink,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.body,
-                fontSize = 13.6.sp,
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TetherKey(onClick = { showLogoutConfirm = false }, classes = KeyClasses.ButtonSecondary, label = "Cancel")
-                TetherKey(
-                    onClick = {
-                        showLogoutConfirm = false
-                        vm.logout()
-                    },
-                    classes = KeyClasses.ButtonDanger,
-                    label = "Sign out",
-                    icon = TetherIcons.LogOut,
-                )
-            }
-        }
-    }
 
     // ta-abm (T8.1 slice 2): the new-session sheet, raised by every New session key (the drawer's,
     // a block's "+", the Overview's, the empty stage's); the draft it draws is the view model's.

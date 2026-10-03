@@ -85,7 +85,7 @@ object ClaudeAccountsCopy {
      * The owner-grade refusal of a server without tether #236 (it says "needs an owner sign-in"): said
      * as the web shows a change's error; nothing is disabled, and the next change clears it.
      */
-    const val OWNER_NEEDED = "This server has not been updated yet to let the app change Claude accounts: it asks for an owner sign-in. Once the server is updated this works from the phone like the web; until then, use the web console."
+    const val OWNER_NEEDED = "This server is older than the app's owner sign-ins (tether #236), so it asks for an owner sign-in here. Update the server to change Claude accounts from the app."
 
     /** settings-dialog.tsx:1806 the armed Remove key, and CLAUDE_ACCOUNT_REMOVE_ARM_MS (:1189). */
     const val CONFIRM_REMOVE = "Confirm remove"

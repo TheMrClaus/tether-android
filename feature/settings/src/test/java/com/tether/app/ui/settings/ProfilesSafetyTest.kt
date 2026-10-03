@@ -28,7 +28,6 @@ import com.tether.app.ui.settings.ProfileFixtures.frame
 import com.tether.app.ui.settings.ProfileFixtures.gemini
 import com.tether.app.ui.settings.ProfileFixtures.profiles
 import com.tether.app.ui.settings.ProfileFixtures.zai
-import com.tether.app.ui.text.SafeText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -41,11 +40,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-q6p r2: the owner's decisions A (risky env keys) and B (Extends) through the semantics tree,
- * and the fixes of the r1 reviews: a reconnect closes a confirmation (security F1), a write while
- * another waits for its broadcast is refused (verifier F1), a refused write is never silent
- * (security F4), the switch sends the value asked for (F8), and an env name collision is refused
- * (F9). Every write is waited for on the writer and asserted as the exact frame.
+ * ta-q6p r2, through the semantics tree: a write while another waits for its broadcast is refused
+ * (verifier F1), a refused write is never silent (security F4), the switch sends the value asked
+ * for (F8). ta-coik.5: as on the web (settings-dialog.tsx 90fbb9f :359-437, :696), every env key
+ * (whatever its name) and the engine are written at once, with no confirmation, and an env name the
+ * profile already has is overwritten. Every write is waited for on the writer and asserted as the
+ * exact frame.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -114,173 +114,76 @@ class ProfilesSafetyTest {
         compose.waitForIdle()
     }
 
-    private fun confirm() {
-        compose.mainClock.advanceTimeBy(CONFIRM_ARM_MS + 50)
-        compose.waitForIdle()
-        tag(ProfileTags.Confirm).performClick()
-    }
-
     private fun waitForWrites(w: RecordingProvidersWriter, n: Int) = compose.waitUntil(5_000) { w.writes.size >= n }
 
     private fun flushWrites() = androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
 
-    // ---- A: risky env keys ------------------------------------------------------------------------
+    // ---- every env key and the engine, at once (ta-coik.5) ----------------------------------------
 
-    @Test fun aRiskyValueIsConfirmedWithItsValuesMaskedAndRevealable() {
+    /** :393-401: a value's blur writes it, whatever the key; nothing asks first. */
+    @Test fun aValueOfAKeyThatChangesWhatRunsIsWrittenAtOnceLikeTheWeb() {
         val w = answering()
         show(writer = w)
-        tap(ProfileTags.envReveal("gemini", "PATH"))
+        assertEquals("/usr/bin", editable(ProfileTags.envInput("gemini", "PATH")))
         typeAndDone(ProfileTags.envInput("gemini", "PATH"), "/opt/bin")
-        assertEquals("Done only asks", emptyList<Any>(), w.writes)
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        assertTrue(texts().contains("Change what Gemini CLI runs?"))
-        assertEquals("Change the value of PATH", SafeText.original(textOf(ProfileTags.ConfirmAction)))
-        // Both values masked until their own reveal.
-        tag(ProfileTags.ConfirmNewMasked).assertExists()
-        tag(ProfileTags.ConfirmNowMasked).assertExists()
-        assertFalse(exists(ProfileTags.ConfirmNewValue))
-        tap(ProfileTags.ConfirmNewReveal)
-        assertEquals("/opt/bin", SafeText.original(textOf(ProfileTags.ConfirmNewValue)))
-        tap(ProfileTags.ConfirmNowReveal)
-        assertEquals("/usr/bin", SafeText.original(textOf(ProfileTags.ConfirmNowValue)))
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(extraEnv = ""","PATH":"/opt/bin""""), WORK, zai()), w.frames().single())
-        assertTrue(w.writes.single().first.isConfirmed)
+        assertFalse("no confirmation", texts().any { it.startsWith("Change what ") })
     }
 
-    @Test fun aNewValueStaysMaskedInTheConfirmation() {
-        show(writer = recording())
-        tap(ProfileTags.envReveal("gemini", "PATH"))
-        typeAndDone(ProfileTags.envInput("gemini", "PATH"), SENTINEL)
-        // The dialog draws a fixed mask; only the reveal inside it shows the value.
-        val dialog = compose.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().last()
-        fun all(node: SemanticsNode): String = node.config.joinToString { "${it.key.name}=${it.value}" } + node.children.joinToString { all(it) }
-        assertFalse(all(dialog).contains(SENTINEL))
-        assertTrue(texts().contains("New value, hidden"))
-    }
-
-    @Test fun addingARiskyKeyInAnyCaseIsConfirmedAndCancelSendsNothing() {
+    @Test fun addingAKeyInAnyCaseIsWrittenAtOnce() {
         val w = answering()
         show(writer = w)
         tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("path")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("/tmp/evil")
+        tag(ProfileTags.envNewInput("claude-work")).performScrollTo().performTextReplacement("/tmp/evil")
         tap(ProfileTags.envAdd("claude-work"))
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        assertEquals("Add path", SafeText.original(textOf(ProfileTags.ConfirmAction)))
-        tag(ProfileTags.Cancel).performClick()
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        // The draft is kept; Add asks again, and the confirmation sends it.
-        tap(ProfileTags.envAdd("claude-work"))
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(withPath, WORK.replace(",\"enabled\":true", ",\"enabled\":true,\"env\":{\"path\":\"/tmp/evil\"}"), zai()), w.frames().single())
+        // The draft clears once sent, as the web's Add.
+        compose.waitForIdle()
+        assertEquals("", editable(ProfileTags.envNewName("claude-work")))
+        assertEquals("", editable(ProfileTags.envNewInput("claude-work")))
     }
 
-    @Test fun renamingOntoARiskyKeyIsConfirmedAndAFocusLossNeverSendsIt() {
+    /** :376-391: a name's blur renames it, onto any name. */
+    @Test fun renamingOntoAKeyThatChangesWhatRunsIsWrittenOnBlur() {
         val w = answering()
         show(writer = w)
         val key = ProfileTags.envKey("zai", "ANTHROPIC_BASE_URL")
         tag(key).performScrollTo().performClick()
         tag(key).performTextReplacement("HOME")
         tag(ProfileTags.field("zai", ProfileTags.LABEL)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(CommitFieldTags.note(key)).assertExists()
-        assertTrue(texts().contains(CommitOutcome.REVIEW_ON_DONE))
-        tag(key).performScrollTo().performImeAction()
-        compose.waitForIdle()
-        assertEquals("Rename ANTHROPIC_BASE_URL → HOME", SafeText.original(textOf(ProfileTags.ConfirmAction)))
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(withPath, WORK, zai().replace("\"ANTHROPIC_BASE_URL\":", "\"HOME\":")), w.frames().single())
     }
 
-    @Test fun removingARiskyKeyIsConfirmed() {
+    @Test fun removingAKeyIsWrittenAtOnce() {
         val w = answering()
         show(writer = w)
         tap(ProfileTags.envRemove("gemini", "PATH"))
-        assertEquals(emptyList<Any>(), w.writes)
-        assertEquals("Remove PATH", SafeText.original(textOf(ProfileTags.ConfirmAction)))
-        tag(ProfileTags.ConfirmNowMasked).assertExists()
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(), WORK, zai()), w.frames().single())
     }
 
-    @Test fun aRiskyKeyChangedElsewhereMidConfirmationClosesItAndSaysSo() {
-        val w = recording()
-        show(writer = w)
-        tap(ProfileTags.envRemove("gemini", "PATH"))
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        broadcast(profiles(gemini(extraEnv = ""","PATH":"/usr/local/bin""""), WORK, zai()))
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(ProfileTags.notice("gemini")).assertExists()
-        assertTrue(texts().contains(ProfileRows.CHANGED_WHILE_CONFIRMING))
-        assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    // ---- B: Extends ---------------------------------------------------------------------------------
-
-    @Test fun anotherEngineIsConfirmedShowingWhatItWillRun() {
+    /** :696: another engine is written at once. */
+    @Test fun anotherEngineIsWrittenAtOnce() {
         val w = answering()
         show(writer = w)
         compose.onNodeWithContentDescription("gemini extends").performScrollTo().performClick()
         compose.waitForIdle()
         compose.onNodeWithContentDescription("claude").performClick()
-        compose.waitForIdle()
-        assertEquals(emptyList<Any>(), w.writes)
-        assertTrue(texts().contains("Change the Gemini CLI engine?"))
-        assertEquals("claude", SafeText.original(textOf(ProfileTags.ConfirmNew)))
-        assertEquals("acp", SafeText.original(textOf(ProfileTags.ConfirmNow)))
-        // Claude hides the command in the editor, but the server uses it: shown here.
-        assertEquals(listOf("gemini", "--experimental-acp"), SafeText.original(textOf(ProfileTags.ConfirmCommand)).split('\n'))
-        assertEquals("/srv/homes/gemini", SafeText.original(textOf(ProfileTags.ConfirmHome)))
-        assertTrue(texts().any { it.contains("For Claude, the command's first part is the CLI path") })
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(extraEnv = ""","PATH":"/usr/bin"""", extends = "claude"), WORK, zai()), w.frames().single())
-    }
-
-    @Test fun anEngineChangedElsewhereMidConfirmationClosesIt() {
-        val w = recording()
-        show(writer = w)
-        compose.onNodeWithContentDescription("claude-work extends").performScrollTo().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithContentDescription("codex").performClick()
-        compose.waitForIdle()
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        broadcast(profiles(withPath, WORK.replace("\"extends\":\"claude\"", "\"extends\":\"pi\""), zai()))
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(ProfileTags.notice("claude-work")).assertExists()
-        assertEquals(emptyList<Any>(), w.writes)
-    }
-
-    // ---- security F1: a reconnect ------------------------------------------------------------------
-
-    @Test fun aReconnectClosesAConfirmationAndNothingIsSent() {
-        val w = recording()
-        show(writer = w)
-        typeAndDone(ProfileTags.field("gemini", ProfileTags.COMMAND), "/opt/g")
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        // The same registry again, but from a new socket.
-        broadcast(profiles(withPath, WORK, zai()), epoch = 1)
-        assertFalse(exists(ProfileTags.ConfirmSheet))
-        tag(ProfileTags.notice("gemini")).assertExists()
-        assertEquals(emptyList<Any>(), w.writes)
+        assertFalse("no confirmation", texts().contains("Change the Gemini CLI engine?"))
     }
 
     // ---- verifier F1: a write in flight ----------------------------------------------------------------
 
-    /** The verifier's probe: a plain write before the confirmed write's broadcast would put the old command back. */
+    /** The verifier's probe: a write before the last write's broadcast would put the old command back. */
     @Test fun aSecondWriteBeforeTheBroadcastIsRefusedAndSaysSo() {
         val w = recording()
         show(writer = w)
         typeAndDone(ProfileTags.field("gemini", ProfileTags.COMMAND), "/opt/g")
-        confirm()
         waitForWrites(w, 1)
         compose.waitForIdle()
         typeAndDone(ProfileTags.field("claude-work", ProfileTags.LABEL), "Work")
@@ -341,12 +244,10 @@ class ProfilesSafetyTest {
         assertEquals(frame(withPath, WORK, zai().replace("Z.AI GLM", "GLM")), w.frames().single())
         compose.waitForIdle()
         assertFalse(exists(ProfileTags.notice("zai")))
-        // A refused confirmation says so too.
+        // A refused command says so too, under its field.
         w.refuseWith = ProvidersRefusal.InFlight
         typeAndDone(ProfileTags.field("gemini", ProfileTags.COMMAND), "/opt/g")
-        confirm()
-        compose.waitForIdle()
-        tag(ProfileTags.notice("gemini")).assertExists()
+        tag(CommitFieldTags.note(ProfileTags.field("gemini", ProfileTags.COMMAND))).assertExists()
         assertTrue(texts().contains(ProfileRows.NOT_SAVED_IN_FLIGHT))
     }
 
@@ -359,17 +260,25 @@ class ProfilesSafetyTest {
         assertEquals(frame(withPath.replace("\"enabled\":true", "\"enabled\":false"), WORK, zai()), w.frames().single())
     }
 
-    @Test fun anEnvNameCollisionIsRefusedAndSaid() {
-        val w = recording()
+    /**
+     * ta-coik.4 / ta-coik.5: a name the profile already has is overwritten, as the web's rename (:386-389:
+     * `delete next[key]; next[nextKey] = value`) and Add (:369: `{ ...env, [key]: draftValue }`) do.
+     */
+    @Test fun anEnvNameCollisionOverwritesAsTheWeb() {
+        val w = answering()
         show(writer = w)
         val key = ProfileTags.envKey("zai", "ANTHROPIC_BASE_URL")
         typeAndDone(key, "ANTHROPIC_AUTH_TOKEN")
-        tag(CommitFieldTags.note(key)).assertExists()
-        assertTrue(texts().contains(ProfileRows.NOT_SAVED_COLLISION))
+        waitForWrites(w, 1)
+        val renamed = zai().replace(""""ANTHROPIC_AUTH_TOKEN":"FAKE-demo-token-1111","ANTHROPIC_BASE_URL":""", """"ANTHROPIC_AUTH_TOKEN":""")
+        assertEquals(frame(withPath, WORK, renamed), w.frames().single())
+        compose.waitForIdle()
         tag(ProfileTags.envNewName("zai")).performScrollTo().performTextReplacement(" ANTHROPIC_AUTH_TOKEN ")
+        tag(ProfileTags.envNewInput("zai")).performScrollTo().performTextReplacement("FAKE-new")
         tap(ProfileTags.envAdd("zai"))
-        tag(ProfileTags.envNewNote("zai")).assertExists()
-        assertEquals(emptyList<Any>(), w.writes)
+        waitForWrites(w, 2)
+        assertEquals(frame(withPath, WORK, zai(token = "FAKE-new").replace(""","ANTHROPIC_BASE_URL":"https://api.z.ai/api/anthropic"""", "")), w.frames()[1])
+        assertFalse(exists(ProfileTags.envNewNote("zai")))
     }
 
     /** F4 for slice 3's rows (the shared field): a server-settings write that is refused says so and keeps the text. */
@@ -378,7 +287,6 @@ class ProfilesSafetyTest {
             override fun patch(patch: kotlinx.serialization.json.JsonObject, origin: String) = false
             override fun cliVersion(message: com.tether.app.protocol.ClientMessage.SetAdvancedSettings, origin: String) = false
             override fun detectEngines(origin: String) = false
-            override fun confirmed(write: com.tether.app.client.ConfirmedEngineWrite, origin: String) = false
         }
         state.tab = SettingsTab.Advanced
         compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding(writer = refusing)) }
@@ -394,60 +302,26 @@ class ProfilesSafetyTest {
 
     /**
      * ta-coik.4: a key holding `=` is any name the web's env editor takes (settings-dialog.tsx:366-372),
-     * so it is no longer refused for its shape. Still risky (it would set LD_PRELOAD in the child), it
-     * goes through the confirmation (ta-coik.5's), and confirmed it is written exactly as typed.
+     * and (ta-coik.5) it is written at once, exactly as typed.
      */
-    @Test fun anEqualsSignInANewKeyIsTakenThroughItsConfirmation() {
+    @Test fun anEqualsSignInANewKeyIsWrittenAsTyped() {
         val w = answering()
         show(writer = w)
         tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("LD_PRELOAD=/tmp/x.so:")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("v")
+        tag(ProfileTags.envNewInput("claude-work")).performScrollTo().performTextReplacement("v")
         tap(ProfileTags.envAdd("claude-work"))
         assertFalse("no shape refusal", texts().any { it.startsWith("Not saved: use letters") })
-        tag(ProfileTags.ConfirmSheet).assertExists()
-        assertEquals(emptyList<Any>(), w.writes)
-        confirm()
         waitForWrites(w, 1)
         assertTrue(w.frames().single().toString().contains("LD_PRELOAD=/tmp/x.so:"))
     }
 
-    /** A key the server already holds that is not a plain name is changed only through the confirmation. */
-    @Test fun anExistingKeyThatIsNotAPlainNameIsConfirmed() {
+    /** A key the server already holds that is not a plain name is removed at once like any other. */
+    @Test fun anExistingKeyThatIsNotAPlainNameIsRemovedAtOnce() {
         val w = answering()
         show(ProfileFixtures.list(profiles(gemini(extraEnv = ""","A-B":"v""""), WORK, zai())), w)
         tap(ProfileTags.envRemove("gemini", "A-B"))
-        assertEquals(emptyList<Any>(), w.writes)
-        assertEquals("Remove A-B", SafeText.original(textOf(ProfileTags.ConfirmAction)))
-        confirm()
         waitForWrites(w, 1)
         assertEquals(frame(gemini(), WORK, zai()), w.frames().single())
-    }
-
-    /** Item 4: the engine confirmation names the risky variables (never their values) the new engine will read. */
-    @Test fun theEngineConfirmationNamesTheRiskyVariables() {
-        show(writer = recording())
-        compose.onNodeWithContentDescription("gemini extends").performScrollTo().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithContentDescription("claude").performClick()
-        compose.waitForIdle()
-        assertEquals("PATH", SafeText.original(textOf(ProfileTags.ConfirmEnvKeys)))
-        assertFalse(textOf(ProfileTags.ConfirmEnvKeys).contains("/usr/bin"))
-    }
-
-    /** Item 5: a confirmed risky add clears the Add row's name and value. */
-    @Test fun aConfirmedRiskyAddClearsTheAddRow() {
-        val w = answering()
-        show(writer = w)
-        tag(ProfileTags.envNewName("claude-work")).performScrollTo().performTextReplacement("HOME")
-        tap(ProfileTags.envNewReveal("claude-work"))
-        tag(ProfileTags.envNewInput("claude-work")).performTextReplacement("/srv/h")
-        tap(ProfileTags.envAdd("claude-work"))
-        confirm()
-        waitForWrites(w, 1)
-        compose.waitForIdle()
-        assertEquals("", editable(ProfileTags.envNewName("claude-work")))
-        assertEquals("", editable(ProfileTags.envNewInput("claude-work")))
     }
 
     /** Item 3 (the verifier's probe): another client's list landing before ours keeps the guard up. */

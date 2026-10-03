@@ -62,7 +62,6 @@ enum class SettingsShot(
     DevicesSelf("settings-devices-self", SettingsTab.Devices, devices = DevicesShot.Self),
     DevicesTokenPassword("settings-devices-token-password", SettingsTab.Devices, devices = DevicesShot.TokenPassword),
     DevicesCode("settings-devices-code", SettingsTab.Devices, devices = DevicesShot.Code),
-    DevicesCodeRevealed("settings-devices-code-revealed", SettingsTab.Devices, devices = DevicesShot.CodeRevealed),
     DevicesCodeExpired("settings-devices-code-expired", SettingsTab.Devices, devices = DevicesShot.CodeExpired),
     DevicesOwner("settings-devices-owner", SettingsTab.Devices, devices = DevicesShot.Owner),
     DevicesChecking("settings-devices-checking", SettingsTab.Devices, devices = DevicesShot.Checking),
@@ -94,12 +93,10 @@ enum class SettingsShot(
     EnginesMissing("settings-engines-missing", SettingsTab.Engines, server = ServerShot.EnginesMissing),
     EnginesLocked("settings-engines-locked", SettingsTab.Engines, server = ServerShot.EnginesLocked),
     Profiles("settings-profiles", SettingsTab.Engines, profiles = ProfilesShot.Loaded),
-    ProfilesEnv("settings-profiles-env", SettingsTab.Engines, profiles = ProfilesShot.Masked),
-    ProfilesRevealed("settings-profiles-revealed", SettingsTab.Engines, profiles = ProfilesShot.Revealed),
+    ProfilesEnv("settings-profiles-env", SettingsTab.Engines, profiles = ProfilesShot.Env),
     Nodes("settings-nodes", SettingsTab.Nodes, nodes = NodesShot.List),
     NodesEmpty("settings-nodes-empty", SettingsTab.Nodes, nodes = NodesShot.Empty),
     NodesAdding("settings-nodes-adding", SettingsTab.Nodes, nodes = NodesShot.Adding),
-    NodesRevealed("settings-nodes-revealed", SettingsTab.Nodes, nodes = NodesShot.Revealed),
     NodesResult("settings-nodes-result", SettingsTab.Nodes, nodes = NodesShot.Result),
     NodesError("settings-nodes-error", SettingsTab.Nodes, nodes = NodesShot.Error),
 }
@@ -108,8 +105,8 @@ enum class SettingsShot(
  * T10.3: the Nodes seeds, timing-free like the others: the list and the last answer are built HERE
  * and handed in (the answer as the actions' initial notice), so the first frame is the drawn tab;
  * the writer behind them fails the shot on any request. `settings-nodes` the list (every status,
- * the skew warning), `-empty` no nodes, `-adding` the form filled with the credential masked,
- * `-revealed` the same shown (an obviously FAKE bundle), `-result` a probe's answer, `-error` the
+ * the skew warning), `-empty` no nodes, `-adding` the form filled (ta-coik.5: the credential shown
+ * as the web's textarea shows it, an obviously FAKE bundle), `-result` a probe's answer, `-error` the
  * refusal a phone sign-in gets before tether #236 is deployed. The form is filled by synchronous
  * semantics actions on the hand-driven clock, then the focus cleared (no cursor in the shot).
  */
@@ -117,13 +114,11 @@ enum class NodesShot(
     val scrollTo: String?,
     val list: List<com.tether.app.protocol.NodeSummary> = NodeFixtures.LIST,
     val fill: Boolean = false,
-    val reveal: Boolean = false,
     val notice: NodeNotice? = null,
 ) {
     List(NodeTags.row("node_ws")),
     Empty(NodeTags.Add, list = emptyList()),
     Adding(null, fill = true),
-    Revealed(null, fill = true, reveal = true),
     Result(NodeTags.Add, notice = NodeNotice(NodeFixtures.ORIGIN, NodeAction.Probe, "node_ws", ok = true, text = "Reachable.", heldByServer = false, serial = 1)),
     Error(NodeTags.Add, notice = NodeNotice(NodeFixtures.ORIGIN, NodeAction.Add, null, ok = false, text = NodeFixtures.REFUSAL, heldByServer = false, serial = 1)),
     ;
@@ -137,9 +132,8 @@ enum class NodesShot(
  * any call, the clock fixed. `settings-devices` the top (Notifications, Passkeys), `-sessions` the
  * signed-in sessions (the app's passkey session marked), `-paired` the paired devices with the pair
  * hint, `-self` a device-token sign-in whose only device is this phone, `-token-password` the
- * password switch a device-token sign-in cannot turn off (r2, security F6),
- * `-code` a fresh code masked, `-code-revealed` the same shown (an obviously FAKE code; the one tap
- * of the shot, a synchronous state change on the hand clock), `-code-expired` the expired card,
+ * password switch from a device-token sign-in (ta-coik.5: usable, as on the web),
+ * `-code` a fresh code, shown at once as on the web (an obviously FAKE code), `-code-expired` the expired card,
  * `-owner` the owner-grade refusal before tether #236 is deployed, `-checking` the opening reads in
  * flight, `-error` a refusal in each area. T10.5 (the panel's passkey prompt available, as on a
  * device): `-passkey-empty` none yet, the add row ready (the web reference's own state),
@@ -147,14 +141,13 @@ enum class NodesShot(
  * the web's words for an authenticator that already has one, `-passkey-added` the notice and the new
  * row after the re-read.
  */
-enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
+enum class DevicesShot(val scrollTo: String?) {
     Top(null),
     Sessions(DevicesTags.Sessions),
     Paired(DevicesTags.Paired),
     Self(DevicesTags.Paired),
     TokenPassword(DevicesTags.PasswordToggle),
     Code(DevicesTags.Paired),
-    CodeRevealed(DevicesTags.Paired, reveal = true),
     CodeExpired(DevicesTags.Paired),
     Owner(null),
     Checking(null),
@@ -169,7 +162,7 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
         Top, Sessions, Paired -> DevicesFixtures.seed()
         Self -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, devices = listOf(DevicesFixtures.PHONE), sessions = listOf(DevicesFixtures.BROWSER))
         TokenPassword -> DevicesFixtures.seed(com.tether.app.client.AppSignIn.DeviceToken, sessions = listOf(DevicesFixtures.BROWSER))
-        Code, CodeRevealed -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE))
+        Code -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE))
         CodeExpired -> DevicesFixtures.seed(code = DevicesFixtures.code(DevicesFixtures.FAKE_CODE, expiresAt = DevicesFixtures.NOW - 1_000))
         Owner -> DevicesSeed(ownerNeeded = true, signIn = com.tether.app.client.AppSignIn.DeviceToken)
         Checking -> DevicesSeed()
@@ -191,13 +184,12 @@ enum class DevicesShot(val scrollTo: String?, val reveal: Boolean = false) {
  * ta-q6p: the Custom providers seeds, timing-free like the others: the list is built HERE and handed
  * in, so the first frame is the drawn editor and nothing is fetched or written (the writer behind it
  * fails the shot if asked). `settings-profiles` the section's top (the caption and the Gemini CLI
- * acp card), `-env` the env editor with its value masked, `-revealed` the same with the value shown
- * (an obviously FAKE key; the one tap of the shot, a synchronous state change on the hand clock).
+ * acp card), `-env` the env editor, its value shown as the web's plain field shows it (an obviously
+ * FAKE key; ta-coik.5).
  */
-enum class ProfilesShot(val scrollTo: String, val reveal: Boolean = false) {
+enum class ProfilesShot(val scrollTo: String) {
     Loaded(ProfileTags.Section),
-    Masked(ProfileTags.row("gemini", ProfileTags.ENV)),
-    Revealed(ProfileTags.row("gemini", ProfileTags.ENV), reveal = true),
+    Env(ProfileTags.row("gemini", ProfileTags.ENV)),
     ;
 
     fun binding() = ProvidersBinding(ProfileFixtures.list(), ProfileFixtures.ORIGIN, NeverWritesProviders)
@@ -258,7 +250,6 @@ private object NeverWrites : ServerSettingsWriter {
     override fun patch(patch: JsonObject, origin: String): Boolean = error("a seeded shot must not write")
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = error("a seeded shot must not write")
     override fun detectEngines(origin: String): Boolean = error("a seeded shot must not scan")
-    override fun confirmed(write: com.tether.app.client.ConfirmedEngineWrite, origin: String): Boolean = error("a seeded shot must not write")
 }
 
 /**
@@ -382,27 +373,13 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     if (shot.nodes?.fill == true) {
         onNodeWithTag(NodeTags.Label, useUnmergedTree = true).performTextReplacement("Workstation")
         onNodeWithTag(NodeTags.BaseUrl, useUnmergedTree = true).performTextReplacement("http://10.0.0.2:4173")
-        onNodeWithTag(NodeTags.CredentialReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        mainClock.advanceTimeBy(600)
-        waitForIdle()
         onNodeWithTag(NodeTags.Credential, useUnmergedTree = true).performTextReplacement(NodeFixtures.FAKE_CREDENTIAL)
-        if (!shot.nodes.reveal) onNodeWithTag(NodeTags.CredentialReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         runOnIdle { focus?.clearFocus(force = true) }
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
     if (shot.server?.reveal == true) {
         onNodeWithTag(ServerSettingsTags.reveal(ServerSetting.Password), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        mainClock.advanceTimeBy(600)
-        waitForIdle()
-    }
-    if (shot.devices?.reveal == true) {
-        onNodeWithTag(DevicesTags.CodeReveal, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        mainClock.advanceTimeBy(600)
-        waitForIdle()
-    }
-    if (shot.profiles?.reveal == true) {
-        onNodeWithTag(ProfileTags.envReveal("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }

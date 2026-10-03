@@ -71,11 +71,9 @@ import kotlinx.coroutines.launch
  * requestId in the client (TetherClient.addNode & co.), sent once, never queued or retried, and
  * only on a socket opened for the server this screen was drawn from.
  *
- * The credential bundle carries the peer's node BEARER: it is a credential (slice 3's rules,
- * shared with ServerSettingsRows.kt): masked by default (the masked well never reads it, so no
- * semantics node holds it), revealed by a tap into a field with the password keyboard and no copy
- * or cut, masked again on close, tab change, server switch, rotation and ON_STOP, held in plain
- * `remember` (never saved state, never a preference, never logged), sent only by Add node.
+ * The credential bundle carries the peer's node BEARER. ta-coik.5: as on the web it is a plain
+ * textarea (no mask, copy and cut work; a copy is marked sensitive), held in plain `remember`
+ * (never saved state, never a preference, never logged), sent only by Add node.
  */
 
 /** Tags of the Nodes panel's parts. */
@@ -84,8 +82,6 @@ object NodeTags {
     const val Label = "nodes-add-label"
     const val BaseUrl = "nodes-add-base-url"
     const val Credential = "nodes-add-credential"
-    const val CredentialMasked = "nodes-add-credential-masked"
-    const val CredentialReveal = "nodes-add-credential-reveal"
     const val Add = "nodes-add"
     const val Notice = "nodes-notice"
     const val Empty = "nodes-empty"
@@ -398,11 +394,11 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
 }
 
 /**
- * `.settings-node-add`: the form. Label and base URL are plain fields; the credential is the
- * slice-3 secret (masked well / revealed field). Every field is plain `remember`: a rotation, a
+ * `.settings-node-add`: the form. Label, base URL and the credential are plain fields, as on the
+ * web. Every field is plain `remember`: a rotation, a
  * close, a tab change or another server starts it empty, and nothing in it is ever sent but by
  * Add node. The credential is let go once the server holds the node ([NodeNotice.heldByServer]);
- * after any other answer (a refusal, nothing sent, no answer) the form keeps it, masked, so a
+ * after any other answer (a refusal, nothing sent, no answer) the form keeps it, so a
  * deliberate second tap can send it again. Nothing is resent by itself.
  */
 @Composable
@@ -414,10 +410,9 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
     var credential by remember { mutableStateOf("") }
     // r2 (security F2): the credential last handed to the server (an answer that kept it: refused,
     // lost, no answer). While the field still holds exactly that, the app going to the background
-    // CLEARS it; a credential never sent as it stands is only masked (the operator may be away
-    // copying it). Plain remember, like the field.
+    // CLEARS it; a credential never sent as it stands is kept (the operator may be away copying
+    // it). Plain remember, like the field.
     var sentText by remember { mutableStateOf<String?>(null) }
-    var revealed by rememberMaskedReveal()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -444,36 +439,10 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
         Text(NodesCopy.ADD_HEADING, color = t.faint, style = settingsText(type.ui, 13f, 720))
         NodeField(label, { if (NodeFormRules.labelFits(it)) label = it }, NodesCopy.LABEL_PLACEHOLDER, NodeTags.Label, ui, KeyboardType.Text)
         NodeField(baseUrl, { if (NodeFormRules.baseUrlFits(it)) baseUrl = it }, NodesCopy.BASE_URL_PLACEHOLDER, NodeTags.BaseUrl, ui, KeyboardType.Uri)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val box = Modifier.weight(1f).heightIn(min = 104.dp)
-            if (revealed) {
-                CredentialField(credential, { if (NodeFormRules.credentialFits(it)) credential = it }, mono, box)
-            } else {
-                MaskedWell(
-                    tag = NodeTags.CredentialMasked,
-                    description = ServerRowCopy.maskedDescription(NodesCopy.CREDENTIAL_LABEL, credential.isEmpty()),
-                    hasValue = credential.isNotEmpty(),
-                    placeholder = NodesCopy.CREDENTIAL_PLACEHOLDER,
-                    narrow = narrow,
-                    modifier = box,
-                )
-            }
-            TetherKey(
-                onClick = { revealed = !revealed },
-                classes = KeyClasses.IconButton,
-                icon = if (revealed) TetherIcons.EyeOff else TetherIcons.Eye,
-                iconSize = 14.dp,
-                contentDescription = if (revealed) ServerRowCopy.hide(CREDENTIAL_NAME) else ServerRowCopy.reveal(CREDENTIAL_NAME),
-                modifier = Modifier.testTag(NodeTags.CredentialReveal),
-            )
-        }
+        CredentialField(credential, { if (NodeFormRules.credentialFits(it)) credential = it }, mono, Modifier.fillMaxWidth().heightIn(min = 104.dp))
         val adding = busy?.action == NodeAction.Add
         TetherKey(
-            onClick = {
-                // Masked at once: the credential leaves the screen the moment it is sent.
-                revealed = false
-                if (actions?.add(origin, credential, label, baseUrl) == true) sentText = credential
-            },
+            onClick = { if (actions?.add(origin, credential, label, baseUrl) == true) sentText = credential },
             classes = KeyClasses.ButtonSecondary,
             label = if (adding) NodesCopy.ADDING else NodesCopy.ADD,
             enabled = actions != null && busy == null && credential.isNotBlank(),
@@ -481,9 +450,6 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
         )
     }
 }
-
-/** The reveal key's object ("Reveal credential bundle"). */
-private const val CREDENTIAL_NAME = "credential bundle"
 
 /** `.settings-node-add input`: a 44dp field, the placeholder as its name (the web's only label). */
 @Composable
@@ -503,16 +469,15 @@ private fun NodeField(value: String, onChange: (String) -> Unit, placeholder: St
 }
 
 /**
- * The revealed credential (`.settings-node-add textarea`: mono, at least 104dp, wrapping): the
- * password keyboard (nothing learned or suggested), no copy or cut (slice 3's [NoCopyScope]), no
- * keyboard action that sends: only Add node does.
+ * The credential (`.settings-node-add textarea`: mono, at least 104dp, wrapping): the password
+ * keyboard (nothing learned or suggested), copy and cut as the web's textarea (a copy marked
+ * sensitive), no keyboard action that sends: only Add node does.
  */
 @Composable
 private fun CredentialField(value: String, onChange: (String) -> Unit, style: TextStyle, modifier: Modifier) {
     val t = LocalTetherTokens.current
     var focused by remember { mutableStateOf(false) }
-    // r2 (verifier L2), ta-oqx: a Cut deletes nothing and copies nothing: closed at its source (slice 3's shared guard).
-    NoCopyScope(true) { guard ->
+    SensitiveClipScope(true) {
         BasicTextField(
             value = value,
             onValueChange = onChange,
@@ -520,7 +485,7 @@ private fun CredentialField(value: String, onChange: (String) -> Unit, style: Te
             textStyle = style.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Default),
-            modifier = guard.then(modifier).testTag(NodeTags.Credential).semantics { contentDescription = NodesCopy.CREDENTIAL_LABEL }.onFocusChanged { focused = it.isFocused },
+            modifier = modifier.testTag(NodeTags.Credential).semantics { contentDescription = NodesCopy.CREDENTIAL_LABEL }.onFocusChanged { focused = it.isFocused },
             decorationBox = { inner ->
                 ServerFieldBox(true, focused, style, if (value.isEmpty()) AnnotatedString(NodesCopy.CREDENTIAL_PLACEHOLDER) else null, inner, alignTop = true)
             },

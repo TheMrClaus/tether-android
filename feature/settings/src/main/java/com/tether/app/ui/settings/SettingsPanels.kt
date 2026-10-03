@@ -57,8 +57,8 @@ internal fun SettingsPanel(
         // T10.4: keyed on the server, so another server's panel starts from nothing (no pending
         // confirmation, no rename half typed); the controller itself is one per server.
         SettingsTab.Devices -> key(devices.controller?.origin) { DevicesPanel(prefs, narrow, devices) }
-        // T10.3: keyed on the server, so another server's form starts empty (the credential masked
-        // and dropped, nothing half-typed carried over); its requests are bound to their server.
+        // T10.3: keyed on the server, so another server's form starts empty (the credential dropped,
+        // nothing half-typed carried over); its requests are bound to their server.
         SettingsTab.Nodes -> key(nodes.origin) { NodesPanel(narrow, nodes) }
         SettingsTab.Engines -> EnginesPanel(narrow, claudeAccounts, serverSettings, providers)
         // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
@@ -265,10 +265,9 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  * (the two secrets, masked), Storage, GitHub connection, Session lifecycle, Session defaults, then
  * Claude CLI. Every row writes at once (`set-server-settings` with only its key); a value an
  * environment variable forces is locked. The restart banner above follows the server's
- * `restartRequired` in its reply. One row here sets what the server RUNS: the Claude CLI picker
- * (which binary a new Claude session spawns), so a pick is confirmed first, the new CLI shown
- * (ClaudeCliConfirmDialog; r2). The engine homes, commands and launch command are on Engines (ta-dh1,
- * EnginesSection.kt), behind the same kind of confirmation (EngineConfirmDialog).
+ * `restartRequired` in its reply. The Claude CLI picker writes at once like the web's (ta-coik.5:
+ * no app-only confirmation). The engine homes, commands and launch command are on Engines (ta-dh1,
+ * EnginesSection.kt), written as the web's blur writes them.
  *
  * Not here: the GitHub connection card (the `/api/github/connection` routes, MATRIX row `/api/github/...`, T8.4)
  * holds its place with a note; the active Codex / opencode session's provider controls

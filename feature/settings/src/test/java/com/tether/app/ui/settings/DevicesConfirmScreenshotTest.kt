@@ -19,7 +19,8 @@ import org.robolectric.annotation.Config
 /**
  * T10.4: the Devices confirmations, seeded synchronously (composed with their values, no tap, the
  * clock driven by hand) and captured with their own window: `-confirm-self` revoking the phone the
- * app is signed in with (it says the phone signs out), `-confirm-passkey` the web's Remove this passkey.
+ * app is signed in with (ta-coik.5: the web's words only, as for any device), `-confirm-passkey` the
+ * web's Remove this passkey.
  */
 enum class DevicesConfirmShot(val id: String, val confirm: DevicesConfirm) {
     Self("settings-devices-confirm-self", DevicesConfirm.Revoke(DevicesFixtures.PHONE, SelfMatch.Yes)),

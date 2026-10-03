@@ -154,23 +154,22 @@ class NodesBehaviourTest {
         assertFalse("the preference store holds the credential", prefs.contains(leak))
     }
 
-    private fun reveal() {
-        tag(NodeTags.CredentialReveal).performScrollTo().performClick()
-        waitFor(NodeTags.Credential)
+    /** What reached saved state, a log line or the preference store: never the credential. */
+    private fun assertNotStored(leak: String) {
+        assertFalse("saved state holds the credential", savedState().contains(leak))
+        assertFalse("a log line holds the credential", ShadowLog.getLogs().any { "${it.tag} ${it.msg} ${it.throwable}".contains(leak) })
+        assertFalse("the preference store holds the credential", store.stored().toString().contains(leak))
     }
 
-    private fun hide() {
-        tag(NodeTags.CredentialReveal).performClick()
-        waitFor(NodeTags.CredentialMasked)
-    }
-
-    /** Type [text] into the (revealed) credential, then mask it. */
-    private fun typeCredential(text: String, keepRevealed: Boolean = false) {
-        reveal()
+    /** Type [text] into the credential (a plain textarea, as the web's: ta-coik.5). */
+    private fun typeCredential(text: String) {
+        tag(NodeTags.Credential).performScrollTo()
         tag(NodeTags.Credential).performTextReplacement(text)
-        compose.waitUntil(5_000) { tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text == text }
-        if (!keepRevealed) hide()
+        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == text }
     }
+
+    private fun systemClipboard() = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        .getSystemService(android.content.ClipboardManager::class.java)
 
     private fun tapAdd() {
         compose.waitUntil(5_000) { enabled(NodeTags.Add) }
@@ -192,7 +191,7 @@ class NodesBehaviourTest {
             NodesCopy.ADD_HEADING,
             NodesCopy.LABEL_PLACEHOLDER,
             NodesCopy.BASE_URL_PLACEHOLDER,
-            "Credential bundle, not set",
+            NodesCopy.CREDENTIAL_LABEL,
             NodesCopy.ADD,
             "Workstation",
             "Lab box",
@@ -254,18 +253,18 @@ class NodesBehaviourTest {
         origin = null
         show()
         assertFalse(exists(NodeTags.Add))
-        assertFalse(exists(NodeTags.CredentialMasked))
+        assertFalse(exists(NodeTags.Credential))
         assertFalse(exists(NodeTags.row("node_ws")))
         assertTrue(writer.calls.isEmpty())
     }
 
     // ---- add -------------------------------------------------------------------------------
 
-    @Test fun addSendsTheFormOnceMasksTheCredentialAndShowsItsOwnAnswer() {
+    @Test fun addSendsTheFormOnceAndShowsItsOwnAnswer() {
         show()
         tag(NodeTags.Label).performTextReplacement(" Workstation ")
         tag(NodeTags.BaseUrl).performTextReplacement("http://10.0.0.2:4173")
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         tapAdd()
         waitCalls(1)
         val call = writer.calls.single()
@@ -274,9 +273,7 @@ class NodesBehaviourTest {
         assertTrue("the typed credential went", call.credential!!.matches(SENTINEL))
         assertEquals(" Workstation ", call.label)
         assertEquals("http://10.0.0.2:4173", call.baseUrl)
-        // Masked the moment it is sent; busy, so a second tap sends nothing.
-        waitFor(NodeTags.CredentialMasked)
-        assertFalse(allSemantics().contains(SENTINEL))
+        // Busy, so a second tap sends nothing.
         waitText(NodesCopy.ADDING)
         assertFalse(enabled(NodeTags.Add))
         assertFalse(enabled(NodeTags.probe("node_ws")))
@@ -287,7 +284,7 @@ class NodesBehaviourTest {
         writer.answer(answered(true, "node_new", "Reachable."))
         waitFor(NodeTags.Notice)
         waitText("Reachable.")
-        compose.waitUntil(5_000) { description(NodeTags.CredentialMasked) == "Credential bundle, not set" }
+        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "" }
         // The label and base URL stay, as on the web.
         assertEquals(" Workstation ", fieldText(NodeTags.Label))
         assertEquals("http://10.0.0.2:4173", fieldText(NodeTags.BaseUrl))
@@ -304,10 +301,10 @@ class NodesBehaviourTest {
         writer.answer(answered(false, null, REFUSAL))
         waitFor(NodeTags.Notice)
         waitText(REFUSAL)
-        // The form keeps what was typed (the credential still held, masked) ...
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+        // The form keeps what was typed (the credential still held) ...
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
         assertEquals("Workstation", fieldText(NodeTags.Label))
-        assertNowhere(SENTINEL)
+        assertNotStored(SENTINEL)
         // ... and nothing is sent again by itself, however long it waits.
         compose.mainClock.advanceTimeBy(60_000)
         compose.waitForIdle()
@@ -326,7 +323,7 @@ class NodesBehaviourTest {
         writer.answer(NodeRequestOutcome.ServerError("Skipping‮ this is refused.\n\nAsk the owner.⁦"))
         waitText("Skipping this is refused. Ask the owner.")
         assertFalse(texts().any { it.contains("‮") || it.contains("⁦") })
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
     }
 
     @Test fun noAnswerALostLinkAndNotConnectedAreEachSaidAndNeverRetried() {
@@ -347,7 +344,7 @@ class NodesBehaviourTest {
             compose.waitForIdle()
             assertEquals("nothing was retried", n + 1, writer.calls.size)
             // The credential is kept for a deliberate retry (the server may not hold the node).
-            assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+            assertEquals(SENTINEL, fieldText(NodeTags.Credential))
         }
     }
 
@@ -358,7 +355,7 @@ class NodesBehaviourTest {
         waitCalls(1)
         writer.answer(answered(false, "node_x", "The node did not respond in time (timed out)."))
         waitText("The node did not respond in time (timed out).")
-        compose.waitUntil(5_000) { description(NodeTags.CredentialMasked) == "Credential bundle, not set" }
+        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "" }
     }
 
     // ---- probe and remove -------------------------------------------------------------------
@@ -407,15 +404,15 @@ class NodesBehaviourTest {
     @Test fun aServerSwitchStartsEmptyAndTheOldServersAnswerIsNotShown() {
         show()
         tag(NodeTags.Label).performTextReplacement("For A")
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         tapAdd()
         waitCalls(1)
         assertEquals(ORIGIN, writer.calls[0].origin)
-        // Signed in to another server: its registry, an empty form, the credential gone and masked.
+        // Signed in to another server: its registry, an empty form, the credential gone.
         list = listOf(NodeFixtures.LAB)
         origin = OTHER_ORIGIN
         waitGone(NodeTags.row("node_ws"))
-        assertEquals("Credential bundle, not set", description(NodeTags.CredentialMasked))
+        assertEquals("", fieldText(NodeTags.Credential))
         assertEquals("", fieldText(NodeTags.Label))
         assertFalse(allSemantics().contains(SENTINEL))
         // A's answer lands: not B's to show.
@@ -428,38 +425,23 @@ class NodesBehaviourTest {
         assertEquals(OTHER_ORIGIN, writer.calls[1].origin)
     }
 
-    // ---- the credential: slice 3's rules ----------------------------------------------------
+    // ---- the credential: the web's plain textarea (ta-coik.5) ------------------------------------
 
-    @Test fun theCredentialIsMaskedByDefaultAndInNoSemanticsLogPreferenceOrSavedState() {
+    @Test fun theCredentialIsAPlainFieldAsTheWebsAndInNoLogPreferenceOrSavedState() {
         ShadowLog.clear()
         show()
+        assertFalse(texts().any { it.startsWith("Reveal credential") || it == "Credential bundle, hidden" })
         typeCredential(SENTINEL)
         compose.waitForIdle()
-        // Masked: a fixed mask, named "hidden"; the value is in no property of any node (InputText included).
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
-        assertFalse(exists(NodeTags.Credential))
-        assertNowhere(SENTINEL)
-        assertFalse("the mask gives away the length", allSemantics().contains("•".repeat(SENTINEL.length)))
-    }
-
-    @Test fun revealShowsItInTheFieldOnlyAndHideMasksItAgain() {
-        ShadowLog.clear()
-        show()
-        typeCredential(SENTINEL, keepRevealed = true)
-        // Control: the probe sees a revealed value (so its absence elsewhere means something).
-        assertTrue(allSemantics().contains(SENTINEL))
-        assertFalse(savedState().contains(SENTINEL))
-        assertFalse(store.stored().toString().contains(SENTINEL))
-        assertFalse(ShadowLog.getLogs().any { "${it.tag} ${it.msg}".contains(SENTINEL) })
-        hide()
-        assertNowhere(SENTINEL)
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
+        assertFalse(tag(NodeTags.Credential).fetchSemanticsNode().config.contains(SemanticsProperties.Password))
+        assertNotStored(SENTINEL)
         assertTrue(writer.calls.isEmpty())
     }
 
-    @Test fun theRevealedFieldUsesThePasswordKeyboardAndTheLabelDoesNot() {
+    @Test fun theFieldUsesThePasswordKeyboardAndTheLabelDoesNot() {
         show()
-        reveal()
-        tag(NodeTags.Credential).performClick()
+        tag(NodeTags.Credential).performScrollTo().performClick()
         compose.waitForIdle()
         val info = EditorInfo()
         compose.runOnIdle { root!!.onCreateInputConnection(info) }
@@ -472,81 +454,37 @@ class NodesBehaviourTest {
         assertNotEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, label.inputType and InputType.TYPE_MASK_VARIATION)
     }
 
-    @Test fun theRevealedCredentialCannotBeCopiedOrCut() {
+    /** As the web's textarea: copy and cut work; the clip is marked `EXTRA_IS_SENSITIVE`. */
+    @Test fun theCredentialIsCopiedAndCutOntoASensitiveClip() {
         show()
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         val field = tag(NodeTags.Credential)
         field.performClick()
+        NoCopyProbe.seed()
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        assertTrue("the field offers copy", field.fetchSemanticsNode().config.contains(SemanticsActions.CopyText))
         field.performSemanticsAction(SemanticsActions.CopyText)
         compose.waitForIdle()
+        assertEquals("the copy reached the clipboard", SENTINEL, NoCopyProbe.clip())
+        assertTrue("marked sensitive", systemClipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
+        NoCopyProbe.seed()
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
         compose.waitForIdle()
-        assertTrue("the field offers cut", field.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
         field.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
-        assertEquals("the cut deleted the credential", SENTINEL, fieldText(NodeTags.Credential))
-        val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
-            .getSystemService(android.content.ClipboardManager::class.java)
-        val clip = clipboard.primaryClip
-        assertFalse("the clipboard holds the credential", clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
-    }
-
-    /** ta-78a (1): the hardware copy and cut keys write nothing and delete nothing from the revealed credential. */
-    @Config(shadows = [DeviceKeyCharacterMap::class])
-    @Test fun theRevealedCredentialSurvivesTheCopyAndCutKeys() {
-        show()
-        typeCredential(SENTINEL, keepRevealed = true)
-        val field = tag(NodeTags.Credential)
-        field.performClick()
-        compose.waitForIdle()
-        NoCopyProbe.seed()
-        for (keys in ClipKeys.entries) {
-            field.selectAllAndPress(keys)
-            compose.waitForIdle()
-            assertEquals("$keys changed the credential", SENTINEL, fieldText(NodeTags.Credential))
-        }
-        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
-        field.assertCtrlVPastesTheClipboard(compose, "credential")
-    }
-
-    /** ta-78a r2: the revealed credential's real menus (long press, right click) offer nothing that reads it; the Label field is the control. */
-    @Config(shadows = [NoMagnifier::class])
-    @Test fun theRevealedCredentialsRealMenusOfferNothingThatReadsIt() {
-        val menus = MenuSpies()
-        show(menus = menus)
-        tag(NodeTags.Label).performTextReplacement("Workstation peer")
-        typeCredential(SENTINEL, keepRevealed = true)
-        assertSecretMenus(compose, menus, tag(NodeTags.Label), tag(NodeTags.Credential), "credential")
-    }
-
-    /**
-     * ta-oqx N1 / N2: a deletion followed at once by a Copy that fits the gap never brings the
-     * deleted text back (the field no longer remembers its last edit at all).
-     */
-    @Test fun aDeletionThenACopyNeverBringsTheCredentialBack() {
-        show()
-        typeCredential(SENTINEL + SENTINEL, keepRevealed = true)
-        val field = tag(NodeTags.Credential)
-        field.performClick()
-        field.performTextReplacement(SENTINEL)
-        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-        field.performSemanticsAction(SemanticsActions.CopyText)
-        compose.waitForIdle()
-        assertEquals("the deleted text came back", SENTINEL, fieldText(NodeTags.Credential))
+        assertEquals("the cut reached the clipboard", SENTINEL, NoCopyProbe.clip())
+        assertEquals("the cut removed the text", "", fieldText(NodeTags.Credential))
+        assertTrue(systemClipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
     }
 
     @Test fun nothingButAddNodeSendsTheCredential() {
         show()
         tag(NodeTags.Label).performTextReplacement("Workstation")
         tag(NodeTags.Label).performImeAction()
-        typeCredential(SENTINEL, keepRevealed = true)
-        // Focus moving away, masking, the keyboard's own action, leaving the tab, closing: nothing goes.
+        typeCredential(SENTINEL)
+        // Focus moving away, the keyboard's own action, leaving the tab, closing: nothing goes.
         tag(NodeTags.BaseUrl).performClick()
         tag(NodeTags.BaseUrl).performImeAction()
-        hide()
         state.tab = SettingsTab.General
         compose.waitForIdle()
         state.tab = SettingsTab.Nodes
@@ -562,23 +500,23 @@ class NodesBehaviourTest {
 
     @Test fun closingSettingsDropsTheCredential() {
         show()
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         shown = false
         compose.waitForIdle()
         shown = true
-        waitFor(NodeTags.CredentialMasked)
-        assertEquals("Credential bundle, not set", description(NodeTags.CredentialMasked))
+        waitFor(NodeTags.Credential)
+        assertEquals("", fieldText(NodeTags.Credential))
         assertNowhere(SENTINEL)
     }
 
     @Test fun leavingTheTabDropsTheCredential() {
         show()
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         state.tab = SettingsTab.Advanced
         compose.waitForIdle()
         state.tab = SettingsTab.Nodes
-        waitFor(NodeTags.CredentialMasked)
-        assertEquals("Credential bundle, not set", description(NodeTags.CredentialMasked))
+        waitFor(NodeTags.Credential)
+        assertEquals("", fieldText(NodeTags.Credential))
         assertNowhere(SENTINEL)
     }
 
@@ -602,7 +540,7 @@ class NodesBehaviourTest {
         assertTrue("a tap meant for node_lab went to ${writer.calls.map { it.nodeId }}", writer.calls.all { it.nodeId == "node_lab" })
     }
 
-    /** r2 (security F2): a credential already sent once (here refused) is CLEARED when the app stops, not only masked. */
+    /** r2 (security F2): a credential already sent once (here refused) is CLEARED when the app stops. */
     @Test fun aSentCredentialIsClearedWhenTheAppStops() {
         val owner = TestOwner()
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
@@ -612,20 +550,19 @@ class NodesBehaviourTest {
         waitCalls(1)
         writer.answer(answered(false, null, REFUSAL))
         waitText(REFUSAL)
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
-        compose.waitUntil(5_000) { description(NodeTags.CredentialMasked) == "Credential bundle, not set" }
+        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "" }
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         compose.waitForIdle()
-        // Gone for good: revealing shows an empty field, and Add cannot send it again.
-        reveal()
+        // Gone for good: the field is empty, and Add cannot send it again.
         assertEquals("", fieldText(NodeTags.Credential))
         assertFalse(enabled(NodeTags.Add))
         assertEquals(1, writer.calls.size)
     }
 
-    /** r2 (security F2): a credential edited after its send has not been sent as it stands: the app stopping only masks it. */
-    @Test fun aCredentialEditedAfterItsSendIsOnlyMaskedWhenTheAppStops() {
+    /** r2 (security F2): a credential edited after its send has not been sent as it stands: the app stopping keeps it. */
+    @Test fun aCredentialEditedAfterItsSendIsKeptWhenTheAppStops() {
         val owner = TestOwner()
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         show(owner)
@@ -637,48 +574,24 @@ class NodesBehaviourTest {
         typeCredential(SENTINEL + "-edited")
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
         compose.waitForIdle()
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
-        assertFalse(allSemantics().contains(SENTINEL))
+        assertEquals(SENTINEL + "-edited", fieldText(NodeTags.Credential))
     }
 
-    /** r2 (verifier L2): a Cut (an accessibility action or a key; the menu offers none) neither copies nor deletes the credential. */
-    @Test fun aCutLeavesTheCredentialWhereItIs() {
-        show()
-        typeCredential(SENTINEL, keepRevealed = true)
-        val field = tag(NodeTags.Credential)
-        field.performClick()
-        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-        compose.waitForIdle()
-        assertTrue("the field offers cut", field.fetchSemanticsNode().config.contains(SemanticsActions.CutText))
-        field.performSemanticsAction(SemanticsActions.CutText)
-        compose.waitForIdle()
-        assertEquals("the cut deleted the credential", SENTINEL, fieldText(NodeTags.Credential))
-        val clipboard = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
-            .getSystemService(android.content.ClipboardManager::class.java)
-        val clip = clipboard.primaryClip
-        assertFalse(clip != null && (0 until clip.itemCount).any { clip.getItemAt(it).text?.contains(SENTINEL) == true })
-        // The field still edits normally afterwards.
-        field.performTextReplacement("x")
-        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "x" }
-    }
-
-    @Test fun stoppingTheAppMasksTheCredential() {
+    @Test fun stoppingTheAppKeepsAnUnsentCredential() {
         val owner = TestOwner()
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         show(owner)
-        typeCredential(SENTINEL, keepRevealed = true)
+        typeCredential(SENTINEL)
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
-        waitFor(NodeTags.CredentialMasked)
-        // Masked, still held for when the operator comes back (to paste, say), and in no semantics node.
-        assertEquals("Credential bundle, hidden", description(NodeTags.CredentialMasked))
-        assertFalse(allSemantics().contains(SENTINEL))
+        compose.waitForIdle()
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
         assertTrue(writer.calls.isEmpty())
     }
 }
 
 /**
- * T10.3: a rotation (saved-instance-state restore) drops the credential and masks the field: the
- * form is plain `remember`, the reveal is not saved, and the restored state holds no credential.
+ * T10.3: a rotation (saved-instance-state restore) drops the credential: the form is plain
+ * `remember`, and the restored state holds no credential.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -701,17 +614,15 @@ class NodesRotationTest {
             SideEffect { saved = registry?.performSave()?.toString() }
         }
         fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
-        compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.CredentialReveal, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-        tag(NodeTags.CredentialReveal).performScrollTo().performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.Credential, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        tag(NodeTags.Credential).performScrollTo()
         tag(NodeTags.Credential).performTextReplacement(SENTINEL)
         compose.waitForIdle()
         restoration.emulateSavedInstanceStateRestore()
-        compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.CredentialMasked, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-        // The tab is restored (saved state); the reveal and the credential are not.
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.Credential, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        // The tab is restored (saved state); the credential is not.
         tag(SettingsDialogTags.panel(SettingsTab.Nodes)).assertExists()
-        tag(NodeTags.Credential).assertDoesNotExist()
-        assertEquals("Credential bundle, not set", tag(NodeTags.CredentialMasked).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString())
+        assertEquals("", tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
         assertFalse("the saved state holds the credential", saved.orEmpty().contains(SENTINEL))
         assertTrue(writer.calls.isEmpty())
     }
@@ -731,7 +642,7 @@ class NodesRecreationTest {
      * r2 (verifier L1): the recreated activity draws Settings again (its own content, set as it is
      * created, like an app's onCreate, with the dialog's saved state restored), so the test sees the
      * tab after the recreation: the Nodes tab back (saved state), the form empty, the credential
-     * masked and gone, nothing sent before, during or after.
+     * gone, nothing sent before, during or after.
      */
     @Test fun recreatingTheActivitySendsNothingAndStartsTheFormEmpty() {
         val writer = RecordingNodesWriter()
@@ -765,15 +676,13 @@ class NodesRecreationTest {
             fun one(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().size == 1
             compose.waitUntil(5_000) { one(NodeTags.Section) }
             tag(NodeTags.Label).performTextReplacement("Workstation")
-            tag(NodeTags.CredentialReveal).performScrollTo().performClick()
-            tag(NodeTags.Credential).performClick()
+            tag(NodeTags.Credential).performScrollTo().performClick()
             tag(NodeTags.Credential).performTextReplacement(SENTINEL)
             compose.waitForIdle()
             assertTrue(writer.calls.isEmpty())
             compose.activityRule.scenario.recreate()
-            compose.waitUntil(5_000) { recreated.get() == 1 && one(NodeTags.Section) && one(NodeTags.CredentialMasked) }
-            tag(NodeTags.Credential).assertDoesNotExist()
-            assertEquals("Credential bundle, not set", tag(NodeTags.CredentialMasked).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString())
+            compose.waitUntil(5_000) { recreated.get() == 1 && one(NodeTags.Section) && one(NodeTags.Credential) }
+            assertEquals("", tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
             assertEquals("", tag(NodeTags.Label).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
             compose.waitForIdle()
             assertTrue(writer.calls.isEmpty())

@@ -81,9 +81,7 @@ object DevicesTags {
     const val Pair = "devices-pair"
     const val PairHint = "devices-pair-hint"
     const val CodeCard = "pairing-code-card"
-    const val CodeMasked = "pairing-code-masked"
-    const val CodeRevealed = "pairing-code-revealed"
-    const val CodeReveal = "pairing-code-reveal"
+    const val CodeShown = "pairing-code"
     const val CodeCopy = "pairing-code-copy"
     const val CodeExpiry = "pairing-code-expiry"
     const val ConfirmSheet = "devices-confirm"
@@ -101,7 +99,7 @@ object DevicesTags {
     fun signOut(id: String) = "session-sign-out:$id"
 }
 
-/** A confirmation the panel is asking (the web's `<dialog>`s; revoking this phone also says it signs out). */
+/** A confirmation the panel is asking (the web's three `<dialog>`s, their words as the web's). */
 sealed interface DevicesConfirm {
     data class Revoke(val device: PairedDevice, val self: SelfMatch) : DevicesConfirm
     data class RemovePasskey(val passkey: Passkey) : DevicesConfirm
@@ -211,12 +209,12 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         if (view != null) {
             SettingsToggleRow(
                 title = DevicesCopy.PASSWORD_TITLE,
-                caption = DevicesRules.passwordNote(view, c.signIn),
+                caption = DevicesRules.passwordNote(view),
                 tip = null,
                 checked = view.policy.passwordLoginEnabled,
                 onToggle = { c.setPasswordLogin(!view.policy.passwordLoginEnabled) },
                 narrow = narrow,
-                enabled = DevicesRules.passwordToggleable(view, c.signIn) && !busy,
+                enabled = DevicesRules.passwordToggleable(view) && !busy,
                 modifier = Modifier.testTag(DevicesTags.PasswordToggle),
             )
         }
@@ -488,19 +486,16 @@ private fun DeviceRow(device: PairedDevice, self: Boolean, now: Long, narrow: Bo
 }
 
 /**
- * `.pairing-code-card`: the fresh code, shown ONCE. Masked by default here (the web draws it at
- * once): the masked well never reads the code, and is one node named "Pairing code, hidden", so no
- * semantics node holds it. Reveal draws the two blocks of four, one node read letter by letter (the
- * web's `role="img"` label); the reveal is plain `remember`, masked again on ON_STOP, a tab change,
- * a rotation and a new code. Copy code as on the web, onto a sensitive clip cleared shortly after.
- * Once it expires the plaintext is dropped and the card says so.
+ * `.pairing-code-card`: the fresh code, shown ONCE, drawn at once as on the web (ta-coik.5): the
+ * two blocks of four, one node read letter by letter (the web's `role="img"` label). Copy code as on
+ * the web, onto a sensitive clip (see [PairingClipboard]). Once it expires the plaintext is dropped
+ * and the card says so.
  */
 @Composable
 private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, readNow: () -> Long, onTick: (Long) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val code = shown.code
-    var revealed by rememberMaskedReveal()
     var copied by remember { mutableStateOf(false) }
     val left = DevicesRules.secondsLeft(shown.expiresAt, now)
     val expired = code == null || left <= 0
@@ -536,38 +531,19 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, r
     ) {
         Text(DevicesCopy.CODE_LABEL, color = t.faint, style = settingsText(type.ui, 13f, 720))
         if (code != null && !expired) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val big = settingsText(type.mono, 24f, 650, lineHeight = 1.3f, trackingEm = 0.12f)
-                val well = Modifier
-                    .weight(1f)
+            val big = settingsText(type.mono, 24f, 650, lineHeight = 1.3f, trackingEm = 0.12f)
+            val plain = code.code.reveal()
+            Text(
+                plain.take(4) + "  " + plain.drop(4),
+                color = t.white,
+                style = big,
+                modifier = Modifier
+                    .fillMaxWidth()
                     .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
                     .padding(horizontal = 14.dp, vertical = 10.dp)
-                if (revealed) {
-                    // Only here is the plaintext read.
-                    val plain = code.code.reveal()
-                    Text(
-                        plain.take(4) + "  " + plain.drop(4),
-                        color = t.white,
-                        style = big,
-                        modifier = well.testTag(DevicesTags.CodeRevealed).clearAndSetSemantics { contentDescription = DevicesCopy.codeSpoken(plain) },
-                    )
-                } else {
-                    Text(
-                        DevicesCopy.MASK,
-                        color = t.ink,
-                        style = big,
-                        modifier = well.testTag(DevicesTags.CodeMasked).clearAndSetSemantics { contentDescription = DevicesCopy.CODE_HIDDEN },
-                    )
-                }
-                TetherKey(
-                    onClick = { revealed = !revealed },
-                    classes = KeyClasses.IconButton,
-                    icon = if (revealed) TetherIcons.EyeOff else TetherIcons.Eye,
-                    iconSize = 14.dp,
-                    contentDescription = if (revealed) DevicesCopy.HIDE_CODE else DevicesCopy.REVEAL_CODE,
-                    modifier = Modifier.testTag(DevicesTags.CodeReveal),
-                )
-            }
+                    .testTag(DevicesTags.CodeShown)
+                    .clearAndSetSemantics { contentDescription = DevicesCopy.codeSpoken(plain) },
+            )
             Text(
                 buildAnnotatedString {
                     withStyle(SpanStyle(fontWeight = FontWeight(700), color = t.ink)) { append(DevicesCopy.CODE_SHOWN_ONCE) }
@@ -694,14 +670,14 @@ private fun Tag(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * The confirmations, in the web's confirm chrome; the confirm key is armed after a beat (ta-dh1 r2)
- * and drawn as danger. ta-ban: armed for the confirmation it SHOWS (ta-q9l's rule): one replaced
- * while open (another device or passkey) disarms the key and the beat runs again.
+ * The web's three confirmations (revoke a device, remove a passkey, sign out everywhere else) in its
+ * confirm chrome, their words as the web's; the confirm key is the web's `button-danger` and acts
+ * on the first tap (ta-coik.5: no app-only arm delay).
  */
 @Composable
 internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val (title, body, action) = when (confirm) {
-        is DevicesConfirm.Revoke -> Triple(DevicesCopy.REVOKE_TITLE, DevicesRules.revokeBody(DevicesRules.label(confirm.device.label, "Paired device"), confirm.self), DevicesCopy.REVOKE_CONFIRM)
+        is DevicesConfirm.Revoke -> Triple(DevicesCopy.REVOKE_TITLE, DevicesRules.revokeBody(DevicesRules.label(confirm.device.label, "Paired device")), DevicesCopy.REVOKE_CONFIRM)
         is DevicesConfirm.RemovePasskey -> Triple(DevicesCopy.REMOVE_PASSKEY_TITLE, listOf(DevicesCopy.removePasskeyBody(DevicesRules.label(confirm.passkey.label, "Passkey"))), DevicesCopy.REMOVE_PASSKEY_CONFIRM)
         DevicesConfirm.SignOutOthers -> Triple(DevicesCopy.SIGN_OUT_OTHERS_TITLE, listOf(DevicesCopy.SIGN_OUT_OTHERS_BODY), DevicesCopy.SIGN_OUT_OTHERS)
     }
@@ -710,7 +686,7 @@ internal fun DevicesConfirmDialog(confirm: DevicesConfirm, onCancel: () -> Unit,
         title = title,
         footer = {
             TetherKey(onClick = onCancel, classes = KeyClasses.ButtonSecondary, label = "Cancel", modifier = Modifier.testTag(DevicesTags.ConfirmCancel))
-            ArmedConfirmKey(action, DevicesTags.ConfirmGo, onConfirm, classes = KeyClasses.ButtonDanger, shown = confirm)
+            TetherKey(onClick = onConfirm, classes = KeyClasses.ButtonDanger, label = action, modifier = Modifier.testTag(DevicesTags.ConfirmGo))
         },
     ) {
         Column(Modifier.fillMaxWidth().testTag(DevicesTags.ConfirmSheet), verticalArrangement = Arrangement.spacedBy(10.dp)) {
