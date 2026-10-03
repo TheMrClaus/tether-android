@@ -52,9 +52,10 @@ class DraftAttachmentStager(
     }
 }
 
-/** What the draft sheet's paperclip opens: the T7.4 sheet's three rows, wired to the pickers. */
+/** What the draft sheet's paperclip opens: the T7.4 sheet's rows (and ta-coik.3's camera), wired to the pickers. */
 class DraftAttachmentPickers internal constructor(
     val pickImages: () -> Unit,
+    val takePhoto: () -> Unit,
     val pasteImage: () -> Unit,
     val pickFiles: () -> Unit,
 )
@@ -78,9 +79,11 @@ fun rememberDraftAttachmentPickers(onSources: (List<AttachmentSource>) -> Unit, 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         latestSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it, uriPolicy) })
     }
-    return remember(context, imagePicker, filePicker) {
+    val takePhoto = rememberCameraCapture(onSources = { latestSources(it) }, onFlash = { latestFlash(it) })
+    return remember(context, imagePicker, filePicker, takePhoto) {
         DraftAttachmentPickers(
             pickImages = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            takePhoto = takePhoto,
             pasteImage = paste@{
                 val clip = try {
                     context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip

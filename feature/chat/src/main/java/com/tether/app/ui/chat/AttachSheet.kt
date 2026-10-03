@@ -59,6 +59,10 @@ import kotlinx.coroutines.withContext
  * "Paste image" (the clipboard's pictures only, as on the web) and "Upload file" (the Storage Access
  * Framework document picker).
  *
+ * ta-coik.3: plus "Take photo" after "Add image" ([rememberCameraCapture]): on Android the web's file
+ * input reaches the camera through Chrome's chooser, which the Photo Picker and the document picker
+ * do not offer, so the app gives the camera its own row.
+ *
  * Logged divergence: the web's fourth row, "Add issue or PR", browses the workspace's GitHub issues
  * and pull requests (GET /api/github/issues, /api/github/pull-requests); the app has no GitHub work
  * client yet (T8.4), so the row is left out rather than drawn as a row that cannot work. It returns
@@ -73,21 +77,22 @@ internal const val ATTACH_SHEET_TITLE = "Add attachment"
 
 /** The sheet's rows. A tap closes the sheet first, then runs its row (attach-sheet.tsx run()). */
 @Composable
-internal fun ColumnScope.AttachSheetRows(onClose: () -> Unit, onPickImages: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
+internal fun ColumnScope.AttachSheetRows(onClose: () -> Unit, onPickImages: () -> Unit, onTakePhoto: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
     fun run(action: () -> Unit) {
         onClose()
         action()
     }
     TetherSheetRow(ATTACH_ROW_IMAGES, onClick = { run(onPickImages) }, icon = TetherIcons.Image)
+    TetherSheetRow(ATTACH_ROW_CAMERA, onClick = { run(onTakePhoto) }, icon = TetherIcons.Camera)
     TetherSheetRow(ATTACH_ROW_PASTE, onClick = { run(onPasteImage) }, icon = TetherIcons.ClipboardPaste)
     TetherSheetRow(ATTACH_ROW_FILES, onClick = { run(onPickFiles) }, icon = TetherIcons.Paperclip)
 }
 
 /** The modal sheet (a bottom sheet on a phone, a centred card from 48rem). */
 @Composable
-fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
+fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onTakePhoto: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
     TetherSheet(onDismiss = onDismiss, title = ATTACH_SHEET_TITLE) {
-        Column(Modifier.testTag(ATTACH_SHEET_TAG)) { AttachSheetRows(onDismiss, onPickImages, onPasteImage, onPickFiles) }
+        Column(Modifier.testTag(ATTACH_SHEET_TAG)) { AttachSheetRows(onDismiss, onPickImages, onTakePhoto, onPasteImage, onPickFiles) }
     }
 }
 
@@ -95,7 +100,7 @@ fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onPasteImage: (
 @Composable
 internal fun AttachSheetSurface(modifier: Modifier = Modifier, docked: Boolean) {
     TetherSheetSurface(title = ATTACH_SHEET_TITLE, modifier = modifier, docked = docked, onClose = {}) {
-        AttachSheetRows({}, {}, {}, {})
+        AttachSheetRows({}, {}, {}, {}, {})
     }
 }
 

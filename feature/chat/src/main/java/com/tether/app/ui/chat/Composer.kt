@@ -752,6 +752,8 @@ fun Composer(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         stageSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it, uriPolicy) })
     }
+    // ta-coik.3: the camera row (the picture is staged like a pick, never sent).
+    val takePhoto = rememberCameraCapture(onSources = ::stageSources, onFlash = ::flash)
     fun pasteImage() {
         // The clip is read here (the clipboard answers the focused app); its items are looked at
         // off the main thread (L3: a type query per item is a call into another app's provider).
@@ -985,6 +987,7 @@ fun Composer(
         AttachSheet(
             onDismiss = { attachSheetOpen = false },
             onPickImages = { imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onTakePhoto = takePhoto,
             onPasteImage = ::pasteImage,
             onPickFiles = { filePicker.launch(arrayOf("*/*")) },
         )

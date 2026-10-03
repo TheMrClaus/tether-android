@@ -440,6 +440,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         AttachSheet(
             onDismiss = { attachOpen = false },
             onPickImages = pickers.pickImages,
+            onTakePhoto = pickers.takePhoto,
             onPasteImage = pickers.pasteImage,
             onPickFiles = pickers.pickFiles,
         )

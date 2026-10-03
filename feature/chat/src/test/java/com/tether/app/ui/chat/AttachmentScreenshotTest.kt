@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
 /**
  * T7.4 visual states, every skin at phone size (the brief's minimum is Studio light and dark):
  * `attach-sheet` = the paperclip's sheet over a composer holding two staged attachments (the web's
- * touch shell: Add image, Paste image, Upload file); `composer-attachments` = those staged chips (a
+ * touch shell: Add image, Take photo (ta-coik.3), Paste image, Upload file); `composer-attachments` = those staged chips (a
  * picture with its thumbnail, a file with its glyph, names and sizes, the remove keys);
  * `bubble-attachments` = a sent message with a materialized picture (the thumbnail through the
  * tool-media path) and a file chip. Tablet (from 48rem): the sheet as the centred card. The failure

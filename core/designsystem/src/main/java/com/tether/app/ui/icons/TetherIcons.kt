@@ -20,6 +20,7 @@ import com.composables.icons.lucide.Boxes
 import com.composables.icons.lucide.Braces
 import com.composables.icons.lucide.Brain
 import com.composables.icons.lucide.CalendarClock
+import com.composables.icons.lucide.Camera
 import com.composables.icons.lucide.ChartColumn
 import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.ChevronDown
@@ -296,6 +297,10 @@ object TetherIcons {
     // [byWebName] yet: the vendored web inventory (lucide-web-glyphs.txt) predates the redesign and
     // is re-baselined with the rest of the corpus by T15.8.
     val PanelLeft: ImageVector get() = Lucide.PanelLeft
+
+    // ta-coik.3: the attach sheet's "Take photo" row (native-only: the web reaches the camera through
+    // Chrome's file-input chooser, so it imports no camera glyph).
+    val Camera: ImageVector get() = Lucide.Camera
 
     /** Deprecated lucide-react names the web imports -> the canonical name used here. */
     val deprecatedAliases: Map<String, String> = linkedMapOf(

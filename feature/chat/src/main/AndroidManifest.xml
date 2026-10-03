@@ -4,4 +4,20 @@
     <!-- Haptic feedback (Vibrator). Also declared by :app; merged, not duplicated. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <application>
+        <!-- ta-coik.3 "Take photo": a write grant on ONE capture file under
+             cache/attachment-capture/ (res/xml/attachment_capture_paths.xml), handed to the camera
+             app through ACTION_IMAGE_CAPTURE. Not exported; access only through the per-intent URI
+             grant. No CAMERA permission is declared (the camera app holds its own). -->
+        <provider
+            android:name="com.tether.app.ui.chat.AttachmentCaptureProvider"
+            android:authorities="${applicationId}.attachmentcapture"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/attachment_capture_paths" />
+        </provider>
+    </application>
+
 </manifest>

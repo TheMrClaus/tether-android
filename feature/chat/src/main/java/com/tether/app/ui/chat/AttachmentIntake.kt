@@ -183,6 +183,9 @@ object AttachmentCopy {
     const val NO_CLIPBOARD_IMAGE = "No image found on the clipboard."
     const val CLIPBOARD_UNREADABLE = "Couldn't read the clipboard — grant clipboard permission and try again."
 
+    /** ta-coik.3: the "Take photo" row found no camera app to take the picture. */
+    const val CAMERA_UNAVAILABLE = "No camera app is available to take a photo."
+
     fun size(bytes: Long): String = AttachmentDraft.humanSize(bytes.toDouble())
 }
 
