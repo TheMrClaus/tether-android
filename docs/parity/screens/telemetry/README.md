@@ -37,6 +37,7 @@ them, so nothing changed on the app side for those.
 - **Empty and partial sessions:** before the first response the panel shows "Telemetry appears after
   the agent completes its first response." and omits the Limits band. When there is no reading,
   the panel prints "No current 5-hour or weekly reading for this account." (#233).
+- **Ledgers:** each number sits on the baseline of its label's first line (`.ti-ledger > div { align-items: baseline }`), never at the level of the note under the label.
 - **Coarse pointer:** Android always counts as a coarse pointer, so phones and tablets both use the
   web's phone sizes (telemetry-panel.css 338-353) and 44dp targets.
 
@@ -55,3 +56,9 @@ reflow (wider lines and different wrap points), not missing or misplaced content
 - The Limits band's "Use reset" key and the reset dialogs belong to T9.2, which is in progress with
   another actor. The panel shows the banked count and the grant headline only.
 - The Repository band's "Draft commit message" and "Draft pull request" actions belong to T8.5.
+- Four further web panel functions are owned elsewhere: the coordinator filed them as a separate
+  bead after the r1 verify. They are not built here:
+  - the pull request's "PR #N" link (repository-panel.tsx);
+  - "Refresh pull request status" (repository-panel.tsx, `onRefreshChangeRequest`);
+  - Run / Stop / Restart on each worktree script (worktree-services-card.tsx, `onControl`);
+  - the "Output of <script>" log view (worktree-services-card.tsx, `onRequestLogs`).

@@ -130,6 +130,8 @@ object InspectorTags {
     const val RunUsage = "inspector-run-usage"
     const val ShowSession = "inspector-show-session"
     const val Tokens = "inspector-tokens"
+    const val LedgerRow = "inspector-ledger-row"
+    const val LedgerValue = "inspector-ledger-value"
     const val PerModel = "inspector-per-model"
     const val Repository = "inspector-repository"
     const val Changes = "inspector-changes"
@@ -529,11 +531,13 @@ private fun Ledger(rows: List<LedgerRow>, compact: Boolean = false) {
                             Modifier.padding(vertical = if (compact) 1.6.dp else 4.8.dp)
                         },
                     )
-                    .semantics(mergeDescendants = true) {},
-                verticalAlignment = Alignment.Bottom,
+                    .semantics(mergeDescendants = true) {}
+                    .testTag(InspectorTags.LedgerRow),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(Modifier.weight(1f)) {
+                // `.ti-ledger > div { align-items: baseline }`: the number sits on the label's first
+                // line (a flex column's baseline is its first line's), never at the note's level.
+                Column(Modifier.weight(1f).alignByBaseline()) {
                     val labelStyle = when {
                         compact -> cssText(type.ui, 0.68f, 520)
                         row.sub -> cssText(type.ui, 0.72f, 520)
@@ -547,7 +551,7 @@ private fun Ledger(rows: List<LedgerRow>, compact: Boolean = false) {
                     row.sub -> cssText(type.mono, 0.74f, 520)
                     else -> cssText(type.mono, 0.88f, 620)
                 }
-                Text(row.value, style = valueStyle, color = if (compact || row.sub) t.ink else t.white, maxLines = 1, softWrap = false)
+                Text(row.value, style = valueStyle, color = if (compact || row.sub) t.ink else t.white, maxLines = 1, softWrap = false, modifier = Modifier.alignByBaseline().testTag(InspectorTags.LedgerValue))
             }
         }
     }

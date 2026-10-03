@@ -14,6 +14,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.getAlignmentLinePosition
+import androidx.compose.ui.layout.FirstBaseline
+import com.tether.app.protocol.model.UsageWindow
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -260,6 +263,54 @@ open class InspectorUiTest {
                 val h = nodes[i].getUnclippedBoundsInRoot().let { it.bottom - it.top }
                 assertTrue("$tag[$i] is ${h.value}dp", h.value >= 43.5f)
             }
+        }
+    }
+
+    /**
+     * #233 (0b4d91f, inspector.tsx:772-777): an idle Claude session with metrics but no window, no
+     * grant summary and no banked credit prints the neutral sentence, never the old "… yet" copy.
+     */
+    @Test
+    fun anIdleClaudeSessionWithNoReadingPrintsTheNeutralLimitsSentence() {
+        val idle = InspectorBoards.session(status = "idle", metrics = SessionMetrics(totalTokens = 1_200, model = "claude-opus-5-5"))
+        show(InspectorBoards.model(idle))
+        rule.onNodeWithTag(InspectorTags.Limits).assertExists()
+        rule.onNodeWithText("No current 5-hour or weekly reading for this account.").assertExists()
+        rule.onNodeWithText("No 5-hour or weekly window reported for this account yet.").assertDoesNotExist()
+        rule.onAllNodesWithTag(InspectorTags.Gauge).assertCountEquals(0)
+    }
+
+    /** The positive control: the same idle session with its served windows draws them, and no sentence. */
+    @Test
+    fun anIdleClaudeSessionWithReadingsDrawsThemAndNoSentence() {
+        val idle = InspectorBoards.session(
+            status = "idle",
+            metrics = SessionMetrics(
+                totalTokens = 1_200,
+                fiveHour = UsageWindow(12.0, 300, InspectorBoards.NOW + 60 * InspectorBoards.MIN),
+                weekly = UsageWindow(40.0, 10_080, null),
+            ),
+        )
+        show(InspectorBoards.model(idle))
+        rule.onNodeWithText("No current 5-hour or weekly reading for this account.").assertDoesNotExist()
+        rule.onAllNodesWithTag(InspectorTags.Gauge).assertCountEquals(2)
+        rule.onNodeWithText("12%", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("40%", useUnmergedTree = true).assertExists()
+    }
+
+    /** `.ti-ledger > div { align-items: baseline }`: a number sits on its label's line, not the note's. */
+    @Test
+    fun aLedgerNumberSitsOnItsLabelsBaseline() {
+        show(InspectorBoards.Reference.model(InspectorBoards.Reference.Variant.Full), InspectorBoards.Reference.state)
+        fun baseline(text: String): Float {
+            val node = rule.onNodeWithText(text, useUnmergedTree = true)
+            return node.getUnclippedBoundsInRoot().top.value + node.getAlignmentLinePosition(FirstBaseline).value
+        }
+        for ((label, value) in listOf("Last turn" to "79.9M", "Processed" to "1.1B", "Fresh input" to "21.4M")) {
+            val labelLine = baseline(label)
+            val valueNode = rule.onAllNodesWithText(value, useUnmergedTree = true)[0]
+            val valueLine = valueNode.getUnclippedBoundsInRoot().top.value + valueNode.getAlignmentLinePosition(FirstBaseline).value
+            assertEquals("$label / $value", labelLine, valueLine, 0.6f)
         }
     }
 
