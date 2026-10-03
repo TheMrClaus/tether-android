@@ -142,7 +142,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
-| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | DONE | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
+| T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | VERIFIED | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
 | T9.3 | Scheduled actions | VERIFIED | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
 
 ### Phase 10 — Settings & first run
