@@ -129,9 +129,9 @@ interface TetherClient {
     /**
      * Sign out (user action). Cookie session: `POST /api/auth/logout`, which
      * REVOKES the session server-side for every holder of the cookie. Device
-     * token: local forget only — the server refuses device-management routes to
-     * device tokens by design, so a paired device cannot revoke itself; the owner
-     * revokes it from a browser (Settings → Paired devices).
+     * token: local forget only — `/api/auth/logout` revokes cookie sessions only,
+     * so the device stays paired until it is revoked in Settings → Paired devices
+     * (from the web or, since tether #236, from this app).
      *
      * Either way the local credential is cleared FIRST (a network failure or a
      * process death mid-call still leaves the phone signed out), the socket is
@@ -816,13 +816,6 @@ interface TetherClient {
      */
     fun setServerSettings(patch: JsonObject, origin: String): Boolean = false
 
-    /**
-     * ta-dh1 r2: a confirmed engine home / command / launch command ([ConfirmedEngineWrite], made only
-     * by [ServerSettingsPatch.engineValue]), bound to [origin] like [setServerSettings]. The ONE
-     * way such a key reaches the server: [setServerSettings] refuses a plain patch naming one.
-     */
-    fun setConfirmedEngineValue(write: ConfirmedEngineWrite, origin: String): Boolean = false
-
     /** ta-t7l: v16 `set-advanced-settings` (the Claude CLI picker), bound to [origin] like [setServerSettings]. */
     fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = false
 
@@ -1102,12 +1095,12 @@ sealed interface LogoutResult {
     /** Cookie session revoked on the server and forgotten locally. */
     data object Revoked : LogoutResult
 
-    /** Device token (or nothing) — forgotten locally; only a browser can revoke a device. */
+    /** Device token (or nothing) — forgotten locally; the device is revoked in Settings → Paired devices. */
     data object LocalOnly : LogoutResult
 
     /**
      * Forgotten locally, but the server could not be told: the cookie session
-     * stays valid server-side until it expires or is signed out from a browser.
+     * stays valid server-side until it expires or is signed out in Settings → Signed-in sessions.
      */
     data object ServerNotReached : LogoutResult
 }

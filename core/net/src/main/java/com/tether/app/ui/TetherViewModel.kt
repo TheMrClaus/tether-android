@@ -723,11 +723,11 @@ data class FindRequest(val query: String, val nonce: Long, val historyId: String
 fun logoutNoticeFor(result: LogoutResult): String? = when (result) {
     LogoutResult.Revoked -> null
     LogoutResult.LocalOnly ->
-        "Signed out on this phone. A paired device can only be revoked from a browser: " +
+        "Signed out on this phone. It stays paired with the server until it is revoked in " +
             "Settings → Paired devices."
     LogoutResult.ServerNotReached ->
         "Signed out on this phone, but the server could not be reached. That session stays valid " +
-            "until it expires or you sign it out from a browser."
+            "until it expires or is signed out in Settings → Signed-in sessions."
 }
 
 class TetherViewModelFactory(

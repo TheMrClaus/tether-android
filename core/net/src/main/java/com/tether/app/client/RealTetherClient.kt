@@ -2781,7 +2781,7 @@ class RealTetherClient(
     }
 
     /**
-     * Close code 4001 = the owner revoked this device from a browser; 4002 = the
+     * Close code 4001 = this device was revoked (Settings → Paired devices); 4002 = the
      * cookie session was revoked (signed out elsewhere / "sign out everywhere").
      * Terminal, NOT a transient drop: the stored credential is dead, so
      * reconnecting with it would only spin. Drop the credential and fall back to
@@ -4367,12 +4367,9 @@ class RealTetherClient(
 
     override fun requestAdvancedSettings(): Boolean = sendFrame(ClientMessage.AdvancedSettingsRequest)
 
-    // ta-dh1 r2: the choke point: a plain patch never carries a key that sets what the server runs.
+    // ta-coik.5: any key the web's tabs write, the engine cards' included (no confirmation, as on the web).
     override fun setServerSettings(patch: JsonObject, origin: String): Boolean =
-        patch.isNotEmpty() && !ServerSettingsPatch.touchesWhatRuns(patch) && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
-
-    override fun setConfirmedEngineValue(write: ConfirmedEngineWrite, origin: String): Boolean =
-        write.patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(write.patch))
+        patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
 
     override fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = sendFrameFor(origin, message)
 

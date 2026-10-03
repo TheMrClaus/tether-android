@@ -31,9 +31,10 @@ class SecretText(private val value: String) {
 
 /**
  * How a [ServerSetting] is read and written (settings-dialog.tsx's Server*Row helpers). ta-dh1:
- * [Runs] is a value that sets what the server RUNS (an engine's home, command or launch command):
- * read like [Text], but written ONLY by [ServerSettingsPatch.engineValue], after a confirmation
- * that shows the new value (owner decision 2026-10-01); [ServerSettingsPatch.text] refuses it.
+ * [Runs] is an engine card's home, command or launch command: read like [Text], written by
+ * [ServerSettingsPatch.engineValue] the way the engine card's own blur writes it (settings-dialog.tsx
+ * 90fbb9f :2174, :2209, :2226: trimmed, a command never null). ta-coik.5: no confirmation, as on the
+ * web (owner rule 2026-10-03).
  */
 enum class SettingKind { Text, Secret, Number, Toggle, Choice, Paths, Runs }
 
@@ -192,22 +193,16 @@ class ServerSettingsView private constructor(
 object ServerSettingsPatch {
     private fun patch(setting: ServerSetting, value: JsonElement) = JsonObject(mapOf(setting.key to value))
 
-    /** r2: the keys that set what the server runs ([SettingKind.Runs]): written only as a [ConfirmedEngineWrite]. */
-    val runsKeys: Set<String> by lazy { ServerSetting.entries.filter { it.kind == SettingKind.Runs }.map { it.key }.toSet() }
-
-    /** r2: [patch] names a key that sets what the server runs (so it may go out only as a [ConfirmedEngineWrite]). */
-    fun touchesWhatRuns(patch: JsonObject): Boolean = patch.keys.any { it in runsKeys }
-
-    /** r2: a builder that writes without a confirmation never takes a [SettingKind.Runs] key (the send path refuses one too). */
-    private fun unconfirmed(setting: ServerSetting) = setting.kind != SettingKind.Runs
+    /** The builders of the ServerXRow helpers never take an engine card's value ([SettingKind.Runs]: its own blur rule, [engineValue]). */
+    private fun plain(setting: ServerSetting) = setting.kind != SettingKind.Runs
 
     /**
      * ServerTextRow's commit (:129-132): `{ [field]: current || null }` when the field differs from
      * what it showed ([shown]: the server value as the field was filled with it). ta-dh1: never a
-     * [SettingKind.Runs] key (those go through [engineValue], after their confirmation).
+     * [SettingKind.Runs] key (those are written by [engineValue], the engine card's own rule).
      */
     fun text(view: ServerSettingsView, setting: ServerSetting, edited: String, shown: String): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting) || edited == shown) return null
+        if (!plain(setting) || view.forced(setting) || edited == shown) return null
         return patch(setting, if (edited.isEmpty()) JsonNull else JsonPrimitive(edited))
     }
 
@@ -220,7 +215,7 @@ object ServerSettingsPatch {
      * The server validates the value.
      */
     fun number(view: ServerSettingsView, setting: ServerSetting, text: String): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting)) return null
+        if (!plain(setting) || view.forced(setting)) return null
         val value = jsTrim(text).takeIf { NUMBER_INPUT.matches(it) }.orEmpty()
         val parsed: Double? = if (value.isEmpty()) null else value.toDouble()
         val shown = view.number(setting)
@@ -234,19 +229,19 @@ object ServerSettingsPatch {
 
     /** ServerToggleRow (:230): `{ [field]: !value }`. */
     fun toggle(view: ServerSettingsView, setting: ServerSetting): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting)) return null
+        if (!plain(setting) || view.forced(setting)) return null
         return patch(setting, JsonPrimitive(!view.toggle(setting)))
     }
 
     /** ServerSelectRow (:274): `{ [field]: next === "" ? null : next }`, when it is another option. */
     fun choice(view: ServerSettingsView, setting: ServerSetting, next: String): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting) || next == view.choice(setting)) return null
+        if (!plain(setting) || view.forced(setting) || next == view.choice(setting)) return null
         return patch(setting, if (next.isEmpty()) JsonNull else JsonPrimitive(next))
     }
 
     /** ServerRootsRow's Add (:298-304): the trimmed path appended, the WHOLE list sent; empty or a duplicate sends nothing. */
     fun addPath(view: ServerSettingsView, setting: ServerSetting, typed: String): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting)) return null
+        if (!plain(setting) || view.forced(setting)) return null
         val value = typed.trim()
         val roots = view.paths(setting)
         if (value.isEmpty() || value in roots) return null
@@ -255,7 +250,7 @@ object ServerSettingsPatch {
 
     /** ServerRootsRow's remove (:305): the list without [path]. */
     fun removePath(view: ServerSettingsView, setting: ServerSetting, path: String): JsonObject? {
-        if (!unconfirmed(setting) || view.forced(setting)) return null
+        if (!plain(setting) || view.forced(setting)) return null
         val roots = view.paths(setting)
         if (path !in roots) return null
         return patch(setting, JsonArray(roots.filter { it != path }.map(::JsonPrimitive)))
@@ -289,60 +284,40 @@ object ServerSettingsPatch {
     }
 
     /**
-     * ta-dh1: an engine's home, command or launch command ([SettingKind.Runs]), the value the user
-     * CONFIRMED, built when they confirm from the latest frame ([view]). As the web's blur
-     * (settings-dialog.tsx:2175, 2207, 2226): a home or the launch command sends `value || null`, a
-     * command sends `value` (an empty command runs the engine's own name, server.mjs
-     * `providerCommands`). Null when the key is env-forced, the value is the server's already, or it
-     * passes the server's size limit. [value] is sent exactly as given: the caller trims it (the
-     * web's `.trim()`, [jsTrim]) BEFORE the confirmation, which shows the trimmed value.
-     *
-     * r2: the ONLY producer of a [ConfirmedEngineWrite], the only form in which the client sends a
-     * [SettingKind.Runs] key ([TetherClient.setServerSettings] refuses one in a plain patch).
-     * ta-q9l: [EngineConfirmationOnly]: a caller must opt in, so the confirmation path (and the
-     * tests) are the only, greppable, places that mint one. r2 (security F1): [expectedNow] is the
-     * current value the confirmation SHOWED ("Now"); when [view]'s differs (the server's value
-     * changed between the confirmation and the build), nothing is built: a write is never confirmed
-     * against a "Now" the user did not see.
+     * ta-dh1: an engine card's home, command or launch command ([SettingKind.Runs]), as its blur
+     * writes it (settings-dialog.tsx 90fbb9f :2174, :2209, :2226): `value = typed.trim()`, sent when
+     * it differs from the server's value, a home or the launch command as `value || null`, a command
+     * as `value` (an empty command runs the engine's own name, server.mjs `providerCommands`). [shown]
+     * is what the field was filled with: an untouched field sends nothing. Null when the key is
+     * env-forced (the web's field is disabled then) or the value passes the server's size limit.
+     * ta-coik.5: sent at once, as on the web: no confirmation (owner rule 2026-10-03).
      */
-    @EngineConfirmationOnly
-    fun engineValue(view: ServerSettingsView, setting: ServerSetting, value: String, expectedNow: String): ConfirmedEngineWrite? {
-        if (setting.kind != SettingKind.Runs || view.forced(setting)) return null
-        if (view.text(setting) != expectedNow) return null
+    fun engineValue(view: ServerSettingsView, setting: ServerSetting, typed: String, shown: String): JsonObject? {
+        if (setting.kind != SettingKind.Runs || view.forced(setting) || typed == shown) return null
+        val value = jsTrim(typed)
         if (value == view.text(setting) || !fits(setting, value)) return null
         val nullable = setting !in EngineCard.commandSettings
-        return ConfirmedEngineWrite(patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value)))
+        return patch(setting, if (nullable && value.isEmpty()) JsonNull else JsonPrimitive(value))
+    }
+
+    /**
+     * "Use detected" (settings-dialog.tsx 90fbb9f :2191-2194): the detected home as it came, offered
+     * while the engine needs a home ([ServerSettingsView.needsHome]) and a home was detected, written
+     * at once. ta-coik.5: as on the web, whether or not the environment forces the key (the web's
+     * button has no such check; the server decides).
+     */
+    fun useDetected(view: ServerSettingsView, engine: EngineCard): JsonObject? {
+        val dir = detectedHome(view, engine) ?: return null
+        return patch(engine.home, JsonPrimitive(dir))
+    }
+
+    /** The home "Use detected" offers, or null when the web draws no such row (:2191: `noHome && det?.configDir`). */
+    fun detectedHome(view: ServerSettingsView, engine: EngineCard): String? {
+        val dir = view.detection(engine)?.configDir?.takeIf { it.isNotEmpty() } ?: return null
+        return dir.takeIf { view.needsHome(engine) }
     }
 
     /** Within [setting]'s server limit (UTF-8 bytes; protocol-validate.mjs `isBoundedString`). */
     fun fits(setting: ServerSetting, value: String): Boolean =
         setting.maxBytes <= 0 || value.toByteArray(Charsets.UTF_8).size <= setting.maxBytes
-}
-
-/**
- * ta-q9l: marks [ServerSettingsPatch.engineValue], the one producer of a [ConfirmedEngineWrite].
- * Only the code that runs after the user confirmed a value (feature/settings' pending engine edit)
- * opts in; any other use is a compile error. Kotlin has no friend modules, so this is the
- * cross-module restriction: an opt-in is explicit and greppable, never silent.
- */
-@RequiresOptIn(
-    level = RequiresOptIn.Level.ERROR,
-    message = "Only the engine confirmation may build a ConfirmedEngineWrite (ta-dh1 r2, ta-q9l).",
-)
-@Retention(AnnotationRetention.BINARY)
-@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CONSTRUCTOR)
-annotation class EngineConfirmationOnly
-
-/**
- * ta-dh1 r2: a `set-server-settings` patch naming a key that sets what the server RUNS (an engine's
- * home, command or launch command), as confirmed by the user. Only [ServerSettingsPatch.engineValue]
- * makes one (the constructor is internal to this module), and the client sends such a key only in
- * this form: [TetherClient.setServerSettings] refuses a plain patch that names one. [toString]
- * names the key, never the value. ta-q9l r2 (security F4): the constructor is under
- * [EngineConfirmationOnly] too, so code in this module cannot mint one without opting in either.
- */
-class ConfirmedEngineWrite @EngineConfirmationOnly internal constructor(val patch: JsonObject) {
-    override fun toString(): String = "ConfirmedEngineWrite(${patch.keys.sorted()})"
-    override fun equals(other: Any?): Boolean = other is ConfirmedEngineWrite && other.patch == patch
-    override fun hashCode(): Int = patch.hashCode()
 }

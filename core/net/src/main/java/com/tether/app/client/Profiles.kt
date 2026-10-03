@@ -28,6 +28,10 @@ import kotlinx.serialization.json.longOrNull
  *
  * Each profile's `env` VALUES are secrets the server sends in plaintext: they are [SecretText]
  * here, and no `toString` in this file prints one.
+ *
+ * ta-coik.5 (owner rule 2026-10-03): every edit is sent as the web's handler sends it, with no
+ * confirmation: the command, the home, the engine and any env key included, and an env add or
+ * rename onto a name the profile already has overwrites it, as the web's object spread does.
  */
 object ProfileLimits {
     // lib/providers-registry.mjs 887c222 :28-45.
@@ -147,93 +151,6 @@ class ProvidersList private constructor(
     }
 }
 
-/**
- * r2 (owner decision 2026-10-01, A, "exec/home-class keys and similar"): the profile env keys that
- * decide WHAT the server runs or WHERE an engine or tool reads its config, so adding, changing,
- * renaming or removing one is confirmed like a command:
- * - loader and interpreter hooks: PATH, every LD_ / DYLD_ variable, GCONV_PATH, NODE_OPTIONS,
- *   NODE_PATH, BASH_ENV, ENV, the PYTHON / PERL / RUBY start-up and library paths, the JVM option
- *   variables, SHELL and ZDOTDIR;
- * - commands other tools run for the agent: GIT_SSH_COMMAND, GIT_EXEC_PATH, GIT_ASKPASS,
- *   SSH_ASKPASS, GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF, git's environment config (GIT_CONFIG_*),
- *   EDITOR, VISUAL, GIT_EDITOR, PAGER, GIT_PAGER;
- * - config homes, which hold hooks and MCP servers: HOME, the XDG_* directories, CLAUDE_CONFIG_DIR,
- *   CODEX_HOME, the other engines' homes, GIT_CONFIG_GLOBAL, GH_CONFIG_DIR.
- * Proxy and base-URL keys are NOT here (a separate owner question).
- *
- * Linux names are case-sensitive, but a key is compared upper-cased here, so `path` or `Path`
- * cannot slip past as an ordinary key. r3 (verify + security F1): a key that is not a plain
- * variable name ([NAME]) counts as risky too: the child's environment is built as `key=value`, so
- * `LD_PRELOAD=/tmp/x.so:` set as a KEY sets LD_PRELOAD. ta-coik.4: such a key may be added or
- * renamed to, as in the web's env editor (settings-dialog.tsx:366-372, any trimmed non-empty name;
- * lib/providers-registry.mjs sanitizeEnv bounds only its length); it counts as risky here.
- */
-object RiskyEnvKeys {
-    val NAMES: Set<String> = setOf(
-        // loader and interpreter hooks
-        "PATH", "GCONV_PATH", "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV",
-        "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
-        "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "SHELL", "ZDOTDIR",
-        // commands other tools run
-        "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF",
-        "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "EDITOR", "VISUAL", "GIT_EDITOR", "PAGER", "GIT_PAGER",
-        // config homes
-        "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_DIRS", "XDG_DATA_DIRS",
-        "CLAUDE_CONFIG_DIR", "CODEX_HOME", "REASONIX_HOME", "DSH_HOME", "PI_CODING_AGENT_DIR",
-        "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "GIT_CONFIG_GLOBAL", "GH_CONFIG_DIR",
-    )
-
-    /** LD_ subsumes LD_PRELOAD, LD_LIBRARY_PATH, LD_AUDIT and the rest of the loader's variables. */
-    val PREFIXES: List<String> = listOf("LD_", "DYLD_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
-
-    /** A plain environment variable name (POSIX portable). */
-    val NAME: Regex = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
-
-    fun validName(key: String): Boolean = NAME.matches(key)
-
-    fun risky(key: String): Boolean {
-        if (!validName(key)) return true
-        val k = key.uppercase(java.util.Locale.ROOT)
-        return k in NAMES || PREFIXES.any { k.startsWith(it) }
-    }
-}
-
-/**
- * r2: what a profile RUNS, as the send rule compares it: its engine (`extends`), command, home
- * and its [RiskyEnvKeys] entries (exact keys, raw values). Two writes run the same thing iff
- * their snapshots are equal. Holds env values: [toString] prints the keys only.
- */
-class RunsSnapshot internal constructor(
-    internal val extends: JsonElement?,
-    internal val command: JsonElement?,
-    internal val homeDir: JsonElement?,
-    internal val riskyEnv: Map<String, JsonElement>,
-) {
-    override fun equals(other: Any?): Boolean =
-        other is RunsSnapshot && other.extends == extends && other.command == command && other.homeDir == homeDir && other.riskyEnv == riskyEnv
-
-    override fun hashCode(): Int = listOf(extends, command, homeDir, riskyEnv).hashCode()
-
-    override fun toString(): String = "RunsSnapshot(extends=$extends, command=${command != null}, home=${homeDir != null}, riskyEnv=${riskyEnv.keys})"
-
-    companion object {
-        private fun present(e: JsonElement?): JsonElement? = if (e == null || e is JsonNull) null else e
-
-        internal fun of(raw: JsonObject?): RunsSnapshot? {
-            raw ?: return null
-            val env = (raw["env"] as? JsonObject).orEmpty().filterKeys(RiskyEnvKeys::risky)
-            return RunsSnapshot(present(raw["extends"]), present(raw["command"]), present(raw["homeDir"]), env)
-        }
-
-        fun of(profile: Profile): RunsSnapshot = of(profile.raw)!!
-
-        /** A profile "Add profile" makes (:625): Claude, nothing it runs set. */
-        internal val NEW_PROFILE = RunsSnapshot(JsonPrimitive("claude"), null, null, emptyMap())
-
-        private fun JsonObject?.orEmpty(): Map<String, JsonElement> = this ?: emptyMap()
-    }
-}
-
 /** A Kotlin mirror of lib/providers-registry.mjs 887c222 `normalizeProfileEntry` (shape only). */
 internal object ProfileShape {
     private fun bounded(e: JsonElement?, max: Int): Boolean =
@@ -309,10 +226,8 @@ internal object ProfileShape {
 }
 
 /**
- * One edit of the registry that is NOT what the server runs, applied to whatever list is newest
- * when it is sent (each is the web's handler, settings-dialog.tsx 887c222 :621-1000, re-read
- * against that list). r2: an env edit that touches a [RiskyEnvKeys] key, and any Extends change,
- * are not plain: they are [ProfileRunsEdit]s, sent only after their confirmation.
+ * One edit of the registry, applied to whatever list is newest when it is sent (each is the web's
+ * handler, settings-dialog.tsx 90fbb9f :621-864, re-read against that list).
  */
 sealed interface ProfileEdit {
     /** The switch (:647). r2 (security F8): the value the user asked for, not a toggle of whatever is newest. */
@@ -324,7 +239,16 @@ sealed interface ProfileEdit {
     /** ID (:670): the profile renamed in place (the server propagates the rename to its sessions). */
     data class Rename(val id: String, val typed: String) : ProfileEdit
 
-    /** EnvEditor's key blur (:385-393): the trimmed new name, with the key's value. r2: never onto another key. */
+    /** Extends (:694-699): the engine the profile runs on. */
+    data class Extends(val id: String, val value: String) : ProfileEdit
+
+    /** Command (:713-717): split at whitespace after `.trim()`; empty clears it (`undefined`). */
+    data class Command(val id: String, val typed: String) : ProfileEdit
+
+    /** Home (:737): the trimmed value; empty clears it (`value || undefined`). */
+    data class Home(val id: String, val typed: String) : ProfileEdit
+
+    /** EnvEditor's key blur (:384-391): the trimmed new name, with the key's value (onto an existing name: that one is overwritten, as on the web). */
     data class EnvKey(val id: String, val key: String, val typed: String) : ProfileEdit
 
     /** EnvEditor's value (:400-404), not trimmed. [value] is a secret. */
@@ -333,7 +257,7 @@ sealed interface ProfileEdit {
     /** EnvEditor's remove (:410). */
     data class EnvRemove(val id: String, val key: String) : ProfileEdit
 
-    /** EnvEditor's Add (:368-374): the trimmed name with [value] (a secret, not trimmed). r2: never over an existing key. */
+    /** EnvEditor's Add (:367-373): the trimmed name with [value] (a secret, not trimmed); an existing name is overwritten, as on the web. */
     data class EnvAdd(val id: String, val typedKey: String, val value: SecretText) : ProfileEdit
 
     /** Drop env prefixes (:766-770): split at commas. */
@@ -379,28 +303,6 @@ sealed interface ModelOp {
     data class Add(val initialId: String, val typedId: String, val typedLabel: String) : ModelOp
 }
 
-/**
- * What sets what the server RUNS for a profile (owner decisions 2026-10-01): its command, its
- * home, its engine (r2, B) and its [RiskyEnvKeys] entries (r2, A). Written only after a
- * confirmation that shows the change, and only while the profile still runs exactly what that
- * confirmation showed as "Now" ([ProvidersPatch.confirmed]).
- */
-sealed interface ProfileRunsEdit {
-    val id: String
-
-    /** Command (:705-711): [parts] are the binary and its arguments; empty clears it (`undefined`). */
-    data class Command(override val id: String, val parts: List<String>) : ProfileRunsEdit
-
-    /** Home (:735): the trimmed value; empty clears it (`value || undefined`). */
-    data class Home(override val id: String, val value: String) : ProfileRunsEdit
-
-    /** Extends (:681): the engine the profile runs on. */
-    data class Extends(override val id: String, val value: String) : ProfileRunsEdit
-
-    /** An env change that touches a [RiskyEnvKeys] key (the add, change, rename or remove an [ProfileEdit] would make). */
-    data class Env(override val id: String, val change: EnvChange) : ProfileRunsEdit
-}
-
 /** One env change of the editor, by its action. Values are secrets ([SecretText]). */
 sealed interface EnvChange {
     data class Add(val key: String, val value: SecretText) : EnvChange
@@ -417,7 +319,6 @@ sealed interface EnvChange {
             is Remove -> listOf(key)
         }
 
-    val risky: Boolean get() = keys.any(RiskyEnvKeys::risky)
 }
 
 /** Why a write was not built or not sent. */
@@ -428,26 +329,14 @@ enum class ProvidersRefusal {
     /** The edit's profile (or row) is not in the newest list any more. */
     Gone,
 
-    /** What the profile runs is not what the confirmation showed (it changed meanwhile). */
-    Changed,
-
     /** Built from an older list (a broadcast landed since) or from before a reconnect. */
     Stale,
 
     /** A write is still waiting for its broadcast: one built now would undo it. */
     InFlight,
 
-    /** The edit changes what a profile runs: it goes through its confirmation. */
-    NeedsConfirmation,
-
-    /** An env rename or add onto a key the profile already has. */
-    Collision,
-
     /** The value passes the server's limits or rules. */
     Invalid,
-
-    /** It changes what a profile runs without being that change's confirmation. */
-    Unconfirmed,
 
     /** No live socket for the list's server. */
     NotConnected,
@@ -463,35 +352,20 @@ sealed interface ProvidersBuild {
 }
 
 /**
- * r2: the confirmation a [ProvidersWrite] carries: the one profile it changes, what that profile
- * ran as the confirmation showed it ([expectedNow]) and what it runs after ([after]).
- */
-class ConfirmedRuns internal constructor(val edit: ProfileRunsEdit, internal val expectedNow: RunsSnapshot, internal val after: RunsSnapshot) {
-    override fun toString(): String = "ConfirmedRuns(${edit::class.simpleName}:${edit.id})"
-}
-
-/**
- * A `set-providers` write: the WHOLE list as it will be sent, the [generation] and [epoch] of the
- * list it was built from, and (only when it came from a confirmation) the one change of what a
- * profile runs it makes. Made only by [ProvidersPatch] (the constructor is internal to this
+ * A `set-providers` write: the WHOLE list as it will be sent, and the [generation] and [epoch] of
+ * the list it was built from. Made only by [ProvidersPatch] (the constructor is internal to this
  * module), and the client sends nothing else as `set-providers` ([TetherClient.setProviders]).
  * [toString] prints ids only.
  */
 class ProvidersWrite internal constructor(
     val profiles: List<JsonObject>,
     val generation: Long,
-    internal val confirmed: ConfirmedRuns?,
-    /** new id -> old id, for a rename (the renamed profile keeps what it runs). */
-    internal val renames: Map<String, String> = emptyMap(),
     val epoch: Long = 0L,
 ) {
     val message: ClientMessage.SetProviders get() = ClientMessage.SetProviders(profiles)
 
-    /** Whether this write came from a confirmation of what the server runs. */
-    val isConfirmed: Boolean get() = confirmed != null
-
     override fun toString(): String =
-        "ProvidersWrite(ids=${profiles.map { (it["id"] as? JsonPrimitive)?.content }}, generation=$generation, epoch=$epoch, confirmed=$confirmed)"
+        "ProvidersWrite(ids=${profiles.map { (it["id"] as? JsonPrimitive)?.content }}, generation=$generation, epoch=$epoch)"
 }
 
 /**
@@ -634,7 +508,6 @@ object ProvidersPatch {
     fun build(list: ProvidersList?, edit: ProfileEdit): ProvidersBuild {
         if (list == null || !list.writable) return ProvidersBuild.Refused(ProvidersRefusal.NotWritable)
         val base = list.raws
-        var renames = emptyMap<String, String>()
         val next: List<JsonObject> = when (edit) {
             is ProfileEdit.Add -> {
                 var id = "profile"
@@ -650,15 +523,11 @@ object ProvidersPatch {
                 val value = jsTrim(edit.typed)
                 if (value.isEmpty() || value == edit.id) return ProvidersBuild.NoChange
                 if (base.none { idOf(it) == edit.id }) return gone()
-                renames = mapOf(value to edit.id)
                 base.map { if (idOf(it) == edit.id) with(it, "id", JsonPrimitive(value)) else it }
             }
             else -> {
                 val target = base.firstOrNull { idOf(it) == profileId(edit) } ?: return gone()
                 val profile = list.profile(profileId(edit)) ?: return gone()
-                envChangeOf(edit)?.let { change ->
-                    if (change.risky) return ProvidersBuild.Refused(ProvidersRefusal.NeedsConfirmation)
-                }
                 val updated = when (val r = applyTo(profile, target, edit)) {
                     is Applied.To -> r.raw
                     Applied.Nothing -> return ProvidersBuild.NoChange
@@ -669,7 +538,7 @@ object ProvidersPatch {
             }
         }
         if (next == base) return ProvidersBuild.NoChange
-        return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, confirmed = null, renames = renames, epoch = list.epoch))
+        return ProvidersBuild.Ready(ProvidersWrite(next, list.generation, epoch = list.epoch))
     }
 
     /** The name an env change adds or renames to (null for a value change or a remove). */
@@ -689,74 +558,15 @@ object ProvidersPatch {
     }
 
     /**
-     * A change of what a profile runs the user CONFIRMED, applied to the newest [list] when they
-     * confirm. [expectedNow] is what the confirmation showed the profile running (r2, verifier F2):
-     * if the newest list differs, nothing is built ([ProvidersRefusal.Changed]), and [refusal]
-     * checks it again at the send. The ONLY producer of a write that changes what runs.
-     */
-    fun confirmed(list: ProvidersList?, edit: ProfileRunsEdit, expectedNow: RunsSnapshot): ProvidersBuild {
-        if (list == null || !list.writable) return ProvidersBuild.Refused(ProvidersRefusal.NotWritable)
-        val base = list.raws
-        val target = base.firstOrNull { idOf(it) == edit.id } ?: return gone()
-        val profile = list.profile(edit.id) ?: return gone()
-        if (RunsSnapshot.of(profile) != expectedNow) return ProvidersBuild.Refused(ProvidersRefusal.Changed)
-        val updated: JsonObject = when (edit) {
-            is ProfileRunsEdit.Command -> {
-                if (!commandFits(edit.parts)) return invalid()
-                // :709 compares the joined text: the same words with other spacing are no change.
-                if (edit.parts.joinToString(" ") == (profile.command ?: emptyList()).joinToString(" ")) return ProvidersBuild.NoChange
-                if (edit.parts.isEmpty()) without(target, "command") else with(target, "command", JsonArray(edit.parts.map(::JsonPrimitive)))
-            }
-            is ProfileRunsEdit.Home -> {
-                if (edit.value.length > ProfileLimits.HOME) return invalid()
-                if (edit.value == (profile.homeDir ?: "")) return ProvidersBuild.NoChange
-                if (edit.value.isEmpty()) without(target, "homeDir") else with(target, "homeDir", JsonPrimitive(edit.value))
-            }
-            is ProfileRunsEdit.Extends -> {
-                if (edit.value !in ProfileLimits.EXTENDS) return invalid()
-                if (edit.value == profile.extends) return ProvidersBuild.NoChange
-                with(target, "extends", JsonPrimitive(edit.value))
-            }
-            is ProfileRunsEdit.Env -> when (val r = applyEnv(target, edit.change)) {
-                is Applied.To -> r.raw
-                Applied.Nothing -> return ProvidersBuild.NoChange
-                is Applied.No -> return ProvidersBuild.Refused(r.reason)
-            }
-        }
-        if (updated == target) return ProvidersBuild.NoChange
-        val confirmation = ConfirmedRuns(edit, expectedNow, RunsSnapshot.of(updated)!!)
-        return ProvidersBuild.Ready(ProvidersWrite(base.map { if (it === target) updated else it }, list.generation, confirmed = confirmation, epoch = list.epoch))
-    }
-
-    /**
      * Why [write] must NOT be sent against [newest] (the client's newest list), or null when it may.
      * Every send path applies it, the client's under the same lock as its frames:
      * - no newest list, or one that cannot be written back;
      * - [write] was built from another list than [newest] (a broadcast landed since, or the socket
-     *   changed: sending it would undo what the server holds now);
-     * - for a confirmation: the profile no longer runs what it showed as "Now";
-     * - any profile runs something else than in [newest] (its engine, command, home or a
-     *   [RiskyEnvKeys] entry; a renamed profile compared with its old self, a new one with what
-     *   "Add profile" makes), unless it is exactly the change its confirmation names.
+     *   changed: sending it would undo what the server holds now).
      */
     fun refusal(write: ProvidersWrite, newest: ProvidersList?): ProvidersRefusal? {
         if (newest == null || !newest.writable) return ProvidersRefusal.NotWritable
         if (write.generation != newest.generation || write.epoch != newest.epoch) return ProvidersRefusal.Stale
-        val confirmed = write.confirmed
-        if (confirmed != null) {
-            val now = newest.raws.firstOrNull { idOf(it) == confirmed.edit.id } ?: return ProvidersRefusal.Changed
-            if (RunsSnapshot.of(now) != confirmed.expectedNow) return ProvidersRefusal.Changed
-        }
-        for (p in write.profiles) {
-            val id = idOf(p)
-            val before = newest.raws.firstOrNull { idOf(it) == (write.renames[id] ?: id) }
-            val expected = when {
-                confirmed != null && confirmed.edit.id == id && write.renames.isEmpty() -> confirmed.after
-                before != null -> RunsSnapshot.of(before)
-                else -> RunsSnapshot.NEW_PROFILE
-            }
-            if (RunsSnapshot.of(p) != expected) return ProvidersRefusal.Unconfirmed
-        }
         return null
     }
 
@@ -778,6 +588,9 @@ object ProvidersPatch {
         is ProfileEdit.Enabled -> edit.id
         is ProfileEdit.Label -> edit.id
         is ProfileEdit.Rename -> edit.id
+        is ProfileEdit.Extends -> edit.id
+        is ProfileEdit.Command -> edit.id
+        is ProfileEdit.Home -> edit.id
         is ProfileEdit.EnvKey -> edit.id
         is ProfileEdit.EnvValue -> edit.id
         is ProfileEdit.EnvRemove -> edit.id
@@ -794,6 +607,30 @@ object ProvidersPatch {
     private fun applyTo(profile: Profile, raw: JsonObject, edit: ProfileEdit): Applied = when (edit) {
         is ProfileEdit.Enabled -> applied(if (edit.enabled == profile.enabled) null else with(raw, "enabled", JsonPrimitive(edit.enabled)))
         is ProfileEdit.Label -> applied(jsTrim(edit.typed).takeIf { it.isNotEmpty() && it != profile.label }?.let { with(raw, "label", JsonPrimitive(it)) })
+        is ProfileEdit.Extends -> when {
+            edit.value !in ProfileLimits.EXTENDS -> Applied.No(ProvidersRefusal.Invalid)
+            edit.value == profile.extends -> Applied.Nothing
+            else -> Applied.To(with(raw, "extends", JsonPrimitive(edit.value)))
+        }
+        is ProfileEdit.Command -> {
+            val parts = commandParts(edit.typed)
+            when {
+                // :716 compares the joined text: the same words with other spacing are no change.
+                parts.joinToString(" ") == (profile.command ?: emptyList()).joinToString(" ") -> Applied.Nothing
+                !commandFits(parts) -> Applied.No(ProvidersRefusal.Invalid)
+                parts.isEmpty() -> Applied.To(without(raw, "command"))
+                else -> Applied.To(with(raw, "command", JsonArray(parts.map(::JsonPrimitive))))
+            }
+        }
+        is ProfileEdit.Home -> {
+            val value = jsTrim(edit.typed)
+            when {
+                value == (profile.homeDir ?: "") -> Applied.Nothing
+                value.length > ProfileLimits.HOME -> Applied.No(ProvidersRefusal.Invalid)
+                value.isEmpty() -> Applied.To(without(raw, "homeDir"))
+                else -> Applied.To(with(raw, "homeDir", JsonPrimitive(value)))
+            }
+        }
         is ProfileEdit.EnvKey, is ProfileEdit.EnvValue, is ProfileEdit.EnvRemove, is ProfileEdit.EnvAdd -> applyEnv(raw, envChangeOf(edit)!!)
         is ProfileEdit.DropEnv -> applied(splitList(raw, "dropEnv", edit.typed, profile.dropEnv))
         is ProfileEdit.DisallowedTools -> applied(splitList(raw, "disallowedTools", edit.typed, profile.disallowedTools))
@@ -827,8 +664,9 @@ object ProvidersPatch {
     }
 
     /**
-     * The env editor's handlers (:368-410). r2 (security F9): a rename or an add onto a key the
-     * profile already has is refused ([ProvidersRefusal.Collision]), never a silent overwrite.
+     * The env editor's handlers (:359-411). ta-coik.5: a rename or an add onto a name the profile
+     * already has overwrites that entry in its place, as the web's `{ ...env, [key]: value }` and
+     * `delete next[key]; next[nextKey] = value` do.
      */
     private fun applyEnv(raw: JsonObject, change: EnvChange): Applied {
         val env = raw["env"] as? JsonObject
@@ -837,7 +675,6 @@ object ProvidersPatch {
                 val value = env?.get(change.from) ?: return Applied.No(ProvidersRefusal.Gone)
                 if (change.to.isEmpty() || change.to == change.from) return Applied.Nothing
                 if (change.to.length > ProfileLimits.COMMAND_ENTRY) return Applied.No(ProvidersRefusal.Invalid)
-                if (change.to in env) return Applied.No(ProvidersRefusal.Collision)
                 val next = LinkedHashMap(env)
                 next.remove(change.from)
                 next[change.to] = value
@@ -860,8 +697,7 @@ object ProvidersPatch {
             is EnvChange.Add -> {
                 if (change.key.isEmpty()) return Applied.Nothing
                 if (change.key.length > ProfileLimits.COMMAND_ENTRY || change.value.reveal().length > ProfileLimits.ENV_VALUE) return Applied.No(ProvidersRefusal.Invalid)
-                if (env != null && change.key in env) return Applied.No(ProvidersRefusal.Collision)
-                if ((env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
+                if ((env == null || change.key !in env) && (env?.size ?: 0) >= ProfileLimits.ENV_KEYS) return Applied.No(ProvidersRefusal.Invalid)
                 val next = LinkedHashMap(env ?: emptyMap())
                 next[change.key] = JsonPrimitive(change.value.reveal())
                 Applied.To(withEnv(raw, next))
@@ -937,9 +773,4 @@ object ProvidersPatch {
     private fun without(o: JsonObject, key: String): JsonObject = if (key !in o) o else JsonObject(LinkedHashMap(o).apply { remove(key) })
 
     private fun idOf(o: JsonObject): String? = (o["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content
-
-    /** A key's value with JSON null read as absent (JSON.stringify drops `undefined`; the validator reads null as absent). */
-    private fun present(e: JsonElement?): JsonElement? = if (e == null || e is JsonNull) null else e
-
-    private fun JsonObject?.orEmpty(): Map<String, JsonElement> = this ?: emptyMap()
 }
