@@ -1181,9 +1181,11 @@ private fun ServiceItem(
         verticalArrangement = Arrangement.spacedBy(3.2.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm), verticalAlignment = Alignment.CenterVertically) {
-            RuledText(listOf(row.name), cssText(type.mono, 0.76f, 400), t.ink, Modifier.weight(1f, fill = false), maxLines = 1)
-            Text(row.status, style = cssText(type.ui, 0.76f, 400), color = problem)
-            Spacer(Modifier.weight(1f))
+            // `.actions { margin-left: auto }`: the name and status take the room, the keys sit at the end.
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                RuledText(listOf(row.name), cssText(type.mono, 0.76f, 400), t.ink, Modifier.weight(1f, fill = false), maxLines = 1)
+                Text(row.status, style = cssText(type.ui, 0.76f, 400), color = problem)
+            }
             val label = row.name.text
             Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                 if (row.running) {
