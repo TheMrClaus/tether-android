@@ -270,6 +270,18 @@ fun LoginScreen(
     // ta-coik.1 r3: the order of this screen's sign-in attempts (see [AttemptOrder]).
     val attempts = remember { AttemptOrder() }
 
+    /**
+     * ta-coik.1 r4 (ta-5csf I1): [attempt] ended Superseded (another sign-in or a sign-out came first)
+     * and shows nothing of its own. If no other attempt is still running, nothing else will settle the
+     * screen either, so a screen still busy with it goes back to ready (never over a success).
+     */
+    fun supersededAlone(attempt: Long) {
+        if (!attempts.dropped(attempt)) return
+        if (phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey) {
+            phase = LoginPhase.Ready
+        }
+    }
+
     // ta-coik.1: the armed autofill offer, and the arming run that claimed its address (once per page,
     // as the web). r2 (security F2): a claim is an object, so only the run that made it can release it.
     var autofill by remember { mutableStateOf<ArmedAutofill?>(null) }
@@ -278,7 +290,7 @@ fun LoginScreen(
     /** use-login-flow.ts signInWithPasskey's outcomes, for the prompt and the autofill offer alike. */
     fun passkeyOutcome(attempt: Long, result: LoginResult) {
         // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
-        if (result is LoginResult.Superseded) return
+        if (result is LoginResult.Superseded) return supersededAlone(attempt)
         if (!attempts.settle(attempt)) return
         val blocked = result is LoginResult.LocalNetworkBlocked
         when {
@@ -401,7 +413,7 @@ fun LoginScreen(
                 }
             }
             // ta-coik.1 r3: another sign-in (or a sign-out) came first; its outcome stands, this one is dropped.
-            if (superseded) return@launch
+            if (superseded) return@launch supersededAlone(attempt)
             // ta-coik.1 r3 (verifier r2, Low): a newer attempt has already settled; this older one's
             // outcome (a late refusal after a picked passkey signed in, say) leaves the screen as it is.
             if (!attempts.settle(attempt)) return@launch
@@ -533,13 +545,23 @@ private class AttemptOrder {
     private var begun = 0L
     private var settled = 0L
 
-    fun begin(): Long = ++begun
+    /** ta-coik.1 r4: the attempts still running. */
+    private val pending = HashSet<Long>()
+
+    fun begin(): Long = (++begun).also { pending += it }
 
     /** Whether [attempt]'s outcome may land: true, and it is the latest settled, unless a newer one has. */
     fun settle(attempt: Long): Boolean {
+        pending -= attempt
         if (attempt < settled) return false
         settled = attempt
         return true
+    }
+
+    /** ta-coik.1 r4: [attempt] ended with no outcome to show; true when no other attempt is still running. */
+    fun dropped(attempt: Long): Boolean {
+        pending -= attempt
+        return pending.isEmpty()
     }
 }
 

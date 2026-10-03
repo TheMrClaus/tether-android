@@ -49,8 +49,10 @@ class SignInSupersededTest {
         @Volatile var loginGate: CountDownLatch? = null
         @Volatile var loginStatus = 200
         @Volatile var claimGate: CountDownLatch? = null
+        @Volatile var verifyGate: CountDownLatch? = null
         val loginArrived = CountDownLatch(1)
         val claimArrived = CountDownLatch(1)
+        val verifyArrived = CountDownLatch(1)
 
         /** The Cookie header of each `POST /api/auth/logout`. */
         val logouts = ConcurrentLinkedQueue<String>()
@@ -69,6 +71,7 @@ class SignInSupersededTest {
         fun releaseAll() {
             loginGate?.countDown()
             claimGate?.countDown()
+            verifyGate?.countDown()
         }
 
         private fun ok(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
@@ -85,7 +88,11 @@ class SignInSupersededTest {
                     else ok("""{"error":"Those credentials are not correct."}""").setResponseCode(401)
                 }
                 path == "/api/auth/passkey/login/options" -> ok(PasskeyFixtures.loginOptionsJson(request.requestUrl!!.host))
-                path == "/api/auth/passkey/login/verify" -> ok("""{"ok":true}""").addHeader("Set-Cookie", cookie(passkeyCookie))
+                path == "/api/auth/passkey/login/verify" -> {
+                    verifyArrived.countDown()
+                    verifyGate?.await(15, TimeUnit.SECONDS)
+                    ok("""{"ok":true}""").addHeader("Set-Cookie", cookie(passkeyCookie))
+                }
                 path == "/api/devices/claim" -> {
                     claimArrived.countDown()
                     claimGate?.await(15, TimeUnit.SECONDS)
@@ -255,7 +262,9 @@ class SignInSupersededTest {
     /** A sign-out that lands while the winning sign-in is still writing the store: the sign-out stands. */
     @Test fun aSignOutDuringTheStoreWriteStandsAndTheWriteIsTakenBack() {
         a.start()
-        val inner = InMemorySettings()
+        b.start()
+        // ta-coik.1 r4 (ta-5csf I2): a server URL was stored before (the login screen's prefill).
+        val inner = InMemorySettings(initialBaseUrl = b.base)
         val writing = CompletableDeferred<Unit>()
         val proceed = CompletableDeferred<Unit>()
         val settings = object : SettingsStore by inner {
@@ -272,6 +281,7 @@ class SignInSupersededTest {
         proceed.complete(Unit)
         assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
         assertNull("the store write is taken back", stored(inner))
+        assertEquals("and the URL it moved, back to the one stored before", b.base, storedUrl(inner))
         assertEquals(OriginStanding.SignedOut, client.originStanding(a.base))
         awaitTrue("the session is revoked") { a.logouts.any { it == "tether_session=${a.passwordCookie}" } }
     }
@@ -313,6 +323,85 @@ class SignInSupersededTest {
     }
 
     // ---- a sign-in to another server within the window -----------------------------------------
+
+    /** A password sign-in to [console] held at the console; the caller releases [Console.loginGate]. */
+    private fun startHeld(client: RealTetherClient, console: Console) = heldPasswordSignIn(client, console)
+
+    /**
+     * ta-coik.1 r4 (verifier R3-1, security L1 / ta-5csf): overlapping sign-ins to two servers. The one
+     * the user started LAST decides, even when the older one's 200 lands first: the older is not
+     * adopted, and its session is revoked at its own server.
+     */
+    @Test fun aNewerSignInToAnotherServerWinsWhenTheOlderFinishesFirst() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val toA = startHeld(client, a)
+        val toB = startHeld(client, b)
+        a.loginGate!!.countDown()
+        assertEquals("A, older, answered first", LoginResult.Superseded, runBlocking { toA.await() })
+        assertNull("nothing adopted while B is pending", stored(settings))
+        b.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { toB.await() })
+        assertEquals(b.base, storedUrl(settings))
+        assertEquals(b.passwordCookie, stored(settings).cookieValue())
+        assertEquals(OriginStanding.Configured, client.originStanding(b.base))
+        awaitTrue("A's session is revoked at A") { a.logouts.toList() == listOf("tether_session=${a.passwordCookie}") }
+        assertTrue(b.logouts.isEmpty())
+    }
+
+    /** Positive control of the same rule: the newer one answers first and is adopted; the older is revoked. */
+    @Test fun aNewerSignInToAnotherServerWinsWhenItFinishesFirst() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val toA = startHeld(client, a)
+        val toB = startHeld(client, b)
+        b.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { toB.await() })
+        a.loginGate!!.countDown()
+        assertEquals(LoginResult.Superseded, runBlocking { toA.await() })
+        assertEquals(b.base, storedUrl(settings))
+        assertEquals(b.passwordCookie, stored(settings).cookieValue())
+        awaitTrue("A's session is revoked at A") { a.logouts.toList() == listOf("tether_session=${a.passwordCookie}") }
+    }
+
+    /** A newer sign-in elsewhere that FAILED is not pending any more: the older one may still land. */
+    @Test fun aNewerSignInElsewhereThatFailedDoesNotHoldTheOlderOneBack() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val toA = startHeld(client, a)
+        b.loginStatus = 401
+        assertEquals(LoginResult.BadPassword("Those credentials are not correct."), runBlocking { client.login(b.base, "wrong", "") })
+        a.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { toA.await() })
+        assertEquals(a.base, storedUrl(settings))
+        assertTrue(a.logouts.isEmpty())
+    }
+
+    /**
+     * Same server, in parallel (a password and a passkey, as the autofill pick allows): first-wins stays.
+     * Here the OLDER one (the password) answers first and is adopted; the newer passkey is revoked.
+     */
+    @Test fun sameServerAttemptsKeepFirstWinsWhenTheOlderFinishesFirst() {
+        a.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val password = startHeld(client, a)
+        a.verifyGate = CountDownLatch(1)
+        val passkey = scope.async { client.passkeyLogin(a.base, RecordingPasskeys()) }
+        assertTrue(a.verifyArrived.await(10, TimeUnit.SECONDS))
+        a.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { password.await() })
+        a.verifyGate!!.countDown()
+        assertEquals(LoginResult.Superseded, runBlocking { passkey.await() })
+        assertEquals(a.passwordCookie, stored(settings).cookieValue())
+        awaitTrue("the passkey session is revoked") { a.logouts.toList() == listOf("tether_session=${a.passkeyCookie}") }
+    }
 
     @Test fun aSwitchToAnotherServerWithinTheWindowStaysThere() {
         a.start()

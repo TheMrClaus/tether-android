@@ -419,6 +419,15 @@ class RealTetherClient(
     private var signInGeneration = 0L
     // ta-coik.1 r3: one adoption at a time, so the store and memory always hold the same sign-in.
     private val adoptMutex = Mutex()
+    // ta-coik.1 r4 (ta-5csf L1, verifier R3-1): the sign-in the user started LAST decides the server.
+    // Every sign-in the user starts (login(), pair(), a passkey prompt, a passkey picked from autofill)
+    // takes the next start number and names its target origin while it runs ([SignInTicket]). An
+    // attempt is not adopted while one started after it, to ANOTHER server, is still pending: that
+    // newer one decides (it is adopted, or it fails and the older one may still land after it). One
+    // started after it and already adopted moved [signInGeneration], which refuses it as well. Attempts
+    // to the same server keep first-wins (the generation). Guarded by [lock].
+    private var signInStarts = 0L
+    private val pendingSignIns = HashMap<Long, String>()
 
     // The ONE credential in force. Cookie (password login) and device token
     // (pairing) differ only in the header they add, so the connect loop below
@@ -742,6 +751,16 @@ class RealTetherClient(
         val generation = signInGenerationNow()
         val normalized = normalizeBaseUrl(baseUrl)
             ?: return@withContext LoginResult.Unreachable("That server URL is not valid.")
+        // ta-coik.1 r4: pending, as started now, until it ends (see [signInStarts]).
+        val ticket = beginSignIn(normalized, generation)
+        try {
+            loginWith(normalized, password, username, ticket)
+        } finally {
+            endSignIn(ticket)
+        }
+    }
+
+    private suspend fun loginWith(normalized: HttpUrl, password: String, username: String, ticket: SignInTicket): LoginResult = withContext(Dispatchers.IO) {
         if (blockedBeforeConnect(normalized)) return@withContext LoginResult.LocalNetworkBlocked
 
         // 1. Cheapest pre-flight: /healthz carries the native window unauthenticated.
@@ -785,7 +804,7 @@ class RealTetherClient(
                     // ta-jt9 I-3: the server has minted a session: adopt it whatever happens
                     // to the caller, or it is never stored nor revoked. ta-coik.1 r3: unless another
                     // sign-in or a sign-out came first; then it is revoked, not adopted.
-                    val adopted = withContext(NonCancellable) { adoptCredential(normalized, cookie, generation) }
+                    val adopted = withContext(NonCancellable) { adoptCredential(normalized, cookie, ticket) }
                     return@withContext if (adopted) LoginResult.Success else LoginResult.Superseded
                 }
                 // Tether's own refusal is JSON `{error}` and never carries a challenge
@@ -840,12 +859,18 @@ class RealTetherClient(
      * runs them apart, as the web's conditional ceremony does).
      */
     override suspend fun passkeyLogin(baseUrl: String, passkeys: PasskeyAuthenticator): LoginResult = withContext(Dispatchers.IO) {
-        val request = when (val start = passkeyLoginStart(baseUrl, passkeys.available)) {
-            is PasskeyLoginStart.Ready -> start.request
-            is PasskeyLoginStart.Refused -> return@withContext start.result
+        // ta-coik.1 r4: the user started this sign-in now (the key), whatever the prompt takes.
+        val ticket = normalizeBaseUrl(baseUrl)?.let { beginSignIn(it, signInGenerationNow()) }
+        try {
+            val request = when (val start = passkeyLoginStart(baseUrl, passkeys.available)) {
+                is PasskeyLoginStart.Ready -> start.request
+                is PasskeyLoginStart.Refused -> return@withContext start.result
+            }
+            // The ceremony (the authenticator moves to the main thread itself).
+            finishPasskey(request, passkeys.authenticate(request.requestJson()), checkNotNull(ticket))
+        } finally {
+            ticket?.let(::endSignIn)
         }
-        // The ceremony (the authenticator moves to the main thread itself).
-        passkeyLoginFinish(request, passkeys.authenticate(request.requestJson()))
     }
 
     override suspend fun passkeyLoginStart(baseUrl: String): PasskeyLoginStart = passkeyLoginStart(baseUrl, available = true)
@@ -894,7 +919,21 @@ class RealTetherClient(
         PasskeyLoginStart.Ready(PasskeyLoginRequest(normalized, challenge.challengeId, requestJson, generation))
     }
 
+    /**
+     * ta-coik.1 r4: an autofill pick. The user starts this sign-in by picking (arming the offer started
+     * nothing), so it takes its start number now; the generation is the armed request's, so a sign-out
+     * since the offer was armed still refuses it.
+     */
     override suspend fun passkeyLoginFinish(request: PasskeyLoginRequest, ceremony: PasskeyCeremony): LoginResult = withContext(Dispatchers.IO) {
+        val ticket = beginSignIn(request.server, request.generation)
+        try {
+            finishPasskey(request, ceremony, ticket)
+        } finally {
+            endSignIn(ticket)
+        }
+    }
+
+    private suspend fun finishPasskey(request: PasskeyLoginRequest, ceremony: PasskeyCeremony, ticket: SignInTicket): LoginResult = withContext(Dispatchers.IO) {
         val normalized = request.server
         val answer = when (ceremony) {
             is PasskeyCeremony.Done -> PasskeyRules.response(ceremony)
@@ -927,7 +966,7 @@ class RealTetherClient(
                 }
                 // ta-jt9 I-3, as for a password: a minted session is adopted whatever happens to the caller,
                 // ta-coik.1 r3: unless another sign-in or a sign-out came first since the challenge was asked.
-                val adopted = withContext(NonCancellable) { adoptCredential(normalized, cookie, request.generation) }
+                val adopted = withContext(NonCancellable) { adoptCredential(normalized, cookie, ticket) }
                 if (adopted) LoginResult.Success else LoginResult.Superseded
             }
         } catch (e: IOException) {
@@ -972,6 +1011,16 @@ class RealTetherClient(
         val generation = signInGenerationNow()
         val normalized = normalizeBaseUrl(baseUrl)
             ?: return@withContext PairResult.Unreachable("That server URL is not valid.")
+        // ta-coik.1 r4: pending, as started now, until it ends (see [signInStarts]).
+        val ticket = beginSignIn(normalized, generation)
+        try {
+            pairWith(normalized, code, label, ticket)
+        } finally {
+            endSignIn(ticket)
+        }
+    }
+
+    private suspend fun pairWith(normalized: HttpUrl, code: String, label: String, ticket: SignInTicket): PairResult = withContext(Dispatchers.IO) {
         if (blockedBeforeConnect(normalized)) return@withContext PairResult.LocalNetworkBlocked
         // Trim only. Case folding, separator stripping and U→V are the server's
         // job (lib/device-tokens.mjs normalizePairingCode) — a second copy here
@@ -1027,7 +1076,7 @@ class RealTetherClient(
                     // ta-jt9 I-3: the single-use code is spent: a token not adopted now is orphaned.
                     // ta-coik.1 r3: unless another sign-in or a sign-out came first; then it is revoked.
                     val adopted = withContext(NonCancellable) {
-                        adoptCredential(normalized, Credential.DeviceToken(token), generation, deviceId)
+                        adoptCredential(normalized, Credential.DeviceToken(token), ticket, deviceId)
                     }
                     return@withContext if (adopted) PairResult.Success else PairResult.Superseded
                 }
@@ -1051,26 +1100,46 @@ class RealTetherClient(
 
     private fun signInGenerationNow(): Long = synchronized(lock) { signInGeneration }
 
+    /** ta-coik.1 r4: one sign-in the user started: its start number, target origin and generation. */
+    private class SignInTicket(val start: Long, val origin: String, val generation: Long)
+
+    private fun beginSignIn(server: HttpUrl, generation: Long): SignInTicket = synchronized(lock) {
+        val ticket = SignInTicket(++signInStarts, serverOrigin(server.toString()) ?: server.toString(), generation)
+        pendingSignIns[ticket.start] = ticket.origin
+        ticket
+    }
+
+    private fun endSignIn(ticket: SignInTicket) {
+        synchronized(lock) { pendingSignIns.remove(ticket.start) }
+    }
+
+    /** ta-coik.1 r4: a sign-in started after [ticket], to another server, is still pending. Caller holds [lock]. */
+    private fun overtakenLocked(ticket: SignInTicket): Boolean =
+        pendingSignIns.any { (start, origin) -> start > ticket.start && origin != ticket.origin }
+
     /**
      * Persist a freshly-obtained credential and (re)start the connection loop, ta-coik.1 r3: only if no
-     * other sign-in was adopted and no sign-out happened since this sign-in began ([generation], read
-     * then). One adoption at a time ([adoptMutex]), so the store and memory never hold two different
+     * other sign-in was adopted and no sign-out happened since this sign-in began ([SignInTicket.generation],
+     * read then), and r4: no sign-in started after it, to another server, is still pending
+     * ([overtakenLocked]). One adoption at a time ([adoptMutex]), so the store and memory never hold two different
      * sign-ins. True when adopted. Otherwise the credential the server minted is revoked there, best
      * effort ([revokeSuperseded]): never kept, never left alive unheld (ta-jt9 I-3). [deviceId] names a
      * device token's device (pair()), for that revoke.
      */
-    private suspend fun adoptCredential(base: HttpUrl, credential: Credential, generation: Long, deviceId: String? = null): Boolean {
-        val adopted = adoptMutex.withLock { adoptIfCurrent(base, credential, generation) }
+    private suspend fun adoptCredential(base: HttpUrl, credential: Credential, ticket: SignInTicket, deviceId: String? = null): Boolean {
+        val adopted = adoptMutex.withLock { adoptIfCurrent(base, credential, ticket) }
         if (!adopted) revokeSuperseded(base, credential, deviceId)
         return adopted
     }
 
     /** [adoptCredential]'s body, under [adoptMutex]. */
-    private suspend fun adoptIfCurrent(base: HttpUrl, credential: Credential, generation: Long): Boolean {
+    private suspend fun adoptIfCurrent(base: HttpUrl, credential: Credential, ticket: SignInTicket): Boolean {
         // ta-coik.1 r3: claimed under the lock, before anything is written: any other sign-in that began
         // at [generation] is late from here on, and a sign-out from here on moves the generation again.
         val claimed = synchronized(lock) {
-            if (signInGeneration != generation) return false
+            if (signInGeneration != ticket.generation) return false
+            // ta-coik.1 r4: a newer sign-in to another server is still running: it decides.
+            if (overtakenLocked(ticket)) return false
             ++signInGeneration
         }
         // ta-jt9 L-A2: the boot purge decides on the store as the boot found it, so no sign-in
@@ -1092,8 +1161,10 @@ class RealTetherClient(
         withTimeoutOrNull(signOutClearWaitMs) { signOutClearsInFlight.first { it == 0 } }
         // Read BEFORE the URL moves: the server that unsent input filed before
         // the store was bound (a fresh process) was written for.
+        // ta-coik.1 r4 (ta-5csf I2): whether it read, so a take-back below restores it only when known.
+        var configuredBeforeRead = false
         val configuredBefore = try {
-            settings.baseUrl.first()
+            settings.baseUrl.first().also { configuredBeforeRead = true }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -1145,8 +1216,14 @@ class RealTetherClient(
             false
         }
         if (signedOutMeanwhile) {
-            // Only this credential is taken back (compare-and-clear): never a newer one.
-            if (stored) runCatching { settings.clearCredentialIf(credential) }
+            // Only this credential is taken back (compare-and-clear): never a newer one. ta-coik.1 r4
+            // (ta-5csf I2): with it the URL it moved, back to the one stored before (when that read).
+            if (stored) {
+                runCatching {
+                    if (configuredBeforeRead) settings.revertServerIf(credential, configuredBefore)
+                    else settings.clearCredentialIf(credential)
+                }
+            }
             return false
         }
         if (switch != null) raceHook?.invoke(RacePoint.ServerMoved, null)
@@ -2078,10 +2155,11 @@ class RealTetherClient(
             // Best effort.
         }
 
-        // 3. Cookie: revoke server-side. Device token: nothing to call — the
-        //    server refuses device-management routes to a device token BY DESIGN
-        //    (requireOwnerGrade), and /api/auth/logout only revokes cookie
-        //    sessions. The owner revokes a device from a browser.
+        // 3. Cookie: revoke server-side (/api/auth/logout revokes cookie sessions only).
+        //    Device token: not revoked here. Since tether ta-drm a device token is owner-grade
+        //    and may call the device routes (DELETE /api/devices/<id>, as a superseded pairing
+        //    does, see revokeSuperseded), but the store keeps no device id, and the web's sign-out
+        //    revokes no device either; the owner removes a device in Settings > Devices.
         if (credential !is Credential.Cookie) return LogoutResult.LocalOnly
         if (blockedBeforeConnect(base)) return LogoutResult.ServerNotReached
         return withContext(Dispatchers.IO) {

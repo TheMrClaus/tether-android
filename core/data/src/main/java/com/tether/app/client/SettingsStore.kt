@@ -242,6 +242,13 @@ interface SettingsStore {
     suspend fun clearCredentialIf(expected: Credential): Boolean
 
     /**
+     * ta-coik.1 r4 (ta-5csf I2): take back a sign-in's [setServer]. While the credential in force is
+     * still [expected], drop it and put the server URL back to [previousBaseUrl] (null: none), in one
+     * step under the store's own lock. A newer credential (and its URL) is never touched. True = taken back.
+     */
+    suspend fun revertServerIf(expected: Credential, previousBaseUrl: String?): Boolean
+
+    /**
      * ta-jt9 L-A1: whether a credential is stored, keeping "cannot tell right now" apart from
      * "nothing": [credential] reads null for a sealed credential that a transient Keystore error
      * left unopened (it is kept and retried), which is [StoredCredentialState.Unknown] here.
@@ -635,6 +642,18 @@ class DataStoreSettings(
         true
     }
 
+    override suspend fun revertServerIf(expected: Credential, previousBaseUrl: String?): Boolean = mutex.withLock {
+        if (credentials.value == null || retryPending) loadLocked()
+        val current = credentials.value?.let { credentialInForce(it.cookie, it.deviceToken) }
+        if (current != expected) return@withLock false
+        // The credential goes and the URL moves back in the same edit (setServer moved it with this
+        // credential, so while the credential is [expected] the URL is still the one it wrote).
+        forgetCredentialsLocked(extra = { prefs ->
+            if (previousBaseUrl != null) prefs[baseUrlKey] = previousBaseUrl else prefs.remove(baseUrlKey)
+        })
+        true
+    }
+
     override suspend fun storedCredentialState(): StoredCredentialState = mutex.withLock {
         if (credentials.value == null || retryPending) loadLocked()
         val loaded = credentials.value
@@ -865,6 +884,17 @@ class InMemorySettings(
         } else {
             cookieState.value = null
             deviceTokenState.value = null
+            true
+        }
+    }
+
+    override suspend fun revertServerIf(expected: Credential, previousBaseUrl: String?): Boolean = synchronized(lock) {
+        if (credentialInForce(cookieState.value, deviceTokenState.value) != expected) {
+            false
+        } else {
+            cookieState.value = null
+            deviceTokenState.value = null
+            baseUrlState.value = previousBaseUrl
             true
         }
     }
