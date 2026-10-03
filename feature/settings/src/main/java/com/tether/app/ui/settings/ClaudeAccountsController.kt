@@ -140,8 +140,9 @@ fun interface LoginLinkOpener {
          * androidx.core (ExternalLinks' rule).
          */
         fun browser(context: Context) = LoginLinkOpener { link ->
-            val intent = intentFor(link)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return@LoginLinkOpener false
             try {
+                // r4 (security N1): built inside the try, so nothing about the link can crash the tap.
+                val intent = intentFor(link)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return@LoginLinkOpener false
                 context.startActivity(intent)
                 true
             } catch (_: ActivityNotFoundException) {
@@ -167,7 +168,10 @@ fun interface LoginLinkOpener {
             if (!link.web && link.url.startsWith("intent:")) {
                 val intent = try {
                     Intent.parseUri(link.url, Intent.URI_INTENT_SCHEME)
-                } catch (_: java.net.URISyntaxException) {
+                } catch (_: Exception) {
+                    // r4 (security N1): parseUri throws more than URISyntaxException for a malformed
+                    // link (NumberFormatException for `launchFlags=zz` or `i.k=x`, and others): any
+                    // of them is a link that does not parse (not a coroutine path: nothing to rethrow).
                     return null
                 }
                 if (intent.scheme?.lowercase(java.util.Locale.ROOT) in ClaudeLoginLink.NOT_OPENED) return null

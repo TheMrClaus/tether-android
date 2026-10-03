@@ -414,6 +414,32 @@ class ProfilesTest {
         assertNotNull(again.next(answered, 0, "https://a.example"))
     }
 
+    /**
+     * ta-coik.17 r4 (security N2): an edit sent at once (nothing in flight) whose send fails goes back
+     * to the queue FOR ITS SERVER, so the next flush there sends it (before r4 it was dropped
+     * silently: the fast path left no origin); a flush on another server still drops it (r3).
+     * The steps are the client's: setProviders' submit, sendProvidersLocked's failed ws.send ->
+     * unsent, flushProvidersLocked's next.
+     */
+    @Test fun aFastPathEditWhoseSendFailsGoesOutOnTheNextFlushToItsServer() {
+        val a = "https://a.example"
+        val edit = ProvidersPatch.write(two, ProfileEdit.Label("work", "W"))!!
+        val labelled = profiles(gemini, work.replace("\"label\":\"Work\"", "\"label\":\"W\""))
+        val outbox = ProvidersOutbox()
+        val first = (outbox.submit(edit, two, 0, a) as ProvidersOutbox.Step.Send).write
+        outbox.unsent(first)
+        assertTrue(outbox.hasQueued)
+        assertEquals("W", outbox.shown(two)!!.profile("work")!!.label)
+        assertEquals(labelled, sent(outbox.next(two, 0, a)))
+        assertFalse(outbox.hasQueued)
+        // The same failure, then a flush on ANOTHER server's socket: dropped, never sent there or later.
+        val other = ProvidersOutbox()
+        other.unsent((other.submit(edit, two, 0, a) as ProvidersOutbox.Step.Send).write)
+        assertNull(other.next(two, 0, "https://b.example"))
+        assertFalse(other.hasQueued)
+        assertNull(other.next(two, 0, a))
+    }
+
     /** ta-coik.17 r3 (security F4): a reset leaves nothing of the last server's write (its expected list holds env values). */
     @Test fun aResetClearsTheWriteInFlight() {
         val outbox = ProvidersOutbox()

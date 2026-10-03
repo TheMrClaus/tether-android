@@ -402,6 +402,9 @@ class ProvidersOutbox(val inFlight: ProvidersInFlight = ProvidersInFlight()) {
         if (queued.isEmpty() && newest.epoch == epoch && !inFlight.waiting(newest) &&
             write.generation == newest.generation && write.epoch == newest.epoch
         ) {
+            // r4 (security N2): the write's origin, so a failed send ([unsent]) re-queues it for this
+            // server and the next flush here sends it (another server still drops it).
+            queuedOrigin = origin
             return Step.Send(write)
         }
         if (queuedOrigin != origin) queued.clear()

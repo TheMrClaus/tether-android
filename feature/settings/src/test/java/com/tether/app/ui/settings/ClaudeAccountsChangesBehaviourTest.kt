@@ -444,6 +444,58 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals(0, intent.flags and LoginLinkOpener.ALLOWED_INTENT_FLAGS.inv())
     }
 
+    /**
+     * r4 (security N1): an `intent:` link Intent.parseUri rejects with something other than a
+     * URISyntaxException (a launchFlags or typed extra that is not a number) is a link that does not
+     * parse, like any other: no intent, the opener opens nothing, and the Open tap shows the same note
+     * as for a link that does not parse at all. Before r4 every Open tap on it crashed the app.
+     */
+    @Test fun anIntentLinkParseUriThrowsOnOpensNothingLikeAnyUnparsableLink() {
+        val parse = { raw: String -> android.content.Intent.parseUri(raw, android.content.Intent.URI_INTENT_SCHEME) }
+        // The baseline: a link that does not parse the way r3 already handled (URISyntaxException).
+        assertTrue(runCatching { parse(UNPARSABLE) }.exceptionOrNull() is java.net.URISyntaxException)
+        val throwing = listOf(
+            BAD_FLAGS,
+            "intent:#Intent;launchFlags=0x80000000;end",
+            BAD_EXTRA,
+            "intent://claude.ai/x#Intent;scheme=https;b.k=x;end",
+            "intent://claude.ai/x#Intent;scheme=https;f.k=x;end",
+        )
+        for (raw in throwing) {
+            val thrown = runCatching { parse(raw) }.exceptionOrNull()
+            assertTrue("$raw: $thrown", thrown != null && thrown !is java.net.URISyntaxException)
+        }
+        for (raw in listOf(UNPARSABLE) + throwing) {
+            val l = ClaudeLoginLink.parse(raw)!!
+            assertFalse(raw, l.web)
+            assertNull(raw, LoginLinkOpener.intentFor(l))
+            assertFalse(raw, LoginLinkOpener.browser(appContext()).open(l))
+        }
+    }
+
+    /** r4 (security N1): the Open tap on `launchFlags=zz`, through the real opener: no crash, the note any unparsable link gets. */
+    @Test fun anOpenTapOnAnIntentLinkWithABadLaunchFlagsNumberCrashesNothing() = openTapSaysUnopened(BAD_FLAGS)
+
+    /** r4 (security N1): the Open tap on an `i.k=x` extra, through the real opener: no crash, the note any unparsable link gets. */
+    @Test fun anOpenTapOnAnIntentLinkWithABadTypedExtraCrashesNothing() = openTapSaysUnopened(BAD_EXTRA)
+
+    /** The baseline the two above match: a link parseUri refuses with a URISyntaxException. */
+    @Test fun anOpenTapOnAnIntentLinkThatDoesNotParseSaysSo() = openTapSaysUnopened(UNPARSABLE)
+
+    private fun appContext() = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+
+    private fun openTapSaysUnopened(raw: String) {
+        val actions = FakeAccountActions()
+        show(binding(FakeAccounts(), actions, LoginLinkOpener.browser(appContext())))
+        tap(ClaudeAccountsTags.login("claude-work"))
+        waitForCall(actions, "startLogin")
+        actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, ClaudeLoginLink.parse(raw)!!, false, null), ORIGIN, null))
+        waitFor(ClaudeAccountsCopy.OPEN_CAPTION_WEB)
+        tap(ClaudeAccountsTags.loginOpen("claude-work"))
+        waitFor(ClaudeAccountsCopy.LINK_UNOPENED_APP)
+        tag(ClaudeAccountsTags.loginOpen("claude-work") + ":unopened").assertExists()
+    }
+
     @Test fun aLoginAlreadyRunningElsewhereIsSaid() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
@@ -857,6 +909,15 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertFalse(everything().any { it.contains("FAKE-LEFT-BEHIND") })
         tag(ClaudeAccountsTags.loginPanel("claude-work")).assertDoesNotExist()
         assertNull(actions.calls.firstOrNull { it.name == "submitCode" })
+    }
+
+    private companion object {
+        /** r4 (security N1): parseUri throws NumberFormatException for these, not URISyntaxException. */
+        const val BAD_FLAGS = "intent:#Intent;launchFlags=zz;end"
+        const val BAD_EXTRA = "intent://claude.ai/x#Intent;scheme=https;i.k=x;end"
+
+        /** parseUri throws URISyntaxException ("unknown EXTRA type"): the unparsable link r3 already handled. */
+        const val UNPARSABLE = "intent://claude.ai/x#Intent;scheme=https;x.k=v;end"
     }
 }
 
