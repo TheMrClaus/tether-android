@@ -1242,7 +1242,7 @@ private fun ServiceLinks(open: ServiceOpen?, local: ServiceLocal?, opener: LinkO
                 refusal = null
                 scope.launch {
                     try {
-                        when (val outcome = serviceOpen.open(link.url, link.host.text)) {
+                        when (val outcome = serviceOpen.open(link.url, link.serviceUrl)) {
                             is ServiceOpenSource.Outcome.Open -> opener.open(context, outcome.url, t.graphite)
                             is ServiceOpenSource.Outcome.Refused -> refusal = outcome.message
                         }

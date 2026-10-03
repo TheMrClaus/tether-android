@@ -47,12 +47,13 @@ interface ServiceOpenSource {
     /**
      * Ask the paired server for [link] (the console's pinned `/api/worktree/open` URL, absolute on
      * the paired origin) and return where to send the browser: only a 303-style answer whose target
-     * is the service host [serviceHost] with exactly one `tether-auth` handoff.
+     * is on the snapshot's service origin [serviceUrl] (`proxyUrl`: same scheme, host and port) with
+     * exactly one `tether-auth` handoff. A null [serviceUrl] opens nothing.
      */
-    suspend fun open(link: String, serviceHost: String): Outcome
+    suspend fun open(link: String, serviceUrl: String?): Outcome
 
     object Unavailable : ServiceOpenSource {
-        override suspend fun open(link: String, serviceHost: String): Outcome = Outcome.Refused(SIGNED_OUT)
+        override suspend fun open(link: String, serviceUrl: String?): Outcome = Outcome.Refused(SIGNED_OUT)
     }
 
     companion object {
@@ -73,15 +74,20 @@ interface ServiceOpenSource {
 
         /**
          * The browser target for a redirect [location], or null unless it is exactly what server.mjs
-         * writes: `http(s)://<serviceHost>[:port]/?tether-auth=<handoff>` (no user info, no other
-         * path, query or fragment).
+         * writes: `<proxyUrl>/?tether-auth=<handoff>` (no user info, no other path, query or
+         * fragment), where [serviceUrl] is the snapshot's `proxyUrl` (lib/service-origin.mjs
+         * `serviceAddress`: `http(s)://<proxyHost>[:port]`). ta-t5rl: the whole origin is pinned, as a
+         * browser following the console's 303 stays on that one origin: scheme, host and effective
+         * port compared normalised (a default port written or omitted is the same origin), so the
+         * handoff only ever goes to the origin the snapshot names.
          */
-        fun handoffTarget(location: String?, serviceHost: String): String? {
+        fun handoffTarget(location: String?, serviceUrl: String?): String? {
             if (location == null || location.length > 2_048) return null
             if (location.any { it.code !in 0x21..0x7E }) return null
             val url = location.toHttpUrlOrNull() ?: return null
             if (url.scheme != "http" && url.scheme != "https") return null
-            if (!url.host.equals(serviceHost, ignoreCase = true)) return null
+            val service = serviceUrl?.toHttpUrlOrNull() ?: return null
+            if (url.scheme != service.scheme || !url.host.equals(service.host, ignoreCase = true) || url.port != service.port) return null
             if (url.username.isNotEmpty() || url.password.isNotEmpty() || url.fragment != null) return null
             if (url.encodedPath != "/" || url.querySize != 1 || url.queryParameterName(0) != HANDSHAKE_PARAM) return null
             val token = url.queryParameterValue(0) ?: return null
@@ -107,7 +113,7 @@ class HttpServiceOpen(
         }
     }
 
-    override suspend fun open(link: String, serviceHost: String): ServiceOpenSource.Outcome {
+    override suspend fun open(link: String, serviceUrl: String?): ServiceOpenSource.Outcome {
         val paired = when (val a = authority()) {
             FilesAuthority.SignedOut -> return refused(ServiceOpenSource.SIGNED_OUT)
             FilesAuthority.LocalNetworkBlocked -> return refused(ServiceOpenSource.LOCAL_NETWORK)
@@ -134,7 +140,7 @@ class HttpServiceOpen(
         val call = http.newCall(request)
         call.timeout().timeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         return try {
-            callCancellably(call) { response -> read(response, serviceHost) }
+            callCancellably(call) { response -> read(response, serviceUrl) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: IOException) {
@@ -144,10 +150,10 @@ class HttpServiceOpen(
         }
     }
 
-    private fun read(response: Response, serviceHost: String): ServiceOpenSource.Outcome {
+    private fun read(response: Response, serviceUrl: String?): ServiceOpenSource.Outcome {
         if (response.code in 300..399) {
-            // Tether's answer goes to the service host; any other redirect is a sign-in gateway's.
-            val target = ServiceOpenSource.handoffTarget(response.header("Location"), serviceHost)
+            // Tether's answer goes to the service origin; any other redirect is a sign-in gateway's.
+            val target = ServiceOpenSource.handoffTarget(response.header("Location"), serviceUrl)
             return if (target != null) ServiceOpenSource.Outcome.Open(target) else refused(ServiceOpenSource.GATEWAY)
         }
         val declaredType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)

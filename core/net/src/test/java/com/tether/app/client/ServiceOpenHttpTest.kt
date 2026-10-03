@@ -37,8 +37,8 @@ class ServiceOpenHttpTest {
     private val source get() = HttpServiceOpen(noRedirects, authority = { paired })
     private val link get() = "http://${console.hostName}:${console.port}/api/worktree/open?session=s%201&script=web"
 
-    /** The service host the snapshot named; the redirect must go there. */
-    private val host get() = service.hostName
+    /** The service origin the snapshot named (its proxyUrl); the redirect must go there. */
+    private val host get() = "http://${service.hostName}:${service.port}"
     private val target get() = "http://${service.hostName}:${service.port}/?tether-auth=$token"
 
     private fun redirect(location: String) = MockResponse().setResponseCode(303).setHeader("Location", location).setHeader("Cache-Control", "no-store")
@@ -72,7 +72,10 @@ class ServiceOpenHttpTest {
         }
         // The right handoff for ANOTHER host than the snapshot named.
         console.enqueue(redirect(target))
-        assertEquals(ServiceOpenSource.Outcome.Refused(ServiceOpenSource.GATEWAY), source.open(link, "other.example.test"))
+        assertEquals(ServiceOpenSource.Outcome.Refused(ServiceOpenSource.GATEWAY), source.open(link, "http://other.example.test:${service.port}"))
+        // ...or with no proxyUrl at all.
+        console.enqueue(redirect(target))
+        assertEquals(ServiceOpenSource.Outcome.Refused(ServiceOpenSource.GATEWAY), source.open(link, null))
         assertEquals(0, service.requestCount)
     }
 
@@ -125,12 +128,57 @@ class ServiceOpenHttpTest {
     }
 
     @Test fun handoffTargetIsExactlyWhatTheServerWrites() {
-        assertEquals("https://web--feat.svc.example.test/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://web--feat.svc.example.test/?tether-auth=$token", "web--feat.svc.example.test"))
-        assertEquals("https://web.svc.example.test:8443/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://web.svc.example.test:8443/?tether-auth=$token", "web.svc.example.test"))
+        assertEquals("https://web--feat.svc.example.test/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://web--feat.svc.example.test/?tether-auth=$token", "https://web--feat.svc.example.test"))
+        assertEquals("https://web.svc.example.test:8443/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://web.svc.example.test:8443/?tether-auth=$token", "https://web.svc.example.test:8443"))
         // A parser-normalised variant (upper-case host, default port) is not byte for byte the server's.
-        assertNull(ServiceOpenSource.handoffTarget("https://WEB.svc.example.test/?tether-auth=$token", "web.svc.example.test"))
-        assertNull(ServiceOpenSource.handoffTarget("https://web.svc.example.test:443/?tether-auth=$token", "web.svc.example.test"))
-        assertNull(ServiceOpenSource.handoffTarget("https://web.svc.example.test/?tether-auth=$token\n", "web.svc.example.test"))
-        assertNull(ServiceOpenSource.handoffTarget(null, "web.svc.example.test"))
+        assertNull(ServiceOpenSource.handoffTarget("https://WEB.svc.example.test/?tether-auth=$token", "https://web.svc.example.test"))
+        assertNull(ServiceOpenSource.handoffTarget("https://web.svc.example.test:443/?tether-auth=$token", "https://web.svc.example.test"))
+        assertNull(ServiceOpenSource.handoffTarget("https://web.svc.example.test/?tether-auth=$token\n", "https://web.svc.example.test"))
+        assertNull(ServiceOpenSource.handoffTarget(null, "https://web.svc.example.test"))
+    }
+
+    /**
+     * ta-t5rl: the handoff goes only to the origin the snapshot's proxyUrl names (server.mjs writes
+     * `${proxyUrl}/?tether-auth=...`; a browser following that 303 stays on exactly that origin):
+     * scheme, host and effective port, compared normalised.
+     */
+    @Test fun theRedirectIsPinnedToTheSnapshotsWholeOrigin() {
+        val h = "web.svc.example.test"
+        // The exact origin.
+        assertEquals("https://$h/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", "https://$h"))
+        assertEquals("http://$h:4173/?tether-auth=$token", ServiceOpenSource.handoffTarget("http://$h:4173/?tether-auth=$token", "http://$h:4173"))
+        // The same origin, its default port written explicitly in the snapshot (or its host in upper case).
+        assertEquals("https://$h/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", "https://$h:443"))
+        assertEquals("http://$h/?tether-auth=$token", ServiceOpenSource.handoffTarget("http://$h/?tether-auth=$token", "http://$h:80"))
+        assertEquals("https://$h/?tether-auth=$token", ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", "https://WEB.svc.example.test"))
+        // Another port on the same host.
+        assertNull(ServiceOpenSource.handoffTarget("https://$h:9999/?tether-auth=$token", "https://$h"))
+        assertNull(ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", "https://$h:8443"))
+        assertNull(ServiceOpenSource.handoffTarget("http://$h:4174/?tether-auth=$token", "http://$h:4173"))
+        // An http downgrade (default or same port), or an upgrade the snapshot did not name.
+        assertNull(ServiceOpenSource.handoffTarget("http://$h/?tether-auth=$token", "https://$h"))
+        assertNull(ServiceOpenSource.handoffTarget("http://$h:443/?tether-auth=$token", "https://$h"))
+        assertNull(ServiceOpenSource.handoffTarget("http://$h:8443/?tether-auth=$token", "https://$h:8443"))
+        assertNull(ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", "http://$h"))
+        // Another host; no or no usable proxyUrl.
+        assertNull(ServiceOpenSource.handoffTarget("https://other.example.test/?tether-auth=$token", "https://$h"))
+        assertNull(ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", null))
+        assertNull(ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", h))
+        assertNull(ServiceOpenSource.handoffTarget("https://$h/?tether-auth=$token", ""))
+    }
+
+    @Test fun overHttpAnotherPortOrADowngradeOpensNothing() = runBlocking<Unit> {
+        val serviceUrl = "https://${service.hostName}:${service.port}"
+        for (location in listOf(
+            "https://${service.hostName}:9999/?tether-auth=$token",
+            "http://${service.hostName}:${service.port}/?tether-auth=$token",
+        )) {
+            console.enqueue(redirect(location))
+            assertEquals(location, ServiceOpenSource.Outcome.Refused(ServiceOpenSource.GATEWAY), source.open(link, serviceUrl))
+        }
+        val exact = "$serviceUrl/?tether-auth=$token"
+        console.enqueue(redirect(exact))
+        assertEquals(exact, (source.open(link, serviceUrl) as ServiceOpenSource.Outcome.Open).url)
+        assertEquals(0, service.requestCount)
     }
 }

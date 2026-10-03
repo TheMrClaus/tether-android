@@ -396,12 +396,12 @@ data class ServiceLocal(val url: String) {
 /**
  * T15.7 / ta-coik.2: a running service's "Open" link: [url] (the console's pinned worktree-open
  * route, resolved against the paired origin) is asked with the app's sign-in, and the browser goes
- * where it redirects, which must be [host] (the service's own hostname, `proxyHost`, drawn by the
- * line rule). [toString] never prints the URL, so a model dumped into a log or a test failure does
- * not carry it.
+ * where it redirects, which must be on [serviceUrl] (the snapshot's `proxyUrl`: its scheme, host and
+ * port, ta-t5rl). [host] is the service's own hostname (`proxyHost`, drawn by the line rule).
+ * [toString] never prints the URL, so a model dumped into a log or a test failure does not carry it.
  */
 @Immutable
-data class ServiceOpen(val url: String, val host: Seg) {
+data class ServiceOpen(val url: String, val host: Seg, val serviceUrl: String? = null) {
     override fun toString(): String = "ServiceOpen(url=<redacted>)"
 }
 
@@ -961,7 +961,7 @@ private fun serviceOpen(o: JsonObject, name: String, sessionId: String?, serverO
     if (o["proxyUnavailable"].let { it != null && it !is JsonNull }) return null
     val host = o.string("proxyHost")?.takeIf { it.isNotEmpty() } ?: return null
     val url = ServiceOpenLink.resolve(o.string("proxyAuthUrl"), sessionId, name, serverOrigin) ?: return null
-    return ServiceOpen(url, code(host))
+    return ServiceOpen(url, code(host), o.string("proxyUrl"))
 }
 
 // ---- Runtime details

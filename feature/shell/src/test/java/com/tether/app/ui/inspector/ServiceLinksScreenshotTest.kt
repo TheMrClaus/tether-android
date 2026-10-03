@@ -42,7 +42,7 @@ class ServiceLinksScreenshotTest(private val shot: ServiceLinksShot, private val
     )
 
     private val refusing = object : ServiceOpenSource {
-        override suspend fun open(link: String, serviceHost: String) = ServiceOpenSource.Outcome.Refused("That service has no proxied address.")
+        override suspend fun open(link: String, serviceUrl: String?) = ServiceOpenSource.Outcome.Refused("That service has no proxied address.")
     }
 
     @Test fun links() = rule.snapBoard(

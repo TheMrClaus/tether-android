@@ -37,6 +37,8 @@ class ServiceLinkModelTest {
         assertEquals(Rule.Line, open.host.rule)
         assertEquals(open.host, r.address)
         assertNull(r.unavailable)
+        // ta-t5rl: the snapshot's proxyUrl is what the redirect is pinned to.
+        assertEquals("https://web--feat.svc.example.test", open.serviceUrl)
         // Pre-v134 servers sent no proxyUnavailable at all: same link.
         assertNotNull(running(""","proxyHost":"h.example.test","proxyAuthUrl":"$link"""").open)
     }

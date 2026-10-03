@@ -66,10 +66,10 @@ class ServiceLinkBehaviourTest {
 
     /** Records what it was asked; answers [answer] (or waits on [gate] first). */
     private class FakeOpen(var answer: ServiceOpenSource.Outcome, val gate: CompletableDeferred<Unit>? = null) : ServiceOpenSource {
-        val asked = mutableListOf<Pair<String, String>>()
+        val asked = mutableListOf<Pair<String, String?>>()
 
-        override suspend fun open(link: String, serviceHost: String): ServiceOpenSource.Outcome {
-            asked += link to serviceHost
+        override suspend fun open(link: String, serviceUrl: String?): ServiceOpenSource.Outcome {
+            asked += link to serviceUrl
             gate?.await()
             return answer
         }
@@ -117,7 +117,7 @@ class ServiceLinkBehaviourTest {
         val source = FakeOpen(ServiceOpenSource.Outcome.Open(handoff))
         show(model(), source)
         tap(InspectorTags.ServiceOpen)
-        assertEquals(listOf(url to "web--feat.svc.example.test"), source.asked)
+        assertEquals("asked with the snapshot's proxyUrl (ta-t5rl)", listOf(url to "https://web--feat.svc.example.test"), source.asked)
         assertEquals("opened on the tap, no confirm sheet", listOf(handoff), opened)
         assertEquals(0, count(InspectorTags.ServiceOpenRefusal))
     }
@@ -153,7 +153,7 @@ class ServiceLinkBehaviourTest {
         rule.onNodeWithText("On this machine").assertExists()
         tap(InspectorTags.ServiceLocal)
         assertEquals(listOf("$ORIGIN$path"), opened)
-        assertEquals("the path form never asks the worktree-open route", emptyList<Pair<String, String>>(), source.asked)
+        assertEquals("the path form never asks the worktree-open route", emptyList<Pair<String, String?>>(), source.asked)
         // Both links, like the web, when both were sent.
         assertEquals(1, count(InspectorTags.ServiceOpen))
     }
