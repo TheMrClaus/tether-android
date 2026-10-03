@@ -100,8 +100,9 @@ Divergences from the web, on purpose:
   in the same instant (a second finger) makes the tap do nothing, and an option or Other field of a page that
   is no longer shown ignores input. The operator sees the change and taps again.
 - Tapjacking: a touch that arrives through another window drawn over the app (`FLAG_WINDOW_IS_OBSCURED` /
-  `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control, and a card's controls stay disabled for
-  500 ms after it becomes answerable or its request changes. The web has neither (a browser has no such signal).
+  `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`) is dropped on every card control (a browser has no such signal).
+  ta-coik.13 retired the 500 ms arm delay: a card acts on its first tap, as on the web (chat-view.tsx
+  90fbb9f :1291-1326, :1073-1120); a press across a change of request or question page is dropped.
 - Card state is bound to the exact request and kept per app window, not per row. Its identity is the
   request's card fingerprint (the canonical request, its turn and its session, without the server origin); the
   lazy row's key carries it, so a request re-raised under the same id with other content is a new card that
@@ -113,7 +114,7 @@ Divergences from the web, on purpose:
   never saved (above). If a record is lost (the store keeps the newest 64 per kind), the card comes back fully
   ticked AND unconfirmed. After process death a decision may be made again (the in-memory ledger died with the
   process); a decision sent on a socket that then dropped says "Sent before the connection dropped — delivery
-  unconfirmed" and is never sent again. A question page change re-arms the 500 ms delay, and a touch refused
+  unconfirmed" and is never sent again. A touch refused
   because of an overlay says so: "A screen overlay is blocking this card."
 - Question answers are built by the client, not by the card: the card sends which options (by label) and
   what "Other" text per question; the client checks every index against the request and builds the answer

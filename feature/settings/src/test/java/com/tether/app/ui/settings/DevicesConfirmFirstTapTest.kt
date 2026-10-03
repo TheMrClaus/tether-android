@@ -22,18 +22,15 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * [ArmedConfirmKey] (ta-q9l): still the new-session composer's setup confirmation key (feature/shell
- * WorktreeUi.kt, until ta-coik.11), armed for what it SHOWS: a value replaced while it is open
- * disarms it and the [CONFIRM_ARM_MS] window runs again; an equal value recomposed keeps it armed.
- *
- * ta-coik.5: Settings uses it no more. The web's three Devices confirmations (paired-devices.tsx
- * 90fbb9f :192-212, sign-in-security.tsx) act on the FIRST tap of their danger key, whatever was
- * shown a moment before: no app-only arm delay. Each dialog is composed on its own, the clock driven
- * by hand; a tap is the key's semantics action, counted synchronously.
+ * ta-coik.5: the web's three Devices confirmations (paired-devices.tsx 90fbb9f :192-212,
+ * sign-in-security.tsx) act on the FIRST tap of their danger key, whatever was shown a moment
+ * before: no app-only arm delay. ta-coik.13 deleted the old ArmedConfirmKey (its last caller went in
+ * ta-coik.11). Each dialog is composed on its own, the clock driven by hand; a tap is the key's
+ * semantics action, counted synchronously.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
-class ArmedConfirmKeyTest {
+class DevicesConfirmFirstTapTest {
     @get:Rule val compose = createComposeRule()
 
     private var confirmed = 0
@@ -63,45 +60,6 @@ class ArmedConfirmKeyTest {
             Snapshot.sendApplyNotifications()
         }
         frame()
-    }
-
-    // ---- ArmedConfirmKey itself (its one remaining caller is feature/shell's) ---------------------
-
-    @Test fun aKeyReArmsWhenWhatItShowsIsReplaced() {
-        var shown by mutableStateOf("/opt/codex")
-        host { ArmedConfirmKey("Create session", "armed-key", count, shown = shown) }
-        frame(CONFIRM_ARM_MS + 50)
-        tap("armed-key")
-        assertEquals("armed before the change", 1, confirmed)
-        replace { shown = "/tmp/evil" }
-        tap("armed-key")
-        assertEquals("a tap right after the value changed", 1, confirmed)
-        frame(CONFIRM_ARM_MS - 150)
-        tap("armed-key")
-        assertEquals("a tap inside the window again", 1, confirmed)
-        frame(200)
-        tap("armed-key")
-        assertEquals("re-armed", 2, confirmed)
-    }
-
-    @Test fun anEqualValueRecomposedKeepsTheKeyArmed() {
-        var shown by mutableStateOf(listOf("a"))
-        host { ArmedConfirmKey("Create session", "armed-key", count, shown = shown) }
-        frame(CONFIRM_ARM_MS + 50)
-        replace { shown = listOf("a") }
-        tap("armed-key")
-        assertEquals(1, confirmed)
-    }
-
-    @Test fun aKeyWithoutAShownValueArmsOnceAsBefore() {
-        var label by mutableStateOf("Revoke")
-        host { ArmedConfirmKey(label, "armed-key", count) }
-        tap("armed-key")
-        assertEquals("not armed at once", 0, confirmed)
-        frame(CONFIRM_ARM_MS + 50)
-        replace { label = "Remove" }
-        tap("armed-key")
-        assertEquals("keyed on nothing: stays armed", 1, confirmed)
     }
 
     // ---- Settings → Devices: the web's confirmations, no arm delay (ta-coik.5) ---------------------

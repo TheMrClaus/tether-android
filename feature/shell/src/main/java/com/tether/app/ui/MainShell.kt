@@ -29,8 +29,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -551,10 +549,6 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     }
                 },
             )
-        // T6.7 r2: when the toast goes away, every armed key re-arms (a tap aimed at the toast as it
-        // vanished never lands on the key that was under it).
-        var toastBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-        val armEpoch = rememberToastArmEpoch(toast != null, toastBounds)
         // T15.4: Back steps to the view behind this one (the web's browser Back between views; from
         // an Overview opened over a session, that session). The shell's own surfaces (menu, drawer,
         // popover, sheet) register later and so close first. Nothing behind: Back leaves the app.
@@ -572,7 +566,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
         // dashboard.tsx:1446: the rail belongs to Sessions (and Scheduled); the Overview is full width.
         val showRail = (view == DashboardView.Sessions || view == DashboardView.Scheduled) && !usageOpen
-        CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness, com.tether.app.ui.chat.LocalArmEpoch provides armEpoch) {
+        CompositionLocalProvider(com.tether.app.ui.shell.LocalShellFreshness provides shellFreshness) {
         if (layout == TetherLayoutClass.Expanded) {
             ExpandedShell(
                 state = shell,
@@ -625,8 +619,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(12.dp)
-                    .zIndex(20f)
-                    .onGloballyPositioned { toastBounds = it.boundsInWindow() },
+                    .zIndex(20f),
             )
         }
 
@@ -718,32 +711,6 @@ private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: St
     val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
     com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss)
 }
-
-/**
- * T6.7 r2/r3: the arm epoch every armed key re-arms on. It moves when the toast uncovers something:
- * it goes away, or its bounds ([bounds], in the window) no longer cover what they covered (it shrank
- * or moved). A toast that grows or keeps its bounds (new words, same size) moves nothing, so a
- * server's stream of text changes cannot keep the keys disarmed.
- */
-@Composable
-internal fun rememberToastArmEpoch(shown: Boolean, bounds: androidx.compose.ui.geometry.Rect?): Int {
-    var epoch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    val covered = remember { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
-    LaunchedEffect(shown, bounds) {
-        val before = covered[0]
-        if (!shown) {
-            if (before != null) epoch++
-            covered[0] = null
-        } else if (bounds != null) {
-            if (before != null && !bounds.covers(before)) epoch++
-            covered[0] = bounds
-        }
-    }
-    return epoch
-}
-
-private fun androidx.compose.ui.geometry.Rect.covers(other: androidx.compose.ui.geometry.Rect): Boolean =
-    left <= other.left && top <= other.top && right >= other.right && bottom >= other.bottom
 
 /** T6.7: the caption over an error toast whose words a server wrote. */
 const val SERVER_ERROR_CAPTION = "From the server"

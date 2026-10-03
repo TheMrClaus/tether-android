@@ -64,7 +64,7 @@ abstract class DevicesPasskeyBehaviourBase(private val layout: TetherLayoutClass
 
     private fun opened(view: PasskeysView = DevicesFixtures.PASSKEYS, authenticator: WaitingPasskeys = passkeys, origin: String = ORIGIN) {
         compose.setContent {
-            CompositionLocalProvider(LocalSaveableStateRegistry provides registry, LocalConfirmArmMs provides 0L) {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
                 val controller = rememberDevicesController(source, origin, authenticator = authenticator)
                 SettingsUnderTest(store.prefs, state, layout = layout, devices = DevicesBinding(controller, now = { DevicesFixtures.NOW }))
             }

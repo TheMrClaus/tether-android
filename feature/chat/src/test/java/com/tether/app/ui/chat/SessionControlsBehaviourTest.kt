@@ -44,7 +44,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Frames for a window to open; well under [CONSENT_ARM_DELAY_MS]. */
+/** Frames for a window to open. */
 internal const val NAV_SETTLE_MS = 200L
 
 /** The composer host shared by the phone and tablet behaviour tests. */
@@ -89,10 +89,10 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
         rule.waitForIdle()
     }
 
-    /** Past the T6.3 arming delay. */
-    fun arm() = settle(CONSENT_ARM_DELAY_MS + 100)
+    /** Let the composition settle ([SETTLE_MS]); no control has an arm delay (ta-coik.9, ta-coik.13). */
+    fun arm() = settle(SETTLE_MS)
 
-    /** A tap, then a few frames: a sheet or menu window needs them to open (far under the arming delay). */
+    /** A tap, then a few frames: a sheet or menu window needs them to open. */
     fun click(tag: String) {
         rule.onNodeWithTag(tag).performClick()
         settle()

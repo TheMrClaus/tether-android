@@ -50,12 +50,11 @@ Divergences from the web, on purpose:
   leaves the keys as they were. Round 3: "accepted" only means queued, so the latch clears when the link drops,
   the session's liveness flips or the server changes, and lapses after 10s while the command still runs (the
   key then arms again); it is not saved, so switching sessions away and back starts clean.
-- Round 2 (M1): the running rows are keyed by command, and a Stop key arms 500ms after it becomes usable (T6.3's
-  I3 delay) and again after it moves more than 4dp in its window (a command finishing, the queue draining, the
-  todo bar appearing), so a tap aimed at one row cannot stop the command that slid under the finger. Touches
-  through an overlay are refused. The stop is bound to the server origin its row was drawn for. Round 3: the
-  movement is measured from where the key stood when its arming began (a slow slide re-arms it too), and each
-  Stop key's accessible name carries its command ("Stop <command>").
+- Round 2 (M1): the running rows are keyed by command, so a press that began on one row's Stop never stops
+  the command that slid under the finger. ta-coik.13 retired the 500 ms arm and the re-arm after a move: a
+  Stop key acts on its first tap, as on the web (chat-view.tsx 90fbb9f :3866-3875). Touches through an
+  overlay are refused. The stop is bound to the server origin its row was drawn for, and each Stop key's
+  accessible name carries its command ("Stop <command>").
 - The output sheet is anchored near the top of the window (the web centres it), so its head and Stop key stay
   put while short output grows the sheet downward.
 - Command labels show their first non-blank line ("…" when there are more) inside a bidi isolate, with embedding,

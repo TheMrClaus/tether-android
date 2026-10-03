@@ -35,7 +35,8 @@ import org.robolectric.annotation.Config
 
 /**
  * T6.6 behaviour: a notice's X sends exactly its dismiss key once per link, and only on a tap; the
- * limit card's keys send exactly their action for THIS prompt's `resetsAt`, armed, once; the
+ * limit card's keys send exactly their action for THIS prompt's `resetsAt`, on the first tap (no arm
+ * delay, ta-coik.13; a press across a change of prompt or session is dropped), once; the
  * scheduled row's X sends `dismiss`; nothing is sent by composition or by state that moves; a lock
  * says why and sends nothing. The composer of a handed-off or read-only session takes no input.
  */
@@ -78,18 +79,14 @@ class NoticeBehaviourTest {
         rule.waitForIdle()
     }
 
-    private fun arm() = settle(CONSENT_ARM_DELAY_MS + 100)
+    private fun arm() = settle(SETTLE_MS)
 
     @Test
     fun aTapOnTheXSendsExactlyItsKeyOnce() {
         show(NoticeFixtures.sessionNotices)
         rule.onAllNodesWithTag("notice-dismiss").assertCountEquals(3)
-        // Just appeared: a tap aimed at what was there a moment ago lands on nothing.
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.dismissed.isEmpty())
-        arm()
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
+        // ta-coik.13: notice-dismiss-button.tsx 90fbb9f :12-20, the X acts on the first click (no arm delay).
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled().performClick()
         settle()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
         settle()
@@ -161,14 +158,10 @@ class NoticeBehaviourTest {
     }
 
     @Test
-    fun theLimitCardIsArmedAndSendsExactlyItsChoiceOnce() {
+    fun theLimitCardActsOnTheFirstTapAndSendsExactlyItsChoiceOnce() {
         show(NoticeFixtures.limit)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
-        // Just appeared: not yet armed.
-        rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
-        arm()
+        // ta-coik.13: chat-view.tsx 90fbb9f :1384-1394, the web's keys act on the first click.
         rule.onNodeWithTag("rate-limit-schedule").assertIsEnabled().performClick()
         settle()
         rule.onNodeWithTag("rate-limit-resume-now").performClick()
@@ -179,7 +172,7 @@ class NoticeBehaviourTest {
     }
 
     @Test
-    fun aRefusedLimitChoiceReArmsTheKeysAndSaysWhy() {
+    fun aRefusedLimitChoiceReleasesTheKeysAndSaysWhy() {
         rec.controlResult = ControlResult.NotOffered
         show(NoticeFixtures.limit)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
@@ -211,11 +204,6 @@ class NoticeBehaviourTest {
         actions = rec.actions(controlLock = ConsentLock.HandedOff)
         show(NoticeFixtures.limit)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
-        // Armed like any choice: its first moment sends nothing.
-        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
-        arm()
         rule.onNodeWithTag("rate-limit-status")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString(HANDED_OFF_LIMIT_COPY))))
         // Starting work in the source stays locked.
@@ -236,10 +224,6 @@ class NoticeBehaviourTest {
         actions = rec.actions(controlLock = ConsentLock.HandedOff)
         show(NoticeFixtures.scheduled)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
-        arm()
         rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
         settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
@@ -287,14 +271,11 @@ class NoticeBehaviourTest {
         settle()
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
         rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
-        // Not latched, and not armed: B's card just appeared.
-        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
-        settle()
+        // Not latched: B's card is answerable at once (ta-coik.13: no arm delay).
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "schedule")), rec.controls)
-        arm()
         rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled()
 
-        // The notices' X likewise: A's armed, latched X is not B's.
+        // The notices' X likewise: A's latched X is not B's.
         fixture = NoticeFixtures.sessionNotices
         actions = rec.actions()
         arm()
@@ -305,10 +286,8 @@ class NoticeBehaviourTest {
         actions = rec.actions(sessionId = "s2")
         settle()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice")
-            .assertIsNotEnabled()
+            .assertIsEnabled()
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
-        arm()
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
     }
 
     @Test
@@ -316,12 +295,8 @@ class NoticeBehaviourTest {
         show(NoticeFixtures.scheduled)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
         rule.onNodeWithText("Automatic resume scheduled for 2:03 AM UTC.").assertExists()
-        // Armed: its first moment sends nothing.
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
-        arm()
-        rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
+        // ta-coik.13: the first tap cancels (no arm delay); a second sends nothing more.
+        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
         settle()
         rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
         settle()
@@ -331,14 +306,14 @@ class NoticeBehaviourTest {
     @Test
     fun theRowsOwnStateIsScopedToTheSessionEvenInOneSlot() {
         // Drawn outside the list (one composition slot, as a reused lazy slot would be): switching
-        // the session behind the same resetsAt / dismiss key starts every control unarmed and unsent.
+        // the session behind the same resetsAt / dismiss key starts every control unsent.
         rule.mainClock.autoAdvance = false
         val limit = rateLimitPrompt(NoticeFixtures.limit.tree)!!
         val scheduled = rateLimitPrompt(NoticeFixtures.scheduled.tree)!!
         rule.setContent {
             ChatHost(TetherSkin.StudioDark) {
                 androidx.compose.runtime.CompositionLocalProvider(LocalNoticeActions provides actions) {
-                    // The card last: its "Choice sent" line would move (and so re-arm) anything below it.
+                    // The card last: its "Choice sent" line would move anything below it.
                     androidx.compose.foundation.layout.Column {
                         NoticeDismissButton("ext-1", "Dismiss external-advancement notice")
                         ScheduledResumeRow(scheduled, zone = ChatFixtures.zone)
@@ -358,15 +333,45 @@ class NoticeBehaviourTest {
         actions = rec.actions(sessionId = "s2")
         settle()
         rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
-        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled()
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled()
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsNotEnabled()
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
-        arm()
         rule.onNodeWithTag("rate-limit-resume-now").assertIsEnabled()
         rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+    }
+
+    @Test
+    fun aPressAcrossASessionSwitchInOneSlotIsDropped() {
+        // ta-coik.13's stale-tap guard: each control is keyed by (session, prompt or key, link); a
+        // press that began on session A's control and lifts on session B's sends nothing for B.
+        rule.mainClock.autoAdvance = false
+        val limit = rateLimitPrompt(NoticeFixtures.limit.tree)!!
+        val scheduled = rateLimitPrompt(NoticeFixtures.scheduled.tree)!!
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalNoticeActions provides actions) {
+                    androidx.compose.foundation.layout.Column {
+                        NoticeDismissButton("ext-1", "Dismiss external-advancement notice")
+                        ScheduledResumeRow(scheduled, zone = ChatFixtures.zone)
+                        RateLimitCard(limit, zone = ChatFixtures.zone)
+                    }
+                }
+            }
+        }
+        settle()
+        var session = 1
+        fun next() { session++; actions = rec.actions(sessionId = "s$session") }
+        rule.pressAcross({ rule.onNodeWithContentDescription("Dismiss external-advancement notice") }, settle = { settle() }) { next() }
+        rule.pressAcross({ rule.onNodeWithContentDescription("Cancel scheduled resume") }, settle = { settle() }) { next() }
+        rule.pressAcross({ rule.onNodeWithTag("rate-limit-resume-now") }, settle = { settle() }) { next() }
+        rule.pressAcross({ rule.onNodeWithTag("rate-limit-dismiss") }, settle = { settle() }) { next() }
+        assertTrue("a press across a session switch sent: ${rec.dismissed} ${rec.controls}", rec.dismissed.isEmpty() && rec.controls.isEmpty())
+        // A fresh tap on each acts at once.
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
+        rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
+        settle()
+        assertEquals(listOf("ext-1"), rec.dismissed)
+        assertEquals(1, rec.controls.size)
     }
 
     @Test

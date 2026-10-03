@@ -319,7 +319,7 @@ internal fun QueuedMessageRow(
     onRemove: () -> Unit,
     onInterruptNow: (turnId: String) -> Unit,
     interruptLock: String?,
-    /** T6.7: what "Interrupt now" is armed for (session, queued message, turn): a change re-arms it. */
+    /** T6.7: what "Interrupt now" is drawn for (session, queued message, turn): a press across a change is dropped. */
     interruptIdentity: Any = Unit,
     /** T6.7: the turn "Interrupt now" is drawn for; null = none runs, so it cannot send. */
     interruptTurnId: String? = null,
@@ -566,28 +566,29 @@ private fun QueueInterruptNow(
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
     val ink = if (confirm) t.ink else t.muted
-    // T6.7: bound to the turn it is drawn for and armed like the composer's Interrupt key (500 ms,
-    // re-armed by a new turn or a move, no overlay touches); drawn as before while it arms. The
-    // confirmation is a new control, so it arms afresh: a double tap never passes straight through.
-    val arming = rememberArmedControl(identity, lock == null && turnId != null)
-    val armed = arming.armed && lock == null && turnId != null
-    Row(
-        Modifier
-            .heightIn(min = 44.dp)
-            .then(arming.modifier)
-            // T13.2 r2: a copy that is not live cannot interrupt: shown, dimmed, and inert.
-            .alpha(if (lock == null) 1f else 0.55f)
-            .cssSurface(shape, Color.Transparent, CssBorder(1.dp, if (confirm) t.ink else t.lineStrong))
-            .clickable(enabled = armed, onClick = { if (armed && turnId != null) onClick(turnId) })
-            .semantics(mergeDescendants = true) {
-                contentDescription = if (lock == null) description else "$description, unavailable: $lock"
-            }
-            .testTag(tag)
-            .padding(horizontal = t.css.spaceSm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.8.dp),
-    ) {
-        Icon(TetherIcons.CircleStop, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
-        Text(label, color = ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+    // T6.7: bound to the turn it is drawn for. ta-coik.13: it acts on the first tap, as on the web
+    // (chat-view.tsx 90fbb9f :1495-1506; its confirmation :1518-1529 the same); a press that began
+    // before the turn or the row changed is dropped ([StaleTapGuard]), and never through an overlay.
+    val live = lock == null && turnId != null
+    StaleTapGuard(identity) { guard ->
+        Row(
+            Modifier
+                .heightIn(min = 44.dp)
+                .then(guard)
+                // T13.2 r2: a copy that is not live cannot interrupt: shown, dimmed, and inert.
+                .alpha(if (lock == null) 1f else 0.55f)
+                .cssSurface(shape, Color.Transparent, CssBorder(1.dp, if (confirm) t.ink else t.lineStrong))
+                .clickable(enabled = live, onClick = { if (live && turnId != null) onClick(turnId) })
+                .semantics(mergeDescendants = true) {
+                    contentDescription = if (lock == null) description else "$description, unavailable: $lock"
+                }
+                .testTag(tag)
+                .padding(horizontal = t.css.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.8.dp),
+        ) {
+            Icon(TetherIcons.CircleStop, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
+            Text(label, color = ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+        }
     }
 }

@@ -25,8 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,7 +86,6 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
-import kotlinx.coroutines.delay
 
 /** Tags of the server-settings rows (one per wire key). */
 object ServerSettingsTags {
@@ -830,44 +827,6 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
             )
         }
     }
-}
-
-/**
- * ta-dh1 r2 (security F2): how long [ArmedConfirmKey] ignores taps after it appears. ta-coik.5:
- * Settings no longer uses it (the web's confirmations have no arm delay); its last caller is the
- * new-session composer's setup confirmation (feature/shell WorktreeUi.kt), which ta-coik.11 removes:
- * delete this then. The wait runs on the composition's clock; [LocalConfirmArmMs] sets it.
- */
-const val CONFIRM_ARM_MS: Long = 450L
-
-val LocalConfirmArmMs = staticCompositionLocalOf { CONFIRM_ARM_MS }
-
-/**
- * The confirm key of a confirmation: drawn at rest at once, but a tap counts only once armed.
- *
- * ta-q9l: [shown] is what the confirmation shows (its edit, its "Now"): when it changes while the
- * dialog is open, the key disarms and the window runs again, so a value replaced under the user's
- * finger cannot be confirmed unread. Pass a stable value (equal across recompositions while the
- * same thing is shown); null keys on nothing (the key arms once per composition).
- */
-@Composable
-internal fun ArmedConfirmKey(
-    label: String,
-    tag: String,
-    onConfirm: () -> Unit,
-    // T10.4: the web's `button-primary button-danger` for a destructive confirmation.
-    classes: Set<com.tether.app.ui.components.KeyClass> = KeyClasses.ButtonPrimary,
-    shown: Any? = null,
-) {
-    val ms = LocalConfirmArmMs.current
-    var armed by remember(shown) { mutableStateOf(ms <= 0L) }
-    LaunchedEffect(ms, shown) {
-        if (ms > 0L) {
-            delay(ms)
-            armed = true
-        }
-    }
-    TetherKey(onClick = { if (armed) onConfirm() }, classes = classes, label = label, modifier = Modifier.testTag(tag))
 }
 
 /** Before the first `server-settings` reply (the web draws nothing then; the app says it is waiting). */

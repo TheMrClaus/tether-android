@@ -159,9 +159,7 @@ class ComposerBehaviourTest {
         rule.onNodeWithText(PLACEHOLDER_BUSY).assertExists()
         // Phone: an empty Queue key is hidden (globals.css:11944), Interrupt stays.
         rule.onAllNodesWithContentDescription("Queue message").assertCountEquals(0)
-        // T6.7: armed like every operator control, then bound to the turn it is drawn for.
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
-        rule.waitForIdle()
+        // T6.7: bound to the turn it is drawn for; ta-coik.13: the first tap interrupts.
         rule.onNodeWithContentDescription("Interrupt the current turn").performClick()
         assertEquals(listOf("t1"), interrupts)
         input().performTextInput("after this turn")
@@ -260,8 +258,7 @@ class ComposerBehaviourTest {
         rule.onAllNodesWithText("Queued — sends at the next tool call or when the turn ends", substring = true).assertCountEquals(1)
         val interruptNow = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
         rule.onAllNodesWithContentDescription(interruptNow).assertCountEquals(1)
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
-        rule.waitForIdle()
+        // ta-coik.13: the first tap interrupts (chat-view.tsx 90fbb9f :1495-1506).
         rule.onNodeWithContentDescription(interruptNow).performClick()
         assertEquals(listOf("t1"), interrupts)
         rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()

@@ -79,8 +79,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
@@ -380,22 +378,18 @@ private fun RunningCommandRow(command: BackgroundCommandView, actions: CommandAc
     }
 }
 
-/** M1: how far (dp) a Stop key may move in its window before it re-arms. */
-internal const val STOP_REARM_MOVE_DP = 4f
-
 /**
  * The Stop key: `.chat-bg-command-stop` (compact) / `.command-modal-stop`. Enabled only while the
- * command runs, the link is live and the session may be driven, and — M1, T6.3's I3 rule — only
- * [CONSENT_ARM_DELAY_MS] after it became so, and again after the key MOVED in its window (a row
- * finishing, a queue draining, the todo bar appearing), so a tap aimed at another row cannot land
- * on this one. Touches through an overlay are refused. A tap asks the client, which re-checks it
- * all against the live projection. "Stopping…" is shared per command ([StopLatches]).
+ * command runs, the link is live and the session may be driven. ta-coik.13: the first tap stops it,
+ * as on the web (chat-view.tsx 90fbb9f :3866-3875 and :1719, no arm delay); a press that began on
+ * another command's key is dropped ([StaleTapGuard], keyed by the command). Touches through an
+ * overlay are refused. A tap asks the client, which re-checks it all against the live projection.
+ * "Stopping…" is shared per command ([StopLatches]).
  */
 @Composable
 private fun StopKey(command: BackgroundCommandView, actions: CommandActions, compact: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val density = androidx.compose.ui.platform.LocalDensity.current
     val latchToken = actions.latches.tokenOf(command.commandId)
     val sent = latchToken != null
     val lock = actions.stopLock
@@ -407,62 +401,48 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
             actions.latches.expire(command.commandId, latchToken)
         }
     }
-    // M1 / Info 7: the key re-arms once it has moved more than STOP_REARM_MOVE_DP from where it
-    // stood when its current arming began (cumulative, so a slow slide cannot creep past it).
-    var moves by remember(command.commandId) { androidx.compose.runtime.mutableIntStateOf(0) }
-    val anchor = remember(command.commandId) { arrayOfNulls<Offset>(1) }
-    val armed = rememberArmed(command.commandId to moves, actionable)
     val name = commandLabel(command.command)
     val shape = RoundedCornerShape(t.radiusSm)
     val label = if (sent) "Stopping…" else "Stop"
     fun stop() {
-        // The ONE place a stop-command originates: a tap on an armed key.
-        if (armed && actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) actions.latches.mark(command.commandId)
+        // The ONE place a stop-command originates: a tap on a live key.
+        if (actionable && actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) actions.latches.mark(command.commandId)
     }
-    Box(
-        Modifier
-            .heightIn(min = 44.dp)
-            .widthIn(min = 44.dp)
-            .onGloballyPositioned { coordinates ->
-                val now = coordinates.positionInWindow()
-                val since = anchor[0]
-                val limit = with(density) { STOP_REARM_MOVE_DP.dp.toPx() }
-                if (since == null) {
-                    anchor[0] = now
-                } else if (kotlin.math.abs(now.x - since.x) > limit || kotlin.math.abs(now.y - since.y) > limit) {
-                    anchor[0] = now
-                    moves++
-                }
-            }
-            .refuseObscuredTouches()
-            .then(if (armed) Modifier.clickable(role = Role.Button) { stop() } else Modifier)
-            // Its own node whether or not it is armed (a disabled key must not merge into its row).
-            .semantics(mergeDescendants = true) { }
-            .clearAndSetSemantics {
-                role = Role.Button
-                contentDescription = when {
-                    sent -> "Stopping $name"
-                    lock != null -> "Stop $name, unavailable: $lock"
-                    else -> "Stop $name"
-                }
-                if (!armed) disabled()
-                if (armed) onClick("Stop") { stop(); true }
-                testTag = "bg-command-stop"
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
+    StaleTapGuard(command.commandId) { guard ->
+        Box(
             Modifier
-                .alpha(if (actionable) 1f else 0.55f)
-                .clip(shape)
-                .background(t.dangerWash)
-                .border(1.dp, t.dangerEdge, shape)
-                .padding(horizontal = if (compact) 6.4.dp else 8.dp, vertical = if (compact) 2.4.dp else 4.8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.2.dp),
+                .heightIn(min = 44.dp)
+                .widthIn(min = 44.dp)
+                .then(guard)
+                .then(if (actionable) Modifier.clickable(role = Role.Button) { stop() } else Modifier)
+                // Its own node whether or not it is live (a disabled key must not merge into its row).
+                .semantics(mergeDescendants = true) { }
+                .clearAndSetSemantics {
+                    role = Role.Button
+                    contentDescription = when {
+                        sent -> "Stopping $name"
+                        lock != null -> "Stop $name, unavailable: $lock"
+                        else -> "Stop $name"
+                    }
+                    if (!actionable) disabled()
+                    if (actionable) onClick("Stop") { stop(); true }
+                    testTag = "bg-command-stop"
+                },
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(TetherIcons.CircleStop, contentDescription = null, tint = t.danger, modifier = Modifier.size(if (compact) 12.dp else 13.dp))
-            Text(label, style = TextStyle(fontFamily = type.ui, fontSize = if (compact) rem(0.68f) else rem(0.7f), fontWeight = FontWeight(600)), color = t.danger)
+            Row(
+                Modifier
+                    .alpha(if (actionable) 1f else 0.55f)
+                    .clip(shape)
+                    .background(t.dangerWash)
+                    .border(1.dp, t.dangerEdge, shape)
+                    .padding(horizontal = if (compact) 6.4.dp else 8.dp, vertical = if (compact) 2.4.dp else 4.8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.2.dp),
+            ) {
+                Icon(TetherIcons.CircleStop, contentDescription = null, tint = t.danger, modifier = Modifier.size(if (compact) 12.dp else 13.dp))
+                Text(label, style = TextStyle(fontFamily = type.ui, fontSize = if (compact) rem(0.68f) else rem(0.7f), fontWeight = FontWeight(600)), color = t.danger)
+            }
         }
     }
 }
@@ -521,7 +501,7 @@ internal fun CommandOutputDialog(command: BackgroundCommandView?, actions: Comma
                 .pointerInput(onClose) { detectTapGestures { onClose() } }
                 .padding(t.css.spaceMd),
             // P3 (r3): top-anchored, not centred like the web's, so the sheet's head (and its Stop
-            // key) stays put while short output grows the sheet downward, and the key stays armed.
+            // key) stays put while short output grows the sheet downward.
             contentAlignment = Alignment.TopCenter,
         ) {
             CommandOutputSurface(command, actions, onClose, Modifier.padding(top = SHEET_TOP_INSET))

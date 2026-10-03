@@ -30,14 +30,14 @@ Montages (`web | android | diff`), 6 skins at phone size, built by
 1. **`!` command mode is free-form, as on the web.** The command is the operator's own shell line
    (chat-view.tsx:3083-3102), not a value from an inventory. It is offered only where the server's
    `ready` sets `capabilities.commandRunner` for the session's provider. It is checked for shape only:
-   non-empty, and at most 16 KiB of UTF-8 (protocol-validate.mjs). It is sent only on a tap of an armed
-   key or an explicit submit (Enter, or the soft keyboard's Send). The client re-checks everything under
+   non-empty, and at most 16 KiB of UTF-8 (protocol-validate.mjs). It is sent only on a tap of its
+   key (the first tap, as on the web; ta-coik.13) or an explicit submit (Enter, or the soft keyboard's Send). The client re-checks everything under
    its lock: a live handshaken socket, the composer's server origin, the session live and neither
    read-only, handed off nor archived, and no turn running for a foreground run. Each run gets a fresh
    idempotency key. Nothing is retried or queued (`CommandGuard`, `RealTetherClient.runCommand`).
 2. **Background / Stop** are bound to the turn they were drawn for. Background (`background-command`)
    is sent only while that turn is still the open foreground command turn. Stop is T6.7's turn-bound
-   `interrupt`, as the web's relabelled key is. Both keys are armed and locked on a copy that is not
+   `interrupt`, as the web's relabelled key is. Both keys act on the first tap (ta-coik.13) and are locked on a copy that is not
    live. **Ctrl+B** does the same as Background from a hardware keyboard, and only while a foreground
    command runs. **Android addition:** the web leaves both keys live on a stale copy.
 3. **Slash commands follow the web's passthrough.** The palette is offered on every engine. For Codex

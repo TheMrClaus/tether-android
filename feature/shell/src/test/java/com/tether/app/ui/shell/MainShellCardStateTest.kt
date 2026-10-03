@@ -85,7 +85,7 @@ class MainShellCardStateTest {
     )
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(600) // past the cards' 500 ms arm delay
+        rule.mainClock.advanceTimeBy(600) // settle (ta-coik.13: the cards have no arm delay)
         rule.waitForIdle()
     }
 

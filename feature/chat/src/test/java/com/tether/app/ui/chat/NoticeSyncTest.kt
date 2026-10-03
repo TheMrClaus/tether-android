@@ -67,11 +67,11 @@ private fun ComposeContentTestRule.hostChat(client: ChatTestClient, shown: Agent
 }
 
 private fun ComposeContentTestRule.armChat() {
-    mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+    mainClock.advanceTimeBy(SETTLE_MS)
     waitForIdle()
 }
 
-/** A sheet or dialog that just opened: let it stand still, then wait out the arming delay. */
+/** A sheet or dialog that just opened: let it stand still and settle ([SETTLE_MS]). */
 private fun ComposeContentTestRule.openAndArmChat() {
     mainClock.advanceTimeBy(NAV_SETTLE_MS)
     waitForIdle()
@@ -238,7 +238,7 @@ class NoticeSyncTest {
         rule.onNodeWithTag("session-settings-trigger").performClick()
         rule.waitForIdle()
         rule.onNodeWithText("Auto-continue", useUnmergedTree = true).performClick()
-        // The sheet slides in (its rows move, so they re-arm once it stands still).
+        // The sheet slides in; let it stand still.
         openAndArm()
         rule.onNodeWithTag("control-option-true").assertIsEnabled()
         for ((name, sync) in notLiveCopies(controlled.id)) {

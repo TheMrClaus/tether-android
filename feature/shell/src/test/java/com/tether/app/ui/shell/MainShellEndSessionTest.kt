@@ -65,7 +65,7 @@ class MainShellEndSessionTest {
 
     private fun confirmKey() = rule.onNodeWithTag(com.tether.app.ui.chat.END_SESSION_CONFIRM_TAG)
 
-    /** T6.7: the confirmation's key is armed like every operator control (500 ms). */
+    /** Let the composition settle; ta-coik.13: the confirmation's key has no arm delay. */
     private fun arm() {
         rule.mainClock.advanceTimeBy(700)
         rule.waitForIdle()
@@ -80,9 +80,9 @@ class MainShellEndSessionTest {
         rule.waitForIdle()
     }
 
-    /** T6.7: the web's words; the key does nothing in its first 500 ms, then ends the session once. */
+    /** T6.7: the web's words; ta-coik.13: the key ends the session on its first tap (dashboard.tsx 90fbb9f :1909). */
     @Test
-    fun theConfirmationIsTheWebsAndItsKeyIsArmed() {
+    fun theConfirmationIsTheWebsAndItsKeyActsOnTheFirstTap() {
         val client = ShellConsentClient().also { it.show(session, tree) }
         host(client)
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
@@ -90,10 +90,6 @@ class MainShellEndSessionTest {
         rule.onNodeWithText("End session?").assertExists()
         rule.onNodeWithText("\u2068ends\u2069 — its running process will stop.").assertExists()
         rule.mainClock.autoAdvance = false
-        confirmKey().assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue("an unarmed key ended the session: ${client.killCalls}", client.killCalls.isEmpty())
-        arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)

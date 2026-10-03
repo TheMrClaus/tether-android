@@ -41,7 +41,7 @@ web code:
 
 | Surface | Web | Android |
 |---|---|---|
-| `interrupt` | `{type:"interrupt", sessionId}` on a click, from the key and from "Interrupt now" | The same frame, and no new field. Sent only from a tap on an armed key, over a live handshaken socket, while the session is live and not read-only or handed off. It is bound to the origin and, new in T6.7, to the turn the key was drawn for. |
+| `interrupt` | `{type:"interrupt", sessionId}` on a click, from the key and from "Interrupt now" | The same frame, and no new field. Sent only from a tap on the key (its first tap, as on the web; ta-coik.13), over a live handshaken socket, while the session is live and not read-only or handed off. It is bound to the origin and, new in T6.7, to the turn the key was drawn for. |
 | `interrupt_result` | `failed`: `setError(error \|\| "The interrupt request could not be delivered.")`. The other statuses say nothing. | The same. The server's words are cleaned and attributed to the server. A `requested` result for a turn other than the one the tap was bound to is reported in the app's words. |
 | `{type:"error"}` | `setError(message)`, shown in the `.error-toast` | Shown from the live socket only. The text is cleaned (`LabelText.error`), shown under "From the server", and read by TalkBack as "Server error: …". |
 | `error` event | Folded into `turn.error` (the outcome row) and `lastError` (the session row) | The same. Both rows are cleaned. |
@@ -53,10 +53,10 @@ web code:
 
 ## Deliberate divergences
 
-- **Interrupt keys are armed.** The composer's Interrupt and a queued row's "Interrupt now" are not
-  usable for 500 ms after they appear for a turn. A new turn re-arms them, and so does a move of
-  more than 4dp. Touches through an overlay are refused. While a key arms it is drawn as before,
-  and a tap on it does nothing. The web's buttons act at once.
+- *(Retired by ta-coik.13.)* The composer's Interrupt and a queued row's "Interrupt now" act on the
+  first tap, as on the web (chat-view.tsx 90fbb9f :1495-1506, :4559-4573): no arm delay and no
+  re-arm after a move. Kept: a press that began on a key drawn for another turn is dropped (the key
+  is keyed by its turn), and touches through an overlay are refused.
 - **Interrupt is bound to its turn.** The client refuses unless the key's turn is still the open
   active turn of the live projection. A tap that lands after turn A ended and turn B began sends
   nothing, and the composer says so. One race remains that the client cannot close: the server may
@@ -66,12 +66,13 @@ web code:
 - **A server's error words are attributed.** They sit under a "From the server" caption, because
   the web's bare toast would let a server write text that reads like the app's own ("The secure link
   is reconnecting… sign in again").
-- **The End session confirmation is armed and closes itself.** It closes when the link drops or
+- **The End session confirmation closes itself.** Its key acts on the first tap, as on the web
+  (dashboard.tsx 90fbb9f :1909; ta-coik.13 retired the 500 ms arm). It closes when the link drops or
   the copy stops being live, on a server switch, and when the app stops. The web's `<dialog>`
   stays open.
 - **Only reading rows are selectable (r2: an allowlist).** Selectable: blocks, denials, answered
   questions, outcome and session-error rows, a Codex turn's plan, diff and review, and the
-  continuation and retry markers. Not selectable: every row with an armed key (the consent and
+  continuation and retry markers. Not selectable: every row with an action key (the consent and
   limit cards, and the notices with their X), and the single-control rows. The web lets the cards'
   and notices' text be selected. The X itself is never part of a selection. As on the web, the
   +/- column of a Codex diff (`.diffMarker`) and of an edit diff (`.diff-gutter`) is left out of a
@@ -83,8 +84,8 @@ web code:
   when the server reports that this turn's interrupt failed, so the operator can retry. The
   server-side fix is ta-yw0.
 - **The toast is a surface (r2/r3).** A touch on it never reaches the composer's keys underneath.
-  It only observes touches, so its own X still takes a finger that moves a little. When it goes
-  away, shrinks or moves, every armed key re-arms. New words at the same size re-arm nothing. A server's toast is tagged with the server it came from,
+  It only observes touches, so its own X still takes a finger that moves a little. Once it has gone,
+  the key it uncovered acts on its next tap, as on the web (ta-coik.13 retired the re-arm). A server's toast is tagged with the server it came from,
   and is dropped when the configured or linked server changes.
 - **The session error row** is read as "Session error: …". The web's row has only the glyph, so no
   caption is drawn.

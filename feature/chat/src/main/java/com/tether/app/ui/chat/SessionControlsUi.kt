@@ -26,19 +26,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -150,39 +146,6 @@ private val FAST_MODE_REASON_COPY = mapOf(
 )
 
 internal const val FAST_MODE_COST_HINT = "Responds faster, but uses more of your usage allowance per turn."
-
-/** M1 (T6.4): how far (dp) an armed control may move in its window before it re-arms. */
-internal const val CONTROL_REARM_MOVE_DP = 4f
-
-/**
- * T6.3/T6.4 arming for a control that can change the permission posture: usable only
- * [CONSENT_ARM_DELAY_MS] after it appeared (or its [identity] changed), and again after it MOVED
- * more than [CONTROL_REARM_MOVE_DP] in its window, so a tap aimed at what was there a moment ago
- * cannot land on it. Touches through an overlay are refused. Not saved: a re-created control waits.
- */
-internal class ArmedControl(val armed: Boolean, val modifier: Modifier)
-
-@Composable
-internal fun rememberArmedControl(identity: Any, actionable: Boolean): ArmedControl {
-    val density = LocalDensity.current
-    var moves by remember(identity) { mutableIntStateOf(0) }
-    val anchor = remember(identity) { arrayOfNulls<Offset>(1) }
-    val armed = rememberArmed(identity to moves, actionable)
-    val modifier = Modifier
-        .onGloballyPositioned { coordinates ->
-            val now = coordinates.positionInWindow()
-            val since = anchor[0]
-            val limit = with(density) { CONTROL_REARM_MOVE_DP.dp.toPx() }
-            if (since == null) {
-                anchor[0] = now
-            } else if (kotlin.math.abs(now.x - since.x) > limit || kotlin.math.abs(now.y - since.y) > limit) {
-                anchor[0] = now
-                moves++
-            }
-        }
-        .refuseObscuredTouches()
-    return ArmedControl(armed, modifier)
-}
 
 /**
  * ta-coik.9: a session control acts on its FIRST tap, as on the web (chat-view.tsx:4352-4413, the

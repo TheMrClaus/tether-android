@@ -52,9 +52,10 @@ import org.robolectric.annotation.Config
 
 /**
  * T6.7 in the chat (ChatScreen over [ChatTestClient]): the composer's Interrupt key and a queued
- * row's "Interrupt now" are armed and bound to the turn they are drawn for; a tap that lands after
- * the turn changed sends nothing; a refusal is said in words; the End session confirmation is
- * armed, in the web's words, and closes when the copy stops being live or the app stops; the
+ * row's "Interrupt now" act on the first tap (ta-coik.13, as on the web) and are bound to the turn
+ * they are drawn for; a press across a turn change sends nothing; a refusal is said in words; the
+ * End session confirmation acts on its first tap, in the web's words, and closes when the copy
+ * stops being live or the app stops; the
  * session's `lastError` shows, cleaned; transcript text is selectable and copyable one row at a
  * time, the composer and the consent cards are not.
  */
@@ -84,11 +85,11 @@ class InterruptErrorBehaviourTest {
     }
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
-    /** Frames only: well inside the arming delay. */
+    /** Frames only. */
     private fun frames() {
         rule.mainClock.advanceTimeBy(48)
         rule.waitForIdle()
@@ -96,43 +97,35 @@ class InterruptErrorBehaviourTest {
 
     private fun interruptKey() = rule.onNodeWithTag(INTERRUPT_KEY_TAG)
 
-    // ---- Interrupt: armed, bound to its turn -------------------------------------------------------
+    // ---- Interrupt: first tap, bound to its turn ---------------------------------------------------
 
     @Test
-    fun theInterruptKeyIsArmedAndInterruptsTheTurnItIsDrawnFor() {
+    fun theInterruptKeyActsOnTheFirstTapForTheTurnItIsDrawnFor() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :4559-4573, the web's Interrupt acts on the first click.
         val client = liveClient(busy, InterruptErrorFixtures.turnA)
         rule.mainClock.autoAdvance = false
         host(client)
         frames()
-        interruptKey().assertIsNotEnabled().performClick()
-        frames()
-        assertTrue("a tap in the first 500 ms sends nothing: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        arm()
         interruptKey().assertIsEnabled().performClick()
-        rule.waitForIdle()
+        frames()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
 
     /**
-     * The late tap, at the UI: the key was drawn (and armed) for turn A; A ends and B begins under
-     * the finger. The key is B's now, and not armed yet: the tap sends nothing. Armed again, it
-     * interrupts B, by B's id.
+     * The late tap, at the UI: a press began on the key drawn for turn A; A ends and B begins under
+     * the finger. The lift sends nothing (ta-coik.13's stale-tap guard). A fresh tap then interrupts
+     * B at once, by B's id.
      */
     @Test
-    fun aLateTapAfterTurnAEndedAndTurnBStartedSendsNothing() {
+    fun aPressAcrossTurnAEndingAndTurnBStartingSendsNothing() {
         val client = liveClient(busy, InterruptErrorFixtures.turnA)
         rule.mainClock.autoAdvance = false
         host(client)
-        arm()
-        interruptKey().assertIsEnabled()
-        rule.runOnIdle { client.show(busy, InterruptErrorFixtures.turnB) }
         frames()
+        rule.pressAcross({ interruptKey() }, settle = { frames() }) { client.show(busy, InterruptErrorFixtures.turnB) }
+        assertTrue("a press on turn A's key never interrupts turn B: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         interruptKey().performClick()
         frames()
-        assertTrue("a key drawn for turn A never interrupts turn B: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        arm()
-        interruptKey().performClick()
-        rule.waitForIdle()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }
 
@@ -151,28 +144,23 @@ class InterruptErrorBehaviourTest {
     }
 
     @Test
-    fun interruptNowIsArmedAndBoundToItsTurnToo() {
+    fun interruptNowActsOnTheFirstTapAndIsBoundToItsTurnToo() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :1495-1506, the web's "Interrupt now" acts on the first click.
         val client = liveClient(busy, queuedOn("t1"))
         rule.mainClock.autoAdvance = false
         host(client)
         frames()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
         frames()
-        assertTrue(client.interruptCalls.isEmpty())
-        arm()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
-        rule.waitForIdle()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
-        // The turn changes under the row: it re-arms for the new turn before it can send again.
+        // A press that began while t1 ran never interrupts t2.
         client.interruptCalls.clear()
-        rule.runOnIdle { client.show(busy, queuedOn("t2")) }
+        rule.runOnIdle { client.show(busy, queuedOn("t1")) }
         frames()
+        rule.pressAcross({ rule.onNodeWithTag(QUEUE_INTERRUPT_TAG) }, settle = { frames() }) { client.show(busy, queuedOn("t2")) }
+        assertTrue("Interrupt now pressed for t1 never interrupts t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
         frames()
-        assertTrue("Interrupt now drawn for t1 never interrupts t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        arm()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
-        rule.waitForIdle()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }
 
@@ -412,7 +400,7 @@ class InterruptErrorBehaviourTest {
         arm()
         interruptKey().assertIsNotEnabled()
 
-        // The server reports this turn's interrupt failed: the controls unlock (armed again) for a retry.
+        // The server reports this turn's interrupt failed: the controls unlock for a retry.
         rule.runOnIdle { client.failed.value = mapOf(busy.id to "t1") }
         arm()
         interruptKey().assertIsEnabled().performClick()
@@ -423,29 +411,24 @@ class InterruptErrorBehaviourTest {
     }
 
     /**
-     * r2 (verifier): the same queued message across a turn change. Its "Interrupt now" re-arms for
-     * the new turn (the arming identity carries the turn, not only the queueId): a tap before it
-     * re-arms sends nothing; once armed it interrupts the new turn.
+     * r2 (verifier): the same queued message across a turn change. Its "Interrupt now" is bound to
+     * the turn (the stale-tap identity carries the turn, not only the queueId): a press that began
+     * on t1's row sends nothing for t2; a fresh tap interrupts t2 at once (ta-coik.13: no re-arm).
      */
     @Test
-    fun theSameQueuedRowReArmsWhenTheTurnChanges() {
+    fun theSameQueuedRowDropsAPressAcrossATurnChange() {
         val client = liveClient(busy, queuedOn("t1", queueId = "q-same"))
         rule.mainClock.autoAdvance = false
         host(client)
-        arm()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled()
-        rule.runOnIdle { client.show(busy, queuedOn("t2", queueId = "q-same")) }
         frames()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
-        frames()
-        assertTrue("the row armed for t1 sent for t2 before re-arming: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        arm()
+        rule.pressAcross({ rule.onNodeWithTag(QUEUE_INTERRUPT_TAG) }, settle = { frames() }) { client.show(busy, queuedOn("t2", queueId = "q-same")) }
+        assertTrue("the row pressed for t1 sent for t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
-        rule.waitForIdle()
+        frames()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }
 
-    /** r2: the notices (each with its armed X) are not selectable; a selection elsewhere never swallows or doubles the X's tap. */
+    /** r2: the notices (each with its X) are not selectable; a selection elsewhere never swallows or doubles the X's tap. */
     @Test
     fun theNoticeXStaysOneTapWhileASelectionIsActive() {
         val recorder = NoticeFixtures.Recorder()

@@ -43,7 +43,7 @@ import org.robolectric.annotation.Config
 /**
  * T7.3 behaviour of the composer's commands, against tether components/chat-view.tsx (v128): the
  * `!` command mode only where the server offers it, Enter runs in the foreground and the Background
- * key detached, both keys armed and inert on a copy that is not live; while a FOREGROUND command
+ * key detached, both acting on the first tap (ta-coik.13) and inert on a copy that is not live; while a FOREGROUND command
  * runs, Interrupt reads "Stop" (the turn-bound interrupt) and Background replaces Queue (also
  * Ctrl+B); the slash palette on every engine, fed by the CLI inventory, with the web's passthrough,
  * blocked and desync rules; the `@` Agents picker and its delegate chip.
@@ -97,7 +97,7 @@ class CommandComposerBehaviourTest {
     private fun input() = rule.onNodeWithContentDescription("Message the agent")
     private fun inputText(): String = input().fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -122,17 +122,23 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
-    fun theBackgroundKeyRunsDetachedOnceArmed() {
+    fun theBackgroundKeyRunsDetachedOnTheFirstTap() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :4588-4596, the web's Background key acts on the first click.
         show()
         input().performTextInput("!sleep 30")
-        // Not armed yet: a tap in the first 500 ms does nothing.
-        rule.onNodeWithTag(RUN_BACKGROUND_KEY_TAG).performClick()
-        rule.waitForIdle()
-        assertEquals(emptyList<Pair<String, Boolean>>(), rec.runs)
-        arm()
         rule.onNodeWithTag(RUN_BACKGROUND_KEY_TAG).performClick()
         rule.waitForIdle()
         assertEquals(listOf("sleep 30" to true), rec.runs)
+    }
+
+    @Test
+    fun theSendToAgentKeyRunsInTheForegroundOnTheFirstTap() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :4579-4587.
+        show()
+        input().performTextInput("!npm test")
+        rule.onNodeWithTag(RUN_KEY_TAG).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("npm test" to false), rec.runs)
     }
 
     @Test
@@ -238,12 +244,16 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
-    fun theForegroundKeysAreArmedAndFollowTheLock() {
+    fun theForegroundKeysActOnTheFirstTapAndFollowTheLock() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :4566-4573, Stop acts on the first click; Background too.
         show(CommandFixtures.running)
         rule.onNodeWithTag(BACKGROUND_KEY_TAG).performClick()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
         rule.waitForIdle()
-        assertTrue("nothing in the first 500 ms", rec.backgrounds.isEmpty() && interrupts.isEmpty())
+        assertEquals(listOf("t1"), rec.backgrounds)
+        assertEquals(listOf("t1"), interrupts)
+        rec.backgrounds.clear()
+        interrupts.clear()
         liveness = ComposerLiveness(interruptLock = "Catching up…", stale = null)
         arm()
         rule.onNodeWithTag(BACKGROUND_KEY_TAG).performClick()

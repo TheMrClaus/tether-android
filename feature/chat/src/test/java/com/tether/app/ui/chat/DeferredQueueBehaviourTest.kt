@@ -30,7 +30,8 @@ import org.robolectric.annotation.Config
  * journal-stamped `queuedAt` to the event-anchored server now, ticking — and after 60 s with work
  * still live it offers the choice (keep waiting / interrupt). With live work "Interrupt now" and the
  * composer's Interrupt key need a second, informed tap that names the cost, and that second tap is
- * armed, bound to its turn and locked on a copy that is not live, as T6.7 / T13.2 made the first.
+ * bound to its turn and locked on a copy that is not live, as T6.7 / T13.2 made the first. ta-coik.13:
+ * each acts on its first tap, as on the web (no arm delay): a double tap passes through, as there.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -66,7 +67,7 @@ class DeferredQueueBehaviourTest {
         frames()
     }
 
-    /** A few frames, well inside the 500 ms arming delay: enough for a tap's state to recompose. */
+    /** A few frames: enough for a tap's state to recompose. */
     private fun frames() {
         // A tap's write lands in the global snapshot; with the clock paused nothing else would tell
         // the recomposer about it before the next ticker second.
@@ -76,7 +77,7 @@ class DeferredQueueBehaviourTest {
     }
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -132,7 +133,7 @@ class DeferredQueueBehaviourTest {
     }
 
     @Test
-    fun interruptNowWithLiveWorkAsksForAnArmedSecondTapThatNamesTheCost() {
+    fun interruptNowWithLiveWorkAsksForASecondTapThatNamesTheCost() {
         show(ComposerFixtures.deferred())
         arm()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
@@ -140,11 +141,8 @@ class DeferredQueueBehaviourTest {
         assertTrue("the first tap only asks: $interrupts", interrupts.isEmpty())
         rule.onNodeWithText("$cost — it cannot be undone.").assertExists()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertDoesNotExist()
-        // The confirmation is a new control: a tap before it arms (a double tap) sends nothing.
-        rule.onNodeWithTag(QUEUE_STOP_ANYWAY_TAG).assertIsNotEnabled().performClick()
-        frames()
-        assertTrue("a double tap never passes through: $interrupts", interrupts.isEmpty())
-        arm()
+        // ta-coik.13: chat-view.tsx 90fbb9f :1518-1529, the web's confirmation acts on its first
+        // click (a double tap passes through there too): no arm delay.
         rule.onNodeWithTag(QUEUE_STOP_ANYWAY_TAG).assertIsEnabled().performClick()
         frames()
         assertEquals(listOf("t1"), interrupts)
@@ -176,7 +174,7 @@ class DeferredQueueBehaviourTest {
         rule.runOnIdle { fixture = ComposerFixtures.deferred(turnId = "t2") }
         frames()
         rule.onNodeWithTag(QUEUE_STOP_ANYWAY_TAG).assertDoesNotExist()
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertExists()
         assertTrue(interrupts.isEmpty())
     }
 
@@ -213,7 +211,7 @@ class DeferredQueueBehaviourTest {
     // ---- the composer's Stop (chat-view.tsx:4543-4572) ----------------------------------------------
 
     @Test
-    fun interruptWithLiveWorkShowsTheCostAndKeepRunningThenTheArmedSecondTapStops() {
+    fun interruptWithLiveWorkShowsTheCostAndKeepRunningThenTheSecondTapStops() {
         show(ComposerFixtures.deferred())
         arm()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
@@ -223,10 +221,7 @@ class DeferredQueueBehaviourTest {
         rule.onNodeWithText("$cost — Stop anyway").assertExists()
         rule.onNodeWithContentDescription("$cost — stop anyway").assertExists()
         rule.onNodeWithContentDescription("Keep the turn running").assertExists()
-        rule.onNodeWithTag(STOP_ANYWAY_KEY_TAG).assertIsNotEnabled().performClick()
-        frames()
-        assertTrue("a double press never passes through: $interrupts", interrupts.isEmpty())
-        arm()
+        // ta-coik.13: chat-view.tsx 90fbb9f :4552-4558, "Stop anyway" acts on its first click.
         rule.onNodeWithTag(STOP_ANYWAY_KEY_TAG).assertIsEnabled().performClick()
         frames()
         assertEquals(listOf("t1"), interrupts)

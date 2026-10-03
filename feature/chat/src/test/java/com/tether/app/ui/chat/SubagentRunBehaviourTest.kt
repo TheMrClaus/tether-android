@@ -73,9 +73,9 @@ class SubagentRunBehaviourTest {
         return vm
     }
 
-    /** T6.3's I3 delay: a Stop key arms [CONSENT_ARM_DELAY_MS] after it became actionable (or moved). */
+    /** Let the composition settle ([SETTLE_MS]); ta-coik.13: the Stop key has no arm delay. */
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 

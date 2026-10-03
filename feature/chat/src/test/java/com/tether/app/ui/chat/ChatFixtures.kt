@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.AgentEvent
@@ -28,6 +29,31 @@ import com.tether.app.ui.theme.mode
 import kotlinx.serialization.json.put
 import java.time.ZoneId
 import java.time.ZoneOffset
+
+/**
+ * ta-coik.13: how long the behaviour tests let the composition settle after a change (frames,
+ * effects, a window opening). It was the old 500 ms arm delay plus 100 ms; no control waits for it
+ * any more (every control acts on its first tap), so it is only a settle time now.
+ */
+internal const val SETTLE_MS = 600L
+
+/**
+ * ta-coik.13: a stale tap. A press begins on [node], then [change] lands (the control's meaning
+ * changes under the finger), then the finger lifts. [settle] runs after each step (the default lets
+ * the composition catch up; a test driving the clock by hand passes its own).
+ */
+internal fun androidx.compose.ui.test.junit4.ComposeTestRule.pressAcross(
+    node: () -> androidx.compose.ui.test.SemanticsNodeInteraction,
+    settle: () -> Unit = { waitForIdle() },
+    change: () -> Unit,
+) {
+    node().performTouchInput { down(center) }
+    settle()
+    runOnIdle { change() }
+    settle()
+    node().performTouchInput { up() }
+    settle()
+}
 
 /**
  * Transcript fixtures folded by the real v128 reducer (the path RealTetherClient takes), mirroring

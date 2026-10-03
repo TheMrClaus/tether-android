@@ -1,6 +1,5 @@
 package com.tether.app.ui.settings
 
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -67,11 +66,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     private fun binding(reads: FakeAccounts, actions: FakeAccountActions, opener: LoginLinkOpener = LoginLinkOpener.None, origin: String = ORIGIN) =
         ClaudeAccountsBinding(reads, origin, AccountsFixtures.TIME, actions = actions, opener = opener, pace = fast)
 
-    private fun show(binding: ClaudeAccountsBinding, armMs: Long = 0L, wait: String = "Claude Code (work)") {
+    private fun show(binding: ClaudeAccountsBinding, wait: String = "Claude Code (work)") {
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides armMs) {
-                SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = binding)
-            }
+            SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = binding)
         }
         compose.waitUntil(5_000) { state.draft != null }
         waitFor(wait)
@@ -456,7 +453,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val second = binding(FakeAccounts(origin = OTHER_ORIGIN), actions, origin = OTHER_ORIGIN)
         var current by mutableStateOf(first)
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) { SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = current) }
+            SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = current)
         }
         compose.waitUntil(5_000) { state.draft != null }
         waitFor("Claude Code (work)")

@@ -91,7 +91,7 @@ fun ComposeContentTestRule.snapNotice(shot: NoticeShot, skin: TetherSkin, name: 
             }
         }
     }
-    // Past the limit card's arming delay, so its keys are drawn live.
+    // Settled, so the limit card is drawn as it stands.
     mainClock.advanceTimeBy(CaptureAtMs)
     waitForIdle()
     mainClock.advanceTimeBy(CaptureAtMs)

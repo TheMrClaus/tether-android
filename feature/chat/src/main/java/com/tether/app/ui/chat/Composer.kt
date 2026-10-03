@@ -1136,51 +1136,52 @@ private fun RowScope.ComposerActions(
     }
     // T7.3: one command key (`chat-send chat-send--command[-bg]`): the web's `:root .chat-send`
     // material rule (0,2,0) outranks the variant's own colours (0,1,0), so it is drawn as a Send key;
-    // the Terminal / SendToBack glyph and the words tell them apart. Armed like every operator
-    // control (500 ms, re-armed when it moves, no touches through an overlay).
+    // the Terminal / SendToBack glyph and the words tell them apart. ta-coik.13: it acts on the
+    // first tap, as on the web (chat-view.tsx 90fbb9f :4578-4596, no arm delay); a press on a key
+    // whose meaning changed under the finger is dropped ([StaleTapGuard]).
     @Composable
     fun CommandKey(identity: Any, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, enabled: Boolean, tag: String, onTap: () -> Unit) {
-        val arming = rememberArmedControl(identity, enabled && commandLock == null)
-        val armed = arming.armed && enabled && commandLock == null
-        TetherKey(
-            onClick = { if (armed) onTap() },
-            classes = KeyClasses.ChatSend,
-            label = if (labelled) label else null,
-            icon = icon,
-            iconSize = 18.dp,
-            fontSize = fontSize,
-            enabled = enabled && commandLock == null,
-            minHeight = height,
-            modifier = keyModifier
-                .then(arming.modifier)
-                .semantics { if (!armed) disabled() }
-                .testTag(tag),
-            contentPadding = padding,
-            contentDescription = if (commandLock == null) description else "$description, unavailable: $commandLock",
-        )
+        val live = enabled && commandLock == null
+        StaleTapGuard(identity) { guard ->
+            TetherKey(
+                onClick = { if (live) onTap() },
+                classes = KeyClasses.ChatSend,
+                label = if (labelled) label else null,
+                icon = icon,
+                iconSize = 18.dp,
+                fontSize = fontSize,
+                enabled = live,
+                minHeight = height,
+                modifier = keyModifier
+                    .then(guard)
+                    .testTag(tag),
+                contentPadding = padding,
+                contentDescription = if (commandLock == null) description else "$description, unavailable: $commandLock",
+            )
+        }
     }
     if (busy && commandRunning && interruptTurnId != null) {
         // chat-view.tsx:4462-4476: a foreground command runs — Background (the touch Ctrl+B) + Stop.
         val drawnFor = interruptTurnId
         CommandKey(Triple("background", sessionId, drawnFor), "Background", TetherIcons.SendToBack, "Send this command to the background", true, BACKGROUND_KEY_TAG) { onBackground(drawnFor) }
-        val arming = rememberArmedControl(Triple("interrupt", sessionId, drawnFor), interruptLock == null)
-        val armed = arming.armed && interruptLock == null
-        TetherKey(
-            onClick = { if (armed) onInterrupt(drawnFor) },
-            classes = KeyClasses.ChatInterrupt,
-            label = if (labelled) "Stop" else null,
-            icon = TetherIcons.CircleStop,
-            iconSize = 18.dp,
-            fontSize = fontSize,
-            enabled = interruptLock == null,
-            minHeight = height,
-            modifier = keyModifier
-                .then(arming.modifier)
-                .semantics { if (!armed) disabled() }
-                .testTag(INTERRUPT_KEY_TAG),
-            contentPadding = padding,
-            contentDescription = if (interruptLock == null) "Stop the command" else "Stop the command, unavailable: $interruptLock",
-        )
+        // ta-coik.13: the first tap stops it, as on the web (chat-view.tsx 90fbb9f :4566-4573).
+        StaleTapGuard(Triple("interrupt", sessionId, drawnFor)) { guard ->
+            TetherKey(
+                onClick = { if (interruptLock == null) onInterrupt(drawnFor) },
+                classes = KeyClasses.ChatInterrupt,
+                label = if (labelled) "Stop" else null,
+                icon = TetherIcons.CircleStop,
+                iconSize = 18.dp,
+                fontSize = fontSize,
+                enabled = interruptLock == null,
+                minHeight = height,
+                modifier = keyModifier
+                    .then(guard)
+                    .testTag(INTERRUPT_KEY_TAG),
+                contentPadding = padding,
+                contentDescription = if (interruptLock == null) "Stop the command" else "Stop the command, unavailable: $interruptLock",
+            )
+        }
     } else if (busy) {
         if (labelled || canQueue) {
             TetherKey(
@@ -1198,15 +1199,14 @@ private fun RowScope.ComposerActions(
             )
         }
         // T13.2 r2: a copy that is not live cannot interrupt (its "busy" is not a turn running now).
-        // T6.7: bound to the turn it is drawn for, and armed like every operator control: not in
-        // the first 500 ms after it appeared for that turn (a new turn re-arms it), again after it
-        // moved, and never through an overlay. Drawn as before while it arms; it just does nothing.
+        // T6.7: bound to the turn it is drawn for. ta-coik.13: it acts on the first tap, as on the web
+        // (chat-view.tsx 90fbb9f :4559-4573, no arm delay); a press that began before the turn changed
+        // is dropped ([StaleTapGuard]), and never through an overlay.
         val drawnFor = interruptTurnId
         if (confirmingStop && drawnFor != null) {
             // ta-ceo (chat-view.tsx:4543-4558): Stop is turn-wide — with live work the second tap
             // names the price. The pair is always labelled (a phone's icon-only key would hide the
-            // price); "Stop anyway" is a new control, so it arms afresh and a double tap never
-            // passes straight through.
+            // price). ta-coik.13: "Stop anyway" acts on its first tap, as on the web (:4552-4558).
             TetherKey(
                 onClick = { onConfirmStop(false) },
                 classes = KeyClasses.ChatSend,
@@ -1217,58 +1217,59 @@ private fun RowScope.ComposerActions(
                 contentPadding = 16.dp,
                 contentDescription = "Keep the turn running",
             )
-            val confirmArming = rememberArmedControl(Triple("interrupt-confirm", sessionId, drawnFor), interruptLock == null)
-            val confirmArmed = confirmArming.armed && interruptLock == null
+            StaleTapGuard(Triple("interrupt-confirm", sessionId, drawnFor)) { guard ->
+                TetherKey(
+                    onClick = {
+                        if (interruptLock == null) {
+                            onConfirmStop(false)
+                            onInterrupt(drawnFor)
+                        }
+                    },
+                    classes = KeyClasses.ChatInterrupt,
+                    label = "$stopCost — Stop anyway",
+                    icon = TetherIcons.CircleStop,
+                    iconSize = 18.dp,
+                    fontSize = fontSize,
+                    enabled = interruptLock == null,
+                    minHeight = height,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(min = height)
+                        .then(guard)
+                        .testTag(STOP_ANYWAY_KEY_TAG),
+                    contentPadding = 16.dp,
+                    contentDescription = "$stopCost — stop anyway",
+                    // The price is never cut: the key grows a line instead.
+                    maxLines = Int.MAX_VALUE,
+                )
+            }
+            return
+        }
+        val live = interruptLock == null && drawnFor != null
+        StaleTapGuard(Triple("interrupt", sessionId, drawnFor)) { guard ->
             TetherKey(
                 onClick = {
-                    if (confirmArmed) {
-                        onConfirmStop(false)
-                        onInterrupt(drawnFor)
+                    if (live && drawnFor != null) {
+                        // issue #229: with live work the first tap asks; without, it interrupts at once.
+                        if (stopCost.isNotEmpty()) onConfirmStop(true) else onInterrupt(drawnFor)
                     }
                 },
                 classes = KeyClasses.ChatInterrupt,
-                label = "$stopCost — Stop anyway",
+                label = if (labelled) "Interrupt" else null,
                 icon = TetherIcons.CircleStop,
                 iconSize = 18.dp,
                 fontSize = fontSize,
                 enabled = interruptLock == null,
                 minHeight = height,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .heightIn(min = height)
-                    .then(confirmArming.modifier)
-                    .semantics { if (!confirmArmed) disabled() }
-                    .testTag(STOP_ANYWAY_KEY_TAG),
-                contentPadding = 16.dp,
-                contentDescription = "$stopCost — stop anyway",
-                // The price is never cut: the key grows a line instead.
-                maxLines = Int.MAX_VALUE,
+                modifier = keyModifier
+                    .then(guard)
+                    // No turn to bind it to: drawn as the key, but it does nothing.
+                    .semantics { if (!live) disabled() }
+                    .testTag(INTERRUPT_KEY_TAG),
+                contentPadding = padding,
+                contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
             )
-            return
         }
-        val arming = rememberArmedControl(Triple("interrupt", sessionId, drawnFor), interruptLock == null && drawnFor != null)
-        val armed = arming.armed && interruptLock == null && drawnFor != null
-        TetherKey(
-            onClick = {
-                if (armed && drawnFor != null) {
-                    // issue #229: with live work the first tap asks; without, it interrupts at once.
-                    if (stopCost.isNotEmpty()) onConfirmStop(true) else onInterrupt(drawnFor)
-                }
-            },
-            classes = KeyClasses.ChatInterrupt,
-            label = if (labelled) "Interrupt" else null,
-            icon = TetherIcons.CircleStop,
-            iconSize = 18.dp,
-            fontSize = fontSize,
-            enabled = interruptLock == null,
-            minHeight = height,
-            modifier = keyModifier
-                .then(arming.modifier)
-                .semantics { if (!armed) disabled() }
-                .testTag(INTERRUPT_KEY_TAG),
-            contentPadding = padding,
-            contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
-        )
     } else if (commandMode) {
         // chat-view.tsx:4479-4499: run in the foreground (Enter) or detached.
         CommandKey(Pair("run", sessionId), "Send to agent", TetherIcons.Terminal, "Run command and send output to the agent", canRun, RUN_KEY_TAG) { onRun(false) }

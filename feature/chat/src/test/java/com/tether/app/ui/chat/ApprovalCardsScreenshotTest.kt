@@ -101,7 +101,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
             onNodeWithText("Postgres").performClick()
             onNodeWithTag("question-next").performClick()
             waitForIdle()
-            mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100) // L2: page 2 re-arms
+            mainClock.advanceTimeBy(SETTLE_MS)
             waitForIdle()
             onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("question-submit"))
             onNodeWithTag("question-submit").performClick()

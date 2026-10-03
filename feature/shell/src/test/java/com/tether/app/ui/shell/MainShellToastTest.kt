@@ -7,9 +7,6 @@ import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.unit.IntSize
@@ -34,8 +31,8 @@ import org.robolectric.annotation.Config
 
 /**
  * T6.7 r2 through MainShell: the error toast is drawn over the composer's keys. A tap on the toast
- * never reaches the Interrupt key under it; and when the toast goes away every armed key re-arms, so
- * a tap aimed at the vanishing toast does not land on the key it uncovered.
+ * never reaches the Interrupt key under it. ta-coik.13: once the toast has gone, the key it uncovered
+ * acts on its next tap, as on the web (no re-arm after the toast).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-mdpi")
@@ -83,7 +80,7 @@ class MainShellToastTest {
     }
 
     @Test
-    fun aTapOnTheToastOverAnArmedKeySendsNothing() {
+    fun aTapOnTheToastOverAKeySendsNothing() {
         val client = ShellConsentClient().also { it.show(session, tree) }
         host(client)
         val key = rule.onNodeWithTag(interruptKey).fetchSemanticsNode().boundsInRoot
@@ -98,39 +95,8 @@ class MainShellToastTest {
         assertTrue("a tap on the toast reached the key under it: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         rule.onNodeWithTag(ERROR_TOAST_TAG).assertDoesNotExist() // the tap was the X's: the toast closed
 
-        // The toast went away: the key it uncovered re-arms before a second tap can land on it.
+        // The toast went away: the next tap is the key's, at once (ta-coik.13, the web's toast too).
         tapRootAt(under.center)
-        assertTrue("a tap aimed at the vanishing toast interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-
-        arm()
-        rule.onNodeWithTag(interruptKey).performClick()
-        rule.waitForIdle()
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN#t1"), client.interruptCalls)
-    }
-
-    /**
-     * r3: a toast that shrinks uncovers what was under its old bounds: the keys re-arm. New words at
-     * the same size move nothing, so a stream of text changes cannot keep the keys disarmed.
-     */
-    @Test
-    fun aShrinkingToastReArmsTheKeysButSameSizeWordsDoNot() {
-        val client = ShellConsentClient().also { it.show(session, tree) }
-        host(client)
-        val long = "The server could not complete the request: " + "the session store is busy, try again in a moment. ".repeat(3)
-        rule.runOnIdle { vm.reportLocalError(long) }
-        arm()
-        rule.onNodeWithTag(interruptKey).assertIsEnabled()
-        // Same bounds, new words: still armed.
-        rule.runOnIdle { vm.reportLocalError(long.replace("busy", "full")) }
-        rule.mainClock.advanceTimeBy(48)
-        rule.waitForIdle()
-        rule.onNodeWithTag(interruptKey).assertIsEnabled()
-        // It shrinks to one line: the key re-arms before it can be tapped.
-        rule.runOnIdle { vm.reportLocalError("Not connected.") }
-        rule.mainClock.advanceTimeBy(48)
-        rule.waitForIdle()
-        rule.onNodeWithTag(interruptKey).assertIsNotEnabled()
-        arm()
-        rule.onNodeWithTag(interruptKey).assertIsEnabled()
     }
 }

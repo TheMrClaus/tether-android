@@ -209,7 +209,7 @@ class ClaudeAccountsBehaviourTest {
             val origin = "http://${server.hostName}:${server.port}"
             val binding = ClaudeAccountsBinding(HttpClaudeAccounts(http, authority = authority), origin, AccountsFixtures.TIME, actions = HttpClaudeAccountActions(http, authority = authority))
             compose.setContent {
-                androidx.compose.runtime.CompositionLocalProvider(LocalConfirmArmMs provides 0L) { SettingsUnderTest(store.prefs, state, claudeAccounts = binding) }
+                SettingsUnderTest(store.prefs, state, claudeAccounts = binding)
             }
             compose.waitUntil(5_000) { state.draft != null }
             waitFor("Claude Code (work)")

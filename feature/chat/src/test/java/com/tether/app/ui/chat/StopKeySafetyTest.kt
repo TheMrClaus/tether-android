@@ -46,8 +46,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T6.4 round 2. M1: a Stop tap never lands on another command's key when the rows move (keyed rows,
- * an arming delay, re-arming after a move). The "Stopping…" latch is one per command, shared by the
+ * T6.4 round 2. M1: a Stop press never lands on another command's key when the rows move (keyed rows
+ * and ta-coik.13's stale-tap guard; no arm delay, as on the web: chat-view.tsx 90fbb9f :3866-3875,
+ * a first tap stops). The "Stopping…" latch is one per command, shared by the
  * bar and the sheet. L3: a stop is bound to the server origin its row was drawn for. L2: repeated
  * lazy keys never crash the chat screen. L1: a run tab follows new steps only at the bottom, and a
  * denial's focus request is handed back once used.
@@ -80,7 +81,7 @@ class StopKeySafetyTest {
     }
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -88,46 +89,41 @@ class StopKeySafetyTest {
 
     // ---- M1 ----------------------------------------------------------------------------------------
 
-    @Test fun aNewKeyIsDisarmedFor500msThenStopsNormally() {
+    @Test fun aNewKeyStopsOnTheFirstTap() {
+        // ta-coik.13: the web's Stop (chat-view.tsx 90fbb9f :3866-3875) acts on the first click.
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         rule.mainClock.autoAdvance = false
-        stopOf(0).assertIsNotEnabled().performClick()
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS - 100)
-        rule.waitForIdle()
-        stopOf(0).assertIsNotEnabled().performClick()
-        assertTrue("nothing before the key armed", client.stopCalls.isEmpty())
-        rule.mainClock.advanceTimeBy(200)
-        rule.waitForIdle()
         stopOf(0).assertIsEnabled().performClick()
+        rule.mainClock.advanceTimeBy(64)
         rule.waitForIdle()
         assertEquals(listOf("s1:a"), client.stopCalls)
     }
 
-    @Test fun aRowShiftUnderAPendingTapSendsNothingToTheOtherCommand() {
+    @Test fun aRowShiftUnderAPendingPressSendsNothingToTheOtherCommand() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000), cmd("b", "running", 3_000))) }
         host(client)
         arm()
-        // The operator aims at B's Stop (the lower row; the deck grows upward from the composer) …
+        // The operator presses B's Stop (the lower row; the deck grows upward from the composer) …
         val aimed = stopOf(1).fetchSemanticsNode().boundsInRoot.center
-        // … and B finishes in that instant: A's row slides down under the finger.
+        rule.mainClock.autoAdvance = false
+        rule.onRoot().performTouchInput { down(aimed) }
+        rule.mainClock.advanceTimeBy(16)
+        rule.waitForIdle()
+        // … and B finishes while the finger is down: A's row slides down under it.
         rule.runOnIdle {
             val tree = foldTree(client.projectionTrees.value.getValue("s1"), cmd("b", "finished", 3_000))
             client.show(session, ChatFixtures.Folded(checkNotNull(LegacyProjectionAdapter.adaptOnce(tree)), tree))
         }
-        rule.mainClock.autoAdvance = false
-        rule.mainClock.advanceTimeBy(64) // two frames: the rows recompose and move, far under the arming delay
+        rule.mainClock.advanceTimeBy(64) // two frames: the rows recompose and move
         rule.waitForIdle()
         rule.onAllNodesWithTag("bg-command-stop").assertCountEquals(1)
         assertEquals("A's key is now where B's was", aimed.y, stopOf(0).fetchSemanticsNode().boundsInRoot.center.y, 2f)
-        rule.onRoot().performTouchInput { click(aimed) }
+        rule.onRoot().performTouchInput { up() }
         rule.mainClock.advanceTimeBy(64)
         rule.waitForIdle()
-        assertTrue("the tap meant for B never stops A: ${client.stopCalls}", client.stopCalls.isEmpty())
-        stopOf(0).assertIsNotEnabled()
-        // A's key, now still, re-arms and then stops A as usual.
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
-        rule.waitForIdle()
+        assertTrue("the press meant for B never stops A: ${client.stopCalls}", client.stopCalls.isEmpty())
+        // A fresh tap stops A at once.
         stopOf(0).assertIsEnabled().performClick()
         rule.mainClock.advanceTimeBy(64)
         rule.waitForIdle()
@@ -235,7 +231,7 @@ class StopKeySafetyTest {
         assertEquals(listOf<String?>(TEST_ORIGIN, "https://other.example"), client.stopOrigins)
     }
 
-    @Test fun theLatchExpiresWhileTheCommandStillRunsAndTheKeyArmsAgain() {
+    @Test fun theLatchExpiresWhileTheCommandStillRunsAndTheKeyStopsAgain() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         arm()
@@ -248,11 +244,8 @@ class StopKeySafetyTest {
         assertEquals(listOf("s1:a"), client.stopCalls)
         rule.mainClock.advanceTimeBy(1_100)
         rule.waitForIdle()
-        // Lapsed: named for its command again, and disarmed for the usual delay before it may send.
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsNotEnabled()
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
-        rule.waitForIdle()
-        stopOf(0).assertIsEnabled().performClick()
+        // Lapsed: named for its command again, and live at once (ta-coik.13: no arm delay).
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
         rule.mainClock.advanceTimeBy(64)
         rule.waitForIdle()
         assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
@@ -260,7 +253,7 @@ class StopKeySafetyTest {
 
     @Test fun switchingAwayAndBackStartsWithoutALatch() {
         // P4 (intended): latches live with the session's screen, not saved; back on s1 the key is
-        // named for its command and arms normally.
+        // named for its command and live.
         val other = session.copy(id = "s2", name = "Other")
         val client = ChatTestClient().also {
             it.show(other, folded())
@@ -287,9 +280,9 @@ class StopKeySafetyTest {
         stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled()
     }
 
-    // ---- round 3: the sheet's key while output grows; a slow slide ------------------------------
+    // ---- round 3: the sheet's key while output grows; a slide -------------------------------------
 
-    @Test fun theSheetsStopArmsWhileShortOutputKeepsGrowing() {
+    @Test fun theSheetsStopStaysLiveWhileShortOutputKeepsGrowing() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         rule.onNodeWithTag("bg-command-open").performClick()
@@ -322,12 +315,13 @@ class StopKeySafetyTest {
             rule.waitForIdle()
         }
         rule.onNode(hasText("line 4"), useUnmergedTree = true).assertIsDisplayed()
-        assertTrue("the sheet's Stop armed by frame 36 (armed at $armedAt)", armedAt in 1..36)
-        assertEquals("growing output never moved the armed key", -1, disarmedAgainAt)
+        assertEquals("the sheet's Stop is live from its first frame (ta-coik.13)", 1, armedAt)
+        assertEquals("growing output never disables the key", -1, disarmedAgainAt)
         rule.onAllNodesWithTag("bg-command-stop").fetchSemanticsNodes().last().let { assertTrue(!it.config.contains(SemanticsProperties.Disabled)) }
     }
 
-    @Test fun aKeySlidingSlowlyRearmsOnceItMovedFourDpSinceItArmed() {
+    @Test fun aKeyThatSlidStillStopsOnTheFirstTap() {
+        // ta-coik.13: no re-arm after a move (the web has none); the slid key is still this command's.
         var offset by mutableStateOf(0)
         val command = BackgroundCommandView("a", "npm run a", "/w", "/w/a.log", "running", null, null, 1.0, false, JsArr.EMPTY)
         val calls = mutableListOf<String>()
@@ -340,7 +334,7 @@ class StopKeySafetyTest {
                 }
             }
         }
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
         stopOf(0).assertIsEnabled()
         // 1dp a frame: no single frame moves it 4dp, but five frames do.
@@ -349,8 +343,10 @@ class StopKeySafetyTest {
             rule.mainClock.advanceTimeByFrame()
             rule.waitForIdle()
         }
-        stopOf(0).assertIsNotEnabled().performClick()
-        assertTrue(calls.isEmpty())
+        stopOf(0).assertIsEnabled().performClick()
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitForIdle()
+        assertEquals(listOf("a"), calls)
     }
 
     @Test fun aLabelDropsBidiControlsAndLeadingBlankLines() {

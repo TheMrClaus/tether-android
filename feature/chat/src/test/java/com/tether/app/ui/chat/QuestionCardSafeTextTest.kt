@@ -108,7 +108,7 @@ class QuestionCardSafeTextTest {
             }
         }
         rule.waitForIdle()
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 

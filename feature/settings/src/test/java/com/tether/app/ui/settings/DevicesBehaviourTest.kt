@@ -92,7 +92,7 @@ class DevicesBehaviourTest {
 
     private fun show() {
         compose.setContent {
-            CompositionLocalProvider(LocalSaveableStateRegistry provides registry, LocalConfirmArmMs provides 0L) {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
                 if (shown) {
                     val controller = rememberDevicesController(source, origin, clipboard = clipboard)
                     SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
@@ -359,10 +359,8 @@ class DevicesBehaviourTest {
         // A clock the test moves: the code expires in 5 s.
         var clock = NOW
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
-            }
+            val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+            SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
         }
         waitCalls(3)
         source.answerReads()
@@ -387,10 +385,8 @@ class DevicesBehaviourTest {
     @Test fun aCodeExpiresWhileItsCardIsOffScreen() {
         var clock = NOW
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
-            }
+            val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+            SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
         }
         waitCalls(3)
         source.answerReads()
@@ -425,11 +421,9 @@ class DevicesBehaviourTest {
     @Test fun twoWritesInOneFrameStartOnePerArea() {
         var captured: DevicesController? = null
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
-                captured = controller
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
-            }
+            val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+            captured = controller
+            SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
         }
         waitCalls(3)
         source.answerReads()
@@ -573,11 +567,9 @@ class DevicesBehaviourTest {
     @Test fun aRowWhoseIdCannotBeNamedIsListedButNothingCanBeSentForIt() {
         var captured: DevicesController? = null
         compose.setContent {
-            CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
-                captured = controller
-                SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
-            }
+            val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
+            captured = controller
+            SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
         }
         waitCalls(3)
         val long = PHONE.copy(id = "x".repeat(1400), label = "Too long", actionable = false)

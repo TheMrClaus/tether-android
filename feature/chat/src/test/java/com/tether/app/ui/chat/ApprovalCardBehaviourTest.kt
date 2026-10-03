@@ -112,7 +112,7 @@ class ApprovalCardBehaviourTest {
     private var generation by mutableStateOf(0)
     private var hosted = false
 
-    private fun show(f: ChatFixtures.Folded, c: ConsentActions = actions(), armIt: Boolean = true) {
+    private fun show(f: ChatFixtures.Folded, c: ConsentActions = actions()) {
         if (hosted) {
             rule.runOnIdle {
                 fixture = f
@@ -120,7 +120,7 @@ class ApprovalCardBehaviourTest {
                 generation++
             }
             rule.waitForIdle()
-            if (armIt) arm()
+            arm()
             return
         }
         hosted = true
@@ -145,7 +145,7 @@ class ApprovalCardBehaviourTest {
             hostView = androidx.compose.ui.platform.LocalView.current
         }
         rule.waitForIdle()
-        if (armIt) arm()
+        arm()
     }
 
     private val listState = androidx.compose.foundation.lazy.LazyListState()
@@ -154,9 +154,9 @@ class ApprovalCardBehaviourTest {
     private val store = CardStateStore()
     private var hostView: android.view.View? = null
 
-    /** I3: let the cards' arm delay pass (a fresh or changed card is disabled for 500 ms). */
+    /** Let the composition settle ([SETTLE_MS]); ta-coik.13: the cards have no arm delay to wait out. */
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -322,7 +322,7 @@ class ApprovalCardBehaviourTest {
         rule.onAllNodesWithTag("question-option")[0].assertIsOn()
         rule.onNodeWithTag("question-next").assertIsEnabled().performClick()
         rule.waitForIdle()
-        arm() // L2: a new page re-arms
+        arm()
         scrollTo("question-submit")
         rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
         rule.onNodeWithText("staging").performClick()
@@ -520,21 +520,55 @@ class ApprovalCardBehaviourTest {
         assertEquals(listOf(after), fingerprints)
     }
 
-    @Test fun aCardIgnoresTapsUntilItsArmDelayPasses() {
-        show(ApprovalFixtures.write, armIt = false)
+    @Test fun aCardActsOnTheFirstTapTheMomentItAppears() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :1291-1326, the web's Approve / Deny / choice buttons act
+        // on the first click: no arm delay. The tap lands in the card's first composed frame.
         rule.mainClock.autoAdvance = false
-        val allow = rule.onNodeWithTag("approval-allow")
-        allow.assertIsNotEnabled()
-        allow.performClick()
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS - 100)
-        rule.waitForIdle()
-        allow.assertIsNotEnabled()
-        rule.mainClock.advanceTimeBy(200)
-        rule.waitForIdle()
-        rule.mainClock.autoAdvance = true
-        allow.assertIsEnabled().performClick()
-        rule.waitForIdle()
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides store) {
+                    ChatTranscript(
+                        projection = ApprovalFixtures.write.projection,
+                        tree = ApprovalFixtures.write.tree,
+                        showThinking = false,
+                        onFetchTurns = { _, _ -> },
+                        zone = ChatFixtures.zone,
+                        consent = actions(),
+                        listState = listState,
+                    )
+                }
+            }
+        }
+        rule.mainClock.advanceTimeByFrame()
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.mainClock.advanceTimeByFrame()
         assertEquals(listOf("approval:req-w:allow"), calls)
+    }
+
+    @Test fun aPressAcrossAReRaiseOfTheRequestIsDropped() {
+        // ta-coik.13's stale-tap guard: the request was re-raised (same id, wider) while the finger
+        // was down; the press began on the old request's key and never decides the new one.
+        show(grantsAfterHistory)
+        scrollTo("approval-choice")
+        rule.pressAcross({ rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true) }) { fixture = widerGrants(grantsAfterHistory, "g1") }
+        assertTrue("a press on the old request decided the new one: $calls", calls.isEmpty())
+        // A fresh tap on the new request acts at once.
+        scrollTo("approval-choice")
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, calls.size)
+    }
+
+    @Test fun aPressOnAQuestionPageThatChangedUnderTheFingerIsDropped() {
+        // ta-coik.13's stale-tap guard: page 1's Skip was pressed, page 2 came up under the finger
+        // (another tap moved the store's page); the lift never skips page 2.
+        show(ApprovalFixtures.question)
+        scrollTo("question-skip")
+        val cfp = pendingQuestions(ApprovalFixtures.question.tree).single().contentFp
+        rule.pressAcross({ rule.onNodeWithTag("question-skip") }) { store.setQuestion(cfp, store.question(cfp).copy(page = 1)) }
+        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        assertTrue("page 2 was skipped by a press on page 1: ${store.question(cfp).skipped}", store.question(cfp).skipped.isEmpty())
+        assertTrue(calls.isEmpty())
     }
 
     /** Tap [tag]'s centre with MotionEvents carrying [flags], straight into the host view. */
@@ -600,7 +634,7 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
         assertTrue(calls.isEmpty())
     }
-    // ---- round 3: identity (N1), lost records (L1), page re-arm (L2), Bundle size (L3) ----------
+    // ---- round 3: identity (N1), lost records (L1), pages (L2), Bundle size (L3) -----------------
 
     /** [base] with req-g re-raised under the SAME id, wider: a second write path, still network. */
     private fun widerGrants(base: ChatFixtures.Folded, turnId: String): ChatFixtures.Folded {
@@ -775,30 +809,21 @@ class ApprovalCardBehaviourTest {
         assertTrue(calls.isEmpty())
     }
 
-    @Test fun aDoubleTapAcrossAPageChangeLandsOnNothing() {
-        // L2: tap Next, and a second tap at once where page 2's Skip / Submit now are.
+    @Test fun page2sKeysActOnTheirFirstTapRightAfterNext() {
+        // ta-coik.13: chat-view.tsx 90fbb9f :1108-1120, the web's next page is answerable at once (no
+        // per-page wait). A fresh tap on page 2's Skip, in the frame after Next, skips it and sends.
         show(ApprovalFixtures.question)
         scrollTo("question-next")
         rule.onNodeWithText("Postgres").performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag("question-next").assertIsEnabled()
-        // (waitForIdle recomposes but never lets the arm delay's virtual 500 ms pass: arm() does.)
         val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         rule.runOnUiThread { next() }
         rule.waitForIdle()
         rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
-        rule.onNodeWithTag("question-submit").assertIsNotEnabled()
-        rule.onNodeWithTag("question-skip").assertIsNotEnabled()
-        val skip = rule.onNodeWithTag("question-skip").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-        rule.runOnUiThread {
-            skip()
-            submit()
-        }
+        rule.onNodeWithTag("question-submit").assertIsEnabled()
+        rule.onNodeWithTag("question-skip").assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertTrue("a tap meant for page 1 decided page 2: $calls", calls.isEmpty())
-        arm()
-        rule.onNodeWithTag("question-skip").assertIsEnabled()
+        assertEquals("page 2 skipped, page 1's answer sent: $calls", 1, calls.size)
     }
 
     @Test fun aHugeQuestionIsNeverWrittenIntoTheSavedState() {
@@ -1445,7 +1470,7 @@ class ApprovalScreenBehaviourTest {
     }
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -1470,9 +1495,7 @@ class ApprovalScreenBehaviourTest {
 
         rule.runOnIdle { client.live.value = setOf("s1") }
         rule.waitForIdle()
-        // A lock lifted is a card that just became answerable: armed after the delay only.
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
-        arm()
+        // ta-coik.13: a lock lifted is answerable at once, as on the web (no arm delay).
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)

@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.ConnectionState
@@ -80,7 +81,7 @@ class ChatSyncTest {
     private fun state(text: String) = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text)
 
     private fun arm() {
-        rule.mainClock.advanceTimeBy(CONSENT_ARM_DELAY_MS + 100)
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
         rule.waitForIdle()
     }
 
@@ -97,7 +98,7 @@ class ChatSyncTest {
         rule.waitForIdle()
         assertTrue("nothing left the card", client.consentCalls.isEmpty())
 
-        // Freshness and the live set agree again: answerable, after the arm delay.
+        // Freshness and the live set agree again: answerable at once (ta-coik.13: no arm delay).
         rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Live, 2L)) }
         arm()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
@@ -304,11 +305,8 @@ class ChatSyncTest {
         // T6.7: the web's words (dashboard.tsx:1904-1905), the name isolated.
         rule.onNodeWithText("End session?").assertExists()
         rule.onNodeWithText("\u2068s1\u2069 — its running process will stop.").assertExists()
-        // T6.7: armed — a tap in its first 500 ms ends nothing.
-        confirmKey().assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue(client.killCalls.isEmpty())
-        arm()
+        // ta-coik.13: the web's End session key (dashboard.tsx 90fbb9f :1909) ends on the first tap,
+        // in the dialog's first frame: no arm delay.
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
@@ -324,9 +322,11 @@ class ChatSyncTest {
         host(client, running, header = true)
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
-        arm()
         confirmKey().assertIsEnabled()
-        // Signed in to another server that lists (and has live) a session with the same id.
+        // Signed in to another server that lists (and has live) a session with the same id, while
+        // the finger was down on the key: the key goes with the dialog, so the lift lands nowhere.
+        confirmKey().performTouchInput { down(center) }
+        rule.waitForIdle()
         rule.runOnIdle { client.origin.value = "https://other.example" }
         arm()
         // T6.7: a pending confirmation closes on a server switch: nothing is left to tap.
@@ -336,7 +336,6 @@ class ChatSyncTest {
         // Opened afresh on the current server: it ends there, bound to that origin.
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
-        arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@https://other.example:true"), client.killCalls)

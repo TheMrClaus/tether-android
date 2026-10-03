@@ -201,11 +201,11 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
     val identity = Triple(actions.sessionId, dismissKey, actions.link)
     var latched by remember(identity) { mutableStateOf(false) }
     val lock = actions.lock
-    // Armed like every operator control: not in its first 500 ms, again after it moved; no overlay taps.
-    val arming = rememberArmedControl(identity, lock == null && !latched)
-    val enabled = lock == null && !latched && arming.armed
+    // ta-coik.13: the first tap dismisses, as on the web (notice-dismiss-button.tsx 90fbb9f :12-20,
+    // no arm delay); a press across a change of notice is dropped ([StaleTapGuard]); no overlay taps.
+    val enabled = lock == null && !latched
     val tap = {
-        if (!latched && actions.lock == null && arming.armed) {
+        if (!latched && actions.lock == null) {
             latched = true
             val result = actions.onDismiss(dismissKey)
             if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) {
@@ -214,24 +214,26 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
             }
         }
     }
-    Box(
-        modifier
-            .then(arming.modifier)
-            .size(TetherDimens.touchTargetDp)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
-            .semantics(mergeDescendants = true) {
-                contentDescription = label
-                role = Role.Button
-                when {
-                    lock != null -> stateDescription = lock.copy
-                    latched -> stateDescription = "Dismissing…"
+    StaleTapGuard(identity) { guard ->
+        Box(
+            modifier
+                .then(guard)
+                .size(TetherDimens.touchTargetDp)
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = label
+                    role = Role.Button
+                    when {
+                        lock != null -> stateDescription = lock.copy
+                        latched -> stateDescription = "Dismissing…"
+                    }
+                    if (!enabled) disabled()
                 }
-                if (!enabled) disabled()
-            }
-            .testTag("notice-dismiss"),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+                .testTag("notice-dismiss"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+        }
     }
 }
 
@@ -372,10 +374,11 @@ internal fun SessionNoticeRow(view: SessionNoticeView, modifier: Modifier = Modi
 /**
  * The limit card (`RateLimitResumeCard`, `.chat-approval.chat-rate-limit`, `role="alertdialog"`):
  * "Limit hit", the reset time, why a schedule waits two minutes, and three keys — Schedule
- * auto-continue · <time>, Resume now, Dismiss. Each is bound to THIS prompt's `resetsAt`, armed like
- * an approval (no tap on a card that just appeared), refused under an overlay, and sends once per
+ * auto-continue · <time>, Resume now, Dismiss. Each is bound to THIS prompt's `resetsAt`, acts on
+ * the first tap as on the web (chat-view.tsx 90fbb9f :1384-1394, no arm delay; ta-coik.13), drops a
+ * press across a change of prompt ([StaleTapGuard]), is refused under an overlay, and sends once per
  * link: the card then says the choice was sent and waits for the server's event to remove it.
- * Stricter than the web, which re-enables its keys after 4 s; here a new link re-arms them.
+ * Stricter than the web, which re-enables its keys after 4 s; here a new link re-enables them.
  * A handed-off source keeps only Dismiss ([NoticeActions.cancelLock]); read-only keeps none.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -385,16 +388,14 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     val type = LocalTetherTypography.current
     val actions = LocalNoticeActions.current
     val shape = RoundedCornerShape(14.dp)
-    // Scoped to the session too (r2): another session's prompt with the same resetsAt starts unarmed and unsent.
+    // Scoped to the session too (r2): another session's prompt with the same resetsAt starts unsent.
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
     var sent by remember(identity) { mutableStateOf<String?>(null) }
     var overlayBlocked by remember(identity) { mutableStateOf(false) }
     val lock = actions.controlLock
     val cancelLock = actions.cancelLock
-    // Armed whenever any key could act (Dismiss alone on a handed-off source).
-    val actionable = sent == null && cancelLock == null
-    val arming = rememberArmedControl(identity, actionable)
-    val armed = arming.armed
+    // Live whenever any key could act (Dismiss alone on a handed-off source).
+    val armed = sent == null && cancelLock == null
     val resetClock = limitClockTime(view.resetsAt, locale, zone)
     val resumeClock = limitClockTime(view.resumeAt, locale, zone)
 
@@ -410,95 +411,97 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     }
     val blocked = { overlayBlocked = true }
 
-    Column(
-        modifier
-            .then(arming.modifier)
-            .fillMaxWidth()
-            .cssSurface(
-                shape,
-                background = t.attentionBg,
-                border = CssBorder(1.dp, t.attentionBorder),
-                shadows = emptyList(),
-            )
-            .padding(20.dp)
-            .semantics { paneTitle = "Limit hit" }
-            .testTag("rate-limit-card"),
-        verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-            Icon(TetherIcons.Clock, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
-            Text(
-                "Limit hit",
-                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.98f), fontWeight = FontWeight(700), letterSpacing = (-0.01).em),
-                color = t.white,
-                modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        Text(
-            "Resets at $resetClock.",
-            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.85f)),
-            color = t.ink,
-            modifier = Modifier.padding(vertical = (0.85f * TetherTypography.SP_PER_REM).dp),
-        )
-        Text(
-            buildAnnotatedString {
-                append("Schedule auto-continue to ask the agent to resume actual work at ")
-                withStyle(SpanStyle(color = t.ink)) { append(resumeClock) }
-                append(" — two minutes after the reset.")
-            },
-            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f),
-            color = t.muted,
-        )
-        val status = when {
-            lock == ConsentLock.HandedOff && cancelLock == null && sent == null -> HANDED_OFF_LIMIT_COPY
-            // r3: handed off AND not live: even Dismiss waits for the link / a live copy; say so.
-            lock == ConsentLock.HandedOff && cancelLock != null && sent == null ->
-                "This session was handed off. " + cancelLock.copy.replace("answer", "dismiss this prompt")
-            lock != null && sent == null -> lock.copy.replace("answer", "choose")
-            overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
-            sent != null -> "Choice sent. Waiting for the server."
-            else -> null
-        }
-        status?.let {
-            Text(
-                it,
-                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f),
-                color = t.muted,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("rate-limit-status"),
-            )
-        }
-        FlowRow(
-            Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
-            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    StaleTapGuard(identity) { guard ->
+        Column(
+            modifier
+                .then(guard)
+                .fillMaxWidth()
+                .cssSurface(
+                    shape,
+                    background = t.attentionBg,
+                    border = CssBorder(1.dp, t.attentionBorder),
+                    shadows = emptyList(),
+                )
+                .padding(20.dp)
+                .semantics { paneTitle = "Limit hit" }
+                .testTag("rate-limit-card"),
             verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
-            val phone = currentLayoutClass() == TetherLayoutClass.Phone
-            // globals.css:8546 (phone): each key takes the full row.
-            val keyModifier = (if (phone) Modifier.fillMaxWidth() else Modifier).refuseObscuredTouches(blocked)
-            TetherKey(
-                onClick = { choose("schedule") },
-                classes = KeyClasses.ButtonPrimary,
-                label = "Schedule auto-continue · $resumeClock",
-                icon = TetherIcons.Clock,
-                enabled = armed && lock == null,
-                modifier = keyModifier.testTag("rate-limit-schedule"),
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                Icon(TetherIcons.Clock, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
+                Text(
+                    "Limit hit",
+                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.98f), fontWeight = FontWeight(700), letterSpacing = (-0.01).em),
+                    color = t.white,
+                    modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite },
+                )
+            }
+            Text(
+                "Resets at $resetClock.",
+                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.85f)),
+                color = t.ink,
+                modifier = Modifier.padding(vertical = (0.85f * TetherTypography.SP_PER_REM).dp),
             )
-            TetherKey(
-                onClick = { choose("resume-now") },
-                classes = KeyClasses.ButtonSecondary,
-                label = "Resume now",
-                icon = TetherIcons.Play,
-                enabled = armed && lock == null,
-                modifier = keyModifier.testTag("rate-limit-resume-now"),
+            Text(
+                buildAnnotatedString {
+                    append("Schedule auto-continue to ask the agent to resume actual work at ")
+                    withStyle(SpanStyle(color = t.ink)) { append(resumeClock) }
+                    append(" — two minutes after the reset.")
+                },
+                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f),
+                color = t.muted,
             )
-            TetherKey(
-                onClick = { choose("dismiss") },
-                classes = KeyClasses.ButtonSecondary,
-                label = "Dismiss",
-                icon = TetherIcons.Ban,
-                enabled = armed && cancelLock == null,
-                modifier = keyModifier.testTag("rate-limit-dismiss"),
-            )
+            val status = when {
+                lock == ConsentLock.HandedOff && cancelLock == null && sent == null -> HANDED_OFF_LIMIT_COPY
+                // r3: handed off AND not live: even Dismiss waits for the link / a live copy; say so.
+                lock == ConsentLock.HandedOff && cancelLock != null && sent == null ->
+                    "This session was handed off. " + cancelLock.copy.replace("answer", "dismiss this prompt")
+                lock != null && sent == null -> lock.copy.replace("answer", "choose")
+                overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
+                sent != null -> "Choice sent. Waiting for the server."
+                else -> null
+            }
+            status?.let {
+                Text(
+                    it,
+                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f),
+                    color = t.muted,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("rate-limit-status"),
+                )
+            }
+            FlowRow(
+                Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+                verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            ) {
+                val phone = currentLayoutClass() == TetherLayoutClass.Phone
+                // globals.css:8546 (phone): each key takes the full row.
+                val keyModifier = (if (phone) Modifier.fillMaxWidth() else Modifier).refuseObscuredTouches(blocked)
+                TetherKey(
+                    onClick = { choose("schedule") },
+                    classes = KeyClasses.ButtonPrimary,
+                    label = "Schedule auto-continue · $resumeClock",
+                    icon = TetherIcons.Clock,
+                    enabled = armed && lock == null,
+                    modifier = keyModifier.testTag("rate-limit-schedule"),
+                )
+                TetherKey(
+                    onClick = { choose("resume-now") },
+                    classes = KeyClasses.ButtonSecondary,
+                    label = "Resume now",
+                    icon = TetherIcons.Play,
+                    enabled = armed && lock == null,
+                    modifier = keyModifier.testTag("rate-limit-resume-now"),
+                )
+                TetherKey(
+                    onClick = { choose("dismiss") },
+                    classes = KeyClasses.ButtonSecondary,
+                    label = "Dismiss",
+                    icon = TetherIcons.Ban,
+                    enabled = armed && cancelLock == null,
+                    modifier = keyModifier.testTag("rate-limit-dismiss"),
+                )
+            }
         }
     }
 }
@@ -530,11 +533,12 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
     var latched by remember(identity) { mutableStateOf(false) }
     val lock = actions.cancelLock
-    val arming = rememberArmedControl(identity, lock == null && !latched)
-    val enabled = lock == null && !latched && arming.armed
+    // ta-coik.13: the first tap cancels, as on the web (chat-view.tsx 90fbb9f :3707-3714, no arm
+    // delay); a press across a change of prompt is dropped ([StaleTapGuard]); no overlay taps.
+    val enabled = lock == null && !latched
     val label = "Cancel scheduled resume"
     val tap = {
-        if (!latched && actions.cancelLock == null && arming.armed) {
+        if (!latched && actions.cancelLock == null) {
             latched = true
             val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
             if (result != ControlResult.Sent) {
@@ -555,23 +559,25 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
             color = t.muted,
             modifier = Modifier.alpha(0.8f).weight(1f, fill = false).semantics { liveRegion = LiveRegionMode.Polite },
         )
-        Box(
-            arming.modifier
-                .size(TetherDimens.touchTargetDp)
-                .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = label
-                    role = Role.Button
-                    when {
-                        lock != null -> stateDescription = cancelLockCopy(lock)
-                        latched -> stateDescription = "Cancelling…"
+        StaleTapGuard(identity) { guard ->
+            Box(
+                guard
+                    .size(TetherDimens.touchTargetDp)
+                    .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = label
+                        role = Role.Button
+                        when {
+                            lock != null -> stateDescription = cancelLockCopy(lock)
+                            latched -> stateDescription = "Cancelling…"
+                        }
+                        if (!enabled) disabled()
                     }
-                    if (!enabled) disabled()
-                }
-                .testTag("rate-limit-cancel"),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+                    .testTag("rate-limit-cancel"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+            }
         }
     }
 }
