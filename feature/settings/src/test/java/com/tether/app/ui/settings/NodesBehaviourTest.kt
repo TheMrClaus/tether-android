@@ -59,8 +59,8 @@ import org.robolectric.shadows.ShadowLog
  * its key only, to the drawing server, one at a time, its own answer shown (a refusal included,
  * the form kept, nothing retried); and the credential under slice 3's rules: masked by default,
  * the sentinel in no semantics node, log line, preference, saver or saved-state value while
- * masked, no copy or cut, the password keyboard, masked again on close, tab change, server switch,
- * rotation and ON_STOP, and never sent by anything but Add node.
+ * masked, no copy or cut, the password keyboard, masked again on close, tab change, server switch
+ * and rotation, kept over ON_STOP/ON_START (ta-coik.15), and never sent by anything but Add node.
  *
  * The v2 rule (ta-b72): an answer resumes the panel's request on the composition's dispatcher,
  * the test's here, and every read after a tap waits on the screen or the writer.
@@ -540,8 +540,11 @@ class NodesBehaviourTest {
         assertTrue("a tap meant for node_lab went to ${writer.calls.map { it.nodeId }}", writer.calls.all { it.nodeId == "node_lab" })
     }
 
-    /** r2 (security F2): a credential already sent once (here refused) is CLEARED when the app stops. */
-    @Test fun aSentCredentialIsClearedWhenTheAppStops() {
+    /**
+     * ta-coik.15: a credential already sent once (here refused) stays in the field over ON_STOP and
+     * ON_START, as on the web (no lifecycle clear); nothing is resent by itself.
+     */
+    @Test fun aSentCredentialIsKeptWhenTheAppStopsAndComesBack() {
         val owner = TestOwner()
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         show(owner)
@@ -552,12 +555,13 @@ class NodesBehaviourTest {
         waitText(REFUSAL)
         assertEquals(SENTINEL, fieldText(NodeTags.Credential))
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED }
-        compose.waitUntil(5_000) { fieldText(NodeTags.Credential) == "" }
+        compose.waitForIdle()
+        assertEquals("kept over ON_STOP", SENTINEL, fieldText(NodeTags.Credential))
+        compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.STARTED }
         compose.runOnIdle { owner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
         compose.waitForIdle()
-        // Gone for good: the field is empty, and Add cannot send it again.
-        assertEquals("", fieldText(NodeTags.Credential))
-        assertFalse(enabled(NodeTags.Add))
+        assertEquals("kept over ON_START", SENTINEL, fieldText(NodeTags.Credential))
+        assertTrue(enabled(NodeTags.Add))
         assertEquals(1, writer.calls.size)
     }
 

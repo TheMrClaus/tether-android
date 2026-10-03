@@ -488,8 +488,9 @@ private fun DeviceRow(device: PairedDevice, self: Boolean, now: Long, narrow: Bo
 /**
  * `.pairing-code-card`: the fresh code, shown ONCE, drawn at once as on the web (ta-coik.5): the
  * two blocks of four, one node read letter by letter (the web's `role="img"` label). Copy code as on
- * the web, onto a sensitive clip (see [PairingClipboard]). Once it expires the plaintext is dropped
- * and the card says so.
+ * the web, onto a sensitive clip (see [PairingClipboard]). ta-coik.15: once it expires the code stays
+ * on the card with Copy, and the countdown gives way to the expired line, as on the web
+ * (paired-devices.tsx: only closing Settings forgets the code).
  */
 @Composable
 private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, readNow: () -> Long, onTick: (Long) -> Unit) {
@@ -498,14 +499,11 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, r
     val code = shown.code
     var copied by remember { mutableStateOf(false) }
     val left = DevicesRules.secondsLeft(shown.expiresAt, now)
-    val expired = code == null || left <= 0
+    val expired = left <= 0
     LaunchedEffect(shown.serial, expired) {
-        if (expired) {
-            c.expire(shown.serial)
-            return@LaunchedEffect
-        }
-        // One tick a second while the clock says the code has time left (bounded): the tick that
-        // finds it run out relaunches this as expired.
+        // One tick a second while the clock says the code has time left (bounded), as the web's
+        // interval runs only while counting: the tick that finds it run out relaunches this as expired.
+        if (expired) return@LaunchedEffect
         var ticks = 0L
         while (ticks++ < PAIRING_TICKS_MAX) {
             delay(1_000)
@@ -530,50 +528,50 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, r
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(DevicesCopy.CODE_LABEL, color = t.faint, style = settingsText(type.ui, 13f, 720))
-        if (code != null && !expired) {
-            val big = settingsText(type.mono, 24f, 650, lineHeight = 1.3f, trackingEm = 0.12f)
-            val plain = code.code.reveal()
-            Text(
-                plain.take(4) + "  " + plain.drop(4),
-                color = t.white,
-                style = big,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                    .testTag(DevicesTags.CodeShown)
-                    .clearAndSetSemantics { contentDescription = DevicesCopy.codeSpoken(plain) },
+        val big = settingsText(type.mono, 24f, 650, lineHeight = 1.3f, trackingEm = 0.12f)
+        val plain = code.code.reveal()
+        Text(
+            plain.take(4) + "  " + plain.drop(4),
+            color = t.white,
+            style = big,
+            modifier = Modifier
+                .fillMaxWidth()
+                .cssSurface(RoundedCornerShape(8.dp), t.graphite, CssBorder(1.dp, t.lineStrong), emptyList())
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .testTag(DevicesTags.CodeShown)
+                .clearAndSetSemantics { contentDescription = DevicesCopy.codeSpoken(plain) },
+        )
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight(700), color = t.ink)) { append(DevicesCopy.CODE_SHOWN_ONCE) }
+                append(DevicesCopy.CODE_NOTE)
+            },
+            color = t.muted,
+            style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TetherKey(
+                onClick = { if (c.copyCode()) copied = true },
+                classes = KeyClasses.ButtonSecondary,
+                label = if (copied) DevicesCopy.COPIED else DevicesCopy.COPY,
+                icon = if (copied) TetherIcons.Check else TetherIcons.Copy,
+                iconSize = 15.dp,
+                modifier = Modifier.testTag(DevicesTags.CodeCopy),
             )
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight(700), color = t.ink)) { append(DevicesCopy.CODE_SHOWN_ONCE) }
-                    append(DevicesCopy.CODE_NOTE)
-                },
-                color = t.muted,
-                style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TetherKey(
-                    onClick = { if (c.copyCode()) copied = true },
-                    classes = KeyClasses.ButtonSecondary,
-                    label = if (copied) DevicesCopy.COPIED else DevicesCopy.COPY,
-                    icon = if (copied) TetherIcons.Check else TetherIcons.Copy,
-                    iconSize = 15.dp,
-                    modifier = Modifier.testTag(DevicesTags.CodeCopy),
-                )
+            if (expired) {
+                Row(
+                    Modifier.weight(1f, fill = false).testTag(DevicesTags.CodeExpiry).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.warning, modifier = Modifier.size(14.dp))
+                    Text(DevicesCopy.EXPIRED, color = t.attentionInk, style = settingsText(type.ui, 13f, 500, lineHeight = 1.5f))
+                }
+            } else {
                 Row(Modifier.testTag(DevicesTags.CodeExpiry).semantics(mergeDescendants = true) { }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(TetherIcons.Timer, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
                     Text(DevicesCopy.expiresIn(elapsedLabel(left).ifEmpty { "0s" }), color = t.muted, style = settingsText(type.ui, 12f, 500, lineHeight = 1.5f))
                 }
-            }
-        } else {
-            Row(
-                Modifier.testTag(DevicesTags.CodeExpiry).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.warning, modifier = Modifier.size(14.dp))
-                Text(DevicesCopy.EXPIRED, color = t.attentionInk, style = settingsText(type.ui, 13f, 500, lineHeight = 1.5f))
             }
         }
     }

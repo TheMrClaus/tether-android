@@ -2,7 +2,6 @@ package com.tether.app.ui.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,7 +28,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /*
@@ -233,11 +231,12 @@ object DevicesRules {
 }
 
 /**
- * The fresh code on screen (the web's component state: the ONLY copy in existence). [code] is null
- * once it has expired (the card then says so with nothing left to reveal or copy).
+ * The fresh code on screen (the web's component state: the ONLY copy in existence). ta-coik.15: as
+ * on the web it stays, expired or not, until Settings closes, another code is minted, or this
+ * device is signed out (the card says when it has expired; Copy still copies it, as the web's does).
  */
-class ShownCode(val code: FreshPairingCode?, val expiresAt: Long, internal val serial: Long) {
-    override fun toString(): String = "ShownCode(expiresAt=$expiresAt, live=${code != null})"
+class ShownCode(val code: FreshPairingCode, val expiresAt: Long, internal val serial: Long) {
+    override fun toString(): String = "ShownCode(expiresAt=$expiresAt)"
 }
 
 /** A state a seeded shot hands the controller (timing-free): nothing is fetched while it stands. */
@@ -274,8 +273,6 @@ class DevicesController(
     parent: CoroutineScope,
     seed: DevicesSeed? = null,
     private val clipboard: PairingClipboard = PairingClipboard.None,
-    /** The wall clock a code's expiry is measured on (a seam for the tests). */
-    private val now: () -> Long = { System.currentTimeMillis() },
     /** T10.5: Credential Manager on a device, a fake in tests; [PasskeyAuthenticator.None] offers nothing. */
     val authenticator: PasskeyAuthenticator = PasskeyAuthenticator.None,
 ) {
@@ -319,15 +316,9 @@ class DevicesController(
         private set
 
     private var opened = seed != null
-    private var expiryJob: Job? = null
     private var devicesTicket = 0L
     private var securityTicket = 0L
     private var codeSerial = 0L
-
-    /** The dialog composed this controller: a seeded code's expiry starts counting (r2, security F7). */
-    fun activate() {
-        shown?.let(::scheduleExpiry)
-    }
 
     /** The Devices tab opened: read once per controller (a seed counts as read). */
     fun open() {
@@ -405,7 +396,6 @@ class DevicesController(
             forgetCode()
             val fresh = ShownCode(r.value, r.value.expiresAt, ++codeSerial)
             shown = fresh
-            scheduleExpiry(fresh)
             signIn = r.signIn
             refreshDevices()
         } else {
@@ -545,47 +535,19 @@ class DevicesController(
         refreshSecurity()
     }
 
-    /** The code on screen expired: the plaintext goes (the card still says it expired). */
-    fun expire(serial: Long) {
-        val s = shown ?: return
-        if (s.serial != serial || s.code == null) return
-        clipboard.clearIfHolds(s.code.code)
-        shown = ShownCode(null, s.expiresAt, s.serial)
-    }
-
-    /** Copy the code on screen: marked sensitive, cleared again shortly after (see [PairingClipboard]). */
+    /** Copy the code on screen, as the web's Copy code: onto a sensitive clip, left there (see [PairingClipboard]). */
     fun copyCode(): Boolean {
         val code = shown?.code ?: return false
-        // ta-x5e: with the life it has left, on the same clock the expiry runs on; no clear is retried past it.
-        return clipboard.copy(code.code, code.expiresAt - now())
+        return clipboard.copy(code.code)
     }
 
-    /**
-     * r2 (security F7): the code's expiry runs in the controller's own scope, so the plaintext (and its
-     * clipboard copy) goes when the code runs out even while the card is off screen (another tab).
-     * Checked at most every [EXPIRY_STEP_MS] (a wall clock that jumps is caught), [EXPIRY_CHECKS] times.
-     */
-    private fun scheduleExpiry(s: ShownCode) {
-        expiryJob?.cancel()
-        if (s.code == null) return
-        expiryJob = scope.launch {
-            repeat(EXPIRY_CHECKS) {
-                val left = s.expiresAt - now()
-                if (left <= 0) return@launch expire(s.serial)
-                delay(left.coerceAtMost(EXPIRY_STEP_MS))
-            }
-        }
-    }
-
-    /** Settings closed or another server: the code goes, and its copy with it; nothing in flight answers here any more. */
+    /** Settings closed or another server: the code on screen goes (the clipboard is left alone, as on the web); nothing in flight answers here any more. */
     fun dispose() {
         forgetCode()
         job.cancel()
     }
 
     private fun forgetCode() {
-        expiryJob?.cancel()
-        shown?.code?.let { clipboard.clearIfHolds(it.code) }
         shown = null
     }
 
@@ -634,16 +596,11 @@ class DevicesController(
         }
         return true
     }
-
-    private companion object {
-        const val EXPIRY_STEP_MS = 15_000L
-        const val EXPIRY_CHECKS = 240
-    }
 }
 
 /**
  * The controller for the dialog: one per (source, server), in plain `remember` (never saved), and
- * disposed (the code and its clipboard copy dropped, its calls cancelled) when the dialog closes or
+ * disposed (the code dropped, the clipboard left alone, its calls cancelled) when the dialog closes or
  * the server changes.
  */
 @Composable
@@ -652,12 +609,10 @@ fun rememberDevicesController(
     origin: String?,
     seed: DevicesSeed? = null,
     clipboard: PairingClipboard = PairingClipboard.None,
-    now: () -> Long = { System.currentTimeMillis() },
     authenticator: PasskeyAuthenticator = PasskeyAuthenticator.None,
 ): DevicesController {
     val scope = rememberCoroutineScope()
-    val controller = remember(source, origin, authenticator) { DevicesController(source, origin, scope, seed?.takeIf { origin != null }, clipboard, now, authenticator) }
-    LaunchedEffect(controller) { controller.activate() }
+    val controller = remember(source, origin, authenticator) { DevicesController(source, origin, scope, seed?.takeIf { origin != null }, clipboard, authenticator) }
     DisposableEffect(controller) { onDispose { controller.dispose() } }
     return controller
 }

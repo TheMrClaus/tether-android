@@ -228,9 +228,9 @@ fun SettingsDialog(
         consoleProtocol = consoleProtocol,
     )
     // T10.4: one controller per server, held here (a tab change keeps a call and the code on
-    // screen; closing Settings drops them, the code's clipboard copy with it).
+    // screen; closing Settings drops them; a copied code stays on the clipboard, as on the web).
     val context = androidx.compose.ui.platform.LocalContext.current
-    val pairingClipboard = remember(context) { AndroidPairingClipboard.forApp(context) }
+    val pairingClipboard = remember(context) { AndroidPairingClipboard(context) }
     // T10.5: passkey registration runs on this activity's Credential Manager prompt.
     val activity = context.findActivity()
     val passkeys = remember(activity) { com.tether.app.client.CredentialManagerPasskeys { activity } }
@@ -240,8 +240,6 @@ fun SettingsDialog(
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
-        // ta-x5e: back in the app with Settings open, focus goes to this window: a pending clipboard clear retries then.
-        RetryClipboardClearOnFocus(pairingClipboard)
         val progress = rememberDialogIn()
         SettingsFrame(
             prefs = prefs,

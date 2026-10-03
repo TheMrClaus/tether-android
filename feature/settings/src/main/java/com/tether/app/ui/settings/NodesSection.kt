@@ -14,7 +14,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.Stable
@@ -41,9 +40,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tether.app.client.LabelText
 import com.tether.app.client.NodeCredential
 import com.tether.app.client.NodeRegistryRules
@@ -395,11 +391,12 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
 
 /**
  * `.settings-node-add`: the form. Label, base URL and the credential are plain fields, as on the
- * web. Every field is plain `remember`: a rotation, a
- * close, a tab change or another server starts it empty, and nothing in it is ever sent but by
- * Add node. The credential is let go once the server holds the node ([NodeNotice.heldByServer]);
- * after any other answer (a refusal, nothing sent, no answer) the form keeps it, so a
- * deliberate second tap can send it again. Nothing is resent by itself.
+ * web. Every field is plain `remember` (the web's `useState`, gone on a page reload): a rotation, a
+ * process death, a close, a tab change or another server starts it empty, and nothing in it is ever
+ * sent but by Add node. The credential is let go once the server holds the node
+ * ([NodeNotice.heldByServer]); after any other answer (a refusal, nothing sent, no answer) the form
+ * keeps it, so a deliberate second tap can send it again. Nothing is resent by itself. ta-coik.15:
+ * the app going to the background clears nothing (the web has no such clear).
  */
 @Composable
 private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?, notice: NodeNotice?, narrow: Boolean) {
@@ -408,28 +405,11 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
     var label by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var credential by remember { mutableStateOf("") }
-    // r2 (security F2): the credential last handed to the server (an answer that kept it: refused,
-    // lost, no answer). While the field still holds exactly that, the app going to the background
-    // CLEARS it; a credential never sent as it stands is kept (the operator may be away copying
-    // it). Plain remember, like the field.
-    var sentText by remember { mutableStateOf<String?>(null) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && sentText != null) {
-                if (credential == sentText) credential = ""
-                sentText = null
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
     // The answer that was already shown when this form appeared is not this form's.
     val shownBefore = remember { notice?.serial }
     LaunchedEffect(notice?.serial) {
         if (notice != null && notice.serial != shownBefore && notice.action == NodeAction.Add && notice.heldByServer) {
             credential = ""
-            sentText = null
         }
     }
     val ui = settingsText(type.ui, if (narrow) 16f else 13f, 400, lineHeight = 1.5f)
@@ -442,7 +422,7 @@ private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?,
         CredentialField(credential, { if (NodeFormRules.credentialFits(it)) credential = it }, mono, Modifier.fillMaxWidth().heightIn(min = 104.dp))
         val adding = busy?.action == NodeAction.Add
         TetherKey(
-            onClick = { if (actions?.add(origin, credential, label, baseUrl) == true) sentText = credential },
+            onClick = { actions?.add(origin, credential, label, baseUrl) },
             classes = KeyClasses.ButtonSecondary,
             label = if (adding) NodesCopy.ADDING else NodesCopy.ADD,
             enabled = actions != null && busy == null && credential.isNotBlank(),

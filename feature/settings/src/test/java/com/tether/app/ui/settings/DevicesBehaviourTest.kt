@@ -43,7 +43,6 @@ import com.tether.app.ui.settings.DevicesFixtures.TABLET
 import com.tether.app.ui.settings.DevicesFixtures.ok
 import com.tether.app.ui.settings.DevicesFixtures.signInHandle
 import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -85,23 +84,17 @@ class DevicesBehaviourTest {
     private val registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
     private val source = RecordingSecuritySource()
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-    private val systemPairingClipboard = AndroidPairingClipboard(context)
+    private val clipboard = AndroidPairingClipboard(context)
 
-    /** ta-x5e: the life each copy was handed (the clipboard stops retrying its clear past it). */
-    private val copiedLives = CopyOnWriteArrayList<Long>()
-    private val clipboard = object : PairingClipboard by systemPairingClipboard {
-        override fun copy(code: com.tether.app.client.PairingCode, lifeMs: Long): Boolean {
-            copiedLives += lifeMs
-            return systemPairingClipboard.copy(code, lifeMs)
-        }
-    }
+    /** The pairing-code clipboard clear the app used to run (removed in ta-coik.15): the tests advance past it. */
+    private val OLD_CLEAR_AFTER_MS = 30_000L
     private val systemClipboard = context.getSystemService(ClipboardManager::class.java)
 
     private fun show() {
         compose.setContent {
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry, LocalConfirmArmMs provides 0L) {
                 if (shown) {
-                    val controller = rememberDevicesController(source, origin, clipboard = clipboard, now = { NOW })
+                    val controller = rememberDevicesController(source, origin, clipboard = clipboard)
                     SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
                 }
             }
@@ -308,45 +301,44 @@ class DevicesBehaviourTest {
         assertEquals("devices", source.calls.last().name)
     }
 
-    @Test fun copyPutsASensitiveClipThatIsClearedShortlyAfter() {
+    /**
+     * ta-coik.15: the copy stays on the clipboard, as on the web (paired-devices.tsx copyCode only
+     * writes): still there past the old 30 s clear and past the code's life, both clocks advanced.
+     */
+    @Test fun copyPutsASensitiveClipThatStaysOnTheClipboard() {
         opened()
         mint()
         tap(DevicesTags.CodeCopy)
         waitText(DevicesCopy.COPIED)
         assertEquals(SENTINEL, clipText())
-        assertEquals("the code's life left, on the controller's clock", listOf(299_000L), copiedLives.toList())
         val description = systemClipboard.primaryClipDescription!!
         assertEquals(PairingClipboard.CLIP_LABEL, description.label.toString())
         assertTrue("marked sensitive", description.extras!!.getBoolean(PairingClipboard.EXTRA_IS_SENSITIVE))
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(PairingClipboard.CLEAR_AFTER_MS + 1_000))
-        assertFalse("cleared after the delay", clipText()?.contains(SENTINEL) == true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(OLD_CLEAR_AFTER_MS + 1_000))
+        compose.mainClock.advanceTimeBy(OLD_CLEAR_AFTER_MS + 1_000)
+        compose.waitForIdle()
+        assertEquals("still on the clipboard after the old delay", SENTINEL, clipText())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(10))
+        compose.waitForIdle()
+        assertEquals("still on the clipboard past the code's life", SENTINEL, clipText())
     }
 
-    @Test fun somethingCopiedSinceIsLeftAlone() {
-        opened()
-        mint()
-        tap(DevicesTags.CodeCopy)
-        waitText(DevicesCopy.COPIED)
-        systemClipboard.setPrimaryClip(android.content.ClipData.newPlainText("note", "the operator's own text"))
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(PairingClipboard.CLEAR_AFTER_MS + 1_000))
-        assertEquals("the operator's own text", clipText())
-    }
-
-    @Test fun closingSettingsDropsTheCodeAndItsCopy() {
+    /** ta-coik.15: closing Settings forgets the code (the web's dialog `close`), and leaves the clipboard alone. */
+    @Test fun closingSettingsDropsTheCodeAndLeavesItsCopy() {
         opened()
         mint()
         tap(DevicesTags.CodeCopy)
         waitText(DevicesCopy.COPIED)
         shown = false
         compose.waitForIdle()
-        assertFalse("the copy is cleared on close", clipText()?.contains(SENTINEL) == true)
+        assertEquals("the copy stays on close, as on the web", SENTINEL, clipText())
         shown = true
         waitFor(DevicesTags.Paired)
         waitCalls(8)
         source.answerReads()
         waitFor(DevicesTags.Pair)
         assertFalse(exists(DevicesTags.CodeCard))
-        assertNowhere(SENTINEL)
+        assertNowhere(SENTINEL, clipboardToo = false)
     }
 
     @Test fun aTabChangeKeepsTheCode() {
@@ -359,12 +351,16 @@ class DevicesBehaviourTest {
         assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
     }
 
-    @Test fun anExpiredCodeIsDroppedAndItsCopyCleared() {
+    /**
+     * ta-coik.15: an expired code stays on the card with Copy and the expired line, as on the web
+     * (paired-devices.tsx: only closing forgets it); its copy stays on the clipboard, and Copy still copies it.
+     */
+    @Test fun anExpiredCodeStaysWithCopyAndItsCopyStays() {
         // A clock the test moves: the code expires in 5 s.
         var clock = NOW
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { clock })
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
             }
         }
@@ -379,17 +375,20 @@ class DevicesBehaviourTest {
         clock = NOW + 6_000
         compose.mainClock.advanceTimeBy(6_000)
         waitText(DevicesCopy.EXPIRED)
-        assertFalse(exists(DevicesTags.CodeShown))
-        assertFalse(exists(DevicesTags.CodeCopy))
-        assertFalse(clipText()?.contains(SENTINEL) == true)
+        assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
+        assertEquals(SENTINEL, clipText())
+        systemClipboard.clearPrimaryClip()
+        compose.mainClock.advanceTimeBy(2_000)
+        tag(DevicesTags.CodeCopy).performScrollTo().performClick()
+        compose.waitUntil(5_000) { clipText() == SENTINEL }
     }
 
-    /** r2 (security F7): the code expires in the controller, so its plaintext and copy go even while another tab is shown. */
+    /** ta-coik.15: a code that runs out while another tab is shown is still on the card (expired) when the tab comes back. */
     @Test fun aCodeExpiresWhileItsCardIsOffScreen() {
         var clock = NOW
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { clock })
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { clock }))
             }
         }
@@ -405,10 +404,12 @@ class DevicesBehaviourTest {
         waitGone(DevicesTags.CodeCard)
         clock = NOW + 20_000
         compose.mainClock.advanceTimeBy(20_000)
-        compose.waitUntil(5_000) { clipText()?.contains(SENTINEL) != true }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(OLD_CLEAR_AFTER_MS + 1_000))
         state.tab = SettingsTab.Devices
         waitText(DevicesCopy.EXPIRED)
-        assertFalse(exists(DevicesTags.CodeCopy))
+        assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
+        assertTrue(exists(DevicesTags.CodeCopy))
+        assertEquals(SENTINEL, clipText())
     }
 
     @Test fun aDoubleTapOnPairMintsOnce() {
@@ -425,7 +426,7 @@ class DevicesBehaviourTest {
         var captured: DevicesController? = null
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
                 captured = controller
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             }
@@ -573,7 +574,7 @@ class DevicesBehaviourTest {
         var captured: DevicesController? = null
         compose.setContent {
             CompositionLocalProvider(LocalConfirmArmMs provides 0L) {
-                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard, now = { NOW })
+                val controller = rememberDevicesController(source, ORIGIN, clipboard = clipboard)
                 captured = controller
                 SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             }
@@ -760,7 +761,7 @@ class DevicesRotationTest {
         var saved: String? = null
         restoration.setContent {
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Devices) }
-            val controller = rememberDevicesController(source, ORIGIN, now = { NOW })
+            val controller = rememberDevicesController(source, ORIGIN)
             SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
             val registry = LocalSaveableStateRegistry.current
             androidx.compose.runtime.SideEffect { saved = registry?.performSave()?.toString() }
@@ -800,7 +801,7 @@ class DevicesRecreationTest {
         val source = RecordingSecuritySource()
         val content: @androidx.compose.runtime.Composable () -> Unit = {
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Devices) }
-            val controller = rememberDevicesController(source, ORIGIN, now = { NOW })
+            val controller = rememberDevicesController(source, ORIGIN)
             SettingsUnderTest(store.prefs, state, devices = DevicesBinding(controller, now = { NOW }))
         }
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()

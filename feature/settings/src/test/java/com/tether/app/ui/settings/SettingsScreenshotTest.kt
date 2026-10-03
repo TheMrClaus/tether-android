@@ -133,7 +133,7 @@ enum class NodesShot(
  * signed-in sessions (the app's passkey session marked), `-paired` the paired devices with the pair
  * hint, `-self` a device-token sign-in whose only device is this phone, `-token-password` the
  * password switch from a device-token sign-in (ta-coik.5: usable, as on the web),
- * `-code` a fresh code, shown at once as on the web (an obviously FAKE code), `-code-expired` the expired card,
+ * `-code` a fresh code, shown at once as on the web (an obviously FAKE code), `-code-expired` the expired card (the code kept with Copy, as on the web),
  * `-owner` the owner-grade refusal before tether #236 is deployed, `-checking` the opening reads in
  * flight, `-error` a refusal in each area. T10.5 (the panel's passkey prompt available, as on a
  * device): `-passkey-empty` none yet, the add row ready (the web reference's own state),
@@ -347,7 +347,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     setContent {
         focus = androidx.compose.ui.platform.LocalFocusManager.current
         val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
-        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), now = { DevicesFixtures.NOW }, authenticator = NeverPromptsPasskeys) }
+        val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), authenticator = NeverPromptsPasskeys) }
         SettingsUnderTest(
             store.prefs,
             state,
