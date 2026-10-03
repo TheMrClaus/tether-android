@@ -143,7 +143,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 |---|---|---|---|---|---|
 | T9.1 | Inspector + telemetry | VERIFIED | executor-T9.1 @ 2026-09-30 16:58 |  |  |
 | T9.2 | Usage page, accounts, reset credits/grants, deepseek peak | IN-PROGRESS | TheMrClaus @ 2026-10-02 22:04 |  | checkpoint: net source edc4c24d; UI wip in feature/shell ui/usage (UsageDashboard, UsageAccountsDialog, ResetDialogs, DeepSeekPeak) compile… |
-| T9.3 | Scheduled actions | DONE | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
+| T9.3 | Scheduled actions | VERIFIED | TheMrClaus @ 2026-10-02 22:04 | `bd show` |  |
 
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -388,6 +388,7 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-02 | **ta-coik.1 passkeys: rpId stays EXACT host (browser-enforced binding).** Supersedes the brief's "host or a registrable parent". tether derives rpId = its own origin's hostname and checks clientDataJSON origin == that origin (lib/passkeys.mjs:109-148, :444-458), so a browser signs in only with rpId == the console host; the app's origin (android:apk-key-hash) is the same for every host, so a parent rule would let a host under the console's domain relay the console's challenge (security review FAIL F1). Exact host reproduces what the browser enforces; it is not an app-only gate. Kept: Pairing-path offer, autofill-style offer (API 35+). Same-host other-port relay documented as a native-only gap. | Owner rule exception: rules the browser itself enforces | claude-main (coordinator) |
 | 2026-10-03 | **Overnight delegation (owner, 2026-10-02 night).** "Keep working through the night, make decisions on your behalf." The app has exactly the web's permissions and functions; where they differ the app may have MORE functions, never fewer. Do not ask the owner app-vs-web questions. Morning deliverable: a release plus a test list of every user-visible change since 0.15.0 (the owner's installed version). Fix the failing CI runs on GitHub. | Owner | claude-main (coordinator) |
 | 2026-10-03 | **0.17.0 released** (code 35, Latest) from main `2f0c05fd` (two green full gates, 5592/0/4): ta-coik.4, ta-coik.7, ta-coik.2, ta-7rh + ta-ban since 0.16.0. Morning test list for the owner covers 0.15.0 -> 0.17.0. | Owner overnight delegation | claude-main (coordinator) |
+| 2026-10-03 | T9.3 Scheduled: keep the Sandbox field hint "Server tier, else workspace write" although deployed 90fbb9f lacks it (tether main has it, scheduled-actions-view.tsx:538). "Last ran" reads runs[0] as the web does | Text only, restricts nothing; correct once main deploys; app >= web | claude-main (owner delegation) |
 
 ## Session log (append-only)
 
