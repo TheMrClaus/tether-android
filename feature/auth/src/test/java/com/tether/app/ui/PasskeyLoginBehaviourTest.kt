@@ -5,6 +5,7 @@ import androidx.compose.runtime.snapshots.ObserverHandle
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -36,6 +37,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -175,6 +178,13 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
 
     private val server = MockWebServer()
     private val console = Console()
+    // ta-coik.1 r4: a second console (server B) for the tests that move to another server.
+    private val serverB = MockWebServer()
+    private val consoleB = Console()
+    private var serverBStarted = false
+    // ta-coik.1 r4: the client and its store under the screen, for the tests that look underneath.
+    private val settings = InMemorySettings()
+    private lateinit var client: RealTetherClient
 
     // r2 (security F1): the console over TLS with a certificate only this client trusts.
     private val cert = okhttp3.tls.HeldCertificate.Builder().addSubjectAlternativeName("localhost").addSubjectAlternativeName(server.hostName).build()
@@ -197,6 +207,8 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
     @After fun tearDown() {
         writeObserver?.dispose()
         console.releaseAll()
+        consoleB.releaseAll()
+        if (serverBStarted) runCatching { serverB.shutdown() }
         scope.cancel()
         server.shutdown()
         assertTrue("screen state written off the main thread: ${offMainWrites.distinct()}", offMainWrites.isEmpty())
@@ -207,7 +219,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
     private fun launch(authenticator: PasskeyAuthenticator = passkeys) {
         if (tls) server.useHttps(okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(), false)
         server.start()
-        val client = RealTetherClient(settings = InMemorySettings(), httpClient = tlsClient, scope = scope)
+        client = RealTetherClient(settings = settings, httpClient = tlsClient, scope = scope)
         rule.setContent {
             val skin = if (surface == LoginSurface.Studio) TetherSkin.Studio else TetherSkin.StudioDark
             TetherTheme(skin.mode) {
@@ -578,6 +590,89 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         assertEquals(listOf("tether_session=0123456789abcdef0123456789abcdef.YXBwLXBhc3NrZXk"), console.logouts.toList())
         assertTrue("the password's outcome stands", shows(successCopy))
         assertFalse(shows("Passkey sign-in failed."))
+    }
+
+    private fun startServerB(): String {
+        serverB.dispatcher = consoleB
+        serverB.useHttps(okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(), false)
+        serverB.start()
+        serverBStarted = true
+        return serverB.url("/").toString().trimEnd('/')
+    }
+
+    private val passwordSession = "tether_session=fedcba9876543210fedcba9876543210.cGFzc3dvcmQ"
+
+    /**
+     * ta-coik.1 r4 (verifier R3-1, security L1 / ta-5csf; the idea of its probe
+     * scratchR3FormIsEnabledWhileAnOlderPasswordAttemptIsStillPending): a failed pick frees the form while
+     * the older password attempt to A is still at A, so the operator can start a sign-in to B. The one
+     * started LAST decides: A's 200 lands first and is not adopted (revoked at A); B's is, and the screen
+     * shows B's success.
+     */
+    @Test fun aNewerSignInToAnotherServerStartedWhileAnOlderOneIsPendingDecides() {
+        console.loginSucceeds = true
+        console.verifyRefuses = true
+        launch(WaitingPasskeys(autofill = true))
+        typeUrlAndWaitForTheProbe()
+        waitFor { armedNodes().isNotEmpty() }
+        val offer = armedOffer()
+        val gateA = CountDownLatch(1)
+        console.holdLogin = gateA
+        field("Dashboard password").performTextInput("pw")
+        field("Dashboard password").performImeAction()
+        waitFor { console.logins.size == 1 }
+        pick(offer)
+        waitFor { console.verifies.size == 1 }
+        waitFor { shows("That passkey could not be verified.") }
+        // A is still pending, and the form takes a new sign-in.
+        assertEquals(1L, gateA.count)
+        field("Server URL").assertIsEnabled()
+        // A sign-in to B, started now.
+        consoleB.passkeyCount = 0
+        consoleB.loginSucceeds = true
+        val gateB = CountDownLatch(1)
+        consoleB.holdLogin = gateB
+        val baseB = startServerB()
+        field("Server URL").performTextReplacement(baseB)
+        waitFor { consoleB.probes.get() > 0 && !shows("Connecting to your workspace…") && !shows("sign-in requirements · checking…") }
+        field("Dashboard password").performTextReplacement("pw")
+        field("Dashboard password").performImeAction()
+        waitFor { consoleB.logins.size == 1 }
+        // A's 200 lands first: not adopted, revoked at A.
+        gateA.countDown()
+        waitFor { console.logouts.toList() == listOf(passwordSession) }
+        assertEquals("nothing adopted yet", null, runBlocking { settings.credential.first() })
+        // B's lands: adopted, and the screen shows its success.
+        gateB.countDown()
+        waitFor { shows(successCopy) }
+        assertEquals(baseB, runBlocking { settings.baseUrl.first() })
+        assertTrue("nothing of B's revoked", consoleB.logouts.isEmpty())
+    }
+
+    /**
+     * ta-coik.1 r4 (ta-5csf I1): an attempt that ends Superseded with nothing else running (here a
+     * sign-out underneath it) leaves no outcome to show, so the screen goes back to ready instead of
+     * staying busy for good.
+     */
+    @Test fun aLoneSupersededAttemptPutsTheScreenBackToReady() {
+        console.loginSucceeds = true
+        launch()
+        typeUrlAndWaitForTheProbe()
+        val gate = CountDownLatch(1)
+        console.holdLogin = gate
+        field("Dashboard password").performTextInput("pw")
+        field("Dashboard password").performImeAction()
+        waitFor { console.logins.size == 1 }
+        // Busy with it (the control): a disabled field takes no text.
+        fun urlEditable() = has(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Server URL", substring = true)))
+        assertFalse(urlEditable())
+        runBlocking { client.logout() }
+        gate.countDown()
+        waitFor { console.logouts.contains(passwordSession) }
+        waitFor { urlEditable() }
+        rule.waitForIdle()
+        assertFalse("not shown as signed in", shows(successCopy))
+        assertEquals(null, runBlocking { settings.credential.first() })
     }
 
     @Test fun aPhoneThatCannotOfferPasskeysInAutofillAsksForNoChallenge() {
