@@ -642,6 +642,32 @@ class DataStoreSettingsTest {
     }
 
     /**
+     * ta-coik.1 r4 (ta-5csf I2): taking a sign-in back drops its credential AND puts the URL back to the
+     * one stored before (or none), in one step; for any other credential it does nothing at all.
+     */
+    @Test
+    fun revertServerIfRestoresThePreviousUrlOnlyForTheExpectedCredential() = runBlocking {
+        val opened = open()
+        opened.store.setServer(serverA, Credential.Cookie(cookie))
+        assertFalse(opened.store.revertServerIf(Credential.Cookie("another-cookie"), "https://previous.example.com"))
+        assertEquals(serverA, opened.store.baseUrl.first())
+        assertEquals(Credential.Cookie(cookie), opened.store.credential.first())
+        assertTrue(opened.store.revertServerIf(Credential.Cookie(cookie), "https://previous.example.com"))
+        assertNull(opened.store.credential.first())
+        assertEquals("https://previous.example.com", opened.store.baseUrl.first())
+        opened.close()
+        val reopened = open()
+        assertNull("the take-back reached disk", reopened.store.credential.first())
+        assertEquals("https://previous.example.com", reopened.store.baseUrl.first())
+        // None stored before: none after.
+        reopened.store.setServer(serverA, Credential.DeviceToken("tthr_token"))
+        assertTrue(reopened.store.revertServerIf(Credential.DeviceToken("tthr_token"), null))
+        assertNull(reopened.store.baseUrl.first())
+        assertNull(reopened.store.credential.first())
+        reopened.close()
+    }
+
+    /**
      * ta-jt9 L-X: the check and the clear are ONE step under the store's lock. A setServer that
      * is queued behind the compare-and-clear lands after it, and one queued before it makes it
      * a no-op; never "checked old, then cleared new".
