@@ -181,7 +181,7 @@ class InspectorModelTest {
         val repo = m.repository!!
         assertEquals("feature/inspector", repo.branch!!.text)
         assertEquals("2 commits ahead upstream", repo.divergence)
-        assertEquals(PullRequestLine("Pull request #12", "Open · Approved"), repo.pullRequest)
+        assertEquals(PullRequestLine("Pull request #12", "Open · Approved", "https://example.test/pr/12"), repo.pullRequest)
         assertEquals("2 files", repo.changesCount)
 
         assertTrue(m.mcpHealth)
@@ -427,6 +427,47 @@ class InspectorModelTest {
             PullRequestLine("Pull request #4", "Open"),
             pr(ChangeRequestReading(obj("""{"number":4,"state":"OPEN","isDraft":false,"reviewDecision":"FOO_BAR","mergeable":"MERGEABLE"}"""), false)),
         )
+    }
+
+    /** ta-coik.14 (repository-panel.tsx:56): the headline is a link exactly when the reply carries the pull request's address. */
+    @Test
+    fun thePullRequestHeadlineLinksToItsAddress() {
+        val base = InspectorBoards.session(metrics = SessionMetrics(gitBranch = "b"))
+        fun pr(json: String) = InspectorBoards.model(base, replies = InspectorReplies(changeRequest = ChangeRequestReading(obj(json), false))).repository!!.pullRequest!!
+        assertEquals("https://github.com/o/r/pull/9", pr("""{"number":9,"url":"https://github.com/o/r/pull/9","state":"OPEN"}""").url)
+        // `cr.url ? <a> : text`: null and empty are plain text.
+        assertNull(pr("""{"number":9,"url":null,"state":"OPEN"}""").url)
+        assertNull(pr("""{"number":9,"url":"","state":"OPEN"}""").url)
+        assertNull(pr("""{"number":9,"state":"OPEN"}""").url)
+        // Outside the web's link schemes it is never a link (a browser refuses a javascript: tab too).
+        assertNull(pr("""{"number":9,"url":"javascript:alert(1)","state":"OPEN"}""").url)
+        assertEquals("Pull request #9", pr("""{"number":9,"url":"javascript:alert(1)","state":"OPEN"}""").headline)
+    }
+
+    /**
+     * ta-coik.14 (worktree-services-card.tsx:101, 110-127): Restart and Stop while a script runs or
+     * starts, Run in every other state; the frames name the script exactly as declared.
+     */
+    @Test
+    fun eachScriptOffersTheWebsKeysForItsState() {
+        val states = listOf("idle", "starting", "running", "stopping", "exited", "failed")
+        val entries = states.joinToString(",") { """{"name":"s-$it","type":"script","command":"x","status":"$it"}""" }
+        val rows = services(obj("""{"sessionId":"s1","scripts":[$entries],"setupStatus":"ok","setupLog":[],"configWarnings":[]}"""))!!.scripts
+        assertEquals(states.associate { "s-$it" to (it == "running" || it == "starting") }, rows.associate { it.scriptName to it.running })
+        val rlo = "\u202e"
+        val hostile = services(obj("""{"sessionId":"s1","scripts":[{"name":"dev$rlo","type":"script","command":"x","status":"idle"}]}"""))!!.scripts.single()
+        assertEquals("dev\u202e", hostile.scriptName)
+    }
+
+    /** ta-coik.14 (worktree-services-card.tsx:157-163): the last `worktree-logs` reply, under the script it names. */
+    @Test
+    fun theLogsReplyIsKeptForTheScriptItNames() {
+        val snapshot = obj("""{"sessionId":"s1","scripts":[{"name":"dev","type":"script","command":"x","status":"idle"}]}""")
+        assertNull(services(snapshot)!!.logs)
+        val logs = services(snapshot, logs = com.tether.app.client.WorktreeLogsReading("dev", listOf("a", "b"), 0))!!.logs!!
+        assertEquals("dev", logs.name)
+        assertEquals(Seg("a\nb", Rule.Code), logs.output)
+        assertNull(services(snapshot, logs = com.tether.app.client.WorktreeLogsReading("dev", emptyList(), 0))!!.logs!!.output)
     }
 
     @Test

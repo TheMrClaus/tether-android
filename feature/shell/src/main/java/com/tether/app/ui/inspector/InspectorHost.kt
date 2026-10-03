@@ -40,6 +40,7 @@ fun ColumnScope.InspectorHost(
     val fileDiffs by vm.client.gitFileDiffs.collectAsStateWithLifecycle()
     val scripts by vm.client.worktreeScripts.collectAsStateWithLifecycle()
     val changeRequests by vm.client.changeRequests.collectAsStateWithLifecycle()
+    val logs by vm.client.worktreeLogs.collectAsStateWithLifecycle()
     val selected by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     // T15.7: a service's "Open" link resolves only against the paired server's canonical origin.
     val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
@@ -50,7 +51,7 @@ fun ColumnScope.InspectorHost(
     // clearing event), so the panel is re-derived at that instant too.
     val expiry = rememberRateLimitExpiry(view)
     val runs = remember(view) { collectSubagentRuns(view?.obj) }
-    val replies = InspectorReplies(diffs[session.id], scripts[session.id], changeRequests[session.id])
+    val replies = InspectorReplies(diffs[session.id], scripts[session.id], changeRequests[session.id], logs[session.id])
     // Keyed on the minute tick and the expiry; derived at the real instant it recomputes.
     val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin, expiry) {
         inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv.current(), origin)
@@ -63,6 +64,10 @@ fun ColumnScope.InspectorHost(
         onRequestFileDiff = { path -> vm.client.requestGitFileDiff(session.id, path) },
         serviceOpen = vm.client.serviceOpen,
         onUseCodexReset = onUseCodexReset?.let { open -> codexResetRequest(session)?.let { request -> { open(request) } } },
+        // ta-coik.14: dashboard.tsx:1457-1459.
+        onRefreshChangeRequest = { vm.client.requestChangeRequest(session.id, refresh = true) },
+        onWorktreeScript = { name, action -> vm.client.controlWorktreeScript(session.id, name, action) },
+        onWorktreeLogs = { name -> vm.client.requestWorktreeLogs(session.id, name) },
     )
 }
 

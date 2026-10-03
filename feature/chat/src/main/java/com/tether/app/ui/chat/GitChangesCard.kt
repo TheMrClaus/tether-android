@@ -62,7 +62,8 @@ import com.tether.app.ui.text.codeDirection
  * T6.2: components/git-changes-card.tsx (#159 #2, v110) — the live diff of a repo session against
  * its base ref, with per-file hunks fetched only when a file is expanded (`git-diff-file`).
  * Read-only: Tether shows git state; it never stages, commits or pushes. Status is always words.
- * Its host, the repository panel, is T8.3's; the card and the request/reply state are here.
+ * Its host is the inspector's Repository band (feature/shell Inspector.kt); the card and the
+ * request/reply state are here.
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
@@ -336,7 +337,7 @@ private fun HunkPre(hunks: String) {
             .testTag("git-hunks"),
     ) {
         Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)) {
-            // Round 4: the same caps as the transcript's diffs, so the host (T8.3) cannot ship it
+            // Round 4: the same caps as the transcript's diffs, so the host (the inspector) cannot ship it
             // uncapped — DIFF_CARD_MAX_ROWS lines, each cut at UNIFIED_LINE_MAX, then "+N more lines".
             // R4-M2: walked with indexOf, at most DIFF_CARD_MAX_ROWS lines built, the rest only counted.
             val (lines, totalLines) = remember(hunks) { boundedLines(hunks, DIFF_CARD_MAX_ROWS) }

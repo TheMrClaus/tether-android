@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -54,6 +56,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -66,6 +69,8 @@ import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.chat.CustomTabLinkOpener
 import com.tether.app.ui.chat.GitChangesCard
 import com.tether.app.ui.chat.LinkOpener
+import com.tether.app.ui.chat.LocalLinkOpener
+import com.tether.app.ui.chat.openChatLink
 import com.tether.app.ui.chat.ProviderNoticeRow
 import com.tether.app.ui.chat.RUN_ERROR
 import com.tether.app.ui.chat.RUN_RUNNING
@@ -112,8 +117,9 @@ import kotlinx.coroutines.launch
  * Sizes are the panel's coarse-pointer set (`@media (max-width: 47.999rem), (pointer: coarse)`,
  * telemetry-panel.css 338-353): Android is always a coarse pointer, on a phone and a tablet alike.
  *
- * Display only: no key here sends anything but the reads the web's panel makes (a file's diff
- * hunks) and a service's links; the Limits band's "Use reset" opens T9.2's shared Codex confirmation.
+ * The keys are the web panel's own: a file's diff hunks, the pull request's link and its refresh,
+ * each worktree script's Run / Stop / Restart and "Output of" view (ta-coik.14), a service's links,
+ * and the Limits band's "Use reset" (T9.2's shared Codex confirmation).
  */
 
 object InspectorTags {
@@ -136,6 +142,9 @@ object InspectorTags {
     const val PerModel = "inspector-per-model"
     const val Repository = "inspector-repository"
     const val Changes = "inspector-changes"
+    const val PullRequestLink = "inspector-pull-request-link"
+    const val RefreshPullRequest = "inspector-pull-request-refresh"
+    const val ScriptLog = "inspector-script-log"
     const val Limits = "inspector-limits"
     const val Services = "inspector-services"
     const val ServiceOpen = "inspector-service-open"
@@ -186,6 +195,12 @@ fun ColumnScope.Inspector(
     serviceOpen: ServiceOpenSource = ServiceOpenSource.Unavailable,
     /** T9.2 (inspector.tsx:759-769): the banked resets row's "Use reset" opens the shared Codex confirmation. */
     onUseCodexReset: (() -> Unit)? = null,
+    /** ta-coik.14 (dashboard.tsx:1457): "Refresh pull request status", `change-request` with `refresh: true`. */
+    onRefreshChangeRequest: () -> Unit = {},
+    /** ta-coik.14 (dashboard.tsx:1458): Run / Stop / Restart, the script's exact name and "start" | "stop" | "restart". */
+    onWorktreeScript: (name: String, action: String) -> Unit = { _, _ -> },
+    /** ta-coik.14 (dashboard.tsx:1459): "Output of", asks for the script's recent output. */
+    onWorktreeLogs: (name: String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().testTag(InspectorTags.Root)) {
         HeaderBlock(model.identity, model.header)
@@ -204,8 +219,8 @@ fun ColumnScope.Inspector(
             McpHealthCard(servers, "Plugins", compact = false, count = { n -> "$n loaded" })
         }
         model.tokens?.let { TokensBandView(it) }
-        model.repository?.let { RepositoryPanel(it, fileDiffs, onRequestFileDiff) }
-        model.services?.let { ServicesCard(it, serviceOpener, serviceOpen) }
+        model.repository?.let { RepositoryPanel(it, fileDiffs, onRequestFileDiff, onRefreshChangeRequest) }
+        model.services?.let { ServicesCard(it, serviceOpener, serviceOpen, onWorktreeScript, onWorktreeLogs) }
         if (model.codexNotices.isNotEmpty()) {
             Column(
                 Modifier.fillMaxWidth().padding(top = LocalTetherTokens.current.css.spaceLg).semantics { contentDescription = "Codex notices" }.testTag(InspectorTags.CodexNotices),
@@ -955,7 +970,12 @@ private fun TiDisclosure(
 
 /** repository-panel.tsx, flattened into the band rhythm (telemetry-panel.css 327-328). */
 @Composable
-private fun RepositoryPanel(repo: RepositorySection, fileDiffs: Map<String, ServerMessage.GitDiffFile>?, onRequestFileDiff: (String) -> Unit) {
+private fun RepositoryPanel(
+    repo: RepositorySection,
+    fileDiffs: Map<String, ServerMessage.GitDiffFile>?,
+    onRequestFileDiff: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
     val t = LocalTetherTokens.current
     Column(
         Modifier
@@ -970,10 +990,7 @@ private fun RepositoryPanel(repo: RepositorySection, fileDiffs: Map<String, Serv
         repo.branch?.let { branch ->
             RepoLine(TetherIcons.GitBranch, listOf(branch), repo.divergence, code = true)
         }
-        repo.pullRequest?.let { pr ->
-            // Plain text: the link opens nowhere from here (the app's link gate is ta-fz3's, the refresh T8.3's).
-            RepoLine(TetherIcons.GitPullRequest, listOf(app(pr.headline)), pr.state, code = false)
-        }
+        repo.pullRequest?.let { pr -> PullRequestRow(pr, onRefresh) }
         repo.changes?.let { diff ->
             var open by rememberSaveable { mutableStateOf(false) }
             TiDisclosure("Changes", open, { open = !open }, Modifier.testTag(InspectorTags.Changes), count = repo.changesCount, rule = t.line) {
@@ -981,6 +998,61 @@ private fun RepositoryPanel(repo: RepositorySection, fileDiffs: Map<String, Serv
                 GitChangesCard(diff, fileDiffs, onRequestFile = onRequestFileDiff)
             }
         }
+    }
+}
+
+/**
+ * repository-panel.tsx:53-61: the headline (a link to the pull request when the reply carries its
+ * address, opening on one tap like the web's `<a target="_blank">` and a chat link), its state, and
+ * the refresh key. The refresh shows nothing of its own: the reply replaces the line (an `unknown`
+ * one reads "PR status unavailable"), as on the web.
+ */
+@Composable
+private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val context = LocalContext.current
+    val opener = LocalLinkOpener.current
+    val style = cssText(type.ui, 0.72f, 400)
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = t.css.spaceMd),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Icon(TetherIcons.GitPullRequest, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+        Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
+            val url = pr.url
+            if (url != null) {
+                Text(
+                    pr.headline,
+                    style = style.copy(textDecoration = TextDecoration.Underline),
+                    color = t.ink,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClickLabel = "Open in browser") { openChatLink(context, opener, url, t.graphite) }
+                        .testTag(InspectorTags.PullRequestLink),
+                )
+            } else {
+                Text(pr.headline, style = style, color = t.muted)
+            }
+            pr.state?.let { Text(it, style = cssText(type.ui, 0.65f, 400), color = t.muted, modifier = Modifier.padding(top = t.css.spaceXs)) }
+        }
+        IconKey(TetherIcons.RefreshCw, "Refresh pull request status", Modifier.testTag(InspectorTags.RefreshPullRequest), onRefresh)
+    }
+}
+
+/** An `.icon-button` / `.actions button`: a 14dp glyph in a 44dp target, named by [label]. */
+@Composable
+private fun IconKey(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    Box(
+        modifier
+            .size(Ti.target)
+            .clip(RoundedCornerShape(t.radiusSm))
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -1004,12 +1076,20 @@ private fun RepoLine(icon: androidx.compose.ui.graphics.vector.ImageVector, line
 // --- Services --------------------------------------------------------------------------------
 
 /**
- * worktree-services-card.tsx: the MCP card's frame, rows in words. Display only but for the links
- * of a running service (worktree-services-card.tsx:141-154), which open on a tap, as on the web:
- * "Open" through [serviceOpen] (the app's sign-in), "On this machine" straight to [opener].
+ * worktree-services-card.tsx: the MCP card's frame, rows in words. Each script has the web's keys
+ * (worktree-services-card.tsx:110-131): Restart and Stop while it runs or starts, Run otherwise, and
+ * "Output of" toggling its log view; none asks first, as on the web. A running service's links
+ * (141-154) open on a tap: "Open" through [serviceOpen] (the app's sign-in), "On this machine"
+ * straight to [opener].
  */
 @Composable
-private fun ServicesCard(services: ServicesSection, opener: LinkOpener, serviceOpen: ServiceOpenSource) {
+private fun ServicesCard(
+    services: ServicesSection,
+    opener: LinkOpener,
+    serviceOpen: ServiceOpenSource,
+    onControl: (name: String, action: String) -> Unit,
+    onRequestLogs: (name: String) -> Unit,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusMd)
@@ -1052,9 +1132,28 @@ private fun ServicesCard(services: ServicesSection, opener: LinkOpener, serviceO
         }
         if (services.scripts.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp)) {
+                // worktree-services-card.tsx:52, 63-70: one log view open at a time; opening one asks for its output.
+                var openLog by rememberSaveable { mutableStateOf<String?>(null) }
                 services.scripts.forEachIndexed { i, row ->
                     val last = i == services.scripts.lastIndex
-                    ServiceItem(row, Modifier.then(if (last) Modifier else Modifier.bottomRule(tint)), opener, serviceOpen)
+                    val name = row.scriptName
+                    ServiceItem(
+                        row,
+                        Modifier.then(if (last) Modifier else Modifier.bottomRule(tint)),
+                        opener,
+                        serviceOpen,
+                        onControl = { action -> onControl(name, action) },
+                        logOpen = openLog == name,
+                        onToggleLog = {
+                            if (openLog == name) {
+                                openLog = null
+                            } else {
+                                openLog = name
+                                onRequestLogs(name)
+                            }
+                        },
+                        log = services.logs?.takeIf { it.name == name }?.output,
+                    )
                 }
             }
         }
@@ -1062,7 +1161,17 @@ private fun ServicesCard(services: ServicesSection, opener: LinkOpener, serviceO
 }
 
 @Composable
-private fun ServiceItem(row: ServiceRow, modifier: Modifier, opener: LinkOpener, serviceOpen: ServiceOpenSource) {
+private fun ServiceItem(
+    row: ServiceRow,
+    modifier: Modifier,
+    opener: LinkOpener,
+    serviceOpen: ServiceOpenSource,
+    onControl: (action: String) -> Unit,
+    logOpen: Boolean,
+    onToggleLog: () -> Unit,
+    /** The output of this script's last `worktree-logs` reply; null = none for it, or no lines. */
+    log: Seg?,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val problem = if (row.failed) t.warning else t.muted
@@ -1071,15 +1180,37 @@ private fun ServiceItem(row: ServiceRow, modifier: Modifier, opener: LinkOpener,
         modifier.fillMaxWidth().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm).semantics(mergeDescendants = true) {},
         verticalArrangement = Arrangement.spacedBy(3.2.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm), verticalAlignment = Alignment.CenterVertically) {
             RuledText(listOf(row.name), cssText(type.mono, 0.76f, 400), t.ink, Modifier.weight(1f, fill = false), maxLines = 1)
             Text(row.status, style = cssText(type.ui, 0.76f, 400), color = problem)
+            Spacer(Modifier.weight(1f))
+            val label = row.name.text
+            Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                if (row.running) {
+                    IconKey(TetherIcons.RotateCcw, "Restart $label") { onControl("restart") }
+                    IconKey(TetherIcons.Square, "Stop $label") { onControl("stop") }
+                } else {
+                    IconKey(TetherIcons.Play, "Run $label") { onControl("start") }
+                }
+                IconKey(
+                    TetherIcons.Terminal,
+                    "Output of $label",
+                    Modifier.semantics { stateDescription = if (logOpen) "Expanded" else "Collapsed" },
+                    onToggleLog,
+                )
+            }
         }
         RuledText(listOf(row.command), mono, t.muted)
         row.address?.let { RuledText(listOf(app("Own address "), it), mono, t.ink) }
         if (row.open != null || row.local != null) ServiceLinks(row.open, row.local, opener, serviceOpen)
         row.unavailable?.let { Text(it, style = mono, color = t.warning, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
         row.error?.let { RuledText(listOf(it), mono, t.warning, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        // `.log`: at most 12rem tall, scrolled within, from the top; the web's copy when there is nothing.
+        if (logOpen) {
+            Box(Modifier.fillMaxWidth().padding(top = 3.2.dp).heightIn(max = 192.dp).verticalScroll(rememberScrollState()).testTag(InspectorTags.ScriptLog)) {
+                RuledText(listOf(log ?: app("No output yet.")), cssText(type.mono, 0.68f, 400, lineHeight = 1.5f), t.muted)
+            }
+        }
     }
 }
 

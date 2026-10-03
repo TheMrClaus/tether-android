@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.tether.app.client.ChangeRequestReading
 import com.tether.app.client.ConsentGuard
 import com.tether.app.client.LabelText
+import com.tether.app.client.WorktreeLogsReading
 import com.tether.app.protocol.fold.numberToString
 import com.tether.app.protocol.helpers.ClaudeResetGrantsView
 import com.tether.app.protocol.helpers.Format
@@ -24,6 +25,7 @@ import com.tether.app.ui.chat.RunSource
 import com.tether.app.ui.chat.STATUS_TEXT
 import com.tether.app.ui.chat.SubagentRun
 import com.tether.app.ui.chat.WorktreeDiffSummaryView
+import com.tether.app.ui.chat.isSafeHref
 import com.tether.app.ui.chat.providerNotices
 import com.tether.app.ui.chat.runStatusText
 import com.tether.app.ui.chat.subagentRosterSummary
@@ -317,7 +319,7 @@ data class SpecRow(
 @Immutable
 data class Note(val line: Line, val warning: Boolean = false, val status: Boolean = false)
 
-/** repository-panel.tsx: the branch, the linked pull request and the changes (read-only). */
+/** repository-panel.tsx: the branch, the linked pull request (its link and refresh) and the changes. */
 @Immutable
 data class RepositorySection(
     val branch: Seg?,
@@ -330,19 +332,32 @@ data class RepositorySection(
     val changesCount: String get() = "$changedFiles ${if (changedFiles == 1) "file" else "files"}"
 }
 
-/** `inspector-pull-request`: the headline ("Pull request #12", "No pull request", "PR status unavailable") and its state. */
+/**
+ * `inspector-pull-request`: the headline ("Pull request #12", "No pull request", "PR status
+ * unavailable") and its state. [url]: the pull request's address when the reply carries one
+ * (repository-panel.tsx:56 makes the headline a link then); a link opens it on a tap.
+ */
 @Immutable
-data class PullRequestLine(val headline: String, val state: String?)
+data class PullRequestLine(val headline: String, val state: String?, val url: String? = null)
 
 
-/** worktree-services-card.tsx, display only (running and stopping services is T8.3's). */
+/** worktree-services-card.tsx: the declared scripts, each with Run / Stop / Restart and its "Output of" view. */
 @Immutable
 data class ServicesSection(
     val count: String,
     val setup: ServiceSetup?,
     val configWarnings: List<Seg>,
     val scripts: List<ServiceRow>,
+    /** The session's last `worktree-logs` reply (null = none yet); shown under the row it names. */
+    val logs: ServiceLogs? = null,
 )
+
+/**
+ * One `worktree-logs` reply: the script it names ([name], exact) and its output as one code block,
+ * null when it has no lines ("No output yet.").
+ */
+@Immutable
+data class ServiceLogs(val name: String, val output: Seg?)
 
 @Immutable
 data class ServiceSetup(val text: String, val failed: Boolean, val log: Seg?)
@@ -350,6 +365,10 @@ data class ServiceSetup(val text: String, val failed: Boolean, val log: Seg?)
 @Immutable
 data class ServiceRow(
     val name: Seg,
+    /** The script's name exactly as the snapshot declares it: what the `worktree-script` / `worktree-logs` frames name. */
+    val scriptName: String,
+    /** Running or starting: Restart and Stop; otherwise Run (worktree-services-card.tsx:101, 110-127). */
+    val running: Boolean,
     val status: String,
     val failed: Boolean,
     val command: Seg,
@@ -395,6 +414,8 @@ data class InspectorReplies(
     val worktreeDiff: JsonObject? = null,
     val worktreeScripts: JsonObject? = null,
     val changeRequest: ChangeRequestReading? = null,
+    /** ta-coik.14: the session's last `worktree-logs` reply. */
+    val worktreeLogs: WorktreeLogsReading? = null,
 )
 
 
@@ -431,7 +452,7 @@ fun inspectorModel(
         opencodePlugins = session.engineGeneration == "opencode-serve-v2" && state != null,
         tokens = tokensBand(session, state, runs, metrics, env),
         repository = repository(session, replies),
-        services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin) else null,
+        services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin, replies.worktreeLogs) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
             providerNotices(state.obj["providerNotices"], "Codex").map { it.copy(dismissKey = null) }
@@ -777,7 +798,9 @@ internal fun pullRequestLine(reading: ChangeRequestReading): PullRequestLine {
     if (reading.unknown) return PullRequestLine("PR status unavailable", null)
     val cr = reading.changeRequest ?: return PullRequestLine("No pull request", null)
     val number = cr.number("number")?.let(::numberToString) ?: "?"
-    return PullRequestLine("Pull request #$number", changeRequestLine(cr).ifEmpty { null })
+    // repository-panel.tsx:56: a link when `cr.url` is set; an href outside the web's link schemes is never one.
+    val url = cr.string("url")?.takeIf { it.isNotEmpty() && isSafeHref(it) }
+    return PullRequestLine("Pull request #$number", changeRequestLine(cr).ifEmpty { null }, url)
 }
 
 internal fun repository(session: AgentSession, replies: InspectorReplies): RepositorySection? {
@@ -848,10 +871,16 @@ private fun JsonObject.strings(key: String): List<String> =
     (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.orEmpty()
 
 /**
- * worktree-services-card.tsx; null when the card would be an empty frame. Display only but for
- * T15.7's "Open" link, which exists only for [sessionId] on [serverOrigin] (see [ServiceOpenLink]).
+ * worktree-services-card.tsx; null when the card would be an empty frame. T15.7's "Open" link
+ * exists only for [sessionId] on [serverOrigin] (see [ServiceOpenLink]); [logs] is the session's
+ * last `worktree-logs` reply.
  */
-internal fun services(snapshot: JsonObject?, sessionId: String? = null, serverOrigin: String? = null): ServicesSection? {
+internal fun services(
+    snapshot: JsonObject?,
+    sessionId: String? = null,
+    serverOrigin: String? = null,
+    logs: WorktreeLogsReading? = null,
+): ServicesSection? {
     if (snapshot == null) return null
     val scripts = (snapshot["scripts"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty().take(LabelText.MAX_ITEMS)
     val setupStatus = snapshot.string("setupStatus")
@@ -878,6 +907,7 @@ internal fun services(snapshot: JsonObject?, sessionId: String? = null, serverOr
         setup = setup,
         configWarnings = warnings.map(::prose),
         scripts = scripts.mapNotNull { serviceRow(it, sessionId, serverOrigin) },
+        logs = logs?.let { ServiceLogs(it.name, it.lines.takeIf { l -> l.isNotEmpty() }?.let { l -> Seg(l.joinToString("\n"), Rule.Code) }) },
     )
 }
 
@@ -898,6 +928,8 @@ private fun serviceRow(o: JsonObject, sessionId: String?, serverOrigin: String?)
     val open = if (live) serviceOpen(o, name, sessionId, serverOrigin) else null
     return ServiceRow(
         name = code(name),
+        scriptName = name,
+        running = status == "running" || status == "starting",
         status = words,
         failed = failed,
         command = code(o.string("command").orEmpty()),
