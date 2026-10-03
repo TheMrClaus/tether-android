@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -20,7 +21,12 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import com.tether.app.client.CodexSnapshot
+import com.tether.app.client.SessionControlsGuard
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.tether.app.client.ControlResult
 import com.tether.app.client.ModeVocabulary
 import com.tether.app.client.OpencodeSnapshot
@@ -91,13 +97,36 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
         rule.onNodeWithTag(tag).performClick()
         settle()
     }
+
+    /**
+     * ta-coik.9: a press that begins on [tag], then [change] lands (the control changes under the
+     * finger), then the finger lifts.
+     */
+    fun pressAcross(tag: String, change: () -> Unit) {
+        rule.onNodeWithTag(tag).performTouchInput { down(center) }
+        settle(16)
+        change()
+        settle(16)
+        rule.onNodeWithTag(tag).performTouchInput { up() }
+        settle()
+    }
+
+    /** ta-coik.9: what the recorded taps put on the wire ([SessionControlsGuard.frame]). */
+    fun frames(): List<JsonObject> = recorder.sent.map { SessionControlsGuard.frame(ComposerFixtures.SESSION_ID, it, "op-1").toJsonObject() }
+}
+
+/** ta-coik.9: the web's frame for a [type] with [body] (hooks/use-tether.ts:1693-1728). */
+internal fun webFrame(type: String, body: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject {
+    put("type", type)
+    put("sessionId", ComposerFixtures.SESSION_ID)
+    body()
 }
 
 /**
  * T7.2 behaviour on a phone (the web below 64rem): the one settings key in the toolbar opens the
- * session sheet; a pick sends exactly its value through [SessionControlActions.onControl]; Mode rows
- * are armed; the most permissive posture needs the confirmation; nothing received, restored or
- * recomposed sends anything; a locked session sends nothing.
+ * session sheet; a pick sends exactly its value through [SessionControlActions.onControl]; every row
+ * acts on the first tap (ta-coik.9, no arm delay); nothing received, restored or recomposed sends
+ * anything; a locked session sends nothing.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -174,7 +203,8 @@ class SessionControlsPhoneBehaviourTest {
     }
 
     @Test
-    fun providerKeysReArmWhenTheCatalogIsReplaced() {
+    fun providerKeysActOnTheFirstTapForTheCatalogTheyShow() {
+        // ta-coik.9: codex-controls.tsx:317-320, a plain button (disabled only while busy): no arm delay.
         h.session = SessionControlFixtures.codex
         h.controls = null
         h.codex = SessionControlFixtures.codexState
@@ -182,18 +212,27 @@ class SessionControlsPhoneBehaviourTest {
         h.click("session-settings-trigger")
         h.click("sheet-row-Provider controls")
         h.click("codex-compact")
-        assertTrue("armed: the first tap as the panel appears lands on nothing", h.recorder.sent.isEmpty())
-        h.arm()
-        h.click("codex-compact")
         assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-3")), h.recorder.sent)
-        // The catalog is re-read: the keys re-arm for the new snapshot.
+        // The catalog is re-read: the next tap, at once, acts for the new snapshot.
         h.codex = SessionControlFixtures.codexStateNext
         h.settle(16)
         h.click("codex-compact")
-        assertEquals(1, h.recorder.sent.size)
-        h.arm()
+        assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-3"), SessionControl.CodexCompaction("catalog-4")), h.recorder.sent)
+    }
+
+    @Test
+    fun aPressBegunBeforeANewCatalogIsDropped() {
+        // ta-coik.9's kept stale-tap guard: a press that began on the catalog-3 key never acts for catalog-4.
+        h.session = SessionControlFixtures.codex
+        h.controls = null
+        h.codex = SessionControlFixtures.codexState
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Provider controls")
+        h.pressAcross("codex-compact") { h.codex = SessionControlFixtures.codexStateNext }
+        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
         h.click("codex-compact")
-        assertEquals(SessionControl.CodexCompaction("catalog-4"), h.recorder.sent.last())
+        assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-4")), h.recorder.sent)
     }
 
     @Test
@@ -206,7 +245,6 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         h.click("session-settings-trigger")
         h.click("sheet-row-Provider controls")
-        h.arm()
         h.click("opencode-apply-mode")
         assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("default", "oc-1")), h.recorder.sent)
         rule.onNodeWithText("That option is no longer offered — the setting was not changed.").assertExists()
@@ -227,7 +265,6 @@ class SessionControlsPhoneBehaviourTest {
         h.settle()
         rule.onNodeWithContentDescription("Plan (planx), Plans only (really: everything)").performClick()
         h.settle()
-        h.arm()
         h.click("opencode-apply-mode")
         assertEquals(listOf<SessionControl>(SessionControl.OpencodeMode("planx", "oc-1")), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
@@ -243,22 +280,36 @@ class SessionControlsPhoneBehaviourTest {
         rule.onNodeWithText("Reasoning effort set to low.").assertExists()
         h.click("session-settings-trigger")
         h.click("sheet-row-Fast")
-        h.arm()
         h.click("control-option-on")
         assertEquals(listOf(SessionControl.Effort("low"), SessionControl.FastMode(true)), h.recorder.sent)
+        // ta-coik.9: the frames are the web's (hooks/use-tether.ts:1716-1717).
+        assertEquals(webFrame("set-fast-mode") { put("enabled", true) }, h.frames().last())
     }
 
     @Test
-    fun modeRowsAreArmed() {
+    fun modeRowsActOnTheFirstTap() {
+        // ta-coik.9: the web's Mode select has no arm delay (chat-view.tsx:4352-4367, chooseMode :2501-2503).
         h.show()
         h.click("session-settings-trigger")
         rule.onNodeWithTag("sheet-row-Mode").performClick()
         h.settle()
-        // A tap aimed at what was there before the list appeared lands on nothing.
-        rule.onNodeWithTag("control-option-plan").assertIsNotEnabled().performClick()
+        rule.onNodeWithTag("control-option-plan").assertIsEnabled().performClick()
         h.settle(0)
-        assertTrue(h.recorder.sent.isEmpty())
-        h.arm()
+        assertEquals(listOf<SessionControl>(SessionControl.Mode("plan")), h.recorder.sent)
+        assertEquals(listOf(webFrame("set-mode") { put("permissionMode", "plan") }), h.frames())
+    }
+
+    @Test
+    fun aPressOnAModeRowWhoseOptionChangedUnderTheFingerIsDropped() {
+        // ta-coik.9's kept stale-tap guard: the row a press began on now holds another option.
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.opencodeControls
+        h.show()
+        h.click("session-settings-trigger")
+        h.click("sheet-row-Mode")
+        val swapped = SessionControlFixtures.opencodeControls.copy(modes = SessionControlFixtures.opencodeControls.modes!!.reversed())
+        h.pressAcross("control-option-plan") { h.controls = swapped }
+        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
         h.click("control-option-plan")
         assertEquals(listOf<SessionControl>(SessionControl.Mode("plan")), h.recorder.sent)
     }
@@ -269,7 +320,6 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         h.click("session-settings-trigger")
         h.click("sheet-row-Mode")
-        h.arm()
         h.click("control-option-${ModeVocabulary.AUTO}")
         assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO)), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
@@ -286,7 +336,6 @@ class SessionControlsPhoneBehaviourTest {
         h.click("control-option-claude-sonnet-5")
         h.click("session-settings-trigger")
         h.click("sheet-row-Mode")
-        h.arm()
         h.click("control-option-plan")
         assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
     }
@@ -431,7 +480,6 @@ class SessionControlsPhoneBehaviourTest {
         h.click("session-settings-trigger")
         h.click("sheet-row-Provider controls")
         assertEquals("opening the panel re-reads the catalogs", 1, h.recorder.codexReads)
-        h.arm()
         rule.onNodeWithTag("codex-compact").performClick()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.CodexCompaction("catalog-3")), h.recorder.sent)
@@ -446,7 +494,6 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         h.click("session-settings-trigger")
         h.click("sheet-row-Auto approve")
-        h.arm()
         h.click("control-option-true")
         assertEquals(listOf<SessionControl>(SessionControl.CodexAutoApprove(true, "catalog-3")), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
@@ -469,10 +516,9 @@ class SessionControlsTabletBehaviourTest {
         h.click("control-option-claude-haiku-5")
         h.click("control-mode")
         h.click("control-option-acceptEdits")
-        assertEquals("Mode rows are armed", listOf<SessionControl>(SessionControl.Model("claude-haiku-5")), h.recorder.sent)
-        h.arm()
-        h.click("control-option-acceptEdits")
+        // ta-coik.9: the Mode menu's rows act on the first tap, as the web's TetherSelect does.
         assertEquals(listOf(SessionControl.Model("claude-haiku-5"), SessionControl.Mode("acceptEdits")), h.recorder.sent)
+        assertEquals(webFrame("set-mode") { put("permissionMode", "acceptEdits") }, h.frames().last())
     }
 
     @Test
@@ -481,18 +527,36 @@ class SessionControlsTabletBehaviourTest {
         h.session = SessionControlFixtures.opencode
         h.controls = SessionControlFixtures.opencodeControls
         h.show()
-        h.click("control-auto")
-        assertTrue("the toggle is armed", h.recorder.sent.isEmpty())
-        h.arm()
+        // ta-coik.9: the first tap toggles (chat-view.tsx:4384-4387), no arm delay.
         h.click("control-auto")
         assertEquals(listOf<SessionControl>(SessionControl.Mode(ModeVocabulary.AUTO)), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
         rule.onAllNodesWithText("Turn on", substring = true).assertCountEquals(0)
         h.session = SessionControlFixtures.opencode.copy(approvalPolicy = "never")
-        h.arm()
+        h.settle()
         rule.onNodeWithText("Auto-approves permission requests that are not explicitly denied").assertExists()
         h.click("control-auto")
         assertEquals(SessionControl.Mode("default"), h.recorder.sent.last())
+    }
+
+    @Test
+    fun aPressOnTheAutoChipThatFlippedUnderTheFingerIsDropped() {
+        // ta-coik.9's kept stale-tap guard: another device turned Auto on while the finger was down.
+        h.session = SessionControlFixtures.opencode
+        h.controls = SessionControlFixtures.opencodeControls
+        h.show()
+        h.pressAcross("control-auto") { h.session = SessionControlFixtures.opencode.copy(approvalPolicy = "never") }
+        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
+        h.click("control-auto")
+        assertEquals(listOf<SessionControl>(SessionControl.Mode("default")), h.recorder.sent)
+    }
+
+    @Test
+    fun theAutoContinueKeyActsOnTheFirstTapWithTheWebsFrame() {
+        // ta-coik.9: chat-view.tsx:4401-4405 -> set-auto-continue-on-limit (hooks/use-tether.ts:1726-1727).
+        h.show()
+        h.click("control-auto-continue")
+        assertEquals(listOf(webFrame("set-auto-continue-on-limit") { put("enabled", true) }), h.frames())
     }
 
     @Test
@@ -517,7 +581,6 @@ class SessionControlsTabletBehaviourTest {
         h.controls = SessionControlFixtures.sneakyOpencodeControls
         h.show()
         h.click("control-mode")
-        h.arm()
         rule.onNodeWithTag("control-option-planx").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Plan (planx), Plans only (really: everything)")))
         h.click("control-option-planx")
         assertEquals(listOf<SessionControl>(SessionControl.Mode("planx")), h.recorder.sent)
@@ -530,7 +593,6 @@ class SessionControlsTabletBehaviourTest {
         h.show()
         h.click("control-fast")
         assertTrue("opening is a read", h.recorder.sent.isEmpty())
-        h.arm()
         h.click("control-option-on")
         assertEquals(listOf<SessionControl>(SessionControl.FastMode(true)), h.recorder.sent)
     }

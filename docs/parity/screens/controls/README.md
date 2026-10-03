@@ -25,7 +25,13 @@ Codex / opencode-serve session's row):
 
 ## Deliberate divergences (logged for the reviewer)
 
-1. **Mode, Auto and Fast rows are armed** (T6.3/T6.4), in the row's menus and in the sheet.
+1. *(Retired by ta-coik.9.)* The Mode, Auto, Fast, Auto approve and Auto-continue rows, the Auto
+   chip, the Auto-continue key and the provider-panel keys no longer have a 500 ms arm delay: the
+   first tap acts, as on the web (chat-view.tsx:4352-4413; codex-controls.tsx and
+   opencode-serve-controls.tsx disable their buttons only while busy). Kept, because it never
+   blocks a tap on the control that is shown: a press that began on a control which changed under
+   the finger (another option at that row, the toggle's other state, a new catalog revision) is
+   dropped, and touches through another app's overlay are refused.
 2. **Provider-controls panels live in the session sheet** (hub row "Provider controls", and a
    "Provider controls" key at the end of the tablet row). The web keeps them in Settings → Advanced,
    which the app does not have yet (T10.1).
@@ -48,7 +54,8 @@ Codex / opencode-serve session's row):
    `default` / `build` / `plan` is drawn in `--warning` unless a source explicitly marks it safe (either
    source flagging it is enough; picking it sends at once, as on the web), and shows "label (value)"
    when its label could pass for another agent's.
-   Provider actions carry the catalog revision they were drawn from, and their keys are armed.
+   Provider actions carry the catalog revision they were drawn from (their keys act on the first
+   tap, see 1).
    Server-supplied names, hints and errors are cleaned (bidi / invisible characters, whitespace)
    and bounded. Round 3: an agent's value is compared RAW
    against the built-ins and shown with its invisible characters spelled out (`\u{200B}`), so

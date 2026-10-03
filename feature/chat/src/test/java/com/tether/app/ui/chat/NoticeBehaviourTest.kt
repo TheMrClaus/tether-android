@@ -538,15 +538,14 @@ class AutoContinueBehaviourTest {
     }
 
     @Test
-    fun theSheetRowsAreArmed() {
+    fun theSheetRowsActOnTheFirstTap() {
+        // ta-coik.9: session-settings-sheet.tsx's Off / On rows have no arm delay.
         h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
         h.show()
-        h.arm()
         openAutoContinueSheet()
-        // A tap aimed at what was there before the list appeared lands on nothing.
-        rule.onNodeWithTag("control-option-false").assertIsNotEnabled().performClick()
+        rule.onNodeWithTag("control-option-false").assertIsEnabled().performClick()
         h.settle(0)
-        assertTrue(h.recorder.sent.isEmpty())
+        assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(false)), h.recorder.sent)
     }
 
     @Test
@@ -584,7 +583,7 @@ class AutoContinueBehaviourTest {
     }
 }
 
-/** T6.6: the Auto-continue key in the wide row (from 64rem): armed, and sent on the tap (ta-coik.7). */
+/** T6.6: the Auto-continue key in the wide row (from 64rem): sent on the first tap (ta-coik.7, ta-coik.9). */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
 class AutoContinueTabletBehaviourTest {
@@ -592,17 +591,14 @@ class AutoContinueTabletBehaviourTest {
     private val h = ControlsHost(rule)
 
     @Test
-    fun theKeyIsArmedAndSendsOnTheTap() {
+    fun theKeySendsOnTheFirstTap() {
         h.show()
-        h.click("control-auto-continue")
-        assertTrue("the key is armed", h.recorder.sent.isEmpty())
-        h.arm()
         h.click("control-auto-continue")
         assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
         rule.onNodeWithText("Turn on \u2068Auto-continue\u2069?").assertDoesNotExist()
         h.session = SessionControlFixtures.claude.copy(autoContinueOnLimit = true)
-        h.arm()
+        h.settle()
         h.click("control-auto-continue")
         assertEquals(SessionControl.AutoContinueOnLimit(false), h.recorder.sent.last())
     }

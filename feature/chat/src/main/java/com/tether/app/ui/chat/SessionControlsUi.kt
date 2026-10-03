@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -184,6 +185,20 @@ internal fun rememberArmedControl(identity: Any, actionable: Boolean): ArmedCont
 }
 
 /**
+ * ta-coik.9: a session control acts on its FIRST tap, as on the web (chat-view.tsx:4352-4413, the
+ * Mode select, the Auto chip and the Auto-continue checkbox; codex-controls.tsx /
+ * opencode-serve-controls.tsx, buttons disabled only while busy): there is no arm delay. The one
+ * guard kept is the stale-tap guard: [content] is keyed by [identity], so a press that began on a
+ * control which changed under the finger (another option now at that row, the toggle's other
+ * state, a new catalog revision) goes away with the old node instead of landing on the new one.
+ * Touches through an overlay are refused, as before.
+ */
+@Composable
+internal fun StaleTapGuard(identity: Any, content: @Composable (Modifier) -> Unit) {
+    key(identity) { content(Modifier.refuseObscuredTouches()) }
+}
+
+/**
  * The operator's handlers for the row and the sheet (Composer builds them; each ends in
  * [SessionControlActions.onControl]).
  */
@@ -213,7 +228,7 @@ internal class ControlHandlers(
  * `.chat-mode-row.chat-mode-row-live` (chat-view.tsx:4203-4373): the Model / Effort / Mode pills,
  * each named by its icon (Cpu, Brain, Shield — the word is the pill's accessible name), the Auto
  * toggle where Auto is not a Mode row, a Provider controls key (Android: the web keeps those panels
- * in Settings) and the flex-1 hint. Mode and Auto rows are armed.
+ * in Settings) and the flex-1 hint. Every control acts on the first tap ([StaleTapGuard]).
  */
 @Composable
 internal fun ComposerOptionsRow(
@@ -292,21 +307,22 @@ internal fun ComposerOptionsRow(
         }
         // T6.6 (chat-view.tsx:4331-4348): the Auto-continue checkbox; Check when on, Clock when off.
         controls.autoContinue?.let { ac ->
-            // Armed like the Auto chip: a tap aimed at what was there before lands on nothing.
-            val arming = rememberArmedControl("auto-continue" to ac.on, enabled)
-            ControlPill(
-                label = "Auto-continue",
-                icon = if (ac.on) TetherIcons.Check else TetherIcons.Clock,
-                enabled = enabled && arming.armed,
-                modifier = arming.modifier,
-                active = ac.on,
-                chevron = false,
-                role = Role.Checkbox,
-                contentDescription = "Auto-continue when the limit resets",
-                stateDescription = controlLockCopy(lock) ?: if (ac.on) "On" else "Off",
-                onClick = { handlers.setAutoContinue(!ac.on) },
-                testTag = "control-auto-continue",
-            )
+            // ta-coik.9: the first tap acts (chat-view.tsx:4401-4405); a press on the other state is dropped.
+            StaleTapGuard("auto-continue" to ac.on) { guard ->
+                ControlPill(
+                    label = "Auto-continue",
+                    icon = if (ac.on) TetherIcons.Check else TetherIcons.Clock,
+                    enabled = enabled,
+                    modifier = guard,
+                    active = ac.on,
+                    chevron = false,
+                    role = Role.Checkbox,
+                    contentDescription = "Auto-continue when the limit resets",
+                    stateDescription = controlLockCopy(lock) ?: if (ac.on) "On" else "Off",
+                    onClick = { handlers.setAutoContinue(!ac.on) },
+                    testTag = "control-auto-continue",
+                )
+            }
         }
         handlers.openProviderControls?.let { open ->
             ControlPill(
@@ -534,16 +550,22 @@ internal fun ControlOptionList(control: SelectControl, armedRows: Boolean, onSel
  * One row (`.tether-select-option`): ≥44dp, the label (white/650 when selected, `--warning` when
  * danger), its description in `--muted`, a provider tag, and a leading-edge-free violet Check on
  * the selected row (colour never carries the state alone: the check and the selected state do).
+ * [armedRow] (kept name): the row carries the [StaleTapGuard]; it has no arm delay (ta-coik.9).
  */
 @Composable
 fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean, divider: Boolean, onClick: () -> Unit) {
+    // ta-coik.9: a guarded row acts on the first tap; a press on the option that was at this row before is dropped.
+    if (armedRow) StaleTapGuard(option.value) { guard -> OptionRowBody(option, selected, divider, guard, onClick) }
+    else OptionRowBody(option, selected, divider, Modifier, onClick)
+}
+
+@Composable
+private fun OptionRowBody(option: ControlOption, selected: Boolean, divider: Boolean, guard: Modifier, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val actionable = !option.disabled
-    val arming = if (armedRow) rememberArmedControl(option.value, actionable) else null
-    val usable = actionable && (arming?.armed ?: true)
+    val usable = !option.disabled
     val labelColor = when {
         option.danger -> t.warning
         selected -> t.white
@@ -552,7 +574,7 @@ fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean
     Column(
         Modifier
             .fillMaxWidth()
-            .then(arming?.modifier ?: Modifier)
+            .then(guard)
             .clickable(interaction, indication = null, enabled = usable, role = Role.Button, onClick = onClick)
             .clearAndSetSemantics {
                 role = Role.Button
@@ -597,24 +619,26 @@ fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean
 
 /**
  * issue #48's standalone Auto toggle (`.chat-mode-select.draft-auto-chip`): Zap + "Auto"; on =
- * `is-danger` AND the state spoken ("On"), so the posture is never colour alone. Armed.
+ * `is-danger` AND the state spoken ("On"), so the posture is never colour alone. ta-coik.9: the
+ * first tap toggles (chat-view.tsx:4384-4387); a press on the other state is dropped ([StaleTapGuard]).
  */
 @Composable
 private fun AutoChip(on: Boolean, enabled: Boolean, lockCopy: String?, onToggle: () -> Unit) {
-    val arming = rememberArmedControl("auto" to on, enabled)
-    ControlPill(
-        label = "Auto",
-        icon = TetherIcons.Zap,
-        enabled = enabled && arming.armed,
-        danger = on,
-        chevron = false,
-        role = Role.Switch,
-        contentDescription = "Auto mode",
-        stateDescription = lockCopy ?: if (on) "On — runs everything without asking" else "Off",
-        onClick = onToggle,
-        modifier = arming.modifier,
-        testTag = "control-auto",
-    )
+    StaleTapGuard("auto" to on) { guard ->
+        ControlPill(
+            label = "Auto",
+            icon = TetherIcons.Zap,
+            enabled = enabled,
+            danger = on,
+            chevron = false,
+            role = Role.Switch,
+            contentDescription = "Auto mode",
+            stateDescription = lockCopy ?: if (on) "On — runs everything without asking" else "Off",
+            onClick = onToggle,
+            modifier = guard,
+            testTag = "control-auto",
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

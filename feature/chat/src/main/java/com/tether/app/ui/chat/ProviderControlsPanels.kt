@@ -305,9 +305,10 @@ internal fun OpencodeControlsPanel(
 }
 
 /**
- * Round 2 (L2): a provider action key, armed for the snapshot it was drawn from (T6.3/T6.4): usable
- * [CONSENT_ARM_DELAY_MS] after the panel (or a new catalog revision) appears, and again after it
- * moves; touches through an overlay are refused. Only its tap calls [onTap].
+ * Round 2 (L2): a provider action key, bound to the snapshot it was drawn from. ta-coik.9: it acts
+ * on the first tap, as the web's buttons do (codex-controls.tsx:312-320, opencode-serve-controls.tsx:
+ * 193/225, disabled only while busy); a press begun before a new catalog revision is dropped
+ * ([StaleTapGuard]). Only its tap calls [onTap].
  */
 @Composable
 private fun ArmedPanelKey(
@@ -320,16 +321,17 @@ private fun ArmedPanelKey(
     contentDescription: String? = null,
     onTap: () -> Unit,
 ) {
-    val arming = rememberArmedControl(revision to id, enabled)
-    TetherKey(
-        onClick = { if (arming.armed) onTap() },
-        classes = KeyClasses.ButtonSecondary,
-        label = label,
-        icon = icon,
-        enabled = enabled && arming.armed,
-        contentDescription = contentDescription,
-        modifier = arming.modifier.testTag(tag),
-    )
+    StaleTapGuard(revision to id) { guard ->
+        TetherKey(
+            onClick = onTap,
+            classes = KeyClasses.ButtonSecondary,
+            label = label,
+            icon = icon,
+            enabled = enabled,
+            contentDescription = contentDescription,
+            modifier = guard.testTag(tag),
+        )
+    }
 }
 
 @Composable
