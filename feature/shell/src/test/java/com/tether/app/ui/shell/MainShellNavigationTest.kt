@@ -208,10 +208,10 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         assertTrue(backLeavesTheApp)
     }
 
-    @Test fun scheduledAndUsageAreShownUnavailableWithTheirReason() {
+    @Test fun usageIsShownUnavailableWithItsReason() {
         launch()
         onOverview()
-        for (destination in listOf(TopBarDestination.Scheduled, TopBarDestination.Usage)) {
+        for (destination in listOf(TopBarDestination.Usage)) {
             val node = rule.onNodeWithTag(ShellTags.nav(destination))
             node.assertIsNotEnabled()
             assertEquals(TopbarReasons.NOT_YET, node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription))
@@ -220,6 +220,46 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         rule.onNodeWithTag(ShellTags.AccountsKey).assertIsNotEnabled()
         rule.onNodeWithTag(ShellTags.FilesKey).assertIsNotEnabled()
         assertTrue(selected(ShellTags.nav(TopBarDestination.Overview)))
+    }
+
+    /**
+     * T9.3 (dashboard.tsx:223, 387-392, 1446, 1587-1600): Scheduled is a live destination: the bar
+     * and the rail's key open it beside the rail (the key reads current), its actions reach the
+     * client, Open last session shows Sessions, and Back steps back.
+     */
+    @Test fun scheduledOpensFromTheBarAndTheRailBesideTheRail() {
+        client.show(session("s1"), freshTree())
+        client.scheduled.value = com.tether.app.client.ScheduledActionsState(
+            schedules = listOf(
+                com.tether.app.client.ScheduledAction(
+                    id = "sch", name = "Triage", prompt = "p", cwd = "/w", provider = "claude", profileId = null, model = null,
+                    reasoningEffort = null, permissionMode = null, sandboxPolicy = null, useWorktree = false, cron = "0 9 * * 1-5",
+                    timeZone = "UTC", maxRuns = null, status = "active", createdAt = 1, updatedAt = 1, nextRunAt = null, lastRunAt = 2,
+                    runs = listOf(com.tether.app.client.ScheduledActionRun("r", "succeeded", 1, 2, "s1", null, false)),
+                ),
+            ),
+            loaded = true,
+        )
+        launch()
+        onOverview()
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Scheduled)).performClick()
+        awaitTag(com.tether.app.ui.scheduled.ScheduledTags.Root)
+        assertTrue(selected(ShellTags.nav(TopBarDestination.Scheduled)))
+        assertTrue("the rail stays beside Scheduled", exists(ShellTags.Sidebar))
+        assertTrue("the rail's key reads current", selected(com.tether.app.ui.sidebar.SidebarTags.Scheduled))
+        rule.waitUntil(5_000) { storedView() == "scheduled" }
+        rule.onNodeWithText("Run now").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("sch" to "run"), client.scheduleControls.toList())
+        rule.onNodeWithText("Open last session").performClick()
+        awaitTag(ShellTags.WorkspaceHeader)
+        assertEquals("s1", vm.selectedSessionId.value)
+        assertTrue(selected(ShellTags.nav(TopBarDestination.Sessions)))
+        // The rail's own key opens it too; Back returns to the session.
+        rule.onNodeWithTag(com.tether.app.ui.sidebar.SidebarTags.Scheduled).performClick()
+        awaitTag(com.tether.app.ui.scheduled.ScheduledTags.Root)
+        back()
+        awaitTag(ShellTags.WorkspaceHeader)
     }
 
     @Test fun theViewAndWhatIsBehindItSurviveRotation() {
@@ -295,6 +335,18 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
 @OptIn(ExperimentalTestApi::class)
 class MainShellPhoneNavigationTest : NavigationBase(1082, 2402) {
 
+    /** T9.3: from the phone's menu Scheduled shows with the drawer key (the rail exists there). */
+    @Test fun theMenuOpensScheduledWithTheDrawerKey() {
+        launch()
+        onOverview()
+        rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
+        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Scheduled)).performClick()
+        awaitTag(com.tether.app.ui.scheduled.ScheduledTags.Root)
+        assertTrue(exists(ShellTags.MenuKey))
+        back()
+        onOverview()
+    }
+
     @Test fun theMenuNavigatesAndTheDrawerKeyBelongsToSessions() {
         client.show(session("s1"), freshTree())
         launch()
@@ -302,7 +354,7 @@ class MainShellPhoneNavigationTest : NavigationBase(1082, 2402) {
         assertFalse("no rail, so no drawer key on the Overview", exists(ShellTags.MenuKey))
         rule.onNodeWithTag(ShellTags.ToolsMenuKey).performClick()
         assertTrue(selected(ShellTags.menuNav(TopBarDestination.Overview)))
-        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Scheduled)).assertIsNotEnabled()
+        rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Usage)).assertIsNotEnabled()
         rule.onNodeWithTag(ShellTags.menuNav(TopBarDestination.Sessions)).performClick()
         awaitTag(ShellTags.MenuKey)
         assertFalse("an item closes the menu", exists(ShellTags.ToolsMenu))

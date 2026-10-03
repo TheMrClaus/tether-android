@@ -130,6 +130,8 @@ object SidebarTags {
     const val List = "sidebar-list"
     const val NewSession = "sidebar-new-session"
     const val AddWorkspace = "sidebar-add-workspace"
+    /** T9.3: the rail's Scheduled actions key. */
+    const val Scheduled = "sidebar-scheduled"
     fun row(key: String) = "sidebar-row:$key"
     fun freshness(key: String) = "sidebar-freshness:$key"
     fun blockDot(workspace: String) = "sidebar-block-dot:$workspace"
@@ -415,7 +417,8 @@ private fun ScheduledNav(count: Int, active: Boolean, onClick: (() -> Unit)?) {
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .alpha(if (onClick == null) 0.48f else 1f)
             .border(1.dp, Color.Transparent, shape)
-            .padding(start = 0.875f.rem, end = 0.875f.rem),
+            .padding(start = 0.875f.rem, end = 0.875f.rem)
+            .testTag(SidebarTags.Scheduled),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {

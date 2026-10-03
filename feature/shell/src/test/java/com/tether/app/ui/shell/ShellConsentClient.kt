@@ -21,6 +21,11 @@ import kotlinx.coroutines.flow.StateFlow
 class ShellConsentClient : TetherClient {
     /** T6.3: the link state the consent cards read. */
     val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
+    // T9.3: the scheduled actions the Scheduled destination draws, and the controls it sent.
+    val scheduled = MutableStateFlow(com.tether.app.client.ScheduledActionsState())
+    override val scheduledActions: StateFlow<com.tether.app.client.ScheduledActionsState> get() = scheduled
+    val scheduleControls = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    override fun controlSchedule(scheduleId: String, action: String): Boolean = scheduleControls.add(scheduleId to action)
     override val connection: StateFlow<ConnectionState> get() = link
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
     override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(emptyList())

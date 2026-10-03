@@ -614,8 +614,10 @@ private fun ScheduleRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp, if (layout.mobile) Alignment.Start else Alignment.End),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ≤ 47.9375rem: `.schedule-action { flex: 1 1 auto }`.
-            val grow = if (layout.mobile) Modifier.weight(1f, fill = true) else Modifier
+            // ≤ 47.9375rem `.schedule-action { flex: 1 1 auto }` grows the keys to fill each line; a
+            // FlowRow weight shares the line evenly instead and clips a long legend, so the keys keep
+            // their own width (whole legends first).
+            val grow = Modifier
             latestRun?.sessionId?.let { sessionId ->
                 RowAction("Open last session", { onOpenSession(sessionId) }, layout, grow)
             }
