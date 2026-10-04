@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.DefaultNetworkWatch
 import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
 import com.tether.app.push.PushScope
@@ -177,12 +178,19 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     // Foreground/background is process-wide (ProcessLifecycleOwner, wired in
     // TetherApp): client.setAppForeground re-checks the link on return.
 
-    // Network: reconnect the moment a default network comes back.
+    // Network: reconnect the moment a default network comes back. ta-coik.32 (R1): when the default
+    // network CHANGED, a socket opened on the previous one is dead: it is replaced at once rather
+    // than pinged for 8 s (the web's `online` only pings).
     DisposableEffect(client) {
         val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val watch = DefaultNetworkWatch<Network>()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                client.reconnectIfIdle()
+                if (watch.available(network)) client.onDefaultNetworkChanged() else client.reconnectIfIdle()
+            }
+
+            override fun onLost(network: Network) {
+                watch.lost(network)
             }
         }
         try {

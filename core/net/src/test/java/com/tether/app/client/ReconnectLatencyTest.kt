@@ -3,6 +3,8 @@ package com.tether.app.client
 import okhttp3.WebSocket
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -68,5 +70,78 @@ class ReconnectLatencyTest {
         h.client.setAppForeground(false)
         lose(ws)
         assertEquals(550L, h.scheduler.await(::isReconnectDelay).delayMs)
+    }
+
+    // ------------------------------------------------------------------
+    // R1: a socket presumed dead is replaced, not pinged
+    // ------------------------------------------------------------------
+
+    @Test
+    fun backAfterALongAbsenceTheOpenSocketIsReplacedAtOnceWithoutAPing() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        // A new socket at once: no timer had to fire, and nothing went out on the old one.
+        val next = h.nextSocket()
+        h.handshake(next)
+        assertTrue("no ping wait", h.scheduler.pending().none { it.delayMs == ConnectionTimings.PING_TIMEOUT_MS })
+        assertTrue("no reconnect timer", h.scheduler.history().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun backAfterAShortTripTheOpenSocketIsStillPingedAsOnTheWeb() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS - 1)
+        h.client.setAppForeground(true)
+        assertEquals("ping", h.expectFrame("ping").type())
+        assertEquals("only the first probe and upgrade: no new connect", 2, h.server.requestCount)
+    }
+
+    @Test
+    fun aDefaultNetworkChangeReplacesAnOpenSocketAtOnce() {
+        connected()
+        h.enqueueConnect()
+        h.client.onDefaultNetworkChanged()
+        h.handshake(h.nextSocket())
+        assertTrue("no ping wait", h.scheduler.pending().none { it.delayMs == ConnectionTimings.PING_TIMEOUT_MS })
+        assertTrue("no reconnect timer", h.scheduler.history().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun aDefaultNetworkChangeCutsABackoffWaitShort() {
+        val ws = connected()
+        lose(ws) // lost right after its handshake: a backoff wait
+        val wait = h.scheduler.await(::isReconnectDelay)
+        h.enqueueConnect()
+        h.client.onDefaultNetworkChanged()
+        h.handshake(h.nextSocket())
+        assertTrue("the wait was cancelled", wait.cancelled)
+    }
+
+    @Test
+    fun aDefaultNetworkChangeDoesNothingWhileSuspendedInTheBackground() {
+        connected()
+        h.client.setAppForeground(false)
+        h.scheduler.await { it == ConnectionTimings.BACKGROUND_GRACE_MS }.fire()
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        val requests = h.server.requestCount
+        h.client.onDefaultNetworkChanged()
+        assertEquals(requests, h.server.requestCount)
+        assertTrue(h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun theWatchReportsAChangeOnlyForAnotherOrAReturningDefaultNetwork() {
+        val watch = DefaultNetworkWatch<String>()
+        assertFalse("the first network is the current one, not a change", watch.available("wifi"))
+        assertFalse("the same one again is not a change", watch.available("wifi"))
+        assertTrue("another default network", watch.available("cell"))
+        watch.lost("wifi") // not the current one: nothing
+        assertFalse(watch.available("cell"))
+        watch.lost("cell")
+        assertTrue("the same network back after it was lost", watch.available("cell"))
     }
 }

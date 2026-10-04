@@ -38,6 +38,14 @@ object ConnectionTimings {
      * this period at most; every later attempt backs off.
      */
     const val IMMEDIATE_RECONNECT_MIN_LIFETIME_MS: Long = 10_000
+
+    /**
+     * ta-coik.32 (R1): back in front after at least this long away, an open socket is not pinged
+     * (up to [PING_TIMEOUT_MS]) but replaced at once. A backgrounded app is frozen by the OS and
+     * cannot answer the server's heartbeat (a ping every 30 s, the socket ended at the second
+     * miss), so after this long the link is presumed gone; a shorter trip keeps the web's ping.
+     */
+    const val BACKGROUND_REPLACE_AFTER_MS: Long = 25_000
 }
 
 /** Handle to a task scheduled on a [Scheduler]. */

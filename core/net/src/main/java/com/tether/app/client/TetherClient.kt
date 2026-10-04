@@ -610,9 +610,19 @@ interface TetherClient {
     fun reconnectIfIdle()
 
     /**
+     * ta-coik.32 (R1): the DEFAULT network changed (another network became the default one, or the
+     * same one came back after it was lost). A socket opened on the previous network is dead, so it
+     * is dropped and a new link is opened at once instead of being pinged for
+     * [ConnectionTimings.PING_TIMEOUT_MS]. A no-op in a terminal state. Default: [reconnectIfIdle].
+     */
+    fun onDefaultNetworkChanged() = reconnectIfIdle()
+
+    /**
      * Process lifecycle (ProcessLifecycleOwner ON_START / ON_STOP), the native
      * twin of the web's `visibilitychange`. Foreground: re-check the link at once
-     * (ping an open socket, reconnect a dead one). Background: after
+     * (ping an open socket, reconnect a dead one); ta-coik.32 (R1): after
+     * [ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS] or more away, an open socket is replaced at once
+     * instead (the server's heartbeat has ended it while the app could not answer). Background: after
      * [ConnectionTimings.BACKGROUND_GRACE_MS] the socket is closed and reconnects
      * stop until the next foreground; FCM covers the background.
      */

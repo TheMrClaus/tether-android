@@ -358,9 +358,11 @@ class RealTetherClient(
     // Backgrounded past the grace period: no socket, no reconnects, until foreground.
     private var backgroundSuspended = false
     private var inForeground = true
+    // ta-coik.32 (R1): when the app last left the foreground ([clock]); null while in front.
+    private var backgroundedAt: Long? = null
     private var backgroundTask: Cancellable? = null
     private var connecting = false
-    // Connect-attempt generation: bumped by every sign-in, stop() and logout(),
+    // Connect-attempt generation: bumped by every sign-in, stop(), logout() and default-network change,
     // which also free [connecting]. An attempt carries the generation it started
     // in; once that is stale the attempt does NOTHING (no state, no socket, and
     // it never owns or releases [connecting]), so neither an old credential nor
@@ -2344,6 +2346,7 @@ class RealTetherClient(
 
     override fun setAppForeground(foreground: Boolean) {
         if (foreground) {
+            var stale: WebSocket? = null
             val resume = synchronized(lock) {
                 inForeground = true
                 backgroundTask?.cancel()
@@ -2351,18 +2354,64 @@ class RealTetherClient(
                 val wasSuspended = backgroundSuspended
                 backgroundSuspended = false
                 if (wasSuspended) backoff.reset()
+                // R1: long enough away that the server's heartbeat has ended the link.
+                val away = backgroundedAt?.let { clock() - it }
+                backgroundedAt = null
+                if (!wasSuspended && socketOpen && away != null && away >= ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS) stale = socket
                 wasSuspended
             }
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
             // reconnect a dead one immediately.
-            if (resume) connectNow() else reconnectIfIdle()
+            when {
+                resume -> connectNow()
+                stale != null -> replaceSocketNow(stale!!)
+                else -> reconnectIfIdle()
+            }
             return
         }
         synchronized(lock) {
             inForeground = false
+            if (backgroundedAt == null) backgroundedAt = clock()
             backgroundTask?.cancel()
             backgroundTask = scheduler.schedule(ConnectionTimings.BACKGROUND_GRACE_MS) { suspendForBackground() }
         }
+    }
+
+    override fun onDefaultNetworkChanged() {
+        var abandoned: WebSocket? = null
+        val stale = synchronized(lock) {
+            if (haltedLocked()) return
+            if (socketOpen) return@synchronized socket
+            // A probe or an upgrade still in flight on the previous network is abandoned (it does
+            // nothing once stale), as is a backoff wait: a new attempt starts now.
+            if (connecting || socket != null) {
+                endConnectAttemptsLocked()
+                abandoned = detachSocketLocked()
+            }
+            reconnectTask?.cancel()
+            reconnectTask = null
+            null
+        }
+        abandoned?.cancel()
+        if (stale != null) replaceSocketNow(stale) else connectNow()
+    }
+
+    /**
+     * ta-coik.32 (R1): [ws] is presumed dead (another network, or a long absence): it is let go and a
+     * new link is opened at once, with no ping wait and no backoff. Its late callbacks find it retired.
+     */
+    private fun replaceSocketNow(ws: WebSocket) {
+        synchronized(lock) {
+            if (socket !== ws) return
+            detachSocketLocked()
+            connecting = false
+            reconnectTask?.cancel()
+            reconnectTask = null
+            if (haltedLocked()) return
+        }
+        ws.cancel()
+        connectionState.value = ConnectionState.Disconnected
+        connectNow()
     }
 
     /** Grace period over: close the socket and stop reconnecting until foreground. */
