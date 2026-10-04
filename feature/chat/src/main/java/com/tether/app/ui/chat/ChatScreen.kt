@@ -127,21 +127,21 @@ fun ChatScreen(
     // T6.4: background commands — open one's output; STOP one (a tap on its Stop key, and only then).
     var openCommandId by remember(session?.id) { mutableStateOf<String?>(null) }
     val onOpenCommand: (String) -> Unit = remember(session?.id) { { id -> openCommandId = id } }
+    // ta-coik.22: a copy that is not live (offline, catching up) leaves the command keys live, as the
+    // web does ([commandKeyLock]); a tap asks the client, which refuses off a live link and says why.
     val stopLock = stopLockCopy(
-        consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session),
+        commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)),
     )
-    // Round 2: one "Stopping…" latch per command for this session (the bar and the sheet share it);
-    // L3: the stop is bound to the server origin this row was drawn for.
-    // L-3 (r3): a stop sent on one link never latches the keys past it.
-    val stopLatches = rememberStopLatches(session?.id, Triple(connection, liveNow, consentOrigin))
-    val commandActions = remember(session?.id, stopLock, consentOrigin, vm, stopLatches) {
+    // L3: the stop is bound to the server origin this row was drawn for. ta-coik.22: no "Stopping…"
+    // latch (the web's Stop key has none).
+    val commandActions = remember(session?.id, stopLock, consentOrigin, vm) {
         val s = session
         val drawnFor = consentOrigin
-        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) }, stopLatches)
+        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) })
     }
-    // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock:
-    // a saved or catching-up copy's "busy" never interrupts a real turn. Bound to the server the key
-    // was drawn for; the client re-checks it all under its lock.
+    // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock.
+    // ta-coik.22: like the web's, they stay live on a copy that is not live; bound to the server the
+    // key was drawn for and to its turn, the client re-checks it all under its lock.
     // T6.7 r3: a failed interrupt of the turn that is still cancelling unlocks the keys for a retry.
     val failedInterrupts by vm.client.failedInterrupts.collectAsStateWithLifecycle()
     val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync), failedInterruptTurn = session?.let { failedInterrupts[it.id] })
@@ -689,7 +689,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
 
     confirmEnd?.let { drawn ->
         // T13.2 r2/r3: only while the link is up, this session's copy live, and on the server the
-        // confirmation was opened for. T6.7: it closes itself the moment that stops holding.
+        // confirmation was opened for. ta-coik.22: as on the web, it stays open meanwhile (key disabled).
         val endable = endAllowed && drawn.sessionId == session.id && drawn.drawnFor != null && drawn.drawnFor == origin
         EndSessionDialog(
             sessionName = session.name,

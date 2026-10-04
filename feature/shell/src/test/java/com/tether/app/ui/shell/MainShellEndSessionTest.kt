@@ -40,8 +40,9 @@ import org.robolectric.annotation.Config
 
 /**
  * T13.2 r2 through MainShell: End session needs a live link AND a live copy of the session, at the
- * header key and again at the confirmation (a link that drops under the open dialog disables it).
- * The kill asks the client to re-check the live set (requireLive).
+ * header key and again at the confirmation (a link that drops under the open dialog disables its
+ * key; ta-coik.22: the dialog itself stays open, as the web's). The kill asks the client to re-check
+ * the live set (requireLive).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w600dp-h1000dp-mdpi")
@@ -96,12 +97,13 @@ class MainShellEndSessionTest {
     }
 
     /**
-     * T13.2 r2 / T6.7: a link that drops under the open dialog closes it (a saved copy never ends a
-     * session, and the question never outlives the link it was asked on); the header key stays
-     * disabled until the copy is live again, and a fresh confirmation then ends it once.
+     * T13.2 r2 / ta-coik.22: a link that drops under the open dialog disables its key (a saved copy
+     * never ends a session) but, like the web's `<dialog>` (dashboard.tsx 90fbb9f :1902-1911), leaves
+     * it open; the header key stays disabled until the copy is live again, and the same confirmation
+     * then ends it once.
      */
     @Test
-    fun theConfirmationClosesWhenTheCopyStopsBeingLive() {
+    fun theConfirmationStaysOpenWhenTheCopyStopsBeingLive() {
         val client = ShellConsentClient().also { it.show(session, tree) }
         host(client)
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
@@ -114,28 +116,29 @@ class MainShellEndSessionTest {
             client.live.value = emptySet()
         }
         arm()
-        rule.onNodeWithText("End session?").assertDoesNotExist()
+        rule.onNodeWithText("End session?").assertExists()
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
         assertTrue("nothing from a saved copy: ${client.killCalls}", client.killCalls.isEmpty())
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
 
-        // Back, but not yet confirmed on the new link (catching up): still disabled.
+        // Back, but not yet confirmed on the new link (catching up): still disabled, still open.
         rule.runOnIdle { client.link.value = ConnectionState.Connected }
         arm()
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
+        confirmKey().assertIsNotEnabled()
 
         rule.runOnIdle { client.live.value = setOf("s1") }
-        arm()
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
-        rule.waitForIdle()
         arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+        rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 
     /**
-     * r3 / T6.7: the confirmation carries the server it was opened for. A switch to another server
-     * under the open dialog, even one where a same-id session is live, closes it and ends nothing.
+     * r3 / ta-coik.22: the confirmation carries the server it was opened for. A switch to another
+     * server under the open dialog, even one where a same-id session is live, leaves it open (as on
+     * the web) with its key disabled, and ends nothing; Cancel, then a fresh one ends it there.
      */
     @Test
     fun theConfirmationIsBoundToTheServerItWasOpenedFor() {
@@ -148,9 +151,14 @@ class MainShellEndSessionTest {
 
         rule.runOnIdle { client.origin.value = OTHER_ORIGIN }
         arm()
-        rule.onNodeWithText("End session?").assertDoesNotExist()
+        rule.onNodeWithText("End session?").assertExists()
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
         assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
 
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
         // Opened afresh on the current server: it ends there, bound to that origin.
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()

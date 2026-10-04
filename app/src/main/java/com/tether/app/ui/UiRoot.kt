@@ -18,14 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.testTag
 import com.tether.app.nav.DeepLinkIntents
 import com.tether.app.nav.NavContext
 import com.tether.app.nav.NavEffect
@@ -33,7 +26,6 @@ import com.tether.app.nav.NavigationViewModel
 import com.tether.app.nav.SessionLinkOpener
 import com.tether.app.ui.chat.CustomTabLinkOpener
 import com.tether.app.ui.chat.LocalLinkOpener
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
@@ -82,17 +74,18 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     // notification tap only opens the app: the server's FCM payload is id-free, so a
     // session in a push intent could only come from another app (T12.1 H1).
     val navigator = viewModel<NavigationViewModel>().navigator
-    var inputGuard by remember { mutableStateOf(false) }
-    var guardSerial by remember { mutableIntStateOf(0) }
     val focusManager = LocalFocusManager.current
     val applyNav: (NavEffect?) -> Unit = { effect ->
         when (effect) {
             is NavEffect.Open -> {
                 // Focus (and with it the keyboard's input session) does not follow a link into
-                // the new session: typing aimed at the previous composer stops here.
+                // the new session: the web remounts its ChatView per session (dashboard.tsx
+                // `key={activeSession.id}`), so the previous composer's focus goes with it.
+                // ta-coik.22: no timed input pause follows, as on the web; the chat's acting
+                // controls drop a press that began on a control which has since changed
+                // (StaleTapGuard, ta-coik.13).
                 focusManager.clearFocus(force = true)
                 vm.openSession(effect.sessionId)
-                guardSerial++
             }
             is NavEffect.Notice -> vm.reportLocalError(effect.text)
             null -> Unit
@@ -128,15 +121,6 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 vm.setBootLinkPending(false)
             }
         }
-    }
-    // A switch made by a link swallows touches and hardware keys briefly, so input aimed at
-    // the previous session cannot land on the new one's controls (another window can fire a
-    // link). Each switch restarts the window.
-    LaunchedEffect(guardSerial) {
-        if (guardSerial == 0) return@LaunchedEffect
-        inputGuard = true
-        delay(NAV_INPUT_GUARD_MS)
-        inputGuard = false
     }
     val linkOpener = remember(client, navigator) {
         SessionLinkOpener(
@@ -243,7 +227,6 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .onPreviewKeyEvent { inputGuard }
                     // A notice already cleared the status bar.
                     .then(if (denied || mismatch != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
@@ -259,7 +242,6 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                     CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
                         MainShell(vm = vm, prefs = prefs)
                     }
-                    if (inputGuard) NavInputGuard(Modifier.matchParentSize())
                 }
             }
         }
@@ -271,11 +253,6 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
         }
     }
 }
-
-/** How long touches are swallowed after a link switched the session (see [NavInputGuard]). */
-internal const val NAV_INPUT_GUARD_MS = 500L
-
-internal const val NAV_INPUT_GUARD_TAG = "nav-input-guard"
 
 /**
  * The client's state as the navigator reads it. The connection is read BEFORE the session list:
@@ -289,21 +266,5 @@ internal fun navContextOf(client: TetherClient): NavContext {
         serverUrl = client.serverUrl.value,
         connected = connection == ConnectionState.Connected,
         sessionIds = client.sessions.value.mapTo(HashSet()) { it.id },
-    )
-}
-
-/** Consumes every pointer event over the shell while it is composed. Invisible, not focusable. */
-@Composable
-private fun NavInputGuard(modifier: Modifier) {
-    Box(
-        modifier
-            .testTag(NAV_INPUT_GUARD_TAG)
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-                    }
-                }
-            },
     )
 }

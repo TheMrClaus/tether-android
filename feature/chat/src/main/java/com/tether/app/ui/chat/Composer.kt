@@ -141,8 +141,9 @@ internal const val STALE_RUN_TAG = "composer-run-stale"
 @androidx.compose.runtime.Immutable
 class ComposerLiveness(
     /**
-     * Why Interrupt (the key and a queued row's "Interrupt now") cannot send ([stopLockCopy]'s words);
-     * null = it can. A saved or catching-up copy's "busy" is not a turn that is running now.
+     * Why Interrupt (the key and a queued row's "Interrupt now") and the command keys cannot send
+     * ([stopLockCopy]'s words); null = they can. ta-coik.22: the screen leaves a saved or catching-up
+     * copy unlocked, as the web does ([commandKeyLock]); the client refuses off a live link.
      */
     val interruptLock: String?,
     /** Null while the copy is Live; else its freshness: the run row reads "Was running" and stops ticking. */
@@ -294,7 +295,7 @@ fun Composer(
     }
     val confirmingStop = confirmStop && stopCost.isNotEmpty() && interruptLock == null && !commandRunning
     val commandMode = runActions.commandMode && draft.startsWith("!")
-    // T13.2's rule: a copy that is not live runs nothing (the words say why).
+    // ta-coik.22: the same lock as Interrupt ([commandKeyLock]: read-only / handed off, never a stale copy).
     val commandLock = liveness.interruptLock
     val readOnly = session?.readOnly == true
     val handedOffNow = !session?.handedOffTo.isNullOrEmpty()

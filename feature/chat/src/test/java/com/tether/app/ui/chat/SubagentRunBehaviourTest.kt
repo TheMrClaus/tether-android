@@ -261,12 +261,13 @@ class SubagentRunBehaviourTest {
         stop.performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:bg-3"), client.stopCalls)
-        // Sent: the key reads "Stopping…" and a second tap sends nothing more.
-        rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled()
-        rule.onNodeWithTag("bg-command-stop").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm test -- --runInBand")}")))
-        rule.onNodeWithTag("bg-command-stop").performClick()
+        // ta-coik.22: as on the web (chat-view.tsx 90fbb9f :3866-3875), no "Stopping…" latch: the key
+        // still reads Stop and is live; each tap is one stop.
+        rule.onNodeWithTag("bg-command-stop").assertIsEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}")))
+            .performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:bg-3"), client.stopCalls)
+        assertEquals(listOf("s1:bg-3", "s1:bg-3"), client.stopCalls)
     }
 
     @Test fun aRefusedStopKeepsTheKeyAndSendsNothingElse() {
@@ -279,25 +280,37 @@ class SubagentRunBehaviourTest {
         rule.onNodeWithTag("bg-command-stop").assertIsEnabled()
     }
 
-    @Test fun stopIsDisabledAndSaysWhyOfflineCatchingUpOrReadOnly() {
+    /**
+     * ta-coik.22: the web leaves Stop live on a saved copy and while catching up (a click goes to the
+     * socket, which sends only when open); here a tap asks the client, which re-checks the link.
+     * A read-only session keeps the lock (the server refuses its `stop-command`), and says why.
+     */
+    @Test fun stopIsLiveOfflineAndCatchingUpButLockedReadOnly() {
         val client = client(SubagentFixtures.activity)
         client.link.value = ConnectionState.Disconnected
+        client.stopResult = StopCommandResult.NotConnected
         host(client)
-        val stop = rule.onNodeWithTag("bg-command-stop")
-        stop.assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}, unavailable: Connect to stop it. This is a saved copy.")))
-        stop.performClick()
+        rule.onNodeWithTag("bg-command-stop").assertIsEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}")))
+            .performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:bg-3"), client.stopCalls)
         rule.runOnIdle {
             client.link.value = ConnectionState.Connected
             client.live.value = emptySet()
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled().performClick()
+        client.stopResult = StopCommandResult.NotLive
+        rule.onNodeWithTag("bg-command-stop").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:bg-3", "s1:bg-3"), client.stopCalls)
         rule.runOnIdle { client.sessions.value = listOf(session.copy(readOnly = true)); client.live.value = setOf("s1") }
         rule.waitForIdle()
-        rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled().performClick()
+        rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}, unavailable: ${stopLockCopy(ConsentLock.ReadOnly)}")))
+            .performClick()
         rule.waitForIdle()
-        assertTrue(client.stopCalls.isEmpty())
+        assertEquals(listOf("s1:bg-3", "s1:bg-3"), client.stopCalls)
     }
 
     @Test fun nothingReceivedEverStopsACommand() {

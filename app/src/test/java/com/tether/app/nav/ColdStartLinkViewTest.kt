@@ -13,7 +13,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.ConnectionState
 import com.tether.app.nav.NavTestClient.Companion.LISTED
-import com.tether.app.ui.NAV_INPUT_GUARD_MS
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.UiRoot
 import com.tether.app.ui.prefs.UiPrefs
@@ -78,7 +77,6 @@ class ColdStartLinkViewTest {
             client.sessionsFlow.value = sessions
             client.connectionFlow.value = ConnectionState.Connected
         }
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         onSessionsOnly()
         assertEquals(LISTED, vm.selectedSessionId.value)
         assertFalse("nothing is behind the linked session: Back leaves the app", rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())

@@ -43,13 +43,11 @@ ellipsize inside their 13rem maximum, the chips wrap.
 
 Divergences from the web, on purpose:
 
-- Stop is disabled, with its reason in its accessible name, when the app is offline (a saved copy), catching up,
-  or the session is read-only or handed off (the server refuses `stop-command` on a read-only session anyway,
-  `server.mjs` READ_ONLY_MUTATIONS). The web shows the key live. After a stop the client accepted, every Stop key
-  for that command (the bar's and the sheet's: one latch per command, round 2) reads "Stopping…"; a refused stop
-  leaves the keys as they were. Round 3: "accepted" only means queued, so the latch clears when the link drops,
-  the session's liveness flips or the server changes, and lapses after 10s while the command still runs (the
-  key then arms again); it is not saved, so switching sessions away and back starts clean.
+- Stop is disabled, with its reason in its accessible name, only when the session is read-only or handed off
+  (the server refuses `stop-command` on a read-only session anyway, `server.mjs` READ_ONLY_MUTATIONS). As on the
+  web it stays live offline (a saved copy) and while catching up (ta-coik.22): a tap asks the client, which sends
+  only over a live link. There is no "Stopping…" latch (ta-coik.22; the web's key reads "Stop" and stays live
+  after a click, chat-view.tsx 90fbb9f :3866-3875, :1719): every tap is one stop request.
 - Round 2 (M1): the running rows are keyed by command, so a press that began on one row's Stop never stops
   the command that slid under the finger. ta-coik.13 retired the 500 ms arm and the re-arm after a move: a
   Stop key acts on its first tap, as on the web (chat-view.tsx 90fbb9f :3866-3875). Touches through an

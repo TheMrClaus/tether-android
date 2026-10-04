@@ -683,7 +683,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         // T13.2 r2: the confirmation acts only while the session is still live (a link that dropped
         // under the open dialog disables it; the client refuses it too). r3: and only on the server
         // it was opened for (a switch under the open dialog disables it; the client refuses it too).
-        // T6.7: the shared confirmation closes itself the moment either stops holding.
+        // ta-coik.22: as on the web, the confirmation stays open meanwhile (its key disabled).
         val endable = shellFreshness.sessionLive(target.id) && drawnFor != null && drawnFor == consentOrigin
         com.tether.app.ui.chat.EndSessionDialog(
             sessionName = target.name,

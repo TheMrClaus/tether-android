@@ -562,7 +562,8 @@ private fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> Un
         ) {
             if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = t.accentInk, modifier = Modifier.size(12.dp))
         }
-        Box(Modifier.weight(1f)) { label() }
+        // ta-coik.22: a control in a selectable card: its words never join a selection.
+        Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.DisableSelection { label() } }
     }
 }
 
@@ -779,7 +780,9 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                             .testTag("question-skip"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("Skip", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(560)), color = t.muted)
+                        androidx.compose.foundation.text.selection.DisableSelection {
+                            Text("Skip", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(560)), color = t.muted)
+                        }
                     }
                 }
                 if (isLastPage || unavailable != null) {
@@ -848,9 +851,12 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
             .testTag("question-option"),
         verticalArrangement = Arrangement.spacedBy(1.6.dp),
     ) {
-        Text(proseText(cut4k(option.label)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.86f), fontWeight = FontWeight(500)), color = if (enabled) t.white else t.muted)
-        option.description?.let {
-            Text(proseText(cut4k(it)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f)), color = t.muted)
+        // ta-coik.22: an option is a control in a selectable card: its words never join a selection.
+        androidx.compose.foundation.text.selection.DisableSelection {
+            Text(proseText(cut4k(option.label)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.86f), fontWeight = FontWeight(500)), color = if (enabled) t.white else t.muted)
+            option.description?.let {
+                Text(proseText(cut4k(it)), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f)), color = t.muted)
+            }
         }
     }
 }

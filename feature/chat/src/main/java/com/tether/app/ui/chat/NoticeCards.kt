@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +62,7 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherTypography
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.chrono.IsoChronology
@@ -76,9 +78,10 @@ import java.util.Locale
  * 8546-8553 (.chat-approval / .chat-rate-limit), codex-rich-renderers.module.css 340-401 (.notice).
  *
  * Operator discipline (T6.3 / T6.4 / T7.2): a row only calls [NoticeActions] from a tap on its X,
- * the limit card only from a tap on one of its keys; each sends at most once per link (a latch here,
- * the client's own checks under its lock), never in answer to anything received, and shows why in
- * words when it cannot act. Nothing is retried.
+ * the limit card only from a tap on one of its keys; an X sends at most once per link and the limit
+ * card's keys rest for 4 s after a choice, as the web's do (a latch here, the client's own checks
+ * under its lock); never in answer to anything received, and shows why in words when it cannot act.
+ * Nothing is retried on its own.
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
@@ -376,9 +379,10 @@ internal fun SessionNoticeRow(view: SessionNoticeView, modifier: Modifier = Modi
  * "Limit hit", the reset time, why a schedule waits two minutes, and three keys — Schedule
  * auto-continue · <time>, Resume now, Dismiss. Each is bound to THIS prompt's `resetsAt`, acts on
  * the first tap as on the web (chat-view.tsx 90fbb9f :1384-1394, no arm delay; ta-coik.13), drops a
- * press across a change of prompt ([StaleTapGuard]), is refused under an overlay, and sends once per
- * link: the card then says the choice was sent and waits for the server's event to remove it.
- * Stricter than the web, which re-enables its keys after 4 s; here a new link re-enables them.
+ * press across a change of prompt ([StaleTapGuard]) and is refused under an overlay. A choice the
+ * client sent disables the keys while the card waits for the server's event to remove it; as on the
+ * web (chat-view.tsx 90fbb9f :1361-1371, ta-coik.22), they re-enable after [RATE_LIMIT_RETRY_MS] so a
+ * choice a half-open link swallowed can be made again (a new link re-enables them at once too).
  * A handed-off source keeps only Dismiss ([NoticeActions.cancelLock]); read-only keeps none.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -392,6 +396,14 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
     var sent by remember(identity) { mutableStateOf<String?>(null) }
     var overlayBlocked by remember(identity) { mutableStateOf(false) }
+    // chat-view.tsx 90fbb9f :1361-1368: "If a half-open socket swallows the fire-and-forget control
+    // message, let the operator retry instead of leaving both choices disabled forever."
+    LaunchedEffect(identity, sent) {
+        if (sent != null) {
+            delay(RATE_LIMIT_RETRY_MS)
+            sent = null
+        }
+    }
     val lock = actions.controlLock
     val cancelLock = actions.cancelLock
     // Live whenever any key could act (Dismiss alone on a handed-off source).
@@ -505,6 +517,9 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
         }
     }
 }
+
+/** chat-view.tsx 90fbb9f :1367: how long a sent limit choice keeps the card's keys disabled. */
+internal const val RATE_LIMIT_RETRY_MS = 4_000L
 
 /** r3: why the scheduled-resume cancel cannot send, worded like the Stop keys' lock ([stopLockCopy]). */
 internal fun cancelLockCopy(lock: ConsentLock): String = when (lock) {

@@ -187,8 +187,8 @@ class StopCommandTransmissionTest {
     @Test
     fun aRepeatedCallIsSentAgainWhileTheCommandStillRuns() {
         // No ledger in the client (unlike a consent decision): stopping twice is harmless on the
-        // server (session-manager.mjs stopCommand kills an existing handle or does nothing). The UI
-        // makes ONE stop per command: its shared "Stopping…" latch disables every key for it.
+        // server (session-manager.mjs stopCommand kills an existing handle or does nothing). As on the
+        // web (ta-coik.22), the UI's Stop key stays live: each tap is one stop request.
         val (client, _) = connected()
         assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))

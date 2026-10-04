@@ -48,8 +48,8 @@ import org.robolectric.annotation.Config
 /**
  * T6.4 round 2. M1: a Stop press never lands on another command's key when the rows move (keyed rows
  * and ta-coik.13's stale-tap guard; no arm delay, as on the web: chat-view.tsx 90fbb9f :3866-3875,
- * a first tap stops). The "Stopping…" latch is one per command, shared by the
- * bar and the sheet. L3: a stop is bound to the server origin its row was drawn for. L2: repeated
+ * a first tap stops). ta-coik.22: no "Stopping…" latch, as on the web: every Stop key stays "Stop"
+ * and live while its command runs, also on a saved copy. L3: a stop is bound to the server origin its row was drawn for. L2: repeated
  * lazy keys never crash the chat screen. L1: a run tab follows new steps only at the bottom, and a
  * denial's focus request is handed back once used.
  */
@@ -137,22 +137,45 @@ class StopKeySafetyTest {
         stopOf(0).performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:b"), client.stopCalls)
-        // A command C launched earlier is listed first (the fold's order): B's "Stopping…" stays B's.
+        // A command C launched earlier is listed first (the fold's order): each key stays its own command's.
         rule.runOnIdle {
             val tree = foldTree(client.projectionTrees.value.getValue("s1"), cmd("c", "running", 4_000))
             client.show(session, ChatFixtures.Folded(checkNotNull(LegacyProjectionAdapter.adaptOnce(tree)), tree))
         }
         rule.waitForIdle()
         arm()
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm run b")}"))).assertIsNotEnabled()
-        stopOf(1).assertIsEnabled().performClick()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run b"))).assertIsEnabled()
+        stopOf(1).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run c"))).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:b", "s1:c"), client.stopCalls)
     }
 
-    // ---- the shared latch ------------------------------------------------------------------------
+    // ---- ta-coik.22: no "Stopping…" latch (chat-view.tsx 90fbb9f :3866-3875, :1719) -------------------
 
-    @Test fun aStopFromTheBarShowsStoppingInTheSheet() {
+    private fun stopName(command: String) = listOf("Stop ${commandLabel(command)}")
+
+    private fun label(n: Int): String =
+        rule.onAllNodesWithTag("bg-command-stop", useUnmergedTree = true)[n].fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+
+    /** The web's key reads "Stop" and is live after a click; a second tap asks for a second stop at once. */
+    @Test fun aStoppedCommandsKeyStaysLiveAndStopsAgainAtOnce() {
+        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
+        host(client)
+        arm()
+        rule.mainClock.autoAdvance = false
+        stopOf(0).performClick()
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a"), client.stopCalls)
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
+        assertTrue("never \"Stopping…\"", rule.onAllNodes(hasText("Stopping", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    /** The bar's stop leaves the sheet's key live too (the web's sheet key has no state of its own). */
+    @Test fun aStopFromTheBarLeavesTheSheetsKeyLive() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         arm()
@@ -162,59 +185,59 @@ class StopKeySafetyTest {
         rule.waitForIdle()
         arm()
         rule.onAllNodesWithTag("bg-command-stop").assertCountEquals(2)
-        stopOf(1).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm run a")}"))).assertIsNotEnabled().performClick()
+        stopOf(1).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals("one stop per command, whichever key was tapped", listOf("s1:a"), client.stopCalls)
+        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
     }
 
-    // ---- round 3: the latch's lifetime ----------------------------------------------------------------
-
-    private fun stopName(command: String) = listOf("Stop ${commandLabel(command)}")
-
-    @Test fun theLatchClearsWhenTheLinkDropsAndStopWorksAgainOnTheNewLink() {
+    /**
+     * ta-coik.22 (item 4): on a saved copy (the link dropped) and while catching up the web's Stop key
+     * stays live (a click goes to the socket, which sends only when it is open). Here too: the key
+     * is live and named for its command, and a tap asks the client, which re-checks the link.
+     */
+    @Test fun theStopKeyStaysLiveOnACopyThatIsNotLive() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         arm()
-        stopOf(0).performClick()
-        rule.waitForIdle()
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stopping ${commandLabel("npm run a")}")))
         rule.runOnIdle {
             client.link.value = com.tether.app.client.ConnectionState.Disconnected
             client.live.value = emptySet()
         }
         rule.waitForIdle()
-        // The frame was only queued on the lost link: no longer "Stopping…", just locked while offline.
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm run a")}, unavailable: ${stopLockCopy(ConsentLock.Offline)}")))
-        rule.runOnIdle {
-            client.link.value = com.tether.app.client.ConnectionState.Connected
-            client.live.value = setOf("s1")
-        }
-        rule.waitForIdle()
-        arm()
+        client.stopResult = com.tether.app.client.StopCommandResult.NotConnected
         stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
-    }
-
-    @Test fun theLatchClearsWhenOnlyTheSessionsLivenessFlips() {
-        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
-        host(client)
-        arm()
-        stopOf(0).performClick()
+        assertEquals(listOf("s1:a"), client.stopCalls)
+        // Connected again but not yet live (catching up): still live.
+        rule.runOnIdle { client.link.value = com.tether.app.client.ConnectionState.Connected }
         rule.waitForIdle()
-        // Still connected, same server: only this session stops being live (a resync), then is again.
-        rule.runOnIdle { client.live.value = emptySet() }
-        rule.waitForIdle()
-        rule.runOnIdle { client.live.value = setOf("s1") }
-        rule.waitForIdle()
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a")))
-        arm()
+        client.stopResult = com.tether.app.client.StopCommandResult.Sent
         stopOf(0).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
     }
 
-    @Test fun theLatchClearsWhenOnlyTheServerOriginChanges() {
+    /** A read-only session keeps its lock (the server refuses a read-only `stop-command`). */
+    @Test fun aReadOnlySessionsStopKeyStaysLocked() {
+        val readOnly = session.copy(readOnly = true)
+        val client = ChatTestClient().also { it.show(readOnly, folded(cmd("a", "running", 2_000))) }
+        val vm = TetherViewModel(client)
+        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+                val projections by client.projections.collectAsStateWithLifecycle()
+                ChatScreen(vm = vm, session = readOnly, projection = projections[readOnly.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        stopOf(0).assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue(client.stopCalls.isEmpty())
+        assertTrue(label(0).startsWith("Stop ${commandLabel("npm run a")}, unavailable: "))
+    }
+
+    @Test fun theStopFollowsTheServerOriginItIsDrawnFor() {
         val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
         host(client)
         arm()
@@ -223,37 +246,14 @@ class StopKeySafetyTest {
         // Connected and live throughout: only the server behind the link changes.
         rule.runOnIdle { client.origin.value = "https://other.example" }
         rule.waitForIdle()
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a")))
         arm()
-        stopOf(0).assertIsEnabled().performClick()
+        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
         assertEquals(listOf<String?>(TEST_ORIGIN, "https://other.example"), client.stopOrigins)
     }
 
-    @Test fun theLatchExpiresWhileTheCommandStillRunsAndTheKeyStopsAgain() {
-        val client = ChatTestClient().also { it.show(session, folded(cmd("a", "running", 2_000))) }
-        host(client)
-        arm()
-        stopOf(0).performClick()
-        rule.waitForIdle()
-        rule.mainClock.autoAdvance = false
-        rule.mainClock.advanceTimeBy(STOP_LATCH_MS - 1_000)
-        rule.waitForIdle()
-        stopOf(0).assertIsNotEnabled().performClick()
-        assertEquals(listOf("s1:a"), client.stopCalls)
-        rule.mainClock.advanceTimeBy(1_100)
-        rule.waitForIdle()
-        // Lapsed: named for its command again, and live at once (ta-coik.13: no arm delay).
-        stopOf(0).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, stopName("npm run a"))).assertIsEnabled().performClick()
-        rule.mainClock.advanceTimeBy(64)
-        rule.waitForIdle()
-        assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
-    }
-
-    @Test fun switchingAwayAndBackStartsWithoutALatch() {
-        // P4 (intended): latches live with the session's screen, not saved; back on s1 the key is
-        // named for its command and live.
+    @Test fun switchingAwayAndBackKeepsTheKeyLive() {
         val other = session.copy(id = "s2", name = "Other")
         val client = ChatTestClient().also {
             it.show(other, folded())

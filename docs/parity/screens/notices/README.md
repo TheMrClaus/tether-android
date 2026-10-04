@@ -35,10 +35,11 @@ error notices), `notice-session` (external advancement, background loss ×2), `n
 ## Divergences from the web (deliberate)
 
 - **Limit card keys** act on the first tap, as on the web (ta-coik.13 retired the 500 ms arm; a
-  press across a change of prompt or session is dropped). They refuse touches through an overlay,
-  and send once per link: the card then says "Choice sent. Waiting for the server." The web
-  re-enables its keys after 4 s. Here a new connection re-enables them; nothing is ever retried
-  automatically.
+  press across a change of prompt or session is dropped). They refuse touches through an overlay.
+  A sent choice disables them while the card says "Choice sent. Waiting for the server."; as on the
+  web (chat-view.tsx 90fbb9f :1361-1371, ta-coik.22) they re-enable after 4 s, so a choice a
+  half-open link swallowed can be made again (a new connection re-enables them at once). Nothing is
+  ever retried automatically.
 - **Rate-limit choices and the scheduled resume's cancel** take T7.2's guarded `sessionControl`
   path. They are bound to the prompt's exact `resetsAt`. All are locked on a read-only session
   (server `READ_ONLY_MUTATIONS`). On a handed-off source, Schedule and Resume now stay locked

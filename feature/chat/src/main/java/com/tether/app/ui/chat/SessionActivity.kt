@@ -226,6 +226,20 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
 }
 
 /**
+ * ta-coik.22: the lock the command keys honour (the composer's Send to agent / Background / Stop,
+ * Interrupt and a queued row's "Interrupt now", and the background commands' Stop). The web leaves
+ * every one of them live on a copy that is not live (chat-view.tsx 90fbb9f :3866-3875, :4535-4596):
+ * a tap goes to the socket, which sends only when it is open. So offline and catching up lock
+ * nothing here either (the client still refuses off a live link and says why). Read-only and a
+ * handed-off session keep their lock (the web draws no composer there; the server refuses a
+ * read-only session's `stop-command`).
+ */
+internal fun commandKeyLock(lock: ConsentLock?): ConsentLock? = when (lock) {
+    ConsentLock.Offline, ConsentLock.CatchingUp -> null
+    else -> lock
+}
+
+/**
  * The display form of a command (Info): its FIRST line, "…" when it has more, isolated
  * (FSI…PDI) so right-to-left text or bidi controls in it cannot reorder the words around it.
  */
@@ -259,52 +273,6 @@ internal fun commandLabel(command: String): String {
  */
 internal fun invisibleCodePoint(cp: Int): Boolean = com.tether.app.client.LabelText.invisibleCodePoint(cp)
 
-/**
- * The "Stopping…" latch, ONE per command for the whole session screen (the bar's key and the output
- * sheet's key read the same entry), keyed by commandId, never by position. Round 3 (L-3): `Sent`
- * only means the frame was queued, so a latch never outlives the link it was sent on ([clear] on a
- * drop, a liveness change or another server) and expires after [STOP_LATCH_MS] while the command
- * still runs; the key then arms again and the operator can stop it anew. Not saved (a restored
- * screen has no link yet), and per session: switching away and back starts clean.
- */
-@androidx.compose.runtime.Stable
-class StopLatches internal constructor() {
-    private val sent = androidx.compose.runtime.mutableStateMapOf<String, Int>()
-    private var tokens = 0
-
-    fun isSent(commandId: String): Boolean = sent.containsKey(commandId)
-
-    /** The token of [commandId]'s latch (null: none): [expire] only clears that same latch. */
-    fun tokenOf(commandId: String): Int? = sent[commandId]
-
-    internal fun mark(commandId: String) {
-        sent[commandId] = ++tokens
-    }
-
-    internal fun expire(commandId: String, token: Int) {
-        if (sent[commandId] == token) sent.remove(commandId)
-    }
-
-    internal fun clear() {
-        if (sent.isNotEmpty()) sent.clear()
-    }
-}
-
-/** How long "Stopping…" holds a still-running command's keys before they may stop it again. */
-internal const val STOP_LATCH_MS = 10_000L
-
-/**
- * One session's latches, cleared whenever [link] changes (the connection, this session's
- * liveness, the server origin): a stop that was only queued on a lost link must not leave the
- * command unstoppable.
- */
-@Composable
-internal fun rememberStopLatches(sessionKey: String?, link: Any?): StopLatches {
-    val latches = remember(sessionKey) { StopLatches() }
-    LaunchedEffect(latches, link) { latches.clear() }
-    return latches
-}
-
 /** What the command surfaces may do: open a command's output, and stop a running one (a TAP only). */
 @androidx.compose.runtime.Immutable
 class CommandActions internal constructor(
@@ -312,12 +280,10 @@ class CommandActions internal constructor(
     val stopLock: String?,
     val onOpen: (commandId: String) -> Unit,
     /**
-     * Called from an ARMED Stop key's tap handler and nowhere else; the client re-checks everything
+     * Called from a Stop key's tap handler and nowhere else; the client re-checks everything
      * (L3: against the server origin captured here, the one this row was drawn for).
      */
     val onStop: (commandId: String) -> com.tether.app.client.StopCommandResult,
-    /** Round 2: the session's shared "Stopping…" latches. */
-    val latches: StopLatches = StopLatches(),
 ) {
     companion object {
         val Unavailable = CommandActions("Connect to stop it. This is a saved copy.", {}, { com.tether.app.client.StopCommandResult.NotConnected })
@@ -384,29 +350,21 @@ private fun RunningCommandRow(command: BackgroundCommandView, actions: CommandAc
  * as on the web (chat-view.tsx 90fbb9f :3866-3875 and :1719, no arm delay); a press that began on
  * another command's key is dropped ([StaleTapGuard], keyed by the command). Touches through an
  * overlay are refused. A tap asks the client, which re-checks it all against the live projection.
- * "Stopping…" is shared per command ([StopLatches]).
+ * ta-coik.22: no "Stopping…" latch: like the web's key (always "Stop", no disabled state after a
+ * click), it stays live while the command runs, and every tap asks the client again.
  */
 @Composable
 private fun StopKey(command: BackgroundCommandView, actions: CommandActions, compact: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val latchToken = actions.latches.tokenOf(command.commandId)
-    val sent = latchToken != null
     val lock = actions.stopLock
-    val actionable = command.running && lock == null && !sent
-    // L-3: a latch on a command that still runs lapses after STOP_LATCH_MS.
-    if (latchToken != null && command.running) {
-        LaunchedEffect(command.commandId, latchToken) {
-            delay(STOP_LATCH_MS)
-            actions.latches.expire(command.commandId, latchToken)
-        }
-    }
+    val actionable = command.running && lock == null
     val name = commandLabel(command.command)
     val shape = RoundedCornerShape(t.radiusSm)
-    val label = if (sent) "Stopping…" else "Stop"
+    val label = "Stop"
     fun stop() {
         // The ONE place a stop-command originates: a tap on a live key.
-        if (actionable && actions.onStop(command.commandId) == com.tether.app.client.StopCommandResult.Sent) actions.latches.mark(command.commandId)
+        if (actionable) actions.onStop(command.commandId)
     }
     StaleTapGuard(command.commandId) { guard ->
         Box(
@@ -420,7 +378,6 @@ private fun StopKey(command: BackgroundCommandView, actions: CommandActions, com
                 .clearAndSetSemantics {
                     role = Role.Button
                     contentDescription = when {
-                        sent -> "Stopping $name"
                         lock != null -> "Stop $name, unavailable: $lock"
                         else -> "Stop $name"
                     }

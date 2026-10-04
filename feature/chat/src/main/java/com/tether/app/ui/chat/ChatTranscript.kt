@@ -356,12 +356,7 @@ private fun ChatRow(
         // reading, stay out of it. ta-blf: a copy never carries a hidden control the reader did not
         // see ([SafeCopyClipboard]; the copy notice offers "Copy raw").
         if (item.selectableText) {
-            val base = androidx.compose.ui.platform.LocalClipboard.current
-            val notices = LocalCopyNotices.current
-            val clipboard = remember(base, notices) { SafeCopyClipboard(base, notices) }
-            CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboard provides clipboard) {
-                SelectionContainer { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
-            }
+            SelectableRow { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
         } else {
             ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone)
         }
@@ -369,22 +364,39 @@ private fun ChatRow(
 }
 
 /**
- * T6.7: whether a row's words take part in text selection. r2: an ALLOWLIST of the rows that are
- * reading and hold no armed control: the blocks (bubbles, thinking, tool cards), denials, answered
- * questions, outcome and session-error rows, a Codex turn's plan / diff / review, and the
- * continuation and retry markers. Everything else stays out, including every row that carries an
- * armed key: the approval, question and limit cards and the notices with their X (the web lets a
- * notice's words be selected; here no long press or drag shares a row with an armed key), and the
- * single-control rows (Load earlier, an activity group's summary — `user-select: none` on the web
- * too — and a background command chip). A new row kind is out until it is added here.
+ * T6.7: one row's words in their own selection (a selection never runs across rows), copied through
+ * [SafeCopyClipboard] (ta-blf: never a hidden control the reader did not see). The row's keys still
+ * take their taps; a key that must never join a selection says so itself ([NoticeDismissButton]).
+ */
+@Composable
+internal fun SelectableRow(content: @Composable () -> Unit) {
+    val base = androidx.compose.ui.platform.LocalClipboard.current
+    val notices = LocalCopyNotices.current
+    val clipboard = remember(base, notices) { SafeCopyClipboard(base, notices) }
+    CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboard provides clipboard) {
+        SelectionContainer { content() }
+    }
+}
+
+/**
+ * T6.7: whether a row's words take part in text selection. r2: an ALLOWLIST: the blocks (bubbles,
+ * thinking, tool cards), denials, answered questions, outcome and session-error rows, a Codex turn's
+ * plan / diff / review, and the continuation and retry markers. ta-coik.22: and, as on the web
+ * (globals.css 90fbb9f sets no `user-select: none` on them), the cards and notices: the approval,
+ * question and limit cards (and the scheduled resume), the provider, compaction and session
+ * notices; their keys keep acting on a tap. Out stay the single-control rows (Load earlier, an
+ * activity group's summary — `user-select: none` on the web too, globals.css :4611-4617 — and a
+ * background command chip, a button on the web). A new row kind is out until it is added here.
  */
 internal val ChatItem.selectableText: Boolean
     get() = when (this) {
         is ChatItem.Block, is ChatItem.Denial, is ChatItem.Answered, is ChatItem.Outcome, is ChatItem.SessionError,
         is ChatItem.TurnPlan, is ChatItem.TurnDiff, is ChatItem.TurnReview,
         is ChatItem.Continuation, is ChatItem.Retry,
+        is ChatItem.Approval, is ChatItem.Question, is ChatItem.RateLimit,
+        is ChatItem.ProviderNotice, is ChatItem.Compaction, is ChatItem.SessionNotice,
         -> true
-        else -> false
+        is ChatItem.LoadEarlier, is ChatItem.ToolGroup, is ChatItem.BgCommand -> false
     }
 
 @Composable

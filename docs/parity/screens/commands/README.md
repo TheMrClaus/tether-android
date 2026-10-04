@@ -37,9 +37,11 @@ Montages (`web | android | diff`), 6 skins at phone size, built by
    idempotency key. Nothing is retried or queued (`CommandGuard`, `RealTetherClient.runCommand`).
 2. **Background / Stop** are bound to the turn they were drawn for. Background (`background-command`)
    is sent only while that turn is still the open foreground command turn. Stop is T6.7's turn-bound
-   `interrupt`, as the web's relabelled key is. Both keys act on the first tap (ta-coik.13) and are locked on a copy that is not
-   live. **Ctrl+B** does the same as Background from a hardware keyboard, and only while a foreground
-   command runs. **Android addition:** the web leaves both keys live on a stale copy.
+   `interrupt`, as the web's relabelled key is. Both keys act on the first tap (ta-coik.13) and, as on
+   the web, stay live on a copy that is not live (ta-coik.22): a tap goes to the client, which sends
+   only over a live link. **Ctrl+B** does the same as Background from a hardware keyboard, and only
+   while a foreground command runs. Send to agent and the run's Background key are live on a stale
+   copy too; only a read-only or handed-off session locks them.
 3. **Slash commands follow the web's passthrough.** The palette is offered on every engine. For Codex
    it lists only compaction, once the catalog says it is ready, and runs it through T7.2's guarded
    `CodexCompaction` control. `/model <id>` stays T7.2's guarded control. `/exit` and `/stop` (by name

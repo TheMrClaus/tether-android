@@ -171,6 +171,39 @@ class NoticeBehaviourTest {
         rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled()
     }
 
+    /**
+     * ta-coik.22: as on the web (chat-view.tsx 90fbb9f :1361-1371), a sent choice rests the card's keys
+     * for 4 s while the server's event is awaited, then they re-enable, so a choice a half-open link
+     * swallowed can be made again. Each tap is one frame.
+     */
+    @Test
+    fun theLimitCardsKeysReEnableAfterFourSecondsAsOnTheWeb() {
+        show(NoticeFixtures.limit)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        rule.onNodeWithTag("rate-limit-resume-now").assertIsEnabled().performClick()
+        settle()
+        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "resume-now")), rec.controls)
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled()
+        // Just short of 4 s after the tap: still resting.
+        rule.mainClock.advanceTimeBy(RATE_LIMIT_RETRY_MS - NAV_SETTLE_MS - 300)
+        rule.waitForIdle()
+        rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled()
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, rec.controls.size)
+        // Past 4 s: live again, the "sent" line gone, and the next tap sends.
+        rule.mainClock.advanceTimeBy(500)
+        rule.waitForIdle()
+        rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
+        rule.onNodeWithTag("rate-limit-schedule").assertIsEnabled()
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled().performClick()
+        settle()
+        assertEquals(
+            listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "resume-now"), SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")),
+            rec.controls,
+        )
+    }
+
     @Test
     fun aRefusedLimitChoiceReleasesTheKeysAndSaysWhy() {
         rec.controlResult = ControlResult.NotOffered

@@ -93,8 +93,9 @@ Decisions where the web is silent or unsafe:
 
 1. **Both confirmations keep T6.7 / T13.2's rules.** "Stop anyway" (row and composer) acts on its first
    tap, as on the web (ta-coik.13 retired the 500 ms arm; a double tap passes through, as there), is
-   bound to the turn it was drawn for (a press across a turn change is dropped), and is locked on a copy
-   that is not live. A confirmation is dropped when its turn changes or the
+   bound to the turn it was drawn for (a press across a turn change is dropped), and, like the web's,
+   stays live on a copy that is not live (ta-coik.22; the client still sends only over a live link). A
+   confirmation is dropped when its turn changes or the
    session changes, when the price disappears (it does not come back by itself), or when the copy stops
    being live. The web keeps `confirmStop` / `confirmingInterrupt` across all of these.
 2. **The phone shows the price.** The web's phone hides `.chat-send` labels (globals.css:7894), so its

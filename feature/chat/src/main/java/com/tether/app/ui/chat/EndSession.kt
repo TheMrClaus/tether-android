@@ -1,13 +1,7 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import com.tether.app.client.LabelText
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherDialog
@@ -33,9 +27,10 @@ fun endSessionBody(sessionName: String?): String {
  * ta-coik.13: its End session key acts on the first tap, as on the web (dashboard.tsx 90fbb9f :1909,
  * no arm delay); a press across a change of [identity] is dropped ([StaleTapGuard]) and touches
  * through an overlay are refused. Only its tap calls [onConfirm], and only while [endable] (the
- * host's live-copy and same-server rule, T13.2). A pending confirmation never outlives what it was
- * opened for: it closes itself ([onCancel]) the moment [endable] goes false (the link dropped, the
- * copy is no longer live, a server switch) and when the app stops, so it never reopens on another link.
+ * host's live-copy and same-server rule, T13.2). ta-coik.22: like the web's `<dialog>` (dashboard.tsx
+ * 90fbb9f :1172-1185, :1902-1911), it stays open until Cancel, a dismissal or End session: a link
+ * that drops or the app going to the background does not close it. While [endable] is false its key
+ * is disabled; it is live again once the copy is (the [identity] still binds it to its session and server).
  */
 @Composable
 fun EndSessionDialog(
@@ -46,9 +41,6 @@ fun EndSessionDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val cancel by rememberUpdatedState(onCancel)
-    LaunchedEffect(endable) { if (!endable) cancel() }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { cancel() }
     TetherDialog(
         onDismiss = onCancel,
         title = "End session?",

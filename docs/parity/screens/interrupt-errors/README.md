@@ -49,7 +49,7 @@ web code:
 | `cancel_requested` | `turn.status = "cancelling"`, and the run row reads "Interrupting" | The same (TurnActivity; a test checks it). |
 | `cancelled` | The outcome row "Turn interrupted", or the `turn_interrupted` account | The same (T6.6). |
 | End session | A confirm dialog, then `kill` | The same words and frame, with T13.2's live-copy and same-server rules. |
-| Selection | Transcript text is selectable. The chrome bars carry `user-select: none` per child, so a drag cannot run into them. The activity summary, diff gutter and thinking head are not selectable. | Each transcript row is its own selection area, so a selection can never run across rows or into the header and composer. The activity summary, diff gutter and thinking head are excluded, as on the web. Long-press selects a word; the system handles and "Copy" work from there. |
+| Selection | Transcript text is selectable, cards and notices included. The chrome bars carry `user-select: none` per child, so a drag cannot run into them. The activity summary, diff gutter and thinking head are not selectable. | Each transcript row (cards and notices included, ta-coik.22) is its own selection area, so a selection can never run across rows or into the header and composer. The activity summary, diff gutter and thinking head are excluded, as on the web. Long-press selects a word; the system handles and "Copy" work from there. |
 
 ## Deliberate divergences
 
@@ -66,15 +66,18 @@ web code:
 - **A server's error words are attributed.** They sit under a "From the server" caption, because
   the web's bare toast would let a server write text that reads like the app's own ("The secure link
   is reconnecting… sign in again").
-- **The End session confirmation closes itself.** Its key acts on the first tap, as on the web
-  (dashboard.tsx 90fbb9f :1909; ta-coik.13 retired the 500 ms arm). It closes when the link drops or
-  the copy stops being live, on a server switch, and when the app stops. The web's `<dialog>`
-  stays open.
-- **Only reading rows are selectable (r2: an allowlist).** Selectable: blocks, denials, answered
-  questions, outcome and session-error rows, a Codex turn's plan, diff and review, and the
-  continuation and retry markers. Not selectable: every row with an action key (the consent and
-  limit cards, and the notices with their X), and the single-control rows. The web lets the cards'
-  and notices' text be selected. The X itself is never part of a selection. As on the web, the
+- **The End session confirmation stays open, as the web's `<dialog>` does** (ta-coik.22). Its key
+  acts on the first tap (dashboard.tsx 90fbb9f :1909; ta-coik.13 retired the 500 ms arm). A link
+  that drops, a copy that stops being live, a server switch or the app going to the background
+  leave it open; its key is disabled while the copy is not live or the server is not the one it
+  was opened for, and live again once it is.
+- **Rows are selectable by an allowlist (r2).** Selectable: blocks, denials, answered questions,
+  outcome and session-error rows, a Codex turn's plan, diff and review, the continuation and retry
+  markers, and (ta-coik.22, as on the web) the approval, question and limit cards, the scheduled
+  resume and the notices, in the transcript and a run's tab. Not selectable: the single-control rows
+  (Load earlier, an activity summary, a background command chip). A key's legend, a grant checkbox,
+  a question option and the notice X are controls and never join a selection; they act on one tap
+  inside a selectable card. As on the web, the
   +/- column of a Codex diff (`.diffMarker`) and of an edit diff (`.diff-gutter`) is left out of a
   copy.
 - **Every interrupt control is locked while the turn is already being interrupted (r2/r3).** That

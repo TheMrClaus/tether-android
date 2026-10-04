@@ -170,13 +170,17 @@ fun TetherKey(
             Icon(icon, contentDescription = null, tint = look.ink, modifier = Modifier.size(iconSize))
         }
         if (shown != null) {
-            Text(
-                text = shown,
-                color = look.ink,
-                style = textStyle,
-                maxLines = maxLines,
-                modifier = Modifier.clearAndSetSemantics { },
-            )
+            // ta-coik.22: a key's legend is a control, never part of a text selection (as a
+            // browser's button), so a key inside a selectable card still takes every tap.
+            androidx.compose.foundation.text.selection.DisableSelection {
+                Text(
+                    text = shown,
+                    color = look.ink,
+                    style = textStyle,
+                    maxLines = maxLines,
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
         }
         trailing?.invoke(this)
     }

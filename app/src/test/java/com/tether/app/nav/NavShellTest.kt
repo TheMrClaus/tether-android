@@ -23,12 +23,9 @@ import com.tether.app.nav.NavTestClient.Companion.OTHER_LISTED
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.nav.NavTestClient.Companion.LISTED
-import com.tether.app.ui.NAV_INPUT_GUARD_MS
-import com.tether.app.ui.NAV_INPUT_GUARD_TAG
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.UiRoot
 import com.tether.app.ui.shell.ShellTags
@@ -46,7 +43,8 @@ import org.robolectric.annotation.Config
 /**
  * T4.4 in the shell: a link opens the session like a sidebar pick (the phone drawer closes, the
  * expanded layout shows it), Back then leaves the app (no in-app back stack, as the web's
- * replaceState), and a link-driven switch briefly swallows touches.
+ * replaceState), and (ta-coik.22) input right after a link-driven switch acts at once, as on the web:
+ * there is no timed pause.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w412dp-h915dp-420dpi")
@@ -88,7 +86,6 @@ class NavShellTest {
         rule.onNodeWithTag(ShellTags.MenuKey).performClick()
         assertTrue("drawer open", backIsConsumed())
         link("tether://session/$LISTED")
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(LISTED, vm.selectedSessionId.value)
         rule.onNodeWithTag(ShellTags.DrawerBackdrop).assertDoesNotExist()
@@ -100,35 +97,45 @@ class NavShellTest {
     fun onATabletALinkOpensTheSessionInTheExpandedLayout() {
         rule.onNodeWithTag(ShellTags.Sidebar).assertExists()
         link("tether://session/$LISTED")
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(LISTED, vm.selectedSessionId.value)
         rule.onNodeWithTag(ShellTags.Sidebar).assertExists()
         assertFalse("Back must fall through to the system", backIsConsumed())
     }
 
-    @Test
-    fun aLinkDrivenSwitchSwallowsTouchesBriefly() {
-        link("tether://session/$LISTED")
-        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) {
-            rule.onAllNodesWithTag(NAV_INPUT_GUARD_TAG).fetchSemanticsNodes().isNotEmpty()
-        }
-        assertEquals(LISTED, vm.selectedSessionId.value)
+    /**
+     * ta-coik.22: drives the clock by hand from the moment [uri] is offered until its session is
+     * selected (a few frames, well inside the 500 ms the retired guard held), so what follows happens
+     * "right after" the switch. Leaves the clock on manual; [settleBriefly] lets a tap land.
+     */
+    private fun switchByHand(uri: String, id: String) {
         rule.mainClock.autoAdvance = false
+        link(uri)
+        var frames = 0
+        while (vm.selectedSessionId.value != id && frames++ < 12) rule.mainClock.advanceTimeByFrame()
+        assertEquals(id, vm.selectedSessionId.value)
+        // The new session is drawn (a couple of frames), still well inside the old guard's window.
+        repeat(3) { rule.mainClock.advanceTimeByFrame() }
+    }
+
+    /** 100 ms of frames: enough for a tap to land, far short of the retired 500 ms pause. */
+    private fun settleBriefly() = rule.mainClock.advanceTimeBy(100)
+
+    /**
+     * ta-coik.22: the web has no input pause after a switch (dashboard.tsx 90fbb9f: a `?session=`
+     * link or a notification just selects the session). A tap made the moment a link switched the
+     * session acts at once.
+     */
+    @Test
+    fun aTapRightAfterALinkDrivenSwitchActsAtOnce() {
         try {
-            rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertExists()
-            // A tap aimed at the shell while the guard is up does nothing.
+            switchByHand("tether://session/$LISTED", LISTED)
             rule.onNodeWithTag(ShellTags.MenuKey).performClick()
-            rule.mainClock.advanceTimeByFrame()
-            assertFalse("the tap reached the shell", rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
+            settleBriefly()
+            assertTrue("the tap right after the switch was swallowed", rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
         } finally {
             rule.mainClock.autoAdvance = true
         }
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
-        rule.waitForIdle()
-        rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertDoesNotExist()
-        rule.onNodeWithTag(ShellTags.MenuKey).performClick()
-        assertTrue("after the guard the tap works", backIsConsumed())
     }
 
     @Test
@@ -138,14 +145,12 @@ class NavShellTest {
         val cwd = client.sessions.value.single { it.id == LISTED }.cwd
         assertFalse(cwd == vm.currentWorkspace.value)
         link("tether://session/$LISTED")
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(cwd, vm.currentWorkspace.value)
     }
 
     private fun openAndSettle(id: String) {
         link("tether://session/$id")
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(id, vm.selectedSessionId.value)
     }
@@ -161,7 +166,6 @@ class NavShellTest {
         composer().requestFocus()
         composer().assertIsFocused()
         link("tether://session/$LISTED")
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
         rule.waitForIdle()
         assertEquals(LISTED, vm.selectedSessionId.value)
         // No text field holds focus, so no keyboard input session carries over (in keyboard mode
@@ -169,57 +173,36 @@ class NavShellTest {
         rule.onAllNodes(isFocused() and hasSetTextAction()).assertCountEquals(0)
     }
 
+    /** ta-coik.22: a hardware key typed the moment a link switched the session reaches the composer. */
     @Test
-    fun hardwareKeysAreSwallowedWhileTheGuardIsUp() {
+    fun aHardwareKeyRightAfterALinkDrivenSwitchTypes() {
         openAndSettle(OTHER_LISTED)
-        link("tether://session/$LISTED")
-        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) {
-            rule.onAllNodesWithTag(NAV_INPUT_GUARD_TAG).fetchSemanticsNodes().isNotEmpty()
-        }
-        rule.mainClock.autoAdvance = false
-        val before: String
         try {
+            switchByHand("tether://session/$LISTED", LISTED)
             composer().requestFocus()
-            before = composerText()
+            settleBriefly()
+            val before = composerText()
             composer().performKeyInput { pressKey(Key.A) }
-            rule.mainClock.advanceTimeByFrame()
-            assertEquals("a key reached the composer during the guard", before, composerText())
+            settleBriefly()
+            val after = composerText()
+            assertEquals("a key right after the switch was swallowed: $after", before.length + 1, after.length)
+            assertEquals(1, after.count { it == 'a' } - before.count { it == 'a' })
         } finally {
             rule.mainClock.autoAdvance = true
         }
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
-        rule.waitForIdle()
-        composer().requestFocus()
-        composer().performKeyInput { pressKey(Key.A) }
-        rule.waitForIdle()
-        assertEquals("after the guard keys type", before.length + 1, composerText().length)
     }
 
+    /** ta-coik.22: back-to-back link switches leave nothing over the shell either. */
     @Test
-    fun eachLinkDrivenSwitchRestartsTheGuard() {
-        link("tether://session/$OTHER_LISTED")
-        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) { vm.selectedSessionId.value == OTHER_LISTED }
-        val first = rule.mainClock.currentTime
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS - 150)
-        link("tether://session/$LISTED")
-        rule.waitUntil(timeoutMillis = NAV_INPUT_GUARD_MS / 2) { vm.selectedSessionId.value == LISTED }
-        rule.mainClock.autoAdvance = false
+    fun aTapRightAfterTwoQuickLinkSwitchesActsAtOnce() {
         try {
-            // Past the first switch's window, inside the second one's.
-            rule.mainClock.advanceTimeBy(maxOf(0L, first + NAV_INPUT_GUARD_MS + 50 - rule.mainClock.currentTime))
-            rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertExists()
+            switchByHand("tether://session/$OTHER_LISTED", OTHER_LISTED)
+            switchByHand("tether://session/$LISTED", LISTED)
+            rule.onNodeWithTag(ShellTags.MenuKey).performClick()
+            settleBriefly()
+            assertTrue("the tap after the second switch was swallowed", rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
         } finally {
             rule.mainClock.autoAdvance = true
         }
-        rule.mainClock.advanceTimeBy(NAV_INPUT_GUARD_MS + 100)
-        rule.waitForIdle()
-        rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertDoesNotExist()
-    }
-
-    @Test
-    fun noGuardWithoutASwitch() {
-        link("https://evil.example/?session=$LISTED")
-        rule.waitForIdle()
-        rule.onNodeWithTag(NAV_INPUT_GUARD_TAG).assertDoesNotExist()
     }
 }

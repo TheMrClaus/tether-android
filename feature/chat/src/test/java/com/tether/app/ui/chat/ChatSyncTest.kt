@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
@@ -163,26 +164,33 @@ class ChatSyncTest {
         rule.onNodeWithTag("approval-allow").assertIsEnabled()
     }
 
+    /**
+     * ta-coik.22 (item 4): the web leaves Stop live on a copy that is not live (chat-view.tsx 90fbb9f
+     * :3866-3875; the socket sends only when open). Here a tap asks the client, which re-checks the
+     * link and the live set under its lock (its own tests), on every kind of copy.
+     */
     @Test
-    fun everyCopyThatIsNotLiveLocksTheStopKeyEvenInTheLiveSet() {
+    fun theStopKeyStaysLiveOnEveryCopyThatIsNotLive() {
         val stopSession = SubagentFixtures.session
         val client = ChatTestClient().also { it.reports = true }
         client.show(stopSession, ChatFixtures.fold(*ChatFixtures.turn("t1", "Run it.", "Started.", 1_000), cmd("a", 2_000)), live = true)
         client.sync.value = live(stopSession.id)
         host(client, stopSession)
         rule.onNodeWithTag("bg-command-stop").assertIsEnabled()
+        var expected = 0
         for ((name, sync) in notLive(stopSession.id)) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled().performClick()
+            rule.onNodeWithTag("bg-command-stop").assertIsEnabled().performClick()
             rule.waitForIdle()
-            assertTrue("$name: no stop from a copy that is not live", client.stopCalls.isEmpty())
+            expected++
+            assertEquals("$name: the tap reaches the client", expected, client.stopCalls.size)
         }
         rule.runOnIdle { client.sync.value = live(stopSession.id) }
         arm()
         rule.onNodeWithTag("bg-command-stop").assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:a"), client.stopCalls)
+        assertEquals(List(expected + 1) { "s1:a" }, client.stopCalls)
     }
 
     @Test
@@ -206,8 +214,13 @@ class ChatSyncTest {
         assertTrue(client.controlCalls.isEmpty())
     }
 
+    /**
+     * ta-coik.22: the web leaves Interrupt and "Interrupt now" live on a copy that is not live
+     * (chat-view.tsx 90fbb9f :4559-4573, :1495-1506). Each tap goes to the client, bound to the server
+     * and the turn the key was drawn for; the client re-checks the link and the live set.
+     */
     @Test
-    fun everyCopyThatIsNotLiveLocksBothInterruptKeysAndTheLiveOneIsBoundToItsServer() {
+    fun bothInterruptKeysStayLiveOnEveryCopyThatIsNotLiveAndAreBoundToTheirServer() {
         val busy = ComposerFixtures.session
         val client = ChatTestClient().also { it.reports = true }
         client.show(busy, ComposerFixtures.queued, live = true)
@@ -218,12 +231,13 @@ class ChatSyncTest {
         for ((name, sync) in notLive(busy.id)) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsNotEnabled().performClick()
-            rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsNotEnabled().performClick()
+            rule.onNodeWithContentDescription("Interrupt the current turn").assertIsEnabled()
+            rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsEnabled().performClick()
+            rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
             rule.waitForIdle()
-            assertTrue("$name: a stale busy never interrupts", client.interruptCalls.isEmpty())
+            assertEquals("$name: both taps reach the client", 2, client.interruptCalls.size)
+            client.interruptCalls.clear()
         }
-        rule.onNodeWithContentDescription("Interrupt the current turn, unavailable: ${stopLockCopy(ConsentLock.CatchingUp)}").assertExists()
         rule.runOnIdle { client.sync.value = live(busy.id) }
         arm()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsEnabled().performClick()
@@ -232,15 +246,67 @@ class ChatSyncTest {
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1", "${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
 
+    /**
+     * ta-coik.22 (item 4): the web leaves the command keys live on a copy that is not live
+     * (chat-view.tsx 90fbb9f :4535-4541 Background, :4559-4573 Stop, :4576-4596 Send to agent /
+     * Background): a click goes to the socket, which sends only when open. Here every tap goes to the
+     * client (which re-checks the link and the live set under its lock), on every kind of copy.
+     */
     @Test
-    fun offlineTheInterruptKeySaysItIsASavedCopy() {
+    fun theCommandKeysStayLiveOnEveryCopyThatIsNotLive() {
+        val s = ComposerFixtures.session
+        val client = ChatTestClient().also { it.reports = true }
+        client.providers.value = listOf(
+            com.tether.app.protocol.model.ProviderInfo(
+                id = s.provider, label = "Claude", glyph = "C", available = true,
+                capabilities = com.tether.app.protocol.model.ProviderCapabilities(commandRunner = true),
+            ),
+        )
+        client.show(s, CommandFixtures.running, live = true)
+        client.sync.value = live(s.id)
+        host(client, s)
+        for ((name, sync) in notLive(s.id)) {
+            rule.runOnIdle { client.sync.value = sync }
+            arm()
+            rule.onNodeWithContentDescription("Send this command to the background").assertIsEnabled().performClick()
+            rule.onNodeWithContentDescription("Stop the command").assertIsEnabled().performClick()
+            rule.waitForIdle()
+            assertEquals("$name: Background reaches the client", listOf("${s.id}#t1"), client.backgroundCalls)
+            assertEquals("$name: Stop reaches the client", listOf("${s.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
+            client.backgroundCalls.clear()
+            client.interruptCalls.clear()
+        }
+        // Idle, a "!" draft on a saved copy: Send to agent and Background run.
+        rule.runOnIdle {
+            client.show(s, ComposerFixtures.idle, live = false)
+            client.sync.value = mapOf(s.id to SessionSync(Freshness.Saved, 1L))
+        }
+        arm()
+        val input = rule.onNodeWithContentDescription("Message the agent")
+        input.performTextInput("!npm test")
+        arm()
+        rule.onNodeWithContentDescription("Run command and send output to the agent").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        input.performTextInput("!sleep 30")
+        arm()
+        rule.onNodeWithContentDescription("Run command in the background").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("${s.id}:npm test", "${s.id}:sleep 30:bg"), client.runCalls)
+    }
+
+    /** ta-coik.22: offline the Interrupt key stays live, as the web's; the client says the link is down. */
+    @Test
+    fun offlineTheInterruptKeyStaysLive() {
         val busy = ComposerFixtures.session
         val client = ChatTestClient().also { it.reports = true }
         client.show(busy, ComposerFixtures.busy, live = false)
         client.link.value = ConnectionState.Disconnected
         client.sync.value = mapOf(busy.id to SessionSync(Freshness.Saved, 1L))
+        client.interruptResult = com.tether.app.client.InterruptResult.NotConnected
         host(client, busy)
-        rule.onNodeWithContentDescription("Interrupt the current turn, unavailable: ${stopLockCopy(ConsentLock.Offline)}").assertIsNotEnabled()
+        rule.onNodeWithContentDescription("Interrupt the current turn").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(1, client.interruptCalls.size)
     }
 
     @Test
@@ -324,16 +390,24 @@ class ChatSyncTest {
         rule.waitForIdle()
         confirmKey().assertIsEnabled()
         // Signed in to another server that lists (and has live) a session with the same id, while
-        // the finger was down on the key: the key goes with the dialog, so the lift lands nowhere.
+        // the finger was down on the key: the lift ends nothing.
         confirmKey().performTouchInput { down(center) }
         rule.waitForIdle()
         rule.runOnIdle { client.origin.value = "https://other.example" }
         arm()
-        // T6.7: a pending confirmation closes on a server switch: nothing is left to tap.
-        rule.onNodeWithText("End session?").assertDoesNotExist()
+        confirmKey().performTouchInput { up() }
+        arm()
+        // ta-coik.22: as on the web the confirmation stays open, its key disabled: it was opened for
+        // the other server.
+        rule.onNodeWithText("End session?").assertExists()
+        confirmKey().assertIsNotEnabled().performClick()
+        rule.waitForIdle()
         assertTrue("an End opened for one server ended a session on another: ${client.killCalls}", client.killCalls.isEmpty())
 
-        // Opened afresh on the current server: it ends there, bound to that origin.
+        // Cancelled, then opened afresh on the current server: it ends there, bound to that origin.
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
         confirmKey().assertIsEnabled().performClick()

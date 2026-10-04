@@ -25,10 +25,12 @@ Rules checked in review (SYNC_DESIGN §4.2):
   spinner or the waiting ping. Approval and question cards from a copy that is not Live render disabled
   with their reason ("Connect to answer. This is a saved copy." offline). `ChatSyncTest` covers this,
   including a moment when freshness and the live set disagree.
-- **r2: nothing that is not Live drives a live action.** Cards, Stop keys, session controls, both
-  Interrupt keys (the composer's and a queued row's "Interrupt now") and End session are locked for
-  every freshness value except Live, and for a session with no freshness entry at all. The client
-  refuses `interrupt` and `kill` on its own too (`InterruptKillTransmissionTest`, over a real socket).
+- **r2: nothing that is not Live drives a live action.** Cards, session controls and End session are
+  locked for every freshness value except Live, and for a session with no freshness entry at all.
+  ta-coik.22: the command keys (Stop, Background, Send to agent), both Interrupt keys (the composer's
+  and a queued row's "Interrupt now") stay live, as on the web; their tap goes to the client. The
+  client refuses `interrupt`, `stop-command`, the command frames and `kill` off a live link on its
+  own (`InterruptKillTransmissionTest`, over a real socket).
 - **r2: readings freeze.** The composer's run row reads "Was running · 12 min ago" on a still dot and
   stops ticking. The context gauge's needle turns neutral and its TalkBack label carries the copy's
   age, and the statusline stops re-reading on its own clock. Offline, sidebar rows say "was" even

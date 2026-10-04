@@ -43,7 +43,8 @@ import org.robolectric.annotation.Config
 /**
  * T7.3 behaviour of the composer's commands, against tether components/chat-view.tsx (v128): the
  * `!` command mode only where the server offers it, Enter runs in the foreground and the Background
- * key detached, both acting on the first tap (ta-coik.13) and inert on a copy that is not live; while a FOREGROUND command
+ * key detached, both acting on the first tap (ta-coik.13) and inert under the screen's lock (read-only or
+ * handed off; ta-coik.22: never a copy that is not live, see ChatSyncTest); while a FOREGROUND command
  * runs, Interrupt reads "Stop" (the turn-bound interrupt) and Background replaces Queue (also
  * Ctrl+B); the slash palette on every engine, fed by the CLI inventory, with the web's passthrough,
  * blocked and desync rules; the `@` Agents picker and its delegate chip.
@@ -183,17 +184,19 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
-    fun aCopyThatIsNotLiveRunsNothing() {
-        liveness = ComposerLiveness(interruptLock = "Connect to run it. This is a saved copy.", stale = null)
+    fun aLockedComposerRunsNothing() {
+        // The screen's lock (ta-coik.22: read-only or handed off only; a stale copy stays live).
+        val lock = stopLockCopy(ConsentLock.ReadOnly)!!
+        liveness = ComposerLiveness(interruptLock = lock, stale = null)
         show()
         input().performTextInput("!npm test")
         arm()
-        rule.onNodeWithContentDescription("Run command and send output to the agent, unavailable: Connect to run it. This is a saved copy.").assertExists()
+        rule.onNodeWithContentDescription("Run command and send output to the agent, unavailable: $lock").assertExists()
         rule.onNodeWithTag(RUN_KEY_TAG).performClick()
         input().performKeyInput { pressKey(Key.Enter) }
         rule.waitForIdle()
         assertTrue(rec.runs.isEmpty())
-        rule.onNodeWithText("Connect to run it. This is a saved copy.").assertExists()
+        rule.onNodeWithText(lock).assertExists()
         assertEquals("the draft is kept", "!npm test", inputText())
     }
 
@@ -254,12 +257,12 @@ class CommandComposerBehaviourTest {
         assertEquals(listOf("t1"), interrupts)
         rec.backgrounds.clear()
         interrupts.clear()
-        liveness = ComposerLiveness(interruptLock = "Catching up…", stale = null)
+        liveness = ComposerLiveness(interruptLock = stopLockCopy(ConsentLock.HandedOff), stale = null)
         arm()
         rule.onNodeWithTag(BACKGROUND_KEY_TAG).performClick()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
         rule.waitForIdle()
-        assertTrue("a copy that is not live stops and moves nothing", rec.backgrounds.isEmpty() && interrupts.isEmpty())
+        assertTrue("a locked composer stops and moves nothing", rec.backgrounds.isEmpty() && interrupts.isEmpty())
     }
 
     @Test

@@ -27,7 +27,7 @@ class ChatTestClient : TetherClient {
     val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
     override val connection: StateFlow<ConnectionState> get() = link
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
-    override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(emptyList())
+    override val providers = MutableStateFlow<List<ProviderInfo>>(emptyList())
     override val workspaceRoot: StateFlow<String?> = MutableStateFlow("/w")
     override val projections = MutableStateFlow<Map<String, SessionProjection>>(emptyMap())
     override val projectionTrees = MutableStateFlow<Map<String, JsObj>>(emptyMap())
@@ -87,6 +87,20 @@ class ChatTestClient : TetherClient {
         stopCalls += "$sessionId:$commandId"
         stopOrigins += expectedOrigin
         return stopResult
+    }
+
+    /** ta-coik.22: every `!` run (`<session>:<command>[:bg]`) and Background (`<session>#<turn>`) the UI asked for. */
+    val runCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val backgroundCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    override fun runCommand(sessionId: String, command: String, background: Boolean, expectedOrigin: String?): com.tether.app.client.RunCommandResult {
+        runCalls += "$sessionId:$command" + if (background) ":bg" else ""
+        return com.tether.app.client.RunCommandResult.Sent
+    }
+
+    override fun backgroundCommand(sessionId: String, expectedOrigin: String?, expectedTurnId: String): com.tether.app.client.BackgroundCommandResult {
+        backgroundCalls += "$sessionId#$expectedTurnId"
+        return com.tether.app.client.BackgroundCommandResult.Sent
     }
 
     /** What the next consent call returns (the real client's verdict). */

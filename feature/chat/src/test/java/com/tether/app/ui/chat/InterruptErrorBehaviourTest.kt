@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -182,32 +184,44 @@ class InterruptErrorBehaviourTest {
         rule.waitForIdle()
     }
 
+    /**
+     * ta-coik.22: the web's `<dialog>` (dashboard.tsx 90fbb9f :1902-1911) stays open whatever the link
+     * does. Here too: a copy that stops being live leaves the confirmation open with its key disabled
+     * (a saved copy ends nothing); live again, the same confirmation's key ends the session on one tap.
+     */
     @Test
-    fun theEndConfirmationClosesWhenTheCopyStopsBeingLive() {
+    fun theEndConfirmationStaysOpenWhenTheCopyStopsBeingLive() {
         val client = liveClient(running, ChatFixtures.idle)
         openEnd(client)
         arm()
         rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsEnabled()
         rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L)) }
         arm()
-        rule.onNodeWithText("End session?").assertDoesNotExist()
-        rule.onAllNodesWithTag(END_SESSION_CONFIRM_TAG).assertCountEquals(0)
+        rule.onNodeWithText("End session?").assertExists()
+        rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsNotEnabled().performClick()
+        arm()
         assertTrue(client.killCalls.isEmpty())
+        rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Live, 2L)) }
+        arm()
+        rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsEnabled().performClick()
+        arm()
+        assertEquals(1, client.killCalls.size)
+        rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 
+    /** ta-coik.22: the app going to the background and back leaves the confirmation open, as the web's. */
     @Test
-    fun theEndConfirmationClosesWhenTheAppStops() {
+    fun theEndConfirmationStaysOpenWhenTheAppStops() {
         val client = liveClient(running, ChatFixtures.idle)
         openEnd(client)
         arm()
-        val confirmAt = rule.screenCentreOf(END_SESSION_CONFIRM_TAG)
         rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         arm()
-        rule.onNodeWithText("End session?").assertDoesNotExist()
-        rule.tapScreenAt(confirmAt)
+        rule.onNodeWithText("End session?").assertExists()
+        rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsEnabled().performClick()
         arm()
-        assertTrue("a tap where the key was ends nothing: ${client.killCalls}", client.killCalls.isEmpty())
+        assertEquals(1, client.killCalls.size)
     }
 
     @Test
@@ -328,14 +342,15 @@ class InterruptErrorBehaviourTest {
     }
 
     @Test
-    fun theComposerAndTheConsentCardsAreNotPartOfTheSelection() {
-        // Rows that are controls stay out of it; everything that is reading is in.
+    fun theComposerIsNotPartOfTheSelectionButTheConsentCardsAre() {
+        // Single-control rows stay out of it; everything that is reading is in. ta-coik.22: the
+        // consent cards' words are selectable, as on the web.
         assertFalse(ChatItem.LoadEarlier(2).selectableText)
         val fixture = ApprovalFixtures.write
         val approval = buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone)
             .filterIsInstance<ChatItem.Approval>()
         assertTrue(approval.isNotEmpty())
-        approval.forEach { assertFalse(it.selectableText) }
+        approval.forEach { assertTrue(it.selectableText) }
         assertTrue(ChatItem.SessionError("s1", "x").selectableText)
         val busyClient = liveClient(busy, InterruptErrorFixtures.turnA)
         host(busyClient)
@@ -428,13 +443,57 @@ class InterruptErrorBehaviourTest {
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }
 
-    /** r2: the notices (each with its X) are not selectable; a selection elsewhere never swallows or doubles the X's tap. */
+    /**
+     * ta-coik.22: a notice's and the limit card's words are selectable and copy, as on the web; the
+     * keys beside them still act on one tap, and a long press on a key selects nothing.
+     */
+    @Test
+    fun aNoticesAndTheLimitCardsWordsCopyAndTheirKeysStillAct() {
+        val recorder = NoticeFixtures.Recorder()
+        transcript(NoticeFixtures.codexNotices, notices = recorder.actions(), richCodex = true)
+        arm()
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(androidx.compose.ui.test.hasText("A newer model is available for this thread."))
+        copyFrom(text = "A newer model is available for this thread.")
+        val copied = clip()
+        assertTrue("the notice's words copy: $copied", copied != null && copied.isNotBlank() && "A newer model is available for this thread.".contains(copied))
+        rule.onAllNodesWithContentDescription("Dismiss notice").onFirst().performClick()
+        rule.waitForIdle()
+        assertEquals(1, recorder.dismissed.size)
+    }
+
+    /** ta-coik.22: the same for the limit card: its reason copies, and Resume now acts on one tap. */
+    @Test
+    fun theLimitCardsWordsCopyAndItsKeysStillAct() {
+        val recorder = NoticeFixtures.Recorder()
+        transcript(NoticeFixtures.limit, notices = recorder.actions())
+        arm()
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        val reason = rule.onNodeWithText("two minutes after the reset", substring = true)
+        reason.performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        reason.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }
+        rule.waitForIdle()
+        val copied = clip()
+        assertTrue("the card's words copy: $copied", copied != null && copied.isNotBlank() && reason.fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("").contains(copied))
+        // A long press on a key selects nothing and sends nothing; a tap then acts once.
+        rule.onNodeWithTag("rate-limit-resume-now").performTouchInput { longClick(center) }
+        rule.waitForIdle()
+        assertEquals(copied, clip())
+        rule.onNodeWithTag("rate-limit-resume-now").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(com.tether.app.client.SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "resume-now")), recorder.controls)
+    }
+
+    /**
+     * r2: a selection elsewhere never swallows or doubles a notice X's tap. ta-coik.22: the notices'
+     * words are selectable, as on the web; the X itself never joins a selection.
+     */
     @Test
     fun theNoticeXStaysOneTapWhileASelectionIsActive() {
         val recorder = NoticeFixtures.Recorder()
         val fixture = NoticeFixtures.sessionNotices
         buildChatItems(fixture.projection, fixture.tree, showThinking = false, zone = ChatFixtures.zone).forEach { item ->
-            if (item is ChatItem.SessionNotice || item is ChatItem.ProviderNotice || item is ChatItem.Compaction) assertFalse("$item is selectable", item.selectableText)
+            if (item is ChatItem.SessionNotice || item is ChatItem.ProviderNotice || item is ChatItem.Compaction) assertTrue("$item is not selectable", item.selectableText)
         }
         transcript(fixture, notices = recorder.actions())
         arm()

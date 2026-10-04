@@ -679,8 +679,11 @@ class TranscriptBidiBehaviourTest {
 
     // ---- every selectable row ----------------------------------------------------------------
 
-    /** The kinds that are never selectable (controls, notices): everything else must be in the walk. */
-    private val notSelectable = setOf("LoadEarlier", "ToolGroup", "Approval", "Question", "ProviderNotice", "Compaction", "SessionNotice", "RateLimit", "BgCommand")
+    /** The kinds that are never selectable (single-control rows): everything else must be in a walk. */
+    private val notSelectable = setOf("LoadEarlier", "ToolGroup", "BgCommand")
+
+    /** ta-coik.22: the cards and notices, selectable as on the web; walked by [noSelectableCardOrNoticeDrawsRawControlsOrAForgedToken]. */
+    private val cardKinds = setOf("Approval", "Question", "ProviderNotice", "Compaction", "SessionNotice", "RateLimit")
 
     /**
      * r2: every selectable row kind, fed hostile words (an override, an isolate, a forged token with
@@ -721,7 +724,7 @@ class TranscriptBidiBehaviourTest {
         val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true, groupOpen = { _, _ -> true })
         val kinds = ChatItem::class.java.declaredClasses.filter { ChatItem::class.java.isAssignableFrom(it) && it != ChatItem::class.java }.map { it.simpleName }.toSet()
         val present = items.map { it::class.java.simpleName }.toSet()
-        assertEquals("selectable kinds missing from the walk", emptySet<String>(), kinds - notSelectable - present)
+        assertEquals("selectable kinds missing from the walks", emptySet<String>(), kinds - notSelectable - cardKinds - present)
         for (item in items) assertEquals(item::class.java.simpleName, item::class.java.simpleName !in notSelectable, item.selectableText)
 
         show(f, richCodex = true)
@@ -742,6 +745,65 @@ class TranscriptBidiBehaviourTest {
         val forbidden = (ALL_BIDI.map { it[0] } + (0x00..0x1F).filter { it != 0x09 && it != 0x0A }.map { it.toChar() } + (0x7F..0x9F).map { it.toChar() }).toSet()
         for (word in listOf("user", "think", "reply", "code", "err", "head", "ask", "ans", "plan", "step", "target", "result", "again", "out")) {
             assertTrue("no row drew \"$word\": $all", all.any { it.contains("$word x", ignoreCase = true) }) // the answered header is uppercase
+        }
+        for (s in all) {
+            for (c in s) assertFalse("raw U+%04X in ${hex(s)}".format(c.code), c in forbidden)
+            var at = s.indexOf(SafeText.MARK)
+            while (at >= 0) {
+                val u = SafeText.unitAt(s, at)
+                assertTrue("a U+2060 that starts no token in ${hex(s)}", u != null)
+                at = s.indexOf(SafeText.MARK, u!!.end)
+            }
+            assertFalse("a forged token drew as one: ${hex(s)}", s.contains("$WJ⟨U+202E⟩w"))
+        }
+    }
+
+    /**
+     * ta-coik.22: the same walk over the cards and notices, now selectable as on the web: the approval
+     * and question cards, a provider notice, a compaction row, a session notice and the limit card,
+     * fed the same hostile words. Nothing any of them draws or describes holds a raw control.
+     */
+    @Test fun noSelectableCardOrNoticeDrawsRawControlsOrAForgedToken() {
+        val h = "x${RLO}y${LRI}z$WJ⟨U+202E⟩w\u001B end"
+        val f = ChatFixtures.fold(
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k-t1") },
+            ev("user_message_accepted", "t1", ts = 1) { put("text", "user $h") },
+            ev("context_compacted", "t1", ts = 1) { put("itemId", "cmp-1") },
+            ev("provider_notice", "t1", ts = 1) { put("noticeId", "n-1"); put("level", "warning"); put("message", "notice $h") },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "tw"); put("name", "Bash"); putJsonObject("input") { put("command", "cmd $h") } },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-1"); put("toolId", "tw"); put("name", "Bash")
+                putJsonObject("input") { put("command", "cmd $h") }
+            },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "ask-1"); put("name", "AskUserQuestion"); putJsonObject("input") {} },
+            ev("question_request", "t1", ts = 1) {
+                put("requestId", "q-1"); put("toolId", "ask-1")
+                putJsonArray("questions") {
+                    addJsonObject {
+                        put("question", "ask $h"); put("header", "head $h"); put("multiSelect", false)
+                        putJsonArray("options") { addJsonObject { put("label", "opt $h"); put("description", "desc $h") } }
+                    }
+                }
+            },
+            evNullTurn("external_advancement", seq = 90, ts = 2) { put("noticeId", "ext-1"); put("count", 2) },
+            // Within the reducer's horizon (an hour after the event).
+            evNullTurn("limit_hit", seq = 91, ts = 2) { put("resetAt", 2L + 3_600_000L); put("limitType", "five_hour") },
+        )
+        val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true)
+        val present = items.map { it::class.java.simpleName }.toSet()
+        assertEquals("card kinds missing from the walk", emptySet<String>(), cardKinds - present)
+        for (item in items) assertEquals(item::class.java.simpleName, item::class.java.simpleName !in notSelectable, item.selectableText)
+
+        show(f, richCodex = true)
+        val all = LinkedHashSet<String>()
+        for (index in 0 until items.size + 8) {
+            runCatching { rule.onNodeWithTag("chat-transcript").performScrollToIndex(index) }
+            rule.waitForIdle()
+            all += spoken()
+        }
+        val forbidden = (ALL_BIDI.map { it[0] } + (0x00..0x1F).filter { it != 0x09 && it != 0x0A }.map { it.toChar() } + (0x7F..0x9F).map { it.toChar() }).toSet()
+        for (word in listOf("notice", "cmd", "ask", "head", "opt", "desc")) {
+            assertTrue("no card drew \"$word\": $all", all.any { it.contains("$word x", ignoreCase = true) })
         }
         for (s in all) {
             for (c in s) assertFalse("raw U+%04X in ${hex(s)}".format(c.code), c in forbidden)

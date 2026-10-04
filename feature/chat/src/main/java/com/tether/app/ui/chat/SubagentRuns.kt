@@ -554,8 +554,9 @@ internal fun SubagentRunTab(
             val flashing = row is PanelRow.Step && f != null && (row.entry["key"] as? JsStr)?.value == f.toolId
             PanelRowView(row, showThinking, flashing, if (flashing) f?.nonce else null)
         }
-        items(pending, key = { "approval/${it.requestId}/${it.contentFp}" }) { ApprovalCard(it) }
-        items(pendingQuestions, key = { "question/${it.requestId}/${it.contentFp}" }) { QuestionCard(it, answered = it.requestId in answeredIds) }
+        // ta-coik.22: the cards' words are selectable here too, as in the transcript and on the web.
+        items(pending, key = { "approval/${it.requestId}/${it.contentFp}" }) { SelectableRow { ApprovalCard(it) } }
+        items(pendingQuestions, key = { "question/${it.requestId}/${it.contentFp}" }) { SelectableRow { QuestionCard(it, answered = it.requestId in answeredIds) } }
     }
 }
 
