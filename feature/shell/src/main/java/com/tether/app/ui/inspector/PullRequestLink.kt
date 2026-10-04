@@ -59,8 +59,6 @@ private fun urlScheme(href: String): String? {
 
 private fun Char.isAsciiLetter() = this in 'a'..'z' || this in 'A'..'Z'
 
-/** What the browser itself navigates to and never hands an app (Chrome refuses these from a web page's link). */
-private val BROWSER_ONLY_SCHEMES = setOf("file", "content", "data", "blob", "filesystem")
 
 /** Shown under the pull request when nothing on the phone took its link (the browser's own failure, said). */
 internal const val PULL_REQUEST_UNOPENED = "No app on this phone could open the link."
@@ -70,8 +68,8 @@ internal const val PULL_REQUEST_UNOPENED = "No app on this phone could open the 
  * links' path ([openChatLink] through [opener]: a Custom Tab, or the app for a session on the paired
  * server), unchanged. An `intent:` address opens as Chrome opens it ([ChromeIntents], shared with the
  * Claude login link: sanitised, then its web fallback or its package's store page when no app takes
- * it). A file, content, data, blob or filesystem address goes nowhere (Chrome never hands a page's
- * link to one on). Any other scheme is offered to the phone's apps as a browser hands it on:
+ * it). An address of the shared browser-only set goes nowhere ([ChromeIntents.BROWSER_ONLY_SCHEMES]:
+ * Chrome never hands a page's link to one on). Any other scheme is offered to the phone's apps as a browser hands it on:
  * `ACTION_VIEW` + `CATEGORY_BROWSABLE` (only activities that say a link may open them).
  *
  * Returns false when nothing opened it, as a browser fails on a scheme nothing handles.
@@ -80,6 +78,6 @@ fun openPullRequestLink(context: Context, opener: LinkOpener, href: String, tool
     if (isSafeHref(href)) return openChatLink(context, opener, href, toolbarColor)
     val scheme = urlScheme(href) ?: return false
     if (scheme == "intent") return ChromeIntents.open(context, href) { web -> openChatLink(context, opener, web, toolbarColor) }
-    if (scheme in BROWSER_ONLY_SCHEMES) return false
+    if (scheme in ChromeIntents.BROWSER_ONLY_SCHEMES) return false
     return ChromeIntents.start(context, ChromeIntents.view(href))
 }

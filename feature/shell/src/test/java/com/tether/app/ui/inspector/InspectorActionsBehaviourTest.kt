@@ -198,6 +198,20 @@ class InspectorActionsBehaviourTest {
         rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
     }
 
+    /** ta-coik.18 r3: Chrome's own and in-page schemes go nowhere, as a link and as an `intent:`'s data (the shared set). */
+    @Test fun chromesIgnoredSchemesAreNotHandedOn() {
+        val links = listOf("about:blank", "CHROME://settings", "chrome-native://newtab", "devtools://x", "fido:/x", "blob:https://x.test/1", "filesystem:https://x.test/t/a", "intent://x#Intent;scheme=about;end", "intent://x#Intent;scheme=Fido;end")
+        show(model(cr = pr(links.first())))
+        for (link in links) {
+            current = model(cr = pr(link))
+            rule.waitForIdle()
+            tapPullRequest()
+            assertNull(link, shadowOf(rule.activity).nextStartedActivity)
+            rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
+        }
+        assertEquals(emptyList<String>(), opened)
+    }
+
     /** ta-coik.18: an `intent:` address goes out with Chrome's sanitising, and to its web fallback when no app takes it. */
     @Test fun anIntentAddressIsSanitisedAndFallsBackLikeChrome() {
         show(model(cr = pr("intent://pr/12#Intent;scheme=gh;component=com.example.other/.Secret;launchFlags=0x10000003;end")))

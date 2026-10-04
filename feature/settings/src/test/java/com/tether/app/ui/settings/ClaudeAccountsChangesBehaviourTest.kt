@@ -456,7 +456,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertNull(LoginLinkOpener.intentFor(sel)!!.selector)
         val l = ClaudeLoginLink.parse("intent://oauth/x#Intent;scheme=claude;package=com.example.claude;end")!!
         assertTrue(LoginLinkOpener.browser(phone).open(l))
-        assertEquals("market://details?id=com.example.claude", started.single().dataString)
+        val market = started.single()
+        assertEquals("com.example.claude", android.net.Uri.parse(market.dataString).getQueryParameter("id"))
+        assertEquals("on the Play Store app, as Chrome", com.tether.app.client.ChromeIntents.PLAY_STORE_PACKAGE, market.`package`)
     }
 
     /** r3 (security F2): a parsed `intent:` link keeps only Chrome's ALLOWED_INTENT_FLAGS: CLEAR_TASK and the grants are stripped. */

@@ -60,8 +60,8 @@ enum class ClaudeLoginStatus { Idle, PendingUrl, AwaitingCode, Success, Error, U
  * ta-coik.17: the web renders ANY url the server sends as that link (settings-dialog.tsx 90fbb9f
  * :1763-1768, no scheme check), and a phone's browser hands another scheme to the app that takes it
  * (intent:, market:, an app's own); so is it here. Kept out only what the browser itself never opens
- * from a page ([NOT_OPENED]: React blocks `javascript:`, Chrome blocks a page opening `data:`,
- * `file:` and `content:`) and what is not a URL at all (no scheme, or http(s) with no host).
+ * from a page ([NOT_OPENED]: React blocks `javascript:`; Chrome never hands a page's `file:`,
+ * `content:`, `data:`, `blob:`, `filesystem:` or its own internal schemes to an app) and what is not a URL at all (no scheme, or http(s) with no host).
  * [url] is the parsed URL's canonical spelling for http(s) (what is opened is what was read), else
  * the link as the URL parser reads it (its scheme lowercased); [host] is the http(s) canonical host
  * (ASCII, punycode), drawn beside the Open key so the operator sees where it really goes whatever
@@ -99,8 +99,12 @@ class ClaudeLoginLink private constructor(val url: String, val host: String) {
          */
         val ANTHROPIC_HOSTS: Set<String> = setOf("claude.ai", "claude.com", "console.anthropic.com", "platform.claude.com")
 
-        /** The schemes a browser never opens from a page's link (see the class). */
-        val NOT_OPENED: Set<String> = setOf("javascript", "data", "file", "content")
+        /**
+         * The schemes a browser never opens from a page's link (see the class): React's blocked
+         * `javascript:` and the shared browser-only set ([ChromeIntents.BROWSER_ONLY_SCHEMES], ta-coik.18
+         * r3: the inspector's pull request link refuses the same).
+         */
+        val NOT_OPENED: Set<String> = setOf("javascript") + ChromeIntents.BROWSER_ONLY_SCHEMES
 
         private val SCHEME = Regex("^([A-Za-z][A-Za-z0-9+.\\-]*):")
 
