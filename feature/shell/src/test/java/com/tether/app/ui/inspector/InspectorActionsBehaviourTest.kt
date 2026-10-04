@@ -205,9 +205,27 @@ class InspectorActionsBehaviourTest {
         val started = shadowOf(rule.activity).nextStartedActivity
         assertEquals("gh://pr/12", started.dataString)
         assertNull("no explicit component", started.component)
-        assertEquals("no flags it carried (no URI grants)", 0, started.flags)
+        assertEquals("Chrome's allowed flags kept, the URI grants dropped", Intent.FLAG_ACTIVITY_NEW_TASK, started.flags)
         assertTrue(started.hasCategory(Intent.CATEGORY_BROWSABLE))
         assertEquals(emptyList<String>(), opened)
+    }
+
+    /** ta-coik.18 r2: an `intent:` naming a package no app on the phone has opens that package's store page, as Chrome does. */
+    @Test fun anIntentNoAppTakesOpensItsPackagesStorePage() {
+        noAppTakesLinks()
+        show(model(cr = pr("intent://pr/12#Intent;scheme=gh;package=com.example.gh;end")))
+        tapPullRequest()
+        // No store app either (the test phone has none): the Play web page, through the chat links' path.
+        assertEquals(listOf("https://play.google.com/store/apps/details?id=com.example.gh"), opened)
+        assertEquals(0, tagCount(InspectorTags.PullRequestUnopened))
+    }
+
+    /** ta-coik.18 r2: `data:` as an `intent:` link's data is not refused (Chrome refuses only content: and file:). */
+    @Test fun anIntentWithDataAddressDataIsHandedOn() {
+        show(model(cr = pr("intent:,pr#Intent;scheme=data;end")))
+        tapPullRequest()
+        assertEquals("data:,pr", shadowOf(rule.activity).nextStartedActivity.dataString)
+        assertEquals(0, tagCount(InspectorTags.PullRequestUnopened))
     }
 
     @Test fun anIntentNoAppTakesOpensItsWebFallback() {

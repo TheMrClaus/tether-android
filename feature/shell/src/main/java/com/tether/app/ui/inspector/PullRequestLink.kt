@@ -1,17 +1,13 @@
 package com.tether.app.ui.inspector
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.ui.graphics.Color
+import com.tether.app.client.ChromeIntents
 import com.tether.app.ui.chat.LinkOpener
 import com.tether.app.ui.chat.isSafeHref
 import com.tether.app.ui.chat.openChatLink
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import java.net.URISyntaxException
 import java.util.regex.Pattern
 
 /**
@@ -72,56 +68,18 @@ internal const val PULL_REQUEST_UNOPENED = "No app on this phone could open the 
 /**
  * Opens [href] (a [pullRequestHref]) as the web's link does. A web or mail address takes the chat
  * links' path ([openChatLink] through [opener]: a Custom Tab, or the app for a session on the paired
- * server), unchanged. Any other scheme is offered to the phone's apps as a browser hands it on:
- * `ACTION_VIEW` + `CATEGORY_BROWSABLE` (only activities that say a link may open them); an `intent:`
- * address with Chrome's sanitising (browsable only, no explicit component or selector component, no
- * flags it carries), falling back to its `browser_fallback_url` when no app takes it, as Chrome does.
+ * server), unchanged. An `intent:` address opens as Chrome opens it ([ChromeIntents], shared with the
+ * Claude login link: sanitised, then its web fallback or its package's store page when no app takes
+ * it). A file, content, data, blob or filesystem address goes nowhere (Chrome never hands a page's
+ * link to one on). Any other scheme is offered to the phone's apps as a browser hands it on:
+ * `ACTION_VIEW` + `CATEGORY_BROWSABLE` (only activities that say a link may open them).
  *
  * Returns false when nothing opened it, as a browser fails on a scheme nothing handles.
  */
 fun openPullRequestLink(context: Context, opener: LinkOpener, href: String, toolbarColor: Color): Boolean {
     if (isSafeHref(href)) return openChatLink(context, opener, href, toolbarColor)
-    val intent = pullRequestIntent(href) ?: return false
-    if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    return try {
-        context.startActivity(intent)
-        true
-    } catch (_: ActivityNotFoundException) {
-        val fallback = intent.getStringExtra(BROWSER_FALLBACK_URL)
-        val web = fallback?.let(::urlScheme).let { it == "http" || it == "https" }
-        if (href.startsWith("intent:") && web) openChatLink(context, opener, fallback!!, toolbarColor) else false
-    } catch (_: SecurityException) {
-        false
-    }
-}
-
-private const val BROWSER_FALLBACK_URL = "browser_fallback_url"
-
-/** The intent a browser would hand on for [href] (a non-web scheme), or null when it hands on none. */
-@SuppressLint("UseKtx")
-internal fun pullRequestIntent(href: String): Intent? {
-    val scheme = urlScheme(href) ?: return null
-    val intent = if (scheme == "intent") {
-        try {
-            Intent.parseUri(href, Intent.URI_INTENT_SCHEME)
-        } catch (_: URISyntaxException) {
-            return null
-        } catch (_: RuntimeException) {
-            return null
-        }.apply {
-            component = null
-            flags = 0
-            selector?.let { s ->
-                s.addCategory(Intent.CATEGORY_BROWSABLE)
-                s.component = null
-            }
-        }
-    } else {
-        Intent(Intent.ACTION_VIEW, Uri.parse(href))
-    }
-    // A local-file, content or in-page address goes nowhere, nor an `intent:` carrying one (and a
-    // file:// one would be refused by StrictMode's file-URI rule).
-    if (listOfNotNull(intent.data, intent.selector?.data).any { it.scheme?.lowercase() in BROWSER_ONLY_SCHEMES }) return null
-    intent.addCategory(Intent.CATEGORY_BROWSABLE)
-    return intent
+    val scheme = urlScheme(href) ?: return false
+    if (scheme == "intent") return ChromeIntents.open(context, href) { web -> openChatLink(context, opener, web, toolbarColor) }
+    if (scheme in BROWSER_ONLY_SCHEMES) return false
+    return ChromeIntents.start(context, ChromeIntents.view(href))
 }

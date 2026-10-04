@@ -1,10 +1,7 @@
 package com.tether.app.ui.settings
 
-import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -19,6 +16,7 @@ import com.tether.app.client.ClaudeAccountsSync
 import com.tether.app.client.ClaudeLoginCode
 import com.tether.app.client.ClaudeLoginLink
 import com.tether.app.client.ClaudeLoginStatus
+import com.tether.app.client.ChromeIntents
 import com.tether.app.client.ClaudeSyncConfig
 import com.tether.app.client.ClaudeSyncMode
 import com.tether.app.client.LabelText
@@ -136,61 +134,30 @@ fun interface LoginLinkOpener {
          * `ACTION_VIEW` + `CATEGORY_BROWSABLE` on the link read ([ClaudeLoginLink]): an http(s) one in
          * the phone's browser, no app credential with it (the T15.7 / CompatibilityBanner pattern);
          * ta-coik.17: another scheme to the app that takes it, as a phone's browser hands a page's
-         * link on ([intentFor]). Uri.parse, not core-ktx's toUri: this module does not depend on
-         * androidx.core (ExternalLinks' rule).
+         * link on ([intentFor]).
          */
         fun browser(context: Context) = LoginLinkOpener { link ->
-            try {
-                // r4 (security N1): built inside the try, so nothing about the link can crash the tap.
-                val intent = intentFor(link)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return@LoginLinkOpener false
-                context.startActivity(intent)
-                true
-            } catch (_: ActivityNotFoundException) {
-                false
-            } catch (_: SecurityException) {
-                false
-            } catch (_: RuntimeException) {
-                // r3 (security F1): FileUriExposedException and the like: nothing opens, nothing crashes.
-                false
+            // ta-coik.18 r2: an `intent:` link as Chrome opens it (the shared ChromeIntents: its web
+            // fallback or its package's store page when no app takes it); nothing about it crashes the tap.
+            if (!link.web && ChromeIntents.isIntentLink(link.url)) {
+                ChromeIntents.open(context, link.url, newTask = true) { web -> ChromeIntents.start(context, ChromeIntents.view(web), newTask = true) }
+            } else {
+                val intent = intentFor(link) ?: return@LoginLinkOpener false
+                ChromeIntents.start(context, intent, newTask = true)
             }
         }
 
         /**
          * The intent a phone's browser starts for a page's link to [link]: `ACTION_VIEW` +
-         * `CATEGORY_BROWSABLE`; an `intent:` link is read as Chrome reads it (`Intent.parseUri`),
-         * then made browsable with no named component or selector, its flags limited to Chrome's
-         * ALLOWED_INTENT_FLAGS (no URI grant, no CLEAR_TASK), as Chrome does. Null: an `intent:`
-         * link that does not parse, or whose data is a scheme a browser never opens
-         * ([ClaudeLoginLink.NOT_OPENED], r3 security F1: Chrome's file/content checks).
+         * `CATEGORY_BROWSABLE`; an `intent:` link as Chrome reads and sanitises it ([ChromeIntents.parse],
+         * shared with the inspector's pull request link). Null: an `intent:` link that does not
+         * parse, or whose data is a `content:` or `file:` address (Chrome's checks).
          */
-        @SuppressLint("UseKtx")
-        fun intentFor(link: ClaudeLoginLink): Intent? {
-            if (!link.web && link.url.startsWith("intent:")) {
-                val intent = try {
-                    Intent.parseUri(link.url, Intent.URI_INTENT_SCHEME)
-                } catch (_: Exception) {
-                    // r4 (security N1): parseUri throws more than URISyntaxException for a malformed
-                    // link (NumberFormatException for `launchFlags=zz` or `i.k=x`, and others): any
-                    // of them is a link that does not parse (not a coroutine path: nothing to rethrow).
-                    return null
-                }
-                if (intent.scheme?.lowercase(java.util.Locale.ROOT) in ClaudeLoginLink.NOT_OPENED) return null
-                intent.addCategory(Intent.CATEGORY_BROWSABLE)
-                intent.component = null
-                intent.selector = null
-                intent.flags = intent.flags and ALLOWED_INTENT_FLAGS
-                return intent
-            }
-            return Intent(Intent.ACTION_VIEW, Uri.parse(link.url)).addCategory(Intent.CATEGORY_BROWSABLE)
-        }
+        fun intentFor(link: ClaudeLoginLink): Intent? =
+            if (!link.web && ChromeIntents.isIntentLink(link.url)) ChromeIntents.parse(link.url) else ChromeIntents.view(link.url)
 
-        /** r3 (security F2): Chrome's ExternalNavigationHandler ALLOWED_INTENT_FLAGS; every other flag of a parsed `intent:` link is dropped. */
-        @SuppressLint("InlinedApi")
-        const val ALLOWED_INTENT_FLAGS = Intent.FLAG_EXCLUDE_STOPPED_PACKAGES or Intent.FLAG_ACTIVITY_CLEAR_TOP or
-            Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_MATCH_EXTERNAL or Intent.FLAG_ACTIVITY_NEW_TASK or
-            Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_RETAIN_IN_RECENTS or
-            Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
-
+        /** Chrome's ExternalNavigationHandler ALLOWED_INTENT_FLAGS ([ChromeIntents.ALLOWED_INTENT_FLAGS]). */
+        const val ALLOWED_INTENT_FLAGS = ChromeIntents.ALLOWED_INTENT_FLAGS
     }
 }
 

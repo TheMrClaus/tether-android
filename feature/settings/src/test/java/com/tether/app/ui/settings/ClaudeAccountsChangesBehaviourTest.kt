@@ -419,9 +419,15 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals(0, intent.flags and (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
     }
 
-    /** r3 (security F1): an `intent:` link whose data is a scheme a browser never opens is refused, and opening it crashes nothing. */
-    @Test fun anIntentLinkToAFileContentJavascriptOrDataAddressOpensNothing() {
-        for (scheme in listOf("file", "content", "javascript", "data", "FILE")) {
+    /**
+     * r3 (security F1), ta-coik.18 r2: an `intent:` link whose data is a `file:` or `content:` address
+     * (Chrome's refusals) is refused, and opening it crashes nothing; other data schemes are not refused.
+     */
+    @Test fun anIntentLinkToAFileOrContentAddressOpensNothing() {
+        for (scheme in listOf("data", "blob", "filesystem", "javascript")) {
+            assertEquals(scheme, "$scheme://x/y", LoginLinkOpener.intentFor(ClaudeLoginLink.parse("intent://x/y#Intent;scheme=$scheme;end")!!)?.dataString)
+        }
+        for (scheme in listOf("file", "content", "FILE", "Content")) {
             val l = ClaudeLoginLink.parse("intent://x/y#Intent;scheme=$scheme;end")!!
             assertNull(scheme, LoginLinkOpener.intentFor(l))
             assertFalse(scheme, LoginLinkOpener.browser(androidx.test.core.app.ApplicationProvider.getApplicationContext()).open(l))
@@ -431,6 +437,26 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
             override fun startActivity(intent: android.content.Intent?) = throw android.os.FileUriExposedException("file:///sdcard/x exposed")
         }
         assertFalse(LoginLinkOpener.browser(throwing).open(link))
+    }
+
+    /**
+     * ta-coik.18 r2: the Open key's `intent:` link goes through the shared Chrome rule: no selector,
+     * and with no app for it and no fallback, the store page of the package it names.
+     */
+    @Test fun anIntentLinkNoAppTakesOpensItsPackagesStorePage() {
+        val started = mutableListOf<android.content.Intent>()
+        val phone = object : android.content.ContextWrapper(appContext()) {
+            override fun startActivity(intent: android.content.Intent) {
+                if (intent.scheme != "market") throw android.content.ActivityNotFoundException()
+                started += intent
+            }
+        }
+        // parseUri keeps a selector only when the link names no package.
+        val sel = ClaudeLoginLink.parse("intent://oauth/x#Intent;action=OPEN;SEL;action=android.intent.action.VIEW;scheme=https;component=com.example.other/.Sel;end")!!
+        assertNull(LoginLinkOpener.intentFor(sel)!!.selector)
+        val l = ClaudeLoginLink.parse("intent://oauth/x#Intent;scheme=claude;package=com.example.claude;end")!!
+        assertTrue(LoginLinkOpener.browser(phone).open(l))
+        assertEquals("market://details?id=com.example.claude", started.single().dataString)
     }
 
     /** r3 (security F2): a parsed `intent:` link keeps only Chrome's ALLOWED_INTENT_FLAGS: CLEAR_TASK and the grants are stripped. */

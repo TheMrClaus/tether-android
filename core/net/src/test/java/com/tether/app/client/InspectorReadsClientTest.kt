@@ -225,6 +225,27 @@ class InspectorReadsClientTest {
         }
     }
 
+    /** ta-coik.18 r2: a read that goes out says nothing (the not-sent text is for a read the link could not carry). */
+    @Test fun aConnectedReadSaysNothing() {
+        h.enqueueConnect()
+        h.newClient()
+        val errors = CopyOnWriteArrayList<String>()
+        val job = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        try {
+            h.client.start()
+            val ws = h.nextSocket()
+            h.handshake(ws)
+            assertEquals(true, h.client.requestChangeRequest("s1"))
+            h.expectFrame("change-request")
+            assertEquals(true, h.client.requestChangeRequest("s1", refresh = true))
+            h.expectFrame("change-request")
+            h.serverBarrier(ws)
+            assertEquals(emptyList<String>(), errors.toList())
+        } finally {
+            job.cancel()
+        }
+    }
+
     /**
      * ta-coik.18: the client keeps a `worktree-logs` reply within the server's own bound
      * (worktree-scripts.mjs: 200 lines of 500 chars): the LAST 200 lines, each cut to 500 chars.
