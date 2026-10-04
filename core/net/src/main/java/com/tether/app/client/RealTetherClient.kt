@@ -2461,15 +2461,17 @@ class RealTetherClient(
      * new link is opened at once, with no ping wait and no backoff. Its late callbacks find it retired.
      */
     private fun replaceSocketNow(ws: WebSocket) {
-        synchronized(lock) {
+        val halted = synchronized(lock) {
             if (socket !== ws) return
             detachSocketLocked()
             connecting = false
             reconnectTask?.cancel()
             reconnectTask = null
-            if (haltedLocked()) return
+            haltedLocked()
         }
+        // Let go, so cancelled on every path (halted or not).
         ws.cancel()
+        if (halted) return
         connectionState.value = ConnectionState.Disconnected
         connectNow()
     }
