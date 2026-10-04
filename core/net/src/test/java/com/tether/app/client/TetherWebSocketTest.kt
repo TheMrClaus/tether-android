@@ -227,7 +227,7 @@ class TetherWebSocketTest {
 
         val url: String get() = "http://127.0.0.1:${listening.localPort}/ws"
 
-        fun accept(accept: (String) -> String = ::rfcAccept, extraHeaders: String = "") {
+        fun accept(accept: (String) -> String = ::rfcAccept, extraHeaders: String = "", answerAfterMs: Long = 0) {
             socket = listening.accept()
             socket.soTimeout = 20_000
             input = DataInputStream(socket.getInputStream().buffered())
@@ -237,6 +237,7 @@ class TetherWebSocketTest {
                 if (line.isEmpty()) break
                 requestLines += line
             }
+            if (answerAfterMs > 0) Thread.sleep(answerAfterMs)
             val key = requestLines.first { it.startsWith("Sec-WebSocket-Key:", ignoreCase = true) }.substringAfter(':').trim()
             output.write(
                 ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
@@ -453,7 +454,8 @@ class TetherWebSocketTest {
         assertTrue(data.dropLast(1).none { it.fin })
         assertEquals(message.length, data.sumOf { it.payload.size })
         assertEquals(message, data.joinToString("") { String(it.payload) })
-        assertEquals(0L, ws.queueSize())
+        // The writer lets go of the message once its last fragment is out (just after the server has it).
+        awaitQueue(ws, 0L)
     }
 
     @Test
@@ -590,6 +592,130 @@ class TetherWebSocketTest {
         events.nothingMore()
         assertFalse(ws.send("y"))
         assertNull("nothing unmasked went out, and the socket is closed", server.readFrameOrNull())
+    }
+
+    private fun awaitQueue(ws: WebSocket, expected: Long) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+        while (ws.queueSize() != expected && System.nanoTime() < deadline) Thread.sleep(5)
+        assertEquals(expected, ws.queueSize())
+    }
+
+    /**
+     * r2 (security F2): the memory bound is on what is HELD. A message stays in memory whole until its
+     * last fragment is out, so it counts whole until then; before, it dropped out fragment by
+     * fragment and the queue could take another message the bound had no room for.
+     */
+    @Test
+    fun aMessageCountsWholeInTheQueueUntilItsLastFragmentIsOut() {
+        val server = RawServer()
+        val events = Recorder()
+        val mib = 1024 * 1024
+        val ws = connect(server.url, events, maxQueueBytes = 28L * mib)
+        server.accept()
+        assertEquals("open", events.next())
+        val message = text(24 * mib)
+        assertTrue(ws.send(message))
+        // The server takes the first fragment and then stops reading: the rest (well past the
+        // loopback buffers) cannot all be out.
+        val frames = arrayListOf(server.readFrame())
+        Thread.sleep(200)
+        assertEquals("still held, so still counted whole", 24L * mib, ws.queueSize())
+        assertFalse("24 + 5 MiB would pass the 28 MiB bound", ws.send(text(5 * mib)))
+        assertFalse("and the socket is closing", ws.send("x"))
+        while (true) {
+            val f = server.readFrame()
+            frames += f
+            if (f.opcode == WebSocketFrames.OPCODE_CLOSE) break
+        }
+        assertEquals(message, frames.dropLast(1).joinToString("") { String(it.payload) })
+        assertEquals(1001, Buffer().write(frames.last().payload).readShort().toInt())
+        awaitQueue(ws, 0L)
+    }
+
+    /**
+     * r2 (security F2): one message over the server's own bound (LIMITS.WS_FRAME_BYTES, 32 MiB; its ws
+     * `maxPayload` would close with 1009) is refused, OkHttp's contract for a send the socket cannot
+     * take: false, and a graceful close (1001); nothing of it reaches the wire. The bound itself goes.
+     */
+    @Test
+    fun aSingleMessageOverTheServersBoundIsRefusedAndTheBoundItselfGoes() {
+        val bound = TetherWebSocket.SERVER_MESSAGE_BYTES.toInt()
+
+        val atBound = RawServer()
+        val okEvents = Recorder()
+        val ok = connect(atBound.url, okEvents)
+        atBound.accept()
+        assertEquals("open", okEvents.next())
+        assertTrue(ok.send(text(bound)))
+        var received = 0L
+        while (true) {
+            val f = atBound.readFrame()
+            received += f.payload.size
+            if (f.fin) break
+        }
+        assertEquals(bound.toLong(), received)
+
+        val over = RawServer()
+        val overEvents = Recorder()
+        val refused = connect(over.url, overEvents)
+        over.accept()
+        assertEquals("open", overEvents.next())
+        assertFalse(refused.send(text(bound + 1)))
+        assertEquals("nothing of it was queued", 0L, refused.queueSize())
+        assertFalse(refused.send("after"))
+        val close = over.readFrame()
+        assertEquals("the close is the only frame", WebSocketFrames.OPCODE_CLOSE, close.opcode)
+        assertEquals(1001, Buffer().write(close.payload).readShort().toInt())
+        // A binary message is held to the same bound.
+        val binary = RawServer()
+        val binaryEvents = Recorder()
+        val bin = connect(binary.url, binaryEvents)
+        binary.accept()
+        assertEquals("open", binaryEvents.next())
+        assertFalse(bin.send(ByteArray(bound + 1).toByteString()))
+        assertEquals(WebSocketFrames.OPCODE_CLOSE, binary.readFrame().opcode)
+    }
+
+    /**
+     * r2 (security F1): the shared client's network interceptors never see the upgrade (OkHttp's own
+     * WebSocket call skipped them too); its application interceptors do, as with OkHttp.
+     */
+    @Test
+    fun theUpgradeSkipsNetworkInterceptorsAndKeepsApplicationOnes() {
+        val server = RawServer()
+        val events = Recorder()
+        val network = java.util.concurrent.atomic.AtomicInteger()
+        val application = java.util.concurrent.atomic.AtomicInteger()
+        val client = OkHttpClient.Builder()
+            .addNetworkInterceptor { chain -> network.incrementAndGet(); chain.proceed(chain.request()) }
+            .addInterceptor { chain -> application.incrementAndGet(); chain.proceed(chain.request()) }
+            .build()
+        val ws = connect(server.url, events, client = client)
+        server.accept()
+        assertEquals("open", events.next())
+        assertTrue(ws.send("hi"))
+        assertEquals("hi", String(server.readFrame().payload))
+        assertEquals("no network interceptor ran", 0, network.get())
+        assertEquals(1, application.get())
+        assertEquals("the caller's client is untouched", 1, client.networkInterceptors.size)
+    }
+
+    /**
+     * r2 (security F1): a call timeout on the shared client (a whole-call deadline for ordinary
+     * requests) does not apply to the upgrade: a slow 101 still opens, and the socket outlives it.
+     */
+    @Test
+    fun aCallTimeoutOnTheSharedClientDoesNotApplyToTheSocket() {
+        val server = RawServer()
+        val events = Recorder()
+        val client = OkHttpClient.Builder().callTimeout(200, TimeUnit.MILLISECONDS).build()
+        val ws = connect(server.url, events, client = client)
+        server.accept(answerAfterMs = 500)
+        assertEquals("open", events.next())
+        Thread.sleep(300)
+        assertTrue(ws.send("still here"))
+        assertEquals("still here", String(server.readFrame().payload))
+        events.nothingMore()
     }
 
     @Test

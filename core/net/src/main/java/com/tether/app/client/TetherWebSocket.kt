@@ -47,8 +47,10 @@ import okio.buffer
  *    message is never interleaved with another data frame, and the only frames between its fragments
  *    are the control frames RFC 6455 §5.4 allows there (a pong answering the server's heartbeat, a
  *    ping when the client has a ping interval) — never a close, which waits for the message to end;
- *  - what is queued is bounded ([MAX_QUEUE_BYTES]): a send past it closes the socket (1001) and is
- *    refused, as OkHttp did at its own bound; the writer's memory is one fragment;
+ *  - what is held is bounded: one message at most [SERVER_MESSAGE_BYTES] (the server's own bound),
+ *    all queued messages at most [MAX_QUEUE_BYTES], each counted whole until its last fragment is
+ *    out; a send past either closes the socket (1001) and is refused, OkHttp's contract at its own
+ *    bound; the writer's own memory is one fragment;
  *  - [cancel] mid-message closes the socket at once (the server discards the incomplete message);
  *    [close] lets the queued messages finish, then sends the close frame;
  *  - nothing here logs, and no payload is put in an exception message.
@@ -107,8 +109,11 @@ internal class TetherWebSocket private constructor(
 
     private fun send(data: ByteString, opcode: Int): Boolean = lock.withLock {
         if (failed || finished || enqueuedClose) return false
-        // As OkHttp at its bound: rather than queue without limit, close (going away) and refuse.
-        if (queueSize + data.size > maxQueueBytes) {
+        // OkHttp's contract for a send the socket cannot take (WebSocket.send): refused (false) and a
+        // graceful close (1001). Here that is a message over the server's own bound (r2, security
+        // F2: the server would drop it with 1009 anyway), or one that would take the queue past
+        // its bound. [queueSize] counts every message whole until its final fragment is out.
+        if (data.size > SERVER_MESSAGE_BYTES || queueSize + data.size > maxQueueBytes) {
             closeLocked(WebSocketFrames.CLOSE_GOING_AWAY, null)
             return false
         }
@@ -149,11 +154,16 @@ internal class TetherWebSocket private constructor(
             .header("Sec-WebSocket-Key", key)
             .header("Sec-WebSocket-Version", "13")
             .build()
-        // The caller's client as it is (trust, pinning, timeouts, interceptors, redirect policy),
-        // over HTTP/1.1 only: an upgrade does not exist on HTTP/2.
+        // The caller's client (trust, pinning, connect/read/write timeouts, application interceptors,
+        // redirect policy), over HTTP/1.1 only: an upgrade does not exist on HTTP/2. r2 (security
+        // F1): without the network interceptors, which OkHttp's own WebSocket call never ran (they
+        // would see, and could hold or rewrite, the raw upgraded exchange), and without a call
+        // timeout, so no whole-call deadline meant for ordinary requests applies to the upgrade.
         val upgradeClient = client.newBuilder()
             .eventListener(EventListener.NONE)
             .protocols(listOf(Protocol.HTTP_1_1))
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .apply { networkInterceptors().clear() }
             .build()
         call = upgradeClient.newCall(upgrade)
         Thread({ runReader() }, "Tether WebSocket reader").apply { isDaemon = true }.start()
@@ -272,7 +282,9 @@ internal class TetherWebSocket private constructor(
                             val last = offset + length == data.size
                             frame(last, if (offset == 0) step.opcode else WebSocketFrames.OPCODE_CONTINUATION, data, offset, length)
                             offset += length
-                            lock.withLock { queueSize -= length }
+                            // r2 (security F2): the message is held whole until its last fragment is
+                            // out, so it counts whole until then (the bound is on memory held).
+                            if (last) lock.withLock { queueSize -= data.size }
                             // RFC 6455 §5.4: control frames, and only they, may go between fragments.
                             while (!last) {
                                 when (val between = lock.withLock { nextStepLocked(block = false) }) {

@@ -13,6 +13,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import com.tether.app.protocol.TetherJson
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -36,7 +37,8 @@ import org.junit.Test
  * ```
  *
  * It proves the server side reassembles the app's fragments byte for byte (the web's largest send
- * and the bound itself), answers its heartbeat pings meanwhile, and drops one byte more (1009).
+ * and the bound itself) and answers its heartbeat pings meanwhile. One byte more never reaches it
+ * (r2, security F2): the app refuses that send and closes (1001), where ws would have closed with 1009.
  */
 class WsLibraryInteropTest {
 
@@ -77,9 +79,11 @@ class WsLibraryInteropTest {
                 println("ws interop: $size bytes reassembled, $pongs heartbeat pongs answered so far")
             }
             assertTrue("the heartbeat was answered", pongs > 0)
-            // One byte past the bound: ws closes with 1009 (message too big).
-            assertTrue(ws.send(text(TetherWebSocket.SERVER_MESSAGE_BYTES.toInt() + 1, 1)))
-            assertEquals("closing:1009", events.ends.poll(60, TimeUnit.SECONDS))
+            // One byte past the bound: refused here, before the wire, with a graceful close the
+            // server answers (ws echoes the code).
+            assertFalse(ws.send(text(TetherWebSocket.SERVER_MESSAGE_BYTES.toInt() + 1, 1)))
+            assertEquals("closing:1001", events.ends.poll(60, TimeUnit.SECONDS))
+            assertTrue("nothing past the bound was ever sent", events.replies.isEmpty())
         } finally {
             ws.cancel()
         }
