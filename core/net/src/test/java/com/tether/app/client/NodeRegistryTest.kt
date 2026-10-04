@@ -472,10 +472,11 @@ class NodeRegistryTest {
     }
 
     /**
-     * OkHttp refuses a send once it has started closing, while the client still
+     * The socket refuses a send once it has started closing, while the client still
      * holds the socket as live (the close handshake is not finished). One frame
-     * over OkHttp's 16 MiB queue cap starts that close (RealWebSocket.send); the
-     * server here never answers the close, so the window stays open.
+     * over the socket's queue cap starts that close (TetherWebSocket.send, as
+     * OkHttp's RealWebSocket.send did at its own cap); the server here never
+     * answers the close, so the window stays open.
      */
     @Test
     fun aSendOkHttpRefusesIsNotSentNotLinkLost() {
@@ -498,7 +499,7 @@ class NodeRegistryTest {
         try {
             h.handshake(serverSide)
 
-            assertFalse("OkHttp refuses the oversized frame", h.client.markSeen("x".repeat(17 * 1024 * 1024), 1L))
+            assertFalse("the socket refuses the oversized frame", h.client.markSeen("x".repeat((AttachmentFrame.SOCKET_QUEUE_BYTES + 1).toInt()), 1L))
             assertEquals(ConnectionState.Connected, h.client.connection.value)
 
             assertEquals(NodeRequestOutcome.NotSent, runBlocking { h.client.probeNode(origin(), "node-a") })

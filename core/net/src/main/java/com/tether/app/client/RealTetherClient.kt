@@ -2625,15 +2625,17 @@ class RealTetherClient(
             // bound in ONE critical section: once stop() / logout() / a
             // sign-in has taken the lock no upgrade can start with the old
             // credential, and whichever of them comes next finds the socket
-            // bound and cancels it (detachSocketLocked). newWebSocket() only
-            // enqueues the call; OkHttp's callbacks run on its own threads and
+            // bound and cancels it (detachSocketLocked). connect() only
+            // starts the call; the socket's callbacks run on its own threads and
             // wait for this lock, and bind the socket first if they win
             // (bindLocked is idempotent). The monitor is reentrant, so a
-            // callback OkHttp makes inline (a rejected enqueue) is safe too.
+            // callback made inline would be safe too.
             socketListener = listener
             socketOrigin = serverOrigin(base.toString())
             // No redirects on the credential-bearing upgrade either (see authHttp).
-            listener.bindLocked(authHttp.newWebSocket(request, listener))
+            // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
+            // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
+            listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener))
         }
     }
 
@@ -3352,9 +3354,10 @@ class RealTetherClient(
             val drain = PendingInput.sendableRecords(added.store, reconciledSessions).map { record ->
                 record.key to if (record.key == key) frame else recordFrame(record).encode()
             }
-            // OkHttp closes the socket rather than queue past its bound: frames that would pass it
-            // now are not handed over, and nothing is filed. Frames sent outside this lock can still
-            // grow the queue before the sends below (rare): OkHttp then refuses, closing the socket.
+            // The socket closes rather than queue past its bound (TetherWebSocket.MAX_QUEUE_BYTES):
+            // frames that would pass it now are not handed over, and nothing is filed. Frames sent
+            // outside this lock can still grow the queue before the sends below (rare): the socket
+            // then refuses, closing.
             attachmentQueueRefusal(ws.queueSize(), drain.sumOf { AttachmentFrame.utf8Length(it.second) })?.let { return@synchronized it }
             pendingStore = added.store
             forgetLocked(added.evicted.map { it.key })

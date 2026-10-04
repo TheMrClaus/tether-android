@@ -65,11 +65,12 @@ class AttachmentLinkGateTest {
     fun aSessionNotConfirmedOnThisSocketIsNotLive() = assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(sessionLive = false), a))
 
     @Test
-    fun theQueueTakesAFrameUpToOkHttpsBoundAndNotOneByteMore() {
-        val bound = AttachmentFrame.OKHTTP_QUEUE_BYTES
+    fun theQueueTakesAFrameUpToTheSocketsBoundAndNotOneByteMore() {
+        val bound = AttachmentFrame.SOCKET_QUEUE_BYTES
         assertNull(attachmentQueueRefusal(0, AttachmentFrame.MAX_SEND_FRAME_BYTES))
         assertNull(attachmentQueueRefusal(bound - 100, 100))
         assertEquals(AttachmentSendResult.LinkBusy, attachmentQueueRefusal(bound - 100, 101))
-        assertEquals(AttachmentSendResult.LinkBusy, attachmentQueueRefusal(2L * 1024 * 1024, AttachmentFrame.MAX_SEND_FRAME_BYTES))
+        assertNull(attachmentQueueRefusal(AttachmentFrame.MAX_SEND_FRAME_BYTES, AttachmentFrame.MAX_SEND_FRAME_BYTES))
+        assertEquals(AttachmentSendResult.LinkBusy, attachmentQueueRefusal(AttachmentFrame.MAX_SEND_FRAME_BYTES + 1, AttachmentFrame.MAX_SEND_FRAME_BYTES))
     }
 }

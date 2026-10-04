@@ -177,7 +177,10 @@ object AttachmentCopy {
     val TOTAL: String = "Attachments exceed the total size limit (${size(AttachmentDraft.MAX_ATTACHMENTS_TOTAL_BYTES.toLong())})."
     fun unreadable(name: String): String = "Could not read \"$name\"."
 
-    /** T7.4 (native, logged divergence): the encoded message would not fit the link's frame bound. */
+    /**
+     * T7.4: the encoded message would not fit the server's frame bound (ta-coik.16: 32 MiB, which
+     * the web's caps above never reach; kept so a frame the server would drop is never staged).
+     */
     val FRAME: String = "Attachments exceed what one message can carry (${size(AttachmentFrame.STAGING_BUDGET_BYTES)} once encoded). Send the rest in another message."
 
     const val NO_CLIPBOARD_IMAGE = "No image found on the clipboard."

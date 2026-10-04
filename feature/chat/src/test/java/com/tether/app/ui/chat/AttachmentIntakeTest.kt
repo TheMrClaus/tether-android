@@ -186,16 +186,25 @@ class AttachmentIntakeTest {
         assertTrue("read ${endless.read.get()}", endless.read.get() <= 3 * 64 * 1024)
     }
 
-    // --- the frame bound (native) ----------------------------------------------------------------
+    // --- the frame bound (the server's) -----------------------------------------------------------
 
+    /**
+     * ta-coik.16: whatever the web's caps take is staged. Before, the app's 15 MiB frame bound (OkHttp's
+     * 16 MiB queue) cut a batch the web sends: two 8 MB files (16 MB raw, about 21 MB of base64)
+     * staged only the first. Now the web's largest batch, two files at the 9 MB per-file cap (18 MB,
+     * its total cap), is staged whole, inside the server's frame bound; the web's total cap still
+     * stops a byte more.
+     */
     @Test
-    fun theFrameBoundStopsABatchTheWebWouldTakeAndSaysSo() {
-        // Two 8 MB files: 16 MB raw is within the web's 18 MB, but about 21 MB of base64 is not
-        // within what one socket frame may carry.
-        val r = intake(listOf(FakeSource("a.bin", 8 * mb), FakeSource("b.bin", 8 * mb)))
-        assertEquals(listOf("a.bin"), r.added.map { it.attachment.name })
-        assertEquals(listOf(AttachmentCopy.FRAME), r.flashes)
+    fun theWebsLargestBatchIsStagedWholeAndOnlyTheWebsCapsStopMore() {
+        val r = intake(listOf(FakeSource("a.bin", 9 * mb), FakeSource("b.bin", 9 * mb), FakeSource("c.bin", 1)))
+        assertEquals(listOf("a.bin", "b.bin"), r.added.map { it.attachment.name })
+        assertEquals(listOf(AttachmentCopy.TOTAL), r.flashes)
         assertTrue(AttachmentFrame.wireBytes(r.added.map { it.attachment }) <= AttachmentFrame.STAGING_BUDGET_BYTES)
+        assertTrue(AttachmentFrame.STAGING_BUDGET_BYTES < AttachmentFrame.MAX_SEND_FRAME_BYTES)
+        val two = intake(listOf(FakeSource("a.bin", 8 * mb), FakeSource("b.bin", 8 * mb)))
+        assertEquals(listOf("a.bin", "b.bin"), two.added.map { it.attachment.name })
+        assertTrue(two.flashes.isEmpty())
     }
 
     // --- types ----------------------------------------------------------------------------------

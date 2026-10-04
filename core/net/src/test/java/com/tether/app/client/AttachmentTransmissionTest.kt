@@ -216,17 +216,14 @@ class AttachmentTransmissionTest {
     fun aFrameOverTheBoundIsRefusedBeforeTheSocketAndTheSocketStaysUp() {
         val (client, _) = connected()
         val origin = client.consentOrigin.value
-        // 15 MiB + 1 of base64: past MAX_SEND_FRAME_BYTES (and short of OkHttp's 16 MiB, which would
-        // close the socket rather than queue it).
+        // 32 MiB of base64 plus the envelope: past MAX_SEND_FRAME_BYTES, the server's own bound
+        // (protocol-validate LIMITS.WS_FRAME_BYTES; its ws `maxPayload` would drop it with 1009).
         val huge = Attachment("big.bin", "application/octet-stream", "A".repeat(AttachmentFrame.MAX_SEND_FRAME_BYTES.toInt()))
         assertEquals(AttachmentSendResult.TooLarge, client.sendAttachments("s1", "x", listOf(huge), null, origin))
-        // Past OkHttp's own queue bound: handed to the socket, this would close it (1001).
-        val past = Attachment("past.bin", "application/octet-stream", "A".repeat(17 * 1024 * 1024))
-        assertEquals(AttachmentSendResult.TooLarge, client.sendAttachments("s1", "x", listOf(past), null, origin))
         assertTrue(frames("send").isEmpty())
         assertEquals(ConnectionState.Connected, client.connection.value)
         assertEquals("the socket was never closed", null, h.serverCloses.poll(200, TimeUnit.MILLISECONDS))
-        // Just inside the bound: it goes, whole, and the link survives it.
+        // Just inside the bound: it goes, whole (in fragments the server reassembles), and the link survives it.
         val fits = Attachment("fits.bin", "application/octet-stream", "A".repeat((AttachmentFrame.MAX_SEND_FRAME_BYTES - 4096).toInt()))
         assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(fits), null, origin))
         val sent = frames("send").single()
@@ -235,10 +232,37 @@ class AttachmentTransmissionTest {
     }
 
     /**
-     * r2 (verifier L2): a frame the socket's send queue cannot take NOW (a large frame still going
-     * out ahead of it) is refused as LinkBusy before the socket is handed it; OkHttp would otherwise
-     * close the socket (1001) rather than queue past 16 MiB. The server stops reading (its reader is
-     * held on the first frame), so the second frame stays queued in the client.
+     * ta-coik.16: everything the web's caps allow goes. Before, the app refused a frame over 15 MiB
+     * (OkHttp's 16 MiB queue), so a selection the web sends (up to 18 MB of files, 24 MiB of
+     * base64) came back TooLarge. Here: the web's total, 24 MiB of base64 across three files each
+     * under the 12 MiB per-file bound (protocol-validate ATTACHMENT_DATA_B64_BYTES), arrives
+     * byte for byte, in order with the frames around it, and the link stays up.
+     */
+    @Test
+    fun theWebsLargestSendGoesWholeAndInOrder() {
+        val (client, _) = connected()
+        val origin = client.consentOrigin.value
+        val perFile = 8 * 1024 * 1024
+        val files = listOf('a', 'b', 'c').map { c -> Attachment("$c.bin", "application/octet-stream", c.toString().repeat(perFile)) }
+        assertEquals(24L * 1024 * 1024, files.sumOf { it.data.length.toLong() })
+        client.pin("before", true)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "large", files, null, origin))
+        client.pin("after", true)
+        val out = h.framesUntilBarrier().filter { it.type() == "pin" || it.type() == "send" }
+        assertEquals(listOf("pin", "send", "pin"), out.map { it.type() })
+        assertEquals(listOf("before", "after"), listOf(out[0].str("sessionId"), out[2].str("sessionId")))
+        val got = (out[1]["attachments"] as JsonArray).map { (it as JsonObject)["data"] as JsonPrimitive }
+        assertEquals(files.map { it.data }, got.map { it.content })
+        assertEquals(ConnectionState.Connected, client.connection.value)
+        assertEquals("the socket was never closed", null, h.serverCloses.poll(200, TimeUnit.MILLISECONDS))
+    }
+
+    /**
+     * r2 (verifier L2): a frame the socket's send queue cannot take NOW (large frames still going
+     * out ahead of it) is refused as LinkBusy before the socket is handed it; the socket would
+     * otherwise close (1001) rather than queue past its bound (two of the largest frames). The server
+     * stops reading (its reader is held on the first frame), so the frames after it stay queued in
+     * the client.
      */
     @Test
     fun aFrameTheSocketQueueCannotTakeNowWaitsAndTheSocketStaysUp() {
@@ -251,7 +275,8 @@ class AttachmentTransmissionTest {
             val big = "A".repeat((AttachmentFrame.MAX_SEND_FRAME_BYTES - 4096).toInt())
             // Queued behind the held reader: at most the loopback buffers (about 10 MB here) drain.
             assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "first", listOf(Attachment("a.bin", "application/octet-stream", big)), null, origin))
-            assertEquals(AttachmentSendResult.LinkBusy, client.sendAttachments("s1", "second", listOf(Attachment("b.bin", "application/octet-stream", big)), null, origin))
+            assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "second", listOf(Attachment("b.bin", "application/octet-stream", big)), null, origin))
+            assertEquals(AttachmentSendResult.LinkBusy, client.sendAttachments("s1", "third", listOf(Attachment("c.bin", "application/octet-stream", big)), null, origin))
             assertEquals(ConnectionState.Connected, client.connection.value)
             assertEquals("the socket was closed", null, h.serverCloses.poll(200, TimeUnit.MILLISECONDS))
         } finally {
@@ -260,7 +285,7 @@ class AttachmentTransmissionTest {
         }
         // Once the queue drains, the next one goes (nothing was lost or closed).
         val sent = h.framesUntilBarrier().filter { it.type() == "send" }
-        assertEquals(listOf("hold", "first"), sent.map { it.str("text") })
+        assertEquals(listOf("hold", "first", "second"), sent.map { it.str("text") })
         assertEquals(ConnectionState.Connected, client.connection.value)
     }
 

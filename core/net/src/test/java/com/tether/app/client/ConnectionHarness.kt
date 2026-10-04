@@ -225,7 +225,7 @@ class ConnectionHarness {
     /**
      * ta-wvz: the next client frame. The bound is on IDLENESS, not on the frame's size: it fails once
      * [FRAME_IDLE_SECONDS] pass with no byte reaching the server, and keeps waiting while a large
-     * frame (a near-limit attachment send is ~15 MiB) is still arriving on a loaded box.
+     * frame (a near-limit attachment send is ~32 MiB) is still arriving on a loaded box.
      */
     fun frame(): JsonObject {
         val hardDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FRAME_HARD_CAP_SECONDS)

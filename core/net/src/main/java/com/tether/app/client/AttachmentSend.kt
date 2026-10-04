@@ -8,31 +8,28 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * T7.4: the size rules of a `send` that carries attachments (v15). The web sends attachments inline,
  * as base64 on the WebSocket `send` frame (lib/attachment-draft.ts, chat-view.tsx addFiles); there
- * is no upload route. The app does the same, with one native bound the web does not need.
+ * is no upload route. The app does the same, within the same caps (AttachmentDraft: 10 files, 9 MB
+ * each, 18 MB in all, about 24 MB once base64-encoded).
  *
- * OkHttp's WebSocket CLOSES the connection (code 1001) when one outgoing message would take its send
- * queue past [OKHTTP_QUEUE_BYTES] (RealWebSocket.MAX_QUEUE_SIZE, 16 MiB). The web's own caps (18 MB
- * of files, about 24 MB once base64-encoded) would pass that, so the app also bounds the ENCODED
- * frame: at most [MAX_SEND_FRAME_BYTES], and never more than the queue can take at the moment of the
- * send. A frame over either bound is refused before anything goes out, so an oversized frame never
- * reaches the socket. The queue check and the send are taken together under the client's lock, but
- * other frames (the resync `attach`, pings, the durable outbox's sends) are handed to the socket
- * outside that lock, so in a rare race one of them can grow the queue between the check and the
- * send. OkHttp's own check then refuses the frame: it closes the socket (1001) and nothing of the
- * frame is sent; the send reports [AttachmentSendResult.NotConnected] and is withdrawn (the web's
- * rollback: the composer keeps the message and its files). The server's own frame bound (protocol-validate
- * LIMITS.WS_FRAME_BYTES, 32 MiB, its `maxPayload`) is not announced to the client; the app's bound
- * is below it, so it is never the one that decides.
- *
- * Logged divergence (coordinator decision, T7.4): a set of large non-image files the web accepts
- * can be refused here (the image shrink below keeps pictures well inside the bound).
+ * ta-coik.16: the app's socket ([TetherWebSocket]) sends a message as large as the server takes
+ * (protocol-validate LIMITS.WS_FRAME_BYTES, 32 MiB, its `maxPayload`, a bound the server enforces
+ * for the web too), in fragments, so every message the web can send goes. [MAX_SEND_FRAME_BYTES] is
+ * that server bound: a frame over it would only be dropped by the server (1009), so it is refused
+ * before anything goes out. The socket closes (1001) rather than queue past [SOCKET_QUEUE_BYTES], so
+ * a frame that would pass it at the moment of the send waits ([AttachmentSendResult.LinkBusy]). The
+ * queue check and the send are taken together under the client's lock, but other frames (the resync
+ * `attach`, pings, the durable outbox's sends) are handed to the socket outside that lock, so in a
+ * rare race one of them can grow the queue between the check and the send. The socket's own check
+ * then refuses the frame: it closes (1001) and nothing of the frame is sent; the send reports
+ * [AttachmentSendResult.NotConnected] and is withdrawn (the web's rollback: the composer keeps the
+ * message and its files).
  */
 object AttachmentFrame {
-    /** OkHttp RealWebSocket.MAX_QUEUE_SIZE: a send that would pass it closes the socket. */
-    const val OKHTTP_QUEUE_BYTES: Long = 16L * 1024 * 1024
+    /** [TetherWebSocket.MAX_QUEUE_BYTES]: a send that would pass it closes the socket. */
+    const val SOCKET_QUEUE_BYTES: Long = TetherWebSocket.MAX_QUEUE_BYTES
 
-    /** The largest `send` frame with attachments the app puts on the wire (1 MiB below the queue bound). */
-    const val MAX_SEND_FRAME_BYTES: Long = OKHTTP_QUEUE_BYTES - 1L * 1024 * 1024
+    /** The largest `send` frame with attachments the app puts on the wire: the server's own bound. */
+    const val MAX_SEND_FRAME_BYTES: Long = TetherWebSocket.SERVER_MESSAGE_BYTES
 
     /**
      * What the attachments of one message may take in the frame while they are staged: the frame
@@ -100,9 +97,9 @@ internal fun attachmentLinkRefusal(link: AttachmentLink, expectedOrigin: String?
     else -> null
 }
 
-/** OkHttp closes the socket rather than queue past its bound: a frame that would pass it now waits. */
+/** The socket closes rather than queue past its bound: a frame that would pass it now waits. */
 internal fun attachmentQueueRefusal(queuedBytes: Long, frameBytes: Long): AttachmentSendResult? =
-    if (queuedBytes + frameBytes > AttachmentFrame.OKHTTP_QUEUE_BYTES) AttachmentSendResult.LinkBusy else null
+    if (queuedBytes + frameBytes > AttachmentFrame.SOCKET_QUEUE_BYTES) AttachmentSendResult.LinkBusy else null
 
 /** What an attempt to send a message with attachments came to ([TetherClient.sendAttachments]). */
 enum class AttachmentSendResult {
@@ -121,7 +118,7 @@ enum class AttachmentSendResult {
     /** A turn is running: attachments ride an idle send only (the server never queues them). */
     Busy,
 
-    /** The encoded frame is over [AttachmentFrame.MAX_SEND_FRAME_BYTES]. */
+    /** The encoded frame is over [AttachmentFrame.MAX_SEND_FRAME_BYTES] (the server's own bound). */
     TooLarge,
 
     /** The socket is still sending a large frame: this one would not fit its queue now. */
