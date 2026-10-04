@@ -176,8 +176,9 @@ fun ChatScreen(
     val codexMap by vm.client.codexControls.collectAsStateWithLifecycle()
     val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
     val pinnedModels by remember(prefs) { prefs.preferences.map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
-    // T13.2 / T6.6 r3: the session controls, the limit card and the auto-continue grant (and its
-    // pending confirmation, which closes on any lock) all stand on the live-copy rule.
+    // T13.2 / T6.6 r3: the session controls and the auto-continue grant (and its pending
+    // confirmation, which closes on any lock) stand on the live-copy rule (ta-coik.23: the limit
+    // card no longer does; see noticeActions below).
     val controlLock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)
     val controlActions = remember(session?.id, controlLock, consentOrigin, vm, codexMap[session?.id], opencodeMap[session?.id]) {
         val s = session
@@ -199,13 +200,14 @@ fun ChatScreen(
         }
     }
 
-    // T6.6: the notices' X (dismiss-notice: link + liveness only, the server allows it read-only)
-    // and the limit card (rate-limit-resume: T7.2's guarded path and lock). Taps only.
-    // r3 (T13.2's consent rule, SYNC_DESIGN §4.2): both stand on [liveNow], LiveCopy's one rule, so
-    // a saved, catching-up or not-downloaded copy (or no entry, when the client reports freshness)
-    // never dismisses, schedules, resumes or cancels, even while the live set still holds the session.
+    // T6.6: the notices' X (dismiss-notice; the server allows it read-only) and the limit card
+    // (rate-limit-resume: T7.2's guarded path). Taps only. ta-coik.23: as on the web (use-tether.ts
+    // 90fbb9f :337-344 `send`, :1657-1665), neither locks offline or catching up: the client sends on
+    // an open socket for the server they were drawn for, and says the link is reconnecting otherwise.
+    // The limit card keeps only the session's own read-only / handed-off lock.
     val noticeLink = Triple(connection, liveNow, consentOrigin)
-    val noticeActions = remember(session?.id, noticeLink, controlLock, vm) {
+    val limitLock = sessionControlLock(session)
+    val noticeActions = remember(session?.id, noticeLink, limitLock, vm) {
         val s = session
         val drawnFor = consentOrigin
         if (s == null) {
@@ -213,8 +215,7 @@ fun ChatScreen(
         } else {
             NoticeActions(
                 sessionId = s.id,
-                lock = noticeLock(connection == com.tether.app.client.ConnectionState.Connected && drawnFor != null, liveNow),
-                controlLock = controlLock,
+                controlLock = limitLock,
                 link = noticeLink,
                 onDismiss = { key -> vm.client.dismissNotice(s.id, key, drawnFor) },
                 onRateLimit = { control -> vm.client.sessionControl(s.id, control, drawnFor) },

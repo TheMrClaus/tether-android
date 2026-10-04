@@ -4163,8 +4163,9 @@ class RealTetherClient(
     /**
      * T6.6: the one path a notice's dismissal takes to the wire. Under the lock, in order: a live,
      * handshaken socket of a running (not halted) client; the X drawn for THIS server; the session
-     * listed and confirmed live on it (read-only and handed-off sessions may dismiss: the server
-     * allows it); a bounded key the session's CURRENT projection still shows (the reducer's own
+     * listed on it (read-only and handed-off sessions may dismiss: the server allows it). ta-coik.23:
+     * not the session's liveness: the web's `send` puts `dismiss-notice` on any OPEN socket
+     * (use-tether.ts 90fbb9f :337-344, :1657-1659) and a refusal comes back as a shown `error`; a bounded key the session's CURRENT projection still shows (the reducer's own
      * [projectionHasNoticeKey]); then enqueued on that socket. ta-coik.22: every tap is one frame, as
      * on the web (notice-dismiss-button.tsx 90fbb9f :12-20, no latch; the server's dismissal is
      * idempotent). Nothing is retried, held or persisted.
@@ -4176,7 +4177,6 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NoticeResult.NotConnected
             if (expectedOrigin != origin) return@synchronized NoticeResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized NoticeResult.NotLive
             sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized NoticeResult.Locked
             if (!projectionHasNoticeKey(sessionStore.tree(sessionId), dismissKey)) return@synchronized NoticeResult.NotShown
             if (!ws.send(ClientMessage.DismissNotice(sessionId, dismissKey).encode())) return@synchronized NoticeResult.NotConnected
@@ -4260,7 +4260,9 @@ class RealTetherClient(
     /**
      * T7.2: the one path a session control takes to the wire. Under the lock, in order: a live,
      * handshaken socket of a running (not halted) client; the control drawn for THIS server
-     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; listed, and neither
+     * ([expectedOrigin] = the socket's origin); ta-coik.23: not the session's liveness (the web's `send`
+     * puts `rate-limit-resume` and every control on any OPEN socket, use-tether.ts 90fbb9f :337-344,
+     * :1661-1665; a refusal comes back as a shown `error`); listed, and neither
      * read-only nor handed off (fail closed) — the one exception (T6.6 r2): a handed-off source may
      * still decline its limit prompt / cancel its scheduled resume
      * ([SessionControlsGuard.allowedWhileHandedOff]), since that resume would otherwise start a turn
@@ -4275,7 +4277,6 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ControlResult.NotConnected
             if (expectedOrigin != origin) return@synchronized ControlResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized ControlResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ControlResult.Locked
             if (session.readOnly) return@synchronized ControlResult.Locked
             if (!session.handedOffTo.isNullOrEmpty() && !SessionControlsGuard.allowedWhileHandedOff(control)) return@synchronized ControlResult.Locked
@@ -4365,7 +4366,8 @@ class RealTetherClient(
      * client; the key drawn for THIS server (r3: [expectedOrigin] = the socket's origin, so an End
      * armed before a server switch never ends a same-id session on the new one); the session listed
      * on it; and, for a key drawn from the session's own copy ([requireLive]), confirmed live on it
-     * ([liveThisEpoch]). Nothing is retried, held or persisted.
+     * ([liveThisEpoch]). Nothing is retried, held or persisted. ta-coik.23: a key drawn for another
+     * server says so in the link's words, as a closed socket does, instead of nothing.
      */
     override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
         if (sessionId.isEmpty()) return
@@ -4373,7 +4375,7 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
-            if (expectedOrigin != origin) return@synchronized null
+            if (expectedOrigin != origin) return@synchronized false
             if (requireLive && sessionId !in liveThisEpoch) return@synchronized null
             if (sessionsState.value.none { it.id == sessionId }) return@synchronized null
             ws.send(ClientMessage.Kill(sessionId).encode())

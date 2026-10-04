@@ -7,6 +7,7 @@ import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -20,8 +21,9 @@ import org.junit.Test
  * T6.6: the notice controls at the one place they reach the wire (RealTetherClient over a
  * MockWebServer socket). `dismiss-notice`, `rate-limit-resume` and `set-auto-continue-on-limit`
  * are operator controls: only a call (a tap) produces one, never anything received; each goes out
- * only on a live connection, for a session live on it, with exactly the value the current state
- * offers; nothing is held for the reconnect and nothing is retried.
+ * only on an open connection to the server that drew it (ta-coik.23: live or catching up, as on the
+ * web), with exactly the value the current state offers; nothing is held for the reconnect and
+ * nothing is retried.
  */
 class NoticeTransmissionTest {
 
@@ -116,28 +118,44 @@ class NoticeTransmissionTest {
     }
 
     @Test
-    fun offlineCatchingUpOrAnotherServerIsRefusedAndNothingIsHeld() {
+    fun offlineOrAnotherServerIsRefusedAndNothingIsHeldButCatchingUpSendsAsOnTheWeb() {
         val (client, ws) = connected()
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
         val key = keys(client).first()
         assertEquals(NoticeResult.NotLive, client.dismissNotice("s1", key, "https://other.example"))
         assertEquals(NoticeResult.NotLive, client.dismissNotice("s1", key, null))
+        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), "https://other.example"))
         h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
+        // use-tether.ts 90fbb9f :337-341: a closed socket sends nothing and says so.
         assertEquals(NoticeResult.NotConnected, client.dismissNotice("s1", key, client.consentOrigin.value))
         assertEquals(ControlResult.NotConnected, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), client.consentOrigin.value))
+        val deadline = System.currentTimeMillis() + 20_000
+        while (errors.size < 2 && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(
+            listOf("The secure link is reconnecting. The notice was not dismissed.", "The secure link is reconnecting. The setting was not changed."),
+            errors.toList(),
+        )
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1"))
         h.expectFrame("attach")
-        assertEquals(NoticeResult.NotLive, client.dismissNotice("s1", key, client.consentOrigin.value))
         assertTrue("the refused taps were not held for the new link", frames("dismiss-notice").isEmpty() && frames("rate-limit-resume").isEmpty())
+        assertTrue("s1 is still catching up", "s1" !in client.liveSessions.value)
+        // ta-coik.23: catching up, the web's `send` still puts both frames on the open socket
+        // (use-tether.ts 90fbb9f :1657-1665); the server answers a refusal with a shown `error`.
+        assertEquals(NoticeResult.Sent, client.dismissNotice("s1", key, client.consentOrigin.value))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), client.consentOrigin.value))
+        val sent = h.framesUntilBarrier()
+        assertEquals(listOf(key), sent.filter { it.type() == "dismiss-notice" }.map { it.str("dismissKey") })
+        assertEquals(listOf("schedule"), sent.filter { it.type() == "rate-limit-resume" }.map { it.str("action") })
 
         ws2.send(snapshotFrame("s1", 5, noticesState()))
         h.await(client.liveSessions) { "s1" in it }
         assertTrue("the snapshot sends nothing by itself", frames("dismiss-notice").isEmpty())
-        // A new connection: one tap sends again (the previous link never carried it).
         assertEquals(NoticeResult.Sent, client.dismissNotice("s1", key, client.consentOrigin.value))
         assertEquals(1, frames("dismiss-notice").size)
     }
@@ -267,7 +285,7 @@ class NoticeTransmissionTest {
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
         assertEquals(listOf("dismiss"), frames("rate-limit-resume").map { it.str("action") })
         assertTrue(frames("set-auto-continue-on-limit").isEmpty())
-        // Still only for THIS server's live session: another origin sends nothing.
+        // Still only for THIS server: another origin sends nothing.
         assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), "https://other.example"))
         assertTrue(frames("rate-limit-resume").isEmpty())
     }

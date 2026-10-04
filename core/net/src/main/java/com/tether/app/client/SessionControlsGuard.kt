@@ -22,7 +22,7 @@ enum class ControlResult {
     /** No live, handshaken socket (or the frame could not be handed to it). */
     NotConnected,
 
-    /** Connected, but the session is not confirmed live on this connection (or the row was drawn for another server). */
+    /** Connected, but the row was drawn for another server. */
     NotLive,
 
     /** The session is read-only or handed off, or not listed at all (fail closed). */

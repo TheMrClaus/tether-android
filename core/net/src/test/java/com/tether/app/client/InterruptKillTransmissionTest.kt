@@ -5,6 +5,7 @@ import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.TetherJson
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -273,11 +274,17 @@ class InterruptKillTransmissionTest {
     @Test
     fun anEndDrawnForAnotherServerIsRefusedEitherWay() {
         val (client, _) = connected()
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
         client.kill("s1", "https://other.example")
         client.kill("s1", "https://other.example", requireLive = false)
         client.kill("s1", null)
         client.kill("s1", null, requireLive = false)
         assertTrue(framesOf("kill").isEmpty())
+        // ta-coik.23: each refusal says so in the client's words, as a closed link does (never silent).
+        val deadline = System.currentTimeMillis() + 20_000
+        while (errors.size < 4 && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(List(4) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
     }
 
     /**

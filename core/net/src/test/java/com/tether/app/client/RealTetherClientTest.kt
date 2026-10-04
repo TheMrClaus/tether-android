@@ -553,9 +553,9 @@ class RealTetherClientTest {
         assertEquals("claude-opus-4-8", controls.models[0].resolvedModel)
         assertEquals("claude-opus-4-8", controls.model)
 
-        // T7.2: a model choice for a session that is not listed / live here sends nothing
-        // (SessionControlsClientTest covers the guarded path end to end).
-        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Model("claude-opus-4-8"), client.consentOrigin.value))
+        // T7.2: a model choice for a session that is not listed here sends nothing (ta-coik.23: the
+        // listing, not liveness, refuses it; SessionControlsClientTest covers the guarded path end to end).
+        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.Model("claude-opus-4-8"), client.consentOrigin.value))
     }
 }
 

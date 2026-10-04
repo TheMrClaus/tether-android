@@ -87,36 +87,17 @@ import java.util.Locale
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
 /**
- * Why no notice of this session can be dismissed right now (only the link and the copy's liveness
- * can stop it). r3: worded like the Stop keys' lock ([stopLockCopy]): offline, it is a saved copy.
- */
-enum class NoticeLock(val copy: String) {
-    Offline("Connect to dismiss this notice. This is a saved copy."),
-    CatchingUp("Catching up… You can dismiss this notice once this session is live."),
-}
-
-/**
- * Dismissal is presentation-only and the server allows it on a read-only or handed-off session, so
- * only the link and the session's liveness lock it (never [ConsentLock.ReadOnly] / HandedOff).
- * r3: [live] is T13.2's [com.tether.app.client.LiveCopy.isLive] for the session (the live set AND a
- * Live freshness entry), never the live set alone.
- */
-fun noticeLock(connected: Boolean, live: Boolean): NoticeLock? = when {
-    !connected -> NoticeLock.Offline
-    !live -> NoticeLock.CatchingUp
-    else -> null
-}
-
-/**
  * What the notices and the limit card of one session may do. [onDismiss] and [onRateLimit] are the
  * ONLY ways they reach the wire. [link] names the connection they were drawn on: a latch set on one
- * link never holds a key disabled on the next.
+ * link never holds a key disabled on the next. ta-coik.23: nothing here locks on the link or the
+ * copy's liveness. As on the web (notice-dismiss-button.tsx, chat-view.tsx 90fbb9f :1384-1394,
+ * :3707-3714), the X and the limit card's keys stay live offline and catching up; the client sends on
+ * an open socket and otherwise says the link is reconnecting.
  */
 @Immutable
 class NoticeActions(
     val sessionId: String?,
-    val lock: NoticeLock?,
-    /** The rate-limit choices change what the agent does: T7.2's lock (read-only / handed off too). */
+    /** The rate-limit choices change what the agent does: read-only / handed off only ([sessionControlLock]). */
     val controlLock: ConsentLock?,
     val link: Any?,
     internal val onDismiss: (dismissKey: String) -> NoticeResult,
@@ -128,31 +109,31 @@ class NoticeActions(
      * T6.6 r2: the lock on declining the limit prompt / cancelling a scheduled resume
      * (`rate-limit-resume` `dismiss`). [controlLock] minus the handoff: a resume left scheduled
      * would start a turn in the source after the handoff, the web draws that X ungated and the
-     * server refuses the frame only read-only. A handed-off session is still bound by the link
-     * ([lock], derived from the same connection and liveness as [controlLock]); read-only stays locked.
+     * server refuses the frame only read-only. Read-only stays locked.
      */
     val cancelLock: ConsentLock?
-        get() = if (controlLock == ConsentLock.HandedOff) {
-            when (lock) {
-                NoticeLock.Offline -> ConsentLock.Offline
-                NoticeLock.CatchingUp -> ConsentLock.CatchingUp
-                null -> null
-            }
-        } else {
-            controlLock
-        }
+        get() = if (controlLock == ConsentLock.HandedOff) null else controlLock
 
     companion object {
         /** Fail closed: every X and key renders disabled and nothing is sent. */
         val Unavailable = NoticeActions(
             sessionId = null,
-            lock = NoticeLock.Offline,
             controlLock = ConsentLock.Offline,
             link = null,
             onDismiss = { NoticeResult.NotConnected },
             onRateLimit = { ControlResult.NotConnected },
         )
     }
+}
+
+/**
+ * ta-coik.23: the limit card's lock, from the session alone (read-only, then handed off): never the
+ * link or the copy's liveness, which the web's keys do not wait for either.
+ */
+fun sessionControlLock(session: com.tether.app.protocol.model.AgentSession?): ConsentLock? = when {
+    session?.readOnly == true -> ConsentLock.ReadOnly
+    !session?.handedOffTo.isNullOrEmpty() -> ConsentLock.HandedOff
+    else -> null
 }
 
 /** The notices read their session's actions here. */
@@ -203,32 +184,27 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
     val actions = LocalNoticeActions.current
     // Scoped to the session too (r2): another session's notice with the same key never inherits this latch or arming.
     val identity = Triple(actions.sessionId, dismissKey, actions.link)
-    val lock = actions.lock
     // ta-coik.13: the first tap dismisses, as on the web (notice-dismiss-button.tsx 90fbb9f :12-20,
-    // no arm delay); a press across a change of notice is dropped ([StaleTapGuard]); no overlay taps.
-    val enabled = lock == null
+    // no arm delay, never disabled; ta-coik.23: not offline or catching up either); a press across a
+    // change of notice is dropped ([StaleTapGuard]); no overlay taps.
     val tap = {
-        if (actions.lock == null) {
-            val result = actions.onDismiss(dismissKey)
-            if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) noticeRefusalCopy(result)?.let(actions.onRefused)
-        }
+        val result = actions.onDismiss(dismissKey)
+        if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) noticeRefusalCopy(result)?.let(actions.onRefused)
     }
     StaleTapGuard(identity) { guard ->
         Box(
             modifier
                 .then(guard)
                 .size(TetherDimens.touchTargetDp)
-                .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
+                .clickable(role = Role.Button, onClickLabel = label, onClick = tap)
                 .semantics(mergeDescendants = true) {
                     contentDescription = label
                     role = Role.Button
-                    if (lock != null) stateDescription = lock.copy
-                    if (!enabled) disabled()
                 }
                 .testTag("notice-dismiss"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null) 1f else 0.5f))
+            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
         }
     }
 }
@@ -457,10 +433,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 color = t.muted,
             )
             val status = when {
-                lock == ConsentLock.HandedOff && cancelLock == null && sent == null -> HANDED_OFF_LIMIT_COPY
-                // r3: handed off AND not live: even Dismiss waits for the link / a live copy; say so.
-                lock == ConsentLock.HandedOff && cancelLock != null && sent == null ->
-                    "This session was handed off. " + cancelLock.copy.replace("answer", "dismiss this prompt")
+                lock == ConsentLock.HandedOff && sent == null -> HANDED_OFF_LIMIT_COPY
                 lock != null && sent == null -> lock.copy.replace("answer", "choose")
                 overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
                 sent != null -> "Choice sent. Waiting for the server."

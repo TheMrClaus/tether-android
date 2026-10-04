@@ -111,7 +111,7 @@ class SessionControlsTransmissionTest {
     }
 
     @Test
-    fun offlineOrCatchingUpIsRefusedAndNothingIsHeldForTheReconnect() {
+    fun offlineIsRefusedAndNothingIsHeldButCatchingUpSendsAsOnTheWeb() {
         val (client, ws) = connected()
         h.enqueueConnect()
         ws.close(1001, null)
@@ -123,14 +123,16 @@ class SessionControlsTransmissionTest {
         val ws2 = h.nextSocket()
         h.handshake(ws2, ready())
         h.expectFrame("attach")
-        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Mode("plan"), client.consentOrigin.value))
-        assertTrue("the refused taps were not held for the new link", controlFrames().isEmpty())
+        assertTrue("the refused tap was not held for the new link", controlFrames().isEmpty())
+        // ta-coik.23: catching up, the web's `send` puts the control on the open socket
+        // (use-tether.ts 90fbb9f :337-344); the server answers a refusal with a shown `error`.
+        assertTrue("s1 is still catching up", "s1" !in client.liveSessions.value)
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("plan"), client.consentOrigin.value))
+        assertEquals(1, controlFrames().size)
 
         ws2.send(snapshotFrame("s1", 5))
         h.await(client.liveSessions) { "s1" in it }
         assertTrue("the snapshot sends nothing by itself", controlFrames().isEmpty())
-        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("plan"), client.consentOrigin.value))
-        assertEquals(1, controlFrames().size)
     }
 
     @Test

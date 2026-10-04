@@ -516,10 +516,10 @@ interface TetherClient {
      * T6.6: dismiss ONE notice instance for every device (`dismiss-notice`, v119; the server journals
      * `notice_dismissed`, and the notice goes when that folds). Call it ONLY from a tap on the notice's
      * X, never in answer to anything received. Sent only on a live, handshaken socket of the server
-     * that drew the X ([expectedOrigin]), for a listed session confirmed live on it, and only while its
-     * CURRENT projection still shows [dismissKey]. A read-only or handed-off session may dismiss (the
-     * server allows it: dismissal is presentation-only). At most once per key per connection; nothing
-     * is retried, queued or persisted.
+     * that drew the X ([expectedOrigin]), for a listed session (ta-coik.23: live or not, as on the web),
+     * and only while its CURRENT projection still shows [dismissKey]. A read-only or handed-off session
+     * may dismiss (the server allows it: dismissal is presentation-only). Nothing is retried, queued or
+     * persisted.
      */
     fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): NoticeResult = NoticeResult.NotConnected
 
@@ -533,7 +533,8 @@ interface TetherClient {
      * `opencode-control-action`). Call it ONLY from a tap or an accessibility action on the control,
      * never in answer to anything received, restored or recomposed. Sent only on a live, handshaken
      * socket of the server that drew the control ([expectedOrigin], the [consentOrigin] the row was
-     * composed with), for a session confirmed live on it that is neither read-only nor handed off,
+     * composed with), for a listed session (ta-coik.23: live or not, as on the web) that is neither
+     * read-only nor handed off,
      * and only with a value the session's CURRENT state offers ([SessionControlsGuard]); the most
      * permissive postures go out on the tap, as on the web. Otherwise nothing is sent or held: no retry,
      * no queue, nothing persisted.
@@ -1267,7 +1268,7 @@ enum class NoticeResult {
     /** No live, handshaken socket. */
     NotConnected,
 
-    /** Connected, but the session is not confirmed live on this connection, or the X was drawn for another server. */
+    /** Connected, but the X was drawn for another server. */
     NotLive,
 
     /** The session is not listed (fail closed). */

@@ -125,16 +125,22 @@ class NoticeBehaviourTest {
         assertTrue("no tap, no frame: ${rec.dismissed} ${rec.controls}", rec.dismissed.isEmpty() && rec.controls.isEmpty())
     }
 
+    /**
+     * ta-coik.23: the web's X is never disabled (notice-dismiss-button.tsx 90fbb9f :12-20). A tap the
+     * client could not send (the link is down) reaches it and adds no words of the card's own: the
+     * client says the link is reconnecting, as the web's `send` does.
+     */
     @Test
-    fun anOfflineOrCatchingUpXSaysWhyAndSendsNothing() {
-        actions = rec.actions(lock = NoticeLock.CatchingUp)
+    fun theXIsNeverLockedAndALinkRefusalIsLeftToTheClientsWords() {
+        rec.dismissResult = NoticeResult.NotConnected
         show(NoticeFixtures.sessionNotices)
         rule.onAllNodesWithTag("notice-dismiss")[0]
-            .assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, NoticeLock.CatchingUp.copy))
+            .assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
             .performClick()
         settle()
-        assertTrue(rec.dismissed.isEmpty())
+        assertEquals(1, rec.dismissed.size)
+        assertTrue(rec.refusals.isEmpty())
     }
 
     @Test
@@ -186,8 +192,10 @@ class NoticeBehaviourTest {
         settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "resume-now")), rec.controls)
         rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled()
+        // ta-coik.23: the web's literal 4_000 ms (chat-view.tsx 90fbb9f :1367), pinned here, never derived.
+        assertEquals(4_000L, RATE_LIMIT_RETRY_MS)
         // Just short of 4 s after the tap: still resting.
-        rule.mainClock.advanceTimeBy(RATE_LIMIT_RETRY_MS - NAV_SETTLE_MS - 300)
+        rule.mainClock.advanceTimeBy(4_000L - NAV_SETTLE_MS - 300)
         rule.waitForIdle()
         rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled()
         rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
@@ -262,20 +270,6 @@ class NoticeBehaviourTest {
         rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
         settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
-    }
-
-    @Test
-    fun aHandedOffSourceStillNeedsTheLinkToCancel() {
-        actions = rec.actions(lock = NoticeLock.Offline, controlLock = ConsentLock.HandedOff)
-        show(NoticeFixtures.scheduled)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
-        arm()
-        rule.onNodeWithContentDescription("Cancel scheduled resume")
-            .assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, cancelLockCopy(ConsentLock.Offline)))
-            .performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
     }
 
     @Test
