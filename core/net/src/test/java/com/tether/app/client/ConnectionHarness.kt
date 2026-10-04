@@ -134,6 +134,9 @@ class ConnectionHarness {
 
     /** The client's HTTP client (its connection pool is observable). */
     val http = OkHttpClient()
+
+    /** ta-coik.32: every TetherTiming line the client emitted, in order. */
+    val timing = java.util.concurrent.ConcurrentLinkedQueue<String>()
     lateinit var settings: InMemorySettings
 
     /** Runs on the server's reader thread before a client frame is recorded (a test may block it). */
@@ -209,6 +212,7 @@ class ConnectionHarness {
         client = RealTetherClient(
             settings = settings,
             httpClient = http,
+            timing = { timing.add(it) },
             scope = scope,
             clock = { now.get() },
             backoff = backoff,

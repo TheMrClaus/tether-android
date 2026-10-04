@@ -23,10 +23,15 @@ import kotlinx.coroutines.launch
 import java.io.File
 import okhttp3.OkHttpClient
 
+/** ta-coik.32: the logcat tag of the connection milestones (fixed words and milliseconds only). */
+const val TIMING_TAG = "TetherTiming"
+
 /** Points the UI's ClientLocator at the real protocol client. */
 class TetherApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // ta-coik.32: `adb logcat -s TetherTiming` — the connection milestones below, timed in ms.
+        Log.i(TIMING_TAG, "process +${android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()}ms app-created")
 
         // Notification channels must exist before any FCM message can arrive.
         PushChannels.ensure(this)
@@ -91,6 +96,7 @@ class TetherApp : Application() {
                 // with the one that was in force (device tokens only).
                 onLogout = { baseUrl, credential -> push.unregisterAfterLogout(baseUrl, credential) },
                 mirror = mirror,
+                timing = { Log.i(TIMING_TAG, it) },
             )
         }
 

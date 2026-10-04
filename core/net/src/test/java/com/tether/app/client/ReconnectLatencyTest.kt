@@ -205,6 +205,7 @@ class ReconnectLatencyTest {
         h.serverBarrier(ws2)
         // The rest, most recently opened first, then the open chat again (the server watches the last).
         assertEquals(listOf("s3" to 1L, "s1" to 1L, "s2" to 1L), attaches(h.framesUntilBarrier()))
+        assertTrue("TetherTiming says when the open chat was in", h.timing.any { it.endsWith(" open-chat-snapshot") })
     }
 
     @Test

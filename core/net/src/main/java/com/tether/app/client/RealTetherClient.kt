@@ -310,7 +310,15 @@ class RealTetherClient(
      * next successful read.
      */
     private val settingsBackoff: Backoff = Backoff(),
+    /**
+     * ta-coik.32: one line per connection milestone (start / resume / network change, then the
+     * probe, the upgrade, ready, the open chat's snapshot), timed in ms. Fixed words only: never a
+     * host, an id or content. The app logs them under `TetherTiming`.
+     */
+    timing: (String) -> Unit = {},
 ) : TetherClient {
+
+    private val trace = TimingTrace(timing)
 
     // T13.1: frame -> mirror writes (null when the mirror is off).
     // Null again once the mirror failed to bind in time (M2): no mirror for this process. The
@@ -1961,6 +1969,7 @@ class RealTetherClient(
     }
 
     override fun start() {
+        trace.begin("start")
         val startEpoch = synchronized(lock) {
             // Deliberately NOT clearing versionHalt: start() re-runs on every
             // activity (re)creation, which is not a decision to retry.
@@ -1976,6 +1985,7 @@ class RealTetherClient(
             // credential the install holds — a password cookie from a pre-pairing
             // version still resolves here, so upgrading never logs anyone out.
             val session = readSessionForStart()
+            trace.mark("settings-read")
             if (session == null) {
                 // ta-exi: the store did not read (after a short retry). Fail closed: nothing is
                 // adopted from it, not the server either, and nothing is bound to it. Only a pair
@@ -2017,6 +2027,7 @@ class RealTetherClient(
             // Restore before the first drain or write (an unreadable store is
             // "nothing to redeliver", never a failed start).
             bindPendingToCurrentServer()
+            trace.mark("saved-copy-bound")
             if (baseUrlValue == null || credentialValue == null) {
                 enterAuthRequired()
             } else {
@@ -2378,6 +2389,7 @@ class RealTetherClient(
 
     override fun setAppForeground(foreground: Boolean) {
         if (foreground) {
+            trace.begin("resume")
             var stale: WebSocket? = null
             val resume = synchronized(lock) {
                 inForeground = true
@@ -2395,8 +2407,14 @@ class RealTetherClient(
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
             // reconnect a dead one immediately.
             when {
-                resume -> connectNow()
-                stale != null -> replaceSocketNow(stale!!)
+                resume -> {
+                    trace.mark("reconnect")
+                    connectNow()
+                }
+                stale != null -> {
+                    trace.mark("replace-socket")
+                    replaceSocketNow(stale!!)
+                }
                 else -> reconnectIfIdle()
             }
             return
@@ -2410,6 +2428,7 @@ class RealTetherClient(
     }
 
     override fun onDefaultNetworkChanged() {
+        trace.begin("network")
         // ta-coik.32 (R4): pooled connections were made on the previous network. A request reusing
         // one would write into a dead socket and wait out the read timeout (10 s), so they go now
         // (a browser drops its sockets on a network change too). Idle ones only; the pool is shared.
@@ -2576,11 +2595,13 @@ class RealTetherClient(
             return
         }
         connectionState.value = ConnectionState.Connecting
+        trace.mark("probe-sent")
         scope.launch(Dispatchers.IO) {
             // §5.3: check auth before each connect.
             val verdict = try {
                 authProbe(base, credential)
             } catch (e: IOException) {
+                trace.mark("probe-failed")
                 val blocked = blockedAfterFailure(base, e)
                 val restricted = localNetworkAccess.isRestricted()
                 val (halted, suspect) = synchronized(lock) {
@@ -2613,6 +2634,7 @@ class RealTetherClient(
                 consecutiveTimeouts = 0
             }
             raceHook?.invoke(RacePoint.VerdictChecked, verdict)
+            trace.mark("probe-answered")
             when (verdict) {
                 ProbeVerdict.Authenticated -> openSocket(base, credential, generation)
                 ProbeVerdict.Rejected -> handleCredentialRejected(
@@ -2767,6 +2789,7 @@ class RealTetherClient(
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
             listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener))
+            trace.mark("upgrade-sent")
         }
     }
 
@@ -2796,6 +2819,7 @@ class RealTetherClient(
             ws = socket ?: return
             sentAt = clock()
             if (!ws.send(ClientMessage.Ping(nonce = UUID.randomUUID().toString()).encode())) return
+            trace.mark("ping-sent")
             pingTask = scheduler.schedule(ConnectionTimings.PING_TIMEOUT_MS) {
                 val dead = synchronized(lock) {
                     pingTask = null
@@ -2863,7 +2887,7 @@ class RealTetherClient(
                 pendingStore = PendingInput.resetInFlight(pendingStore)
                 false
             }
-            if (reject) webSocket.cancel()
+            if (reject) webSocket.cancel() else trace.mark("socket-open")
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -2936,6 +2960,7 @@ class RealTetherClient(
             worked && inForeground
         }
         connectionState.value = ConnectionState.Disconnected
+        trace.mark(if (immediate) "socket-lost reconnect-now" else "socket-lost backoff")
         if (immediate) scheduleReconnect(delayMs = 0) else scheduleReconnect()
     }
 
@@ -3126,6 +3151,7 @@ class RealTetherClient(
      * (a later `version_mismatch` still halts).
      */
     private fun onReady(webSocket: WebSocket, message: ServerMessage.Ready) {
+        trace.mark("ready")
         // The hello goes out first, before any other frame of this epoch. It is
         // sent directly: ordinary frames wait for handshakeDone.
         webSocket.send(ClientMessage.Hello(PROTOCOL_VERSION, HELLO_CLIENT_ANDROID).encode())
@@ -3231,6 +3257,7 @@ class RealTetherClient(
         // Published only once the handshake frames are on the wire: whatever a
         // caller sends after observing Connected is ordered after the re-attach.
         connectionState.value = ConnectionState.Connected
+        trace.mark("connected")
     }
 
     /**
@@ -3278,7 +3305,10 @@ class RealTetherClient(
                 false
             }
         }
-        if (release) releaseDeferredAttach(webSocket)
+        if (release) {
+            trace.mark("open-chat-snapshot")
+            releaseDeferredAttach(webSocket)
+        }
     }
 
     /**
