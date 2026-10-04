@@ -43,8 +43,9 @@ at 1.3× font scale in Machine and Studio.
 - The web follows every `created` reply. The app does too, but it skips re-selecting a session that
   is already selected, so the provider picker's existing create-then-select does not attach twice.
 - **Boot restore** (the web reopens `lastOpenedSession.historyId` when the remembered session has
-  exited) is not wired here. Nothing in the app writes `lastOpenedSession` yet. That belongs to T4.4
-  (navigation). T4.4 can call `TetherViewModel.resumeHistory`.
+  exited) is wired by ta-coik.41: the shell writes `lastOpenedSession` for the chat on screen and
+  `WebSelectionEffects` seeds, restores (`TetherViewModel.bootRestoreStep`, then `resumeHistory`) or
+  gives it up, as dashboard.tsx 90fbb9f :736-748 and :829-886 do.
 - The global-search entry point (`openGlobalHit` → `reopen`) is T5.3's.
 - `discover`'s `requestId` stays with T8.2. On the web it is the folder picker's durable
   workspace-activation intent (issue #141), and the history rows do not use it.
