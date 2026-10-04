@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -269,6 +272,14 @@ fun ChatScreen(
     val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
 
+    // ta-coik.19 (web issue #135, chat-view.tsx 90fbb9f :1983-1992): this session's unresolved and
+    // given-up sends. Dismiss is the failed bubble's one action (use-tether.ts :473-478): local only.
+    val pendingSends by vm.client.pendingSends.collectAsStateWithLifecycle()
+    val failedSends by vm.client.failedSends.collectAsStateWithLifecycle()
+    val sends = remember(session?.id, pendingSends, failedSends, vm) {
+        SendBubbles.forSession(session?.id, pendingSends, failedSends) { key -> vm.client.dismissFailedSend(key) }
+    }
+
     // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.
     val find = rememberChatFindState(session?.id)
     val findFocus = remember { FocusRequester() }
@@ -330,9 +341,9 @@ fun ChatScreen(
                 // T13.2: offline with nothing on the device: say so, not "Connecting…". r2: only while
                 // not connected; connected, the attach is on its way and the loading state below shows.
                 projection == null && sync?.freshness == com.tether.app.client.Freshness.NotDownloaded &&
-                    connection != com.tether.app.client.ConnectionState.Connected -> SessionNotDownloaded()
+                    connection != com.tether.app.client.ConnectionState.Connected -> WithSendBubbles(sends) { SessionNotDownloaded() }
 
-                projection == null -> Column(
+                projection == null -> WithSendBubbles(sends) { Column(
                     Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -346,15 +357,17 @@ fun ChatScreen(
                         fontWeight = TetherWeights.body,
                         fontSize = 13.6.sp,
                     )
+                } }
+
+                projection.turnOrder.isEmpty() -> WithSendBubbles(sends) {
+                    EmptyCentered(
+                        label = "HEADLESS AGENT",
+                        title = "Send a message to start the conversation.",
+                        hint = "Tools that need permission will surface an approval here before they run.",
+                    )
                 }
 
-                projection.turnOrder.isEmpty() -> EmptyCentered(
-                    label = "HEADLESS AGENT",
-                    title = "Send a message to start the conversation.",
-                    hint = "Tools that need permission will surface an approval here before they run.",
-                )
-
-                activeRun != null -> RunTab(
+                activeRun != null -> WithSendBubbles(sends) { RunTab(
                     projection = projection,
                     tree = tree,
                     run = activeRun,
@@ -363,7 +376,7 @@ fun ChatScreen(
                     showApprovals = showApprovals,
                     focus = runFocus,
                     onFocusShown = { runFocus = null },
-                )
+                ) }
 
                 else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { ChatTranscript(
                     find = transcriptFind,
@@ -389,6 +402,7 @@ fun ChatScreen(
                     liveCopy = liveNow,
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
+                    sends = sends,
                 ) }
             }
             }
@@ -419,6 +433,7 @@ fun ChatScreen(
             onOpenSession = { id -> vm.selectSession(id) },
             runActions = runActions,
             onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
+            sendRows = sends.pending,
         )
     }
     CommandOutputDialog(
@@ -504,6 +519,37 @@ internal fun consentActionsFor(
         onOpenRun = { runId -> vm.selectRun(s.id, runId) },
         onFocusCall = onFocusCall ?: { runId, _ -> vm.selectRun(s.id, runId) },
     )
+}
+
+/**
+ * ta-coik.19: the web draws the send bubbles at the foot of `.chat-scroll` whatever it shows above
+ * them (chat-view.tsx 90fbb9f :3402-3411 the loading and empty states, a run tab; :3730-3737 the
+ * bubbles). Here the views that are not the transcript's list get them below, scrolling on their own
+ * once they would take more than most of the well.
+ */
+@Composable
+internal fun WithSendBubbles(sends: SendBubbles, content: @Composable () -> Unit) {
+    if (sends.isEmpty) {
+        content()
+        return
+    }
+    val t = LocalTetherTokens.current
+    val spacing = transcriptSpacing(t, com.tether.app.ui.components.currentLayoutClass() == com.tether.app.ui.components.TetherLayoutClass.Phone)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val cap = maxHeight * 0.6f
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+            SendBubbleColumn(
+                sends,
+                spacing.scrollGap,
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = cap)
+                    .verticalScroll(rememberScrollState())
+                    .padding(spacing.padding),
+            )
+        }
+    }
 }
 
 @Composable

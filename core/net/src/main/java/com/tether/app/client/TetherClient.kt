@@ -267,6 +267,24 @@ interface TetherClient {
     val failedInterrupts: StateFlow<Map<String, String>> get() = NoFailedInterrupts
 
     /**
+     * ta-coik.19 (web issue #135, use-tether.ts 90fbb9f :307-317, :409-424): every unresolved send
+     * of the current server, across sessions (the chat filters to its own), as `sending` / `waiting`
+     * rows. Recomputed whenever the pending store or the link changes and on each sweep (which is
+     * what moves a send from `sending` to `waiting`).
+     */
+    val pendingSends: StateFlow<List<PendingSendRow>> get() = NoPendingSends
+
+    /**
+     * ta-coik.19 (use-tether.ts 90fbb9f :450-497): sends given up on as undeliverable, oldest first,
+     * until [dismissFailedSend], until the server proves the key was accepted after all, or until
+     * their session is archived.
+     */
+    val failedSends: StateFlow<List<FailedSend>> get() = NoFailedSends
+
+    /** ta-coik.19 (use-tether.ts 90fbb9f :473-478): drop one failed bubble. Local only; nothing is sent. */
+    fun dismissFailedSend(key: String) {}
+
+    /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing
      * received may ever produce one). Exactly one of [choiceId] or [decision] ("allow"|"deny");
      * [grantedPermissions] only with a permission-granting [choiceId]. [expectedFingerprint] is the
@@ -1273,6 +1291,10 @@ data class ServerErrorText(val text: String, val origin: String)
 
 /** T6.7 r3: [TetherClient.failedInterrupts] of a client that records none. */
 private val NoFailedInterrupts: StateFlow<Map<String, String>> = MutableStateFlow(emptyMap())
+
+/** ta-coik.19: [TetherClient.pendingSends] / [TetherClient.failedSends] of a client that has none. */
+private val NoPendingSends: StateFlow<List<PendingSendRow>> = MutableStateFlow(emptyList())
+private val NoFailedSends: StateFlow<List<FailedSend>> = MutableStateFlow(emptyList())
 
 /** T6.7: [TetherClient.serverErrors] of a client that has none. */
 private val NoServerErrors: SharedFlow<ServerErrorText> = kotlinx.coroutines.flow.MutableSharedFlow()

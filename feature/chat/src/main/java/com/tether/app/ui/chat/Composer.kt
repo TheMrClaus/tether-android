@@ -224,6 +224,8 @@ fun Composer(
     runActions: ComposerCommandActions = ComposerCommandActions.Unavailable,
     /** T7.3 (v96): the slash palette opened — ask for the live command list with `warm` (a read). */
     onWarmControls: () -> Unit = {},
+    /** ta-coik.19: this session's unresolved sends (the send-status row above the well). */
+    sendRows: List<com.tether.app.client.PendingSendRow> = emptyList(),
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -820,6 +822,10 @@ fun Composer(
                         }
                     }
                 }
+
+                // ta-coik.19 (chat-view.tsx 90fbb9f :3754-3768): the operator never watches an idle-looking
+                // chat while a send is unresolved.
+                ComposerSendRow(sendRows)
 
                 if (projection != null && session != null) {
                     TurnActivity(projection = projection, session = session, serverNow = serverNow, part = TurnActivityPart.Run, stale = liveness.stale)

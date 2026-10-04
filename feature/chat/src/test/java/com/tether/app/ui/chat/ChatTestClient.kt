@@ -23,6 +23,19 @@ class ChatTestClient : TetherClient {
     val failed = MutableStateFlow<Map<String, String>>(emptyMap())
     override val failedInterrupts: StateFlow<Map<String, String>> get() = failed
 
+    /** ta-coik.19: the client's unresolved and given-up sends (tests drive both). */
+    val pendingRows = MutableStateFlow<List<com.tether.app.client.PendingSendRow>>(emptyList())
+    override val pendingSends: StateFlow<List<com.tether.app.client.PendingSendRow>> get() = pendingRows
+    val failedRows = MutableStateFlow<List<com.tether.app.client.FailedSend>>(emptyList())
+    override val failedSends: StateFlow<List<com.tether.app.client.FailedSend>> get() = failedRows
+
+    /** ta-coik.19: every failed bubble the UI dismissed, in order; like the real client, it is dropped. */
+    val dismissedSends = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun dismissFailedSend(key: String) {
+        dismissedSends += key
+        failedRows.value = failedRows.value.filter { it.key != key }
+    }
+
     /** T6.3: the link state the consent cards read. */
     val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
     override val connection: StateFlow<ConnectionState> get() = link

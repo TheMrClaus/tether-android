@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -126,11 +127,13 @@ internal fun ChatTranscript(
      * Otherwise the timeline never says a reply is on its way.
      */
     liveCopy: Boolean = false,
+    /** ta-coik.19: this session's unresolved and given-up sends, drawn at the foot of the list. */
+    sends: SendBubbles = SendBubbles.None,
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
     }
 }
 
@@ -152,6 +155,7 @@ private fun ChatTranscriptBody(
     consentSessionId: String?,
     onOpenCommand: (String) -> Unit,
     liveCopy: Boolean,
+    sends: SendBubbles,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -210,8 +214,10 @@ private fun ChatTranscriptBody(
             }
         }
     }
-    val lastIndex = items.size + leading - 1
-    LaunchedEffect(items, sticky) {
+    // ta-coik.19: the send bubbles are the list's last rows; following the newest content follows them.
+    val sendRows = sends.pending.size + sends.failed.size
+    val lastIndex = items.size + leading + sendRows - 1
+    LaunchedEffect(items, sticky, sendRows) {
         if (sticky && lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
     }
 
@@ -287,6 +293,15 @@ private fun ChatTranscriptBody(
                     onOpenCommand = onOpenCommand,
                     zone = zone,
                 )
+            }
+            // chat-view.tsx 90fbb9f :3730-3737 (issue #135): unresolved and abandoned sends at the foot of
+            // the transcript, so a send is never invisible while in flight, reconnecting, or lost.
+            items(sends.pending, key = { "pending-send:${it.key}" }, contentType = { "pending-send" }) { row ->
+                PendingSendBubble(row, Modifier.padding(top = if (items.size + leading == 0 && row === sends.pending.first()) 0.dp else spacing.scrollGap))
+            }
+            items(sends.failed, key = { "failed-send:${it.key}" }, contentType = { "failed-send" }) { row ->
+                val first = items.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
+                FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap))
             }
         }
         }

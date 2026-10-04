@@ -123,7 +123,7 @@ internal fun bubbleLook(t: TetherTokens, type: TetherTypography, user: Boolean, 
 }
 
 @Composable
-private fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
     Box(modifier.fillMaxWidth(), contentAlignment = if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart) {
         Column(
             Modifier

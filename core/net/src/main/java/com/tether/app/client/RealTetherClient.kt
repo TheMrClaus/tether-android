@@ -435,7 +435,22 @@ class RealTetherClient(
     // --- protocol state (guarded by lock) ---
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
+
+    // ta-coik.19 (web issue #135): the reactive mirror of [pendingStore] the chat draws its
+    // "sending" / "waiting for link" bubbles from, and the sends given up on ("Not delivered").
+    private val pendingSendsState = MutableStateFlow<List<PendingSendRow>>(emptyList())
+    override val pendingSends: StateFlow<List<PendingSendRow>> = pendingSendsState
+    private val failedSendsState = MutableStateFlow<List<FailedSend>>(emptyList())
+    override val failedSends: StateFlow<List<FailedSend>> = failedSendsState
+
+    // Every store change republishes [pendingSends] (use-tether.ts 90fbb9f :409-424 syncPendingState,
+    // called after every mutation of pendingRef). A multi-step change computes its store first and
+    // assigns it once, so no half-done state is ever shown.
     private var pendingStore = PendingInput.emptyStore()
+        set(value) {
+            field = value
+            publishPendingSends()
+        }
     // The canonical origin [pendingStore] belongs to. Null = not bound to a
     // server yet (a fresh process before its first start(), or after stop()).
     private var pendingOrigin: String? = null
@@ -1427,6 +1442,8 @@ class RealTetherClient(
         changeRequestsState.value = emptyMap()
         worktreeLogsState.value = emptyMap()
         failedInterruptsState.value = emptyMap()
+        // ta-coik.19: another server's failed sends must never show (the web's live for one server).
+        failedSendsState.value = emptyList()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
@@ -1493,6 +1510,8 @@ class RealTetherClient(
             restorePendingLocked(raw, setAside.remove(origin))
         }
         if (expired.isNotEmpty()) emitError(undeliveredMessage(expired))
+        // ta-coik.19: as the web's first sweep would (use-tether.ts 90fbb9f :1300-1304), failed bubbles.
+        recordFailed(expired)
         persistPending()
         attachPendingSessionsThenDrain()
     }
@@ -1987,6 +2006,8 @@ class RealTetherClient(
             // configuration can be replayed after a later sign-in.
             val dropped = pendingStore.records.size
             pendingStore = PendingInput.emptyStore()
+            // ta-coik.19: and the failed bubbles, which carry this configuration's words.
+            failedSendsState.value = emptyList()
             clearedKeys = LinkedHashSet()
             pendingLoaded = false
             pendingOrigin = null
@@ -2407,6 +2428,8 @@ class RealTetherClient(
         socketOrigin = null
         socketOpen = false
         handshakeDone = false
+        // ta-coik.19: with the link down every unresolved send reads "waiting for link".
+        publishPendingSends()
         clearLiveLocked()
         // ta-895: the catalog the socket delivered is no longer the live one.
         providerCatalogLiveState.value = false
@@ -2734,10 +2757,12 @@ class RealTetherClient(
                 pingTask?.cancel()
                 pingTask = null
                 // §5.4: do NOT drain pending sends; reset in-flight and wait for ready.
-                pendingStore = PendingInput.resetInFlight(pendingStore)
                 reconciledSessions.clear()
                 tracker.clearResyncFlags()
                 lastInboundAt = clock()
+                // use-tether.ts 90fbb9f :727-729: everything is back to `waiting` until reconcile
+                // (the assignment republishes the rows, now on an open socket).
+                pendingStore = PendingInput.resetInFlight(pendingStore)
                 false
             }
             if (reject) webSocket.cancel()
@@ -2843,6 +2868,12 @@ class RealTetherClient(
                         true
                     }
                     if (changed) persistPending()
+                    // use-tether.ts 90fbb9f :846-852: its failed bubbles can never be retried; drop them too.
+                    ifCurrent(webSocket) {
+                        failedSendsState.update { current ->
+                            current.filter { it.sessionId != message.session.id }.takeIf { it.size != current.size } ?: current
+                        }
+                    }
                 }
                 ifCurrent(webSocket) { upsertSessionLocked(message.session) }
             }
@@ -3145,20 +3176,25 @@ class RealTetherClient(
         val changed = synchronized(lock) {
             if (socket !== webSocket) return
             val result = PendingInput.reconcileWithSnapshot(pendingStore, message.sessionId, tree)
-            pendingStore = result.store
+            var next = result.store
             forgetLocked(result.cleared)
             // Only now is redelivery for this session safe on this connection.
             reconciledSessions.add(message.sessionId)
             // use-tether.ts:975 — never redeliver a key already cleared (tombstoned).
             var discarded = false
-            for (record in pendingStore.records.filter { it.key in clearedKeys }) {
-                pendingStore = PendingInput.discardKey(pendingStore, record.key).store
+            for (record in next.records.filter { it.key in clearedKeys }) {
+                next = PendingInput.discardKey(next, record.key).store
                 discarded = true
             }
+            // ta-coik.19: assigned once, so the chat's rows never show the half-reconciled store.
+            pendingStore = next
             result.cleared.isNotEmpty() || discarded
         }
         if (changed) persistPending()
         drainPending()
+        // ta-coik.19 (use-tether.ts 90fbb9f :1006-1008): a key this snapshot proves was accepted takes
+        // back any failed bubble left from an earlier local give-up.
+        retractFailed(PendingInput.acceptedKeys(tree))
     }
 
     private fun onEvent(webSocket: WebSocket, message: ServerMessage.Event) {
@@ -3219,6 +3255,9 @@ class RealTetherClient(
                 result.removed
             }
             if (removed) persistPending()
+            // ta-coik.19 (use-tether.ts 90fbb9f :1064-1067): even when the record was already gone
+            // (given up on locally before this ack), its failed bubble is false now: take it back.
+            retractFailed(listOf(ackedKey))
         }
         if (buffered) return
         val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
@@ -3369,7 +3408,6 @@ class RealTetherClient(
             // outside this lock can still grow the queue before the sends below (rare): the socket
             // then refuses, closing.
             attachmentQueueRefusal(ws.queueSize(), drain.sumOf { AttachmentFrame.utf8Length(it.second) })?.let { return@synchronized it }
-            pendingStore = added.store
             forgetLocked(added.evicted.map { it.key })
             evicted = added.evicted
             val sent = ArrayList<String>()
@@ -3377,17 +3415,22 @@ class RealTetherClient(
                 if (!ws.send(encoded)) break
                 sent += recordKey
             }
-            pendingStore = PendingInput.markSent(pendingStore, sent, clock())
+            // ta-coik.19: the store is assigned once, so the chat never shows a bubble for a send
+            // the rollback below withdraws (use-tether.ts 90fbb9f :677-683: no bubble for it).
+            val marked = PendingInput.markSent(added.store, sent, clock())
             if (key !in sent) {
                 // The web's rollback: a record with attachments that did not reach the wire is
                 // withdrawn (the composer keeps the text and the files), never left to deliver later.
-                pendingStore = PendingInput.discardKey(pendingStore, key).store
+                pendingStore = PendingInput.discardKey(marked, key).store
                 forgetLocked(listOf(key))
                 return@synchronized AttachmentSendResult.NotConnected
             }
+            pendingStore = marked
             AttachmentSendResult.Sent
         }
         if (evicted.isNotEmpty()) emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
+        // ta-coik.19 (use-tether.ts 90fbb9f :648): surfaced as failed bubbles, not dropped silently.
+        recordFailed(evicted)
         if (result == AttachmentSendResult.Sent || result == AttachmentSendResult.NotConnected) persistPending()
         // Web #135: an attachment frame is large and never persisted, so a half-open socket
         // swallowing it is the worst case — probe right away.
@@ -3479,6 +3522,8 @@ class RealTetherClient(
         if (evicted.isNotEmpty()) {
             emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
         }
+        // ta-coik.19 (use-tether.ts 90fbb9f :648): surfaced as failed bubbles, not dropped silently.
+        recordFailed(evicted)
         persistPending()
         drainPending()
     }
@@ -3568,10 +3613,44 @@ class RealTetherClient(
             }
             if (unsent.isNotEmpty()) {
                 emitError(undeliveredMessage(unsent))
+                // ta-coik.19 (use-tether.ts 90fbb9f :1304): render as failed bubbles, not just a banner.
+                recordFailed(unsent)
                 persistPending()
             }
             drainPending()
+            // ta-coik.19 (use-tether.ts 90fbb9f :1316): promote `sending` -> `waiting for link` as the
+            // watchdog window elapses with no inbound frame.
+            synchronized(lock) { publishPendingSends() }
         }
+    }
+
+    /**
+     * ta-coik.19 (use-tether.ts 90fbb9f :409-424 syncPendingState): recompute the chat's send rows
+     * from the store and the link (open socket, last inbound frame). Equal rows publish nothing.
+     */
+    private fun publishPendingSends() {
+        pendingSendsState.value = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
+    }
+
+    /** ta-coik.19 (use-tether.ts 90fbb9f :450-471 recordFailed): sends given up on, as failed bubbles. */
+    private fun recordFailed(records: List<PendingRecord>, reason: FailedSendReason = FailedSendReason.Expired) {
+        if (records.isEmpty()) return
+        failedSendsState.update { PendingInput.recordFailed(it, records, reason) }
+    }
+
+    /**
+     * ta-coik.19 (use-tether.ts 90fbb9f :479-497 retractFailed): a key the server proves it accepted
+     * (a live ack, or a journal-folded snapshot) takes back its "Not delivered" bubble, which would
+     * otherwise be false: the record can be given up on locally after the server did journal it.
+     */
+    private fun retractFailed(keys: Collection<String>) {
+        if (keys.isEmpty()) return
+        val set = keys as? Set<String> ?: keys.toHashSet()
+        failedSendsState.update { current -> current.filter { it.key !in set }.takeIf { it.size != current.size } ?: current }
+    }
+
+    override fun dismissFailedSend(key: String) {
+        failedSendsState.update { current -> current.filter { it.key != key }.takeIf { it.size != current.size } ?: current }
     }
 
     private fun undeliveredMessage(unsent: List<PendingRecord>): String {
@@ -3612,8 +3691,8 @@ class RealTetherClient(
         var mine = pendingStore
         if (overlay != null) mine = PendingInput.mergeStores(mine, overlay.store, clearedKeys)
         val restored = PendingInput.restoredFromPreviousProcess(PendingInput.fromPersisted(raw), clock())
-        pendingStore = PendingInput.mergeStores(mine, restored, clearedKeys)
-        val expiry = PendingInput.expireRecords(pendingStore, clock())
+        val expiry = PendingInput.expireRecords(PendingInput.mergeStores(mine, restored, clearedKeys), clock())
+        // ta-coik.19: assigned once, so the expired records never show as pending first.
         pendingStore = expiry.store
         forgetLocked(expiry.unsent.map { it.key })
         pendingLoaded = true

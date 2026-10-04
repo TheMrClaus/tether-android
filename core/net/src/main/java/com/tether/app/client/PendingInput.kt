@@ -99,6 +99,48 @@ object PendingInput {
     fun oldestInFlightAge(store: PendingStore, now: Long): Long =
         Web.oldestInFlightAge(store.tree, now.toDouble()).toLong()
 
+    /**
+     * ta-coik.19 (pending-input.mjs 90fbb9f :400-426 describePending): every record as the chat's
+     * `sending` / `waiting` row. Waiting when the link is down, the record is not on the wire, or
+     * it has gone unacknowledged past UNACKED_CLOSE_MS with no inbound frame in that window either.
+     */
+    fun describePending(store: PendingStore, now: Long, socketOpen: Boolean, lastServerFrameAt: Long): List<PendingSendRow> {
+        val options = JsObj.of(
+            "now" to js(now.toDouble()),
+            "socketOpen" to js(socketOpen),
+            "lastServerFrameAt" to js(lastServerFrameAt.toDouble()),
+        )
+        return (Web.describePending(store.tree, options) as JsArr).map { value ->
+            val row = value as JsObj
+            PendingSendRow(
+                key = row["key"].str.orEmpty(),
+                sessionId = row["sessionId"].str.orEmpty(),
+                kind = row["kind"].str.orEmpty(),
+                text = row["text"].str.orEmpty(),
+                status = if (row["status"].str == "sending") SendStatus.Sending else SendStatus.Waiting,
+                attachmentCount = (row["attachmentCount"].num ?: 0.0).toInt(),
+                imageCount = (row["imageCount"].num ?: 0.0).toInt(),
+                bytes = row["bytes"].num ?: 0.0,
+            )
+        }
+    }
+
+    /**
+     * use-tether.ts 90fbb9f :450-471 recordFailed: [records] given up on, as failed bubbles, appended
+     * to [current] unless a key is already there, capped at [MAX_FAILED_SENDS] (oldest off first).
+     */
+    fun recordFailed(current: List<FailedSend>, records: List<PendingRecord>, reason: FailedSendReason): List<FailedSend> {
+        if (records.isEmpty()) return current
+        val store = PendingStore(JsObj.of("records" to JsArr.of(records.map { it.tree })))
+        val seen = current.mapTo(HashSet()) { it.key }
+        val additions = describePending(store, 0L, socketOpen = false, lastServerFrameAt = 0L)
+            .filter { it.key !in seen }
+            .map { FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason) }
+        if (additions.isEmpty()) return current
+        val next = current + additions
+        return if (next.size > MAX_FAILED_SENDS) next.takeLast(MAX_FAILED_SENDS) else next
+    }
+
     fun expireRecords(store: PendingStore, now: Long): ExpireResult {
         val result = Web.expireRecords(store.tree, now.toDouble())
         return ExpireResult(storeOf(result["store"], store), records(result["unsent"]))
