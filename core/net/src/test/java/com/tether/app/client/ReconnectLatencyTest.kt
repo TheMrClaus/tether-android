@@ -246,6 +246,85 @@ class ReconnectLatencyTest {
         assertEquals(listOf("s2" to 1L, "s1" to 1L), attaches(h.framesUntilBarrier()))
     }
 
+    /** Verifier's reproduction (r1 REFUTED): a chat never opened before, opened during the wait. */
+    @Test
+    fun aChatFirstOpenedDuringTheWaitIsTheOneTheServerEndsUpWatching() {
+        val ws = connectedListing("s1", "s2", "s3")
+        open(ws, "s1", "s2")
+        val ws2 = reconnect(ws, readyListing("s1", "s2", "s3"))
+        assertEquals(listOf("s2" to 1L), attaches(h.framesUntilBarrier()))
+        h.now.addAndGet(1)
+        h.client.attach("s3") // never opened in this process: attached at once, in full
+        assertEquals(listOf("s3" to null), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s2", 1, state = null))
+        h.serverBarrier(ws2)
+        // The chat left behind is not attached again: the last attach is still the open chat's.
+        assertEquals(emptyList<Pair<String, Long?>>(), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s3", 1))
+        h.serverBarrier(ws2)
+        val rest = attaches(h.framesUntilBarrier())
+        assertEquals(listOf("s1" to 1L, "s3" to 1L), rest)
+        assertEquals("the server watches the chat on screen", "s3", rest.last().first)
+    }
+
+    @Test
+    fun afterTheWaitTimesOutTheOpenChatIsAttachedAgainOnceItsSnapshotIsIn() {
+        val ws = connectedListing("s1", "s2", "s3")
+        open(ws, "s1", "s2")
+        val ws2 = reconnect(ws, readyListing("s1", "s2", "s3"))
+        assertEquals(listOf("s2" to 1L), attaches(h.framesUntilBarrier()))
+        h.client.attach("s3")
+        assertEquals(listOf("s3" to null), attaches(h.framesUntilBarrier()))
+        h.scheduler.await { it == ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS }.fire()
+        assertEquals("the rest, without a second fetch of s3", listOf("s1" to 1L), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s3", 1))
+        h.serverBarrier(ws2)
+        assertEquals("then s3 again, from its new cursor", listOf("s3" to 1L), attaches(h.framesUntilBarrier()))
+    }
+
+    @Test
+    fun afterTheWaitTimesOutOpeningAnotherChatDropsTheRewatchOfTheOneLeft() {
+        val ws = connectedListing("s1", "s2", "s3")
+        open(ws, "s1", "s2")
+        val ws2 = reconnect(ws, readyListing("s1", "s2", "s3"))
+        assertEquals(listOf("s2" to 1L), attaches(h.framesUntilBarrier()))
+        h.scheduler.await { it == ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS }.fire()
+        assertEquals(listOf("s1" to 1L), attaches(h.framesUntilBarrier()))
+        h.client.attach("s3")
+        assertEquals(listOf("s3" to null), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s2", 1, state = null))
+        h.serverBarrier(ws2)
+        assertEquals("s2 is not on screen any more", emptyList<Pair<String, Long?>>(), attaches(h.framesUntilBarrier()))
+    }
+
+    @Test
+    fun openingTheChatAlreadyInFocusChangesNothing() {
+        val ws = connectedListing("s1", "s2")
+        open(ws, "s1", "s2")
+        val ws2 = reconnect(ws, readyListing("s1", "s2"))
+        assertEquals(listOf("s2" to 1L), attaches(h.framesUntilBarrier()))
+        h.client.attach("s2")
+        assertEquals("attached already", emptyList<Pair<String, Long?>>(), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s2", 1, state = null))
+        h.serverBarrier(ws2)
+        assertEquals(listOf("s1" to 1L, "s2" to 1L), attaches(h.framesUntilBarrier()))
+    }
+
+    @Test
+    fun openingAnAttachedChatWhoseSnapshotIsInReleasesTheRestAtOnce() {
+        val ws = connectedListing("s1", "s2", "s3")
+        open(ws, "s1", "s3", "s2")
+        h.client.send("s1", "keep me")
+        h.expectFrame("send")
+        val ws2 = reconnect(ws, readyListing("s1", "s2", "s3"))
+        assertEquals(listOf("s2" to 1L, "s1" to null), attaches(h.framesUntilBarrier()))
+        ws2.send(snapshotFrame("s1", 1))
+        h.serverBarrier(ws2)
+        h.framesUntilBarrier() // s1's redelivery
+        h.client.attach("s1") // attached with s2, its snapshot in: nothing left to wait for
+        assertEquals(listOf("s3" to 1L, "s1" to 1L), attaches(h.framesUntilBarrier()))
+    }
+
     @Test
     fun anOpenChatTheServerNoLongerListsChangesNothing() {
         val ws = connectedListing("s1", "s2")
