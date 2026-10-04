@@ -1,8 +1,13 @@
 package com.tether.app.client
 
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okhttp3.WebSocket
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -100,6 +105,23 @@ class ReconnectLatencyTest {
         h.client.setAppForeground(true)
         assertEquals("ping", h.expectFrame("ping").type())
         assertEquals("only the first probe and upgrade: no new connect", 2, h.server.requestCount)
+    }
+
+    @Test
+    fun eachTripIsTimedOnItsOwnSoAShortOneAfterALongOneIsStillPinged() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        h.handshake(h.nextSocket())
+        // Back in front for a while, then a short trip: only that trip counts.
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.client.setAppForeground(false)
+        h.now.addAndGet(1_000)
+        h.client.setAppForeground(true)
+        assertEquals("ping", h.expectFrame("ping").type())
+        assertEquals("two connects only: the short trip opened none", 4, h.server.requestCount)
     }
 
     @Test
@@ -362,5 +384,76 @@ class ReconnectLatencyTest {
         assertEquals("/ws", upgrade.path)
         assertEquals("the probe opened the connection", 0, probe.sequenceNumber)
         assertEquals("the upgrade is its second request: no second TCP + TLS handshake", 1, upgrade.sequenceNumber)
+    }
+
+    // ------------------------------------------------------------------
+    // A network change ends the connect in flight on the previous network
+    // ------------------------------------------------------------------
+
+    /** Serves by path: the first probe with [firstProbe], later ones ok; the first upgrade with [firstUpgrade]. */
+    private fun serveByPath(firstProbe: MockResponse, firstUpgrade: MockResponse = h.upgradeResponse()) {
+        val probes = java.util.concurrent.atomic.AtomicInteger()
+        val upgrades = java.util.concurrent.atomic.AtomicInteger()
+        h.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/api/auth/session" ->
+                    if (probes.getAndIncrement() == 0) firstProbe else MockResponse().setBody("""{"authenticated":true}""")
+                "/ws" -> if (upgrades.getAndIncrement() == 0) firstUpgrade else h.upgradeResponse()
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+    }
+
+    private fun probesRunning() = h.http.dispatcher.runningCalls().count { it.request().url.encodedPath == "/api/auth/session" }
+
+    @Test
+    fun aNetworkChangeDuringTheProbeCancelsItAndItsLateVerdictDoesNothing() {
+        val lateMs = 2_000L
+        // The first probe answers late, and says the credential is no good.
+        serveByPath(MockResponse().setBody("""{"authenticated":false}""").setHeadersDelay(lateMs, TimeUnit.MILLISECONDS))
+        h.newClient()
+        h.client.start()
+        assertEquals("/api/auth/session", h.server.takeRequest(10, TimeUnit.SECONDS)?.path)
+        val changedAt = System.nanoTime()
+        h.client.onDefaultNetworkChanged()
+        h.handshake(h.nextSocket())
+        // The abandoned probe is cancelled, not left to run out on the previous network.
+        while (probesRunning() > 0 && System.nanoTime() - changedAt < TimeUnit.MILLISECONDS.toNanos(lateMs / 2)) Thread.sleep(5)
+        assertEquals("the abandoned probe was cancelled", 0, probesRunning())
+        // Past the moment its verdict would have come: nothing acted on it.
+        Thread.sleep(lateMs + 500)
+        assertEquals(ConnectionState.Connected, h.client.connection.value)
+        assertTrue("the credential is kept", h.client.configured.value)
+        assertEquals(null, h.client.signedOutReason.value)
+        assertEquals("one socket only", 0, h.sockets.size)
+        assertTrue("an abandoned probe is not a failure: ${h.timing}", h.timing.none { it.endsWith(" probe-failed") })
+    }
+
+    @Test
+    fun aNetworkChangeDuringTheUpgradeAbandonsItAndConnectsAgainAtOnce() {
+        // The first upgrade never answers (written into a network that is gone).
+        serveByPath(MockResponse().setBody("""{"authenticated":true}"""), MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        h.newClient()
+        h.client.start()
+        assertEquals("/api/auth/session", h.server.takeRequest(10, TimeUnit.SECONDS)?.path)
+        assertEquals("/ws", h.server.takeRequest(10, TimeUnit.SECONDS)?.path)
+        h.client.onDefaultNetworkChanged()
+        h.handshake(h.nextSocket())
+        assertTrue("no reconnect timer", h.scheduler.history().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun lateFramesOfAReplacedSocketAreIgnored() {
+        val old = connectedListing("s1")
+        h.enqueueConnect()
+        h.client.onDefaultNetworkChanged()
+        val next = h.nextSocket()
+        h.handshake(next, readyListing("s2"))
+        old.send(readyListing("ghost"))
+        old.send(snapshotFrame("ghost", 1))
+        h.serverBarrier(next)
+        assertEquals(listOf("s2"), h.client.sessions.value.map { it.id }.filter { !it.startsWith("barrier-") })
+        assertFalse(h.client.projections.value.containsKey("ghost"))
+        assertEquals(ConnectionState.Connected, h.client.connection.value)
     }
 }

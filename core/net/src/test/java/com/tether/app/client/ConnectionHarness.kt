@@ -191,6 +191,9 @@ class ConnectionHarness {
         server.enqueue(MockResponse().withWebSocketUpgrade(listener))
     }
 
+    /** The WS upgrade on its own (for a test that serves requests with its own dispatcher). */
+    fun upgradeResponse(): MockResponse = MockResponse().withWebSocketUpgrade(listener)
+
     fun enqueueAuthFailure(code: Int = 500) {
         server.enqueue(MockResponse().setResponseCode(code).setBody("{}"))
     }

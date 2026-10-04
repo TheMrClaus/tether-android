@@ -413,6 +413,8 @@ class RealTetherClient(
     // it never owns or releases [connecting]), so neither an old credential nor
     // an old attempt's bookkeeping can outlive the change.
     private var connectGeneration = 0L
+    // The auth probe of the current attempt while it runs (cancelled when the attempt ends).
+    private var probeCall: okhttp3.Call? = null
     private var socket: WebSocket? = null
     private var socketListener: SocketListener? = null
     private var socketOpen = false
@@ -2518,6 +2520,9 @@ class RealTetherClient(
     private fun endConnectAttemptsLocked() {
         connectGeneration++
         connecting = false
+        // Its verdict would be ignored: the request itself goes too (it fails at once, as stale).
+        probeCall?.cancel()
+        probeCall = null
     }
 
     /** The attempt started in [generation] was ended since: it must do nothing. Caller holds [lock]. */
@@ -2607,8 +2612,10 @@ class RealTetherClient(
         scope.launch(Dispatchers.IO) {
             // §5.3: check auth before each connect.
             val verdict = try {
-                authProbe(base, credential)
+                authProbe(base, credential, generation)
             } catch (e: IOException) {
+                // Ended since (its call is cancelled then): no trace, no lookup, nothing.
+                if (synchronized(lock) { staleLocked(generation) }) return@launch
                 trace.mark("probe-failed")
                 val blocked = blockedAfterFailure(base, e)
                 val restricted = localNetworkAccess.isRestricted()
@@ -2745,12 +2752,24 @@ class RealTetherClient(
      * body that is not Tether's) throws: transient, reconnect with backoff.
      */
     @Throws(IOException::class)
-    private fun authProbe(base: HttpUrl, credential: Credential): ProbeVerdict {
+    private fun authProbe(base: HttpUrl, credential: Credential, generation: Long): ProbeVerdict {
         val request = Request.Builder()
             .url(base.resolve("/api/auth/session")!!)
             .authorize(credential, base)
             .build()
-        probeHttp.newCall(request).execute().use { response ->
+        val call = probeHttp.newCall(request)
+        // Held while it runs, so the attempt's end (sign-in, stop, logout, network change) cancels it.
+        synchronized(lock) { if (staleLocked(generation)) call.cancel() else probeCall = call }
+        try {
+            return verdictOf(call)
+        } finally {
+            synchronized(lock) { if (probeCall === call) probeCall = null }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun verdictOf(call: okhttp3.Call): ProbeVerdict {
+        call.execute().use { response ->
             if (response.code in 300..399 || response.code == 401 || response.code == 403) return ProbeVerdict.Refused
             if (!response.isSuccessful) throw IOException("auth probe returned HTTP ${response.code}")
             val authenticated = parseJsonObject(response)?.get("authenticated") as? JsonPrimitive
