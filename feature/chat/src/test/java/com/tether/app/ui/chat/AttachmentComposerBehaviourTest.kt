@@ -49,6 +49,17 @@ class AttachmentComposerBehaviourTest {
     private val textSends = mutableListOf<String>()
     private val attachmentSends = mutableListOf<Pair<String, DelegateMention?>>()
     private val removed = mutableListOf<Long>()
+    private val stagedSources = mutableListOf<AttachmentSource>()
+
+    /** T8.4: the attach sheet's GitHub reads (one issue, no pull requests). */
+    private object OneIssue : com.tether.app.client.GitHubWorkSource {
+        override suspend fun issues(origin: String, cwd: String) = com.tether.app.client.SecurityResult.Ok(
+            com.tether.app.client.GitHubIssuesList("octo/tether", listOf(com.tether.app.client.GitHubIssue(60, "Add the GitHub issues button", "Body"))), origin, null,
+        )
+        override suspend fun pullRequests(origin: String, cwd: String) = com.tether.app.client.SecurityResult.Ok(
+            com.tether.app.client.GitHubPullRequestsList("octo/tether", emptyList()), origin, null,
+        )
+    }
     private var staged by mutableStateOf(listOf<StagedAttachment>())
     private var answer = AttachmentSendResult.Sent
 
@@ -77,13 +88,14 @@ class AttachmentComposerBehaviourTest {
                     runActions = if (commandMode) CommandFixtures.Recorder().actions(commandMode = true) else ComposerCommandActions.Unavailable,
                     attachments = ComposerAttachments(
                         staged = staged,
-                        stage = { emptyList() },
+                        stage = { sources -> stagedSources += sources; emptyList() },
                         onRemove = { id -> removed += id; staged = staged.filterNot { it.id == id } },
                         send = { text, mention ->
                             attachmentSends += text to mention
                             answer.also { if (it == AttachmentSendResult.Sent) staged = emptyList() }
                         },
                     ),
+                    github = ComposerGitHub(OneIssue, "https://tether.test:443"),
                 )
             }
         }
@@ -94,6 +106,23 @@ class AttachmentComposerBehaviourTest {
     private fun inputText(): String = input().fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
 
     @Test
+    fun anIssuePickedInTheSheetIsStagedAsItsPrompt() {
+        show()
+        rule.onNodeWithContentDescription("Add attachment").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Add issue or PR").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("#60 · Add the GitHub issues button").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("#60 · Add the GitHub issues button").performClick()
+        rule.waitUntil(5_000) { stagedSources.isNotEmpty() }
+        val source = stagedSources.single() as GitHubWorkAttachmentSource
+        assertEquals("issue-60.md", source.displayName)
+        assertEquals("text/markdown", source.declaredType)
+        assertEquals(com.tether.app.client.GitHubWorkPrompt.issue("octo/tether", com.tether.app.client.GitHubIssue(60, "Add the GitHub issues button", "Body")), source.text)
+        // The pick closed the sheet (attach-sheet.tsx run()).
+        rule.onAllNodesWithText(GitHubWorkCopy.ATTACH_TITLE).assertCountEquals(0)
+    }
+
+    @Test
     fun thePaperclipOpensTheWebsTouchSheet() {
         show()
         rule.onNodeWithContentDescription("Add attachment").performClick()
@@ -102,8 +131,8 @@ class AttachmentComposerBehaviourTest {
         rule.onNodeWithContentDescription("Add image").assertIsEnabled()
         rule.onNodeWithContentDescription("Paste image").assertIsEnabled()
         rule.onNodeWithContentDescription("Upload file").assertIsEnabled()
-        // Logged divergence: no GitHub work client yet (T8.4), so no "Add issue or PR" row.
-        rule.onAllNodesWithContentDescription("Add issue or PR").assertCountEquals(0)
+        // T8.4: the web's "Add issue or PR" row (attach-sheet.tsx :259-261).
+        rule.onNodeWithContentDescription("Add issue or PR").assertIsEnabled()
         rule.onNodeWithContentDescription("Close").performClick()
         rule.waitForIdle()
         rule.onAllNodesWithText(ATTACH_SHEET_TITLE).assertCountEquals(0)
