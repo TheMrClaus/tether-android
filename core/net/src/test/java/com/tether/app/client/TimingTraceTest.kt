@@ -37,6 +37,23 @@ class TimingTraceTest {
     }
 
     @Test
+    fun aLineThatIsNotFixedWordsIsDroppedNotLogged() {
+        val lines = mutableListOf<String>()
+        val trace = TimingTrace(sink = { lines += it }, nowMs = { 0L })
+        trace.begin("resume")
+        trace.mark("socket-open")
+        trace.mark("socket-lost backoff")
+        trace.mark("host.example.org")
+        trace.mark("session s1")
+        trace.mark("Probe")
+        trace.mark("one two three")
+        trace.mark("")
+        trace.begin("user@host")
+        trace.mark("ready")
+        assertEquals(listOf("resume +0ms begin", "resume +0ms socket-open", "resume +0ms socket-lost backoff"), lines)
+    }
+
+    @Test
     fun aColdStartLogsEveryStepOfTheConnectInOrder() {
         connected()
         awaitMilestone("connected")
