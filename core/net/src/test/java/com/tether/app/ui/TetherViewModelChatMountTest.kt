@@ -90,4 +90,28 @@ class TetherViewModelChatMountTest {
         vm.chatViewShown("s9") // the mount that reply caused
         assertEquals(listOf("mount:s1", "attach-if:s9"), client.calls)
     }
+
+    /**
+     * ta-coik.40: a create/resume reply naming the chat already on screen mounts nothing (the view
+     * stays), so its attach must not be kept as an open's still to be matched (TetherViewModel
+     * openCreated, `mountedChat != sessionId`): a later return from the Overview is a real mount and
+     * attaches again, as the web's ChatView remount does (use-tether.ts 90fbb9f :1568).
+     */
+    @Test
+    fun aCreatedReplyForTheChatOnScreenLeavesNoStaleMatchSoAReturnFromOverviewAttaches() {
+        val client = Recording()
+        val vm = vms.track(TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { 0 }))
+        main.scheduler.advanceUntilIdle() // the reply collector is subscribed
+        vm.selectSession("s1")
+        vm.chatViewShown("s1")
+        val same = com.tether.app.protocol.model.AgentSession(id = "s1", provider = "claude", name = "s1", cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1)
+        client.replies.tryEmit(com.tether.app.client.CreatedReply(same, seq = 1, origin = "https://example.test"))
+        main.scheduler.advanceUntilIdle()
+        assertEquals("s1", vm.selectedSessionId.value)
+        assertEquals(listOf("mount:s1", "attach-if:s1"), client.calls)
+
+        vm.chatViewShown(null) // to the Overview
+        vm.chatViewShown("s1") // and back to the same chat: a real mount
+        assertEquals(listOf("mount:s1", "attach-if:s1", "mount:s1"), client.calls)
+    }
 }
