@@ -1,6 +1,7 @@
 package com.tether.app.ui.inspector
 
 import android.content.Context
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,11 +43,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -132,6 +135,87 @@ class InspectorActionsBehaviourTest {
         assertEquals(0, tagCount(InspectorTags.PullRequestLink))
         // The refresh is still there (dashboard.tsx:1457 always passes it).
         assertEquals(1, count("Refresh pull request status"))
+    }
+
+    private fun tapPullRequest() {
+        rule.onNodeWithTag(InspectorTags.PullRequestLink, useUnmergedTree = true).performScrollTo().performClick()
+        rule.waitForIdle()
+    }
+
+    /** Nothing on the phone takes an intent (startActivity throws, as a phone with no handler does). */
+    private fun noAppTakesLinks() = shadowOf(rule.activity.application).checkActivities(true)
+
+    /** ta-coik.18: a relative address resolves against the console and opens through the chat links' path. */
+    @Test fun aRelativePullRequestAddressOpensOnTheConsole() {
+        show(model(cr = pr("/o/r/pull/12")))
+        tapPullRequest()
+        assertEquals(listOf("https://console.example.test/o/r/pull/12"), opened)
+    }
+
+    /** ta-coik.18: React blocks javascript: (any case, leading spaces), so it is plain text, as on the web. */
+    @Test fun aJavascriptPullRequestAddressIsPlainText() {
+        show(model(cr = pr(" JavaScript:alert(1)")))
+        rule.onNodeWithText("Pull request #12", useUnmergedTree = true).performScrollTo()
+        assertEquals(0, tagCount(InspectorTags.PullRequestLink))
+    }
+
+    /** ta-coik.18: any other scheme is a link, offered to the phone's apps as a browser hands it on. */
+    @Test fun anyOtherSchemeIsOfferedToThePhonesApps() {
+        show(model(cr = pr("FTP://files.example.test/pr/12")))
+        tapPullRequest()
+        val started = shadowOf(rule.activity).nextStartedActivity
+        assertEquals(Intent.ACTION_VIEW, started.action)
+        assertEquals("ftp://files.example.test/pr/12", started.dataString)
+        assertTrue(started.hasCategory(Intent.CATEGORY_BROWSABLE))
+        assertNull(started.component)
+        assertEquals("not a web address: not the Custom Tab path", emptyList<String>(), opened)
+        assertEquals(0, tagCount(InspectorTags.PullRequestUnopened))
+    }
+
+    /** ta-coik.18: a scheme no app takes fails as the browser's link would: nothing opens, and the line says so. */
+    @Test fun aSchemeNoAppTakesSaysSoAndDoesNotCrash() {
+        noAppTakesLinks()
+        show(model(cr = pr("ftp://files.example.test/pr/12")))
+        tapPullRequest()
+        rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("No app on this phone could open the link.", useUnmergedTree = true).assertExists()
+        // The link is still there to try again.
+        assertEquals(1, tagCount(InspectorTags.PullRequestLink))
+    }
+
+    /** ta-coik.18: a local-file address is one the browser never hands an app from a page. */
+    @Test fun aFileAddressIsNotHandedOn() {
+        show(model(cr = pr("file:///sdcard/pr.txt")))
+        tapPullRequest()
+        assertNull(shadowOf(rule.activity).nextStartedActivity)
+        rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
+        // Nor through an `intent:` that carries one.
+        current = model(cr = pr("intent:///sdcard/pr.txt#Intent;scheme=file;end"))
+        rule.waitForIdle()
+        assertEquals("a new address starts without the note", 0, tagCount(InspectorTags.PullRequestUnopened))
+        tapPullRequest()
+        assertNull(shadowOf(rule.activity).nextStartedActivity)
+        rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
+    }
+
+    /** ta-coik.18: an `intent:` address goes out with Chrome's sanitising, and to its web fallback when no app takes it. */
+    @Test fun anIntentAddressIsSanitisedAndFallsBackLikeChrome() {
+        show(model(cr = pr("intent://pr/12#Intent;scheme=gh;component=com.example.other/.Secret;launchFlags=0x10000003;end")))
+        tapPullRequest()
+        val started = shadowOf(rule.activity).nextStartedActivity
+        assertEquals("gh://pr/12", started.dataString)
+        assertNull("no explicit component", started.component)
+        assertEquals("no flags it carried (no URI grants)", 0, started.flags)
+        assertTrue(started.hasCategory(Intent.CATEGORY_BROWSABLE))
+        assertEquals(emptyList<String>(), opened)
+    }
+
+    @Test fun anIntentNoAppTakesOpensItsWebFallback() {
+        noAppTakesLinks()
+        show(model(cr = pr("intent://pr/12#Intent;scheme=gh;S.browser_fallback_url=https%3A%2F%2Fexample.test%2Fpr%2F12;end")))
+        tapPullRequest()
+        assertEquals(listOf("https://example.test/pr/12"), opened)
+        assertEquals(0, tagCount(InspectorTags.PullRequestUnopened))
     }
 
     @Test fun refreshAsksAgainAndTheReplyReplacesTheLine() {

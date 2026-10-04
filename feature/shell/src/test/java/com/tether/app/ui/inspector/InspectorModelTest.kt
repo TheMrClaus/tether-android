@@ -439,9 +439,51 @@ class InspectorModelTest {
         assertNull(pr("""{"number":9,"url":null,"state":"OPEN"}""").url)
         assertNull(pr("""{"number":9,"url":"","state":"OPEN"}""").url)
         assertNull(pr("""{"number":9,"state":"OPEN"}""").url)
-        // Outside the web's link schemes it is never a link (a browser refuses a javascript: tab too).
+        // React blocks a javascript: href (ta-coik.18): it is never a link.
         assertNull(pr("""{"number":9,"url":"javascript:alert(1)","state":"OPEN"}""").url)
         assertEquals("Pull request #9", pr("""{"number":9,"url":"javascript:alert(1)","state":"OPEN"}""").headline)
+    }
+
+    /**
+     * ta-coik.18 (repository-panel.tsx:56 at tether 90fbb9f): `<a href={cr.url}>` links any address;
+     * only React's `isJavaScriptProtocol` blocks one. The browser resolves a relative one against the
+     * console page and lowercases a scheme.
+     */
+    @Test
+    fun thePullRequestLinksWhatTheWebLinks() {
+        val console = InspectorBoards.ORIGIN
+        fun href(url: String) = pullRequestHref(url, console)
+        // Any scheme is a link, kept as written but for its case.
+        assertEquals("ftp://files.example.test/pr/9", href("ftp://files.example.test/pr/9"))
+        assertEquals("ftp://files.example.test/PR/9", href("FTP://files.example.test/PR/9"))
+        assertEquals("vbscript:x", href("vbscript:x"))
+        assertEquals("mailto:review@example.test", href("mailto:review@example.test"))
+        assertEquals("intent://pr/9#Intent;scheme=gh;end", href("intent://pr/9#Intent;scheme=gh;end"))
+        // A relative address resolves against the console, as the page's link would.
+        assertEquals("https://console.example.test/o/r/pull/9", href("/o/r/pull/9"))
+        assertEquals("https://console.example.test/pull/9", href("pull/9"))
+        assertEquals("https://github.com/o/r/pull/9", href("//github.com/o/r/pull/9"))
+        assertEquals("https://console.example.test/o/r/pull/9", href("https:o/r/pull/9"))
+        // The URL parser's own clean-up: outer C0 controls and spaces, inner tabs and newlines.
+        assertEquals("https://github.com/o/r/pull/9", href(" \u0001https://git\thub.com/o/r/pull/9\n"))
+        assertEquals("https://github.com/o/r/pull/9", href("HTTPS://GitHub.com/o/r/pull/9"))
+        // React's block: case-insensitive, leading C0 controls or spaces, tabs and newlines inside.
+        for (blocked in listOf("javascript:alert(1)", "JavaScript:alert(1)", " \u0001\u001Fjavascript:x", "java\tscript:x", "j\na\rv\tascript:x", "JAVASCRIPT\n:x")) {
+            assertNull(blocked, href(blocked))
+        }
+        // ASCII case only, as JS `/i` without `u`: a long s is not an `s`, so this is a (relative) link.
+        assertEquals("https://console.example.test/java%C5%BFcript:x", href("javaſcript:x"))
+        // No address, or a relative one with no console to resolve against, is plain text.
+        assertNull(href(""))
+        assertNull(pullRequestHref(null, console))
+        assertNull(pullRequestHref("/o/r/pull/9", null))
+        assertEquals("ftp://files.example.test/pr/9", pullRequestHref("ftp://files.example.test/pr/9", null))
+        assertEquals("https://github.com/o/r/pull/9", pullRequestHref("https://github.com/o/r/pull/9", null))
+        // Through the model: the line carries the resolved address.
+        val base = InspectorBoards.session(metrics = SessionMetrics(gitBranch = "b"))
+        val json = """{"number":9,"url":"/o/r/pull/9","state":"OPEN"}"""
+        val line = InspectorBoards.model(base, replies = InspectorReplies(changeRequest = ChangeRequestReading(obj(json), false))).repository!!.pullRequest!!
+        assertEquals("https://console.example.test/o/r/pull/9", line.url)
     }
 
     /**

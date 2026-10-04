@@ -25,7 +25,6 @@ import com.tether.app.ui.chat.RunSource
 import com.tether.app.ui.chat.STATUS_TEXT
 import com.tether.app.ui.chat.SubagentRun
 import com.tether.app.ui.chat.WorktreeDiffSummaryView
-import com.tether.app.ui.chat.isSafeHref
 import com.tether.app.ui.chat.providerNotices
 import com.tether.app.ui.chat.runStatusText
 import com.tether.app.ui.chat.subagentRosterSummary
@@ -451,7 +450,7 @@ fun inspectorModel(
         mcpHealth = session.provider != "opencode" && state != null,
         opencodePlugins = session.engineGeneration == "opencode-serve-v2" && state != null,
         tokens = tokensBand(session, state, runs, metrics, env),
-        repository = repository(session, replies),
+        repository = repository(session, replies, serverOrigin),
         services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin, replies.worktreeLogs) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
@@ -794,16 +793,16 @@ internal fun changeRequestLine(cr: JsonObject): String {
     ).filter { it.isNotEmpty() }.joinToString(" · ")
 }
 
-internal fun pullRequestLine(reading: ChangeRequestReading): PullRequestLine {
+internal fun pullRequestLine(reading: ChangeRequestReading, consoleOrigin: String? = null): PullRequestLine {
     if (reading.unknown) return PullRequestLine("PR status unavailable", null)
     val cr = reading.changeRequest ?: return PullRequestLine("No pull request", null)
     val number = cr.number("number")?.let(::numberToString) ?: "?"
-    // repository-panel.tsx:56: a link when `cr.url` is set; an href outside the web's link schemes is never one.
-    val url = cr.string("url")?.takeIf { it.isNotEmpty() && isSafeHref(it) }
+    // repository-panel.tsx:56: a link when `cr.url` is set, any address but React's blocked javascript: (ta-coik.18).
+    val url = pullRequestHref(cr.string("url"), consoleOrigin)
     return PullRequestLine("Pull request #$number", changeRequestLine(cr).ifEmpty { null }, url)
 }
 
-internal fun repository(session: AgentSession, replies: InspectorReplies): RepositorySection? {
+internal fun repository(session: AgentSession, replies: InspectorReplies, consoleOrigin: String? = null): RepositorySection? {
     val branch = session.metrics?.gitBranch?.takeIf { it.isNotEmpty() } ?: session.worktree?.branch?.takeIf { it.isNotEmpty() }
     val diff = worktreeDiffSummary(replies.worktreeDiff)
     val cr = replies.changeRequest
@@ -812,7 +811,7 @@ internal fun repository(session: AgentSession, replies: InspectorReplies): Repos
     return RepositorySection(
         branch = branch?.let(::code),
         divergence = gitDivergence(session.metrics?.gitAhead?.toDouble(), session.metrics?.gitBehind?.toDouble()),
-        pullRequest = cr?.let(::pullRequestLine),
+        pullRequest = cr?.let { pullRequestLine(it, consoleOrigin) },
         changes = diff,
         changedFiles = changed,
     )

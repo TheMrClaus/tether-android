@@ -70,7 +70,6 @@ import com.tether.app.ui.chat.CustomTabLinkOpener
 import com.tether.app.ui.chat.GitChangesCard
 import com.tether.app.ui.chat.LinkOpener
 import com.tether.app.ui.chat.LocalLinkOpener
-import com.tether.app.ui.chat.openChatLink
 import com.tether.app.ui.chat.ProviderNoticeRow
 import com.tether.app.ui.chat.RUN_ERROR
 import com.tether.app.ui.chat.RUN_RUNNING
@@ -144,6 +143,7 @@ object InspectorTags {
     const val Changes = "inspector-changes"
     const val PullRequestLink = "inspector-pull-request-link"
     const val RefreshPullRequest = "inspector-pull-request-refresh"
+    const val PullRequestUnopened = "inspector-pull-request-unopened"
     const val ScriptLog = "inspector-script-log"
     const val Limits = "inspector-limits"
     const val Services = "inspector-services"
@@ -1005,7 +1005,8 @@ private fun RepositoryPanel(
  * repository-panel.tsx:53-61: the headline (a link to the pull request when the reply carries its
  * address, opening on one tap like the web's `<a target="_blank">` and a chat link), its state, and
  * the refresh key. The refresh shows nothing of its own: the reply replaces the line (an `unknown`
- * one reads "PR status unavailable"), as on the web.
+ * one reads "PR status unavailable"), as on the web. ta-coik.18: the address is any the web links
+ * ([pullRequestHref]); one no app on the phone takes fails as the browser's would, said under the line.
  */
 @Composable
 private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
@@ -1014,6 +1015,7 @@ private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
     val context = LocalContext.current
     val opener = LocalLinkOpener.current
     val style = cssText(type.ui, 0.72f, 400)
+    var unopened by remember(pr.url) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(bottom = t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
@@ -1028,7 +1030,9 @@ private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
                     style = style.copy(textDecoration = TextDecoration.Underline),
                     color = t.ink,
                     modifier = Modifier
-                        .clickable(role = Role.Button, onClickLabel = "Open in browser") { openChatLink(context, opener, url, t.graphite) }
+                        .clickable(role = Role.Button, onClickLabel = "Open in browser") {
+                            unopened = !openPullRequestLink(context, opener, url, t.graphite)
+                        }
                         .testTag(InspectorTags.PullRequestLink),
                 )
             } else {
@@ -1037,6 +1041,17 @@ private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
             pr.state?.let { Text(it, style = cssText(type.ui, 0.65f, 400), color = t.muted, modifier = Modifier.padding(top = t.css.spaceXs)) }
         }
         IconKey(TetherIcons.RefreshCw, "Refresh pull request status", Modifier.testTag(InspectorTags.RefreshPullRequest), onRefresh)
+    }
+    if (unopened) {
+        Text(
+            PULL_REQUEST_UNOPENED,
+            style = cssText(type.mono, 0.7f, 400, lineHeight = 1.4f),
+            color = t.warning,
+            modifier = Modifier
+                .padding(bottom = t.css.spaceMd)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag(InspectorTags.PullRequestUnopened),
+        )
     }
 }
 
