@@ -27,6 +27,7 @@ import com.tether.app.client.READINESS_NEED_PROMPT
 import com.tether.app.client.READINESS_NEED_PROVIDER
 import com.tether.app.client.StagedAttachment
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.MainShell
@@ -340,6 +341,27 @@ class DraftComposerSheetBehaviourTest {
         client.answer("new-launch")
         awaitGone(DraftComposerTags.Launching)
         until("the new session is selected") { vm.selectedSessionId.value == "new-launch" }
+    }
+
+    /**
+     * ta-coik.39 r2: the create in flight takes the stage from the chat (dashboard.tsx 90fbb9f
+     * `draftLaunching`: no ChatView), so a refusal that brings the chat back mounts it again, and the
+     * web attaches it again (use-tether.ts :1568). A raised sheet alone (a popup) mounts nothing.
+     */
+    @Test
+    fun aRefusedCreateBringsTheChatBackAndItIsAttachedAgain() {
+        client.sessions.value = listOf(AgentSession(id = "s1", provider = "claude", name = "s1", cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1))
+        vm.selectSession("s1")
+        openSheet()
+        until("the chat mounted once") { client.inner.mountCalls.toList() == listOf("s1") }
+        compose("claude", "Then refused")
+        assertEquals("the sheet is a popup: no mount", listOf("s1"), client.inner.mountCalls.toList())
+        tap(DraftComposerTags.Send)
+        until("the create went out") { client.creates.size == 1 }
+        awaitTag(DraftComposerTags.Launching)
+        client.refuse("No.")
+        awaitGone(DraftComposerTags.Launching)
+        until("the chat is attached again") { client.inner.mountCalls.toList() == listOf("s1", "s1") }
     }
 
     @Test
