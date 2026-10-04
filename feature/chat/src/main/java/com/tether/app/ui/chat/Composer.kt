@@ -226,6 +226,8 @@ fun Composer(
     onWarmControls: () -> Unit = {},
     /** ta-coik.19: this session's unresolved sends (the send-status row above the well). */
     sendRows: List<com.tether.app.client.PendingSendRow> = emptyList(),
+    /** T8.4: the attach sheet's "Add issue or PR" reads (null: the row is not drawn). */
+    github: ComposerGitHub? = null,
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -756,6 +758,14 @@ fun Composer(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         stageSources(uris.orEmpty().map { ContentUriSource(context.contentResolver, it, uriPolicy) })
     }
+    // T8.4 (attach-sheet.tsx :115-232): the GitHub list's state, kept per session and server so a
+    // re-open of the sheet does not read again; a pick is staged like a file (chat-view.tsx :2695-2723).
+    val githubSource = github?.source
+    val githubOrigin = github?.origin
+    val attachGitHub = remember(session?.id, githubSource, githubOrigin) {
+        githubSource?.let { AttachGitHubController(it, githubOrigin, scope) }
+    }
+    androidx.compose.runtime.DisposableEffect(attachGitHub) { onDispose { attachGitHub?.cancel() } }
     // ta-coik.3: the camera row (the picture is staged like a pick, never sent).
     val takePhoto = rememberCameraCapture(onSources = ::stageSources, onFlash = ::flash)
     fun pasteImage() {
@@ -998,6 +1008,9 @@ fun Composer(
             onTakePhoto = takePhoto,
             onPasteImage = ::pasteImage,
             onPickFiles = { filePicker.launch(arrayOf("*/*")) },
+            github = attachGitHub?.let { c ->
+                AttachSheetGitHub(session.cwd, c) { repository, selection -> stageSources(listOf(GitHubWorkAttachmentSource(repository, selection))) }
+            },
         )
     }
     val sheetEntry = sheetAt

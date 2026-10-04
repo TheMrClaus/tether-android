@@ -12,6 +12,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import com.tether.app.client.GitHubWorkPrompt
+import com.tether.app.client.LabelText
+import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.cssSurface
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -63,10 +81,11 @@ import kotlinx.coroutines.withContext
  * input reaches the camera through Chrome's chooser, which the Photo Picker and the document picker
  * do not offer, so the app gives the camera its own row.
  *
- * Logged divergence: the web's fourth row, "Add issue or PR", browses the workspace's GitHub issues
- * and pull requests (GET /api/github/issues, /api/github/pull-requests); the app has no GitHub work
- * client yet (T8.4), so the row is left out rather than drawn as a row that cannot work. It returns
- * with T8.4.
+ * T8.4: and the web's "Add issue or PR" after "Paste image" (attach-sheet.tsx 90fbb9f :259-261): the
+ * sheet steps into "Attach issue or PR" (Back returns to the rows), lists the session folder's open
+ * issues and pull requests with a search, and a pick closes the sheet and attaches the item's prompt
+ * as `issue-N.md` / `pr-N.md` ([GitHubWorkAttachmentSource], chat-view.tsx :2695-2723). Drawn where
+ * the composer lends it the reads ([AttachSheetGitHub]; the chat composer does, as the web's ChatView).
  */
 
 internal const val ATTACH_SHEET_TAG = "attach-sheet"
@@ -75,9 +94,33 @@ internal const val ATTACH_ROW_PASTE = "Paste image"
 internal const val ATTACH_ROW_FILES = "Upload file"
 internal const val ATTACH_SHEET_TITLE = "Add attachment"
 
-/** The sheet's rows. A tap closes the sheet first, then runs its row (attach-sheet.tsx run()). */
+internal const val ATTACH_ROW_GITHUB_TAG = "attach-row-github"
+internal const val ATTACH_GITHUB_TAG = "attach-github"
+internal const val ATTACH_GITHUB_SEARCH_TAG = "attach-github-search"
+internal const val ATTACH_GITHUB_RETRY_TAG = "attach-github-retry"
+internal fun attachGitHubRowTag(selection: GitHubWorkSelection) =
+    "attach-github-row:${if (selection is GitHubWorkSelection.Issue) "issue" else "pr"}-${selection.number}"
+
+/**
+ * T8.4: what the sheet's GitHub view needs: the session's folder ([cwd]), the reads' state
+ * ([controller], kept by the composer so a re-open does not read again) and what a pick does ([onAttach]).
+ */
+@Immutable
+class AttachSheetGitHub(val cwd: String, val controller: AttachGitHubController, val onAttach: (repository: String, GitHubWorkSelection) -> Unit)
+
+/**
+ * The sheet's rows. A tap closes the sheet first, then runs its row (attach-sheet.tsx run()); T8.4:
+ * "Add issue or PR" ([onGitHub], when given) steps into the GitHub view instead, the sheet staying up.
+ */
 @Composable
-internal fun ColumnScope.AttachSheetRows(onClose: () -> Unit, onPickImages: () -> Unit, onTakePhoto: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
+internal fun ColumnScope.AttachSheetRows(
+    onClose: () -> Unit,
+    onPickImages: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onPasteImage: () -> Unit,
+    onPickFiles: () -> Unit,
+    onGitHub: (() -> Unit)? = null,
+) {
     fun run(action: () -> Unit) {
         onClose()
         action()
@@ -85,22 +128,173 @@ internal fun ColumnScope.AttachSheetRows(onClose: () -> Unit, onPickImages: () -
     TetherSheetRow(ATTACH_ROW_IMAGES, onClick = { run(onPickImages) }, icon = TetherIcons.Image)
     TetherSheetRow(ATTACH_ROW_CAMERA, onClick = { run(onTakePhoto) }, icon = TetherIcons.Camera)
     TetherSheetRow(ATTACH_ROW_PASTE, onClick = { run(onPasteImage) }, icon = TetherIcons.ClipboardPaste)
+    if (onGitHub != null) {
+        TetherSheetRow(GitHubWorkCopy.ATTACH_ROW, onClick = onGitHub, icon = TetherIcons.GitPullRequestArrow, modifier = Modifier.testTag(ATTACH_ROW_GITHUB_TAG))
+    }
     TetherSheetRow(ATTACH_ROW_FILES, onClick = { run(onPickFiles) }, icon = TetherIcons.Paperclip)
 }
 
 /** The modal sheet (a bottom sheet on a phone, a centred card from 48rem). */
 @Composable
-fun AttachSheet(onDismiss: () -> Unit, onPickImages: () -> Unit, onTakePhoto: () -> Unit, onPasteImage: () -> Unit, onPickFiles: () -> Unit) {
-    TetherSheet(onDismiss = onDismiss, title = ATTACH_SHEET_TITLE) {
-        Column(Modifier.testTag(ATTACH_SHEET_TAG)) { AttachSheetRows(onDismiss, onPickImages, onTakePhoto, onPasteImage, onPickFiles) }
+fun AttachSheet(
+    onDismiss: () -> Unit,
+    onPickImages: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onPasteImage: () -> Unit,
+    onPickFiles: () -> Unit,
+    github: AttachSheetGitHub? = null,
+) {
+    var githubView by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    // attach-sheet.tsx close(): the read in flight stops.
+    val dismiss = {
+        github?.controller?.cancel()
+        onDismiss()
+    }
+    val back = {
+        githubView = false
+        query = ""
+    }
+    TetherSheet(
+        onDismiss = dismiss,
+        title = if (githubView) GitHubWorkCopy.ATTACH_TITLE else ATTACH_SHEET_TITLE,
+        onBack = if (githubView) back else null,
+        backLabel = GitHubWorkCopy.ATTACH_BACK,
+    ) {
+        if (githubView && github != null) {
+            AttachGitHubList(github.controller, query, { query = it }, retry = { github.controller.open(github.cwd) }) { repository, selection ->
+                dismiss()
+                github.onAttach(repository, selection)
+            }
+        } else {
+            Column(Modifier.testTag(ATTACH_SHEET_TAG)) {
+                AttachSheetRows(
+                    dismiss, onPickImages, onTakePhoto, onPasteImage, onPickFiles,
+                    onGitHub = github?.let { g ->
+                        {
+                            // :189-192 openGitHub.
+                            githubView = true
+                            query = ""
+                            g.controller.open(g.cwd)
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 
 /** The sheet's surface drawn inline (goldens; the modal hosts the same surface in a window). */
 @Composable
-internal fun AttachSheetSurface(modifier: Modifier = Modifier, docked: Boolean) {
+internal fun AttachSheetSurface(modifier: Modifier = Modifier, docked: Boolean, github: Boolean = true) {
     TetherSheetSurface(title = ATTACH_SHEET_TITLE, modifier = modifier, docked = docked, onClose = {}) {
-        AttachSheetRows({}, {}, {}, {}, {})
+        AttachSheetRows({}, {}, {}, {}, {}, onGitHub = if (github) ({}) else null)
+    }
+}
+
+/** T8.4: the GitHub view drawn inline (goldens). */
+@Composable
+internal fun AttachGitHubSurface(controller: AttachGitHubController, query: String, modifier: Modifier = Modifier, docked: Boolean) {
+    TetherSheetSurface(title = GitHubWorkCopy.ATTACH_TITLE, modifier = modifier, docked = docked, onClose = {}, onBack = {}, backLabel = GitHubWorkCopy.ATTACH_BACK) {
+        AttachGitHubList(controller, query, {}, retry = {}) { _, _ -> }
+    }
+}
+
+/** attach-sheet.tsx :269-330: the search and the list (loading, the error and Try again, no repository, none, the rows). */
+@Composable
+private fun ColumnScope.AttachGitHubList(
+    c: AttachGitHubController,
+    query: String,
+    onQuery: (String) -> Unit,
+    retry: () -> Unit,
+    onPick: (String, GitHubWorkSelection) -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    GitHubSearchField(query, onQuery)
+    val repository = c.repository
+    val issues = c.issues.filter { matchesGitHubQuery(query, it.number, it.title) }
+    val pulls = c.pullRequests.filter { matchesGitHubQuery(query, it.number, it.title) }
+    Column(Modifier.testTag(ATTACH_GITHUB_TAG).padding(top = t.css.spaceSm)) {
+        @Composable
+        fun note(text: String) = Text(
+            text,
+            color = t.muted,
+            style = type.body.copy(fontSize = 13.12.sp),
+            modifier = Modifier.padding(t.css.spaceMd).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        when {
+            c.loading -> note(GitHubWorkCopy.LOADING_BOTH)
+            c.error.isNotEmpty() -> {
+                note(c.error)
+                TetherKey(
+                    onClick = retry,
+                    classes = KeyClasses.ButtonSecondary,
+                    label = GitHubWorkCopy.TRY_AGAIN,
+                    modifier = Modifier.padding(horizontal = t.css.spaceMd).testTag(ATTACH_GITHUB_RETRY_TAG),
+                )
+            }
+            repository == null -> note(GitHubWorkCopy.NO_REPO)
+            issues.isEmpty() && pulls.isEmpty() -> note(if (GitHubWorkPrompt.jsTrim(query).isNotEmpty()) GitHubWorkCopy.NO_MATCHES else GitHubWorkCopy.NONE_OPEN)
+            else -> {
+                issues.forEach { issue ->
+                    val selection = GitHubWorkSelection.Issue(issue)
+                    TetherSheetRow(
+                        "#${issue.number} · ${LabelText.title(issue.title)}",
+                        onClick = { onPick(repository, selection) },
+                        icon = TetherIcons.CircleDot,
+                        modifier = Modifier.testTag(attachGitHubRowTag(selection)),
+                    )
+                }
+                pulls.forEach { pr ->
+                    val selection = GitHubWorkSelection.PullRequest(pr)
+                    TetherSheetRow(
+                        "#${pr.number} · ${LabelText.title(pr.title)}",
+                        onClick = { onPick(repository, selection) },
+                        icon = if (pr.isDraft) TetherIcons.GitPullRequestDraft else TetherIcons.GitPullRequest,
+                        modifier = Modifier.testTag(attachGitHubRowTag(selection)),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** `.attach-sheet-search`: the Search glyph and the field ("Search issues and PRs…"). */
+@Composable
+private fun GitHubSearchField(value: String, onValue: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(t.radiusMd)
+    val style = type.body.copy(fontSize = 13.76.sp, color = t.ink)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .cssSurface(shape, t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.line), emptyList())
+            .padding(horizontal = t.css.spaceMd),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Icon(TetherIcons.Search, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValue,
+            singleLine = true,
+            textStyle = style,
+            cursorBrush = SolidColor(t.violet),
+            interactionSource = interaction,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Search),
+            modifier = Modifier.weight(1f).semantics { contentDescription = GitHubWorkCopy.SEARCH_LABEL }.testTag(ATTACH_GITHUB_SEARCH_TAG),
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) Text(GitHubWorkCopy.SEARCH_PLACEHOLDER, style = style.copy(color = t.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    inner()
+                }
+            },
+        )
     }
 }
 

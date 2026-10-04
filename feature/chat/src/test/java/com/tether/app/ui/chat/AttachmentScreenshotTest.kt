@@ -33,6 +33,10 @@ import org.robolectric.annotation.Config
  * `bubble-attachments` = a sent message with a materialized picture (the thumbnail through the
  * tool-media path) and a file chip. Tablet (from 48rem): the sheet as the centred card. The failure
  * tile: `bubble-attachments-failed` (Studio light and dark).
+ *
+ * T8.4: the sheet carries "Add issue or PR" after Paste image (attach-sheet.tsx 90fbb9f :259-261);
+ * `attach-github` = its "Attach issue or PR" view: the search and the folder's open issues and pull
+ * requests (a draft PR with its glyph), read from a fake source at once.
  */
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
 
@@ -40,6 +44,33 @@ private val stagedFixture: List<StagedAttachment> by lazy {
     listOf(
         StagedAttachment(1, Attachment("screenshot.png", "image/png", ComposerAttachmentFixtures.PNG_BASE64), 245_760),
         StagedAttachment(2, Attachment("build-output.log", "text/plain", "aGVsbG8="), 18_432),
+    )
+}
+
+/** T8.4: the reads the sheet's GitHub view draws (answers at once; nothing goes on any wire). */
+private object GitHubFixtureReads : com.tether.app.client.GitHubWorkSource {
+    private const val ORIGIN = "https://tether.test:443"
+    override suspend fun issues(origin: String, cwd: String) = com.tether.app.client.SecurityResult.Ok(
+        com.tether.app.client.GitHubIssuesList(
+            "octo/tether",
+            listOf(
+                com.tether.app.client.GitHubIssue(60, "Add the GitHub issues button", "The composer needs it."),
+                com.tether.app.client.GitHubIssue(61, "Sidebar flickers on resume"),
+            ),
+        ),
+        ORIGIN,
+        null,
+    )
+    override suspend fun pullRequests(origin: String, cwd: String) = com.tether.app.client.SecurityResult.Ok(
+        com.tether.app.client.GitHubPullRequestsList(
+            "octo/tether",
+            listOf(
+                com.tether.app.client.GitHubPullRequest(76, "Pull requests tab", headRefName = "feature/prs", baseRefName = "main"),
+                com.tether.app.client.GitHubPullRequest(78, "WIP: attach sheet row", isDraft = true),
+            ),
+        ),
+        ORIGIN,
+        null,
     )
 }
 
@@ -60,6 +91,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.showStaged(skin: Tether
                 initialDraft = "What changed between these two runs?",
                 controlActions = SessionControlFixtures.Recorder().actions(),
                 attachments = ComposerAttachments(stagedFixture, { emptyList() }, {}, { _, _ -> AttachmentSendResult.Sent }),
+                github = ComposerGitHub(GitHubFixtureReads, "https://tether.test:443"),
             )
         }
     }
@@ -78,6 +110,47 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapSheet(skin: TetherS
     mainClock.advanceTimeBy(600)
     waitForIdle()
     captureScreenRoboImage("src/test/screenshots/attach-sheet/${skin.id}-$size.png", roborazziOptions = exact)
+}
+
+/** T8.4: the sheet, then its "Add issue or PR" row: the GitHub view with the lists read. */
+private fun AndroidComposeTestRule<*, ComponentActivity>.snapGitHub(skin: TetherSkin, size: String, width: androidx.compose.ui.unit.Dp? = null) {
+    showStaged(skin, width)
+    onNodeWithContentDescription("Add attachment").performClick()
+    mainClock.advanceTimeBy(616)
+    waitForIdle()
+    onNodeWithTag(ATTACH_ROW_GITHUB_TAG).performClick()
+    mainClock.advanceTimeBy(600)
+    waitForIdle()
+    onNodeWithTag(attachGitHubRowTag(GitHubWorkSelection.PullRequest(com.tether.app.client.GitHubPullRequest(78, "")))).assertExists()
+    captureScreenRoboImage("src/test/screenshots/attach-github/${skin.id}-$size.png", roborazziOptions = exact)
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class AttachGitHubPhoneScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun github() = rule.snapGitHub(skin, "phone")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class AttachGitHubTabletScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun github() = rule.snapGitHub(skin, "tablet", WellWidthTablet)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
 }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)

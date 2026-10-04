@@ -269,6 +269,10 @@ fun ChatScreen(
             )
         }
     }
+    // T8.4: the attach sheet's "Add issue or PR" reads the server signed in to (an HTTP read, as the web's fetch).
+    val configured by vm.client.configured.collectAsStateWithLifecycle()
+    val githubOrigin = if (configured) com.tether.app.client.serverOrigin(serverUrl) else null
+    val composerGitHub = remember(vm.client, githubOrigin) { ComposerGitHub(vm.client.githubWork, githubOrigin) }
     // T6.6: a handed-off source names (and links to) the session it continued in.
     val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
@@ -438,6 +442,7 @@ fun ChatScreen(
             runActions = runActions,
             onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
             sendRows = sends.pending,
+            github = composerGitHub,
         )
     }
     CommandOutputDialog(
