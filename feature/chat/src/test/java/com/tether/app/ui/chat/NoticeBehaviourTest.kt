@@ -82,18 +82,20 @@ class NoticeBehaviourTest {
     private fun arm() = settle(SETTLE_MS)
 
     @Test
-    fun aTapOnTheXSendsExactlyItsKeyOnce() {
+    fun eachTapOnTheXSendsExactlyItsKeyOnce() {
         show(NoticeFixtures.sessionNotices)
         rule.onAllNodesWithTag("notice-dismiss").assertCountEquals(3)
         // ta-coik.13: notice-dismiss-button.tsx 90fbb9f :12-20, the X acts on the first click (no arm delay).
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled().performClick()
         settle()
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").performClick()
-        settle()
         assertEquals(listOf("ext-1"), rec.dismissed)
+        // ta-coik.22: no "Dismissing…" latch, as on the web: the X stays live and a second tap sends again.
         rule.onNodeWithContentDescription("Dismiss external-advancement notice")
-            .assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Dismissing…"))
+            .assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            .performClick()
+        settle()
+        assertEquals(listOf("ext-1", "ext-1"), rec.dismissed)
     }
 
     @Test
@@ -328,12 +330,17 @@ class NoticeBehaviourTest {
         show(NoticeFixtures.scheduled)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
         rule.onNodeWithText("Automatic resume scheduled for 2:03 AM UTC.").assertExists()
-        // ta-coik.13: the first tap cancels (no arm delay); a second sends nothing more.
+        // ta-coik.13: the first tap cancels (no arm delay). ta-coik.22: no "Cancelling…" latch, as on
+        // the web (chat-view.tsx 90fbb9f :3707-3714): the X stays live and each tap sends.
         rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
         settle()
-        rule.onNodeWithContentDescription("Cancel scheduled resume").performClick()
-        settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
+        rule.onNodeWithContentDescription("Cancel scheduled resume")
+            .assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            .performClick()
+        settle()
+        assertEquals(List(2) { SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss") }, rec.controls)
     }
 
     @Test

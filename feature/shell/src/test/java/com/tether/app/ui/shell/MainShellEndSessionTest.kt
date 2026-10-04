@@ -93,17 +93,17 @@ class MainShellEndSessionTest {
         rule.mainClock.autoAdvance = false
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
     }
 
     /**
-     * T13.2 r2 / ta-coik.22: a link that drops under the open dialog disables its key (a saved copy
-     * never ends a session) but, like the web's `<dialog>` (dashboard.tsx 90fbb9f :1902-1911), leaves
-     * it open; the header key stays disabled until the copy is live again, and the same confirmation
-     * then ends it once.
+     * ta-coik.22 r2: like the web's `<dialog>` (dashboard.tsx 90fbb9f :1902-1911), a link that drops
+     * under the open dialog leaves it open and its confirm key live (the web's is never disabled); a
+     * tap asks the client, which sends while the socket is open. The header key is live too
+     * (workspace-header.tsx :133).
      */
     @Test
-    fun theConfirmationStaysOpenWhenTheCopyStopsBeingLive() {
+    fun theConfirmationStaysOpenAndLiveWhenTheCopyStopsBeingLive() {
         val client = ShellConsentClient().also { it.show(session, tree) }
         host(client)
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
@@ -112,26 +112,15 @@ class MainShellEndSessionTest {
         confirmKey().assertIsEnabled()
 
         rule.runOnIdle {
-            client.link.value = ConnectionState.Disconnected
+            client.link.value = ConnectionState.Connected
             client.live.value = emptySet()
         }
         arm()
         rule.onNodeWithText("End session?").assertExists()
-        confirmKey().assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue("nothing from a saved copy: ${client.killCalls}", client.killCalls.isEmpty())
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
-
-        // Back, but not yet confirmed on the new link (catching up): still disabled, still open.
-        rule.runOnIdle { client.link.value = ConnectionState.Connected }
-        arm()
-        confirmKey().assertIsNotEnabled()
-
-        rule.runOnIdle { client.live.value = setOf("s1") }
-        arm()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
         rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 
@@ -165,7 +154,7 @@ class MainShellEndSessionTest {
         arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$OTHER_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$OTHER_ORIGIN:false"), client.killCalls)
     }
 
     // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
@@ -197,7 +186,7 @@ class MainShellEndSessionTest {
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithText("End session?").assertDoesNotExist()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
     }
 
     /** On (the default), the same key asks first and ends nothing until confirmed. */

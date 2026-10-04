@@ -353,29 +353,49 @@ class ChatSyncTest {
         rule.onNodeWithText("Connecting to the session…").assertIsDisplayed()
     }
 
+    /**
+     * ta-coik.22 r2: the web's header End session is disabled only once the session exited
+     * (workspace-header.tsx 90fbb9f :133) and its confirm key never (dashboard.tsx :1909). On a saved
+     * copy both act: the kill goes to the client, which sends while the socket is open.
+     */
     @Test
-    fun theChatHeadersEndSessionNeedsALiveCopy() {
+    fun theChatHeadersEndSessionIsLiveOnASavedCopy() {
         val running = session.copy(status = "active")
         val client = ChatTestClient().also { it.reports = true }
         client.show(running, ApprovalFixtures.write, live = true)
         client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L))
         host(client, running, header = true)
-        rule.onNodeWithContentDescription("End session").assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText("End session?").assertDoesNotExist()
-
-        rule.runOnIdle { client.sync.value = live("s1") }
-        arm()
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
         // T6.7: the web's words (dashboard.tsx:1904-1905), the name isolated.
         rule.onNodeWithText("End session?").assertExists()
         rule.onNodeWithText("\u2068s1\u2069 — its running process will stop.").assertExists()
-        // ta-coik.13: the web's End session key (dashboard.tsx 90fbb9f :1909) ends on the first tap,
-        // in the dialog's first frame: no arm delay.
+        // ta-coik.13: the web's End session key (dashboard.tsx 90fbb9f :1909) ends on the first tap.
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
+    }
+
+    /**
+     * ta-coik.22 r2: offline (no link, so no live origin) the header key and the confirmation are live
+     * too, bound to the configured server; the client then says the session was not ended (the
+     * web's "reconnecting, not sent").
+     */
+    @Test
+    fun offlineTheChatHeadersEndSessionIsBoundToTheConfiguredServer() {
+        val running = session.copy(status = "active")
+        val client = ChatTestClient().also { it.reports = true }
+        client.show(running, ApprovalFixtures.write, live = false)
+        client.link.value = ConnectionState.Disconnected
+        client.origin.value = null
+        client.server.value = "$TEST_ORIGIN/"
+        client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L))
+        host(client, running, header = true)
+        rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        confirmKey().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
     }
 
     /** r3: the confirmation is bound to the server it was opened for; a switch under it ends nothing. */
@@ -412,7 +432,7 @@ class ChatSyncTest {
         rule.waitForIdle()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@https://other.example:true"), client.killCalls)
+        assertEquals(listOf("s1@https://other.example:false"), client.killCalls)
     }
 
     // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
@@ -442,7 +462,7 @@ class ChatSyncTest {
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithText("End session?").assertDoesNotExist()
-        assertEquals(listOf("s1@$TEST_ORIGIN:true"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
     }
 
     private fun confirmKey() = rule.onNodeWithTag(END_SESSION_CONFIRM_TAG)

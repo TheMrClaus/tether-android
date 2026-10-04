@@ -109,9 +109,6 @@ private const val MAX_WORKTREE_LOG_LINE_CHARS = 500
 /** protocol-validate.mjs "dismiss-notice": `isNonEmptyString(dismissKey, 512)`. */
 private const val DISMISS_KEY_MAX = 512
 
-/** T6.6: how many sent dismissals the client remembers (per-connection dedupe). */
-private const val DISMISSALS_REMEMBERED = 200
-
 /** T6.7: how many sent interrupts per session a socket remembers the turns of. */
 private const val INTERRUPTS_REMEMBERED = 8
 
@@ -3874,11 +3871,12 @@ class RealTetherClient(
     }
 
     /**
-     * T13.2 r2: the one path an INTERRUPT takes to the wire, under the same rules as [stopCommand].
-     * Under the lock, in order: a live, handshaken socket of a running (not halted) client; the key
-     * drawn for THIS server ([expectedOrigin] = the socket's origin); the session confirmed live on it
-     * ([liveThisEpoch]: a saved or catching-up copy's stale "busy" never interrupts a real turn);
-     * listed, and neither read-only nor handed off (fail closed); T6.7: the key's turn
+     * T13.2 r2: the one path an INTERRUPT takes to the wire. Under the lock, in order: a live,
+     * handshaken socket of a running (not halted) client; the key drawn for THIS server
+     * ([expectedOrigin] = the socket's origin); ta-coik.22: NOT the session's liveness on this socket
+     * (the web sends whenever its socket is open, use-tether.ts 90fbb9f :1653; the server answers a
+     * refusal with an `error`, shown); listed, and neither read-only nor handed off (fail closed: the
+     * web draws no composer there); T6.7: the key's turn
      * ([expectedTurnId]) still the open active turn of the session's current projection (the
      * reducer's own [isOpenCurrentTurn]); then enqueued on that socket. Nothing is retried, held or
      * persisted.
@@ -3890,7 +3888,6 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized InterruptResult.NotConnected
             if (expectedOrigin != origin) return@synchronized InterruptResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized InterruptResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized InterruptResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized InterruptResult.Locked
             // T6.7: the frame names no turn, so the server would stop whichever one runs now.
@@ -4076,9 +4073,11 @@ class RealTetherClient(
     /**
      * T6.4: the one path a background command's STOP takes to the wire. Under the lock, in order: a
      * live, handshaken socket of a running (not halted) client; the key drawn for THIS server
-     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; not read-only or handed off (an
-     * unlisted session is refused: fail closed); the session's current projection lists the command
-     * as running; then enqueued on that socket. Nothing is retried, held or persisted.
+     * ([expectedOrigin] = the socket's origin); the session listed (an unlisted session is refused:
+     * fail closed); the session's current projection lists the command as running; then enqueued on
+     * that socket. ta-coik.22: like the web's `sendDirect` (use-tether.ts 90fbb9f :1596-1618), not
+     * gated on the session's liveness, read-only or handoff: the server's refusal comes back as an
+     * `error` frame and is shown. Nothing is retried, held or persisted.
      */
     override fun stopCommand(sessionId: String, commandId: String, expectedOrigin: String?): StopCommandResult {
         if (sessionId.isEmpty() || commandId.isEmpty()) return StopCommandResult.NotRunning
@@ -4088,9 +4087,7 @@ class RealTetherClient(
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized StopCommandResult.NotConnected
             // Bound to the server that drew the row: a key composed for another origin never stops here.
             if (expectedOrigin != origin) return@synchronized StopCommandResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized StopCommandResult.NotLive
-            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized StopCommandResult.Locked
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized StopCommandResult.Locked
+            sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized StopCommandResult.Locked
             if (!isRunningCommand(sessionStore.tree(sessionId), commandId)) return@synchronized StopCommandResult.NotRunning
             if (!ws.send(ClientMessage.StopCommand(sessionId, commandId).encode())) return@synchronized StopCommandResult.NotConnected
             StopCommandResult.Sent
@@ -4102,8 +4099,9 @@ class RealTetherClient(
     /**
      * T7.3: the one path a `!` command RUN takes to the wire. Under the lock, in order: a live,
      * handshaken socket of a running (not halted) client; the composer drawn for THIS server
-     * ([expectedOrigin] = the socket's origin); the session confirmed live on it; listed, and neither
-     * read-only, handed off nor archived (fail closed); the provider offered command mode by the
+     * ([expectedOrigin] = the socket's origin); ta-coik.22: not the session's liveness (the web's
+     * `sendDirect` sends whenever its socket is open; a refusal comes back as a shown `error`); listed,
+     * and neither read-only, handed off nor archived (fail closed); the provider offered command mode by the
      * server, a command of the right shape, and no running turn for a foreground run
      * ([CommandGuard.checkRun]); then enqueued on that socket with a fresh idempotency key. Nothing is
      * retried, held or persisted (use-tether.ts runCommand is a direct send too).
@@ -4115,7 +4113,6 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized RunCommandResult.NotConnected
             if (expectedOrigin != origin) return@synchronized RunCommandResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized RunCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized RunCommandResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized RunCommandResult.Locked
             CommandGuard.checkRun(session, providersState.value, sessionStore.tree(sessionId), command, background)?.let { return@synchronized it }
@@ -4128,7 +4125,8 @@ class RealTetherClient(
     }
 
     /**
-     * T7.3: the one path a Background (Ctrl+B) takes to the wire, under [runCommand]'s link rules,
+     * T7.3: the one path a Background (Ctrl+B) takes to the wire, under [runCommand]'s link rules
+     * (ta-coik.22: not gated on the session's liveness),
      * bound to the turn the key was drawn for: [expectedTurnId] must still be the session's open
      * FOREGROUND command turn in its current projection. Nothing is retried, held or persisted.
      */
@@ -4139,7 +4137,6 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized BackgroundCommandResult.NotConnected
             if (expectedOrigin != origin) return@synchronized BackgroundCommandResult.NotLive
-            if (sessionId !in liveThisEpoch) return@synchronized BackgroundCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized BackgroundCommandResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized BackgroundCommandResult.Locked
             CommandGuard.checkBackground(sessionStore.tree(sessionId), expectedTurnId)?.let { return@synchronized it }
@@ -4168,8 +4165,9 @@ class RealTetherClient(
      * handshaken socket of a running (not halted) client; the X drawn for THIS server; the session
      * listed and confirmed live on it (read-only and handed-off sessions may dismiss: the server
      * allows it); a bounded key the session's CURRENT projection still shows (the reducer's own
-     * [projectionHasNoticeKey]); not already sent on this connection; then enqueued on that socket.
-     * Nothing is retried, held or persisted.
+     * [projectionHasNoticeKey]); then enqueued on that socket. ta-coik.22: every tap is one frame, as
+     * on the web (notice-dismiss-button.tsx 90fbb9f :12-20, no latch; the server's dismissal is
+     * idempotent). Nothing is retried, held or persisted.
      */
     override fun dismissNotice(sessionId: String, dismissKey: String, expectedOrigin: String?): NoticeResult {
         if (sessionId.isEmpty() || dismissKey.isEmpty() || dismissKey.length > DISMISS_KEY_MAX) return NoticeResult.NotShown
@@ -4181,19 +4179,12 @@ class RealTetherClient(
             if (sessionId !in liveThisEpoch) return@synchronized NoticeResult.NotLive
             sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized NoticeResult.Locked
             if (!projectionHasNoticeKey(sessionStore.tree(sessionId), dismissKey)) return@synchronized NoticeResult.NotShown
-            val sent = Triple(epoch, sessionId, dismissKey)
-            if (sent in dismissalsSent) return@synchronized NoticeResult.AlreadySent
             if (!ws.send(ClientMessage.DismissNotice(sessionId, dismissKey).encode())) return@synchronized NoticeResult.NotConnected
-            if (dismissalsSent.size >= DISMISSALS_REMEMBERED) dismissalsSent.remove(dismissalsSent.first())
-            dismissalsSent.add(sent)
             NoticeResult.Sent
         }
         if (result == NoticeResult.NotConnected) emitError("The secure link is reconnecting. The notice was not dismissed.")
         return result
     }
-
-    /** T6.6: the dismissals sent, per connection epoch (bounded; a new connection starts clean). Guarded by [lock]. */
-    private val dismissalsSent = LinkedHashSet<Triple<Long, String, String>>()
 
     /** `backgroundCommands` holds [commandId] with status "running" (the fold's own projection). */
     private fun isRunningCommand(tree: JsObj?, commandId: String): Boolean =

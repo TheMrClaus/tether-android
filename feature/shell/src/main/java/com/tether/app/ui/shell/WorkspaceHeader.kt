@@ -229,9 +229,9 @@ fun WorkspaceHeader(
             if (expanded) PinKey(session.pinned, actions.onTogglePinned)
             // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
             // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
-            // prints "End session" at 0.66rem (4117-4121, 11196). T13.2 r2: also disabled unless the
-            // link is up and this session's copy is live (a saved copy never ends a session).
-            val endable = session.status != "exited" && freshness.sessionLive(session.id)
+            // prints "End session" at 0.66rem (4117-4121, 11196). ta-coik.22: only that, as on the web
+            // (workspace-header.tsx 90fbb9f :133): live on a saved or catching-up copy too.
+            val endable = session.status != "exited"
             TetherKey(
                 onClick = { if (endable) actions.onEndSession() },
                 classes = KeyClasses.EndSession,

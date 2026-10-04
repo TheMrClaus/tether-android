@@ -164,12 +164,12 @@ class CommandTransmissionTest {
         val (client, _) = connected(ready(ids = arrayOf()), state = commandState())
         assertEquals(RunCommandResult.Locked, client.runCommand("s1", "ls", true, client.consentOrigin.value))
         assertEquals(BackgroundCommandResult.Locked, client.backgroundCommand("s1", client.consentOrigin.value, "t1"))
-        assertEquals(RunCommandResult.NotLive, client.runCommand("s-unknown", "ls", true, client.consentOrigin.value))
+        assertEquals(RunCommandResult.Locked, client.runCommand("s-unknown", "ls", true, client.consentOrigin.value))
         assertTrue(h.framesUntilBarrier().none { it.type() == "run-command" || it.type() == "background-command" })
     }
 
     @Test
-    fun offlineOrCatchingUpRunsNothingAndNothingIsHeldForTheReconnect() {
+    fun offlineRunsNothingAndNothingIsHeldButCatchingUpSendsAsOnTheWeb() {
         val (client, ws) = connected()
         h.enqueueConnect()
         ws.close(1001, null)
@@ -179,10 +179,12 @@ class CommandTransmissionTest {
         val ws2 = h.nextSocket()
         h.handshake(ws2, ready())
         h.expectFrame("attach")
-        // Catching up (no snapshot on this link yet): refused.
-        assertEquals(RunCommandResult.NotLive, client.runCommand("s1", "ls", false, client.consentOrigin.value))
-        assertEquals(BackgroundCommandResult.NotLive, client.backgroundCommand("s1", client.consentOrigin.value, "t1"))
-        assertTrue("the refused taps were not held for the new link", frames("run-command").isEmpty())
+        // Catching up (no snapshot on this link yet). ta-coik.22: the web's sendDirect sends whenever its
+        // socket is open (use-tether.ts 90fbb9f :1596-1618), so does the client; the offline tap was not held.
+        assertEquals(RunCommandResult.Sent, client.runCommand("s1", "ls", false, client.consentOrigin.value))
+        assertTrue("never refused for liveness", client.backgroundCommand("s1", client.consentOrigin.value, "t1") != BackgroundCommandResult.NotLive)
+        val sent = h.framesUntilBarrier()
+        assertEquals("only the catching-up run went out", 1, sent.count { it.type() == "run-command" })
         ws2.send(snapshotFrame("s1", 5, idleState()))
         h.await(client.liveSessions) { "s1" in it }
         val after = h.framesUntilBarrier()

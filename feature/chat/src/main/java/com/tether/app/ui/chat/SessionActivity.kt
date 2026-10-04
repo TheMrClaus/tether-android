@@ -226,13 +226,12 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
 }
 
 /**
- * ta-coik.22: the lock the command keys honour (the composer's Send to agent / Background / Stop,
- * Interrupt and a queued row's "Interrupt now", and the background commands' Stop). The web leaves
- * every one of them live on a copy that is not live (chat-view.tsx 90fbb9f :3866-3875, :4535-4596):
- * a tap goes to the socket, which sends only when it is open. So offline and catching up lock
- * nothing here either (the client still refuses off a live link and says why). Read-only and a
- * handed-off session keep their lock (the web draws no composer there; the server refuses a
- * read-only session's `stop-command`).
+ * ta-coik.22: the lock the composer's keys honour (Send to agent / Background / Stop, Interrupt and a
+ * queued row's "Interrupt now"). The web leaves every one of them live on a copy that is not live
+ * (chat-view.tsx 90fbb9f :4535-4596): a tap goes to the socket, which sends whenever it is open. So
+ * offline and catching up lock nothing here (the client refuses only a closed link and says so).
+ * Read-only and a handed-off session keep their lock: the web draws no composer there. The running
+ * commands' Stop keys take no lock at all (see ChatScreen).
  */
 internal fun commandKeyLock(lock: ConsentLock?): ConsentLock? = when (lock) {
     ConsentLock.Offline, ConsentLock.CatchingUp -> null

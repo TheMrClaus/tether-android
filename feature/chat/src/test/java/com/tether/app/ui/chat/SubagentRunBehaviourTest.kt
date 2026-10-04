@@ -283,9 +283,9 @@ class SubagentRunBehaviourTest {
     /**
      * ta-coik.22: the web leaves Stop live on a saved copy and while catching up (a click goes to the
      * socket, which sends only when open); here a tap asks the client, which re-checks the link.
-     * A read-only session keeps the lock (the server refuses its `stop-command`), and says why.
+     * ta-coik.22 r2: a read-only session's Stop is live too, as on the web; the server answers.
      */
-    @Test fun stopIsLiveOfflineAndCatchingUpButLockedReadOnly() {
+    @Test fun stopIsLiveOfflineCatchingUpAndReadOnly() {
         val client = client(SubagentFixtures.activity)
         client.link.value = ConnectionState.Disconnected
         client.stopResult = StopCommandResult.NotConnected
@@ -306,11 +306,13 @@ class SubagentRunBehaviourTest {
         assertEquals(listOf("s1:bg-3", "s1:bg-3"), client.stopCalls)
         rule.runOnIdle { client.sessions.value = listOf(session.copy(readOnly = true)); client.live.value = setOf("s1") }
         rule.waitForIdle()
-        rule.onNodeWithTag("bg-command-stop").assertIsNotEnabled()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}, unavailable: ${stopLockCopy(ConsentLock.ReadOnly)}")))
+        // ta-coik.22 r2: read-only too, as on the web (chat-view.tsx 90fbb9f :3852-3876); the server answers.
+        client.stopResult = StopCommandResult.Sent
+        rule.onNodeWithTag("bg-command-stop").assertIsEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Stop ${commandLabel("npm test -- --runInBand")}")))
             .performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1:bg-3", "s1:bg-3"), client.stopCalls)
+        assertEquals(List(3) { "s1:bg-3" }, client.stopCalls)
     }
 
     @Test fun nothingReceivedEverStopsACommand() {

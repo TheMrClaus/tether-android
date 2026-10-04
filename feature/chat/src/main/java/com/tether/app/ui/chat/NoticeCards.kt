@@ -78,10 +78,10 @@ import java.util.Locale
  * 8546-8553 (.chat-approval / .chat-rate-limit), codex-rich-renderers.module.css 340-401 (.notice).
  *
  * Operator discipline (T6.3 / T6.4 / T7.2): a row only calls [NoticeActions] from a tap on its X,
- * the limit card only from a tap on one of its keys; an X sends at most once per link and the limit
- * card's keys rest for 4 s after a choice, as the web's do (a latch here, the client's own checks
- * under its lock); never in answer to anything received, and shows why in words when it cannot act.
- * Nothing is retried on its own.
+ * the limit card only from a tap on one of its keys; an X sends on every tap and the limit card's
+ * keys rest for 4 s after a choice, as the web's do (the client's own checks under its lock); never
+ * in answer to anything received, and shows why in words when it cannot act. Nothing is retried on
+ * its own.
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
@@ -187,8 +187,9 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
 
 /**
  * `NoticeDismissButton` (`.chat-continuation-cancel.notice-dismiss`): the 13px X in a 44dp square
- * (the coarse-pointer hit area), `title` + `aria-label` = [label]. One tap sends one dismissal; the
- * key then stays disabled until the notice folds away (or the link changes).
+ * (the coarse-pointer hit area), `title` + `aria-label` = [label]. One tap sends one dismissal; as on
+ * the web (notice-dismiss-button.tsx 90fbb9f :12-20, ta-coik.22) there is no latch: the X stays live
+ * until the notice folds away, and another tap sends again.
  */
 @Composable
 internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Modifier = Modifier) {
@@ -202,19 +203,14 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
     val actions = LocalNoticeActions.current
     // Scoped to the session too (r2): another session's notice with the same key never inherits this latch or arming.
     val identity = Triple(actions.sessionId, dismissKey, actions.link)
-    var latched by remember(identity) { mutableStateOf(false) }
     val lock = actions.lock
     // ta-coik.13: the first tap dismisses, as on the web (notice-dismiss-button.tsx 90fbb9f :12-20,
     // no arm delay); a press across a change of notice is dropped ([StaleTapGuard]); no overlay taps.
-    val enabled = lock == null && !latched
+    val enabled = lock == null
     val tap = {
-        if (!latched && actions.lock == null) {
-            latched = true
+        if (actions.lock == null) {
             val result = actions.onDismiss(dismissKey)
-            if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) {
-                latched = false
-                noticeRefusalCopy(result)?.let(actions.onRefused)
-            }
+            if (result != NoticeResult.Sent && result != NoticeResult.AlreadySent) noticeRefusalCopy(result)?.let(actions.onRefused)
         }
     }
     StaleTapGuard(identity) { guard ->
@@ -226,16 +222,13 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
                 .semantics(mergeDescendants = true) {
                     contentDescription = label
                     role = Role.Button
-                    when {
-                        lock != null -> stateDescription = lock.copy
-                        latched -> stateDescription = "Dismissing…"
-                    }
+                    if (lock != null) stateDescription = lock.copy
                     if (!enabled) disabled()
                 }
                 .testTag("notice-dismiss"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null) 1f else 0.5f))
         }
     }
 }
@@ -546,20 +539,16 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
     val actions = LocalNoticeActions.current
     // Scoped to the session too (r2), like the card.
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
-    var latched by remember(identity) { mutableStateOf(false) }
     val lock = actions.cancelLock
     // ta-coik.13: the first tap cancels, as on the web (chat-view.tsx 90fbb9f :3707-3714, no arm
     // delay); a press across a change of prompt is dropped ([StaleTapGuard]); no overlay taps.
-    val enabled = lock == null && !latched
+    // ta-coik.22: no "Cancelling…" latch, as on the web (chat-view.tsx 90fbb9f :3707-3714): each tap sends.
+    val enabled = lock == null
     val label = "Cancel scheduled resume"
     val tap = {
-        if (!latched && actions.cancelLock == null) {
-            latched = true
+        if (actions.cancelLock == null) {
             val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
-            if (result != ControlResult.Sent) {
-                latched = false
-                rateLimitRefusalCopy(result)?.let(actions.onRefused)
-            }
+            if (result != ControlResult.Sent) rateLimitRefusalCopy(result)?.let(actions.onRefused)
         }
     }
     Row(
@@ -582,16 +571,13 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
                     .semantics(mergeDescendants = true) {
                         contentDescription = label
                         role = Role.Button
-                        when {
-                            lock != null -> stateDescription = cancelLockCopy(lock)
-                            latched -> stateDescription = "Cancelling…"
-                        }
+                        if (lock != null) stateDescription = cancelLockCopy(lock)
                         if (!enabled) disabled()
                     }
                     .testTag("rate-limit-cancel"),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null && !latched) 1f else 0.5f))
+                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null) 1f else 0.5f))
             }
         }
     }

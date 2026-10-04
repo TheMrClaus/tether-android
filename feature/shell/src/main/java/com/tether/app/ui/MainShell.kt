@@ -383,10 +383,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 // r3: the confirmation is bound to the session AND the server it was opened for.
                 onEndSession = {
                     session?.let {
-                        // The key is enabled only while the session's copy is live; the client
-                        // re-checks the live set and the origin either way (requireLive).
-                        if (confirmBeforeEnd) confirmEnd = EndTarget(it, consentOrigin)
-                        else vm.client.kill(it.id, consentOrigin, requireLive = true)
+                        // ta-coik.22: live as on the web (workspace-header.tsx 90fbb9f :133); bound to
+                        // the server ([endSessionServer]); offline the client says it was not ended.
+                        val server = com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)
+                        if (confirmBeforeEnd) confirmEnd = EndTarget(it, server)
+                        else vm.client.kill(it.id, server, requireLive = false)
                     }
                 },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
@@ -680,11 +681,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
 
     confirmEnd?.let { drawn ->
         val (target, drawnFor) = drawn
-        // T13.2 r2: the confirmation acts only while the session is still live (a link that dropped
-        // under the open dialog disables it; the client refuses it too). r3: and only on the server
-        // it was opened for (a switch under the open dialog disables it; the client refuses it too).
-        // ta-coik.22: as on the web, the confirmation stays open meanwhile (its key disabled).
-        val endable = shellFreshness.sessionLive(target.id) && drawnFor != null && drawnFor == consentOrigin
+        // r3: never on another server than the one it was opened for (the client refuses it too).
+        // ta-coik.22: otherwise live and open, as the web's dialog, whatever the link or the copy.
+        val endable = com.tether.app.ui.chat.endConfirmLive(drawnFor, consentOrigin)
         com.tether.app.ui.chat.EndSessionDialog(
             sessionName = target.name,
             // The session and server it was opened for (not the row itself, which moves on every update).
@@ -692,7 +691,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(target.id, drawnFor, requireLive = true)
+                vm.client.kill(target.id, drawnFor, requireLive = false)
             },
             onCancel = { confirmEnd = null },
         )

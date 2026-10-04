@@ -23,14 +23,31 @@ fun endSessionBody(sessionName: String?): String {
 }
 
 /**
+ * ta-coik.22: the server an End session confirmation (or an unconfirmed End) is bound to: the live
+ * link's origin, else the configured server's, so one opened while offline still names its server.
+ */
+fun endSessionServer(linkOrigin: String?, configuredServer: String?): String? =
+    linkOrigin ?: com.tether.app.client.serverOrigin(configuredServer)
+
+/**
+ * ta-coik.22: whether the confirmation's End session key is live. The web's confirm key is never
+ * disabled (dashboard.tsx 90fbb9f :1909): offline, catching up or a saved copy, its click goes to
+ * `send`, which says "reconnecting, not sent" when the socket is closed. Here too. The one state
+ * kept disabled is a link to ANOTHER server than the one the dialog was opened for: the web cannot
+ * reach it (a page is bound to its origin; another server is another page, which drops the dialog),
+ * and a confirmation opened for server A must never end a session on server B.
+ */
+fun endConfirmLive(drawnFor: String?, linkOrigin: String?): Boolean =
+    drawnFor != null && (linkOrigin == null || linkOrigin == drawnFor)
+
+/**
  * T6.7: the End session confirmation of the session header (chat header and shell header alike).
  * ta-coik.13: its End session key acts on the first tap, as on the web (dashboard.tsx 90fbb9f :1909,
  * no arm delay); a press across a change of [identity] is dropped ([StaleTapGuard]) and touches
  * through an overlay are refused. Only its tap calls [onConfirm], and only while [endable] (the
- * host's live-copy and same-server rule, T13.2). ta-coik.22: like the web's `<dialog>` (dashboard.tsx
+ * host's same-server rule, [endConfirmLive]). ta-coik.22: like the web's `<dialog>` (dashboard.tsx
  * 90fbb9f :1172-1185, :1902-1911), it stays open until Cancel, a dismissal or End session: a link
- * that drops or the app going to the background does not close it. While [endable] is false its key
- * is disabled; it is live again once the copy is (the [identity] still binds it to its session and server).
+ * that drops or the app going to the background does not close it, and its key stays live then.
  */
 @Composable
 fun EndSessionDialog(

@@ -48,8 +48,10 @@ error notices), `notice-session` (external advancement, background loss ×2), `n
   X ungated and the server allows it). The card then says the prompt can still be dismissed here.
   "Take over in a new session" is not offered (handoff is T8.5).
 - **Dismiss X** is allowed read-only and handed off (the server and web allow it), but only on a
-  live link. It sends once per connection, and the client re-checks that the projection still
-  shows the key.
+  live link. ta-coik.22 r2: as on the web (notice-dismiss-button.tsx 90fbb9f :12-20) it has no
+  "Dismissing…" latch and the client no per-connection dedupe: every tap is one frame. The
+  scheduled resume's cancel X has no "Cancelling…" latch either. The client re-checks that the
+  projection still shows the key.
 - **Provider notice level** is also spoken for TalkBack ("Warning" / "Error" / "Info"). Visually,
   warning and error share the web's triangle and differ by colour and edge, as on the web.
 - **MCP "View error"** is a 44dp target (the web's summary is 2rem).

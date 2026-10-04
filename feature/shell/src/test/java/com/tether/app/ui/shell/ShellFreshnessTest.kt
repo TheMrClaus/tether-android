@@ -155,39 +155,48 @@ class ShellFreshnessTest {
         assertEquals(com.tether.app.ui.components.FreshnessCopy.SAVED, ShellFreshness.None.staleLabel(offlineSession.id))
     }
 
+    /**
+     * ta-coik.22 r2: the web's header End session is disabled only once the session exited
+     * (workspace-header.tsx 90fbb9f :133). Offline it is live; its tap asks (or ends, per the
+     * preference) and the client says the session was not ended while the link is down.
+     */
     @Test
-    fun offlineTheRedEndSessionKeyIsDisabled() {
+    fun offlineTheRedEndSessionKeyIsLiveAsOnTheWeb() {
         val ends = mutableListOf<String>()
         rule.setContent { WithFreshness(offlineFreshness()) { ShellUnderTest(TetherSkin.Studio, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertTrue("no End session from a saved copy: $ends", "end" !in ends)
+        assertEquals(listOf("end"), ends.filter { it == "end" })
     }
 
+    /** ta-coik.22 r2: connected, the key is live whatever the session's copy, as on the web. */
     @Test
-    fun connectedEndSessionNeedsTheSessionsCopyToBeLive() {
+    fun connectedEndSessionIsLiveOnEveryCopy() {
         val ends = mutableListOf<String>()
         var freshness by androidx.compose.runtime.mutableStateOf(liveShellFreshness(offlineSession.id))
         rule.setContent { WithFreshness(freshness) { ShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), offlineSession, onEvent = { ends += it }) } }
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled()
         val cases = Freshness.entries.filter { it != Freshness.Live }.map { it.name to mapOf(offlineSession.id to SessionSync(it, VERIFIED)) } +
             ("missing entry" to emptyMap())
+        var expected = 0
         for ((name, sync) in cases) {
             rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id).copy(syncStates = sync) }
             rule.waitForIdle()
-            rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
+            rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
             rule.waitForIdle()
-            assertTrue("$name: no End session from a copy that is not live: $ends", "end" !in ends)
+            expected++
+            assertEquals("$name: the tap acts", expected, ends.count { it == "end" })
         }
-        // Live freshness, but not (or no longer) in the client's live set: still disabled.
-        rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id).copy(liveSessions = emptySet()) }
+    }
+
+    /** As on the web, an exited session's key is disabled. */
+    @Test
+    fun anExitedSessionsEndSessionKeyIsDisabled() {
+        val ends = mutableListOf<String>()
+        rule.setContent { WithFreshness(liveShellFreshness(offlineSession.id)) { ShellUnderTest(TetherSkin.Studio, PhoneShellState(), offlineSession.copy(status = "exited"), onEvent = { ends += it }) } }
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled().performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsNotEnabled()
-        rule.runOnIdle { freshness = liveShellFreshness(offlineSession.id) }
-        rule.waitForIdle()
-        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf("end"), ends.filter { it == "end" })
+        assertTrue("end" !in ends)
     }
 
     @Test

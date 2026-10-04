@@ -4,6 +4,7 @@ import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.reduce.freshTree
 import com.tether.app.protocol.tree.JsCodec
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -98,7 +99,7 @@ class StopCommandTransmissionTest {
     }
 
     @Test
-    fun offlineOrCatchingUpIsRefusedAndNothingIsHeldForTheReconnect() {
+    fun offlineIsRefusedAndNotHeldButCatchingUpIsSentAndARefusalIsShown() {
         val (client, ws) = connected()
         h.enqueueConnect()
         ws.close(1001, null)
@@ -109,9 +110,19 @@ class StopCommandTransmissionTest {
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1"))
         h.expectFrame("attach")
-        // The saved tree still lists c-run as running: not live yet, refused.
-        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", client.consentOrigin.value))
-        assertTrue("the refused taps were not held for the new link", stopFrames().isEmpty())
+        // The saved tree still lists c-run as running. ta-coik.22: catching up, the web's sendDirect
+        // sends (use-tether.ts 90fbb9f :1596-1618), so does the client; the offline tap was not held.
+        val shown = java.util.concurrent.LinkedBlockingQueue<String>()
+        val job = h.scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { client.serverErrors.collect { shown.put(it.text) } }
+        try {
+            assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+            assertEquals("only the catching-up tap went out", 1, stopFrames().size)
+            // A refusal is the server's `error`, shown as the web's setError shows it.
+            ws2.send("""{"type":"error","message":"Session is not attached."}""")
+            assertEquals("Session is not attached.", shown.poll(20, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            job.cancel()
+        }
 
         ws2.send(snapshotFrame("s1", 5, commandsState()))
         h.await(client.liveSessions) { "s1" in it }
@@ -121,13 +132,15 @@ class StopCommandTransmissionTest {
     }
 
     @Test
-    fun aReadOnlyHandedOffOrUnlistedSessionIsLocked() {
+    fun aReadOnlyOrHandedOffSessionsStopIsSentAsOnTheWeb() {
+        // ta-coik.22: the web draws the running commands' Stop on every session and sends on click
+        // (chat-view.tsx 90fbb9f :3852-3876); the server refuses a read-only one with an `error`.
         val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
-        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(StopCommandResult.Locked, client.stopCommand("s1", "c-run", client.consentOrigin.value))
-        assertTrue(stopFrames().isEmpty())
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+        assertEquals(2, stopFrames().size)
     }
 
     @Test

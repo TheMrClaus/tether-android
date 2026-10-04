@@ -75,7 +75,7 @@ class InterruptKillTransmissionTest {
     }
 
     @Test
-    fun offlineOrCatchingUpTheInterruptIsRefusedAndNothingIsHeldForTheReconnect() {
+    fun offlineTheInterruptIsRefusedAndNotHeldButCatchingUpItIsSentAsOnTheWeb() {
         val (client, ws) = connected()
         val origin = client.consentOrigin.value
         h.enqueueConnect()
@@ -88,9 +88,11 @@ class InterruptKillTransmissionTest {
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1", "s2"))
         h.expectFrame("attach")
-        // Catching up: connected and attached, the snapshot not in yet.
-        assertEquals(InterruptResult.NotLive, client.interrupt("s1", client.consentOrigin.value, T1))
-        assertTrue("the refused taps were not held for the new link", framesOf("interrupt").isEmpty())
+        // Catching up: connected and attached, the snapshot not in yet. ta-coik.22: the web sends
+        // whenever its socket is open (use-tether.ts 90fbb9f :1653), so does the client; the offline
+        // tap was not held for the new link (exactly one frame).
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", client.consentOrigin.value, T1))
+        assertEquals("only the catching-up tap went out", 1, framesOf("interrupt").size)
 
         ws2.send(snapshotFrame("s1", 5, FULL_STATE))
         h.await(client.liveSessions) { "s1" in it }
@@ -102,9 +104,10 @@ class InterruptKillTransmissionTest {
     }
 
     @Test
-    fun aListedSessionThatIsNotLiveOnThisConnectionIsNotInterrupted() {
+    fun aListedSessionWithNoCopyHasNoTurnToInterrupt() {
+        // ta-coik.22: liveness no longer gates the frame; with no copy there is no drawn turn to bind it to.
         val (client, _) = connected()
-        assertEquals(InterruptResult.NotLive, client.interrupt("s2", client.consentOrigin.value, T1))
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s2", client.consentOrigin.value, T1))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 
@@ -205,7 +208,7 @@ class InterruptKillTransmissionTest {
         val (client, _) = connected()
         // A wrong turn on another server's key is refused for the server first (nothing to say about turns).
         assertEquals(InterruptResult.NotLive, client.interrupt("s1", "https://other.example", T2))
-        assertEquals(InterruptResult.NotLive, client.interrupt("s2", client.consentOrigin.value, T2))
+        assertEquals(InterruptResult.NotCurrentTurn, client.interrupt("s2", client.consentOrigin.value, T2))
         assertTrue(framesOf("interrupt").isEmpty())
     }
 

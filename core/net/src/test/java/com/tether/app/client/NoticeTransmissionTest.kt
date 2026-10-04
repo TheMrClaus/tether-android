@@ -73,14 +73,17 @@ class NoticeTransmissionTest {
         val (bg, provider) = keys(client)
         val origin = client.consentOrigin.value
         assertEquals(NoticeResult.Sent, client.dismissNotice("s1", bg, origin))
-        assertEquals(NoticeResult.AlreadySent, client.dismissNotice("s1", bg, origin))
+        // ta-coik.22: no per-connection dedupe; a second tap is a second frame, as on the web
+        // (notice-dismiss-button.tsx 90fbb9f :12-20; the server's dismissal is idempotent).
+        assertEquals(NoticeResult.Sent, client.dismissNotice("s1", bg, origin))
         assertEquals(NoticeResult.Sent, client.dismissNotice("s1", provider, origin))
         val sent = frames("dismiss-notice")
-        assertEquals(2, sent.size)
+        assertEquals(3, sent.size)
         // use-tether.ts:1609: { type, sessionId, dismissKey } and nothing else.
         assertEquals(setOf("type", "sessionId", "dismissKey"), sent[0].keys)
         assertEquals(bg, sent[0].str("dismissKey"))
-        assertEquals(provider, sent[1].str("dismissKey"))
+        assertEquals(bg, sent[1].str("dismissKey"))
+        assertEquals(provider, sent[2].str("dismissKey"))
     }
 
     @Test

@@ -43,10 +43,10 @@ ellipsize inside their 13rem maximum, the chips wrap.
 
 Divergences from the web, on purpose:
 
-- Stop is disabled, with its reason in its accessible name, only when the session is read-only or handed off
-  (the server refuses `stop-command` on a read-only session anyway, `server.mjs` READ_ONLY_MUTATIONS). As on the
-  web it stays live offline (a saved copy) and while catching up (ta-coik.22): a tap asks the client, which sends
-  only over a live link. There is no "Stopping…" latch (ta-coik.22; the web's key reads "Stop" and stays live
+- Stop is never locked, as on the web (ta-coik.22 r2; chat-view.tsx 90fbb9f :3852-3876 draws it on every
+  session): offline, catching up, read-only and handed off it is live. A tap asks the client, which sends whenever
+  the socket is open and handshaken (the web's `sendDirect`); a closed socket says "not stopped", and a server
+  refusal (read-only: `server.mjs` READ_ONLY_MUTATIONS) comes back as its `error`, shown. There is no "Stopping…" latch (ta-coik.22; the web's key reads "Stop" and stays live
   after a click, chat-view.tsx 90fbb9f :3866-3875, :1719): every tap is one stop request.
 - Round 2 (M1): the running rows are keyed by command, so a press that began on one row's Stop never stops
   the command that slid under the finger. ta-coik.13 retired the 500 ms arm and the re-arm after a move: a

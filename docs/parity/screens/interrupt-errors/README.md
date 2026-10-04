@@ -41,14 +41,14 @@ web code:
 
 | Surface | Web | Android |
 |---|---|---|
-| `interrupt` | `{type:"interrupt", sessionId}` on a click, from the key and from "Interrupt now" | The same frame, and no new field. Sent only from a tap on the key (its first tap, as on the web; ta-coik.13), over a live handshaken socket, while the session is live and not read-only or handed off. It is bound to the origin and, new in T6.7, to the turn the key was drawn for. |
+| `interrupt` | `{type:"interrupt", sessionId}` on a click, from the key and from "Interrupt now" | The same frame, and no new field. Sent only from a tap on the key (its first tap, as on the web; ta-coik.13), over a handshaken socket (ta-coik.22 r2: also while catching up, as the web sends whenever its socket is open), on a session that is not read-only or handed off. It is bound to the origin and, new in T6.7, to the turn the key was drawn for. |
 | `interrupt_result` | `failed`: `setError(error \|\| "The interrupt request could not be delivered.")`. The other statuses say nothing. | The same. The server's words are cleaned and attributed to the server. A `requested` result for a turn other than the one the tap was bound to is reported in the app's words. |
 | `{type:"error"}` | `setError(message)`, shown in the `.error-toast` | Shown from the live socket only. The text is cleaned (`LabelText.error`), shown under "From the server", and read by TalkBack as "Server error: …". |
 | `error` event | Folded into `turn.error` (the outcome row) and `lastError` (the session row) | The same. Both rows are cleaned. |
 | `process_exit` | Folded into `turn.exit`, never drawn | The same (a test checks that nothing is drawn). |
 | `cancel_requested` | `turn.status = "cancelling"`, and the run row reads "Interrupting" | The same (TurnActivity; a test checks it). |
 | `cancelled` | The outcome row "Turn interrupted", or the `turn_interrupted` account | The same (T6.6). |
-| End session | A confirm dialog, then `kill` | The same words and frame, with T13.2's live-copy and same-server rules. |
+| End session | A confirm dialog, then `kill` | The same words and frame, sent whenever the socket is open (ta-coik.22 r2), bound to the server the dialog was opened for. |
 | Selection | Transcript text is selectable, cards and notices included. The chrome bars carry `user-select: none` per child, so a drag cannot run into them. The activity summary, diff gutter and thinking head are not selectable. | Each transcript row (cards and notices included, ta-coik.22) is its own selection area, so a selection can never run across rows or into the header and composer. The activity summary, diff gutter and thinking head are excluded, as on the web. Long-press selects a word; the system handles and "Copy" work from there. |
 
 ## Deliberate divergences
@@ -69,8 +69,11 @@ web code:
 - **The End session confirmation stays open, as the web's `<dialog>` does** (ta-coik.22). Its key
   acts on the first tap (dashboard.tsx 90fbb9f :1909; ta-coik.13 retired the 500 ms arm). A link
   that drops, a copy that stops being live, a server switch or the app going to the background
-  leave it open; its key is disabled while the copy is not live or the server is not the one it
-  was opened for, and live again once it is.
+  leave it open, and its key live (r2: the web's confirm is never disabled). The one exception is a
+  link to another server than the one it was opened for (or, offline, the configured server): its key
+  is disabled, so a confirmation opened for server A never ends a session on server B. The web cannot
+  reach that state (a page is bound to its origin; another server is another page). The header key is
+  disabled only once the session exited, as on the web (workspace-header.tsx 90fbb9f :133).
 - **Rows are selectable by an allowlist (r2).** Selectable: blocks, denials, answered questions,
   outcome and session-error rows, a Codex turn's plan, diff and review, the continuation and retry
   markers, and (ta-coik.22, as on the web) the approval, question and limit cards, the scheduled

@@ -186,11 +186,12 @@ class InterruptErrorBehaviourTest {
 
     /**
      * ta-coik.22: the web's `<dialog>` (dashboard.tsx 90fbb9f :1902-1911) stays open whatever the link
-     * does. Here too: a copy that stops being live leaves the confirmation open with its key disabled
-     * (a saved copy ends nothing); live again, the same confirmation's key ends the session on one tap.
+     * does, and its confirm key is never disabled. Here too: a copy that stops being live leaves the
+     * confirmation open with its key live; a tap ends the session (the client sends while the socket
+     * is open, and says "not ended" when it is closed).
      */
     @Test
-    fun theEndConfirmationStaysOpenWhenTheCopyStopsBeingLive() {
+    fun theEndConfirmationStaysOpenAndLiveWhenTheCopyStopsBeingLive() {
         val client = liveClient(running, ChatFixtures.idle)
         openEnd(client)
         arm()
@@ -198,14 +199,9 @@ class InterruptErrorBehaviourTest {
         rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L)) }
         arm()
         rule.onNodeWithText("End session?").assertExists()
-        rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsNotEnabled().performClick()
-        arm()
-        assertTrue(client.killCalls.isEmpty())
-        rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Live, 2L)) }
-        arm()
         rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsEnabled().performClick()
         arm()
-        assertEquals(1, client.killCalls.size)
+        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
         rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 
@@ -504,12 +500,13 @@ class InterruptErrorBehaviourTest {
         rule.onAllNodesWithTag("notice-dismiss").onFirst().performClick()
         rule.waitForIdle()
         assertEquals(1, recorder.dismissed.size)
-        // A long press on the X selects nothing and dismisses nothing more: the copy keeps the prompt's word.
+        // A long press on the X selects nothing (the copy keeps the prompt's word) and, with no latch
+        // (ta-coik.22), only ever dismisses that same notice.
         val before = clip()
         rule.onAllNodesWithTag("notice-dismiss").onFirst().performTouchInput { longClick(center) }
         rule.waitForIdle()
         assertEquals(before, clip())
-        assertEquals(1, recorder.dismissed.size)
+        assertEquals(1, recorder.dismissed.toSet().size)
     }
 
     /**

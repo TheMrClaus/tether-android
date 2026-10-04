@@ -133,11 +133,13 @@ fun ChatScreen(
         commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)),
     )
     // L3: the stop is bound to the server origin this row was drawn for. ta-coik.22: no "Stopping…"
-    // latch (the web's Stop key has none).
-    val commandActions = remember(session?.id, stopLock, consentOrigin, vm) {
+    // latch (the web's Stop key has none), and no lock at all: the web draws the running commands'
+    // Stop live on every session, read-only and handed off included (chat-view.tsx 90fbb9f
+    // :3852-3876, above the composer's handoff / read-only branches); the server answers a refusal.
+    val commandActions = remember(session?.id, consentOrigin, vm) {
         val s = session
         val drawnFor = consentOrigin
-        if (s == null) CommandActions.Unavailable else CommandActions(stopLock, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) })
+        if (s == null) CommandActions.Unavailable else CommandActions(null, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) })
     }
     // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock.
     // ta-coik.22: like the web's, they stay live on a copy that is not live; bound to the server the
@@ -302,7 +304,7 @@ fun ChatScreen(
         if (session != null && showWorkspaceHeader) {
             // T10.1: Settings → General's "Confirm before ending" (dashboard.tsx:1170-1180); until read, it asks.
             val confirmBeforeEnd by remember(prefs) { prefs.preferences.map { it.confirmBeforeEnd }.distinctUntilChanged() }.collectAsStateWithLifecycle(true)
-            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, endAllowed = connection == com.tether.app.client.ConnectionState.Connected && liveNow, origin = consentOrigin, confirmBeforeEnd = confirmBeforeEnd)
+            WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, origin = consentOrigin, server = endSessionServer(consentOrigin, serverUrl), confirmBeforeEnd = confirmBeforeEnd)
         }
 
         if (session != null && runs.isNotEmpty()) {
@@ -550,14 +552,15 @@ private fun EmptyCentered(
 private data class ChatEndDraw(val sessionId: String, val drawnFor: String?)
 
 /**
- * Workspace header: session name + status badge + actions; mono path line. [endAllowed] (T13.2 r2):
- * the link is up and this session's copy is live, so End session may send. [origin] (r3): the
- * server ([com.tether.app.client.TetherClient.consentOrigin]) the header is drawn for; the confirmation is bound to the
- * session and the origin it was opened for, and acts only while both still hold.
+ * Workspace header: session name + status badge + actions; mono path line. ta-coik.22: End session
+ * is live whenever the session has not exited, as on the web (workspace-header.tsx 90fbb9f :133);
+ * offline the client says the session was not ended. [origin] (r3): the live link's server
+ * ([com.tether.app.client.TetherClient.consentOrigin]); [server]: the server a confirmation is bound
+ * to ([endSessionServer]); it acts while the link is not to another server ([endConfirmLive]).
  * [confirmBeforeEnd] (T10.1): off, End session sends at once instead of asking.
  */
 @Composable
-private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, endAllowed: Boolean, origin: String?, confirmBeforeEnd: Boolean = true) {
+private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspaceRoot: String?, origin: String?, server: String?, confirmBeforeEnd: Boolean = true) {
     val t = LocalTetherTokens.current
     var showTelemetry by remember { mutableStateOf(false) }
     var confirmEnd by remember { mutableStateOf<ChatEndDraw?>(null) }
@@ -601,16 +604,13 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             if (session.status != "exited") {
                 TetherKey(
                     onClick = {
-                        if (endAllowed) {
-                            if (confirmBeforeEnd) confirmEnd = ChatEndDraw(session.id, origin)
-                            else vm.client.kill(session.id, origin, requireLive = true)
-                        }
+                        if (confirmBeforeEnd) confirmEnd = ChatEndDraw(session.id, server)
+                        else vm.client.kill(session.id, server, requireLive = false)
                     },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
                     contentDescription = "End session",
-                    enabled = endAllowed,
                 )
             }
         }
@@ -688,16 +688,16 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
     }
 
     confirmEnd?.let { drawn ->
-        // T13.2 r2/r3: only while the link is up, this session's copy live, and on the server the
-        // confirmation was opened for. ta-coik.22: as on the web, it stays open meanwhile (key disabled).
-        val endable = endAllowed && drawn.sessionId == session.id && drawn.drawnFor != null && drawn.drawnFor == origin
+        // r3: never on another server than the one it was opened for. ta-coik.22: otherwise live, as
+        // the web's confirm key is, whatever the link or the copy (the client says when it cannot send).
+        val endable = drawn.sessionId == session.id && endConfirmLive(drawn.drawnFor, origin)
         EndSessionDialog(
             sessionName = session.name,
             identity = drawn,
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = true)
+                vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = false)
             },
             onCancel = { confirmEnd = null },
         )

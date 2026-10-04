@@ -217,8 +217,11 @@ class StopKeySafetyTest {
         assertEquals(listOf("s1:a", "s1:a"), client.stopCalls)
     }
 
-    /** A read-only session keeps its lock (the server refuses a read-only `stop-command`). */
-    @Test fun aReadOnlySessionsStopKeyStaysLocked() {
+    /**
+     * ta-coik.22 r2: the web draws the running commands' Stop live on a read-only session too
+     * (chat-view.tsx 90fbb9f :3852-3876) and sends on click; the server answers its refusal.
+     */
+    @Test fun aReadOnlySessionsStopKeyIsLiveAsOnTheWeb() {
         val readOnly = session.copy(readOnly = true)
         val client = ChatTestClient().also { it.show(readOnly, folded(cmd("a", "running", 2_000))) }
         val vm = TetherViewModel(client)
@@ -231,10 +234,30 @@ class StopKeySafetyTest {
         }
         rule.waitForIdle()
         arm()
-        stopOf(0).assertIsNotEnabled().performClick()
+        stopOf(0).assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertTrue(client.stopCalls.isEmpty())
-        assertTrue(label(0).startsWith("Stop ${commandLabel("npm run a")}, unavailable: "))
+        assertEquals(listOf("s1:a"), client.stopCalls)
+        assertEquals("Stop ${commandLabel("npm run a")}", label(0))
+    }
+
+    /** ta-coik.22 r2 (item 4): a handed-off source's running command keeps a live Stop, as on the web. */
+    @Test fun aHandedOffSessionsStopKeyIsLiveAsOnTheWeb() {
+        val handedOff = session.copy(handedOffTo = "s9")
+        val client = ChatTestClient().also { it.show(handedOff, folded(cmd("a", "running", 2_000))) }
+        val vm = TetherViewModel(client)
+        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+                val projections by client.projections.collectAsStateWithLifecycle()
+                ChatScreen(vm = vm, session = handedOff, projection = projections[handedOff.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
+            }
+        }
+        rule.waitForIdle()
+        arm()
+        stopOf(0).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1:a"), client.stopCalls)
+        assertEquals(listOf<String?>(TEST_ORIGIN), client.stopOrigins)
     }
 
     @Test fun theStopFollowsTheServerOriginItIsDrawnFor() {

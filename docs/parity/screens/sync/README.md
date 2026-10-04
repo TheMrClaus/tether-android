@@ -10,7 +10,7 @@ Copies of the checked-in goldens (all six skins, phone 412×915 @420dpi and tabl
 | Files | Golden source | What it shows |
 |---|---|---|
 | `sync-indicators-font-1.3x-<skin>-{phone,tablet}.png` | `core/designsystem/src/test/screenshots/sync-indicators-font-1.3x/` (`FreshnessScreenshotTest`) | The primitive board. The link banner in two states: `wifi-off` + "Offline. Showing saved copies" and `refresh-cw` + "Reconnecting…". The session chip: Catching up… / Saved copy · updated 12 min ago / Not downloaded. Connect to load. The sidebar glyph: `history` + "12m", and `cloud-off`. The qualified badges: "Was running · 12 min ago" and "Was waiting on you · 12 min ago", each on a faint, still dot. The "Older turns not downloaded" row. |
-| `shell-sync-offline-font-1.3x-<skin>-phone.png` | `feature/shell/src/test/screenshots/shell-sync-offline-font-1.3x/` (`ShellSyncPhoneScreenshotTest`) | The phone shell offline with a running session read from a saved copy: the banner under the topbar, the header's status pill reading "Was running", the freshness chip under the title row, and the red End session key rendered disabled (a saved copy never ends a session; r2). |
+| `shell-sync-offline-font-1.3x-<skin>-phone.png` | `feature/shell/src/test/screenshots/shell-sync-offline-font-1.3x/` (`ShellSyncPhoneScreenshotTest`) | The phone shell offline with a running session read from a saved copy: the banner under the topbar, the header's status pill reading "Was running", the freshness chip under the title row, and the red End session key, live as on the web (ta-coik.22 r2 re-recorded: workspace-header.tsx 90fbb9f :133 disables it only once the session exited). |
 | `shell-sync-offline-font-1.3x-<skin>-tablet.png` | same (`ShellSyncExpandedScreenshotTest`) | The same in the expanded shell. |
 | `sidebar-sync-offline-font-1.3x-<skin>-{phone,tablet}.png` | `feature/sidebar/src/test/screenshots/sidebar-sync-offline-font-1.3x/` (`SidebarSyncTest`) | Sidebar rows offline. Running and waiting rows read "Was running" / "Was waiting on you" on a faint dot, with no spinner and no violet ping. Each row has its copy's glyph (`history` + age, or `cloud-off`), and the glyph pieces wrap whole at 1.3×. The workspace header's activity dot is faint and still, and its count reads "1 was waiting" (r2). Each row's End control is dimmed and inert, and the swipe to archive is off (r2). |
 
@@ -25,12 +25,13 @@ Rules checked in review (SYNC_DESIGN §4.2):
   spinner or the waiting ping. Approval and question cards from a copy that is not Live render disabled
   with their reason ("Connect to answer. This is a saved copy." offline). `ChatSyncTest` covers this,
   including a moment when freshness and the live set disagree.
-- **r2: nothing that is not Live drives a live action.** Cards, session controls and End session are
-  locked for every freshness value except Live, and for a session with no freshness entry at all.
-  ta-coik.22: the command keys (Stop, Background, Send to agent), both Interrupt keys (the composer's
-  and a queued row's "Interrupt now") stay live, as on the web; their tap goes to the client. The
-  client refuses `interrupt`, `stop-command`, the command frames and `kill` off a live link on its
-  own (`InterruptKillTransmissionTest`, over a real socket).
+- **r2: cards and session controls need a Live copy.** They are locked for every freshness value
+  except Live, and for a session with no freshness entry at all. ta-coik.22: the command keys (Stop,
+  Background, Send to agent), both Interrupt keys (the composer's and a queued row's "Interrupt now"),
+  End session and its confirmation stay live, as on the web. Their frames go out whenever the socket
+  is open and handshaken, as the web's do (use-tether.ts 90fbb9f :337-344, :1596-1618); a closed
+  socket says "not sent", and a server refusal is its `error`, shown (`InterruptKillTransmissionTest`,
+  `StopCommandTransmissionTest`, `CommandTransmissionTest`, over a real socket).
 - **r2: readings freeze.** The composer's run row reads "Was running · 12 min ago" on a still dot and
   stops ticking. The context gauge's needle turns neutral and its TalkBack label carries the copy's
   age, and the statusline stops re-reading on its own clock. Offline, sidebar rows say "was" even
