@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
@@ -65,6 +66,7 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 
@@ -220,6 +222,34 @@ private fun ChatTranscriptBody(
     LaunchedEffect(items, sticky, sendRows) {
         if (sticky && lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
     }
+    // ta-coik.33: the newest row can grow after the rows were built (a card, an image or a long reply
+    // laid out late), and the well can shrink under it (the keyboard, a banner): while following, the
+    // view stays pinned to its bottom. Keyed on the last row's measured size and the viewport only, so
+    // a scroll that is not a hand drag (TalkBack, a programmatic move) is never pulled back.
+    LaunchedEffect(listState) {
+        var before: LastRowLayout? = null
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.takeIf { it.index == info.totalItemsCount - 1 }
+            LastRowLayout(info.viewportSize, last?.index, last?.size)
+        }
+            .distinctUntilChanged()
+            .collect { now ->
+                val was = before
+                before = now
+                if (was == null) return@collect
+                val resized = now.viewport != was.viewport
+                val grew = now.index != null && now.index == was.index && now.size != was.size
+                if (!resized && !grew) return@collect
+                // Never from inside the layout pass that reported the change, and never against a
+                // scroll already under way: on the next frame, if still following and not at the end.
+                withFrameNanos { }
+                if (sticky && listState.canScrollForward && !listState.isScrollInProgress) {
+                    val end = listState.layoutInfo.totalItemsCount - 1
+                    if (end >= 0) listState.scrollToItem(end, scrollOffset = Int.MAX_VALUE / 2)
+                }
+            }
+    }
 
     // T5.3 chat-view.tsx:2066-2074: land on the active OCCURRENCE, centred. A jump stops the
     // follow mode (so the next streamed delta does not pull the view away from the match), brings
@@ -340,6 +370,9 @@ private fun ChatTranscriptBody(
         CopyNoticeHost(copyNotices, Modifier.align(Alignment.BottomCenter).padding(horizontal = t.css.spaceLg, vertical = t.css.spaceLg))
     }
 }
+
+/** ta-coik.33: what the follow mode watches of the layout: the viewport, and the newest row when it is on screen. */
+private data class LastRowLayout(val viewport: androidx.compose.ui.unit.IntSize, val index: Int?, val size: Int?)
 
 /** The transcript well: `--mineral-deep` (`:root .chat-frame`), Studio's `--graphite` (studio.css:369). */
 internal fun chatWellColor(t: TetherTokens): androidx.compose.ui.graphics.Color =

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -378,7 +379,10 @@ fun ChatScreen(
                     onFocusShown = { runFocus = null },
                 ) }
 
-                else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { ChatTranscript(
+                // ta-coik.33: one transcript per conversation, as the web remounts its ChatView per session
+                // (dashboard.tsx `key={activeSession.id}`): the scroll position and the follow mode never
+                // carry over from the chat opened before, so a chat always opens at its latest message.
+                else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { key(session.id) { ChatTranscript(
                     find = transcriptFind,
                     projection = projection,
                     tree = trees[session.id],
@@ -403,7 +407,7 @@ fun ChatScreen(
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                     sends = sends,
-                ) }
+                ) } }
             }
             }
         }
