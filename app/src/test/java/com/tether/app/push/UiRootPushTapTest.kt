@@ -37,6 +37,11 @@ class UiRootPushTapTest {
             attached += sessionId
             inner.attach(sessionId)
         }
+        // ta-coik.39 r2: a chat view mount attaches too (delegated, it would bypass this record).
+        override fun attachMounted(sessionId: String) {
+            attached += sessionId
+            inner.attachMounted(sessionId)
+        }
     }
 
     private fun render(pushIntent: Intent?): RecordingClient {

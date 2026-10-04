@@ -4209,6 +4209,10 @@ class RealTetherClient(
         attachNow(sessionId, expectedOrigin = null)
     }
 
+    override fun attachMounted(sessionId: String) {
+        attachNow(sessionId, expectedOrigin = null, mounted = true)
+    }
+
     /**
      * ta-2ew (R1): the check that [origin] is the server in force and the subscription are one step
      * under the lock, and the `attach` frame goes on the socket of that step only ([sendFrameOn]): a
@@ -4217,8 +4221,12 @@ class RealTetherClient(
      */
     override fun attachIfConfigured(sessionId: String, origin: String): Boolean = attachNow(sessionId, expectedOrigin = origin)
 
-    /** [attach]; with [expectedOrigin], only while it is the configured server (false: nothing done). */
-    private fun attachNow(sessionId: String, expectedOrigin: String?): Boolean {
+    /**
+     * [attach]; with [expectedOrigin], only while it is the configured server (false: nothing done).
+     * [mounted] ([attachMounted]): the chat view mounted, so a session attached already goes again
+     * even when the last attach on the socket was its own.
+     */
+    private fun attachNow(sessionId: String, expectedOrigin: String?, mounted: Boolean = false): Boolean {
         var on: WebSocket? = null
         var release: WebSocket? = null
         val afterSeq = synchronized(lock) {
@@ -4252,12 +4260,13 @@ class RealTetherClient(
             // and the read-only watch refresh (:10745) follow the chat on screen. From its cursor, as
             // the web (afterSeq = cursor): a stateless reply when nothing changed. Not while a
             // deferral waits (its rewatch attaches the focus last), nor while the timer's rewatch of
-            // this very chat waits for its first snapshot (it goes then), nor when the last attach
-            // on this socket was this chat already (the server watches it). Decided and sent in one
-            // step under the lock, so no other attach slips between.
+            // this very chat waits for its first snapshot (it goes then), nor, unless its chat view
+            // [mounted] (the web attaches on every mount), when the last attach on this socket was
+            // this chat already (a re-selection while the chat stays on screen: the web sends
+            // nothing). Decided and sent in one step under the lock, so no other attach slips between.
             val ws = socket
             val watched = lastAttachSent?.takeIf { it.first === ws }?.second
-            if (live && !send && ws != null && waiting == null && rewatchOnSnapshot?.second != sessionId && watched != sessionId) {
+            if (live && !send && ws != null && waiting == null && rewatchOnSnapshot?.second != sessionId && (mounted || watched != sessionId)) {
                 val frame = ClientMessage.Attach(sessionId, tracker.cursorFor(sessionId))
                 sendLocked(ws, frame, frame.encode())
             }

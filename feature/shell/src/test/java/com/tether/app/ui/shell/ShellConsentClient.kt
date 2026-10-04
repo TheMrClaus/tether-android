@@ -84,6 +84,12 @@ class ShellConsentClient : TetherClient {
     override fun attach(sessionId: String) {
         attachCalls += sessionId
     }
+    /** ta-coik.39 r2: a chat view mount (the web's ChatView mount attach); recorded in [attachCalls] too. */
+    val mountCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun attachMounted(sessionId: String) {
+        mountCalls += sessionId
+        attach(sessionId)
+    }
     override fun send(sessionId: String, text: String, attachments: List<Attachment>) {
         outbox += "send:$text"
     }

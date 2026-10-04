@@ -41,6 +41,8 @@ class NavTestClient(
 
     override fun start() {}
     override fun attach(sessionId: String) { attached += sessionId }
+    // ta-coik.39 r2: a delegated default would reach the inner client's attach, not this record.
+    override fun attachMounted(sessionId: String) { attached += sessionId }
 
     override suspend fun login(baseUrl: String, password: String, username: String): LoginResult {
         stateChanges += "login"

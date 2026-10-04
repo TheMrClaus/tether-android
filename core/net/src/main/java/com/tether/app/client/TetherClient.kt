@@ -201,6 +201,13 @@ interface TetherClient {
     fun attach(sessionId: String)
 
     /**
+     * ta-coik.39 r2: [sessionId]'s chat view was (re)mounted, as the web's ChatView mounts
+     * (use-tether.ts 90fbb9f :1568): [attach], and on a live socket the `attach` goes out even when
+     * the last one was this session's already, exactly as the web sends one on every mount.
+     */
+    fun attachMounted(sessionId: String) = attach(sessionId)
+
+    /**
      * Durable send with a client-minted idempotencyKey (at-most-once, see
      * specs/protocol-spec.md §5.6). T7.4: text only. A message with attachments goes through
      * [sendAttachments] alone; a non-empty [attachments] here is refused (nothing is recorded or

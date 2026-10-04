@@ -431,7 +431,38 @@ class TetherViewModel(
 
     fun selectSession(id: String) {
         showSelected(id)
-        client.attach(id)
+        if (mountedChat == id) {
+            // Re-selected while its chat view stays on screen: the web remounts nothing (dashboard.tsx
+            // `key={activeSession.id}`), so the client sends only if another session was attached since.
+            client.attach(id)
+        } else {
+            // This open mounts the chat view: its attach is the mount's (the shell's report consumes it).
+            attachedForMount = id
+            client.attachMounted(id)
+        }
+    }
+
+    // ta-coik.39 r2: the chat whose view the shell reports on screen (the web's mounted ChatView:
+    // Sessions, not Usage, not a create in flight; dashboard.tsx 90fbb9f :1572-1647), and an open's
+    // attach still to be matched with the mount it causes. Held here, so a rotation (which recomposes
+    // the shell and reports the same chat again) is no mount.
+    private var mountedChat: String? = null
+    private var attachedForMount: String? = null
+
+    /**
+     * ta-coik.39 r2: the shell's report of the chat view on screen ([sessionId]; null: none). A real
+     * mount (another chat, or the same one back from Overview, Scheduled, Usage or a create) attaches
+     * it as the web's ChatView mount does (use-tether.ts 90fbb9f :1568, afterSeq = cursor), unless an
+     * open just attached it for this very mount. The same report again (recomposition, rotation,
+     * background and back) does nothing.
+     */
+    fun chatViewShown(sessionId: String?) {
+        if (sessionId == mountedChat) return
+        mountedChat = sessionId
+        if (sessionId == null) return
+        val opened = attachedForMount == sessionId
+        attachedForMount = null
+        if (!opened) client.attachMounted(sessionId)
     }
 
     /** [selectSession] without the attach (the caller attaches, or already has). */
@@ -656,6 +687,9 @@ class TetherViewModel(
      */
     private fun openCreated(sessionId: String, origin: String?) {
         if (origin != null && !client.attachIfConfigured(sessionId, origin)) return
+        // ta-coik.39 r2: that attach is the one of the mount it causes (the server watches the
+        // created session already: server.mjs 90fbb9f :9073, :9294, :9319).
+        if (origin != null && mountedChat != sessionId) attachedForMount = sessionId
         _openingHistoryId.value = null
         // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
         hideDraft()

@@ -207,6 +207,12 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSession = sessions.firstOrNull { it.id == selectedId }
     val session = selectedSession?.takeIf { sessionsView }
+    // ta-coik.39 r2: the chat view on screen, as the web mounts its ChatView (dashboard.tsx 90fbb9f
+    // :1572-1647: Sessions, a listed selection, no create in flight; the Usage page is another route
+    // there). Reported on every change; the view model counts only a real mount, so a recomposition
+    // or rotation (which reports the same chat again) attaches nothing.
+    val mountedChat = session?.takeUnless { draftLaunching }?.id
+    LaunchedEffect(mountedChat) { vm.chatViewShown(mountedChat) }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
