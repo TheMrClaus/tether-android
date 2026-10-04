@@ -156,32 +156,107 @@ class ChromeIntentsTest {
     }
 
     /** r3 F2: Chrome's resolvesToNonExportedActivity: a link that would reach this app's own non-exported activity starts nothing. */
-    @Test fun aLinkToOurOwnNonExportedActivityStartsNothing() {
-        val app = ApplicationProvider.getApplicationContext<Context>()
-        val inner = android.content.ComponentName(app.packageName, "com.tether.app.Inner")
-        val pm = org.robolectric.Shadows.shadowOf(app.packageManager)
-        val info = pm.addActivityIfNotPresent(inner)
-        info.exported = false
+    /** Registers [component] as a BROWSABLE VIEW handler of `tether-inner:` ([default]: with CATEGORY_DEFAULT). */
+    private fun register(component: android.content.ComponentName, exported: Boolean, default: Boolean = true): android.content.pm.ActivityInfo {
+        val pm = org.robolectric.Shadows.shadowOf(ApplicationProvider.getApplicationContext<Context>().packageManager)
+        val info = pm.addActivityIfNotPresent(component)
+        info.exported = exported
         pm.addOrUpdateActivity(info)
         pm.addIntentFilterForActivity(
-            inner,
+            component,
             android.content.IntentFilter(Intent.ACTION_VIEW).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE)
-                addCategory(Intent.CATEGORY_DEFAULT)
+                if (default) addCategory(Intent.CATEGORY_DEFAULT)
                 addDataScheme("tether-inner")
             },
         )
-        val phone = Phone { false }
-        val link = "intent://x#Intent;scheme=tether-inner;S.browser_fallback_url=https%3A%2F%2Fexample.test%2F;end"
+        return info
+    }
+
+    private val app get() = ApplicationProvider.getApplicationContext<Context>()
+    private val fallbackPart = "S.browser_fallback_url=https%3A%2F%2Fexample.test%2Ffb;"
+
+    /**
+     * r3 F2 / r4: a link that would reach this app's own non-exported activity starts nothing; like
+     * every refusal once the link parses, it opens its web fallback (Chrome's handleFallbackUrl), never the store.
+     */
+    @Test fun aLinkToOurOwnNonExportedActivityOpensOnlyItsWebFallback() {
+        val info = register(android.content.ComponentName(app.packageName, "com.tether.app.Inner"), exported = false)
+        val link = "intent://x#Intent;scheme=tether-inner;$fallbackPart" + "end"
         assertTrue(ChromeIntents.resolvesToNonExportedActivity(app, ChromeIntents.parse(link)!!))
-        assertFalse(ChromeIntents.open(phone, link, newTask = false) { error("no fallback either") })
+        val phone = Phone { false }
+        val web = mutableListOf<String>()
+        assertTrue(ChromeIntents.open(phone, link, newTask = false) { web += it; true })
+        assertEquals(listOf("https://example.test/fb"), web)
+        assertEquals(emptyList<Intent>(), phone.tried)
+        // Without a fallback: nothing, and never the store of the package it names.
+        assertFalse(ChromeIntents.open(phone, "intent://x#Intent;scheme=tether-inner;end", newTask = false) { error("no fallback") })
+        assertEquals(emptyList<Intent>(), phone.tried)
+        // A plain link to it (no intent:) is refused too, and has no fallback.
+        assertFalse(ChromeIntents.openView(phone, "tether-inner://x", newTask = false))
         assertEquals(emptyList<Intent>(), phone.tried)
         // Exported, it is any app's: it goes out.
         info.exported = true
-        pm.addOrUpdateActivity(info)
+        org.robolectric.Shadows.shadowOf(app.packageManager).addOrUpdateActivity(info)
         assertFalse(ChromeIntents.resolvesToNonExportedActivity(app, ChromeIntents.parse(link)!!))
-        assertTrue(ChromeIntents.open(phone, link, newTask = false) { true })
+        assertTrue(ChromeIntents.open(phone, link, newTask = false) { error("taken by the app") })
         assertEquals("tether-inner://x", phone.started.single().dataString)
+        assertTrue(ChromeIntents.openView(phone, "tether-inner://x", newTask = false))
+    }
+
+    /** r4: the package's store is never the answer to a refusal; only the web fallback is. */
+    @Test fun aRefusedLinkThatNamesAPackageNeverGoesToTheStore() {
+        register(android.content.ComponentName(app.packageName, "com.tether.app.Inner"), exported = false)
+        val phone = Phone { false }
+        assertFalse(ChromeIntents.open(phone, "intent://x#Intent;scheme=tether-inner;package=${app.packageName};end", newTask = false) { error("no web") })
+        assertFalse(ChromeIntents.open(phone, "intent://x#Intent;scheme=content;package=com.example.gh;end", newTask = false) { error("no web") })
+        assertEquals(emptyList<Intent>(), phone.tried)
+    }
+
+    /** r4 (test gap): another app's non-exported activity is that app's business: it never blocks the link. */
+    @Test fun anotherAppsNonExportedActivityDoesNotBlockTheLink() {
+        register(android.content.ComponentName("com.example.other", "com.example.other.Inner"), exported = false)
+        val intent = ChromeIntents.parse("intent://x#Intent;scheme=tether-inner;end")!!
+        assertEquals(1, app.packageManager.queryIntentActivities(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).size)
+        assertFalse(ChromeIntents.resolvesToNonExportedActivity(app, intent))
+        val phone = Phone { false }
+        assertTrue(ChromeIntents.open(phone, "intent://x#Intent;scheme=tether-inner;end", newTask = false) { error("taken") })
+        assertTrue(ChromeIntents.openView(phone, "tether-inner://x", newTask = false))
+        assertEquals(2, phone.started.size)
+    }
+
+    /** r4 (ta-qap9): queried as Chrome, MATCH_DEFAULT_ONLY: an own activity without CATEGORY_DEFAULT is not a match. */
+    @Test fun theNonExportedQueryMatchesDefaultActivitiesOnly() {
+        register(android.content.ComponentName(app.packageName, "com.tether.app.Inner"), exported = false, default = false)
+        assertFalse(ChromeIntents.resolvesToNonExportedActivity(app, ChromeIntents.parse("intent://x#Intent;scheme=tether-inner;end")!!))
+    }
+
+    /** r4 (ta-qap9): a query that throws fails closed: nothing starts, the web fallback opens. */
+    @Test fun aQueryThatThrowsStartsNothingAndOpensTheFallback() {
+        val tried = mutableListOf<Intent>()
+        val phone = object : ContextWrapper(app) {
+            override fun getPackageManager(): android.content.pm.PackageManager = throw IllegalStateException("package manager died")
+            override fun startActivity(intent: Intent) { tried += intent }
+        }
+        val web = mutableListOf<String>()
+        assertTrue(ChromeIntents.open(phone, "intent://x#Intent;scheme=gh;package=com.example.gh;$fallbackPart" + "end", newTask = false) { web += it; true })
+        assertEquals(listOf("https://example.test/fb"), web)
+        assertFalse(ChromeIntents.open(phone, "intent://x#Intent;scheme=gh;package=com.example.gh;end", newTask = false) { error("no web") })
+        assertFalse(ChromeIntents.openView(phone, "gh://x", newTask = false))
+        assertEquals(emptyList<Intent>(), tried)
+    }
+
+    /** r4: a link whose data Chrome refuses opens its web fallback, per refused scheme; without one, nothing. */
+    @Test fun aRefusedDataLinkOpensOnlyItsWebFallback() {
+        for (scheme in ChromeIntents.REFUSED_DATA_SCHEMES) {
+            val phone = Phone { false }
+            val web = mutableListOf<String>()
+            assertTrue(scheme, ChromeIntents.open(phone, "intent://x/y#Intent;scheme=$scheme;package=com.example.gh;$fallbackPart" + "end", newTask = false) { web += it; true })
+            assertEquals(scheme, listOf("https://example.test/fb"), web)
+            assertFalse(scheme, ChromeIntents.open(phone, "intent://x/y#Intent;scheme=$scheme;package=com.example.gh;end", newTask = false) { error("no web") })
+            assertEquals(scheme, emptyList<Intent>(), phone.tried)
+        }
+        assertEquals(setOf("content", "file", "about", "chrome", "chrome-native", "devtools", "fido"), ChromeIntents.REFUSED_DATA_SCHEMES)
     }
 
     /** r3 F3: the fallback address is read, then removed: the app that takes the link never receives it. */
@@ -201,6 +276,15 @@ class ChromeIntentsTest {
         assertEquals("utm_source=pr", Uri.parse(market.dataString).getQueryParameter("referrer"))
         assertEquals("com.example.gh", Uri.parse(market.dataString).getQueryParameter("id"))
         assertEquals(ChromeIntents.PLAY_STORE_PACKAGE, market.`package`)
+        // r4: passed on as parsed (parseUri decodes once; it is not decoded again), and an empty one stays empty.
+        fun referrer(extra: String): String? {
+            val p = Phone(noApp)
+            assertTrue(ChromeIntents.open(p, "intent://x#Intent;scheme=gh;package=com.example.gh;$extra" + "end", newTask = false) { true })
+            return Uri.parse(p.started.single().dataString).getQueryParameter("referrer")
+        }
+        assertEquals("a%3Db", referrer("S.market_referrer=a%253Db;"))
+        assertEquals("", referrer("S.market_referrer=;"))
+        assertEquals(app.packageName, referrer(""))
     }
 
     /** r3 F5: the fallback is read with the URL parser's clean-up and passed on in its canonical form. */

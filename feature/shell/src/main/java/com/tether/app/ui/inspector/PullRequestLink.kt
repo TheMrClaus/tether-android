@@ -70,7 +70,8 @@ internal const val PULL_REQUEST_UNOPENED = "No app on this phone could open the 
  * Claude login link: sanitised, then its web fallback or its package's store page when no app takes
  * it). An address of the shared browser-only set goes nowhere ([ChromeIntents.BROWSER_ONLY_SCHEMES]:
  * Chrome never hands a page's link to one on). Any other scheme is offered to the phone's apps as a browser hands it on:
- * `ACTION_VIEW` + `CATEGORY_BROWSABLE` (only activities that say a link may open them).
+ * `ACTION_VIEW` + `CATEGORY_BROWSABLE` (only activities that say a link may open them), never to this
+ * app's own non-exported activity ([ChromeIntents.openView]).
  *
  * Returns false when nothing opened it, as a browser fails on a scheme nothing handles.
  */
@@ -79,5 +80,5 @@ fun openPullRequestLink(context: Context, opener: LinkOpener, href: String, tool
     val scheme = urlScheme(href) ?: return false
     if (scheme == "intent") return ChromeIntents.open(context, href) { web -> openChatLink(context, opener, web, toolbarColor) }
     if (scheme in ChromeIntents.BROWSER_ONLY_SCHEMES) return false
-    return ChromeIntents.start(context, ChromeIntents.view(href))
+    return ChromeIntents.openView(context, href)
 }

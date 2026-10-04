@@ -212,6 +212,35 @@ class InspectorActionsBehaviourTest {
         assertEquals(emptyList<String>(), opened)
     }
 
+    /** ta-coik.18 r4 (ta-qap9): a plain link to this app's own non-exported activity is not handed on, as Chrome. */
+    @Test fun aPlainLinkToOurOwnNonExportedActivityIsNotHandedOn() {
+        run {
+            val pm = shadowOf(rule.activity.packageManager)
+            val inner = android.content.ComponentName(rule.activity.packageName, "com.tether.app.Inner")
+            val info = pm.addActivityIfNotPresent(inner)
+            info.exported = false
+            pm.addOrUpdateActivity(info)
+            pm.addIntentFilterForActivity(inner, android.content.IntentFilter(android.content.Intent.ACTION_VIEW).apply {
+                addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                addCategory(android.content.Intent.CATEGORY_DEFAULT)
+                addDataScheme("tether-inner")
+            })
+        }
+        show(model(cr = pr("tether-inner://x")))
+        tapPullRequest()
+        assertNull(shadowOf(rule.activity).nextStartedActivity)
+        rule.onNodeWithTag(InspectorTags.PullRequestUnopened, useUnmergedTree = true).assertExists()
+    }
+
+    /** ta-coik.18 r4: a refused `intent:` (its data Chrome ignores) still opens its web fallback, as Chrome's handleFallbackUrl. */
+    @Test fun aRefusedIntentOpensItsWebFallback() {
+        show(model(cr = pr("intent://x#Intent;scheme=file;package=com.example.gh;S.browser_fallback_url=https%3A%2F%2Fexample.test%2Fpr%2F12;end")))
+        tapPullRequest()
+        assertNull(shadowOf(rule.activity).nextStartedActivity)
+        assertEquals(listOf("https://example.test/pr/12"), opened)
+        assertEquals(0, tagCount(InspectorTags.PullRequestUnopened))
+    }
+
     /** ta-coik.18: an `intent:` address goes out with Chrome's sanitising, and to its web fallback when no app takes it. */
     @Test fun anIntentAddressIsSanitisedAndFallsBackLikeChrome() {
         show(model(cr = pr("intent://pr/12#Intent;scheme=gh;component=com.example.other/.Secret;launchFlags=0x10000003;end")))

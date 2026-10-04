@@ -461,6 +461,41 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals("on the Play Store app, as Chrome", com.tether.app.client.ChromeIntents.PLAY_STORE_PACKAGE, market.`package`)
     }
 
+    /** ta-coik.18 r4 (ta-qap9): a plain login link to this app's own non-exported activity is not handed on, as Chrome. */
+    @Test fun aPlainLinkToOurOwnNonExportedActivityIsNotHandedOn() {
+        run {
+            val pm = org.robolectric.Shadows.shadowOf(appContext().packageManager)
+            val inner = android.content.ComponentName(appContext().packageName, "com.tether.app.Inner")
+            val info = pm.addActivityIfNotPresent(inner)
+            info.exported = false
+            pm.addOrUpdateActivity(info)
+            pm.addIntentFilterForActivity(inner, android.content.IntentFilter(android.content.Intent.ACTION_VIEW).apply {
+                addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                addCategory(android.content.Intent.CATEGORY_DEFAULT)
+                addDataScheme("tether-inner")
+            })
+        }
+        val started = mutableListOf<android.content.Intent>()
+        val phone = object : android.content.ContextWrapper(appContext()) {
+            override fun startActivity(intent: android.content.Intent) { started += intent }
+        }
+        assertFalse(LoginLinkOpener.browser(phone).open(ClaudeLoginLink.parse("tether-inner://x")!!))
+        assertEquals(emptyList<android.content.Intent>(), started)
+        assertTrue("another scheme still goes out", LoginLinkOpener.browser(phone).open(ClaudeLoginLink.parse("gh://x")!!))
+    }
+
+    /** ta-coik.18 r4: a refused `intent:` login link (file data) opens its web fallback in the browser, as Chrome. */
+    @Test fun aRefusedIntentLinkOpensItsWebFallback() {
+        val started = mutableListOf<android.content.Intent>()
+        val phone = object : android.content.ContextWrapper(appContext()) {
+            override fun startActivity(intent: android.content.Intent) { started += intent }
+        }
+        val l = ClaudeLoginLink.parse("intent://x/y#Intent;scheme=file;S.browser_fallback_url=https%3A%2F%2Fclaude.ai%2Foauth;end")!!
+        assertTrue(LoginLinkOpener.browser(phone).open(l))
+        assertEquals("https://claude.ai/oauth", started.single().dataString)
+        assertTrue(started.single().hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
+    }
+
     /** r3 (security F2): a parsed `intent:` link keeps only Chrome's ALLOWED_INTENT_FLAGS: CLEAR_TASK and the grants are stripped. */
     @Test fun anIntentLinksFlagsAreLimitedToChromesAllowedFlags() {
         val clearTask = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or

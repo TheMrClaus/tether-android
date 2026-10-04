@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Locale
@@ -20,10 +21,11 @@ import java.util.Locale
  *   no selector (crbug 1254422), the flags masked to [ALLOWED_INTENT_FLAGS] (so no URI grant);
  * - its `browser_fallback_url` read and removed before it goes out (r3);
  * - refused when it would resolve to one of this app's own non-exported activities (Chrome's
- *   `resolvesToNonExportedActivity`, r3);
+ *   `resolvesToNonExportedActivity`, r3); a refused link (its data or this check) still opens its
+ *   http(s) `browser_fallback_url`, never the store (r4);
  * - when no app takes it: its `browser_fallback_url` (http or https, in its canonical form) in the
  *   browser, else, when it names a package, that package's store page (`market://details?id=` on the
- *   Play Store app, or the Play web page when that is not there), as Chrome does.
+ *   Play Store app, as Chrome does; then the Play web page, kept on purpose as more than Chrome).
  */
 object ChromeIntents {
     /** Chrome's ExternalNavigationHandler ALLOWED_INTENT_FLAGS; every other flag of a parsed link is dropped. */
@@ -58,16 +60,21 @@ object ChromeIntents {
 
     /** The sanitised intent Chrome starts for the `intent:` link [href], or null when it starts none. */
     fun parse(href: String): Intent? {
-        val intent = try {
-            Intent.parseUri(href, Intent.URI_INTENT_SCHEME)
-        } catch (_: Exception) {
-            // parseUri throws more than URISyntaxException for a malformed link (NumberFormatException
-            // for `launchFlags=zz` or `i.k=x`, and others): any of them is a link that does not parse.
-            return null
-        }
-        if (intent.data?.scheme?.lowercase(Locale.ROOT) in REFUSED_DATA_SCHEMES) return null
+        val intent = parseUri(href) ?: return null
+        if (refusedData(intent)) return null
         return sanitize(intent)
     }
+
+    /** The `intent:` link as parseUri reads it, unsanitised; null when it does not parse. */
+    private fun parseUri(href: String): Intent? = try {
+        Intent.parseUri(href, Intent.URI_INTENT_SCHEME)
+    } catch (_: Exception) {
+        // parseUri throws more than URISyntaxException for a malformed link (NumberFormatException
+        // for `launchFlags=zz` or `i.k=x`, and others): any of them is a link that does not parse.
+        null
+    }
+
+    private fun refusedData(intent: Intent): Boolean = intent.data?.scheme?.lowercase(Locale.ROOT) in REFUSED_DATA_SCHEMES
 
     /**
      * Chrome's sanitizeQueryIntentActivitiesIntent on [intent], in place: browsable only, no explicit
@@ -89,12 +96,20 @@ object ChromeIntents {
 
         /** The store page of the package the link names; [referrer] is the link's `market_referrer`. */
         data class Store(val packageName: String, val referrer: String? = null) : Fallback {
-            /** Chrome's: `market://details?id=<package>&referrer=<the link's, else the opener's package>`. */
+            /**
+             * Chrome's: `market://details?id=<package>&referrer=<the link's market_referrer as parsed
+             * (an empty one stays empty), else the opener's package>`.
+             */
             fun marketUrl(defaultReferrer: String): String = Uri.Builder().scheme("market").authority("details")
                 .appendQueryParameter("id", packageName)
-                .appendQueryParameter("referrer", Uri.decode(referrer?.takeIf { it.isNotEmpty() } ?: defaultReferrer))
+                .appendQueryParameter("referrer", referrer ?: defaultReferrer)
                 .build().toString()
 
+            /**
+             * The Play web page, tried when no store app takes [marketUrl]. Chrome stops at the store
+             * intent; this is kept on purpose as more than Chrome does (a phone without the Play Store
+             * still reaches the page), never less.
+             */
             val webUrl: String get() = "https://play.google.com/store/apps/details?id=" + Uri.encode(packageName)
         }
     }
@@ -128,17 +143,19 @@ object ChromeIntents {
 
     /**
      * r3: Chrome's resolvesToNonExportedActivity: whether [intent] would resolve to an activity of
-     * this app that is not exported (a page's link must never reach the app's own internals).
+     * this app that is not exported (a page's link must never reach the app's own internals). Queried
+     * as Chrome queries (GET_RESOLVED_FILTER | MATCH_DEFAULT_ONLY). r4: a query that throws counts as
+     * one that does (fail closed: nothing starts, the link's web fallback may still open).
      */
     // QueryPermissionsNeeded: only this app's own activities matter here, and an app always sees its own.
     @SuppressLint("QueryPermissionsNeeded")
     fun resolvesToNonExportedActivity(context: Context, intent: Intent): Boolean = try {
-        context.packageManager.queryIntentActivities(intent, 0).any { info ->
+        context.packageManager.queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER or PackageManager.MATCH_DEFAULT_ONLY).any { info ->
             val activity = info.activityInfo
             activity != null && activity.packageName == context.packageName && !activity.exported
         }
     } catch (_: RuntimeException) {
-        false
+        true
     }
 
     /**
@@ -147,9 +164,14 @@ object ChromeIntents {
      * context needs it). False when nothing opened.
      */
     fun open(context: Context, href: String, newTask: Boolean = context !is Activity, openWeb: (String) -> Boolean): Boolean {
-        val intent = parse(href) ?: return false
+        val intent = parseUri(href) ?: return false
         val fallback = takeFallback(intent)
-        if (resolvesToNonExportedActivity(context, intent)) return false
+        // r4 (ENH handleFallbackUrl on every "no override" once the link parses): a refused link
+        // still opens its web fallback; never the store, as Chrome.
+        val webOnly = { (fallback as? Fallback.Web)?.let { openWeb(it.url) } ?: false }
+        if (refusedData(intent)) return webOnly()
+        sanitize(intent)
+        if (resolvesToNonExportedActivity(context, intent)) return webOnly()
         if (start(context, intent, newTask)) return true
         return when (fallback) {
             is Fallback.Web -> openWeb(fallback.url)
@@ -160,6 +182,17 @@ object ChromeIntents {
 
     /** The store intent Chrome starts: the market address on the Play Store app. */
     fun store(marketUrl: String): Intent = view(marketUrl).setPackage(PLAY_STORE_PACKAGE)
+
+    /**
+     * r4 (ta-qap9): a page's plain link [href] (not `intent:`) handed to the app that takes it, as
+     * Chrome hands it on: [view], refused when it would reach this app's own non-exported activity
+     * (such a link has no fallback). False when nothing opened.
+     */
+    fun openView(context: Context, href: String, newTask: Boolean = context !is Activity): Boolean {
+        val intent = view(href)
+        if (resolvesToNonExportedActivity(context, intent)) return false
+        return start(context, intent, newTask)
+    }
 
     /** `ACTION_VIEW` + `CATEGORY_BROWSABLE` on [href]: what a browser hands an app for a page's link. */
     @SuppressLint("UseKtx")

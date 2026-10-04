@@ -142,8 +142,8 @@ fun interface LoginLinkOpener {
             if (!link.web && ChromeIntents.isIntentLink(link.url)) {
                 ChromeIntents.open(context, link.url, newTask = true) { web -> ChromeIntents.start(context, ChromeIntents.view(web), newTask = true) }
             } else {
-                val intent = intentFor(link) ?: return@LoginLinkOpener false
-                ChromeIntents.start(context, intent, newTask = true)
+                // r4 (ta-qap9): as Chrome hands a page's link on, never to this app's own non-exported activity.
+                ChromeIntents.openView(context, link.url, newTask = true)
             }
         }
 
@@ -151,7 +151,8 @@ fun interface LoginLinkOpener {
          * The intent a phone's browser starts for a page's link to [link]: `ACTION_VIEW` +
          * `CATEGORY_BROWSABLE`; an `intent:` link as Chrome reads and sanitises it ([ChromeIntents.parse],
          * shared with the inspector's pull request link). Null: an `intent:` link that does not
-         * parse, or whose data is a `content:` or `file:` address (Chrome's checks).
+         * parse, or whose data is a scheme Chrome refuses ([ChromeIntents.REFUSED_DATA_SCHEMES]:
+         * content, file and Chrome's own internal schemes). [browser] opens such a link's web fallback.
          */
         fun intentFor(link: ClaudeLoginLink): Intent? =
             if (!link.web && ChromeIntents.isIntentLink(link.url)) ChromeIntents.parse(link.url) else ChromeIntents.view(link.url)
