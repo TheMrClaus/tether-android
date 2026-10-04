@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
@@ -153,6 +155,17 @@ fun PhoneShell(
     val t = LocalTetherTokens.current
     BackHandler(enabled = state.canHandleBack) { state.handleBack() }
     LaunchedEffect(showRail) { if (!showRail) state.closeDrawer() }
+    // ta-coik.30: opening the drawer, by whichever path (the top bar's key, the chat's "Sessions"
+    // key, any other openDrawer), takes focus and the keyboard away from the composer, as the web's
+    // sidebar blurs the input. The draft stays; closing the drawer does not bring the keyboard back.
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(state.drawerOpen) {
+        if (state.drawerOpen) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+    }
     val windowWidth = LocalWindowInfo.current.containerSize.width.let { with(LocalDensity.current) { it.toDp().value.toInt() } }
     val topbarState = TopbarState(
         current = current,
