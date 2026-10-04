@@ -46,6 +46,12 @@ object ConnectionTimings {
      * miss), so after this long the link is presumed gone; a shorter trip keeps the web's ping.
      */
     const val BACKGROUND_REPLACE_AFTER_MS: Long = 25_000
+
+    /**
+     * ta-coik.32 (R3): how long the re-attach of every other session waits for the open chat's
+     * snapshot on a new socket before it goes anyway (that session may be gone server-side).
+     */
+    const val DEFERRED_ATTACH_MAX_WAIT_MS: Long = 3_000
 }
 
 /** Handle to a task scheduled on a [Scheduler]. */

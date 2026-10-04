@@ -337,6 +337,27 @@ class RealTetherClient(
     // Last time the UI opened (attached) a session: orders the capped re-attach.
     private val lastOpenedAt = HashMap<String, Long>()
 
+    // --- ta-coik.32 (R3): the open chat first on a new socket (guarded by lock) ---
+    // The session the UI opened last (attach()): the chat on screen. Its attach goes out first on a
+    // new socket, the rest after its snapshot, and it is attached last too, so the server (which
+    // watches the LAST session a socket attached, server.mjs `watchedSessionId`) watches it.
+    private var focusSessionId: String? = null
+    // When each session was last opened in this process ([clock]): the deferred re-attach's order.
+    private val openedAt = HashMap<String, Long>()
+    // The re-attach of the current socket still waiting for the focus's snapshot.
+    private var deferredAttach: DeferredAttach? = null
+
+    private class DeferredAttach(
+        val socket: WebSocket,
+        var focus: String,
+        val ids: MutableList<String>,
+        /** Something went out after the focus's attach: the focus is attached again, last. */
+        var rewatch: Boolean,
+    ) {
+        var timer: Cancellable? = null
+        var focusSnapshot = false
+    }
+
     /**
      * Every request that carries (or obtains) a credential goes through this
      * client, which NEVER follows redirects: OkHttp strips `Authorization` on a
@@ -2487,6 +2508,9 @@ class RealTetherClient(
         socketOrigin = null
         socketOpen = false
         handshakeDone = false
+        // R3: a re-attach still waiting belongs to this socket; the next one re-attaches on its ready.
+        deferredAttach?.timer?.cancel()
+        deferredAttach = null
         // ta-coik.19: with the link down every unresolved send reads "waiting for link".
         publishPendingSends()
         clearLiveLocked()
@@ -3097,6 +3121,7 @@ class RealTetherClient(
         // §5.5: re-attach every subscribed session and every session that has
         // pending outbound input, from its last good cursor.
         val toAttach: List<Pair<String, Long?>>
+        val deferredHydration: List<String>
         synchronized(lock) {
             if (socket !== webSocket) return
             // Published under the same check: a late ready of a socket let go
@@ -3135,13 +3160,39 @@ class RealTetherClient(
             // attach (T0.3 verify).
             attachedThisEpoch.addAll(ids)
             publishAttachedLocked()
-            toAttach = ids.map { it to afterSeqForLocked(it) }
+            // ta-coik.32 (R3): the open chat (listed by this ready) goes first, with the sessions
+            // holding input (their redelivery waits for nothing new); every other one waits for the
+            // open chat's snapshot, then goes in the order they were last opened, and the open chat is
+            // attached once more, last, so the server watches it. Nothing is dropped.
+            deferredAttach?.timer?.cancel()
+            deferredAttach = null
+            val focus = focusSessionId?.takeIf { it in ids && it in listedSessionIds }
+            val first = if (focus == null) {
+                ids.toList()
+            } else {
+                val holding = if (pendingOrigin != null && pendingOrigin == socketOrigin) pendingStore.records.mapTo(HashSet()) { it.sessionId } else emptySet()
+                listOf(focus) + ids.filter { it != focus && it in holding }
+            }
+            if (focus != null) {
+                val later = ids.filter { it !in first }.withIndex()
+                    .sortedWith(compareByDescending<IndexedValue<String>> { openedAt[it.value] ?: Long.MIN_VALUE }.thenBy { it.index })
+                    .map { it.value }
+                if (later.isNotEmpty() || first.size > 1) {
+                    val waiting = DeferredAttach(webSocket, focus, later.toMutableList(), rewatch = true)
+                    waiting.timer = scheduler.schedule(ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS) { releaseDeferredAttach(webSocket) }
+                    deferredAttach = waiting
+                }
+            }
+            toAttach = first.map { it to afterSeqForLocked(it) }
+            deferredHydration = ids.filter { it !in first }
         }
         // On THIS socket only: if it is gone by now, the next one re-attaches.
         for ((sessionId, afterSeq) in toAttach) {
             sendFrameOn(webSocket, ClientMessage.Attach(sessionId, afterSeq))
             requestHydration(sessionId)
         }
+        // The saved copies of the sessions whose attach waits are read now all the same.
+        deferredHydration.forEach(::requestHydration)
         message.workspaceRoot?.let {
             sendFrameOn(webSocket, ClientMessage.Browse(it))
             sendFrameOn(webSocket, ClientMessage.Discover(it))
@@ -3201,6 +3252,41 @@ class RealTetherClient(
      * `trimmedBefore` (v115 bounded snapshot) is recorded per session.
      */
     private fun onSnapshot(webSocket: WebSocket, message: ServerMessage.Snapshot) {
+        applySnapshot(webSocket, message)
+        // R3: the open chat is in: the rest of this socket's re-attach goes out now.
+        val release = synchronized(lock) {
+            val waiting = deferredAttach
+            if (waiting != null && waiting.socket === webSocket && socket === webSocket && waiting.focus == message.sessionId) {
+                waiting.focusSnapshot = true
+                true
+            } else {
+                false
+            }
+        }
+        if (release) releaseDeferredAttach(webSocket)
+    }
+
+    /**
+     * ta-coik.32 (R3): the re-attach that waited for the open chat's snapshot (or for
+     * [ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS]), on [webSocket] only. The open chat goes again
+     * last, from its cursor (a stateless reply when nothing changed), so the server watches it; after
+     * a timeout without its snapshot that would fetch its state twice, so it is skipped then.
+     */
+    private fun releaseDeferredAttach(webSocket: WebSocket) {
+        val frames = synchronized(lock) {
+            val waiting = deferredAttach ?: return
+            if (waiting.socket !== webSocket) return
+            deferredAttach = null
+            waiting.timer?.cancel()
+            if (socket !== webSocket || !socketOpen || !handshakeDone) return
+            val out = waiting.ids.map { ClientMessage.Attach(it, afterSeqForLocked(it)) }.toMutableList()
+            if (waiting.rewatch && waiting.focusSnapshot) out += ClientMessage.Attach(waiting.focus, tracker.cursorFor(waiting.focus))
+            out
+        }
+        frames.forEach { sendFrameOn(webSocket, it) }
+    }
+
+    private fun applySnapshot(webSocket: WebSocket, message: ServerMessage.Snapshot) {
         // A frame of a socket let go meanwhile (a sign-in to another server)
         // must not seed a cursor or authorise redelivery on the next one.
         var shown: JsObj? = message.state
@@ -4048,6 +4134,18 @@ class RealTetherClient(
             if (expectedOrigin != null && originStandingLocked(expectedOrigin) != OriginStanding.Configured) return false
             on = socket
             subscribed.add(sessionId)
+            // R3: the chat the UI opens is the focus; one still waiting in a deferred re-attach goes
+            // now, and becomes the one attached again last (so the server watches it).
+            focusSessionId = sessionId
+            openedAt[sessionId] = clock()
+            val waiting = deferredAttach
+            if (waiting != null && waiting.ids.remove(sessionId)) {
+                waiting.focus = sessionId
+                if (socketOpen && handshakeDone) {
+                    publishAttachedLocked()
+                    return@synchronized afterSeqForLocked(sessionId) to true
+                }
+            }
             // §3.1 rule 5: "most recently opened" orders the capped ready re-attach.
             mirrorOrigin?.let { origin ->
                 mirrorLink?.opened(origin, sessionId)

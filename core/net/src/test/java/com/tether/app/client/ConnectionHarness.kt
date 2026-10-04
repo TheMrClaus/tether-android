@@ -67,7 +67,7 @@ class ManualScheduler : Scheduler {
 fun testBackoff() = Backoff(baseMs = 1_100, capMs = 30_000, random = { 0.0 })
 
 fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.BACKGROUND_GRACE_MS &&
-    ms != NodeRegistryRules.REQUEST_TIMEOUT_MS
+    ms != NodeRegistryRules.REQUEST_TIMEOUT_MS && ms != ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS
 
 const val HEALTH_137 = """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""
 
