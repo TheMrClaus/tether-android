@@ -369,6 +369,17 @@ class RealTetherClient(
         .followSslRedirects(false)
         .build()
 
+    /**
+     * ta-coik.32 (R4): the §5.3 auth probe over HTTP/1.1, like the upgrade that follows it
+     * ([TetherWebSocket] upgrades over HTTP/1.1 on [authHttp]). The two then have the same pool
+     * address, so the upgrade reuses the connection the probe just made instead of opening a second
+     * TCP + TLS handshake. Still one after the other: a sign-out while the probe is out means no
+     * socket ever opens with that credential.
+     */
+    private val probeHttp: OkHttpClient = authHttp.newBuilder()
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+        .build()
+
     private val lock = Any()
 
     // --- connection state (guarded by lock) ---
@@ -2709,7 +2720,7 @@ class RealTetherClient(
             .url(base.resolve("/api/auth/session")!!)
             .authorize(credential, base)
             .build()
-        authHttp.newCall(request).execute().use { response ->
+        probeHttp.newCall(request).execute().use { response ->
             if (response.code in 300..399 || response.code == 401 || response.code == 403) return ProbeVerdict.Refused
             if (!response.isSuccessful) throw IOException("auth probe returned HTTP ${response.code}")
             val authenticated = parseJsonObject(response)?.get("authenticated") as? JsonPrimitive

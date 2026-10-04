@@ -259,18 +259,28 @@ class ReconnectLatencyTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun aDefaultNetworkChangeOpensFreshConnectionsInsteadOfReusingPooledOnes() {
+    fun aDefaultNetworkChangeEvictsThePooledConnections() {
+        connected()
+        // An ordinary HTTP read leaves its connection idle in the pool.
+        h.server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}"))
+        kotlinx.coroutines.runBlocking { h.client.fetchStats() }
+        assertTrue("a connection is idle in the pool", h.http.connectionPool.idleConnectionCount() > 0)
+        // Suspended in the background, so nothing reconnects and refills the pool meanwhile.
+        h.client.setAppForeground(false)
+        h.scheduler.await { it == ConnectionTimings.BACKGROUND_GRACE_MS }.fire()
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        h.client.onDefaultNetworkChanged()
+        assertEquals("nothing made on the previous network is reused", 0, h.http.connectionPool.idleConnectionCount())
+    }
+
+    @Test
+    fun theUpgradeReusesTheConnectionItsProbeJustMade() {
         connected()
         val probe = h.server.takeRequest()
         val upgrade = h.server.takeRequest()
         assertEquals("/api/auth/session", probe.path)
         assertEquals("/ws", upgrade.path)
-        assertTrue("the probe's connection is idle in the pool", h.http.connectionPool.idleConnectionCount() > 0)
-        h.enqueueConnect()
-        h.client.onDefaultNetworkChanged()
-        h.handshake(h.nextSocket())
-        val next = h.server.takeRequest()
-        assertEquals("/api/auth/session", next.path)
-        assertEquals("a new connection (the first request on it), not the pooled one", 0, next.sequenceNumber)
+        assertEquals("the probe opened the connection", 0, probe.sequenceNumber)
+        assertEquals("the upgrade is its second request: no second TCP + TLS handshake", 1, upgrade.sequenceNumber)
     }
 }
