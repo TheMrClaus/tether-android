@@ -235,7 +235,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     )
     // dashboard.tsx:1359 reads the stored record at the moment of navigation.
     val rememberedChat = remember(prefs) { RememberedChat() }
-    LaunchedEffect(prefs) { prefs.preferences.collect { rememberedChat.value = it.lastOpenedSession } }
+    LaunchedEffect(prefs) {
+        kotlinx.coroutines.flow.combine(prefs.preferences, vm.client.serverUrl) { p, url -> p.lastOpenedFor(com.tether.app.client.serverOrigin(url)) }
+            .collect { rememberedChat.value = it }
+    }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.

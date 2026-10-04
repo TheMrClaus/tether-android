@@ -71,7 +71,15 @@ class MainShellSelectionModelTest {
 
     /** The singleton preferences start from this test's own state (the DataStore outlives a test). */
     private fun storedState(view: String, remembered: LastOpenedSession?, showEnded: Boolean = true) = runBlocking {
-        prefs.updatePreferences { it.copy(lastOpenedSession = remembered, defaultWorkspace = "", showEndedSessions = showEnded, pinnedProjects = emptyList()) }
+        prefs.updatePreferences {
+            it.copy(
+                lastOpenedSession = null,
+                lastOpenedByOrigin = remembered?.let { r -> mapOf("" to r) } ?: emptyMap(),
+                defaultWorkspace = "",
+                showEndedSessions = showEnded,
+                pinnedProjects = emptyList(),
+            )
+        }
         prefs.setLastView(view)
     }
 
@@ -90,7 +98,7 @@ class MainShellSelectionModelTest {
         rule.waitForIdle()
     }
 
-    private fun remembered(): LastOpenedSession? = runBlocking { prefs.preferences.first().lastOpenedSession }
+    private fun remembered(origin: String? = null): LastOpenedSession? = runBlocking { prefs.preferences.first().lastOpenedFor(origin) }
 
     private fun reopeningShown() = rule.onAllNodesWithText("Reopening your session.").fetchSemanticsNodes().isNotEmpty()
 
@@ -107,6 +115,91 @@ class MainShellSelectionModelTest {
         assertEquals("the chat view's mount attaches it", listOf("mine"), client.base.mountCalls.toList())
         rule.waitUntil(5_000) { remembered() != null }
         assertEquals(LastOpenedSession("/w", "mine", "h-mine"), remembered())
+    }
+
+    @Test
+    fun nothingIsPickedFromTheSavedListBeforeTheServersFirstSnapshot() {
+        storedState("sessions", remembered = null)
+        val client = Client()
+        client.base.link.value = com.tether.app.client.ConnectionState.Connecting
+        list(client, chat("cached-first"), chat("b")) // the device's saved copy of the list
+        val vm = TetherViewModel(client)
+        compose(vm)
+        assertNull(vm.selectedSessionId.value)
+        // The server's `ready` lists its sessions, then the link is up.
+        client.base.sessions.value = listOf(chat("b"))
+        client.base.link.value = com.tether.app.client.ConnectionState.Connected
+        rule.waitUntil(5_000) { vm.selectedSessionId.value != null }
+        rule.waitForIdle()
+        assertEquals("b", vm.selectedSessionId.value)
+        assertEquals(listOf("b"), client.base.mountCalls.toList())
+    }
+
+    @Test
+    fun theServersSnapshotListingTheSameChatsAsTheSavedCopyStillPicksOnceItLands() {
+        storedState("sessions", remembered = null)
+        val client = Client()
+        client.base.link.value = com.tether.app.client.ConnectionState.Connecting
+        list(client, chat("a"), chat("b"))
+        val vm = TetherViewModel(client)
+        compose(vm)
+        assertNull(vm.selectedSessionId.value)
+        rule.runOnIdle { client.base.link.value = com.tether.app.client.ConnectionState.Connected } // same list
+        rule.waitUntil(5_000) { vm.selectedSessionId.value != null }
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun eachServerRestoresItsOwnRememberedChatAndRemembersUnderItsOrigin() {
+        // Remembered under the canonical origin (SettingsStore serverOrigin), configured as typed.
+        val serverA = "https://a.example:443"
+        val serverB = "https://b.example:443"
+        storedState("sessions", remembered = null)
+        runBlocking {
+            prefs.updatePreferences {
+                it.copy(lastOpenedByOrigin = mapOf(serverA to LastOpenedSession("/w", "a", "h-a"), serverB to LastOpenedSession("/w", "b", "h-b")))
+            }
+        }
+        val client = Client()
+        client.base.server.value = "https://b.example"
+        list(client, chat("a"), chat("b"), chat("c"))
+        val vm = TetherViewModel(client)
+        compose(vm)
+        assertEquals("server B's own chat", "b", vm.selectedSessionId.value)
+        vm.selectSession("c")
+        rule.waitUntil(5_000) { remembered(serverB)?.sessionId == "c" }
+        assertEquals("server A's memory untouched", "a", remembered(serverA)?.sessionId)
+    }
+
+    @Test
+    fun theSingleRememberedChatOfAnOlderVersionBecomesTheCurrentServersOnce() {
+        val serverA = "https://a.example:443"
+        storedState("sessions", remembered = null)
+        runBlocking { prefs.updatePreferences { it.copy(lastOpenedSession = LastOpenedSession("/w", "b", "h-b")) } }
+        val client = Client()
+        client.base.server.value = "https://a.example"
+        list(client, chat("a"), chat("b"))
+        val vm = TetherViewModel(client)
+        compose(vm)
+        assertEquals("b", vm.selectedSessionId.value)
+        rule.waitUntil(5_000) { runBlocking { prefs.preferences.first().lastOpenedSession } == null }
+        assertEquals(LastOpenedSession("/w", "b", "h-b"), remembered(serverA))
+        assertNull("not another server's", remembered("https://other.example"))
+    }
+
+    @Test
+    fun anotherServerSettlesItsOwnCurrentWorkspace() {
+        storedState("sessions", remembered = null)
+        runBlocking { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-a") } }
+        val client = Client()
+        client.base.server.value = "https://a.example"
+        val vm = TetherViewModel(client)
+        compose(vm)
+        rule.waitUntil(5_000) { vm.currentWorkspace.value != null }
+        assertEquals("/w/default-a", vm.currentWorkspace.value)
+        runBlocking { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-b") } }
+        rule.runOnIdle { client.base.server.value = "https://b.example" }
+        rule.waitUntil(5_000) { vm.currentWorkspace.value == "/w/default-b" }
     }
 
     @Test

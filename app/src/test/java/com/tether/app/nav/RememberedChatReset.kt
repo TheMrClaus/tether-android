@@ -11,5 +11,5 @@ import kotlinx.coroutines.runBlocking
  * cold start. A test that boots the real root starts from no remembered chat.
  */
 internal fun forgetRememberedChat() = runBlocking {
-    UiPrefs(ApplicationProvider.getApplicationContext<Context>()).updatePreferences { it.copy(lastOpenedSession = null) }
+    UiPrefs(ApplicationProvider.getApplicationContext<Context>()).updatePreferences { it.copy(lastOpenedSession = null, lastOpenedByOrigin = emptyMap()) }
 }

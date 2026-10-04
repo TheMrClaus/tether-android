@@ -190,6 +190,10 @@ class MainShellCardStateTest {
         // Another server (I-2): nothing of the first one's cards is kept.
         rule.runOnIdle { client.server.value = "https://two.example.test" }
         rule.waitForIdle()
+        // ta-coik.41 r2: another server's console starts with nothing selected (another web origin);
+        // its chat of the same id is opened there.
+        rule.runOnIdle { vm.selectSession("s1") }
+        rule.waitForIdle()
         arm()
         scrollTo("grant-network")
         rule.onNodeWithTag("grant-network").assertIsOn()

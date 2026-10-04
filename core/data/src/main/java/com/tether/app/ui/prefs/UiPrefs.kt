@@ -75,6 +75,7 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         val lastOpenedCwd = stringPreferencesKey(PreferenceKeys.LAST_OPENED_CWD)
         val lastOpenedSessionId = stringPreferencesKey(PreferenceKeys.LAST_OPENED_SESSION_ID)
         val lastOpenedHistoryId = stringPreferencesKey(PreferenceKeys.LAST_OPENED_HISTORY_ID)
+        val lastOpenedByOrigin = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN)
         val sidebarActiveOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_ACTIVE_ONLY)
         val sidebarUnreadOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_UNREAD_ONLY)
         val sidebarHideAgentRuns = booleanPreferencesKey(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS)
@@ -173,6 +174,7 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             prefs.putOrRemove(Keys.lastOpenedCwd, opened?.cwd)
             prefs.putOrRemove(Keys.lastOpenedSessionId, opened?.sessionId)
             prefs.putOrRemove(Keys.lastOpenedHistoryId, opened?.historyId)
+            prefs.putOrRemove(Keys.lastOpenedByOrigin, TetherPreferences.joinOpened(next.lastOpenedByOrigin).ifEmpty { null })
             prefs[Keys.sidebarActiveOnly] = next.sidebarActiveOnly
             prefs[Keys.sidebarUnreadOnly] = next.sidebarUnreadOnly
             prefs[Keys.sidebarHideAgentRuns] = next.sidebarHideAgentRuns

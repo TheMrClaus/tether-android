@@ -46,13 +46,39 @@ data class TetherPreferences(
     val collapsedWorkspaces: List<String> = emptyList(),
     /** historyId → last time this device opened the conversation (epoch ms). */
     val lastSeenSessions: Map<String, Long> = emptyMap(),
+    /**
+     * The single remembered chat the app kept before ta-coik.41 r2. Read only until it is migrated to
+     * the current server ([migrateLastOpened]); [lastOpenedFor] falls back to it meanwhile.
+     */
     val lastOpenedSession: LastOpenedSession? = null,
+    /**
+     * ta-coik.41 r2: the web's `lastOpenedSession` per server origin (the web's localStorage is per
+     * origin, so each server remembers its own chat). Key "" holds it with no server configured.
+     */
+    val lastOpenedByOrigin: Map<String, LastOpenedSession> = emptyMap(),
     val sidebarActiveOnly: Boolean = false,
     val sidebarUnreadOnly: Boolean = false,
     val sidebarHideAgentRuns: Boolean = true,
     val sidebarSort: SidebarSort = SidebarSort.Created,
     val pinnedModels: List<String> = emptyList(),
 ) {
+    /** The chat [origin]'s server last had on screen (null origin: no server configured). */
+    fun lastOpenedFor(origin: String?): LastOpenedSession? = lastOpenedByOrigin[origin.orEmpty()] ?: lastOpenedSession
+
+    /** dashboard.tsx 90fbb9f :829-835 for [origin]: written only when the cwd or the id differs. */
+    fun rememberOpenedFor(origin: String?, opened: LastOpenedSession): TetherPreferences {
+        val current = lastOpenedByOrigin[origin.orEmpty()]
+        if (current != null && current.cwd == opened.cwd && current.sessionId == opened.sessionId) return this
+        return copy(lastOpenedByOrigin = lastOpenedByOrigin + (origin.orEmpty() to opened))
+    }
+
+    /** The pre-r2 single value becomes [origin]'s (once: it is cleared), unless that server has its own. */
+    fun migrateLastOpened(origin: String): TetherPreferences {
+        val legacy = lastOpenedSession ?: return this
+        val byOrigin = if (origin in lastOpenedByOrigin) lastOpenedByOrigin else lastOpenedByOrigin + (origin to legacy)
+        return copy(lastOpenedSession = null, lastOpenedByOrigin = byOrigin)
+    }
+
     companion object {
         /** The web `defaults` (use-preferences.ts:237-260). */
         val Default = TetherPreferences()
@@ -97,6 +123,7 @@ data class TetherPreferences(
                     str(PreferenceKeys.LAST_OPENED_SESSION_ID),
                     raw[PreferenceKeys.LAST_OPENED_HISTORY_ID],
                 ),
+                lastOpenedByOrigin = openedMap(str(PreferenceKeys.LAST_OPENED_BY_ORIGIN)),
                 sidebarActiveOnly = bool(PreferenceKeys.SIDEBAR_ACTIVE_ONLY, d.sidebarActiveOnly),
                 sidebarUnreadOnly = bool(PreferenceKeys.SIDEBAR_UNREAD_ONLY, d.sidebarUnreadOnly),
                 sidebarHideAgentRuns = bool(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS, d.sidebarHideAgentRuns),
@@ -136,6 +163,28 @@ data class TetherPreferences(
         internal fun joinSeen(values: Map<String, Long>): String = values.entries
             .filter { (id, _) -> id.isNotEmpty() && '\n' !in id && '\t' !in id }
             .joinToString("\n") { (id, at) -> "$id\t$at" }
+
+        /**
+         * `origin\tsessionId\thistoryId\tcwd` lines (historyId "" = null; the cwd last, so it may hold
+         * a tab). A line without a session id or a cwd is dropped.
+         */
+        private fun openedMap(value: String?): Map<String, LastOpenedSession> {
+            if (value.isNullOrEmpty()) return emptyMap()
+            val out = LinkedHashMap<String, LastOpenedSession>()
+            for (line in value.split('\n')) {
+                val parts = line.split('\t', limit = 4)
+                if (parts.size != 4 || parts[1].isEmpty()) continue
+                out[parts[0]] = LastOpenedSession(parts[3], parts[1], parts[2].ifEmpty { null })
+            }
+            return out
+        }
+
+        internal fun joinOpened(values: Map<String, LastOpenedSession>): String = values.entries
+            .filter { (origin, o) ->
+                listOf(origin, o.sessionId, o.historyId.orEmpty(), o.cwd).none { '\n' in it } &&
+                    listOf(origin, o.sessionId, o.historyId.orEmpty()).none { '\t' in it } && o.sessionId.isNotEmpty()
+            }
+            .joinToString("\n") { (origin, o) -> "$origin\t${o.sessionId}\t${o.historyId.orEmpty()}\t${o.cwd}" }
 
         /** The web's `{ cwd, sessionId, historyId }`: both ids required, historyId string-or-null. */
         private fun lastOpened(cwd: String?, sessionId: String?, historyId: Any?): LastOpenedSession? {
@@ -184,6 +233,8 @@ object PreferenceKeys {
     const val LAST_OPENED_CWD = "last_opened_cwd"
     const val LAST_OPENED_SESSION_ID = "last_opened_session_id"
     const val LAST_OPENED_HISTORY_ID = "last_opened_history_id"
+    /** ta-coik.41 r2: native-only, `lastOpenedSession` per server origin. */
+    const val LAST_OPENED_BY_ORIGIN = "last_opened_by_origin"
     const val SIDEBAR_ACTIVE_ONLY = "sidebar_active_only"
     const val SIDEBAR_UNREAD_ONLY = "sidebar_unread_only"
     const val SIDEBAR_HIDE_AGENT_RUNS = "sidebar_hide_agent_runs"

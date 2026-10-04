@@ -72,6 +72,12 @@ class UiPrefsPersistenceTest {
             collapsedWorkspaces = listOf("/srv/a"),
             lastSeenSessions = mapOf("h1" to 1_700_000_000_000L, "h2" to 5L),
             lastOpenedSession = LastOpenedSession("/srv/a", "s1", "h1"),
+            // ta-coik.41 r2: per server origin; a cwd may hold a tab, a history id may be absent.
+            lastOpenedByOrigin = mapOf(
+                "https://a.example" to LastOpenedSession("/srv/a", "s1", "h1"),
+                "https://b.example:8443" to LastOpenedSession("/srv/with\ttab", "s2", null),
+                "" to LastOpenedSession("/srv/none", "s3", "h3"),
+            ),
             sidebarActiveOnly = true,
             sidebarUnreadOnly = true,
             sidebarHideAgentRuns = false,
@@ -91,12 +97,13 @@ class UiPrefsPersistenceTest {
             assertFalse(prefs.showEnded.first())
             assertEquals(listOf("/srv/b", "/srv/a"), prefs.pinnedProjects.first())
             // Clearing optional fields removes them.
-            prefs.updatePreferences { it.copy(sidebarWidth = null, lastOpenedSession = null) }
+            prefs.updatePreferences { it.copy(sidebarWidth = null, lastOpenedSession = null, lastOpenedByOrigin = emptyMap()) }
         }
         withPrefs { prefs ->
             val back = prefs.preferences.first()
             assertEquals(null, back.sidebarWidth)
             assertEquals(null, back.lastOpenedSession)
+            assertEquals(emptyMap<String, LastOpenedSession>(), back.lastOpenedByOrigin)
             assertEquals(260, back.inspectorWidth)
         }
     }

@@ -37,6 +37,8 @@ class TetherViewModelSelectionModelTest {
     private class Client : StubClient() {
         override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
         override val connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+        val url = MutableStateFlow<String?>("https://a.example")
+        override val serverUrl: kotlinx.coroutines.flow.StateFlow<String?> get() = url
         val mounted = mutableListOf<String>()
         val resumed = mutableListOf<String>()
         override fun attachMounted(sessionId: String) {
@@ -74,6 +76,12 @@ class TetherViewModelSelectionModelTest {
         Dispatchers.resetMain()
     }
 
+    /** r2: the server's `ready` has listed the sessions (Connected follows it). */
+    private fun goLive() {
+        client.connection.value = ConnectionState.Connected
+        main.scheduler.runCurrent()
+    }
+
     private fun noAttach() {
         assertEquals("nothing attached by the model", emptyList<String>(), client.attached + client.mounted)
     }
@@ -98,6 +106,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun noPickOverASelectionWhoseChatLeftTheList() {
+        goLive()
         vm.onBootView(sessionsView = true, remembered = null)
         vm.selectSession("a")
         vm.pickIfNothingSelected(sessionsView = true, visible = listOf(chat("b")), currentWorkspace = "/w")
@@ -108,6 +117,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun thePickTakesTheFirstChatInTheCurrentWorkspaceElseTheFirstListedAndAttachesNothing() {
+        goLive()
         vm.onBootView(sessionsView = true, remembered = null)
         vm.pickIfNothingSelected(true, listOf(chat("x", cwd = "/other"), chat("y", cwd = "/w"), chat("z", cwd = "/w")), currentWorkspace = "/w")
         assertEquals("y", vm.selectedSessionId.value)
@@ -120,6 +130,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun withNoChatInTheCurrentWorkspaceThePickIsTheFirstListed() {
+        goLive()
         vm.onBootView(sessionsView = true, remembered = null)
         vm.pickIfNothingSelected(true, listOf(chat("x", cwd = "/a"), chat("y", cwd = "/b")), currentWorkspace = "/w")
         assertEquals("x", vm.selectedSessionId.value)
@@ -127,6 +138,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun thePickLeavesTheNewSessionSheetUp() {
+        goLive()
         vm.onBootView(sessionsView = true, remembered = null)
         vm.openDraft()
         vm.pickIfNothingSelected(true, listOf(chat("x")), currentWorkspace = "/w")
@@ -136,6 +148,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun thePickDoesNotFireOffSessionsOnAnEmptyListWhileOpeningOrALinkWaitsOrBeforeTheBootView() {
+        goLive()
         val list = listOf(chat("x"))
         vm.pickIfNothingSelected(true, list, "/w") // the boot view is not resolved yet
         assertNull(vm.selectedSessionId.value)
@@ -155,6 +168,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun aReturnToSessionsWithNothingSelectedPicks() {
+        goLive()
         vm.onBootView(sessionsView = false, remembered = null) // the boot landed on the Overview
         vm.onNavigateToSessions(listOf(chat("x")), remembered = null)
         assertNull(vm.selectedSessionId.value)
@@ -217,6 +231,7 @@ class TetherViewModelSelectionModelTest {
 
     @Test
     fun withNoConversationToReopenTheRememberedChatIsGivenUpAndThePickRuns() {
+        goLive()
         vm.onBootView(true, remembered)
         assertNull(vm.bootRestoreStep(true, listOf(history("h-other"))))
         assertNull(vm.selectedSessionId.value)
@@ -294,6 +309,71 @@ class TetherViewModelSelectionModelTest {
         assertNull(vm.selectedSessionId.value)
         vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
         assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    // --- r2: the live list, sign-out and another server -----------------------------------------
+
+    @Test
+    fun noPickFromTheSavedListBeforeTheServersFirstSnapshot() {
+        vm.onBootView(sessionsView = true, remembered = null)
+        vm.pickIfNothingSelected(true, listOf(chat("cached")), "/w") // read back from the device
+        assertNull(vm.selectedSessionId.value)
+        assertFalse(vm.listLive.value)
+        goLive()
+        assertTrue(vm.listLive.value)
+        vm.pickIfNothingSelected(true, listOf(chat("live")), "/w")
+        assertEquals("live", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun aSignOutReArmsTheGraceAndTheLiveList() {
+        client.connection.value = ConnectionState.Connected
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS + 1)
+        main.scheduler.runCurrent()
+        assertTrue(vm.restoreGraceElapsed.value)
+        assertTrue(vm.listLive.value)
+        vm.logout()
+        main.scheduler.runCurrent()
+        assertFalse("the next sign-in waits for its own discovery", vm.restoreGraceElapsed.value)
+        assertFalse(vm.listLive.value)
+    }
+
+    @Test
+    fun aSignOutClearsTheCurrentWorkspaceSoTheNextServersReadyFixesItsOwn() {
+        vm.settleWorkspace("/serverA/root")
+        vm.logout()
+        main.scheduler.runCurrent()
+        assertNull(vm.currentWorkspace.value)
+        vm.settleWorkspace("/serverB/root")
+        assertEquals("/serverB/root", vm.currentWorkspace.value)
+    }
+
+    @Test
+    fun anotherServerStartsTheConsoleAfresh() {
+        goLive()
+        vm.onBootView(true, null)
+        vm.selectSession("a")
+        vm.settleWorkspace("/serverA/root")
+        client.url.value = "https://b.example"
+        main.scheduler.runCurrent()
+        assertNull(vm.selectedSessionId.value)
+        assertNull(vm.currentWorkspace.value)
+        assertFalse(vm.listLive.value)
+        vm.settleWorkspace("/serverB/root")
+        assertEquals("/serverB/root", vm.currentWorkspace.value)
+        vm.onBootView(true, LastOpenedSession("/serverB/root", "b1", "h-b1")) // its own remembered chat
+        assertEquals("b1", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun theFirstServerLearntAtStartIsNoSwitch() {
+        val fresh = Client().also { it.url.value = null }
+        val cold = vms.track(TetherViewModel(fresh, InMemoryDraftStore(), monotonicClock = { 0 }))
+        main.scheduler.runCurrent()
+        cold.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
+        fresh.url.value = "https://a.example" // the stored server read after the boot view
+        main.scheduler.runCurrent()
+        assertEquals("a", cold.selectedSessionId.value)
     }
 
     // --- the top bar's Sessions ------------------------------------------------------------------

@@ -87,6 +87,15 @@ class TetherViewModel(
      */
     val restoreGraceElapsed: StateFlow<Boolean> = _restoreGraceElapsed.asStateFlow()
 
+    private val _listLive = MutableStateFlow(false)
+
+    /**
+     * ta-coik.41 r2: a server snapshot has listed the sessions since this sign-in (the web has no list
+     * before its first `ready`, use-tether.ts 90fbb9f :769). A list read back from the device's saved
+     * copy is not one, so the one-time pick waits for this.
+     */
+    val listLive: StateFlow<Boolean> = _listLive.asStateFlow()
+
     /** The newest `created` seq already acted on (a reply that arrived before this VM is not a new one). */
     private var followedCreatedSeq = 0L
 
@@ -256,6 +265,10 @@ class TetherViewModel(
         // ta-8cv: the draft composer's preferences are that server's own.
         draftComposer.onOrigin(origin)
         if (origin == draftOrigin) return
+        // ta-coik.41 r2: another server is another web origin, a page of its own: its console starts
+        // afresh (selection, remembered chat, restore, current workspace). Not the first server
+        // learnt after a cold start (no previous origin).
+        if (draftOrigin != null) resetConsole()
         // ta-abm: the dropped draft's sheet goes with its server.
         hideDraft()
         draftOrigin = origin
@@ -413,6 +426,8 @@ class TetherViewModel(
         viewModelScope.launch {
             client.connection.collectLatest { state ->
                 if (state != ConnectionState.Connected) return@collectLatest
+                // r2: the list is the server's from here (its `ready` set it before Connected).
+                _listLive.value = true
                 kotlinx.coroutines.delay(RESTORE_GRACE_MS)
                 _restoreGraceElapsed.value = true
             }
@@ -610,7 +625,7 @@ class TetherViewModel(
      * is seeded first, as the web seeds it at mount).
      */
     fun pickIfNothingSelected(sessionsView: Boolean, visible: List<AgentSession>, currentWorkspace: String?) {
-        if (!bootViewSeen || !sessionsView || visible.isEmpty()) return
+        if (!bootViewSeen || !_listLive.value || !sessionsView || visible.isEmpty()) return
         if (_selectedSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
         val preferred = visible.firstOrNull { it.cwd == currentWorkspace } ?: visible.first()
         adopt(preferred.id)
@@ -629,6 +644,23 @@ class TetherViewModel(
         if (visible.none { it.id == id }) return
         adopt(id)
         _selectionPending.value = true
+    }
+
+    /**
+     * The web's /login unmount (a sign-out, another server): nothing selected, pending or opening, the
+     * remembered chat seeded again on the next boot view, the grace and the live list re-armed by the
+     * next connection, and the current workspace settled again on its `ready` (use-tether.ts :783).
+     */
+    private fun resetConsole() {
+        _selectedSessionId.value = null
+        _selectionPending.value = false
+        _openingHistoryId.value = null
+        bootViewSeen = false
+        restoreTarget = null
+        restoreSettled = false
+        _restoreGraceElapsed.value = false
+        _listLive.value = false
+        _currentWorkspace.value = null
     }
 
     /** The web's `setActiveId` / `setPendingSessionId` alone: no attach, the sheet stays, the opening row stays. */
@@ -761,15 +793,8 @@ class TetherViewModel(
             _logoutNotice.value = logoutNoticeFor(client.logout())
             stagedAttachments.clear()
             draftComposer.clearAttachments()
-            _selectedSessionId.value = null
-            _selectionPending.value = false
-            // ta-coik.41: the web's Dashboard unmounts on /login, so the next sign-in boots afresh
-            // (remembered chat, restore, grace).
-            bootViewSeen = false
-            restoreTarget = null
-            restoreSettled = false
-            _restoreGraceElapsed.value = false
-            _openingHistoryId.value = null
+            // ta-coik.41: the web's Dashboard unmounts on /login, so the next sign-in boots afresh.
+            resetConsole()
             // ta-abm: so does the new-session sheet (the draft itself is the server's, kept in memory).
             hideDraft()
             // T5.3: the web's search state lives in the Dashboard, which /login unmounts.

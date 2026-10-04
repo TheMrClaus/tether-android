@@ -8,7 +8,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.prefs.LastOpenedSession
-import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.shell.DashboardView
@@ -23,7 +22,7 @@ import kotlinx.coroutines.CoroutineScope
  * - the boot restore reopens it by historyId, or gives it up ([TetherViewModel.bootRestoreStep],
  *   :856-886; `reopen` :465-479: the block becomes current, resume, seen, the drawer closes);
  * - the one-time pick ([TetherViewModel.pickIfNothingSelected], :752-763);
- * - the chat on screen is remembered as `lastOpenedSession` (:829-835).
+ * - the chat on screen is remembered as `lastOpenedSession` (:829-835), per server origin (r2).
  * Its own composable, so a preference change recomposes this and not the shell.
  */
 @Composable
@@ -49,9 +48,15 @@ internal fun WebSelectionEffects(
     val historiesByCwd by client.historiesByCwd.collectAsStateWithLifecycle()
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val grace by vm.restoreGraceElapsed.collectAsStateWithLifecycle()
+    val listLive by vm.listLive.collectAsStateWithLifecycle()
+    val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
+    // r2: each server remembers its own chat (the web's localStorage is per origin).
+    val origin = com.tether.app.client.serverOrigin(serverUrl)
+    val remembered = loaded.lastOpenedFor(origin)
+    val scoped = loaded.copy(lastOpenedSession = remembered)
 
     val visible = SidebarModel.visibleSessions(sessions, loaded.showEndedSessions)
-    val current = SidebarController.resolveCurrentWorkspace(picked, loaded, workspaceRoot)
+    val current = SidebarController.resolveCurrentWorkspace(picked, scoped, workspaceRoot)
     val workspaces = SidebarModel.sidebarWorkspaces(SidebarController.pinnedWorkspacesOf(serverSettings, loaded), current)
     val histories = current?.let { historiesByCwd[it] }.orEmpty()
 
@@ -65,14 +70,21 @@ internal fun WebSelectionEffects(
         )
     }
 
-    // use-tether.ts :783-785: `ready` fixes the current workspace (the remembered chat's folder, the
-    // default one, else the server's root), so a chat opened later does not move it.
-    LaunchedEffect(workspaceRoot) {
-        if (workspaceRoot != null) vm.settleWorkspace(SidebarController.resolveCurrentWorkspace(null, loaded, workspaceRoot))
+    // r2: the single chat remembered before per-server memory becomes this server's, once.
+    LaunchedEffect(origin, loaded.lastOpenedSession != null) {
+        if (origin != null && loaded.lastOpenedSession != null) {
+            scope.launchPreferenceWrite { prefs.updatePreferences { it.migrateLastOpened(origin) } }
+        }
     }
-    // :736-748: the first resolved view (once per view model).
+    // use-tether.ts :783-785: `ready` fixes the current workspace (the remembered chat's folder, the
+    // default one, else the server's root), so a chat opened later does not move it; again after a
+    // sign-out or another server clears it (r2).
+    LaunchedEffect(workspaceRoot, picked == null) {
+        if (workspaceRoot != null && picked == null) vm.settleWorkspace(SidebarController.resolveCurrentWorkspace(null, scoped, workspaceRoot))
+    }
+    // :736-748: the first resolved view (once per view model and sign-in).
     LaunchedEffect(view != null) {
-        if (view != null) vm.onBootView(view == DashboardView.Sessions, loaded.lastOpenedSession)
+        if (view != null) vm.onBootView(view == DashboardView.Sessions, remembered)
     }
     // :856-886: the boot restore.
     LaunchedEffect(sessionsView, sessions, histories, grace, selectedId, pending) {
@@ -84,19 +96,13 @@ internal fun WebSelectionEffects(
         }
     }
     // :752-763: the one-time pick.
-    LaunchedEffect(view, sessionsView, selectedId, openingHistoryId, bootLinkPending, visible, current) {
+    LaunchedEffect(view, sessionsView, selectedId, openingHistoryId, bootLinkPending, visible, current, listLive) {
         vm.pickIfNothingSelected(sessionsView, visible, current)
     }
     // :829-835: remember the chat on screen.
-    LaunchedEffect(session?.id, session?.cwd) {
+    LaunchedEffect(session?.id, session?.cwd, origin) {
         val shown = session ?: return@LaunchedEffect
-        scope.launchPreferenceWrite { prefs.updatePreferences { it.rememberOpened(shown) } }
+        val opened = LastOpenedSession(shown.cwd, shown.id, shown.historyId)
+        scope.launchPreferenceWrite { prefs.updatePreferences { it.rememberOpenedFor(origin, opened) } }
     }
-}
-
-/** dashboard.tsx:829-835: `{ cwd, sessionId, historyId }`, written only when the cwd or the id differs. */
-internal fun TetherPreferences.rememberOpened(session: AgentSession): TetherPreferences {
-    val current = lastOpenedSession
-    if (current != null && current.cwd == session.cwd && current.sessionId == session.id) return this
-    return copy(lastOpenedSession = LastOpenedSession(session.cwd, session.id, session.historyId))
 }
