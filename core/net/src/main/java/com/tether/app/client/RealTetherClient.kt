@@ -2399,6 +2399,10 @@ class RealTetherClient(
     }
 
     override fun onDefaultNetworkChanged() {
+        // ta-coik.32 (R4): pooled connections were made on the previous network. A request reusing
+        // one would write into a dead socket and wait out the read timeout (10 s), so they go now
+        // (a browser drops its sockets on a network change too). Idle ones only; the pool is shared.
+        httpClient.connectionPool.evictAll()
         var abandoned: WebSocket? = null
         val stale = synchronized(lock) {
             if (haltedLocked()) return

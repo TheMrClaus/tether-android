@@ -131,6 +131,9 @@ class ConnectionHarness {
     val scheduler = ManualScheduler()
     val now = AtomicLong(1_000_000)
     lateinit var client: RealTetherClient
+
+    /** The client's HTTP client (its connection pool is observable). */
+    val http = OkHttpClient()
     lateinit var settings: InMemorySettings
 
     /** Runs on the server's reader thread before a client frame is recorded (a test may block it). */
@@ -205,7 +208,7 @@ class ConnectionHarness {
         }
         client = RealTetherClient(
             settings = settings,
-            httpClient = OkHttpClient(),
+            httpClient = http,
             scope = scope,
             clock = { now.get() },
             backoff = backoff,

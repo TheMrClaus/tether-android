@@ -253,4 +253,24 @@ class ReconnectLatencyTest {
         assertEquals("every subscription at once, in order", listOf("s1" to 1L, "s2" to 1L), attaches(h.framesUntilBarrier()))
         assertTrue(h.scheduler.pending().none { it.delayMs == ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS })
     }
+
+    // ------------------------------------------------------------------
+    // R4: nothing is reused from the previous network
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aDefaultNetworkChangeOpensFreshConnectionsInsteadOfReusingPooledOnes() {
+        connected()
+        val probe = h.server.takeRequest()
+        val upgrade = h.server.takeRequest()
+        assertEquals("/api/auth/session", probe.path)
+        assertEquals("/ws", upgrade.path)
+        assertTrue("the probe's connection is idle in the pool", h.http.connectionPool.idleConnectionCount() > 0)
+        h.enqueueConnect()
+        h.client.onDefaultNetworkChanged()
+        h.handshake(h.nextSocket())
+        val next = h.server.takeRequest()
+        assertEquals("/api/auth/session", next.path)
+        assertEquals("a new connection (the first request on it), not the pooled one", 0, next.sequenceNumber)
+    }
 }
