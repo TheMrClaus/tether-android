@@ -4163,6 +4163,20 @@ class RealTetherClient(
     })
 
     /**
+     * T8.4: the GitHub issues / pull requests reads, over [authHttp] with the same per-call (server,
+     * credential) read as [githubConnection]; each call is made only when that server is the one the
+     * screen names.
+     */
+    override val githubWork: GitHubWorkSource = HttpGitHubWork(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
+    /**
      * T10.4: Settings → Devices, over [authHttp] with the same per-call (server, credential) read as
      * [files], plus which kind of sign-in that credential is (read in the same lock, so the two
      * always agree). Each call goes only to the server the screen names. r2 (security F2): each call

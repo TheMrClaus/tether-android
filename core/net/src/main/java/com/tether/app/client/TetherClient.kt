@@ -704,6 +704,14 @@ interface TetherClient {
     val githubConnection: GitHubConnectionSource get() = GitHubConnectionSource.Unavailable
 
     /**
+     * T8.4: the working folder's open GitHub issues and pull requests (`GET /api/github/issues` and
+     * `/api/github/pull-requests`, `?cwd=`), each call only to the server it names, on a fixed route,
+     * never following a redirect (see [HttpGitHubWork]). The default refuses every call without
+     * touching the network.
+     */
+    val githubWork: GitHubWorkSource get() = GitHubWorkSource.Unavailable
+
+    /**
      * T10.4: Settings → Devices (paired devices, passkeys, signed-in sessions), over the fixed routes
      * of [DeviceSecuritySource], each call bound to the server it names and sent with the credential
      * in force, never following a redirect (see [HttpDeviceSecurity]).
