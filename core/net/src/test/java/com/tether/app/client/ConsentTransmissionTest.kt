@@ -5,6 +5,7 @@ import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.reduce.freshTree
 import com.tether.app.protocol.tree.JsCodec
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
@@ -226,29 +227,49 @@ class ConsentTransmissionTest {
     }
 
     @Test
-    fun theCopyHeldFromALostConnectionIsNotActionableUntilTheNewSnapshot() {
+    fun offlineADecisionIsRefusedAndNotHeldButCatchingUpItIsSentAsOnTheWeb() {
         val (client, ws) = connected()
+        val errors = java.util.concurrent.LinkedBlockingQueue<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors.put(it) } }
         h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
         assertTrue("nothing is live without a socket", client.liveSessions.value.isEmpty())
-        // Disconnected: refused, and nothing is kept to be sent later.
+        // Disconnected: refused in the web's words (use-tether.ts 90fbb9f :337-344), nothing kept.
         assertEquals(ConsentResult.NotConnected, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals("The secure link is reconnecting. Your input was not sent.", errors.poll(20, java.util.concurrent.TimeUnit.SECONDS))
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1"))
         assertEquals("s1", h.expectFrame("attach").str("sessionId"))
-        // Connected again, the saved tree still shows r-choice pending: not live yet, refused.
+        // ta-coik.24: connected again, catching up (the saved tree still shows r-choice pending): sent
+        // on the open socket, as the web's `send` does; the refused tap above was not held for it.
         assertTrue(client.projectionTrees.value.containsKey("s1"))
-        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
-        assertTrue("the refused tap was not held for the new link", consentFrames().isEmpty())
-
-        ws2.send(snapshotFrame("s1", 5, consentStateJson()))
-        h.await(client.liveSessions) { "s1" in it }
-        assertTrue("the snapshot sends nothing by itself (no replay)", consentFrames().isEmpty())
+        assertFalse("s1" in client.liveSessions.value)
         assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertEquals(1, consentFrames().size)
+
+        // Still one decision per request: the snapshot landing does not open a second one.
+        ws2.send(snapshotFrame("s1", 5, consentStateJson()))
+        h.await(client.liveSessions) { "s1" in it }
+        assertEquals(ConsentResult.AlreadyDecided, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertTrue(consentFrames().isEmpty())
+    }
+
+    @Test
+    fun catchingUpAQuestionIsAnsweredAsOnTheWeb() {
+        val (client, ws) = connected()
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        h.scheduler.await(::isReconnectDelay).fire()
+        val ws2 = h.nextSocket()
+        h.handshake(ws2, readyWithSessions("s1"))
+        h.expectFrame("attach")
+        assertFalse("s1" in client.liveSessions.value)
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
+        assertEquals(listOf("question"), consentFrames().map { it.type() })
     }
 
     @Test
@@ -272,16 +293,15 @@ class ConsentTransmissionTest {
     }
 
     @Test
-    fun aGapMakesTheSessionNotLiveUntilItsResyncSnapshot() {
+    fun aGapDoesNotHoldADecisionBackAsOnTheWeb() {
         val (client, ws) = connected()
         // seq 9 after 5: a gap, the cursor asks for a resync.
         ws.send(eventFrame("s1", 9, "tool_start", "t1", ""","toolId":"x","name":"Bash","input":{}"""))
         assertEquals("attach", h.frame().type())
         h.await(client.liveSessions) { "s1" !in it }
-        assertEquals(ConsentResult.NotLive, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
-        ws.send(snapshotFrame("s1", 9, consentStateJson()))
-        h.await(client.liveSessions) { "s1" in it }
+        // ta-coik.24: the socket is open, so the decision goes out (use-tether.ts 90fbb9f :337-344).
         assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(1, consentFrames().size)
     }
 
     @Test
@@ -472,7 +492,8 @@ class ConsentTransmissionTest {
         ws.send(snapshotFrame("s9", 5, state = null))
         h.serverBarrier(ws)
         assertFalse("s9" in client.liveSessions.value)
-        assertEquals(ConsentResult.NotLive, client.approval("s9", "r-choice", "x", choiceId = "accept"))
+        // No copy of s9 was taken from it, so there is no request to decide.
+        assertEquals(ConsentResult.NotPending, client.approval("s9", "r-choice", "x", choiceId = "accept"))
         assertTrue(consentFrames().isEmpty())
     }
 

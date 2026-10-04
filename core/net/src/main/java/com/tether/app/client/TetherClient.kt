@@ -569,12 +569,12 @@ interface TetherClient {
      * End the session (`kill`). An operator control, called only from a confirmed tap. Sent only on a
      * live, handshaken socket of the server that drew the control ([expectedOrigin], the
      * [consentOrigin] captured when the key was armed or its confirmation opened: an End drawn for
-     * another server is refused, even for a same-id session), for a session the server listed.
-     * [requireLive] (the default: a session header's End session, drawn from the session's own copy)
-     * also needs the session confirmed live on this connection ([liveSessions]); a sidebar row, drawn
-     * from the live session LIST, passes false. Otherwise nothing is sent or held (T13.2 r2, r3).
+     * another server is refused, even for a same-id session). Otherwise nothing is sent or held (T13.2
+     * r2, r3). ta-coik.24: as on the web (dashboard.tsx 90fbb9f :1176, :1184, :1533), neither the
+     * session's liveness nor its being listed gates it; the server answers an unknown session with an
+     * `error` the app shows.
      */
-    fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean = true)
+    fun kill(sessionId: String, expectedOrigin: String?)
 
     /**
      * Called by network observers (and the local-network grant) to reconnect now

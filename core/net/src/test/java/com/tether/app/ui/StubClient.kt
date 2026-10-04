@@ -64,7 +64,7 @@ internal open class StubClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) = Unit
+    override fun kill(sessionId: String, expectedOrigin: String?) = Unit
     /** T13.2 r3: keeps the interface's empty [syncStates], so it reports no freshness. */
     override val reportsFreshness: Boolean = false
     override fun reconnectIfIdle() = Unit

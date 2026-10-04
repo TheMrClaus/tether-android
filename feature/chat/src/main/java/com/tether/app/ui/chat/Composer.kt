@@ -123,7 +123,8 @@ internal const val KEEP_RUNNING_KEY_TAG = "composer-keep-running"
  */
 internal fun interruptRefusalCopy(result: InterruptResult): String? = when (result) {
     InterruptResult.Sent, InterruptResult.NotConnected -> null
-    InterruptResult.NotLive -> "Catching up — the turn was not interrupted. Try again in a moment."
+    // ta-coik.24: NotLive means only "drawn for another server" (RealTetherClient interrupt).
+    InterruptResult.NotLive -> OTHER_SERVER_NOT_SENT
     InterruptResult.Locked -> "This session can’t be interrupted from here."
     InterruptResult.NotCurrentTurn -> "That turn already ended — the turn running now was not interrupted."
 }

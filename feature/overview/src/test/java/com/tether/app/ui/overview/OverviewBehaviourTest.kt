@@ -170,7 +170,7 @@ private class RecordingClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) { calls += "pin" }
     override fun rename(sessionId: String, name: String) { calls += "rename" }
     override fun archive(sessionId: String) { calls += "archive" }
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) { calls += "kill" }
+    override fun kill(sessionId: String, expectedOrigin: String?) { calls += "kill" }
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

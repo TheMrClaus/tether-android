@@ -1479,26 +1479,33 @@ class ApprovalScreenBehaviourTest {
         rule.waitForIdle()
     }
 
-    @Test fun offlineAndCatchingUpCopiesAreNotActionable() {
+    /**
+     * ta-coik.24: as on the web (chat-view.tsx 90fbb9f :1191-1210, :1016-1021: disabled only once
+     * `submitted`), an offline or catching-up copy is answerable; a tap the closed link refused
+     * (use-tether.ts :337-344, the client's NotConnected) leaves the card answerable.
+     */
+    @Test fun offlineAndCatchingUpCopiesAreAnswerableAsOnTheWeb() {
         val client = ChatTestClient()
         client.show(session, ApprovalFixtures.write, live = false)
         client.link.value = ConnectionState.Disconnected
+        client.consentResult = com.tether.app.client.ConsentResult.NotConnected
         host(client)
         scrollTo("approval-allow")
-        rule.onNodeWithText(ConsentLock.Offline.copy).assertIsDisplayed()
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
-
-        rule.runOnIdle { client.link.value = ConnectionState.Connected }
-        rule.waitForIdle()
-        rule.onNodeWithText(ConsentLock.CatchingUp.copy).assertIsDisplayed()
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
-
-        rule.runOnIdle { client.live.value = setOf("s1") }
-        rule.waitForIdle()
-        // ta-coik.13: a lock lifted is answerable at once, as on the web (no arm delay).
+        rule.onNodeWithText(ConsentLock.Offline.copy).assertDoesNotExist()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
+
+        rule.runOnIdle {
+            client.consentResult = com.tether.app.client.ConsentResult.Sent
+            client.link.value = ConnectionState.Connected
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText(ConsentLock.CatchingUp.copy).assertDoesNotExist()
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(List(2) { "approval:s1:req-w:allow" }, client.consentCalls)
+        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
     }
 
     @Test fun theSameRequestOnTwoTabsIsDecidedOnce() {
@@ -1562,8 +1569,9 @@ class ApprovalScreenBehaviourTest {
         rule.onNodeWithTag("grant-network").performClick()
         rule.onNodeWithTag("grant-network").assertIsOff()
         blip(client) {
-            // While the link is down the card is locked, and still shows what the operator chose.
-            rule.onNodeWithText(ConsentLock.Offline.copy).assertIsDisplayed()
+            // While the link is down the card (ta-coik.24: not locked, as on the web) still shows what
+            // the operator chose.
+            rule.onNodeWithText(ConsentLock.Offline.copy).assertDoesNotExist()
             rule.onNodeWithTag("grant-network").assertIsOff()
         }
         scrollTo("grant-network")

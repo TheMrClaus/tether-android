@@ -21,7 +21,7 @@ class FakeTetherClientEndTest {
         val fake = FakeTetherClient()
         val origin = fake.consentOrigin.value
         val target = fake.sessions.value.first { it.status != "exited" }
-        fake.kill(target.id, "https://other.example", requireLive = false)
+        fake.kill(target.id, "https://other.example")
         fake.kill(target.id, null)
         assertNotEquals("exited", fake.sessions.value.first { it.id == target.id }.status)
 

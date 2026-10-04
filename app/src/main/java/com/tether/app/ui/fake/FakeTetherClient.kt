@@ -694,7 +694,7 @@ class FakeTetherClient : TetherClient {
         _sessions.update { list -> list.filterNot { it.id == sessionId } }
     }
 
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
+    override fun kill(sessionId: String, expectedOrigin: String?) {
         // The demo is always connected and every listed session live: only an End drawn for another
         // server (r3) or an unlisted session is refused.
         if (expectedOrigin != DEMO_ORIGIN) return

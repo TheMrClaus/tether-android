@@ -201,7 +201,7 @@ class InterruptErrorBehaviourTest {
         rule.onNodeWithText("End session?").assertExists()
         rule.onNodeWithTag(END_SESSION_CONFIRM_TAG).assertIsEnabled().performClick()
         arm()
-        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
         rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 

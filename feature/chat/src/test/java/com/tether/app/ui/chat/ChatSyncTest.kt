@@ -40,8 +40,8 @@ import org.robolectric.annotation.Config
 import kotlinx.serialization.json.put
 
 /**
- * T13.2 in the chat (SYNC_DESIGN §4.2; native-only, no web reference): an approval card from a
- * saved copy is rendered but never actionable (T6.3's lock, now also wired to freshness), a
+ * T13.2 in the chat (SYNC_DESIGN §4.2): ta-coik.24: an approval card from a saved copy is
+ * answerable as on the web (the client sends on an open socket), a
  * session with nothing on the device says "Not downloaded", and a saved copy's trimmed turns say
  * "Older turns not downloaded" instead of offering a key that cannot load them.
  */
@@ -88,35 +88,44 @@ class ChatSyncTest {
 
     private fun saved() = mapOf("s1" to SessionSync(Freshness.Saved, 1L))
 
+    /**
+     * ta-coik.24: as on the web, a card is answerable whatever the copy (chat-view.tsx 90fbb9f
+     * :1191-1210 disables only once `submitted`); the tap goes to the client, which sends on an open
+     * socket (use-tether.ts :337-344).
+     */
     @Test
-    fun aSavedCopyIsNeverActionableEvenWhereTheLiveSetStillHasIt() {
+    fun aSavedCopysCardIsAnswerableAsOnTheWeb() {
         val client = ChatTestClient()
         client.show(session, ApprovalFixtures.write, live = true)
         client.sync.value = saved()
         host(client)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("approval-allow"))
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue("nothing left the card", client.consentCalls.isEmpty())
-
-        // Freshness and the live set agree again: answerable at once (ta-coik.13: no arm delay).
-        rule.runOnIdle { client.sync.value = mapOf("s1" to SessionSync(Freshness.Live, 2L)) }
-        arm()
+        rule.onNodeWithText(ConsentLock.CatchingUp.copy).assertDoesNotExist()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
     }
 
+    /**
+     * ta-coik.24: offline the card is not locked either; the client refuses the closed link (it says
+     * "The secure link is reconnecting. Your input was not sent.", as the web's `send`) and the card
+     * stays answerable, as the web's (its `submitted` is set only by a send that went out).
+     */
     @Test
-    fun offlineTheCardSaysItIsASavedCopy() {
+    fun offlineTheCardStaysAnswerableAndATapTheLinkRefusedCanBeRepeated() {
         val client = ChatTestClient()
         client.show(session, ApprovalFixtures.write, live = false)
         client.link.value = ConnectionState.Disconnected
         client.sync.value = saved()
+        client.consentResult = com.tether.app.client.ConsentResult.NotConnected
         host(client)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("approval-allow"))
-        rule.onNodeWithText(ConsentLock.Offline.copy).assertIsDisplayed()
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
+        rule.onNodeWithText(ConsentLock.Offline.copy).assertDoesNotExist()
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(List(2) { "approval:s1:req-w:allow" }, client.consentCalls)
     }
 
     @Test
@@ -143,10 +152,10 @@ class ChatSyncTest {
         rule.onNodeWithText("Load 30 earlier turns").assertDoesNotExist()
     }
 
-    // ---- r2: every non-Live freshness locks cards, Stop keys, controls and Interrupt -------------
+    // ---- r2 / ta-coik.22 / ta-coik.24: no non-Live freshness locks cards, Stop keys, controls or Interrupt
 
     @Test
-    fun everyCopyThatIsNotLiveLocksTheCardEvenInTheLiveSet() {
+    fun everyCopyThatIsNotLiveLeavesTheCardAnswerable() {
         val client = ChatTestClient().also { it.reports = true }
         client.show(session, ApprovalFixtures.write, live = true)
         client.sync.value = live("s1")
@@ -155,13 +164,13 @@ class ChatSyncTest {
         for ((name, sync) in notLive("s1")) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
-            rule.waitForIdle()
-            assertTrue("$name: nothing left the card", client.consentCalls.isEmpty())
+            rule.onNodeWithTag("approval-allow").assertIsEnabled()
+            rule.onNodeWithTag("consent-lock").assertDoesNotExist()
         }
-        rule.runOnIdle { client.sync.value = live("s1") }
-        arm()
-        rule.onNodeWithTag("approval-allow").assertIsEnabled()
+        // One decision still: the tap on a copy that is not live reaches the client once.
+        rule.onNodeWithTag("approval-allow").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
     }
 
     /**
@@ -193,8 +202,9 @@ class ChatSyncTest {
         assertEquals(List(expected + 1) { "s1:a" }, client.stopCalls)
     }
 
+    /** ta-coik.24: chat-view.tsx 90fbb9f :2503, :2970, :3018, :4491, none gated on the link or the copy. */
     @Test
-    fun everyCopyThatIsNotLiveLocksTheSessionControlsEvenInTheLiveSet() {
+    fun everyCopyThatIsNotLiveLeavesTheSessionControlsLive() {
         val controlled = SessionControlFixtures.claude
         val client = ChatTestClient().also { it.reports = true }
         client.show(controlled, ComposerFixtures.idle, live = true)
@@ -206,12 +216,15 @@ class ChatSyncTest {
             rule.runOnIdle { client.sync.value = sync }
             arm()
             // Model / Effort / Mode all sit behind this key; its lock is theirs (T7.2).
-            rule.onNodeWithTag("session-settings-trigger").assert(state(controlLockCopy(ConsentLock.CatchingUp)!!))
+            rule.onNodeWithTag("session-settings-trigger").assertIsEnabled()
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
         }
-        rule.runOnIdle { client.sync.value = live(controlled.id) }
+        // Offline too.
+        rule.runOnIdle { client.link.value = ConnectionState.Disconnected }
         arm()
-        rule.onNodeWithTag("session-settings-trigger").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
-        assertTrue(client.controlCalls.isEmpty())
+        rule.onNodeWithTag("session-settings-trigger").assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        assertTrue("nothing is sent without a tap", client.controlCalls.isEmpty())
     }
 
     /**
@@ -310,8 +323,9 @@ class ChatSyncTest {
     }
 
     @Test
-    fun aClientThatReportsNoFreshnessKeepsTheLiveSetRule() {
-        // The documented path: no freshness reported at all, so the T6.3 live set alone decides.
+    fun aClientThatReportsNoFreshnessLeavesTheCardAnswerableOffTheLiveSet() {
+        // No freshness reported at all: ta-coik.24, leaving the live set no longer locks the card
+        // either (as on the web, which has no live set).
         val client = ChatTestClient()
         client.show(session, ApprovalFixtures.write, live = true)
         host(client)
@@ -319,7 +333,7 @@ class ChatSyncTest {
         rule.onNodeWithTag("approval-allow").assertIsEnabled()
         rule.runOnIdle { client.live.value = emptySet() }
         arm()
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled()
+        rule.onNodeWithTag("approval-allow").assertIsEnabled()
     }
 
     // ---- r2: indicators of a copy that is not live -----------------------------------------------
@@ -373,7 +387,7 @@ class ChatSyncTest {
         // ta-coik.13: the web's End session key (dashboard.tsx 90fbb9f :1909) ends on the first tap.
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
     }
 
     /**
@@ -395,7 +409,7 @@ class ChatSyncTest {
         rule.waitForIdle()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
     }
 
     /** r3: the confirmation is bound to the server it was opened for; a switch under it ends nothing. */
@@ -432,7 +446,7 @@ class ChatSyncTest {
         rule.waitForIdle()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@https://other.example:false"), client.killCalls)
+        assertEquals(listOf("s1@https://other.example"), client.killCalls)
     }
 
     // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
@@ -462,7 +476,7 @@ class ChatSyncTest {
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithText("End session?").assertDoesNotExist()
-        assertEquals(listOf("s1@$TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
     }
 
     private fun confirmKey() = rule.onNodeWithTag(END_SESSION_CONFIRM_TAG)

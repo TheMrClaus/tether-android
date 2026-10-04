@@ -135,7 +135,7 @@ class ShellConsentClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = Unit
     override fun rename(sessionId: String, name: String) = Unit
     override fun archive(sessionId: String) = Unit
-    /** T13.2 r2/r3: every End session the shell asked for (`<session>@<origin>:<requireLive>`). */
+    /** T13.2 r2/r3: every End session the shell asked for (`<session>@<origin>`). */
     /** T15.4 r2: every sign-out the UI asked for. */
     val logoutCalls = java.util.concurrent.atomic.AtomicInteger(0)
     override suspend fun logout(): com.tether.app.client.LogoutResult {
@@ -144,8 +144,8 @@ class ShellConsentClient : TetherClient {
     }
 
     val killCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
-        killCalls += "$sessionId@$expectedOrigin:$requireLive"
+    override fun kill(sessionId: String, expectedOrigin: String?) {
+        killCalls += "$sessionId@$expectedOrigin"
     }
     /** T6.7 r2: every interrupt the shell asked for (`<session>@<origin>#<turn>`). */
     val interruptCalls = java.util.concurrent.CopyOnWriteArrayList<String>()

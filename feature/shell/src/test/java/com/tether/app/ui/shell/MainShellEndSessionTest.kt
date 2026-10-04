@@ -41,8 +41,8 @@ import org.robolectric.annotation.Config
 /**
  * T13.2 r2 through MainShell: End session needs a live link AND a live copy of the session, at the
  * header key and again at the confirmation (a link that drops under the open dialog disables its
- * key; ta-coik.22: the dialog itself stays open, as the web's). The kill asks the client to re-check
- * the live set (requireLive).
+ * key; ta-coik.22: the dialog itself stays open, as the web's). The kill is bound to the server the
+ * key was drawn for (ta-coik.24: the client no longer re-checks the live set or the listing).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w600dp-h1000dp-mdpi")
@@ -93,7 +93,7 @@ class MainShellEndSessionTest {
         rule.mainClock.autoAdvance = false
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN"), client.killCalls)
     }
 
     /**
@@ -120,7 +120,7 @@ class MainShellEndSessionTest {
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN"), client.killCalls)
         rule.onNodeWithText("End session?").assertDoesNotExist()
     }
 
@@ -154,7 +154,7 @@ class MainShellEndSessionTest {
         arm()
         confirmKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        assertEquals(listOf("s1@$OTHER_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$OTHER_ORIGIN"), client.killCalls)
     }
 
     // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
@@ -186,7 +186,7 @@ class MainShellEndSessionTest {
         rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
         rule.waitForIdle()
         rule.onNodeWithText("End session?").assertDoesNotExist()
-        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN:false"), client.killCalls)
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN"), client.killCalls)
     }
 
     /** On (the default), the same key asks first and ends nothing until confirmed. */

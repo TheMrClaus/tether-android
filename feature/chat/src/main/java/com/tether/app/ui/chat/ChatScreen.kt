@@ -177,9 +177,11 @@ fun ChatScreen(
     val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
     val pinnedModels by remember(prefs) { prefs.preferences.map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
     // T13.2 / T6.6 r3: the session controls and the auto-continue grant (and its pending
-    // confirmation, which closes on any lock) stand on the live-copy rule (ta-coik.23: the limit
-    // card no longer does; see noticeActions below).
-    val controlLock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)
+    // confirmation, which closes on any lock). ta-coik.24: neither locks offline or catching up, as
+    // on the web (chat-view.tsx 90fbb9f :2503, :2970, :3018, :4491, :4495 call `send` whatever the
+    // link, use-tether.ts :337-344); the client sends on an open socket for the server they were drawn
+    // for and says the link is reconnecting otherwise. Read-only and handed off keep their lock.
+    val controlLock = commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session))
     val controlActions = remember(session?.id, controlLock, consentOrigin, vm, codexMap[session?.id], opencodeMap[session?.id]) {
         val s = session
         // Bound to the server this row was drawn for: a tap on another server's row is refused.
@@ -489,8 +491,11 @@ internal fun consentActionsFor(
     return ConsentActions(
         sessionId = s.id,
         origin = origin,
-        // No live socket origin = no live socket: the fingerprints would name no server.
-        lock = consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync, reportsFreshness), s),
+        // ta-coik.24: no Offline / Catching-up lock, as on the web: its cards disable only once
+        // `submitted` (chat-view.tsx 90fbb9f :1016-1021, :1191-1210), and a send refused by a closed
+        // socket (use-tether.ts :337-344) leaves them answerable and shows "The secure link is
+        // reconnecting. Your input was not sent." The client does the same (transmitConsent).
+        lock = commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync, reportsFreshness), s)),
         decided = decided,
         unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,
@@ -604,7 +609,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                 TetherKey(
                     onClick = {
                         if (confirmBeforeEnd) confirmEnd = ChatEndDraw(session.id, server)
-                        else vm.client.kill(session.id, server, requireLive = false)
+                        else vm.client.kill(session.id, server)
                     },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
@@ -696,7 +701,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(drawn.sessionId, drawn.drawnFor, requireLive = false)
+                vm.client.kill(drawn.sessionId, drawn.drawnFor)
             },
             onCancel = { confirmEnd = null },
         )

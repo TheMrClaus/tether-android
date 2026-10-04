@@ -4003,8 +4003,8 @@ class RealTetherClient(
 
     /**
      * T6.3 (SYNC_DESIGN §5.1 I2/I3, §5.4): the one path an operator decision takes to the wire.
-     * Under the lock, in order: a live, handshaken socket; the session listed, attached and
-     * confirmed on it ([liveThisEpoch]); not read-only or handed off (an unlisted session is refused
+     * Under the lock, in order: a live, handshaken socket; the session listed on it (ta-coik.24: not
+     * its liveness, see below); not read-only or handed off (an unlisted session is refused
      * too: fail closed); the request pending in the active turn with the SAME fingerprint the card
      * rendered (a re-raised or replaced request never matches); not already decided here; an offered
      * choice ([check]); then claimed in the ledger and enqueued on that socket. A frame the socket
@@ -4023,7 +4023,9 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone) return@synchronized ConsentResult.NotConnected
-            if (sessionId !in liveThisEpoch) return@synchronized ConsentResult.NotLive
+            // ta-coik.24: not the session's liveness: the web's `send` puts `approval` / `question` on
+            // any OPEN socket (use-tether.ts 90fbb9f :337-344, :1667-1691), catching up included; the
+            // request must still be the one the card drew, against the copy this client holds.
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ConsentResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized ConsentResult.Locked
             val tree = sessionStore.tree(sessionId)
@@ -4364,20 +4366,20 @@ class RealTetherClient(
     /**
      * T13.2 r2: End session. Under the lock: a live, handshaken socket of a running (not halted)
      * client; the key drawn for THIS server (r3: [expectedOrigin] = the socket's origin, so an End
-     * armed before a server switch never ends a same-id session on the new one); the session listed
-     * on it; and, for a key drawn from the session's own copy ([requireLive]), confirmed live on it
-     * ([liveThisEpoch]). Nothing is retried, held or persisted. ta-coik.23: a key drawn for another
-     * server says so in the link's words, as a closed socket does, instead of nothing.
+     * armed before a server switch never ends a same-id session on the new one). Nothing is retried,
+     * held or persisted. ta-coik.23: a key drawn for another server says so in the link's words, as a
+     * closed socket does, instead of nothing. ta-coik.24: neither the session's liveness nor its being
+     * listed is checked: the web sends `kill` on any OPEN socket (dashboard.tsx 90fbb9f :1176, :1184,
+     * :1533 through use-tether.ts :337-344), and the server answers a session it does not hold with a
+     * shown `error` ("That session no longer exists.", server.mjs 90fbb9f :9602-9603).
      */
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) {
+    override fun kill(sessionId: String, expectedOrigin: String?) {
         if (sessionId.isEmpty()) return
         val sent = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
             if (expectedOrigin != origin) return@synchronized false
-            if (requireLive && sessionId !in liveThisEpoch) return@synchronized null
-            if (sessionsState.value.none { it.id == sessionId }) return@synchronized null
             ws.send(ClientMessage.Kill(sessionId).encode())
         }
         if (sent == false) emitError("The secure link is reconnecting. The session was not ended.")

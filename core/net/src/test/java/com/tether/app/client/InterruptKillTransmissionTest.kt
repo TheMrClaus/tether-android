@@ -26,8 +26,8 @@ import org.junit.Test
  * (RealTetherClient over a MockWebServer socket). While offline or catching up, a saved copy's
  * stale "busy" or "running" never stops a real turn or a real session: `interrupt` goes out only on
  * a live link, bound to the server that drew the key, for a session live on it that may be driven;
- * `kill` only on a live link of the server that drew the control (r3) for a listed session, and,
- * from a session's own copy (the default), only once that copy is live. Nothing refused is held for
+ * `kill` only on a live link of the server that drew the control (r3); ta-coik.24: whatever the
+ * session's liveness or listing, as on the web (the server answers). Nothing refused is held for
  * the reconnect.
  */
 class InterruptKillTransmissionTest {
@@ -226,65 +226,67 @@ class InterruptKillTransmissionTest {
     }
 
     @Test
-    fun offlineEndSessionIsRefusedEitherWayAndNothingIsHeldForTheReconnect() {
+    fun offlineEndSessionIsRefusedAndNothingIsHeldButCatchingUpItIsSentAsOnTheWeb() {
         val (client, ws) = connected()
         val origin = client.consentOrigin.value
         h.enqueueConnect()
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
-        // Drawn while live (the same server): the link, not the origin, refuses them.
+        // Drawn while live (the same server): the closed link refuses it.
         client.kill("s1", origin)
-        client.kill("s1", origin, requireLive = false)
 
         h.scheduler.await(::isReconnectDelay).fire()
         val ws2 = h.nextSocket()
         h.handshake(ws2, readyWithSessions("s1", "s2"))
         h.expectFrame("attach")
-        // Catching up: the header's End session (its own copy) is still refused.
+        // ta-coik.24: catching up (s1 not yet live on this link), the End goes out on the open socket,
+        // as the web's `send` does (dashboard.tsx 90fbb9f :1184, use-tether.ts :337-344); the closed
+        // link's refusal above was not held for this one.
+        assertTrue(client.consentOrigin.value != null && "s1" !in client.liveSessions.value)
         client.kill("s1", client.consentOrigin.value)
-        assertTrue("nothing refused was held for the new link", framesOf("kill").isEmpty())
-
-        ws2.send(snapshotFrame("s1", 5, FULL_STATE))
-        h.await(client.liveSessions) { "s1" in it }
-        assertTrue(framesOf("kill").isEmpty())
-        client.kill("s1", client.consentOrigin.value)
-        assertEquals(1, framesOf("kill").size)
+        assertEquals(listOf("s1"), framesOf("kill").map { it.str("sessionId") })
     }
 
     @Test
-    fun aSessionNotLiveOnThisConnectionIsEndedOnlyFromTheLiveList() {
+    fun aListedSessionNotLiveOnThisConnectionIsEnded() {
         val (client, _) = connected()
-        // s2 is listed on this link but not attached: its own copy is not live …
+        // s2 is listed on this link but not attached: ended all the same (ta-coik.24, as on the web).
         client.kill("s2", client.consentOrigin.value)
-        assertTrue(framesOf("kill").isEmpty())
-        // … the sidebar row, drawn from the live list, may end it.
-        client.kill("s2", client.consentOrigin.value, requireLive = false)
         assertEquals(listOf("s2"), framesOf("kill").map { it.str("sessionId") })
     }
 
     @Test
-    fun anUnlistedSessionIsNeverEnded() {
-        val (client, _) = connected()
+    fun anUnlistedSessionIsSentAndTheServersErrorIsShown() {
+        // ta-coik.24: the web sends `kill` for any id (dashboard.tsx 90fbb9f :1533) and the server's
+        // answer for a session it does not hold (server.mjs 90fbb9f :9602-9603) is shown.
+        val (client, ws) = connected()
+        val server = LinkedBlockingQueue<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.serverErrors.collect { server.put(it.text) } }
         client.kill("s-unknown", client.consentOrigin.value)
-        client.kill("s-unknown", client.consentOrigin.value, requireLive = false)
-        client.kill("", client.consentOrigin.value, requireLive = false)
+        assertEquals(listOf("s-unknown"), framesOf("kill").map { it.str("sessionId") })
+        ws.send("""{"type":"error","message":"That session no longer exists."}""")
+        assertEquals("That session no longer exists.", server.poll(20, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun anEmptySessionIdIsNeverSent() {
+        val (client, _) = connected()
+        client.kill("", client.consentOrigin.value)
         assertTrue(framesOf("kill").isEmpty())
     }
 
     @Test
-    fun anEndDrawnForAnotherServerIsRefusedEitherWay() {
+    fun anEndDrawnForAnotherServerIsRefusedAndSaysSo() {
         val (client, _) = connected()
         val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
         h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
         client.kill("s1", "https://other.example")
-        client.kill("s1", "https://other.example", requireLive = false)
         client.kill("s1", null)
-        client.kill("s1", null, requireLive = false)
         assertTrue(framesOf("kill").isEmpty())
         // ta-coik.23: each refusal says so in the client's words, as a closed link does (never silent).
         val deadline = System.currentTimeMillis() + 20_000
-        while (errors.size < 4 && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(List(4) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
+        while (errors.size < 2 && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(List(2) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
     }
 
     /**
@@ -314,8 +316,7 @@ class InterruptKillTransmissionTest {
             assertTrue(b.framesUntilBarrier(client).isEmpty())
 
             client.kill("s1", originA)
-            client.kill("s1", originA, requireLive = false)
-            client.kill("s2", originA, requireLive = false)
+            client.kill("s2", originA)
             assertTrue("an End drawn for A reached B", b.framesUntilBarrier(client).none { it.type() == "kill" })
             assertTrue("an End reached A", h.received.none { it.contains("\"type\":\"kill\"") })
 

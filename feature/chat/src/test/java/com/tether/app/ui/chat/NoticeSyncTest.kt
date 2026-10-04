@@ -255,8 +255,9 @@ class NoticeSyncTest {
         }
     }
 
+    /** ta-coik.24: the sheet's rows send whatever the copy, as the web's toggle (chat-view.tsx 90fbb9f :4495). */
     @Test
-    fun everyCopyThatIsNotLiveLocksTheAutoContinueSheetRows() {
+    fun everyCopyThatIsNotLiveLeavesTheAutoContinueSheetRowsLive() {
         val controlled = SessionControlFixtures.claude
         val client = client(controlled, ComposerFixtures.idle)
         client.sessionControls.value = mapOf(controlled.id to SessionControlFixtures.claudeControls)
@@ -270,16 +271,11 @@ class NoticeSyncTest {
         for ((name, sync) in notLiveCopies(controlled.id)) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithTag("control-option-true").assertIsNotEnabled().performClick()
-            rule.onNodeWithTag("control-option-false").assertIsNotEnabled().performClick()
-            rule.waitForIdle()
-            rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
-            assertTrue("$name: a copy that is not live changed auto-continue ${client.controlCalls}", client.controlCalls.isEmpty())
+            rule.onNodeWithTag("control-option-true").assertIsEnabled()
+            rule.onNodeWithTag("control-option-false").assertIsEnabled()
         }
-        // Live again: On goes out on the first tap (ta-coik.7: the web asks nothing), once.
-        rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
-        arm()
-        rule.onNodeWithTag("control-option-true").assertIsEnabled().performClick()
+        // On goes out on the first tap from a copy that is not live (ta-coik.7: the web asks nothing), once.
+        rule.onNodeWithTag("control-option-true").performClick()
         rule.waitForIdle()
         rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)
@@ -307,42 +303,45 @@ class NoticeSyncTabletTest {
         return client to controlled
     }
 
+    /**
+     * ta-coik.24: the web's Auto-continue toggle sends whatever the link or the copy (chat-view.tsx
+     * 90fbb9f :4495, use-tether.ts :1726-1728 through `send`, :337-344): every tap reaches the client.
+     */
     @Test
-    fun everyCopyThatIsNotLiveLocksTheAutoContinuePillEvenInTheLiveSet() {
-        // Drawn on: turning it off would send at once, so a pill that ignored the lock would send.
+    fun everyCopyThatIsNotLiveLeavesTheAutoContinuePillLive() {
+        // Drawn on: each tap turns it off at once (the fixture is not re-folded, so it stays drawn on).
         val (client, controlled) = host(on = true)
         rule.onNodeWithTag("control-auto-continue").assertIsEnabled()
+        var expected = 0
         for ((name, sync) in notLiveCopies(controlled.id)) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
             rule.onNodeWithTag("control-auto-continue")
-                .assertIsNotEnabled()
-                .assert(state(controlLockCopy(ConsentLock.CatchingUp)!!))
+                .assertIsEnabled()
+                .assert(state("On"))
                 .performClick()
             rule.waitForIdle()
-            assertTrue("$name: a copy that is not live changed auto-continue ${client.controlCalls}", client.controlCalls.isEmpty())
+            expected++
+            assertEquals("$name: the tap reaches the client", expected, client.controlCalls.size)
         }
-        rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
+        rule.runOnIdle { client.link.value = com.tether.app.client.ConnectionState.Disconnected }
         arm()
-        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
+        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().assert(state("On")).performClick()
         rule.waitForIdle()
-        assertEquals(listOf("${controlled.id}:${SessionControl.AutoContinueOnLimit(false)}"), client.controlCalls)
+        assertEquals(List(expected + 1) { "${controlled.id}:${SessionControl.AutoContinueOnLimit(false)}" }, client.controlCalls)
     }
 
     @Test
-    fun aLiveCopyGrantsAutoContinueOnTheFirstTapAndNoOtherDoes() {
+    fun anyCopyGrantsAutoContinueOnTheFirstTap() {
         val (client, controlled) = host(on = false)
-        for ((name, sync) in notLiveCopies(controlled.id)) {
+        for ((_, sync) in notLiveCopies(controlled.id)) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithTag("control-auto-continue").assertIsNotEnabled().performClick()
-            rule.waitForIdle()
-            assertTrue("$name: nothing was granted: ${client.controlCalls}", client.controlCalls.isEmpty())
+            rule.onNodeWithTag("control-auto-continue").assertIsEnabled()
         }
-        // ta-coik.7: on a live copy the grant goes on the tap, once, with no question (the web's toggle).
-        rule.runOnIdle { client.sync.value = liveCopy(controlled.id) }
-        arm()
-        rule.onNodeWithTag("control-auto-continue").assertIsEnabled().performClick()
+        // ta-coik.7 / ta-coik.24: the grant goes on the tap, once, with no question (the web's toggle),
+        // here from a copy that is not live.
+        rule.onNodeWithTag("control-auto-continue").performClick()
         rule.waitForIdle()
         rule.onAllNodesWithText(CONFIRM_TITLE).assertCountEquals(0)
         rule.onAllNodesWithTag("escalation-confirm").assertCountEquals(0)

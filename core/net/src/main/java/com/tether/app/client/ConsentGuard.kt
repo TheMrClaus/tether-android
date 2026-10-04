@@ -23,9 +23,6 @@ enum class ConsentResult {
     /** No live connection. Nothing is held for later (the T13.3 outbox owns that, SYNC_DESIGN §5.4). */
     NotConnected,
 
-    /** Connected, but the session's projection is not yet confirmed by a snapshot on this connection. */
-    NotLive,
-
     /** The session is read-only or handed off: Tether does not answer for it. */
     Locked,
 

@@ -17,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -166,6 +168,25 @@ class NoticeBehaviourTest {
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "schedule")), rec.controls)
         rule.onNodeWithTag("rate-limit-status").assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString("Choice sent. Waiting for the server."))))
         rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled()
+    }
+
+    /**
+     * ta-coik.24: taps that land in ONE frame (no recomposition between them, so every key is still
+     * drawn enabled) send one choice, as the web's `if (!submitted && …)` guard (chat-view.tsx 90fbb9f
+     * :1371) does: RateLimitCard.choose's own `sent != null` check, not the keys' enabled state.
+     */
+    @Test
+    fun tapsInOneFrameSendExactlyOneChoice() {
+        show(NoticeFixtures.limit)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        settle()
+        // Clicks delivered as semantics actions with the clock held: no frame, so no recomposition,
+        // between them (a touch injection would advance the clock and redraw the keys disabled).
+        rule.onNodeWithTag("rate-limit-schedule").performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNodeWithTag("rate-limit-schedule").performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNodeWithTag("rate-limit-resume-now").performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "schedule")), rec.controls)
     }
 
     /**
@@ -535,7 +556,7 @@ class AutoContinueBehaviourTest {
         rule.onNodeWithText("On", useUnmergedTree = true).performClick()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.AutoContinueOnLimit(true)), h.recorder.sent)
-        rule.onNodeWithText("Catching up — the setting was not changed. Try again in a moment.").assertExists()
+        rule.onNodeWithText(OTHER_SERVER_NOT_SENT).assertExists()
         rule.onNodeWithText(AUTO_CONTINUE_ON_FLASH).assertDoesNotExist()
     }
 

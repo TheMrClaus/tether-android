@@ -98,7 +98,8 @@ class ComposerCommandActions(
 /** What the operator is told when a command tap sent nothing (null: sent, or the client already said why). */
 internal fun runRefusalCopy(result: RunCommandResult): String? = when (result) {
     RunCommandResult.Sent, RunCommandResult.NotConnected -> null
-    RunCommandResult.NotLive -> "Catching up — the command was not run. Try again in a moment."
+    // ta-coik.24: NotLive means only "drawn for another server" (RealTetherClient runCommand).
+    RunCommandResult.NotLive -> OTHER_SERVER_NOT_SENT
     RunCommandResult.Locked -> "This session can’t run commands from here."
     RunCommandResult.NotOffered -> "Command mode isn’t offered for this session — the command was not run."
     RunCommandResult.Invalid -> "The command is empty or over the 16 KiB limit — it was not run."
@@ -107,7 +108,8 @@ internal fun runRefusalCopy(result: RunCommandResult): String? = when (result) {
 
 internal fun backgroundRefusalCopy(result: BackgroundCommandResult): String? = when (result) {
     BackgroundCommandResult.Sent, BackgroundCommandResult.NotConnected -> null
-    BackgroundCommandResult.NotLive -> "Catching up — the command was not moved to the background. Try again in a moment."
+    // ta-coik.24: NotLive means only "drawn for another server" (RealTetherClient backgroundCommand).
+    BackgroundCommandResult.NotLive -> OTHER_SERVER_NOT_SENT
     BackgroundCommandResult.Locked -> "This session can’t be changed from here."
     BackgroundCommandResult.NotRunning -> "That command already finished — nothing was moved to the background."
 }

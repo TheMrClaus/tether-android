@@ -232,6 +232,11 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
  * offline and catching up lock nothing here (the client refuses only a closed link and says so).
  * Read-only and a handed-off session keep their lock: the web draws no composer there. The running
  * commands' Stop keys take no lock at all (see ChatScreen).
+ *
+ * ta-coik.24: the same for the session controls (model / mode / effort / fast, the Auto-continue pill
+ * and sheet: chat-view.tsx 90fbb9f :2503, :2970, :3018, :4491, :4495, none gated on the link) and the
+ * approval and question cards (chat-view.tsx 90fbb9f :1016-1021, :1191-1210: disabled only once
+ * `submitted`, which a send refused by a closed socket never sets, use-tether.ts :337-344).
  */
 internal fun commandKeyLock(lock: ConsentLock?): ConsentLock? = when (lock) {
     ConsentLock.Offline, ConsentLock.CatchingUp -> null

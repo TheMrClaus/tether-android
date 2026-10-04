@@ -121,7 +121,9 @@ internal fun controlLockCopy(lock: ConsentLock?): String? = when (lock) {
 internal fun controlRefusalCopy(result: ControlResult): String? = when (result) {
     ControlResult.Sent -> null
     ControlResult.NotConnected -> "Not connected — the setting was not changed."
-    ControlResult.NotLive -> "Catching up — the setting was not changed. Try again in a moment."
+    // ta-coik.24: the client's NotLive means only "drawn for another server" (RealTetherClient
+    // sessionControl); the session's liveness gates nothing, as on the web (use-tether.ts 90fbb9f :337-344).
+    ControlResult.NotLive -> OTHER_SERVER_NOT_SENT
     ControlResult.Locked -> "This session can’t be changed from here."
     ControlResult.NotOffered -> "That option is no longer offered — the setting was not changed."
 }

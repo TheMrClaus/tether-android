@@ -338,7 +338,7 @@ private class MetricsClient : TetherClient {
     override fun pin(sessionId: String, pinned: Boolean) = error("unused")
     override fun rename(sessionId: String, name: String) = error("unused")
     override fun archive(sessionId: String) = error("unused")
-    override fun kill(sessionId: String, expectedOrigin: String?, requireLive: Boolean) = error("unused")
+    override fun kill(sessionId: String, expectedOrigin: String?) = error("unused")
     override fun reconnectIfIdle() = Unit
     override fun setAppForeground(foreground: Boolean) = Unit
     override fun retryConnection() = Unit

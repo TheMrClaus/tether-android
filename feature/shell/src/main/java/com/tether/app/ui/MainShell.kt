@@ -387,7 +387,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         // the server ([endSessionServer]); offline the client says it was not ended.
                         val server = com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)
                         if (confirmBeforeEnd) confirmEnd = EndTarget(it, server)
-                        else vm.client.kill(it.id, server, requireLive = false)
+                        else vm.client.kill(it.id, server)
                     }
                 },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
@@ -691,7 +691,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(target.id, drawnFor, requireLive = false)
+                vm.client.kill(target.id, drawnFor)
             },
             onCancel = { confirmEnd = null },
         )

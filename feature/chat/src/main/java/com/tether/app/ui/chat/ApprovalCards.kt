@@ -99,10 +99,14 @@ private fun pMargin(r: Float) = (r * TetherTypography.SP_PER_REM).dp
 
 /** Why no card of this session can be answered right now; the copy is the visible reason. */
 enum class ConsentLock(val copy: String) {
-    /** SYNC_DESIGN §4.2: a saved copy (no connection) is shown but never answered. */
+    /**
+     * No connection. ta-coik.24: the chat screen no longer applies this (nor [CatchingUp]) to the
+     * cards or the session controls ([commandKeyLock]), as the web draws them live whatever the link;
+     * it remains the fail-closed default of a screen with no session ([ConsentActions.Unavailable]).
+     */
     Offline("Connect to answer. This is a saved copy."),
 
-    /** Connected, but the session's snapshot has not landed on this connection yet. */
+    /** Connected, but the session's snapshot has not landed on this connection yet (see [Offline]). */
     CatchingUp("Catching up… You can answer once the latest state is in."),
 
     /** `session.readOnly`: an imported replay Tether does not drive. */

@@ -238,7 +238,7 @@ class SidebarController(
         // T13.2 r2: drawn from the live session LIST (the row is inert offline), not from a copy of
         // the session, so it needs no attach; the client still refuses it without a live link.
         // r3: bound to the server the row was armed for (a switch in between is refused).
-        onEndSession = { id, drawnFor -> client.kill(id, drawnFor, requireLive = false) },
+        onEndSession = { id, drawnFor -> client.kill(id, drawnFor) },
         onReorderSessions = { workspace, order -> client.setSessionOrder(workspace, order) },
         onResetSessionOrder = { workspace -> client.setSessionOrder(workspace, emptyList()) },
         onOpenSettings = onOpenSettings,
