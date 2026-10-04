@@ -72,6 +72,10 @@ class DraftTestClient(
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
     override val liveSessions: StateFlow<Set<String>> get() = inner.live
 
+    /** T8.4: the GitHub issues / pull requests reads (answers set by the test). */
+    val github = FakeGitHubWork()
+    override val githubWork: com.tether.app.client.GitHubWorkSource get() = github
+
     /** ta-2uq: the socket the sheet is drawn on; [newSocket] replaces it. */
     override val linkEpoch = MutableStateFlow(1L)
 

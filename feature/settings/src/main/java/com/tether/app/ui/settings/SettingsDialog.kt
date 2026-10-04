@@ -162,11 +162,13 @@ fun SettingsDialog(
     prefs: UiPrefs,
     currentWorkspace: String,
     onDismiss: () -> Unit,
+    /** T8.4: the tab a fresh open shows (the GitHub dialog's "Set up GitHub connection" opens Advanced). */
+    initialTab: SettingsTab = SettingsTab.General,
 ) {
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestServerSettings() }
-    val state = rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState() }
+    val state = rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(initialTab) }
     // ta-9q2: Claude accounts are read for the server signed in to, and only for it.
     val server by client.serverUrl.collectAsStateWithLifecycle()
     val configured by client.configured.collectAsStateWithLifecycle()

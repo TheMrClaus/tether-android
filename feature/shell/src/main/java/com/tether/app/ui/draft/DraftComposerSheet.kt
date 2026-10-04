@@ -156,8 +156,10 @@ import kotlinx.coroutines.launch
  * folder's repo offers (the engine's matched `worktree-inspect`) for the web's setup note. A Send that
  * may run the project's setup sends at once, as on the web (ta-coik.11).
  *
- * Left for a later slice (nothing is drawn for it, so nothing looks like a control that is not
- * there): the GitHub issues / PRs dialog (T8.4).
+ * T8.4: the "GitHub issues" and "Pull requests" buttons after the worktree select (draft-composer.tsx
+ * :347-355) and the two-tab dialog they open ([GitHubWorkDialog]); a row's "Work on this issue" /
+ * "Review this PR" sets the draft's text and folder as the web's `onWork` does, and "Set up GitHub
+ * connection" opens Settings on the GitHub connection ([DraftComposerHost]'s `onOpenGitHubSettings`).
  */
 
 /** Test tags of the sheet (behaviour tests and goldens). */
@@ -260,6 +262,8 @@ class DraftSheetActions(
     val onSelectIsolation: (String) -> Unit = {},
     /** ta-23f: one worktree detail field typed or filled from a suggestion. */
     val onWorktreeField: (com.tether.app.client.WorktreeField, String) -> Unit = { _, _ -> },
+    /** T8.4: the "GitHub issues" / "Pull requests" buttons (open the dialog on that tab). */
+    val onGitHub: (GitHubWorkTab) -> Unit = {},
 )
 
 private fun DraftComposerState.cwd(): String = (form["cwd"] as? JsStr)?.value.orEmpty()
@@ -276,15 +280,15 @@ internal fun sendDisabled(draft: DraftComposerState, readiness: String): Boolean
  * back while it is up), as ta-895's picker did.
  */
 @Composable
-fun DraftComposerHost(vm: TetherViewModel, prefs: UiPrefs) {
+fun DraftComposerHost(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHubSettings: (() -> Unit)? = null) {
     val open by vm.draftOpen.collectAsStateWithLifecycle()
     val draft by vm.draftComposer.state.collectAsStateWithLifecycle()
     if (!open || draft.creating) return
-    DraftComposerDialog(vm, prefs)
+    DraftComposerDialog(vm, prefs, onOpenGitHubSettings)
 }
 
 @Composable
-private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
+private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHubSettings: (() -> Unit)?) {
     val client = vm.client
     val composer = vm.draftComposer
     val draft by composer.state.collectAsStateWithLifecycle()
@@ -332,6 +336,13 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
     )
     var attachOpen by rememberSaveable { mutableStateOf(false) }
     var browsing by rememberSaveable { mutableStateOf(false) }
+    // T8.4: the GitHub dialog reads the server signed in to (an HTTP read, as the web's fetch: no socket
+    // needed), and only it; another server or a sign-out starts it afresh.
+    val configured by client.configured.collectAsStateWithLifecycle()
+    val server by client.serverUrl.collectAsStateWithLifecycle()
+    val githubOrigin = if (configured) com.tether.app.client.serverOrigin(server) else null
+    val github = remember(githubOrigin) { GitHubWorkController(client.githubWork, githubOrigin, scope) }
+    androidx.compose.runtime.DisposableEffect(github) { onDispose { github.dispose() } }
 
     val current = SidebarController.resolveCurrentWorkspace(picked, preferences, root)
     val browserInputs = draftBrowserInputs(draft, if (live) catalog else null, providers, collator, System.currentTimeMillis())
@@ -362,6 +373,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
         onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
         onSelectIsolation = { composer.selectIsolation(it) },
         onWorktreeField = { field, value -> composer.setWorktreeField(field, value) },
+        onGitHub = { tab -> github.openDialog(tab, draft.cwd(), disabled = draft.creating) },
         onPickFolder = composer::setCwd,
         onBrowse = {
             client.browse(draft.cwd().ifEmpty { root.orEmpty() }.ifEmpty { null })
@@ -436,6 +448,15 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs) {
             title = "Choose a working folder",
         )
     }
+    // github-work-dialog.tsx :130-140 / draft-composer.tsx :350-353: `onTextChange(prompt); onSetCwd(cwd)`.
+    GitHubWorkDialog(
+        github,
+        onWork = { work ->
+            composer.setText(work.prompt)
+            composer.setCwd(work.cwd)
+        },
+        onSetUp = onOpenGitHubSettings,
+    )
     if (attachOpen) {
         AttachSheet(
             onDismiss = { attachOpen = false },
@@ -607,8 +628,8 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
 private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
-    // `.chat-project-row`: which folder and, beside it, the worktree select (ta-23f; T8.4 adds the
-    // GitHub dialog). A hairline under it sets the group off.
+    // `.chat-project-row`: which folder and, beside it, the worktree select (ta-23f) and the GitHub
+    // issues / pull requests buttons (T8.4). A hairline under it sets the group off.
     Column(
         Modifier
             .fillMaxWidth()
@@ -622,7 +643,7 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
         ) {
             WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse)
             WorktreeSelect(draft.form, actions.onSelectIsolation)
-            // Slot (T8.4): GitHubWorkDialog.
+            GitHubWorkButtons(draft.cwd(), draft.creating, actions.onGitHub)
         }
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))

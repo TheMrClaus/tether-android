@@ -239,6 +239,8 @@ fun ComposeContentTestRule.snapDraft(
     browser: BrowserShot? = null,
     options: OptionsShot? = null,
     settings: SettingsShot? = null,
+    /** T8.4: drawn over the sheet (the GitHub dialog's shots). */
+    overlay: (@Composable () -> Unit)? = null,
 ) {
     mainClock.autoAdvance = false
     val seed = Seed(shot, browser, options ?: settings?.options)
@@ -269,6 +271,7 @@ fun ComposeContentTestRule.snapDraft(
                             browser != null -> ModelBrowserFrame(seed.browserInputs(), seed.browserState(), failingBrowserActions, layout)
                             settings != null -> DraftSettingsFrame(seed.inputs(), DraftSettingsState(open = true, view = settings.view), failingSettingsActions, layout)
                         }
+                        overlay?.invoke()
                     }
                 }
             }

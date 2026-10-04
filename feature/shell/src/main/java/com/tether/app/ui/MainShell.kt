@@ -201,6 +201,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val sessionsView = view == DashboardView.Sessions && !usageOpen
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    // T8.4: the tab Settings opens on (General; Advanced from the GitHub dialog's "Set up GitHub connection").
+    var settingsTab by rememberSaveable { mutableStateOf(com.tether.app.ui.settings.SettingsTab.General) }
     // ta-3e7: the Studio welcome's "Open workspace" (dashboard.tsx folderDialogRef), at shell level.
     var workspacePickerOpen by rememberSaveable { mutableStateOf(false) }
     var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
@@ -688,12 +690,22 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
-    if (settingsOpen) ShellSettings(vm, prefs, workspaceRoot, onDismiss = { settingsOpen = false })
+    if (settingsOpen) {
+        ShellSettings(vm, prefs, workspaceRoot, settingsTab, onDismiss = {
+            settingsOpen = false
+            settingsTab = com.tether.app.ui.settings.SettingsTab.General
+        })
+    }
     if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, scope = scope, onDismiss = { workspacePickerOpen = false })
 
     // ta-abm (T8.1 slice 2): the new-session sheet, raised by every New session key (the drawer's,
     // a block's "+", the Overview's, the empty stage's); the draft it draws is the view model's.
-    com.tether.app.ui.draft.DraftComposerHost(vm, prefs)
+    // T8.4: "Set up GitHub connection" (github-work-dialog.tsx :251-254, dashboard.tsx openFullSettings)
+    // opens Settings on Advanced, where the GitHub connection is (ta-coik.21); the draft stays.
+    com.tether.app.ui.draft.DraftComposerHost(vm, prefs, onOpenGitHubSettings = {
+        settingsTab = com.tether.app.ui.settings.SettingsTab.Advanced
+        settingsOpen = true
+    })
 
     renaming?.let { target ->
         var name by remember(target.id) { mutableStateOf(target.name) }
@@ -739,11 +751,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
  * General's "Use current", read here so the shell itself never recomposes on preference changes.
  */
 @Composable
-private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: String?, onDismiss: () -> Unit) {
+private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: String?, tab: com.tether.app.ui.settings.SettingsTab, onDismiss: () -> Unit) {
     val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
-    com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss)
+    com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss, initialTab = tab)
 }
 
 /** T6.7: the caption over an error toast whose words a server wrote. */
