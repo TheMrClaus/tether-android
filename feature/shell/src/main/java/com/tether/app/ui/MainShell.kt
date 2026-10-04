@@ -205,7 +205,16 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var workspacePickerOpen by rememberSaveable { mutableStateOf(false) }
     var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val selectedSession = sessions.firstOrNull { it.id == selectedId }
+    // ta-coik.41 (dashboard.tsx 90fbb9f :609-611, :709-717): the selection is on screen only while
+    // its chat is listed (`visibleSessions`: an ended one only with "Show ended sessions" on); one that
+    // left the list stays selected, so it is back on screen when it returns.
+    // Until the stored setting is first read (null) nothing is on screen, so an ended chat never
+    // flashes in; saved, so a rotation does not pass through that state (and remount the chat).
+    var showEnded by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(prefs) { prefs.showEnded.distinctUntilChanged().collect { showEnded = it } }
+    val selectionPending by vm.selectionPending.collectAsStateWithLifecycle()
+    val visibleSessions = if (showEnded == false) sessions.filter { it.status != "exited" } else sessions
+    val selectedSession = if (showEnded == null) null else visibleSessions.firstOrNull { it.id == selectedId }
     val session = selectedSession?.takeIf { sessionsView }
     // ta-coik.39 r2: the chat view on screen, as the web mounts its ChatView (dashboard.tsx 90fbb9f
     // :1572-1647: Sessions, a listed selection, no create in flight; the Usage page is another route
@@ -213,6 +222,20 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // or rotation (which reports the same chat again) attaches nothing.
     val mountedChat = session?.takeUnless { draftLaunching }?.id
     LaunchedEffect(mountedChat) { vm.chatViewShown(mountedChat) }
+    // ta-coik.41: the web's remembered-chat restore, one-time pick and last-opened record.
+    WebSelectionEffects(
+        vm = vm,
+        prefs = prefs,
+        scope = rememberCoroutineScope(),
+        view = view,
+        sessionsView = sessionsView,
+        session = session,
+        workspaceRoot = workspaceRoot,
+        onReopened = shell::closeDrawer,
+    )
+    // dashboard.tsx:1359 reads the stored record at the moment of navigation.
+    val rememberedChat = remember(prefs) { RememberedChat() }
+    LaunchedEffect(prefs) { prefs.preferences.collect { rememberedChat.value = it.lastOpenedSession } }
     val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
@@ -343,7 +366,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
 
     // issue #189: a remembered session whose snapshot has not arrived yet reads as "reopening",
     // never as the welcome stage.
-    val emptyStage = if (selectedId != null && session == null && sessions.isEmpty()) {
+    // ta-coik.41 (dashboard.tsx:1702): `pendingSessionId && !visibleSessions.length`.
+    val emptyStage = if (selectedId != null && selectionPending && visibleSessions.isEmpty()) {
         EmptyStage.Reopening(connected)
     } else {
         EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available, it.id) })
@@ -372,6 +396,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onNavigate = { next ->
                     shell.closeDrawer()
                     userNavigated = true
+                    // ta-coik.41 (dashboard.tsx:1352-1364): with nothing selected, the remembered chat.
+                    if (next == DashboardView.Sessions) vm.onNavigateToSessions(visibleSessions, rememberedChat.value)
                     navigateTo(next)
                 },
                 views = setOf(DashboardView.Overview, DashboardView.Sessions, DashboardView.Scheduled),
@@ -797,4 +823,9 @@ fun ErrorToast(message: String, onClose: () -> Unit, modifier: Modifier = Modifi
 internal fun isGlobalSearchShortcut(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
     val ctrl = event.isCtrlPressed || event.isMetaPressed
     return event.type == KeyEventType.KeyDown && event.key == Key.F && ctrl && event.isShiftPressed && !event.isAltPressed
+}
+
+/** ta-coik.41: the stored `lastOpenedSession`, held for a synchronous read (not composition state). */
+private class RememberedChat {
+    var value: com.tether.app.ui.prefs.LastOpenedSession? = null
 }

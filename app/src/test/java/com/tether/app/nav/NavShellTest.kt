@@ -61,6 +61,7 @@ class NavShellTest {
         // T15.4: these links are opened from Sessions (a fresh install would start on the Overview,
         // where a link pushes Sessions and Back returns there: MainShellNavigationTest).
         kotlinx.coroutines.runBlocking { com.tether.app.ui.prefs.UiPrefs(ApplicationProvider.getApplicationContext<Context>()).setLastView("sessions") }
+        forgetRememberedChat()
         rule.setContent { UiRoot(client = client, launchIntent = launchIntent) }
         rule.waitForIdle()
     }

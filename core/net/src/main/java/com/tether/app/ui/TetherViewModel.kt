@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
@@ -59,6 +60,32 @@ class TetherViewModel(
      */
     private val _openingHistoryId = MutableStateFlow<String?>(null)
     val openingHistoryId: StateFlow<String?> = _openingHistoryId.asStateFlow()
+
+    // ta-coik.41 (declared before init, like the opening row: the created collector may run during it).
+    private val _selectionPending = MutableStateFlow(false)
+
+    /**
+     * Whether the selection is the web's `pendingSessionId` (a link, the remembered chat, a `created`,
+     * a live search hit) rather than a pick: until the list arrives it reads as "Reopening your
+     * session" (dashboard.tsx:1702 `pendingSessionId && !visibleSessions.length`). An explicit
+     * selection, a resume and the restore giving up retire it.
+     */
+    val selectionPending: StateFlow<Boolean> = _selectionPending.asStateFlow()
+
+    /** The first view of this view model is resolved (the remembered chat is seeded, or not, once). */
+    private var bootViewSeen = false
+
+    /** The remembered chat seeded at boot, while its restore (:856-886) is still owed. */
+    private var restoreTarget: com.tether.app.ui.prefs.LastOpenedSession? = null
+    private var restoreSettled = false
+
+    private val _restoreGraceElapsed = MutableStateFlow(false)
+
+    /**
+     * dashboard.tsx:849-854: discovery's bounded grace, 2 s after a connection opens (armed once per
+     * connection; once elapsed it stays so).
+     */
+    val restoreGraceElapsed: StateFlow<Boolean> = _restoreGraceElapsed.asStateFlow()
 
     /** The newest `created` seq already acted on (a reply that arrived before this VM is not a new one). */
     private var followedCreatedSeq = 0L
@@ -382,6 +409,14 @@ class TetherViewModel(
         viewModelScope.launch {
             combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }
         }
+        // ta-coik.41 (dashboard.tsx:849-854): the boot restore's grace, armed on each connection.
+        viewModelScope.launch {
+            client.connection.collectLatest { state ->
+                if (state != ConnectionState.Connected) return@collectLatest
+                kotlinx.coroutines.delay(RESTORE_GRACE_MS)
+                _restoreGraceElapsed.value = true
+            }
+        }
     }
 
     private fun onSessions(list: List<AgentSession>) {
@@ -406,11 +441,9 @@ class TetherViewModel(
         val selectedLocked = selectedNow != null && list.firstOrNull { it.id == selectedNow }?.let(::attachmentsLocked) == true
         if (stagedGone || selectedLocked) stagedAttachments.clear()
 
-        // Drop a selection whose session disappeared (archive).
-        val selected = _selectedSessionId.value
-        if (selected != null && list.none { it.id == selected }) {
-            _selectedSessionId.value = null
-        }
+        // ta-coik.41: a selection whose session left the list is KEPT (dashboard.tsx 90fbb9f: nothing
+        // clears `activeId`; `selectedSession` :709-717 just resolves to nothing, so the empty workspace
+        // shows, and the chat is on screen again if it comes back).
 
         // Drop run-tab selections for sessions that no longer exist (archive /
         // workspace switch) — stale entries are inert (consumers resolve by
@@ -430,6 +463,8 @@ class TetherViewModel(
     }
 
     fun selectSession(id: String) {
+        // dashboard.tsx:300-304 selectActiveId: an explicit selection retires a pending target.
+        _selectionPending.value = false
         showSelected(id)
         if (mountedChat == id) {
             // Re-selected while its chat view stays on screen: the web remounts nothing (dashboard.tsx
@@ -506,7 +541,102 @@ class TetherViewModel(
     /** Select [id] on behalf of a link: [selectSession] plus an [openRequests] event. Navigation only. */
     fun openSession(id: String) {
         selectSession(id)
+        // dashboard.tsx:1114, 1137, 1267: a link's (or a live search hit's) target is a pending one.
+        _selectionPending.value = true
         _openRequests.tryEmit(id)
+    }
+
+    // ------------------------------------------------------------------
+    // ta-coik.41: the web's selection model (dashboard.tsx 90fbb9f). The web holds `activeId` (a pick)
+    // and `pendingSessionId` (a link, the remembered chat, a `created`, a live search hit) and shows
+    // whichever names a listed chat. Here one selection carries both, and [selectionPending] says
+    // whether it came the pending way.
+    // ------------------------------------------------------------------
+
+    /**
+     * dashboard.tsx:736-748: the console's first view is resolved ([sessionsView]: it is Sessions).
+     * Once per view model (a cold start, or a process the system brought back): on Sessions, with no
+     * link and nothing opening, the chat this device last had open ([remembered], the stored
+     * `lastOpenedSession`) becomes the pending selection. Nothing is attached: the chat attaches when
+     * its view mounts ([chatViewShown]).
+     */
+    fun onBootView(sessionsView: Boolean, remembered: com.tether.app.ui.prefs.LastOpenedSession?) {
+        if (bootViewSeen) return
+        bootViewSeen = true
+        if (!sessionsView || remembered == null) return
+        if (_selectedSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
+        restoreTarget = remembered
+        adopt(remembered.sessionId)
+        _selectionPending.value = true
+    }
+
+    /**
+     * dashboard.tsx:856-886, the boot restore, re-evaluated on every change of its inputs and acted
+     * on at most once. While the remembered chat is still the pending selection and not in the
+     * session list, it waits for [histories] (the current workspace's discovered conversations) or
+     * the grace ([restoreGraceElapsed]); then it returns the conversation to reopen by its historyId,
+     * or, with none, gives the remembered chat up (the selection clears, so the one-time pick may
+     * run). Returns null when there is nothing to reopen now; the caller reopens what it returns
+     * (dashboard.tsx `reopen`: the block becomes current, [resumeHistory], seen).
+     */
+    fun bootRestoreStep(sessionsView: Boolean, histories: List<HistorySession>): HistorySession? {
+        if (restoreSettled || !sessionsView) return null
+        val grace = _restoreGraceElapsed.value
+        val target = restoreTarget
+        val stillPending = target != null && _selectionPending.value && _selectedSessionId.value == target.sessionId &&
+            client.sessions.value.none { it.id == target.sessionId }
+        if (!stillPending) {
+            if (grace) restoreSettled = true
+            return null
+        }
+        if (histories.isEmpty() && !grace) return null
+        restoreSettled = true
+        restoreTarget = null
+        val hit = target!!.historyId?.let { id -> histories.firstOrNull { it.historyId == id } }
+        if (hit == null) {
+            _selectedSessionId.value = null
+            _selectionPending.value = false
+        }
+        return hit
+    }
+
+    /**
+     * dashboard.tsx:752-763, the one-time pick: on Sessions ([sessionsView]) with nothing selected,
+     * pending or opening (a cold start with no link and no remembered chat, the restore given up, a
+     * return to Sessions with nothing selected) and a non-empty [visible] list (`visibleSessions`),
+     * the first chat in [currentWorkspace], else the first listed, is selected and kept. A selection
+     * whose chat left the list is still a selection, so nothing is picked over it. Nothing is
+     * attached: the chat attaches when its view mounts. Waits for the boot view (the remembered chat
+     * is seeded first, as the web seeds it at mount).
+     */
+    fun pickIfNothingSelected(sessionsView: Boolean, visible: List<AgentSession>, currentWorkspace: String?) {
+        if (!bootViewSeen || !sessionsView || visible.isEmpty()) return
+        if (_selectedSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
+        val preferred = visible.firstOrNull { it.cwd == currentWorkspace } ?: visible.first()
+        adopt(preferred.id)
+    }
+
+    /**
+     * dashboard.tsx:1352-1364 navigateTo("sessions") from the top bar: with nothing selected, the
+     * remembered chat ([remembered]) becomes the pending selection when it is listed ([visible]).
+     * "Nothing selected" is the web's `selectedSession?.id ?? pendingSessionId` being null: no
+     * selection, or a picked one whose chat left the list (a pending one is kept).
+     */
+    fun onNavigateToSessions(visible: List<AgentSession>, remembered: com.tether.app.ui.prefs.LastOpenedSession?) {
+        val selected = _selectedSessionId.value
+        if (selected != null && (_selectionPending.value || visible.any { it.id == selected })) return
+        val id = remembered?.sessionId ?: return
+        if (visible.none { it.id == id }) return
+        adopt(id)
+        _selectionPending.value = true
+    }
+
+    /** The web's `setActiveId` / `setPendingSessionId` alone: no attach, the sheet stays, the opening row stays. */
+    private fun adopt(id: String) {
+        val staged = stagedAttachments.current.value
+        if ((staged != null && staged.sessionId != id) || _selectedSessionId.value != id) stagedAttachments.clear()
+        _selectedSessionId.value = id
+        loadDraft(id)
     }
 
     /**
@@ -521,6 +651,18 @@ class TetherViewModel(
         // T5.3: use-tether.ts:1351 — the previous workspace's content hits go with it.
         client.clearSearchResults()
         client.discover(cwd)
+    }
+
+    /**
+     * ta-coik.41 (use-tether.ts 90fbb9f :783-785): on `ready` the web fixes its current workspace to
+     * the one it already has, else the preferred one (the last-opened chat's folder, else the default
+     * workspace: dashboard.tsx:207), else the server's root ([resolved]), and keeps it until the
+     * operator picks another. Only when nothing is chosen yet; nothing is sent (the sidebar's watch
+     * discovers it, as the web's `ready` handler does).
+     */
+    fun settleWorkspace(resolved: String?) {
+        if (resolved.isNullOrEmpty() || _currentWorkspace.value != null) return
+        _currentWorkspace.value = resolved
     }
 
     /**
@@ -620,6 +762,13 @@ class TetherViewModel(
             stagedAttachments.clear()
             draftComposer.clearAttachments()
             _selectedSessionId.value = null
+            _selectionPending.value = false
+            // ta-coik.41: the web's Dashboard unmounts on /login, so the next sign-in boots afresh
+            // (remembered chat, restore, grace).
+            bootViewSeen = false
+            restoreTarget = null
+            restoreSettled = false
+            _restoreGraceElapsed.value = false
             _openingHistoryId.value = null
             // ta-abm: so does the new-session sheet (the draft itself is the server's, kept in memory).
             hideDraft()
@@ -649,6 +798,7 @@ class TetherViewModel(
         hideDraft()
         _openingHistoryId.value = history.historyId
         _selectedSessionId.value = null
+        _selectionPending.value = false
         return true
     }
 
@@ -693,8 +843,11 @@ class TetherViewModel(
         _openingHistoryId.value = null
         // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
         hideDraft()
-        if (_selectedSessionId.value == sessionId) return
-        if (origin != null) showSelected(sessionId) else selectSession(sessionId)
+        if (_selectedSessionId.value != sessionId) {
+            if (origin != null) showSelected(sessionId) else selectSession(sessionId)
+        }
+        // ta-coik.41 (dashboard.tsx:778): the reply's session is a pending target.
+        _selectionPending.value = true
     }
 
     // ------------------------------------------------------------------
@@ -772,6 +925,9 @@ class TetherViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client, draftStore) as T
 }
+
+/** ta-coik.41 (dashboard.tsx:851): how long the boot restore waits for discovery after a connection opens. */
+const val RESTORE_GRACE_MS = 2_000L
 
 /** T7.4: attachments handed to the text-only send (the composer never does; nothing is sent). */
 internal const val ATTACHMENTS_REFUSED_COPY = "Not connected — the message and its attachments were not sent."

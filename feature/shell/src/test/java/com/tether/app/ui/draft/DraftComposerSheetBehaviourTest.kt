@@ -227,7 +227,10 @@ class DraftComposerSheetBehaviourTest {
         pick("personal")
         until("the chip names the pick") { chipSays().contains("Claude (personal) · Model 1") }
         // The folder chip's quick picks (pinned → default → current → root).
-        until("the root seeded the folder") { formCwd() == DraftFixtures.ROOT }
+        // ta-coik.41: the current workspace is fixed on `ready` to the preferred one, the default
+        // workspace here (use-tether.ts 90fbb9f :783-785, dashboard.tsx:207), and seeds the folder
+        // (use-draft-composer.ts :169 `currentWorkspace || workspaceRoot`).
+        until("the current workspace seeded the folder") { formCwd() == "/srv/ws/docs" }
         tap(DraftComposerTags.WorkspaceChip)
         awaitTag(DraftComposerTags.WorkspacePopover)
         until("the pinned and default picks are listed") { exists(DraftComposerTags.quickPick("/srv/ws/app")) && exists(DraftComposerTags.quickPick("/srv/ws/docs")) }

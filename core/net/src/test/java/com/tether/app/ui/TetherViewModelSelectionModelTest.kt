@@ -1,0 +1,358 @@
+package com.tether.app.ui
+
+import com.tether.app.client.ConnectionState
+import com.tether.app.client.CreatedReply
+import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.model.HistorySession
+import com.tether.app.ui.prefs.InMemoryDraftStore
+import com.tether.app.ui.prefs.LastOpenedSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * ta-coik.41: the web's selection model (dashboard.tsx 90fbb9f). A selection whose chat left the
+ * list is kept (nothing clears `activeId`); the one-time pick (:752-763) runs only on Sessions with
+ * nothing selected, pending or opening and a non-empty list; the remembered chat is seeded at boot
+ * (:736-748) and restored or given up (:856-886); navigating to Sessions with nothing selected takes
+ * the remembered chat when it is listed (:1352-1364). Nothing here attaches: the chat view's mount does.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class TetherViewModelSelectionModelTest {
+    private val main = StandardTestDispatcher()
+    private val vms = TestViewModels()
+
+    private class Client : StubClient() {
+        override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
+        override val connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+        val mounted = mutableListOf<String>()
+        val resumed = mutableListOf<String>()
+        override fun attachMounted(sessionId: String) {
+            mounted += sessionId
+        }
+        override fun resumeHistory(historyId: String, cwd: String) {
+            resumed += historyId
+        }
+        val replies = MutableSharedFlow<CreatedReply>(extraBufferCapacity = 4)
+        override val createdReplies: Flow<CreatedReply> get() = replies
+    }
+
+    private fun chat(id: String, cwd: String = "/w", status: String = "ready") =
+        AgentSession(id = id, provider = "claude", name = id, cwd = cwd, status = status, startedAt = 1, updatedAt = 1, historyId = "h-$id")
+
+    private fun history(id: String) = HistorySession(historyId = id, provider = "claude", name = id, cwd = "/w", updatedAt = 1)
+
+    private val remembered = LastOpenedSession("/w", "gone", "h-gone")
+
+    private lateinit var client: Client
+    private lateinit var vm: TetherViewModel
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(main)
+        client = Client()
+        vm = vms.track(TetherViewModel(client, InMemoryDraftStore(), monotonicClock = { 0 }))
+        main.scheduler.advanceUntilIdle()
+    }
+
+    @After
+    fun tearDown() {
+        vms.clear()
+        main.scheduler.advanceUntilIdle()
+        Dispatchers.resetMain()
+    }
+
+    private fun noAttach() {
+        assertEquals("nothing attached by the model", emptyList<String>(), client.attached + client.mounted)
+    }
+
+    // --- the selection is kept when its chat leaves the list -------------------------------------
+
+    @Test
+    fun aSelectionWhoseChatLeavesTheListIsKeptAndIsBackWhenItReturns() {
+        client.sessions.value = listOf(chat("a"), chat("b"))
+        main.scheduler.advanceUntilIdle()
+        vm.selectSession("a")
+        client.sessions.value = listOf(chat("b")) // archived / handed off / gone from the list
+        main.scheduler.advanceUntilIdle()
+        assertEquals("a", vm.selectedSessionId.value)
+        client.sessions.value = emptyList() // a transient empty list (a reconnect) changes nothing
+        main.scheduler.advanceUntilIdle()
+        assertEquals("a", vm.selectedSessionId.value)
+        client.sessions.value = listOf(chat("a"), chat("b")) // back in the list: still the selection
+        main.scheduler.advanceUntilIdle()
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun noPickOverASelectionWhoseChatLeftTheList() {
+        vm.onBootView(sessionsView = true, remembered = null)
+        vm.selectSession("a")
+        vm.pickIfNothingSelected(sessionsView = true, visible = listOf(chat("b")), currentWorkspace = "/w")
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    // --- the one-time pick -----------------------------------------------------------------------
+
+    @Test
+    fun thePickTakesTheFirstChatInTheCurrentWorkspaceElseTheFirstListedAndAttachesNothing() {
+        vm.onBootView(sessionsView = true, remembered = null)
+        vm.pickIfNothingSelected(true, listOf(chat("x", cwd = "/other"), chat("y", cwd = "/w"), chat("z", cwd = "/w")), currentWorkspace = "/w")
+        assertEquals("y", vm.selectedSessionId.value)
+        assertFalse("a pick is not a pending target", vm.selectionPending.value)
+        noAttach()
+        // Once committed it is not re-derived (another chat moving to the top changes nothing).
+        vm.pickIfNothingSelected(true, listOf(chat("z", cwd = "/w"), chat("y", cwd = "/w")), currentWorkspace = "/w")
+        assertEquals("y", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun withNoChatInTheCurrentWorkspaceThePickIsTheFirstListed() {
+        vm.onBootView(sessionsView = true, remembered = null)
+        vm.pickIfNothingSelected(true, listOf(chat("x", cwd = "/a"), chat("y", cwd = "/b")), currentWorkspace = "/w")
+        assertEquals("x", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun thePickLeavesTheNewSessionSheetUp() {
+        vm.onBootView(sessionsView = true, remembered = null)
+        vm.openDraft()
+        vm.pickIfNothingSelected(true, listOf(chat("x")), currentWorkspace = "/w")
+        assertEquals("x", vm.selectedSessionId.value)
+        assertTrue(vm.draftOpen.value)
+    }
+
+    @Test
+    fun thePickDoesNotFireOffSessionsOnAnEmptyListWhileOpeningOrALinkWaitsOrBeforeTheBootView() {
+        val list = listOf(chat("x"))
+        vm.pickIfNothingSelected(true, list, "/w") // the boot view is not resolved yet
+        assertNull(vm.selectedSessionId.value)
+        vm.onBootView(sessionsView = false, remembered = null)
+        vm.pickIfNothingSelected(false, list, "/w") // Overview / Scheduled / Usage
+        assertNull(vm.selectedSessionId.value)
+        vm.pickIfNothingSelected(true, emptyList(), "/w") // no list yet
+        assertNull(vm.selectedSessionId.value)
+        vm.setBootLinkPending(true) // a launch link still settling
+        vm.pickIfNothingSelected(true, list, "/w")
+        assertNull(vm.selectedSessionId.value)
+        vm.setBootLinkPending(false)
+        assertTrue(vm.resumeHistory(history("h1"))) // a history row opening
+        vm.pickIfNothingSelected(true, list, "/w")
+        assertNull(vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun aReturnToSessionsWithNothingSelectedPicks() {
+        vm.onBootView(sessionsView = false, remembered = null) // the boot landed on the Overview
+        vm.onNavigateToSessions(listOf(chat("x")), remembered = null)
+        assertNull(vm.selectedSessionId.value)
+        vm.pickIfNothingSelected(true, listOf(chat("x")), "/w")
+        assertEquals("x", vm.selectedSessionId.value)
+    }
+
+    // --- the remembered chat: seed, restore, give up ---------------------------------------------
+
+    @Test
+    fun aSessionsBootSeedsTheRememberedChatAsPendingWithoutAttaching() {
+        vm.onBootView(sessionsView = true, remembered = LastOpenedSession("/w", "a", "h-a"))
+        assertEquals("a", vm.selectedSessionId.value)
+        assertTrue(vm.selectionPending.value)
+        noAttach()
+        // Once per view model: a second report (a rotation) seeds nothing.
+        vm.selectSession("b")
+        vm.onBootView(sessionsView = true, remembered = LastOpenedSession("/w", "a", "h-a"))
+        assertEquals("b", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun noSeedOnAnOverviewBootOrWhenALinkOrASelectionCameFirst() {
+        vm.onBootView(sessionsView = false, remembered = remembered)
+        assertNull(vm.selectedSessionId.value)
+
+        val linked = vms.track(TetherViewModel(Client(), InMemoryDraftStore(), monotonicClock = { 0 }))
+        linked.setBootLinkPending(true)
+        linked.onBootView(sessionsView = true, remembered = remembered)
+        assertNull(linked.selectedSessionId.value)
+
+        val opened = vms.track(TetherViewModel(Client(), InMemoryDraftStore(), monotonicClock = { 0 }))
+        opened.openSession("n")
+        opened.onBootView(sessionsView = true, remembered = remembered)
+        assertEquals("n", opened.selectedSessionId.value)
+    }
+
+    @Test
+    fun aRememberedChatStillListedNeedsNoRestore() {
+        client.sessions.value = listOf(chat("a"))
+        vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-a"))))
+        assertTrue(client.resumed.isEmpty())
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun anExitedRememberedChatIsReopenedByItsHistoryIdOnce() {
+        vm.onBootView(true, remembered)
+        // Nothing discovered and no grace yet: wait.
+        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertEquals("gone", vm.selectedSessionId.value)
+        // Not on Sessions: wait.
+        assertNull(vm.bootRestoreStep(false, listOf(history("h-gone"))))
+        val hit = vm.bootRestoreStep(true, listOf(history("h-x"), history("h-gone")))
+        assertEquals("h-gone", hit?.historyId)
+        // At most once.
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone"))))
+    }
+
+    @Test
+    fun withNoConversationToReopenTheRememberedChatIsGivenUpAndThePickRuns() {
+        vm.onBootView(true, remembered)
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-other"))))
+        assertNull(vm.selectedSessionId.value)
+        assertFalse(vm.selectionPending.value)
+        vm.pickIfNothingSelected(true, listOf(chat("x")), "/w")
+        assertEquals("x", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun theGraceAloneGivesTheRememberedChatUp() {
+        client.connection.value = ConnectionState.Connected
+        vm.onBootView(true, remembered)
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS - 1)
+        main.scheduler.runCurrent()
+        assertFalse(vm.restoreGraceElapsed.value)
+        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertEquals("gone", vm.selectedSessionId.value)
+        main.scheduler.advanceTimeBy(2)
+        main.scheduler.runCurrent()
+        assertTrue(vm.restoreGraceElapsed.value)
+        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertNull(vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun theGraceIsArmedPerConnection() {
+        client.connection.value = ConnectionState.Connected
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS - 1)
+        client.connection.value = ConnectionState.Connecting
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS)
+        main.scheduler.runCurrent()
+        assertFalse(vm.restoreGraceElapsed.value)
+        client.connection.value = ConnectionState.Connected
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS + 1)
+        main.scheduler.runCurrent()
+        assertTrue(vm.restoreGraceElapsed.value)
+    }
+
+    @Test
+    fun aRememberedChatGivenUpIsNotSeededAgainByALaterBootReport() {
+        vm.onBootView(true, remembered)
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-other")))) // given up
+        assertNull(vm.selectedSessionId.value)
+        vm.onBootView(true, remembered) // a rotation reports the view again
+        assertNull(vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun onceTheGraceHasPassedWithTheChatListedTheRestoreIsOverEvenIfTheChatLeavesLater() {
+        client.connection.value = ConnectionState.Connected
+        client.sessions.value = listOf(chat("a"))
+        vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS + 1)
+        main.scheduler.runCurrent()
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-a")))) // listed: nothing to restore, and done
+        client.sessions.value = emptyList() // the chat ends later
+        main.scheduler.advanceUntilIdle()
+        assertNull("the boot restore ran once (bootRestoreRef)", vm.bootRestoreStep(true, listOf(history("h-a"))))
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun anExplicitSelectionBeforeTheRestoreEndsIt() {
+        vm.onBootView(true, remembered)
+        vm.selectSession("b")
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone"))))
+        assertEquals("b", vm.selectedSessionId.value)
+    }
+
+    @Test
+    fun aSignInAfterASignOutBootsTheRememberedChatAgain() {
+        vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
+        vm.logout()
+        main.scheduler.advanceUntilIdle()
+        assertNull(vm.selectedSessionId.value)
+        vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
+        assertEquals("a", vm.selectedSessionId.value)
+    }
+
+    // --- the top bar's Sessions ------------------------------------------------------------------
+
+    @Test
+    fun goingToSessionsWithNothingSelectedTakesTheRememberedChatWhenListed() {
+        vm.onBootView(sessionsView = false, remembered = null)
+        val back = LastOpenedSession("/w", "a", "h-a")
+        vm.onNavigateToSessions(listOf(chat("b")), back) // not listed: nothing
+        assertNull(vm.selectedSessionId.value)
+        vm.onNavigateToSessions(listOf(chat("b"), chat("a")), back)
+        assertEquals("a", vm.selectedSessionId.value)
+        assertTrue(vm.selectionPending.value)
+        noAttach()
+    }
+
+    @Test
+    fun goingToSessionsKeepsAListedOrPendingSelectionAndReplacesAPickedOneThatLeft() {
+        vm.onBootView(sessionsView = false, remembered = null)
+        val back = LastOpenedSession("/w", "a", "h-a")
+        vm.selectSession("b")
+        vm.onNavigateToSessions(listOf(chat("a"), chat("b")), back)
+        assertEquals("listed: kept", "b", vm.selectedSessionId.value)
+        vm.openSession("link")
+        vm.onNavigateToSessions(listOf(chat("a")), back)
+        assertEquals("pending: kept", "link", vm.selectedSessionId.value)
+        vm.selectSession("c")
+        vm.onNavigateToSessions(listOf(chat("a")), back)
+        assertEquals("picked and gone: the remembered chat", "a", vm.selectedSessionId.value)
+    }
+
+    // --- pending vs picked -----------------------------------------------------------------------
+
+    @Test
+    fun linksAndCreatedRepliesArePendingAndAnExplicitSelectionOrAResumeIsNot() {
+        vm.openSession("a")
+        assertTrue(vm.selectionPending.value)
+        vm.selectSession("b")
+        assertFalse(vm.selectionPending.value)
+        client.replies.tryEmit(CreatedReply(chat("c"), seq = 1, origin = null))
+        main.scheduler.advanceUntilIdle()
+        assertEquals("c", vm.selectedSessionId.value)
+        assertTrue(vm.selectionPending.value)
+        assertTrue(vm.resumeHistory(history("h1")))
+        assertFalse(vm.selectionPending.value)
+    }
+
+    // --- the current workspace -------------------------------------------------------------------
+
+    @Test
+    fun theCurrentWorkspaceIsSettledOnceAndNeverOverAPick() {
+        vm.settleWorkspace(null)
+        assertNull(vm.currentWorkspace.value)
+        vm.settleWorkspace("/w/docs")
+        assertEquals("/w/docs", vm.currentWorkspace.value)
+        vm.settleWorkspace("/elsewhere")
+        assertEquals("/w/docs", vm.currentWorkspace.value)
+        vm.selectWorkspace("/picked")
+        vm.settleWorkspace("/elsewhere")
+        assertEquals("/picked", vm.currentWorkspace.value)
+    }
+}

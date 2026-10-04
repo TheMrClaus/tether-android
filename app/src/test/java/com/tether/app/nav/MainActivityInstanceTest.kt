@@ -53,6 +53,7 @@ class MainActivityInstanceTest {
         savedFactory = ClientLocator.factory
         ClientLocator.installForTest(null)
         ClientLocator.factory = { obtained++; client }
+        forgetRememberedChat()
     }
 
     @After
@@ -163,7 +164,8 @@ class MainActivityInstanceTest {
         idle()
         assertNull(shadowOf(main.get()).nextStartedActivity)
         assertFalse(main.get().isFinishing)
-        assertNull(main.vm.selectedSessionId.value)
+        // ta-coik.41: nothing is opened by the relaunch (the web's one-time pick may hold the first chat).
+        assertFalse(main.vm.selectionPending.value)
     }
 
     /**

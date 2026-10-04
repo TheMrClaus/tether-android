@@ -22,6 +22,7 @@ import com.tether.app.ui.TetherViewModel
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -52,6 +53,7 @@ class MainActivityDeepLinkTest {
         val resolver = ApplicationProvider.getApplicationContext<Context>().contentResolver
         Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         ShadowLog.clear()
+        forgetRememberedChat()
     }
 
     @After
@@ -67,6 +69,16 @@ class MainActivityDeepLinkTest {
     private fun install(c: NavTestClient): NavTestClient = c.also {
         client = it
         ClientLocator.installForTest(it)
+    }
+
+    /**
+     * ta-coik.41: no link selected anything. On Sessions with nothing selected the web's one-time
+     * pick (dashboard.tsx 90fbb9f :752-763) chooses the workspace's first chat; that is a pick, never
+     * a link's pending target, and never [linked].
+     */
+    private fun assertNoLinkSelection(vm: TetherViewModel, linked: String = LISTED) {
+        assertFalse("a link's target was selected", vm.selectionPending.value)
+        assertNotEquals(linked, vm.selectedSessionId.value)
     }
 
     private fun idle() = repeat(5) { shadowOf(Looper.getMainLooper()).idle() }
@@ -105,7 +117,7 @@ class MainActivityDeepLinkTest {
     fun warmLinkArrivesThroughOnNewIntent() {
         install(NavTestClient())
         val activity = launch(launcher())
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         activity.newIntent(view("tether://session/$LISTED"))
         idle()
         assertEquals(LISTED, activity.vm.selectedSessionId.value)
@@ -125,7 +137,7 @@ class MainActivityDeepLinkTest {
         val activity = launch(launcher())
         activity.newIntent(view("https://evil.example/?session=$LISTED"))
         idle()
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         assertFalse(LISTED in client.attached)
         assertEquals(DeepLinkNavigator.OTHER_SERVER, activity.vm.activeToast.value)
         assertEquals(PAIRED, client.serverUrl.value)
@@ -135,7 +147,7 @@ class MainActivityDeepLinkTest {
     fun aStaleIdLandsOnTheCurrentScreenWithAToast() {
         install(NavTestClient())
         val activity = launch(view("tether://session/gone-1"))
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm, linked = "gone-1")
         assertEquals(DeepLinkNavigator.SESSION_GONE, activity.vm.activeToast.value)
         // A malformed one too, without a crash.
         activity.newIntent(view("tether://session/..%2F..%2Fetc"))
@@ -176,7 +188,7 @@ class MainActivityDeepLinkTest {
         val activity = launch(view("tether://session/$LISTED"))
         client.signIn("https://other.example")
         idle()
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         assertFalse(LISTED in client.attached)
         assertEquals(DeepLinkNavigator.OTHER_SERVER, activity.vm.activeToast.value)
     }
@@ -188,7 +200,7 @@ class MainActivityDeepLinkTest {
         assertEquals(PAIRED, client.serverUrl.value)
         client.signIn(PAIRED)
         idle()
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         assertFalse(LISTED in client.attached)
     }
 
@@ -213,11 +225,11 @@ class MainActivityDeepLinkTest {
             .putExtra("tether.push.sessionId", LISTED)
             .setData(Uri.parse("tether://session/$LISTED"))
         val activity = launch(tap)
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         assertFalse(LISTED in client.attached)
         activity.newIntent(Intent(PushDeepLink.ACTION_SDK_CLICK).putExtra("kind", "question").putExtra("url", "/?session=$LISTED"))
         idle()
-        assertNull(activity.vm.selectedSessionId.value)
+        assertNoLinkSelection(activity.vm)
         assertNull(activity.vm.activeToast.value)
     }
 

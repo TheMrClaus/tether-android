@@ -23,8 +23,9 @@ import org.robolectric.annotation.Config
 /**
  * Z3 / H1: a notification tap opens the app and does nothing else. The real
  * [UiRoot] renders with a tap intent that names a session the client lists
- * (planted, as another app could). No session may be selected. Selecting one
- * would attach it, so no attach may be sent.
+ * (planted, as another app could). The tap may select no session. Selecting one
+ * would attach it, so no attach may be sent beyond a render without the tap (ta-coik.41:
+ * where the web's one-time pick, dashboard.tsx 90fbb9f :752-763, opens the workspace's first chat).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -50,6 +51,8 @@ class UiRootPushTapTest {
         // the looper can go idle.
         val resolver = ApplicationProvider.getApplicationContext<Context>().contentResolver
         Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
+        // ta-coik.41: each render is a cold start with no remembered chat (the DataStore is a singleton).
+        com.tether.app.nav.forgetRememberedChat()
         val client = RecordingClient()
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         activity.setContent { UiRoot(client = client, launchIntent = pushIntent) }
