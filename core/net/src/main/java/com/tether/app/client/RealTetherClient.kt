@@ -94,6 +94,9 @@ internal enum class RacePoint {
 
     /** ta-coik.3: the server's close was answered; the socket refuses sends but is still the bound one. */
     SocketClosing,
+
+    /** ta-coik.19 r2: sends given up on are computed (the store lock released) and not yet published. */
+    FailedComputed,
 }
 
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
@@ -442,6 +445,9 @@ class RealTetherClient(
     override val pendingSends: StateFlow<List<PendingSendRow>> = pendingSendsState
     private val failedSendsState = MutableStateFlow<List<FailedSend>>(emptyList())
     override val failedSends: StateFlow<List<FailedSend>> = failedSendsState
+    // ta-coik.19 r2: moved, with [failedSendsState] emptied, in the same locked section as every server
+    // switch and sign-out; a failed bubble computed under an older value is never published.
+    private var failedGeneration = 0L
 
     // Every store change republishes [pendingSends] (use-tether.ts 90fbb9f :409-424 syncPendingState,
     // called after every mutation of pendingRef). A multi-step change computes its store first and
@@ -1358,6 +1364,9 @@ class RealTetherClient(
         clearedKeys = LinkedHashSet()
         pendingLoaded = false
         pendingOrigin = target
+        // ta-coik.19: another server's failed sends must never show (the web's live for one server),
+        // nor any computed for it that is still on its way to [recordFailed] (r2).
+        clearFailedSendsLocked()
         clearServerStateLocked()
         // The mirror is still bound to the origin just left: nothing may hydrate from it or
         // write to it until the new origin's bind (bindMirrorToCurrentServer) (L1).
@@ -1442,8 +1451,6 @@ class RealTetherClient(
         changeRequestsState.value = emptyMap()
         worktreeLogsState.value = emptyMap()
         failedInterruptsState.value = emptyMap()
-        // ta-coik.19: another server's failed sends must never show (the web's live for one server).
-        failedSendsState.value = emptyList()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
@@ -1507,9 +1514,9 @@ class RealTetherClient(
         val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
         val expired = synchronized(lock) {
             if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return
-            restorePendingLocked(raw, setAside.remove(origin))
+            givenUpLocked(restorePendingLocked(raw, setAside.remove(origin)))
         }
-        if (expired.isNotEmpty()) emitError(undeliveredMessage(expired))
+        if (expired.records.isNotEmpty()) emitError(undeliveredMessage(expired.records))
         // ta-coik.19: as the web's first sweep would (use-tether.ts 90fbb9f :1300-1304), failed bubbles.
         recordFailed(expired)
         persistPending()
@@ -2007,7 +2014,7 @@ class RealTetherClient(
             val dropped = pendingStore.records.size
             pendingStore = PendingInput.emptyStore()
             // ta-coik.19: and the failed bubbles, which carry this configuration's words.
-            failedSendsState.value = emptyList()
+            clearFailedSendsLocked()
             clearedKeys = LinkedHashSet()
             pendingLoaded = false
             pendingOrigin = null
@@ -3371,7 +3378,7 @@ class RealTetherClient(
         val frame = ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
         val frameBytes = AttachmentFrame.utf8Length(frame)
         if (frameBytes > AttachmentFrame.MAX_SEND_FRAME_BYTES) return AttachmentSendResult.TooLarge
-        var evicted: List<PendingRecord> = emptyList()
+        var evicted = GivenUp.NONE
         val result = synchronized(lock) {
             val link = AttachmentLink(
                 socketBound = socket != null,
@@ -3409,7 +3416,7 @@ class RealTetherClient(
             // then refuses, closing.
             attachmentQueueRefusal(ws.queueSize(), drain.sumOf { AttachmentFrame.utf8Length(it.second) })?.let { return@synchronized it }
             forgetLocked(added.evicted.map { it.key })
-            evicted = added.evicted
+            evicted = givenUpLocked(added.evicted)
             val sent = ArrayList<String>()
             for ((recordKey, encoded) in drain) {
                 if (!ws.send(encoded)) break
@@ -3428,7 +3435,7 @@ class RealTetherClient(
             pendingStore = marked
             AttachmentSendResult.Sent
         }
-        if (evicted.isNotEmpty()) emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
+        if (evicted.records.isNotEmpty()) emitError("${evicted.records.size} unsent message(s) were dropped — too many are waiting to send.")
         // ta-coik.19 (use-tether.ts 90fbb9f :648): surfaced as failed bubbles, not dropped silently.
         recordFailed(evicted)
         if (result == AttachmentSendResult.Sent || result == AttachmentSendResult.NotConnected) persistPending()
@@ -3449,7 +3456,7 @@ class RealTetherClient(
      * therefore cannot slip between the check and the record and file it in another server's outbox.
      */
     override fun sendFirst(sessionId: String, text: String, expectedOrigin: String, expectedEpoch: Long): Boolean {
-        var evicted: List<PendingRecord> = emptyList()
+        var evicted = GivenUp.NONE
         val recorded = synchronized(lock) {
             if (pendingOrigin != expectedOrigin || socketOrigin != expectedOrigin || socket == null) return@synchronized false
             if (epoch != expectedEpoch || haltedLocked()) return@synchronized false
@@ -3476,7 +3483,7 @@ class RealTetherClient(
             emitError(ATTACHMENTS_NOT_SENT_COPY)
             return MentionResult.Locked
         }
-        var evicted: List<PendingRecord> = emptyList()
+        var evicted = GivenUp.NONE
         val result = synchronized(lock) {
             val owner = pendingOrigin
             if (expectedOrigin == null || owner != expectedOrigin || (socketOrigin != null && socketOrigin != expectedOrigin)) return@synchronized MentionResult.NotLive
@@ -3510,17 +3517,17 @@ class RealTetherClient(
         text: String,
         attachments: List<Attachment>?,
         mention: com.tether.app.protocol.DelegateMention?,
-    ): List<PendingRecord> {
+    ): GivenUp {
         val result = PendingInput.addRecord(pendingStore, PendingInput.newKey(), kind, sessionId, text, clock(), attachments, mention)
         pendingStore = result.store
         forgetLocked(result.evicted.map { it.key })
-        return result.evicted
+        return givenUpLocked(result.evicted)
     }
 
     /** The outside-the-lock half of a record: the eviction notice, the persist, one drain. */
-    private fun afterRecord(evicted: List<PendingRecord>) {
-        if (evicted.isNotEmpty()) {
-            emitError("${evicted.size} unsent message(s) were dropped — too many are waiting to send.")
+    private fun afterRecord(evicted: GivenUp) {
+        if (evicted.records.isNotEmpty()) {
+            emitError("${evicted.records.size} unsent message(s) were dropped — too many are waiting to send.")
         }
         // ta-coik.19 (use-tether.ts 90fbb9f :648): surfaced as failed bubbles, not dropped silently.
         recordFailed(evicted)
@@ -3609,10 +3616,10 @@ class RealTetherClient(
                 val result = PendingInput.expireRecords(pendingStore, now)
                 pendingStore = result.store
                 forgetLocked(result.unsent.map { it.key })
-                result.unsent
+                givenUpLocked(result.unsent)
             }
-            if (unsent.isNotEmpty()) {
-                emitError(undeliveredMessage(unsent))
+            if (unsent.records.isNotEmpty()) {
+                emitError(undeliveredMessage(unsent.records))
                 // ta-coik.19 (use-tether.ts 90fbb9f :1304): render as failed bubbles, not just a banner.
                 recordFailed(unsent)
                 persistPending()
@@ -3632,10 +3639,33 @@ class RealTetherClient(
         pendingSendsState.value = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
     }
 
-    /** ta-coik.19 (use-tether.ts 90fbb9f :450-471 recordFailed): sends given up on, as failed bubbles. */
-    private fun recordFailed(records: List<PendingRecord>, reason: FailedSendReason = FailedSendReason.Expired) {
-        if (records.isEmpty()) return
-        failedSendsState.update { PendingInput.recordFailed(it, records, reason) }
+    /**
+     * ta-coik.19 r2: records given up on, with the [failedGeneration] they were computed under (taken
+     * in the same locked section that removed them from the store).
+     */
+    private class GivenUp(val records: List<PendingRecord>, val generation: Long) {
+        companion object {
+            val NONE = GivenUp(emptyList(), -1L)
+        }
+    }
+
+    /** Caller holds [lock]. */
+    private fun givenUpLocked(records: List<PendingRecord>): GivenUp =
+        if (records.isEmpty()) GivenUp.NONE else GivenUp(records, failedGeneration)
+
+    /**
+     * ta-coik.19 (use-tether.ts 90fbb9f :450-471 recordFailed): sends given up on, as failed bubbles.
+     * r2: published only while the server they were given up on is still the one in force: a switch
+     * (or a sign-out) after they were computed, and before this runs, moves [failedGeneration] and
+     * they are never shown on the next server's chat.
+     */
+    private fun recordFailed(givenUp: GivenUp, reason: FailedSendReason = FailedSendReason.Expired) {
+        if (givenUp.records.isEmpty()) return
+        raceHook?.invoke(RacePoint.FailedComputed, givenUp.records)
+        synchronized(lock) {
+            if (givenUp.generation != failedGeneration) return
+            failedSendsState.update { PendingInput.recordFailed(it, givenUp.records, reason) }
+        }
     }
 
     /**
@@ -3647,6 +3677,12 @@ class RealTetherClient(
         if (keys.isEmpty()) return
         val set = keys as? Set<String> ?: keys.toHashSet()
         failedSendsState.update { current -> current.filter { it.key !in set }.takeIf { it.size != current.size } ?: current }
+    }
+
+    /** ta-coik.19 r2: drop every failed bubble and retire their generation. Caller holds [lock]. */
+    private fun clearFailedSendsLocked() {
+        failedGeneration++
+        failedSendsState.value = emptyList()
     }
 
     override fun dismissFailedSend(key: String) {
