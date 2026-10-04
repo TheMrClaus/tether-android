@@ -30,6 +30,14 @@ object ConnectionTimings {
      * see as local (e.g. a global IPv6 address on the Wi-Fi LAN). T0.6 review.
      */
     const val LOCAL_NETWORK_SUSPECT_TIMEOUTS: Int = 3
+
+    /**
+     * ta-coik.32 (R2): a socket whose handshake was accepted at least this long before it was lost
+     * is replaced at once (no backoff) while the app is in front. The floor keeps a server that
+     * accepts and then drops every link from turning that into a loop: one immediate attempt per
+     * this period at most; every later attempt backs off.
+     */
+    const val IMMEDIATE_RECONNECT_MIN_LIFETIME_MS: Long = 10_000
 }
 
 /** Handle to a task scheduled on a [Scheduler]. */

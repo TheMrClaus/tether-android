@@ -372,6 +372,9 @@ class RealTetherClient(
     // The current socket's `ready` was accepted (window ok, hello sent): the
     // connection is live and ordinary frames may go out.
     private var handshakeDone = false
+    // ta-coik.32 (R2): when the current socket's `ready` was accepted ([clock]); a socket that
+    // worked at least [ConnectionTimings.IMMEDIATE_RECONNECT_MIN_LIFETIME_MS] is replaced at once.
+    private var handshakeAt = 0L
     // Connection epoch = one socket. Sessions attached during the current epoch;
     // an attach() for one of them is a no-op (T0.3: attach idempotent per epoch).
     private var epoch = 0L
@@ -2679,12 +2682,12 @@ class RealTetherClient(
         }
     }
 
-    /** The next attempt after [Backoff.next] — never a fixed-rate or tight loop. */
-    private fun scheduleReconnect() {
+    /** The next attempt after [Backoff.next] (or [delayMs], R2's one immediate attempt) — never a fixed-rate or tight loop. */
+    private fun scheduleReconnect(delayMs: Long? = null) {
         synchronized(lock) {
             if (haltedLocked()) return
             reconnectTask?.cancel()
-            reconnectTask = scheduler.schedule(backoff.next()) {
+            reconnectTask = scheduler.schedule(delayMs ?: backoff.next()) {
                 synchronized(lock) { reconnectTask = null }
                 connectNow()
             }
@@ -2833,14 +2836,19 @@ class RealTetherClient(
     }
 
     private fun handleSocketGone(webSocket: WebSocket) {
-        synchronized(lock) {
+        val immediate = synchronized(lock) {
             if (socket !== webSocket) return
+            // ta-coik.32 (R2): a link that worked (handshaken, and alive long enough that a server
+            // accepting then dropping cannot make this a loop) is replaced at once while the app is in
+            // front; any attempt after that backs off as before. The web waits a fixed 1.8 s.
+            val worked = handshakeDone && clock() - handshakeAt >= ConnectionTimings.IMMEDIATE_RECONNECT_MIN_LIFETIME_MS
             detachSocketLocked()
             connecting = false
             if (haltedLocked()) return
+            worked && inForeground
         }
         connectionState.value = ConnectionState.Disconnected
-        scheduleReconnect()
+        if (immediate) scheduleReconnect(delayMs = 0) else scheduleReconnect()
     }
 
     // ------------------------------------------------------------------
@@ -3058,6 +3066,7 @@ class RealTetherClient(
             hiddenAgentSessionCountState.value = message.hiddenAgentSessionCount
             serverProtocolVersionState.value = message.protocolVersion
             handshakeDone = true
+            handshakeAt = clock()
             consentOriginState.value = socketOrigin
             publishConsentLocked()
             // A handshake the server accepted is the success that resets backoff.
