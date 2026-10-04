@@ -134,7 +134,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | coordinator 2026-10-02: all six slices merged and verified (ta-8cv, ta-abm, ta-2uq, ta-xki, ta-23f, ta-3e7). T8.1 stays open only for M.lib… |
 | T8.2 | Folder picker, workspaces | TODO |  |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
-| T8.4 | GitHub work dialog | TODO |  |  | OWNER (2026-10-05): the GitHub issues and Pull requests buttons on the new-session screen are missing; raised to P1 under ta-coik. Web spec… |
+| T8.4 | GitHub work dialog | IN-PROGRESS | TheMrClaus @ 2026-10-04 22:50 |  | checkpoint @538f23fd: commit 2 shell GitHubWorkController/GitHubWorkDialog + buttons in DraftComposerSheet project row; Set up -> SettingsD… |
 | T8.5 | Metadata draft panel, handoff brief + claim | TODO |  |  | from T7.3 (coordinator): add the @ picker's 'Sessions on this project' section (takeover); the T7.3 mention picker is ready for it. |
 | T8.6 | Browser pane (native frame stream) — scope per T0.5 | TODO |  |  |  |
 
